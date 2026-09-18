@@ -5,6 +5,7 @@ import path from 'node:path';
 import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs';
 import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
+import { verifyRsiSkillRelationGraph } from './rsi-skill-relation-graph.mjs';
 
 export const RSI_SKILL_CONTEXT_EVIDENCE_SCHEMA='metaengine.rsi.skill-context-evidence.v1';
 export const RSI_SKILL_ROUTE_CONTEXT_SCHEMA='metaengine.rsi.skill-route-context.v1';
@@ -206,6 +207,7 @@ function summarizeEvidence(skillDigest,context,evidence){
 export function createRsiSkillRoutingPlan({
   library,governance,context,evidence=[],
   coalition_masked_skill_digests=[],
+  relation_graph=null,
   max_selected=4,exploration_slots=1,
   external_planner=false,authored_by_candidate=true,
 }={}){
@@ -270,12 +272,95 @@ export function createRsiSkillRoutingPlan({
     }
   }
 
+  let routedSelected=selected.slice();
+  const relationSuppressed=[];
+  let relationGraphDigest=null;
+  let relationOrderingApplied=false;
+  if(relation_graph!=null){
+    const graph=verifyRsiSkillRelationGraph(relation_graph,checkedLibrary);
+    relationGraphDigest=graph.graph_digest;
+    const applicable=graph.edges.filter(edge=>edge.scope==='GLOBAL_VERIFIED'||edge.context_digest===checkedContext.context_digest);
+    const prerequisiteEdges=applicable.filter(edge=>edge.relation_type==='PREREQUISITE');
+    let prerequisiteClosureChanged=true;
+    while(prerequisiteClosureChanged){
+      prerequisiteClosureChanged=false;
+      const selectedDigests=new Set(routedSelected.map(row=>row.entry.skill_digest));
+      const missingPrerequisites=new Set();
+      for(const edge of prerequisiteEdges){
+        if(selectedDigests.has(edge.to_skill_digest)&&!selectedDigests.has(edge.from_skill_digest)){
+          missingPrerequisites.add(edge.to_skill_digest);
+          if(!relationSuppressed.some(item=>item.skill_digest===edge.to_skill_digest&&item.relation_digest===edge.relation_digest)){
+            relationSuppressed.push(Object.freeze({
+              skill_digest:edge.to_skill_digest,
+              relation_digest:edge.relation_digest,
+              reason:'MISSING_PREREQUISITE',
+            }));
+          }
+        }
+      }
+      if(missingPrerequisites.size>0){
+        const before=routedSelected.length;
+        routedSelected=routedSelected.filter(row=>!missingPrerequisites.has(row.entry.skill_digest));
+        prerequisiteClosureChanged=routedSelected.length!==before;
+      }
+    }
+
+    const remaining=new Map(routedSelected.map((row,index)=>[row.entry.skill_digest,{row,index}]));
+    const prereqEdges=applicable.filter(edge=>edge.relation_type==='PREREQUISITE'
+      &&remaining.has(edge.from_skill_digest)&&remaining.has(edge.to_skill_digest));
+    if(prereqEdges.length>0){
+      const indegree=new Map([...remaining.keys()].map(key=>[key,0]));
+      const children=new Map([...remaining.keys()].map(key=>[key,[]]));
+      for(const edge of prereqEdges){
+        indegree.set(edge.to_skill_digest,indegree.get(edge.to_skill_digest)+1);
+        children.get(edge.from_skill_digest).push(edge.to_skill_digest);
+      }
+      const queue=[...remaining.keys()].filter(key=>indegree.get(key)===0)
+        .sort((a,b)=>remaining.get(a).index-remaining.get(b).index||a.localeCompare(b));
+      const order=[];
+      while(queue.length){
+        const key=queue.shift();order.push(key);
+        for(const child of children.get(key)){
+          indegree.set(child,indegree.get(child)-1);
+          if(indegree.get(child)===0){
+            queue.push(child);
+            queue.sort((a,b)=>remaining.get(a).index-remaining.get(b).index||a.localeCompare(b));
+          }
+        }
+      }
+      if(order.length!==remaining.size)throw new Error('rsi_skill_router_relation_prerequisite_cycle');
+      routedSelected=order.map(key=>remaining.get(key).row);
+      relationOrderingApplied=true;
+    }
+
+    const retained=[];
+    for(const row of routedSelected){
+      const conflict=retained.find(other=>applicable.some(edge=>edge.relation_type==='ANTAGONISTIC'
+        &&((edge.from_skill_digest===row.entry.skill_digest&&edge.to_skill_digest===other.entry.skill_digest)
+          ||(edge.to_skill_digest===row.entry.skill_digest&&edge.from_skill_digest===other.entry.skill_digest))));
+      if(conflict){
+        const edge=applicable.find(edge=>edge.relation_type==='ANTAGONISTIC'
+          &&((edge.from_skill_digest===row.entry.skill_digest&&edge.to_skill_digest===conflict.entry.skill_digest)
+            ||(edge.to_skill_digest===row.entry.skill_digest&&edge.from_skill_digest===conflict.entry.skill_digest)));
+        relationSuppressed.push(Object.freeze({
+          skill_digest:row.entry.skill_digest,
+          relation_digest:edge.relation_digest,
+          reason:'ANTAGONISTIC_WITH_HIGHER_RANKED_SKILL',
+        }));
+        continue;
+      }
+      retained.push(row);
+    }
+    routedSelected=retained;
+  }
+  const effectiveExploreUsed=routedSelected.filter(row=>row.reason==='BOUNDED_EXPLORATION').length;
+
   const core={
     schema:RSI_SKILL_ROUTING_PLAN_SCHEMA,version:1,
     library_digest:checkedLibrary.library_digest,
     governance_digest:checkedGovernance.governance_digest,
     context_digest:checkedContext.context_digest,
-    selected:selected.map((row,index)=>Object.freeze({
+    selected:routedSelected.map((row,index)=>Object.freeze({
       rank:index+1,skill_id:row.entry.skill_id,skill_version:row.entry.skill_version,skill_digest:row.entry.skill_digest,
       role:row.entry.role,reason:row.reason,context_utility:row.utility,
       governance_state:row.governance.state,governance_score:row.governance.governance_score,
@@ -289,20 +374,29 @@ export function createRsiSkillRoutingPlan({
     })).sort((a,b)=>a.skill_digest.localeCompare(b.skill_digest)),
     coalition_masked_count:coalitionMasked.length,
     coalition_masked_skill_digests:Object.freeze(coalitionMask),
-    selected_count:selected.length,
+    relation_graph_digest:relationGraphDigest,
+    relation_suppressed:Object.freeze(relationSuppressed),
+    relation_suppressed_count:relationSuppressed.length,
+    relation_ordering_applied:relationOrderingApplied,
+    selected_count:routedSelected.length,
     vetoed_count:vetoed.length,
     max_selected:maxSelected,
     exploration_slots:explore,
-    exploration_used:exploreUsed,
+    exploration_used:effectiveExploreUsed,
     only_governance_active_skills:true,
     exact_interface_compatibility_required:true,
     exact_context_negative_transfer_veto:true,
     coalition_pollution_mask_supported:true,
     coalition_mask_cannot_grant_activity:true,
+    typed_skill_relation_graph_supported:true,
+    relation_graph_can_only_constrain_or_order_selection:true,
+    relation_graph_cannot_grant_skill_activity:true,
     negative_transfer_exact_min:NEGATIVE_TRANSFER_EXACT_MIN,
     contextual_utility_not_global_truth:true,
     coalition_pollution_mask_is_advisory_input:true,
     coalition_mask_cannot_grant_activity:true,
+    relation_graph_can_only_constrain_or_order_selection:true,
+    relation_graph_cannot_grant_skill_activity:true,
     candidate_can_select_skills:false,
     candidate_can_override_negative_transfer_veto:false,
     candidate_can_choose_router_thresholds:false,
@@ -382,10 +476,10 @@ export class RsiRuntimeSkillRouter{
     if(additions.length>0)await this.#persist();
     return zero({state:additions.length>0?'APPENDED':'IDEMPOTENT',appended_count:additions.length,evidence_digests:additions.map(x=>x.evidence_digest)});
   }
-  async route({library,governance,context,coalition_masked_skill_digests=[],max_selected=4,exploration_slots=1,external_planner=false,authored_by_candidate=true}={}){
+  async route({library,governance,context,coalition_masked_skill_digests=[],relation_graph=null,max_selected=4,exploration_slots=1,external_planner=false,authored_by_candidate=true}={}){
     this.#assertInit();
     const plan=createRsiSkillRoutingPlan({
-      library,governance,context,evidence:this.#evidence,coalition_masked_skill_digests,max_selected,exploration_slots,external_planner,authored_by_candidate,
+      library,governance,context,evidence:this.#evidence,coalition_masked_skill_digests,relation_graph,max_selected,exploration_slots,external_planner,authored_by_candidate,
     });
     this.#routeCount+=1;this.#lastPlanDigest=plan.plan_digest;await this.#persist();return plan;
   }

@@ -916,3 +916,94 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('runtime relation graph constrains verified-skill routing without widening authority', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-relations-'));
+  try {
+    const source = 'a'.repeat(40);
+    const d = (char) => `sha256:${char.repeat(64)}`;
+    const makeSkill = ({ id, sourceChar, implChar }) => {
+      const capsule = createRsiSkillCapsule({
+        skill_id: id,
+        version: 1,
+        parent_skill_digest: null,
+        source_candidate_sha: sourceChar.repeat(40),
+        role: 'ANALYZER',
+        input_schema_digest: d('1'),
+        output_schema_digest: d('2'),
+        implementation_digest: d(implChar),
+        components: [{ component_id: `${id}.component`, artifact_digest: d('f'), kind: 'TYPED_TRANSFORM' }],
+        capabilities: ['READ_VERIFIED_CONTEXT','ANALYZE_FAILURE_CODES'],
+        max_context_tokens: 2048,
+        max_output_tokens: 512,
+        max_invocations: 2,
+        external_builder: true,
+        authored_by_candidate: false,
+      });
+      const evidence = createRsiSkillEvidence({
+        capsule,
+        hidden_holdout_digest: d(sourceChar),
+        evaluator_root_digest: d('4'),
+        unit_test_digest: d('5'),
+        runtime_feedback_digest: d('6'),
+        attempt_count: 12,
+        success_count: 10,
+        hard_invariants_pass: true,
+        verified_for_library: true,
+        evidence_refs: [`VERIFY_${id}`],
+        external_evaluator: true,
+        authored_by_candidate: false,
+      });
+      return { capsule, evidence };
+    };
+    const first = makeSkill({ id: 'skill.runtime.relation.first', sourceChar: 'b', implChar: 'b' });
+    const second = makeSkill({ id: 'skill.runtime.relation.second', sourceChar: 'c', implChar: 'c' });
+    const library = createRsiVerifiedSkillLibrary({
+      library_id: 'runtime.skill.relation.runtime',
+      entries: [first, second],
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+    const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
+    await runtime.start();
+    await runtime.adoptVerifiedSkillLibrary({ library, external_library_owner: true, authored_by_candidate: false });
+    const relation = await runtime.recordSkillRelation({
+      relation_id: 'relation.runtime.first-antagonistic-second',
+      from_skill_digest: first.capsule.skill_digest,
+      to_skill_digest: second.capsule.skill_digest,
+      relation_type: 'ANTAGONISTIC',
+      scope: 'GLOBAL_VERIFIED',
+      evidence_digest: d('7'),
+      evidence_refs: ['relation:runtime:antagonistic'],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(relation.stored.state, 'APPENDED');
+    assert.equal(runtime.snapshot().skill_relation_store.edge_count, 1);
+
+    const route = await runtime.routeVerifiedSkills({
+      context_id: 'context.runtime.relation.1',
+      task_signature_digest: d('8'),
+      environment_fingerprint: 'env.browser.chatgpt.v1',
+      model_family: 'GPT_5_6_SOL',
+      challenge_family: 'BROWSER_INTERACTION',
+      required_role: 'ANALYZER',
+      required_capabilities: ['ANALYZE_FAILURE_CODES'],
+      input_schema_digest: d('1'),
+      output_schema_digest: d('2'),
+      max_selected: 2,
+      exploration_slots: 2,
+      external_planner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(route.relation_suppressed_count, 1);
+    assert.equal(route.selected_count, 1);
+    assert.equal(route.relation_graph_cannot_grant_skill_activity, true);
+    assert.equal(route.routing_is_execution_authority, false);
+    assert.equal(runtime.snapshot().execution_authority, false);
+    assert.equal(runtime.snapshot().authority_effect, false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
