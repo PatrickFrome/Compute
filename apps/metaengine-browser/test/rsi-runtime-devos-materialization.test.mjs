@@ -136,6 +136,77 @@ function schedulerReadback(handoff){
   return {task,claim,binding};
 }
 
+function materializationReceipt(build,admission,handoff,{leaseGeneration=3,candidateSha='d'.repeat(40)}={}){
+  const plan=build.generic_build_plan;
+  return {
+    schema:'metaengine.rsi.isolated-candidate-materialization.v1',
+    plan_id:plan.plan_id,
+    plan_digest:plan.plan_digest,
+    experiment_id:plan.experiment_id,
+    parent_sha:SOURCE,
+    candidate_sha:candidateSha,
+    target_branch:plan.target_branch,
+    workspace:{
+      workspace_id:PHYSICAL_WORKSPACE,
+      isolated:true,
+      host_repository_mounted:false,
+      linked_git_worktree_exposed:false,
+      source_snapshot_read_only:true,
+      writable_layer_private:true,
+      binding_snapshot:{
+        schema:'metaengine.devos.workspace-binding-snapshot.v1',
+        state:'AVAILABLE',
+        coordination_workspace_id:COORD,
+        observed_at:'2026-09-18T18:20:00.000Z',
+        bindings:[{
+          workspace_id:PHYSICAL_WORKSPACE,
+          workspace_generation:1,
+          coordination_workspace_id:COORD,
+          task_id:TASK,
+          claim_id:7,
+          point_id:handoff.point_id,
+          repo_id:'PatrickFrome/Compute',
+          base_sha:SOURCE,
+          branch_name:handoff.target_branch,
+          agent_id:'agent_12345678',
+          tab_id:'tab_12345678',
+          target_id:'webcontents:12',
+          agent_generation_epoch:4,
+          lease_generation:leaseGeneration,
+          lease_expires_at:'2026-09-18T18:30:00.000Z',
+          lease_current:true,
+          state:'READY',
+          last_verified_head_sha:SOURCE,
+          ambiguity_code:null,
+          dirty_hold:false,
+          updated_at:'2026-09-18T18:20:00.000Z',
+          automatic_retry_allowed:false,
+          scheduler_authority:false,
+          browser_actuation_authority:false,
+          page_data_authority:false,
+          authority_effect:false,
+        }],
+        filesystem_paths_exposed:false,
+        scheduler_authority:false,
+        browser_actuation_authority:false,
+        automatic_retry_allowed:false,
+        authority_effect:false,
+      },
+    },
+    input_manifest_digest:plan.source.source_snapshot_digest,
+    output_manifest_digest:d('b'),
+    components:[{path:TARGET,change:'MODIFY',digest:d('c')}],
+    materialized_file_count:1,
+    materialized_bytes:4096,
+    execution_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  };
+}
+
 test('runtime persists synthesis -> DevOS handoff -> exact workspace admission and replays the chain after restart',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-devos-runtime-'));
   const ledgerPath=path.join(root,'rsi.jsonl');
@@ -180,6 +251,30 @@ test('runtime persists synthesis -> DevOS handoff -> exact workspace admission a
     assert.equal(admission.candidate_materialized,false);
     assert.equal(first.snapshot().devos_materialization.admission_count,1);
 
+    const verified=await first.recordVerifiedCandidateMaterialization({
+      materialization_admission_digest:admission.admission_digest,
+      materialization_receipt:materializationReceipt(planned.context_candidate_build,admission,handoff),
+    });
+    assert.equal(verified.verified_materialization.exact_workspace_incarnation_verified,true);
+    assert.equal(verified.verified_materialization.eligible_for_external_evaluation,true);
+    assert.equal(verified.verified_materialization.eligible_for_promotion,false);
+    assert.equal(verified.verified_materialization.materialization_replay_authorized,false);
+    assert.equal(verified.episode_candidate.candidate_sha,'d'.repeat(40));
+    assert.equal(first.snapshot().verified_candidate_materialization.count,1);
+    const evaluator=first.externalEvaluatorHandoff(verified.verified_materialization.candidate_id);
+    assert.ok(evaluator);
+    assert.equal(evaluator.external_evaluation_required,true);
+    assert.equal(evaluator.eligible_for_promotion,false);
+    assert.equal(evaluator.execution_authority,false);
+
+    await assert.rejects(
+      first.recordVerifiedCandidateMaterialization({
+        materialization_admission_digest:admission.admission_digest,
+        materialization_receipt:materializationReceipt(planned.context_candidate_build,admission,handoff),
+      }),
+      /materialization_admission_already_consumed/,
+    );
+
     const second=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
     await second.start();
     assert.equal(second.snapshot().candidate_synthesis.planned_build_count,1);
@@ -187,6 +282,9 @@ test('runtime persists synthesis -> DevOS handoff -> exact workspace admission a
     assert.equal(second.snapshot().devos_materialization.admission_count,1);
     assert.equal(second.snapshot().devos_materialization.last_handoff_digest,handoff.handoff_digest);
     assert.equal(second.snapshot().devos_materialization.last_admission_digest,admission.admission_digest);
+    assert.equal(second.snapshot().verified_candidate_materialization.count,1);
+    assert.equal(second.snapshot().episodes.candidate_count,1);
+    assert.equal(second.externalEvaluatorHandoff(verified.verified_materialization.candidate_id).candidate_sha,'d'.repeat(40));
     assert.equal(second.snapshot().devos_materialization.repository_mutation_performed_by_rsi,false);
     assert.equal(second.snapshot().execution_authority,false);
   }finally{
@@ -208,6 +306,44 @@ test('runtime refuses workspace admission for an unpersisted handoff digest',asy
       }),
       /materialization_handoff_not_persisted/,
     );
+  }finally{
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
+
+
+test('stale materialization receipt lease generation is rejected before candidate registration',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-materialization-stale-'));
+  const ledgerPath=path.join(root,'rsi.jsonl');
+  try{
+    const runtime=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
+    await runtime.start();
+    await runtime.observeBrainSnapshot(ambiguousBrain());
+    const [frontier]=runtime.improvementFrontier({limit:32});
+    const opened=await runtime.openLearningEpisodeFromOpportunity({opportunity_id:frontier.opportunity_id});
+    const planned=await runtime.planContextAwareCandidateBuild({
+      episode_id:opened.episode.episode_id,
+      source_snapshot:sourceSnapshot(),
+      proposal:proposal(),
+    });
+    const handoff=await runtime.prepareDevosMaterializationHandoff({
+      episode_id:opened.episode.episode_id,
+      coordination_workspace_id:COORD,
+    });
+    const {task,claim,binding}=schedulerReadback(handoff);
+    const admission=await runtime.admitDevosMaterializationReadback({
+      handoff_digest:handoff.handoff_digest,
+      task,claim,binding,
+    });
+    await assert.rejects(
+      runtime.recordVerifiedCandidateMaterialization({
+        materialization_admission_digest:admission.admission_digest,
+        materialization_receipt:materializationReceipt(planned.context_candidate_build,admission,handoff,{leaseGeneration:2}),
+      }),
+      /lease_generation_mismatch|source_fence_invalid/,
+    );
+    assert.equal(runtime.snapshot().verified_candidate_materialization.count,0);
+    assert.equal(runtime.snapshot().episodes.candidate_count,0);
   }finally{
     await fs.rm(root,{recursive:true,force:true});
   }
