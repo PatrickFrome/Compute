@@ -322,6 +322,11 @@ export class RsiEpisodeOrchestrator {
     });
   }
 
+  hasEpisode(episode_id) {
+    const id = safeId(episode_id, 'id');
+    return this.#episodes.has(id);
+  }
+
   episode(episode_id) {
     const episode = this.#requireEpisode(episode_id);
     return Object.freeze(cloneEpisode({ ...episode, state: deriveEpisodeState(episode) }));
