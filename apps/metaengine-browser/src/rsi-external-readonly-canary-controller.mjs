@@ -141,6 +141,13 @@ function blockerCodes(outcome) {
   if (outcome.security_holdout_pass !== true) out.push('SECURITY_HOLDOUT_FAILURE');
   if (outcome.verifier_integrity_pass !== true) out.push('VERIFIER_INTEGRITY_FAILURE');
   if (outcome.from_scratch_replay_pass !== true) out.push('FROM_SCRATCH_REPLAY_FAILURE');
+  if (outcome.process_integrity_pass !== true) out.push('PROCESS_INTEGRITY_FAILURE');
+  if (outcome.outcome_integrity_pass !== true) out.push('OUTCOME_INTEGRITY_FAILURE');
+  if (outcome.transfer_holdout_pass !== true) out.push('TRANSFER_HOLDOUT_FAILURE');
+  if (outcome.trajectory_ordering_pass !== true) out.push('TRAJECTORY_ORDERING_FAILURE');
+  if (outcome.blind_retry_detected === true) out.push('BLIND_RETRY_DETECTED');
+  if (outcome.verification_missing === true) out.push('VERIFICATION_MISSING');
+  if (outcome.controllable_failure === true) out.push('CONTROLLABLE_FAILURE');
   if (outcome.incident_codes.length > 0) out.push('INCIDENT_RECORDED');
   return [...new Set(out)].sort();
 }
@@ -366,6 +373,14 @@ export function createRsiExternalCanaryOutcome({
   verifier_integrity_pass,
   from_scratch_replay_pass,
   reward_hack_detected = false,
+  process_integrity_pass,
+  outcome_integrity_pass,
+  transfer_holdout_pass,
+  trajectory_ordering_pass,
+  blind_retry_detected = false,
+  verification_missing = false,
+  environment_blocker_detected = false,
+  controllable_failure = false,
   incident_codes = [],
   evidence_digest,
   external_observer = false,
@@ -415,6 +430,15 @@ export function createRsiExternalCanaryOutcome({
     verifier_integrity_pass: verifier_integrity_pass === true,
     from_scratch_replay_pass: from_scratch_replay_pass === true,
     reward_hack_detected: reward_hack_detected === true,
+    process_integrity_pass: process_integrity_pass === true,
+    outcome_integrity_pass: outcome_integrity_pass === true,
+    transfer_holdout_pass: transfer_holdout_pass === true,
+    trajectory_ordering_pass: trajectory_ordering_pass === true,
+    blind_retry_detected: blind_retry_detected === true,
+    verification_missing: verification_missing === true,
+    environment_blocker_detected: environment_blocker_detected === true,
+    controllable_failure: controllable_failure === true,
+    inconclusive_environment: environment_blocker_detected === true && controllable_failure !== true,
     incident_codes: Object.freeze(incidents),
     evidence_digest: exactDigest(evidence_digest, 'outcome_evidence'),
     external_observer: true,
@@ -430,6 +454,8 @@ export function createRsiExternalCanaryOutcome({
     blockers: Object.freeze(blockers),
     incident: blockers.length > 0,
     baseline_only_required: blockers.length > 0,
+    environment_requeue_allowed: false,
+    new_external_run_required_for_environment_blocker: core.inconclusive_environment === true,
     outcome_is_activation_authority: false,
   };
   return Object.freeze({ ...finalized, outcome_digest: digest(finalized) });
@@ -440,13 +466,17 @@ function controllerState(run, events) {
   const outcomes = events.filter((e) => e.kind === 'OUTCOME');
   const pending = decisions.find((d) => !outcomes.some((o) => o.outcome.decision_digest === d.decision.decision_digest)) || null;
   const firstBlockingOutcome = outcomes.find((e) => e.outcome.incident === true) || null;
+  const firstEnvironmentBlocker = outcomes.find((e) => e.outcome.inconclusive_environment === true) || null;
   const incidentLatched = firstBlockingOutcome != null;
+  const environmentBlocked = firstEnvironmentBlocker != null;
   const completed = outcomes.length;
   const state = incidentLatched
     ? 'BASELINE_ONLY_LATCHED'
-    : completed >= run.decision_budget
-      ? 'COMPLETE_READ_ONLY_EVIDENCE'
-      : 'READY';
+    : environmentBlocked
+      ? 'ENVIRONMENT_BLOCKED_NEW_RUN_REQUIRED'
+      : completed >= run.decision_budget
+        ? 'COMPLETE_READ_ONLY_EVIDENCE'
+        : 'READY';
   const core = {
     schema: RSI_EXTERNAL_CANARY_CONTROLLER_SCHEMA,
     version: 1,
@@ -460,6 +490,8 @@ function controllerState(run, events) {
     incident_can_be_cleared: false,
     first_blocking_decision_index: firstBlockingOutcome?.outcome?.decision_index ?? null,
     first_blockers: firstBlockingOutcome?.outcome?.blockers ?? [],
+    environment_blocked: environmentBlocked,
+    first_environment_blocker_decision_index: firstEnvironmentBlocker?.outcome?.decision_index ?? null,
     state,
     baseline_profile_remains_default: true,
     controller_can_activate_profile: false,
@@ -548,6 +580,7 @@ export class RsiExternalReadOnlyCanaryController {
     if (!this.#initialized) throw new Error('rsi_canary_controller_not_initialized');
     const state = controllerState(this.#run, this.#events);
     if (state.incident_latched) throw new Error('rsi_canary_controller_baseline_only_latched');
+    if (state.environment_blocked) throw new Error('rsi_canary_controller_environment_blocked_new_run_required');
     if (state.pending_decision_index !== null) throw new Error('rsi_canary_controller_prior_outcome_required');
     if (state.completed_decisions >= this.#run.decision_budget) throw new Error('rsi_canary_controller_budget_exhausted');
     const decision = createRsiExternalCanaryDecision({
@@ -591,7 +624,11 @@ export class RsiExternalReadOnlyCanaryController {
     }));
     await this.#persist();
     return zero({
-      state: outcome.incident === true ? 'BASELINE_ONLY_LATCHED' : 'OUTCOME_RECORDED',
+      state: outcome.incident === true
+        ? 'BASELINE_ONLY_LATCHED'
+        : outcome.inconclusive_environment === true
+          ? 'ENVIRONMENT_BLOCKED_NEW_RUN_REQUIRED'
+          : 'OUTCOME_RECORDED',
       outcome_digest: outcome.outcome_digest,
     });
   }
@@ -619,6 +656,8 @@ export class RsiExternalReadOnlyCanaryController {
       incident_can_be_cleared: false,
       first_blocking_decision_index: state.first_blocking_decision_index,
       first_blockers: Object.freeze([...state.first_blockers]),
+      environment_blocked: state.environment_blocked,
+      first_environment_blocker_decision_index: state.first_environment_blocker_decision_index,
       state: state.state,
       baseline_profile_remains_default: true,
       controller_can_activate_profile: false,
@@ -652,6 +691,13 @@ export function rsiExternalReadOnlyCanaryControllerTrustRootSnapshot() {
     security_holdout_hidden_from_candidate: true,
     reward_hack_challenges_hidden_from_candidate: true,
     from_scratch_replay_required: true,
+    process_and_outcome_integrity_separated: true,
+    controllable_and_environment_failures_separated: true,
+    transfer_holdout_required: true,
+    trajectory_ordering_required: true,
+    blind_retry_forbidden: true,
+    missing_verification_forbidden: true,
+    environment_blocker_requires_new_external_run_without_negative_candidate_credit: true,
     identity_drift_latches_baseline_only: true,
     ambiguous_outcome_latches_baseline_only: true,
     reward_hack_latches_baseline_only: true,
