@@ -33,7 +33,7 @@ async function buildMonacoAssets({
   const treeSitterEntry = path.join(appRoot, 'src', 'ide', 'tree-sitter-worker.mjs');
   const webTreeSitterRoot = await packageRoot('web-tree-sitter');
   const javascriptGrammarRoot = await packageRoot('tree-sitter-javascript');
-  const treeSitterRuntimeWasm = path.join(webTreeSitterRoot, 'tree-sitter.wasm');
+  const treeSitterRuntimeWasm = path.join(webTreeSitterRoot, 'web-tree-sitter.wasm');
   const treeSitterJavaScriptWasm = path.join(javascriptGrammarRoot, 'tree-sitter-javascript.wasm');
   await fs.rm(outputDir, { recursive: true, force: true });
   await fs.mkdir(outputDir, { recursive: true });
@@ -80,7 +80,7 @@ async function buildMonacoAssets({
   });
 
   await Promise.all([
-    fs.copyFile(treeSitterRuntimeWasm, path.join(outputDir, 'tree-sitter.wasm')),
+    fs.copyFile(treeSitterRuntimeWasm, path.join(outputDir, 'web-tree-sitter.wasm')),
     fs.copyFile(treeSitterJavaScriptWasm, path.join(outputDir, 'tree-sitter-javascript.wasm')),
   ]);
 
@@ -90,7 +90,7 @@ async function buildMonacoAssets({
     || !entries.includes('editor.css')
     || !entries.includes('editor.worker.js')
     || !entries.includes('tree-sitter.worker.js')
-    || !entries.includes('tree-sitter.wasm')
+    || !entries.includes('web-tree-sitter.wasm')
     || !entries.includes('tree-sitter-javascript.wasm')
   ) {
     throw new Error('ide_asset_build_incomplete');
