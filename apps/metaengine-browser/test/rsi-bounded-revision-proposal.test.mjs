@@ -28,6 +28,8 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stable(value){if(Array.isArray(value))return value.map(stable);if(!value||typeof value!=='object')return value;return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));}
+function structuralDigest(value){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;}
 
 function experimentFixture(label='one',{supported=true}={}){
   const hypothesis=createRsiSharedExperienceHypothesis({
@@ -36,9 +38,13 @@ function experimentFixture(label='one',{supported=true}={}){
     origin_candidate_digest:dg(`origin-candidate-${label}`),
     origin_lineage_digest:dg(`origin-lineage-${label}`),
     sanitized_summary_digest:dg(`summary-${label}`),
+    distilled_recipe_digest:dg(`recipe-${label}`),
     supporting_evidence_digest:dg(`support-${label}`),
     counterevidence_digest:dg(`counter-${label}`),
     falsification_test_digest:dg(`falsification-${label}`),
+    source_context_digest:dg(`source-context-${label}`),
+    local_revalidation_protocol_digest:dg(`revalidate-${label}`),
+    negative_transfer_probe_digest:dg(`negative-transfer-${label}`),
     scope_tags:['PLANNING'],
     recipient_group_tags:['CODING'],
     evaluator_cost_units:8,
@@ -56,6 +62,9 @@ function experimentFixture(label='one',{supported=true}={}){
     counterevidence_reviewed:true,
     falsification_test_precommitted:true,
     hidden_data_non_disclosure_pass:true,
+    recipe_distillation_verified:true,
+    context_compatibility_pass:true,
+    negative_transfer_probe_pass:true,
     scope_precision_pass:true,
     evaluator_budget_available:true,
     marginal_information_gain_certified:true,
@@ -171,6 +180,10 @@ test('external envelope binds exact supported experiment and immutable policy bo
   const checked=verifyRsiBoundedRevisionEnvelope(env,{intent:fx.intent,receipt:fx.receipt});
   assert.equal(checked.envelope_digest,env.envelope_digest);
   assert.equal(env.parent_candidate_artifact_digest,fx.receipt.candidate_artifact_digest);
+  assert.equal(env.experiment_intent_snapshot.intent_digest,fx.intent.intent_digest);
+  assert.equal(env.experiment_receipt_snapshot.receipt_digest,fx.receipt.receipt_digest);
+  assert.equal(env.phase26_experiment_replay_required,true);
+  assert.equal(verifyRsiBoundedRevisionEnvelope(env).envelope_digest,env.envelope_digest);
   assert.equal(env.parent_artifact_preserved,true);
   assert.equal(env.candidate_must_be_new_artifact,true);
   assert.equal(env.protected_policy_roots_immutable,true);
@@ -269,6 +282,62 @@ test('append-only archive preserves multiple proposals and never selects or appl
   assert.equal((await restored.add({envelope:env1,proposal:p1})).state,'IDEMPOTENT');
 });
 
+test('failed archive persistence creates no phantom revision proposal',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-revision-archive-persist-fail-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+  const fx=experimentFixture('persist-fail');
+  const env=envelope(fx,'persist-fail');
+  const p=proposal(env,'persist-fail');
+
+  await fs.mkdir(`${statePath}.tmp`);
+  await assert.rejects(()=>archive.add({envelope:env,proposal:p}));
+  assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().active_artifact_digest,null);
+
+  await fs.rm(`${statePath}.tmp`,{recursive:true,force:true});
+  const restored=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,0);
+});
+
+test('restart rejects self-rehashed envelope or proposal policy downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-revision-archive-replay-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+  const fx=experimentFixture('replay');
+  const env=envelope(fx,'replay');
+  const p=proposal(env,'replay');
+  await archive.add({envelope:env,proposal:p});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const weakenedEnvelope={...persisted.rows[0].envelope,envelope_can_apply_revision:true};
+  delete weakenedEnvelope.envelope_digest;
+  persisted.rows[0].envelope={...weakenedEnvelope,envelope_digest:structuralDigest(weakenedEnvelope)};
+  const stateCore=structuredClone(persisted);delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/envelope_policy_invalid|archive_derived_state_mismatch/);
+});
+
+test('embedded Phase26 experiment tamper invalidates envelope replay',()=>{
+  const fx=experimentFixture('embedded-tamper');
+  const env=envelope(fx,'embedded-tamper');
+  const badIntentCore={...env.experiment_intent_snapshot,candidate_can_execute_experiment:true};
+  delete badIntentCore.intent_digest;
+  const badIntent={...badIntentCore,intent_digest:structuralDigest(badIntentCore)};
+  const tamperedCore={...env,experiment_intent_snapshot:badIntent};
+  delete tamperedCore.envelope_digest;
+  const tampered={...tamperedCore,envelope_digest:structuralDigest(tamperedCore)};
+  assert.throws(()=>verifyRsiBoundedRevisionEnvelope(tampered),/intent_policy_invalid|supported_experiment_required|envelope_digest_mismatch/);
+});
+
 test('revision trust root preserves external boundaries and zero authority',()=>{
   const root=rsiBoundedRevisionProposalTrustRootSnapshot();
   assert.equal(root.supported_phase26_experiment_required,true);
@@ -282,6 +351,9 @@ test('revision trust root preserves external boundaries and zero authority',()=>
   assert.equal(root.preserved_behavior_contract_required,true);
   assert.equal(root.negative_evidence_required,true);
   assert.equal(root.regression_budget_precommitted,true);
+  assert.equal(root.phase26_experiment_snapshots_embedded,true);
+  assert.equal(root.durable_before_visible_required,true);
+  assert.equal(root.restart_revalidation_required,true);
   assert.equal(root.external_implementation_required,true);
   assert.equal(root.external_paired_validation_required,true);
   assert.equal(root.optimizer_may_author_proposal_but_not_envelope,true);
