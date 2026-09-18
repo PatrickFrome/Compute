@@ -72,7 +72,7 @@ function libraryFixture(){
   for(const [role,capability] of roles){
     const char=String(index);
     const a=skill(role,capability,1,char);
-    const b=skill(role,capability,1,String(index+5));
+    const b=skill(role,capability,1,'6789a'[index-1]);
     entries.push(a,b);
     primary[role]=a.capsule;
     alternate[role]=b.capsule;
