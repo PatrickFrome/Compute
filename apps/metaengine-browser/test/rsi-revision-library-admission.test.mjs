@@ -40,6 +40,7 @@ function scopeAdmission(parent,successor){
     schema:'metaengine.rsi.revision-scope-admission.v1',version:1,source_sha:SOURCE,
     admission_id:'revision.scope.library.1',
     reliability_binding_digest:d('7'),
+    reliability_hidden_trial_set_digest:d('8'),
     parent_skill_digest:parent.skill_digest,
     successor_skill_digest:successor.skill_digest,
     scope_candidate_digest:d('8'),
@@ -165,6 +166,8 @@ test('library admission trust root keeps append-only evolution outside Browser a
   assert.equal(root.append_only_library_update,true);
   assert.equal(root.parent_retained,true);
   assert.equal(root.parent_activation_state_unchanged,true);
+  assert.equal(root.successor_holdout_distinct_from_parent,true);
+  assert.equal(root.successor_holdout_distinct_from_reliability,true);
   assert.equal(root.candidate_can_read_library_holdout,false);
   assert.equal(root.candidate_can_self_certify_skill,false);
   assert.equal(root.candidate_can_replace_parent_in_place,false);
