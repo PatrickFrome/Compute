@@ -271,6 +271,7 @@ export class RsiMetaProfileCanaryLedger{
     return zero({state:entry.rollback_required?'ROLLBACK_REQUIRED':'OUTCOME_RECORDED',outcome_digest:checked.outcome_digest,rollback_required:entry.rollback_required});
   }
   admission(canaryId){if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');const e=this.#entry(canaryId);return e?Object.freeze(structuredClone(e.admission)):null}
+  record(canaryId){if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');const e=this.#entry(canaryId);return e?Object.freeze(structuredClone(e)):null}
   snapshot(){
     const s=stateCore(this.#sourceSha,this.#entries);
     return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,canary_count:s.canary_count,
