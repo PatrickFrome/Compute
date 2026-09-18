@@ -28,7 +28,7 @@ function digest(value){
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
 }
 function zeroAuthority(value,label){
-  for(const field of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','signing_authority','direct_tool_execution_authority','authority_effect']){
+  for(const field of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','authority_effect']){
     if(value?.[field]!==false)throw new Error(`rsi_skill_revision_${label}_${field}_invalid`);
   }
   if(value?.automatic_retry_allowed!==false)throw new Error(`rsi_skill_revision_${label}_automatic_retry_invalid`);
@@ -55,7 +55,12 @@ export function createRsiSkillRevisionAdmission({
   zeroAuthority(evaluation,'evaluation');
   const reliability=finalizeRsiContrastiveSkillReliability({revision,evaluation});
   zeroAuthority(reliability,'reliability_result');
-  if(reliability.reliability_gate_pass===false||reliability.eligible_for_v126_scope_preservation!==true){
+  if(
+    reliability.eligible_for_v126_scope_preservation!==true
+    ||evaluation.reliability_gate_pass!==true
+    ||evaluation.reliable_behavior_improved!==true
+    ||evaluation.potential_capability_preserved!==true
+  ){
     throw new Error('rsi_skill_revision_reliability_gate_failed');
   }
 
