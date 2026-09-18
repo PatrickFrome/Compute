@@ -3,8 +3,10 @@ import crypto from 'node:crypto';
 import {
   createRsiProxyAllocationGuidance,
   verifyRsiProxyCalibrationPolicy,
+  verifyRsiProxyReliabilitySnapshot,
 } from './rsi-proxy-reliability-calibration.mjs';
 
+export const RSI_DISAGREEMENT_COMMITTEE_MEMBER_SCHEMA = 'metaengine.rsi.disagreement-committee-member.v1';
 export const RSI_DISAGREEMENT_COMMITTEE_SCHEMA = 'metaengine.rsi.disagreement-committee.v1';
 export const RSI_ACQUISITION_CANDIDATE_SCHEMA = 'metaengine.rsi.acquisition-candidate.v1';
 export const RSI_COMMITTEE_PREDICTION_SCHEMA = 'metaengine.rsi.committee-prediction.v1';
@@ -150,25 +152,33 @@ export function createRsiDisagreementCommitteeMember({
   predictor_identity_digest,
   proxy_policy,
   proxy_snapshot,
+  proxy_pairs,
   external_member_owner = false,
   authored_by_candidate = true,
 } = {}) {
   if (external_member_owner !== true || authored_by_candidate !== false) throw new Error('rsi_disagreement_member_external_origin_required');
   const policy = verifyRsiProxyCalibrationPolicy(proxy_policy);
-  const guidance = createRsiProxyAllocationGuidance({ policy, snapshot: proxy_snapshot });
+  const snapshot = verifyRsiProxyReliabilitySnapshot(proxy_snapshot, policy, proxy_pairs);
+  const guidance = createRsiProxyAllocationGuidance({ policy, snapshot });
   const core = {
+    schema: RSI_DISAGREEMENT_COMMITTEE_MEMBER_SCHEMA,
+    version: 1,
     member_id: boundedId(member_id, 'member_id'),
     predictor_family: boundedToken(predictor_family, 'predictor_family'),
     predictor_identity_digest: exactDigest(predictor_identity_digest, 'predictor_identity'),
     proxy_policy_id: policy.policy_id,
     proxy_policy_digest: policy.policy_digest,
-    proxy_snapshot_digest: exactDigest(proxy_snapshot.snapshot_digest, 'proxy_snapshot'),
+    proxy_snapshot_digest: exactDigest(snapshot.snapshot_digest, 'proxy_snapshot'),
+    proxy_pair_digests: Object.freeze([...snapshot.pair_digests]),
+    calibration_pair_count: positiveInt(snapshot.pair_count, 'calibration_pair_count', 2048),
     reliability_state: boundedToken(guidance.reliability_state, 'reliability_state'),
     reliability_weight: boundedScore(guidance.proxy_allocation_weight, 'reliability_weight'),
     pruning_mode: boundedToken(guidance.pruning_mode, 'pruning_mode'),
     drift_detected: guidance.drift_detected === true,
+    guidance_digest: exactDigest(guidance.guidance_digest, 'guidance'),
     external_member_owner: true,
     authored_by_candidate: false,
+    calibration_recomputed_from_external_pairs: true,
     member_prediction_is_full_evaluator: false,
     member_prediction_is_promotion_authority: false,
     candidate_can_edit_member_weight: false,
@@ -183,35 +193,67 @@ export function createRsiDisagreementCommitteeMember({
   return Object.freeze({ ...core, member_digest: digest(core) });
 }
 
+export function verifyRsiDisagreementCommitteeMember(member, {
+  proxy_policy,
+  proxy_snapshot,
+  proxy_pairs,
+} = {}) {
+  if (!plainObject(member) || member.schema !== RSI_DISAGREEMENT_COMMITTEE_MEMBER_SCHEMA || member.version !== 1) {
+    throw new Error('rsi_disagreement_member_invalid');
+  }
+  assertZeroAuthority(member, 'member');
+  if (
+    member.external_member_owner !== true
+    || member.authored_by_candidate !== false
+    || member.calibration_recomputed_from_external_pairs !== true
+    || member.member_prediction_is_full_evaluator !== false
+    || member.member_prediction_is_promotion_authority !== false
+    || member.candidate_can_edit_member_weight !== false
+  ) throw new Error('rsi_disagreement_member_policy_invalid');
+
+  const canonical = createRsiDisagreementCommitteeMember({
+    member_id: member.member_id,
+    predictor_family: member.predictor_family,
+    predictor_identity_digest: member.predictor_identity_digest,
+    proxy_policy,
+    proxy_snapshot,
+    proxy_pairs,
+    external_member_owner: true,
+    authored_by_candidate: false,
+  });
+  if (canonical.member_digest !== exactDigest(member.member_digest, 'member')) throw new Error('rsi_disagreement_member_digest_mismatch');
+  return canonical;
+}
+
 export function createRsiDisagreementCommittee({
   committee_id,
-  members,
+  member_bindings,
   full_holdout_digest,
   evaluator_root_digest,
   external_committee_owner = false,
   authored_by_candidate = true,
 } = {}) {
   if (external_committee_owner !== true || authored_by_candidate !== false) throw new Error('rsi_disagreement_committee_external_origin_required');
-  if (!Array.isArray(members) || members.length < 2 || members.length > MAX_MEMBERS) throw new Error('rsi_disagreement_members_invalid');
+  if (!Array.isArray(member_bindings) || member_bindings.length < 2 || member_bindings.length > MAX_MEMBERS) {
+    throw new Error('rsi_disagreement_members_invalid');
+  }
 
   const memberIds = new Set();
   const predictorIds = new Set();
-  const rows = members.map((row) => {
-    if (!plainObject(row) || !SHA256_RE.test(String(row.member_digest || ''))) throw new Error('rsi_disagreement_member_invalid');
-    assertZeroAuthority(row, 'member');
-    const clone = structuredClone(row);
-    delete clone.member_digest;
-    if (row.member_digest !== digest(clone)) throw new Error('rsi_disagreement_member_digest_mismatch');
-    if (row.external_member_owner !== true || row.authored_by_candidate !== false || row.candidate_can_edit_member_weight !== false) {
-      throw new Error('rsi_disagreement_member_policy_invalid');
-    }
+  const rows = member_bindings.map((binding) => {
+    if (!plainObject(binding)) throw new Error('rsi_disagreement_member_binding_invalid');
+    const row = verifyRsiDisagreementCommitteeMember(binding.member, {
+      proxy_policy: binding.proxy_policy,
+      proxy_snapshot: binding.proxy_snapshot,
+      proxy_pairs: binding.proxy_pairs,
+    });
     const memberId = boundedId(row.member_id, 'member_id');
     if (memberIds.has(memberId)) throw new Error('rsi_disagreement_member_duplicate');
     memberIds.add(memberId);
     const predictorId = exactDigest(row.predictor_identity_digest, 'predictor_identity');
     if (predictorIds.has(predictorId)) throw new Error('rsi_disagreement_predictor_duplicate');
     predictorIds.add(predictorId);
-    return Object.freeze(structuredClone(row));
+    return row;
   }).sort((a, b) => a.member_id.localeCompare(b.member_id));
 
   const active = rows.filter((row) => row.reliability_weight > 0);
@@ -232,6 +274,7 @@ export function createRsiDisagreementCommittee({
     full_holdout_digest: exactDigest(full_holdout_digest, 'full_holdout'),
     evaluator_root_digest: exactDigest(evaluator_root_digest, 'evaluator_root'),
     acquisition_rule: 'CALIBRATED_QUERY_BY_COMMITTEE',
+    member_weight_source: 'V1_22_RECOMPUTED_EXTERNAL_CALIBRATION',
     unreliable_members_have_zero_weight: true,
     committee_diversity_required_for_disagreement: true,
     disagreement_is_compute_allocation_only: true,
@@ -258,6 +301,7 @@ export function verifyRsiDisagreementCommittee(committee) {
   assertZeroAuthority(committee, 'committee');
   if (
     committee.acquisition_rule !== 'CALIBRATED_QUERY_BY_COMMITTEE'
+    || committee.member_weight_source !== 'V1_22_RECOMPUTED_EXTERNAL_CALIBRATION'
     || committee.unreliable_members_have_zero_weight !== true
     || committee.committee_diversity_required_for_disagreement !== true
     || committee.disagreement_is_compute_allocation_only !== true
