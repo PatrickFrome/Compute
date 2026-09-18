@@ -1470,13 +1470,18 @@ function phase30Entry(evidence,label,{niches=['CONTROL_FLOW'],...overrides}={}){
     SUPPORTED_FOR_BOUNDED_REVISION:{
       recipe_digest:labelDigest(`phase30-recipe-${label}`),
       watch_out_digest:labelDigest(`phase30-watchout-${label}`),
+      sealed_exogenous_acceptance_digest:labelDigest(`phase30-sealed-acceptance-${label}`),
+      differential_reference_digest:labelDigest(`phase30-differential-reference-${label}`),
     },
     CANDIDATE_EXPERIMENT_REJECTED:{
       negative_constraint_digest:labelDigest(`phase30-negative-${label}`),
       watch_out_digest:labelDigest(`phase30-watchout-${label}`),
+      differential_reference_digest:labelDigest(`phase30-differential-reference-${label}`),
+      failure_attribution_digest:labelDigest(`phase30-failure-attribution-${label}`),
     },
     NO_MATERIAL_IMPROVEMENT:{
       low_yield_constraint_digest:labelDigest(`phase30-low-yield-${label}`),
+      differential_reference_digest:labelDigest(`phase30-differential-reference-${label}`),
     },
     INCONCLUSIVE_ENVIRONMENT:{
       environment_diagnostic_digest:labelDigest(`phase30-environment-${label}`),
@@ -1500,6 +1505,7 @@ function phase30Entry(evidence,label,{niches=['CONTROL_FLOW'],...overrides}={}){
     ...byState[evidence.receipt.state],
     external_learning_reviewer:true,
     external_niche_owner:true,
+    external_acceptance_owner:true,
     authored_by_candidate:false,
     ...overrides,
   });
@@ -1532,6 +1538,21 @@ test('Phase30 maps all immutable Phase26 outcomes into typed zero-authority lear
     assert.equal(entry.exact_epoch_sequence_bound,true);
     assert.equal(entry.generation_history_anchor_bound,true);
     assert.equal(entry.differential_reference_required,true);
+    assert.equal(entry.provenance_root_bound,true);
+    assert.equal(entry.external_acceptance_owner,true);
+    assert.equal(entry.sealed_exogenous_acceptance_required_for_positive,true);
+    assert.equal(entry.failure_attribution_required_for_rejected,true);
+    assert.equal(entry.candidate_can_view_sealed_acceptance,false);
+    assert.equal(entry.candidate_can_choose_reference,false);
+    assert.equal(entry.candidate_can_choose_niche,false);
+    if(state==='SUPPORTED_FOR_BOUNDED_REVISION'){
+      assert.match(entry.sealed_exogenous_acceptance_digest,/^sha256:/);
+      assert.match(entry.differential_reference_digest,/^sha256:/);
+    }
+    if(state==='CANDIDATE_EXPERIMENT_REJECTED'){
+      assert.match(entry.failure_attribution_digest,/^sha256:/);
+      assert.match(entry.differential_reference_digest,/^sha256:/);
+    }
     assert.equal(entry.trajectory_summary_is_advisory,true);
     assert.equal(entry.causal_attribution_is_advisory,true);
     assert.equal(entry.candidate_can_author_learning,false);
@@ -1678,10 +1699,13 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
     trajectory_summary_digest:labelDigest('mismatch-trajectory'),
     reference_evidence_digest:labelDigest('mismatch-reference'),
     causal_attribution_digest:labelDigest('mismatch-causal'),
+    sealed_exogenous_acceptance_digest:labelDigest('mismatch-sealed-acceptance'),
+    differential_reference_digest:labelDigest('mismatch-differential-reference'),
     recipe_digest:labelDigest('mismatch-recipe'),
     watch_out_digest:labelDigest('mismatch-watchout'),
     external_learning_reviewer:true,
     external_niche_owner:true,
+    external_acceptance_owner:true,
     authored_by_candidate:false,
   }),/artifact_request_binding_invalid|intent_digest_mismatch|evaluator_generation_seq_mismatch/);
 });
@@ -1692,7 +1716,16 @@ test('Phase30 trust root freezes exact-sequence quality-diverse learning with ze
   assert.equal(root.evaluator_generation_sequence_binding_required,true);
   assert.equal(root.evaluation_epoch_sequence_binding_required,true);
   assert.equal(root.generation_history_anchor_binding_required,true);
+  assert.equal(root.provenance_root_binding_required,true);
+  assert.equal(root.external_acceptance_owner_required,true);
+  assert.equal(root.sealed_exogenous_acceptance_required_for_positive,true);
+  assert.equal(root.candidate_can_view_sealed_acceptance,false);
   assert.equal(root.differential_reference_required,true);
+  assert.equal(root.candidate_can_choose_reference,false);
+  assert.equal(root.candidate_can_choose_niche,false);
+  assert.equal(root.failure_attribution_required_for_rejected,true);
+  assert.equal(root.fast_candidate_loop_separate,true);
+  assert.equal(root.slow_consolidation_loop_advisory_only,true);
   assert.equal(root.trajectory_summary_advisory_only,true);
   assert.equal(root.causal_attribution_advisory_only,true);
   assert.equal(root.quality_diverse_frontier_required,true);
@@ -1707,4 +1740,66 @@ test('Phase30 trust root freezes exact-sequence quality-diverse learning with ze
   assert.equal(root.scheduler_authority,false);
   assert.equal(root.self_update_authority,false);
   assert.equal(root.authority_effect,false);
+});
+
+
+test('Phase30 positive learning requires sealed exogenous acceptance and an independent differential reference',()=>{
+  const evidence=phase30OutcomeEvidence('sealed-positive',{generationSeq:1,epochSeq:1});
+  assert.throws(()=>createRsiGenerationScopedOutcomeEntry({
+    entry_id:'phase30.outcome.missing-sealed',
+    handoff_row:evidence.handoffRow,
+    experiment_intent:evidence.intent,
+    experiment_receipt:evidence.receipt,
+    niche_tags:['CONTROL_FLOW'],
+    summary_digest:labelDigest('missing-sealed-summary'),
+    applicability_digest:labelDigest('missing-sealed-applicability'),
+    counterevidence_digest:labelDigest('missing-sealed-counter'),
+    trajectory_summary_digest:labelDigest('missing-sealed-trajectory'),
+    reference_evidence_digest:labelDigest('missing-sealed-reference'),
+    causal_attribution_digest:labelDigest('missing-sealed-causal'),
+    recipe_digest:labelDigest('missing-sealed-recipe'),
+    watch_out_digest:labelDigest('missing-sealed-watchout'),
+    differential_reference_digest:labelDigest('missing-sealed-differential'),
+    external_learning_reviewer:true,
+    external_niche_owner:true,
+    external_acceptance_owner:true,
+    authored_by_candidate:false,
+  }),/sealed_acceptance_digest_invalid/);
+
+  assert.throws(()=>phase30Entry(evidence,'candidate-owns-acceptance',{
+    external_acceptance_owner:false,
+  }),/external_learning_ownership_required/);
+
+  const alias=labelDigest('phase30-positive-alias');
+  assert.throws(()=>phase30Entry(evidence,'aliased-positive',{
+    sealed_exogenous_acceptance_digest:alias,
+    differential_reference_digest:alias,
+  }),/learning_evidence_roots_must_be_distinct/);
+});
+
+test('Phase30 rejected and no-material evidence remain counterevidence and cannot enter the positive frontier',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase30-negative-frontier-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'frontier.json');
+  const rejected=phase30OutcomeEvidence('negative-rejected',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const flat=phase30OutcomeEvidence('negative-flat',{state:'NO_MATERIAL_IMPROVEMENT'});
+  const er=phase30Entry(rejected,'negative-rejected');
+  const ef=phase30Entry(flat,'negative-flat');
+  const map=new Map([
+    [er.experiment_receipt_digest,{handoff_row:rejected.handoffRow,experiment_intent:rejected.intent,experiment_receipt:rejected.receipt}],
+    [ef.experiment_receipt_digest,{handoff_row:flat.handoffRow,experiment_intent:flat.intent,experiment_receipt:flat.receipt}],
+  ]);
+  const archive=new RsiGenerationScopedOutcomeArchive({
+    statePath,source_sha:SOURCE,
+    evidenceResolver:async({experiment_receipt_digest})=>map.get(experiment_receipt_digest),
+  });
+  await archive.init();
+  await archive.add({entry:er,...map.get(er.experiment_receipt_digest)});
+  await archive.add({entry:ef,...map.get(ef.experiment_receipt_digest)});
+  assert.equal(archive.frontier().length,0);
+  assert.match(er.failure_attribution_digest,/^sha256:/);
+  assert.match(er.differential_reference_digest,/^sha256:/);
+  assert.match(ef.differential_reference_digest,/^sha256:/);
+  assert.equal(archive.snapshot().slow_consolidation_loop_advisory_only,true);
+  assert.equal(archive.snapshot().archive_can_change_budget,false);
 });
