@@ -34,6 +34,14 @@ import {
   verifyRsiReleaseExecutorAdmission,
   rsiReleaseExecutorAdmissionTrustRootSnapshot,
 } from '../src/rsi-release-executor-admission.mjs';
+import {
+  createRsiReleaseEffectCommandReadback,
+  createRsiSelfUpdateTransactionReadback,
+  createRsiSuccessorRuntimeReadback,
+  createRsiReleaseEffectReconciliation,
+  verifyRsiReleaseEffectReconciliation,
+  rsiReleaseEffectReconciliationTrustRootSnapshot,
+} from '../src/rsi-release-effect-reconciliation.mjs';
 
 const PARENT='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -440,4 +448,268 @@ test('release executor admission root reuses existing DB lease plane and gives R
   assert.equal(root.rsi_can_invoke_effect,false);
   assert.equal(root.same_command_receipt_reconciliation_required,true);
   assert.equal(root.ambiguous_effect_replay_allowed,false);
+});
+
+
+function executorAdmissionFixture(){
+  const {request,review,releaseHandoff}=readyReleaseHandoffFixture();
+  const lease=executorReadback(releaseHandoff,review);
+  const authorityReadback=createRsiReleaseAuthorityReadback({
+    verifier_id:'native-pre-effect-monitor-1',
+    verified_at:'2026-09-18T18:12:10.000Z',
+    current_authority_sha:PARENT,
+    current_version:'0.7.0-dev.998.1',
+    browser_generation:28,
+    exact_runtime_identity:true,
+    externally_verified:true,
+  });
+  const admission=createRsiReleaseExecutorAdmission({
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    executor_readback:lease,
+    pre_effect_authority_readback:authorityReadback,
+    evaluated_at:'2026-09-18T18:12:12.000Z',
+  });
+  return {request,review,releaseHandoff,lease,admission};
+}
+
+function postCommandReadback(admission,overrides={}){
+  return createRsiReleaseEffectCommandReadback({
+    verifier_id:'native-command-reconciler-1',
+    observed_at:'2026-09-18T18:13:00.000Z',
+    workspace_id:admission.workspace_id,
+    command_id:admission.command_id,
+    leased_by:admission.leased_by,
+    action:'SELF_UPDATE_APPLY',
+    status:'FAILED',
+    idempotency_key:admission.idempotency_key,
+    command_lane:'GLOBAL_MUTATION',
+    effect_key:'global:control-plane',
+    leased_at:admission.leased_at,
+    expires_at:admission.expires_at,
+    completed_at:'2026-09-18T18:12:30.000Z',
+    receipt:{
+      schema:'metaengine.native-supervisor.command-receipt.v2',
+      command_id:admission.command_id,
+      action:'SELF_UPDATE_APPLY',
+      platform:null,
+      result:null,
+      effect_outcome:'AMBIGUOUS',
+      lane:'GLOBAL_MUTATION',
+      effect_key:'global:control-plane',
+      execution_ms:25,
+      recorded_at:'2026-09-18T18:12:29.000Z',
+      authority_effect:false,
+    },
+    error:'self_update_apply_not_ready',
+    command_row_authority_effect:false,
+    db_row_externally_verified:true,
+    ...overrides,
+  });
+}
+
+function transactionRow(releaseHandoff,{state='PREPARED',effect=false}={}){
+  return {
+    schema:'metaengine.self-update.transaction.v1',
+    transaction_id:'33333333-3333-4333-8333-333333333333',
+    source_version:releaseHandoff.authority_readback.current_version,
+    target_version:releaseHandoff.trusted_release.version,
+    resolved_git_sha:CANDIDATE,
+    state,
+    swapping:!['SUCCESSOR_BOOTED','QUALIFIED','QUARANTINED','SUPERSEDED'].includes(state),
+    qualified:state==='QUALIFIED',
+    quarantined:state==='QUARANTINED',
+    attempt_count:1,
+    automatic_retry_allowed:false,
+    created_at:'2026-09-18T18:12:15.000Z',
+    updated_at:'2026-09-18T18:12:40.000Z',
+    evidence:effect?{
+      effect_barrier_contract:'WRITE_AHEAD_V1',
+      effect_scope:'BROWSER_RESTART',
+      actuator_type:'ELECTRON_UPDATER_QUIT_AND_INSTALL',
+      physical_effect_attempted:true,
+      effect_barrier_crossed:true,
+      effect_must_be_single_shot:true,
+      post_effect_readback_required:true,
+    }:{},
+    authority_effect:false,
+  };
+}
+
+test('failed same command before install barrier is reconciled as NO_EFFECT_PROVEN without retry authority',()=>{
+  const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
+  const command=postCommandReadback(admission);
+  const transaction=createRsiSelfUpdateTransactionReadback({
+    verifier_id:'journal-reconciler-1',
+    observed_at:'2026-09-18T18:13:00.000Z',
+    transaction_present:true,
+    transaction:transactionRow(releaseHandoff,{state:'PREPARED',effect:false}),
+    filesystem_read_verified:true,
+  });
+  const row=createRsiReleaseEffectReconciliation({
+    executor_admission:admission,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    command_readback:command,
+    transaction_readback:transaction,
+    successor_runtime_readback:null,
+    reconciled_at:'2026-09-18T18:13:02.000Z',
+  });
+  verifyRsiReleaseEffectReconciliation(row);
+  assert.equal(row.result,'NO_EFFECT_PROVEN');
+  assert.equal(row.no_effect_proven,true);
+  assert.equal(row.physical_effect_confirmed,false);
+  assert.equal(row.retry_authorized,false);
+  assert.equal(row.effect_reexecution_authorized,false);
+  assert.equal(row.release_authority,false);
+});
+
+test('installer barrier crossed without exact qualified successor is AMBIGUOUS even if DB command completed',()=>{
+  const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
+  const command=postCommandReadback(admission,{
+    status:'COMPLETED',
+    error:null,
+    command_row_authority_effect:true,
+    receipt:{
+      schema:'metaengine.native-supervisor.command-receipt.v2',
+      command_id:admission.command_id,
+      action:'SELF_UPDATE_APPLY',
+      platform:null,
+      result:{state:'RESTART_GRACE',current_version:releaseHandoff.authority_readback.current_version},
+      effect_outcome:'AMBIGUOUS',
+      lane:'GLOBAL_MUTATION',
+      effect_key:'global:control-plane',
+      execution_ms:80,
+      recorded_at:'2026-09-18T18:12:29.000Z',
+      authority_effect:true,
+    },
+  });
+  const transaction=createRsiSelfUpdateTransactionReadback({
+    verifier_id:'journal-reconciler-1',
+    observed_at:'2026-09-18T18:13:00.000Z',
+    transaction_present:true,
+    transaction:transactionRow(releaseHandoff,{state:'INSTALLING',effect:true}),
+    filesystem_read_verified:true,
+  });
+  const row=createRsiReleaseEffectReconciliation({
+    executor_admission:admission,release_handoff:releaseHandoff,
+    promotion_review_result:review,promotion_review_request:request,
+    command_readback:command,transaction_readback:transaction,
+    successor_runtime_readback:null,reconciled_at:'2026-09-18T18:13:02.000Z',
+  });
+  assert.equal(row.result,'AMBIGUOUS');
+  assert.equal(row.reason,'INSTALL_EFFECT_STARTED_SUCCESSOR_NOT_QUALIFIED');
+  assert.equal(row.db_command_completion_is_not_physical_success_proof,true);
+  assert.equal(row.db_authority_effect_is_not_physical_success_proof,true);
+  assert.equal(row.retry_authorized,false);
+  assert.equal(row.ambiguous,true);
+});
+
+test('exact QUALIFIED successor independently proves the physical effect even when command receipt delivery did not complete',()=>{
+  const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
+  const command=createRsiReleaseEffectCommandReadback({
+    verifier_id:'native-command-reconciler-1',
+    observed_at:'2026-09-18T18:14:05.000Z',
+    workspace_id:admission.workspace_id,
+    command_id:admission.command_id,
+    leased_by:admission.leased_by,
+    action:'SELF_UPDATE_APPLY',
+    status:'EXPIRED',
+    idempotency_key:admission.idempotency_key,
+    command_lane:'GLOBAL_MUTATION',
+    effect_key:'global:control-plane',
+    leased_at:admission.leased_at,
+    expires_at:admission.expires_at,
+    completed_at:'2026-09-18T18:14:01.000Z',
+    receipt:null,
+    error:'lease_timeout_no_retry',
+    command_row_authority_effect:false,
+    db_row_externally_verified:true,
+  });
+  const tx=transactionRow(releaseHandoff,{state:'QUALIFIED',effect:true});
+  const transaction=createRsiSelfUpdateTransactionReadback({
+    verifier_id:'journal-reconciler-1',
+    observed_at:'2026-09-18T18:14:05.000Z',
+    transaction_present:true,
+    transaction:tx,
+    filesystem_read_verified:true,
+  });
+  const successor=createRsiSuccessorRuntimeReadback({
+    verifier_id:'successor-runtime-verifier-1',
+    observed_at:'2026-09-18T18:14:06.000Z',
+    transaction_id:tx.transaction_id,
+    running_version:releaseHandoff.trusted_release.version,
+    running_git_sha:CANDIDATE,
+    installed_executable_sha256:releaseHandoff.trusted_release.installed_executable_sha256,
+    browser_generation:29,
+    successor_qualification_state:'QUALIFIED',
+    exact_runtime_identity:true,
+    installed_executable_hash_verified:true,
+    trusted_release_verified:true,
+    external_successor_verifier:true,
+  });
+  const row=createRsiReleaseEffectReconciliation({
+    executor_admission:admission,release_handoff:releaseHandoff,
+    promotion_review_result:review,promotion_review_request:request,
+    command_readback:command,transaction_readback:transaction,
+    successor_runtime_readback:successor,reconciled_at:'2026-09-18T18:14:07.000Z',
+  });
+  assert.equal(row.result,'CONFIRMED');
+  assert.equal(row.physical_effect_confirmed,true);
+  assert.equal(row.no_effect_proven,false);
+  assert.equal(row.ambiguous,false);
+  assert.equal(row.external_release_authority_convergence_still_required,true);
+  assert.equal(row.release_authority,false);
+  assert.equal(row.effect_reexecution_authorized,false);
+});
+
+test('reconciliation rejects a different command id and exact-successor hash drift',()=>{
+  const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
+  assert.throws(()=>createRsiReleaseEffectReconciliation({
+    executor_admission:admission,release_handoff:releaseHandoff,
+    promotion_review_result:review,promotion_review_request:request,
+    command_readback:postCommandReadback(admission,{command_id:'44444444-4444-4444-8444-444444444444'}),
+    transaction_readback:createRsiSelfUpdateTransactionReadback({
+      verifier_id:'journal-reconciler-1',observed_at:'2026-09-18T18:13:00.000Z',
+      transaction_present:false,transaction:null,filesystem_read_verified:true,
+    }),
+    successor_runtime_readback:null,reconciled_at:'2026-09-18T18:13:02.000Z',
+  }),/same_command_binding_mismatch|receipt_command_mismatch/);
+
+  const tx=transactionRow(releaseHandoff,{state:'QUALIFIED',effect:true});
+  const badSuccessor=createRsiSuccessorRuntimeReadback({
+    verifier_id:'successor-runtime-verifier-1',observed_at:'2026-09-18T18:13:31.000Z',
+    transaction_id:tx.transaction_id,running_version:releaseHandoff.trusted_release.version,
+    running_git_sha:'f'.repeat(40),installed_executable_sha256:releaseHandoff.trusted_release.installed_executable_sha256,
+    browser_generation:29,successor_qualification_state:'QUALIFIED',exact_runtime_identity:true,
+    installed_executable_hash_verified:true,trusted_release_verified:true,external_successor_verifier:true,
+  });
+  const ambiguous=createRsiReleaseEffectReconciliation({
+    executor_admission:admission,release_handoff:releaseHandoff,
+    promotion_review_result:review,promotion_review_request:request,
+    command_readback:postCommandReadback(admission),
+    transaction_readback:createRsiSelfUpdateTransactionReadback({
+      verifier_id:'journal-reconciler-1',observed_at:'2026-09-18T18:13:00.000Z',
+      transaction_present:true,transaction:tx,filesystem_read_verified:true,
+    }),
+    successor_runtime_readback:badSuccessor,reconciled_at:'2026-09-18T18:13:32.000Z',
+  });
+  assert.equal(ambiguous.result,'AMBIGUOUS');
+  assert.equal(ambiguous.physical_effect_confirmed,false);
+});
+
+test('release effect reconciliation root encodes at-most-once no-retry semantics',()=>{
+  const root=rsiReleaseEffectReconciliationTrustRootSnapshot();
+  assert.equal(root.same_db_command_identity_required,true);
+  assert.equal(root.db_command_completion_is_not_physical_success_proof,true);
+  assert.equal(root.db_authority_effect_is_not_physical_success_proof,true);
+  assert.equal(root.exact_qualified_successor_required_for_confirmed_success,true);
+  assert.equal(root.failed_or_expired_without_effect_barrier_can_prove_no_effect,true);
+  assert.equal(root.installer_started_without_qualified_successor_is_ambiguous,true);
+  assert.equal(root.effect_reexecution_authorized,false);
+  assert.equal(root.retry_authorized,false);
+  assert.equal(root.ambiguous_effect_replay_allowed,false);
+  assert.equal(root.external_release_authority_convergence_required_after_confirmed_success,true);
 });
