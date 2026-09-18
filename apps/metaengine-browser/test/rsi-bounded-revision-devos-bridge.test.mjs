@@ -9,6 +9,7 @@ import {
 import {
   createRsiEvaluationBudgetPlan,
   createRsiEvaluationRoutingRequest,
+  verifyRsiArtifactEvaluationRoutingRequest,
 } from '../src/rsi-evaluation-budget-router.mjs';
 import {
   createRsiCandidateExperimentIntent,
@@ -24,6 +25,12 @@ import {
   createRsiBoundedRevisionArtifactReceipt,
   verifyRsiBoundedRevisionArtifactReceipt,
 } from '../src/rsi-bounded-revision-devos-bridge.mjs';
+import {
+  createRsiMaterializedCandidateEvaluationHandoff,
+  verifyRsiMaterializedCandidateEvaluationHandoff,
+  createRsiMaterializedCandidateExperimentIntent,
+  rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot,
+} from '../src/rsi-materialized-candidate-evaluation-handoff.mjs';
 import {
   RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA,
   prepareRsiIsolatedCandidateBuild,
@@ -583,4 +590,201 @@ test('artifact receipt rejects candidate-controlled provenance identity',()=>{
     external_attestor:true,
     authored_by_candidate:false,
   }),/provenance_identity_mismatch/);
+});
+
+
+function phase28ArtifactFixture(label='phase29'){
+  const fx=revisionFixture(label);
+  const bridge=provenanceBridge(fx,label);
+  const build=prepareRsiIsolatedCandidateBuild({
+    experiment_plan:bridge.devos_experiment_plan,
+    source_snapshot:sourceSnapshot(),
+    mutations:bridge.approved_mutations,
+    requested_backend:'FIRECRACKER',
+  });
+  const materialization=provenanceMaterialization(build);
+  const artifactReceipt=createRsiBoundedRevisionArtifactReceipt({
+    receipt_id:`phase28.artifact.receipt.${label}`,
+    bridge,
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    build_plan:build,
+    materialization_receipt:materialization,
+    artifact_digest:labelDigest(`${label}-artifact-package`),
+    provenance_attestation_digest:labelDigest(`${label}-provenance-attestation`),
+    signature_bundle_digest:labelDigest(`${label}-signature-bundle`),
+    transparency_log_entry_digest:labelDigest(`${label}-transparency-entry`),
+    reproducibility_evidence_digest:labelDigest(`${label}-reproducibility`),
+    external_attestor:true,
+    authored_by_candidate:false,
+  });
+  const artifactVerification={
+    bridge,
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    build_plan:build,
+    materialization_receipt:materialization,
+  };
+  return {...fx,bridge,build,materialization,artifactReceipt,artifactVerification};
+}
+
+function phase29Handoff(fx,label='phase29',overrides={}){
+  return createRsiMaterializedCandidateEvaluationHandoff({
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    evaluator_root_digest:labelDigest(`${label}-evaluator-root`),
+    evaluator_generation_digest:labelDigest(`${label}-evaluator-generation`),
+    evaluation_epoch_digest:labelDigest(`${label}-evaluation-epoch`),
+    sealed_task_set_digest:labelDigest(`${label}-sealed-task-set`),
+    evaluation_harness_digest:labelDigest(`${label}-evaluation-harness`),
+    trial_worker_image_digest:labelDigest(`${label}-evaluation-worker`),
+    resource_budget_digest:labelDigest(`${label}-resource-budget`),
+    task_order_digest:labelDigest(`${label}-task-order`),
+    acceptance_policy_digest:labelDigest(`${label}-acceptance-policy`),
+    stopping_policy_digest:labelDigest(`${label}-stopping-policy`),
+    hidden_holdout_root_digest:labelDigest(`${label}-hidden-holdout`),
+    safety_suite_root_digest:labelDigest(`${label}-safety-suite`),
+    security_suite_root_digest:labelDigest(`${label}-security-suite`),
+    external_measurement_digest:labelDigest(`${label}-external-measurement`),
+    proxy_score_digest:labelDigest(`${label}-proxy-score`),
+    uncertainty:0.9,
+    decision_closeness:0.8,
+    proxy_reliability_gap:0.3,
+    evaluator_cost_units:8,
+    expected_information_gain:0.9,
+    external_evaluation_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+}
+
+test('Phase29 provenance-bound child re-enters only the existing fresh budget and paired experiment planes',()=>{
+  const fx=phase28ArtifactFixture('phase29-loop');
+  const handoff=phase29Handoff(fx,'phase29-loop');
+  const verified=verifyRsiMaterializedCandidateEvaluationHandoff(handoff,{
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+  });
+  const request=verifyRsiArtifactEvaluationRoutingRequest(verified.fresh_evaluation_request);
+  assert.equal(request.phase28_artifact_receipt_digest,fx.artifactReceipt.artifact_receipt_digest);
+  assert.equal(request.parent_artifact_digest,fx.envelope.parent_candidate_artifact_digest);
+  assert.equal(request.candidate_artifact_digest,fx.artifactReceipt.artifact_digest);
+  assert.equal(request.fresh_budget_epoch_required,true);
+  assert.equal(request.prior_budget_reuse_allowed,false);
+  assert.ok(request.scope_tags.includes('SAFETY'));
+  assert.ok(request.scope_tags.includes('SECURITY'));
+  assert.ok(request.scope_tags.includes('HIDDEN_HOLDOUT'));
+
+  const freshPlan=createRsiEvaluationBudgetPlan({
+    plan_id:'phase29.eval.budget.loop',
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(freshPlan.state,'EVALUATION_BUDGET_ROUTED');
+  assert.equal(freshPlan.safety_floor_satisfied,true);
+  assert.deepEqual(freshPlan.selected_request_digests,[request.request_digest]);
+
+  const intent=createRsiMaterializedCandidateExperimentIntent({
+    handoff,
+    handoff_verification:{artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification},
+    fresh_budget_plan:freshPlan,
+    fresh_plan_requests:[request],
+    intent_id:'phase29.paired.intent.loop',
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(intent.evaluation_request_kind,'MATERIALIZED_CANDIDATE');
+  assert.equal(intent.phase28_artifact_receipt_digest,fx.artifactReceipt.artifact_receipt_digest);
+  assert.equal(intent.baseline_artifact_digest,handoff.parent_artifact_digest);
+  assert.equal(intent.candidate_artifact_digest,handoff.candidate_artifact_digest);
+  assert.equal(intent.evaluator_root_digest,handoff.evaluator_root_digest);
+  assert.equal(intent.evaluator_generation_digest,handoff.evaluator_generation_digest);
+  assert.equal(intent.evaluation_epoch_digest,handoff.evaluation_epoch_digest);
+  assert.equal(intent.sealed_task_set_digest,handoff.sealed_task_set_digest);
+  assert.equal(intent.harness_digest,handoff.evaluation_harness_digest);
+  assert.equal(intent.trial_worker_image_digest,handoff.trial_worker_image_digest);
+  assert.equal(intent.resource_budget_digest,handoff.resource_budget_digest);
+  assert.equal(intent.task_order_digest,handoff.task_order_digest);
+  assert.equal(intent.max_attempts_per_arm,1);
+  assert.equal(intent.max_retries,0);
+  assert.equal(intent.execution_authority,false);
+  assert.equal(intent.scheduler_authority,false);
+  assert.equal(handoff.state,'READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING');
+  assert.equal(handoff.eligible_for_promotion,undefined);
+  assert.equal(handoff.authority_effect,false);
+});
+
+test('Phase29 rejects candidate-owned evaluation and build-worker reuse',()=>{
+  const fx=phase28ArtifactFixture('phase29-negative');
+  assert.throws(()=>createRsiMaterializedCandidateEvaluationHandoff({
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    evaluator_root_digest:labelDigest('neg-evaluator'),
+    evaluator_generation_digest:labelDigest('neg-generation'),
+    evaluation_epoch_digest:labelDigest('neg-epoch'),
+    sealed_task_set_digest:labelDigest('neg-tasks'),
+    evaluation_harness_digest:labelDigest('neg-harness'),
+    trial_worker_image_digest:labelDigest('neg-worker'),
+    resource_budget_digest:labelDigest('neg-budget'),
+    task_order_digest:labelDigest('neg-order'),
+    acceptance_policy_digest:labelDigest('neg-acceptance'),
+    stopping_policy_digest:labelDigest('neg-stopping'),
+    hidden_holdout_root_digest:labelDigest('neg-hidden'),
+    safety_suite_root_digest:labelDigest('neg-safety'),
+    security_suite_root_digest:labelDigest('neg-security'),
+    external_measurement_digest:labelDigest('neg-measurement'),
+    proxy_score_digest:labelDigest('neg-proxy'),
+    uncertainty:0.9,decision_closeness:0.8,proxy_reliability_gap:0.2,
+    evaluator_cost_units:8,expected_information_gain:0.8,
+    external_evaluation_owner:false,
+    authored_by_candidate:true,
+  }),/external_owner_required/);
+
+  assert.throws(()=>phase29Handoff(fx,'worker-reuse',{
+    trial_worker_image_digest:fx.artifactReceipt.worker_image_digest,
+  }),/build_and_evaluation_worker_must_differ/);
+});
+
+test('Phase29 rejects stale budget reuse and evaluator root aliasing',()=>{
+  const fx=phase28ArtifactFixture('phase29-stale');
+  const handoff=phase29Handoff(fx,'phase29-stale');
+  assert.throws(()=>createRsiMaterializedCandidateExperimentIntent({
+    handoff,
+    handoff_verification:{artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification},
+    fresh_budget_plan:fx.budgetPlan,
+    fresh_plan_requests:[fx.request],
+    intent_id:'phase29.paired.intent.stale',
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  }),/request_not_selected|prior_budget_reuse_forbidden|request_schema|request_digest/);
+
+  assert.throws(()=>phase29Handoff(fx,'phase29-alias',{
+    evaluator_root_digest:fx.artifactReceipt.provenance_attestation_digest,
+  }),/aliases_build_provenance/);
+});
+
+test('Phase29 trust root freezes external evaluation assets and zero authority',()=>{
+  const root=rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot();
+  assert.equal(root.verified_phase28_artifact_receipt_required,true);
+  assert.equal(root.fresh_budget_epoch_required,true);
+  assert.equal(root.prior_budget_reuse_allowed,false);
+  assert.equal(root.protected_scope_floor_required,true);
+  assert.equal(root.evaluator_generation_frozen_per_epoch,true);
+  assert.equal(root.build_and_evaluation_workers_must_differ,true);
+  assert.equal(root.existing_evaluation_budget_router_only,true);
+  assert.equal(root.existing_candidate_experiment_ledger_only,true);
+  assert.equal(root.one_attempt_per_arm,true);
+  assert.equal(root.blind_retry_forbidden,true);
+  assert.equal(root.execution_authority,false);
+  assert.equal(root.scheduler_authority,false);
+  assert.equal(root.promotion_authority,false);
+  assert.equal(root.self_update_authority,false);
+  assert.equal(root.authority_effect,false);
 });
