@@ -292,13 +292,16 @@ export class RsiEvaluationBudgetLedger{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_eval_router_ledger_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_REQUESTS)throw new Error('rsi_eval_router_ledger_rows_invalid');
       const ids=new Set();
+      const planIds=new Set();
       const checkedRows=[];
       for(const row of p.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
         const plan=verifyRsiEvaluationBudgetPlan(row.plan);
         if(plan.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
         if(ids.has(plan.plan_digest))throw new Error('rsi_eval_router_ledger_plan_duplicate');
+        if(planIds.has(plan.plan_id))throw new Error('rsi_eval_router_ledger_plan_id_duplicate');
         ids.add(plan.plan_digest);
+        planIds.add(plan.plan_id);
         checkedRows.push(Object.freeze({source_sha:this.#sourceSha,plan}));
       }
       const canonicalState=ledgerState(this.#sourceSha,checkedRows);
