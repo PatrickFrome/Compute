@@ -16,6 +16,8 @@ import {
   verifyRsiSkillLibraryGovernance,
 } from './rsi-skill-library-governance.mjs';
 
+export const RSI_PHASE33_SOURCE_QUALIFICATION_SCHEMA =
+  'metaengine.rsi.phase33-source-qualification.v1';
 export const RSI_ANYTIME_LIBRARY_ADMISSION_PROPOSAL_SCHEMA =
   'metaengine.rsi.anytime-library-admission-proposal.v1';
 export const RSI_ANYTIME_LIBRARY_ADMISSION_CERTIFICATE_SCHEMA =
@@ -27,6 +29,16 @@ const SHA40_RE = /^[0-9a-f]{40}$/;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const MAX_ROWS = 2048;
+const REQUIRED_SOURCE_WORKFLOWS = Object.freeze([
+  'Browser Windows Package Smoke',
+  'Browser Windows Installed Chat Qualification',
+  'METAENGINE Browser Final Runtime Activation V1',
+  'METAENGINE Browser Shell V1',
+  'METAENGINE Browser Self Update E2E',
+  'METAENGINE Browser Critical Audit V1',
+  'METAENGINE Browser Windows Autonomous Soak V1',
+]);
+const TERMINAL_CONCLUSIONS = new Set(['SUCCESS', 'FAILURE', 'CANCELLED', 'TIMED_OUT']);
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -53,6 +65,12 @@ function exactSha(value, label) {
 function id(value, label) {
   const out = String(value || '').trim();
   if (!SAFE_ID_RE.test(out)) throw new Error(`rsi_phase34_${label}_invalid`);
+  return out;
+}
+
+function positiveInt(value, label) {
+  const out = Number(value);
+  if (!Number.isSafeInteger(out) || out < 1) throw new Error(`rsi_phase34_${label}_invalid`);
   return out;
 }
 
@@ -87,6 +105,98 @@ function assertZero(value, label) {
   if (value?.automatic_retry_allowed !== false) {
     throw new Error(`rsi_phase34_${label}_automatic_retry_invalid`);
   }
+}
+
+export function createRsiPhase33SourceQualification({
+  qualification_id,
+  phase33_policy_source_sha,
+  ci_checks,
+  external_ci_observer = false,
+  authored_by_candidate = true,
+} = {}) {
+  if (external_ci_observer !== true || authored_by_candidate !== false) {
+    throw new Error('rsi_phase34_source_qualification_external_observer_required');
+  }
+  const sourceSha = exactSha(phase33_policy_source_sha, 'phase33_policy_source');
+  if (!Array.isArray(ci_checks) || ci_checks.length !== REQUIRED_SOURCE_WORKFLOWS.length) {
+    throw new Error('rsi_phase34_source_qualification_checks_invalid');
+  }
+  const byName = new Map();
+  for (const raw of ci_checks) {
+    const workflow = String(raw?.workflow || '').trim();
+    if (!REQUIRED_SOURCE_WORKFLOWS.includes(workflow)) {
+      throw new Error('rsi_phase34_source_qualification_unexpected_workflow');
+    }
+    if (byName.has(workflow)) throw new Error('rsi_phase34_source_qualification_duplicate_workflow');
+    const conclusion = String(raw?.conclusion || '').trim().toUpperCase();
+    if (!TERMINAL_CONCLUSIONS.has(conclusion)) {
+      throw new Error('rsi_phase34_source_qualification_terminal_conclusion_required');
+    }
+    const headSha = exactSha(raw?.head_sha, 'source_qualification_check_head');
+    if (headSha !== sourceSha) throw new Error('rsi_phase34_source_qualification_head_mismatch');
+    byName.set(workflow, Object.freeze({
+      workflow,
+      run_id: positiveInt(raw?.run_id, 'source_qualification_run_id'),
+      head_sha: headSha,
+      conclusion,
+      evidence_ref: id(raw?.evidence_ref, 'source_qualification_evidence_ref'),
+    }));
+  }
+  for (const workflow of REQUIRED_SOURCE_WORKFLOWS) {
+    if (!byName.has(workflow)) throw new Error('rsi_phase34_source_qualification_required_workflow_missing');
+  }
+  const ordered = Object.freeze(REQUIRED_SOURCE_WORKFLOWS.map((workflow) => byName.get(workflow)));
+  const allGreen = ordered.every((row) => row.conclusion === 'SUCCESS');
+  const core = zero({
+    schema: RSI_PHASE33_SOURCE_QUALIFICATION_SCHEMA,
+    version: 1,
+    qualification_id: id(qualification_id, 'source_qualification_id'),
+    phase33_policy_source_sha: sourceSha,
+    ci_checks: ordered,
+    required_workflows: REQUIRED_SOURCE_WORKFLOWS,
+    all_required_workflows_present: true,
+    all_required_workflows_terminal: true,
+    all_required_workflows_green: allGreen,
+    external_ci_observer: true,
+    authored_by_candidate: false,
+    source_qualification_is_runtime_authority: false,
+    source_qualification_can_append_library: false,
+    source_qualification_can_activate_skill: false,
+  });
+  return Object.freeze({ ...core, qualification_digest: digest(core) });
+}
+
+export function verifyRsiPhase33SourceQualification(row) {
+  if (
+    !row
+    || row.schema !== RSI_PHASE33_SOURCE_QUALIFICATION_SCHEMA
+    || row.version !== 1
+  ) {
+    throw new Error('rsi_phase34_source_qualification_invalid');
+  }
+  assertZero(row, 'source_qualification');
+  if (
+    row.all_required_workflows_present !== true
+    || row.all_required_workflows_terminal !== true
+    || row.external_ci_observer !== true
+    || row.authored_by_candidate !== false
+    || row.source_qualification_is_runtime_authority !== false
+    || row.source_qualification_can_append_library !== false
+    || row.source_qualification_can_activate_skill !== false
+  ) {
+    throw new Error('rsi_phase34_source_qualification_policy_invalid');
+  }
+  const canonical = createRsiPhase33SourceQualification({
+    qualification_id: row.qualification_id,
+    phase33_policy_source_sha: row.phase33_policy_source_sha,
+    ci_checks: row.ci_checks,
+    external_ci_observer: true,
+    authored_by_candidate: false,
+  });
+  if (canonical.qualification_digest !== exactDigest(row.qualification_digest, 'source_qualification')) {
+    throw new Error('rsi_phase34_source_qualification_digest_mismatch');
+  }
+  return canonical;
 }
 
 function verifyPhase33({ bundle, certificate, phase32_evidence, phase33_certificate_args } = {}) {
@@ -414,15 +524,13 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
   certificate_id,
   admission_proposal,
   admission_proposal_args,
-  phase33_policy_source_sha,
-  predecessor_source_qualification_digest,
+  predecessor_source_qualification,
   admission_epoch_digest,
   library_owner_identity_digest,
   statistical_acceptor_identity_digest,
   source_qualification_owner_identity_digest,
   least_privilege_reviewer_identity_digest,
   governance_reviewer_identity_digest,
-  predecessor_source_qualification_pass = false,
   anytime_valid_admission_pass = false,
   error_budget_available = false,
   paired_instance_replay_pass = false,
@@ -466,9 +574,10 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     throw new Error('rsi_phase34_certificate_separation_of_duties_required');
   }
 
-  const policySource = exactSha(phase33_policy_source_sha, 'phase33_policy_source');
+  const sourceQualification = verifyRsiPhase33SourceQualification(predecessor_source_qualification);
+  const policySource = sourceQualification.phase33_policy_source_sha;
   const roots = [
-    exactDigest(predecessor_source_qualification_digest, 'predecessor_source_qualification'),
+    sourceQualification.qualification_digest,
     exactDigest(admission_epoch_digest, 'admission_epoch'),
     ...principalIds,
     proposal.admission_proposal_digest,
@@ -485,7 +594,7 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
   }
 
   const blockers = [];
-  if (predecessor_source_qualification_pass !== true) blockers.push('PREDECESSOR_SOURCE_QUALIFICATION_NOT_GREEN');
+  if (sourceQualification.all_required_workflows_green !== true) blockers.push('PREDECESSOR_SOURCE_QUALIFICATION_NOT_GREEN');
   if (anytime_valid_admission_pass !== true) blockers.push('ANYTIME_VALID_ADMISSION_NOT_PASS');
   if (error_budget_available !== true) blockers.push('FALSE_ADMISSION_ERROR_BUDGET_EXHAUSTED');
   if (paired_instance_replay_pass !== true) blockers.push('PAIRED_INSTANCE_REPLAY_NOT_PASS');
@@ -524,13 +633,14 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     phase33_paired_instance_manifest_digest: proposal.phase33_paired_instance_manifest_digest,
     phase33_stopping_policy_digest: proposal.phase33_stopping_policy_digest,
     predecessor_source_qualification_digest: roots[0],
+    predecessor_source_qualification: sourceQualification,
     admission_epoch_digest: roots[1],
     library_owner_identity_digest: principalIds[0],
     statistical_acceptor_identity_digest: principalIds[1],
     source_qualification_owner_identity_digest: principalIds[2],
     least_privilege_reviewer_identity_digest: principalIds[3],
     governance_reviewer_identity_digest: principalIds[4],
-    predecessor_source_qualification_pass: predecessor_source_qualification_pass === true,
+    predecessor_source_qualification_pass: sourceQualification.all_required_workflows_green === true,
     anytime_valid_admission_pass: anytime_valid_admission_pass === true,
     error_budget_available: error_budget_available === true,
     paired_instance_replay_pass: paired_instance_replay_pass === true,
@@ -588,15 +698,13 @@ export function verifyRsiAnytimeLibraryAdmissionCertificate(row, args = {}) {
   const canonical = createRsiAnytimeLibraryAdmissionCertificate({
     ...args,
     certificate_id: row.certificate_id,
-    phase33_policy_source_sha: row.phase33_policy_source_sha,
-    predecessor_source_qualification_digest: row.predecessor_source_qualification_digest,
+    predecessor_source_qualification: row.predecessor_source_qualification,
     admission_epoch_digest: row.admission_epoch_digest,
     library_owner_identity_digest: row.library_owner_identity_digest,
     statistical_acceptor_identity_digest: row.statistical_acceptor_identity_digest,
     source_qualification_owner_identity_digest: row.source_qualification_owner_identity_digest,
     least_privilege_reviewer_identity_digest: row.least_privilege_reviewer_identity_digest,
     governance_reviewer_identity_digest: row.governance_reviewer_identity_digest,
-    predecessor_source_qualification_pass: row.predecessor_source_qualification_pass,
     anytime_valid_admission_pass: row.anytime_valid_admission_pass,
     error_budget_available: row.error_budget_available,
     paired_instance_replay_pass: row.paired_instance_replay_pass,
@@ -811,6 +919,8 @@ export function rsiAnytimeLibraryAdmissionTrustRootSnapshot() {
     schema: 'metaengine.rsi.anytime-library-admission-root.v1',
     version: 1,
     phase33_exact_owner_precommit_required: true,
+    exact_terminal_phase33_source_qualification_required: true,
+    required_source_workflows: REQUIRED_SOURCE_WORKFLOWS,
     existing_verified_skill_library_reused: true,
     existing_skill_library_governance_reused: true,
     second_skill_library_allowed: false,
