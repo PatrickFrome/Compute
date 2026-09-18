@@ -150,6 +150,110 @@ export function assertCurrentDevOSPtySessionRef(expected, actual) {
   return validateDevOSPtySessionRef(actual);
 }
 
+export function classifyDevOSPtyTransportFence({
+  expected_ref,
+  actual_ref,
+  current_transport_epoch,
+  transport_epoch,
+} = {}) {
+  if (!sameDevOSPtySessionRef(expected_ref, actual_ref)) {
+    return zeroAuthority({ state: 'STALE_SESSION_NO_EFFECT', accepted: false });
+  }
+  const current = positiveInt(current_transport_epoch, 'devos_pty_transport_epoch_invalid');
+  const candidate = positiveInt(transport_epoch, 'devos_pty_transport_epoch_invalid');
+  if (candidate !== current) {
+    return zeroAuthority({
+      state: 'STALE_TRANSPORT_NO_EFFECT',
+      accepted: false,
+      current_transport_epoch: current,
+      transport_epoch: candidate,
+    });
+  }
+  return zeroAuthority({
+    state: 'CURRENT',
+    accepted: true,
+    current_transport_epoch: current,
+    transport_epoch: candidate,
+  });
+}
+
+export function projectDevOSPtyOutputPressure({
+  unacked_bytes = 0,
+  ring_bytes = 0,
+  backpressured = false,
+  incoming_bytes = 0,
+  ack_bytes = 0,
+} = {}) {
+  const unacked = Number(unacked_bytes);
+  const ring = Number(ring_bytes);
+  const incoming = Number(incoming_bytes);
+  const ack = Number(ack_bytes);
+  if (![unacked, ring, incoming, ack].every((value) => Number.isSafeInteger(value) && value >= 0)) {
+    throw new Error('devos_pty_output_pressure_invalid');
+  }
+  if (incoming > 0 && ack > 0) throw new Error('devos_pty_output_pressure_mixed_operation');
+  if (incoming > DEVOS_PTY_BOUNDS.output_frame_bytes) throw new Error('devos_pty_output_bytes_invalid');
+  if (ack > unacked) {
+    return zeroAuthority({
+      state: 'INVALID_ACK_NO_EFFECT',
+      accepted: false,
+      unacked_bytes: unacked,
+      ring_bytes: ring,
+      backpressured: backpressured === true,
+      pause_required: false,
+      resume_required: false,
+    });
+  }
+
+  let nextUnacked = unacked;
+  let nextRing = Math.min(DEVOS_PTY_BOUNDS.output_ring_bytes, ring);
+  let nextBackpressured = backpressured === true;
+  let pauseRequired = false;
+  let resumeRequired = false;
+
+  if (incoming > 0) {
+    nextUnacked += incoming;
+    nextRing = Math.min(DEVOS_PTY_BOUNDS.output_ring_bytes, nextRing + incoming);
+    if (!nextBackpressured && nextUnacked > DEVOS_PTY_BOUNDS.output_high_water_bytes) {
+      nextBackpressured = true;
+      pauseRequired = true;
+    }
+  } else if (ack > 0) {
+    nextUnacked -= ack;
+    if (nextBackpressured && nextUnacked <= DEVOS_PTY_BOUNDS.output_low_water_bytes) {
+      nextBackpressured = false;
+      resumeRequired = true;
+    }
+  }
+
+  return zeroAuthority({
+    state: nextBackpressured ? 'BACKPRESSURED' : 'FLOWING',
+    accepted: true,
+    unacked_bytes: nextUnacked,
+    ring_bytes: nextRing,
+    backpressured: nextBackpressured,
+    pause_required: pauseRequired,
+    resume_required: resumeRequired,
+    ring_truncated: ring + incoming > DEVOS_PTY_BOUNDS.output_ring_bytes,
+  });
+}
+
+export function classifyDevOSPtyTreeCleanup({
+  containment_bound,
+  root_exited,
+  descendants_alive,
+} = {}) {
+  const descendants = Number(descendants_alive);
+  if (!Number.isSafeInteger(descendants) || descendants < 0) throw new Error('devos_pty_descendants_invalid');
+  if (containment_bound !== true) {
+    return zeroAuthority({ state: 'PARTIAL_UNVERIFIED', accepted: false, descendants_alive: descendants });
+  }
+  if (root_exited !== true || descendants !== 0) {
+    return zeroAuthority({ state: 'FAILED_LEAK', accepted: false, descendants_alive: descendants });
+  }
+  return zeroAuthority({ state: 'VERIFIED', accepted: true, descendants_alive: 0 });
+}
+
 export function validateDevOSPtyCreateRequest(value) {
   const row = exactObject(value, 'devos_pty_create_invalid');
   exactKeys(row, ['schema', 'protocol_version', 'request_id', 'workspace', 'profile_id', 'cols', 'rows'], ['env_profile_id'], 'devos_pty_create_fields_invalid');
@@ -344,6 +448,9 @@ export const DEVOS_PTY_PROTOCOL_CONTRACT = Object.freeze({
   arbitrary_pid_selector_allowed: false,
   renderer_node_authority: false,
   second_scheduler_allowed: false,
+  output_backpressure_protocol_required: true,
+  output_ring_hard_bound_required: true,
+  process_tree_cleanup_evidence_required: true,
   production_promotion_authority: false,
   automatic_retry_allowed: false,
   authority_effect: false,
