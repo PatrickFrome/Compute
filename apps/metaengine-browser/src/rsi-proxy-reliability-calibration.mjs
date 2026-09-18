@@ -303,9 +303,11 @@ export function createRsiProxyReliabilitySnapshot({policy,pairs}={}){
   const driftDetected=prior!=null&&brierDrift>checked.drift_brier_delta;
   const interventionRows=rows.filter(row=>row.intervention_case);
   const intervention=interventionRows.length?calibrationStats(interventionRows,checked):null;
+  const minimumInterventionPairs=Math.min(4,checked.min_pairs);
+  const interventionEvidenceSufficient=interventionRows.length>=minimumInterventionPairs;
 
   let state='INSUFFICIENT_EVIDENCE';
-  if(rows.length>=checked.min_pairs){
+  if(rows.length>=checked.min_pairs&&interventionEvidenceSufficient){
     const calibrated=
       all.rank.concordance>=checked.calibrated_min_concordance
       &&all.false_positive_wilson_95.upper<=checked.max_false_positive_upper
@@ -337,6 +339,8 @@ export function createRsiProxyReliabilitySnapshot({policy,pairs}={}){
     brier_drift:brierDrift,
     drift_detected:driftDetected,
     intervention_case_count:interventionRows.length,
+    minimum_intervention_pairs:minimumInterventionPairs,
+    intervention_evidence_sufficient:interventionEvidenceSufficient,
     intervention_stats:intervention,
     heldout_pairing_verified:true,
     proxy_output_treated_as_noisy_label:true,
@@ -364,6 +368,9 @@ export function verifyRsiProxyReliabilitySnapshot(row,policy,pairs){
 export function createRsiProxyAllocationGuidance({policy,snapshot}={}){
   const checked=verifyRsiProxyCalibrationPolicy(policy);
   if(!plainObject(snapshot)||snapshot.schema!==RSI_PROXY_RELIABILITY_SNAPSHOT_SCHEMA||snapshot.policy_digest!==checked.policy_digest)throw new Error('rsi_proxy_guidance_snapshot_invalid');
+  const snapshotClone=structuredClone(snapshot);
+  delete snapshotClone.snapshot_digest;
+  if(exactDigest(snapshot.snapshot_digest,'guidance_snapshot')!==digest(snapshotClone))throw new Error('rsi_proxy_guidance_snapshot_digest_mismatch');
   const state=boundedToken(snapshot.state,'guidance_state');if(!RELIABILITY_STATES.has(state))throw new Error('rsi_proxy_guidance_state_invalid');
   const settings={
     CALIBRATED:{weight:1,exploration:0.10,forcedFull:0.10,pruning:'NORMAL_PROXY_PRUNING'},
