@@ -123,6 +123,16 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     evaluator_root_digest:evaluator,
     evaluator_generation_digest:generation,
     evaluation_epoch_digest:epoch,
+    sealed_task_set_digest:taskSet,
+    harness_digest:harness,
+    trial_worker_image_digest:trialWorker,
+    resource_budget_digest:resourceBudget,
+    task_order_digest:taskOrder,
+    threshold_policy_digest:acceptance,
+    stopping_policy_digest:stopping,
+    hidden_holdout_root_digest:hiddenHoldout,
+    safety_suite_root_digest:safetySuite,
+    security_suite_root_digest:securitySuite,
     external_measurement_digest:externalMeasurement,
     proxy_score_digest:proxyScore,
     uncertainty,decision_closeness,proxy_reliability_gap,evaluator_cost_units,expected_information_gain,
@@ -272,7 +282,13 @@ export function createRsiMaterializedCandidateExperimentIntent({
   if(checkedIntent.evaluator_generation_digest!==checkedHandoff.evaluator_generation_digest
     ||checkedIntent.evaluation_epoch_digest!==checkedHandoff.evaluation_epoch_digest
     ||checkedIntent.phase28_artifact_receipt_digest!==checkedHandoff.phase28_artifact_receipt_digest
-    ||checkedIntent.provenance_root_digest!==checkedHandoff.provenance_root_digest)throw new Error('rsi_materialized_eval_intent_lineage_mismatch');
+    ||checkedIntent.provenance_root_digest!==checkedHandoff.provenance_root_digest
+    ||checkedIntent.threshold_policy_digest!==checkedHandoff.acceptance_policy_digest
+    ||checkedIntent.stopping_policy_digest!==checkedHandoff.stopping_policy_digest
+    ||checkedIntent.hidden_holdout_root_digest!==checkedHandoff.hidden_holdout_root_digest
+    ||checkedIntent.safety_suite_root_digest!==checkedHandoff.safety_suite_root_digest
+    ||checkedIntent.security_suite_root_digest!==checkedHandoff.security_suite_root_digest
+    ||checkedIntent.acceptance_assets_frozen!==true)throw new Error('rsi_materialized_eval_intent_lineage_mismatch');
   return checkedIntent;
 }
 
@@ -296,6 +312,8 @@ export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
     hidden_holdout_external:true,
     safety_suite_external:true,
     security_suite_external:true,
+    underlying_artifact_request_binds_all_acceptance_assets:true,
+    underlying_paired_intent_rechecks_all_acceptance_assets:true,
     existing_evaluation_budget_router_only:true,
     existing_candidate_experiment_ledger_only:true,
     one_attempt_per_arm:true,
