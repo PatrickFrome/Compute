@@ -70,6 +70,7 @@ const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
   'apps/metaengine-browser/src/rsi-shadow-comparison-binding.mjs',
   'apps/metaengine-browser/src/rsi-meta-profile-canary-admission.mjs',
+  'apps/metaengine-browser/src/rsi-external-readonly-canary-controller.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
