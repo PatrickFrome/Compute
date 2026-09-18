@@ -103,6 +103,8 @@ function manifest(selection = shadowSelection(), overrides = {}) {
     selection,
     cohort_digest: overrides.cohort_digest || tagged('cohort-a'),
     comparator_root_digest: overrides.comparator_root_digest || tagged('comparator-root'),
+    security_holdout_digest: overrides.security_holdout_digest || tagged('security-holdout'),
+    monitor_root_digest: overrides.monitor_root_digest || tagged('monitor-root'),
     decision_budget: overrides.decision_budget || 3,
     window_budget: overrides.window_budget || 2,
     external_canary_owner: true,
@@ -141,7 +143,12 @@ test('canary manifest freezes identity, cohort and comparator while keeping the 
   assert.equal(row.baseline_profile_remains_default, true);
   assert.equal(row.baseline_profile_is_fallback, true);
   assert.equal(row.external_comparator_root_fixed, true);
+  assert.equal(row.independent_security_holdout_fixed, true);
+  assert.equal(row.independent_monitor_root_fixed, true);
+  assert.equal(row.security_holdout_hidden_from_candidate, true);
   assert.equal(row.candidate_can_choose_comparator, false);
+  assert.equal(row.candidate_can_choose_security_holdout, false);
+  assert.equal(row.candidate_can_choose_monitor, false);
   assert.equal(row.challenger_output_is_advisory_only, true);
   assert.equal(row.browser_effects_allowed, false);
   assert.equal(row.profile_replacement_allowed, false);
@@ -156,6 +163,8 @@ test('candidate cannot own the cohort or turn a canary observation into an effec
     selection,
     cohort_digest: tagged('cohort-a'),
     comparator_root_digest: tagged('comparator-root'),
+    security_holdout_digest: tagged('security-holdout'),
+    monitor_root_digest: tagged('monitor-root'),
     decision_budget: 2,
     window_budget: 1,
     external_canary_owner: false,
@@ -196,6 +205,18 @@ test('each decision is bound to an exact external comparison context and compara
   assert.throws(
     () => observation(row, selection, 2, { comparison_binding: drifted }),
     /comparator_root_drift/,
+  );
+});
+
+test('monitor and security roots must remain independent from cohort and comparator', () => {
+  const selection = shadowSelection();
+  assert.throws(
+    () => manifest(selection, { security_holdout_digest: tagged('cohort-a') }),
+    /independent_monitor_evidence_required/,
+  );
+  assert.throws(
+    () => manifest(selection, { monitor_root_digest: tagged('comparator-root') }),
+    /independent_monitor_evidence_required/,
   );
 });
 
@@ -293,6 +314,7 @@ test('durable evidence ledger is append-only, restart-safe and conflicts fail cl
   const stored = await ledger.add(first);
   assert.equal(stored.state, 'RECORDED');
   assert.equal(ledger.snapshot().observation_count, 1);
+  assert.equal(ledger.snapshot().incident_latched, false);
   assert.equal(ledger.snapshot().ledger_can_activate_profile, false);
 
   const restarted = new RsiMetaProfileCanaryEvidenceLedger({
@@ -312,12 +334,55 @@ test('durable evidence ledger is append-only, restart-safe and conflicts fail cl
   await assert.rejects(() => restarted.add(conflict), /identity_conflict/);
 });
 
+test('blocking evidence creates a durable incident latch that later clean observations cannot clear', async (t) => {
+  const selection = shadowSelection();
+  const row = manifest(selection, { decision_budget: 3, window_budget: 1 });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'rsi-canary-latch-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const statePath = path.join(dir, 'canary.json');
+  const ledger = new RsiMetaProfileCanaryEvidenceLedger({
+    statePath,
+    source_sha: SOURCE,
+    manifest_digest: row.manifest_digest,
+  });
+  await ledger.init();
+  await ledger.add(observation(row, selection, 1, { security_awareness: 'FAIL', incident_codes: ['SECURITY_NEGATIVE_FAILURE'] }));
+  await ledger.add(observation(row, selection, 2));
+  await ledger.add(observation(row, selection, 3));
+  assert.equal(ledger.snapshot().incident_latched, true);
+  assert.equal(ledger.snapshot().incident_can_be_cleared, false);
+  assert.equal(ledger.snapshot().first_blocking_decision_index, 1);
+  assert.ok(ledger.snapshot().latched_blockers.includes('SECURITY_AWARENESS_FAIL'));
+  const review = ledger.assess({
+    admission_id: 'admission.latched',
+    manifest: row,
+    selection,
+    external_admission_owner: true,
+    authored_by_candidate: false,
+  });
+  assert.equal(review.state, 'BLOCKED_BASELINE_ONLY');
+  assert.equal(review.durable_ledger_incident_latched, true);
+  assert.equal(review.ready_for_external_canary_review, false);
+
+  const restored = new RsiMetaProfileCanaryEvidenceLedger({
+    statePath,
+    source_sha: SOURCE,
+    manifest_digest: row.manifest_digest,
+  });
+  await restored.init();
+  assert.equal(restored.snapshot().incident_latched, true);
+  assert.equal(restored.snapshot().incident_can_be_cleared, false);
+});
+
 test('trust root fixes safe-exploration boundaries and exposes no authority', () => {
   const root = rsiMetaProfileCanaryAdmissionTrustRootSnapshot();
   assert.equal(root.phase18_shadow_selection_required, true);
   assert.equal(root.identity_stable_canary_manifest_required, true);
   assert.equal(root.fixed_external_cohort_required, true);
   assert.equal(root.fixed_external_comparator_root_required, true);
+  assert.equal(root.independent_security_holdout_required, true);
+  assert.equal(root.independent_monitor_root_required, true);
+  assert.equal(root.security_holdout_hidden_from_candidate, true);
   assert.equal(root.exact_context_comparison_binding_required_per_decision, true);
   assert.equal(root.baseline_profile_remains_default, true);
   assert.equal(root.first_canary_surface_read_only_decision_support_only, true);
@@ -326,7 +391,11 @@ test('trust root fixes safe-exploration boundaries and exposes no authority', ()
   assert.equal(root.trajectory_task_utility_required, true);
   assert.equal(root.identity_drift_blocks_canary, true);
   assert.equal(root.ambiguous_evidence_blocks_canary, true);
+  assert.equal(root.incident_latch_fail_closed, true);
+  assert.equal(root.incident_can_be_cleared, false);
   assert.equal(root.candidate_can_choose_comparator, false);
+  assert.equal(root.candidate_can_choose_security_holdout, false);
+  assert.equal(root.candidate_can_choose_monitor, false);
   assert.equal(root.candidate_can_self_admit, false);
   assert.equal(root.canary_token_minted, false);
   assert.equal(root.profile_activation_authorized, false);
