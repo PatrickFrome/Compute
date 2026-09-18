@@ -13,8 +13,12 @@ const PRODUCTION_ESCAPE_RULES = Object.freeze([
   Object.freeze({ id: 'RUNTIME_EVALUATE', pattern: /Runtime\.evaluate/ }),
   Object.freeze({ id: 'REMOTE_DEBUGGING_PORT', pattern: /--remote-debugging-port/ }),
   Object.freeze({ id: 'NO_SANDBOX_SWITCH', pattern: /--no-sandbox/ }),
-  Object.freeze({ id: 'LEGACY_CHAT_Z_AI', pattern: /chat\.z\.ai/i }),
-  Object.freeze({ id: 'LEGACY_GLM_ZAI', pattern: /GLM_ZAI/ }),
+  // Operator directive 2026-09-19: every browser agent runs on GLM 5.3
+  // (chat.z.ai, platform GLM_ZAI) instead of ChatGPT. The former LEGACY_CHAT_Z_AI
+  // and LEGACY_GLM_ZAI prohibitions are inverted — chat.z.ai/GLM_ZAI are now the
+  // sanctioned agent-platform identifiers and live in production src. The
+  // STRICT_GLM_FIRST fallback ordering pattern from the removed era stays
+  // forbidden: platform selection is a static policy, never a runtime fallback.
   Object.freeze({ id: 'LEGACY_STRICT_GLM_FIRST', pattern: /STRICT_GLM_FIRST/ }),
   Object.freeze({ id: 'NODE_INTEGRATION_ENABLED', pattern: /nodeIntegration\s*:\s*true/ }),
   Object.freeze({ id: 'SANDBOX_DISABLED', pattern: /sandbox\s*:\s*false/ }),

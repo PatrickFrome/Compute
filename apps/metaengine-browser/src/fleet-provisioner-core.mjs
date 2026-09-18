@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { AGENT_PLATFORM_HOME_URL, normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { persistFleetStateTargetRevalidation } from './fleet-state-target-revalidation.mjs';
 
@@ -118,13 +119,7 @@ function sanitizeTransportProof(value) {
 }
 
 function normalizeConversationUrl(value) {
-  const url = new URL(String(value || '').trim());
-  if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) {
-    throw new Error('fleet_transport_conversation_origin_invalid');
-  }
-  const path = url.pathname.replace(/\/+$/, '');
-  if (!/^\/c\/[a-z0-9-]+$/i.test(path)) throw new Error('fleet_transport_conversation_path_invalid');
-  return `https://chatgpt.com${path.toLowerCase()}`;
+  return normalizeAgentPlatformConversationUrl(value);
 }
 
 function sanitizeLoadedState(input, policy) {
@@ -533,7 +528,7 @@ export class FleetProvisioner {
     let tab;
     try {
       tab = await this.#createTab({
-        url: 'https://chatgpt.com/',
+        url: AGENT_PLATFORM_HOME_URL,
         select: false,
         load: false,
         ownership: 'FLEET_OWNED',
@@ -571,7 +566,7 @@ export class FleetProvisioner {
     await this.#persist();
 
     try {
-      await this.#loadTab(agent.tab_id, 'https://chatgpt.com/');
+      await this.#loadTab(agent.tab_id, AGENT_PLATFORM_HOME_URL);
     } catch (error) {
       agent.lost_reason = `SURFACE_LOAD_UNVERIFIED:${String(error?.message || error)}`.slice(0, 240);
       agent.updated_at = iso(this.#clock);

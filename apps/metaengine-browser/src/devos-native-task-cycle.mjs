@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { AGENT_PLATFORM_ID, classifyAgentPlatformSurface } from './browser-agent-platform.mjs';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
   assertLiveLeaseBinding as assertCoreLiveLeaseBinding,
@@ -33,12 +34,9 @@ const clip = (value, max = 240) => String(value ?? '').slice(0, max);
 
 function transportUrl(value) {
   try {
-    const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) return null;
-    const pathName = url.pathname.replace(/\/+$/, '');
-    if (pathName === '') return Object.freeze({ url: 'https://chatgpt.com/', stage: 'PRECONVERSATION_ROOT' });
-    if (!/^\/c\/[a-z0-9-]+$/i.test(pathName)) return null;
-    return Object.freeze({ url: `https://chatgpt.com${pathName.toLowerCase()}`, stage: 'CONVERSATION' });
+    const surface = classifyAgentPlatformSurface(String(value || ''));
+    if (!surface || surface.stage === 'OTHER') return null;
+    return Object.freeze({ url: surface.url, stage: surface.stage });
   } catch {
     return null;
   }
@@ -221,7 +219,7 @@ export class DevOsNativeTaskCycle {
         let normalizedUrl = conversationUrl(frame?.url);
 
         if (!frame || !normalizedUrl || !HASH_RE.test(expectedHash) || sha256(normalizedUrl) !== expectedHash) {
-          frame = await observedExecuteCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: String(payload.tab_id || '') } });
+          frame = await observedExecuteCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: String(payload.tab_id || '') } });
           normalizedUrl = conversationUrl(frame?.url);
         }
 
@@ -382,7 +380,7 @@ export class DevOsNativeTaskCycle {
       lease = exactPromotionLease(body, binding);
       if (!lease) throw new Error('devos_transport_promotion_lease_readback_invalid');
 
-      const frame = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: binding.tab_id } });
+      const frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
       const transport = transportUrl(frame?.url);
       if (!transport) throw new Error('devos_transport_promotion_transport_not_ready');
       if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_transport_promotion_target_drift');

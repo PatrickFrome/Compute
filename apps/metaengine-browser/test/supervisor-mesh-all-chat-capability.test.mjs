@@ -18,8 +18,8 @@ function harness() {
 test('fleet chat remains a supervisor-capable mesh peer but is fenced from automatic coordination', async () => {
   const { mesh } = harness();
   await mesh.init();
-  const fleetUrl = 'https://chatgpt.com/c/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-  const supervisorUrl = 'https://chatgpt.com/c/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const fleetUrl = 'https://chat.z.ai/c/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const supervisorUrl = 'https://chat.z.ai/c/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   const snapshot = await mesh.reconcile({
     tabs: [
       { tab_id: 'tab_fleet', url: fleetUrl, selected: true },
@@ -49,7 +49,7 @@ test('a fleet-only mesh exposes control capability but cannot self-interrupt wit
   const { mesh } = harness();
   await mesh.init();
   const snapshot = await mesh.reconcile({
-    tabs: [{ tab_id: 'tab_fleet', url: 'https://chatgpt.com/c/cccccccc-cccc-4ccc-8ccc-cccccccccccc', selected: true }],
+    tabs: [{ tab_id: 'tab_fleet', url: 'https://chat.z.ai/c/cccccccc-cccc-4ccc-8ccc-cccccccccccc', selected: true }],
     fleetAgents: [{ agent_id: 'agent_fleet', tab_id: 'tab_fleet', lifecycle_state: 'ACTIVE' }],
   });
   assert.equal(snapshot.counts.supervisor_capable, 1);
@@ -61,7 +61,7 @@ test('a fleet-only mesh exposes control capability but cannot self-interrupt wit
 test('duplicate physical incarnations of one conversation remain ambiguous even when one is fleet-bound', async () => {
   const { mesh } = harness();
   await mesh.init();
-  const url = 'https://chatgpt.com/c/dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const url = 'https://chat.z.ai/c/dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   const snapshot = await mesh.reconcile({
     tabs: [
       { tab_id: 'tab_one', url, selected: true },

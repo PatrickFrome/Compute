@@ -97,7 +97,7 @@ test('cycle observes up to four running tasks per heartbeat, isolating per-task 
         // while the other three still complete.
         if (command.payload?.tab_id === 'tab_r2') throw new Error('capture_target_unavailable');
         return {
-          tab_id: command.payload?.tab_id, target_id: 'webcontents:1', url: 'https://chatgpt.com/',
+          tab_id: command.payload?.tab_id, target_id: 'webcontents:1', url: 'https://chat.z.ai/',
           viewport: { width: 1200, height: 640 },
           semantic_targets: [{ role: 'button', name: 'Stop generating' }],
           authority_effect: false,

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { AGENT_PLATFORM_ID, isAgentPlatformUrl } from './browser-agent-platform.mjs';
 import { browserControlCapabilities } from './browser-control-capabilities.mjs';
 import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
 import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
@@ -21,7 +22,7 @@ import {
   planPostRestoreDuplicateTabCleanup,
   restoreSelfUpdateSessionContinuity,
 } from './self-update-session-continuity.mjs';
-import { classifyChatGptAuthReadbackFromTabs } from './chatgpt-auth-readback.mjs';
+import { classifyChatAuthReadbackFromTabs } from './chatgpt-auth-readback.mjs';
 import { SECURITY_POLICY } from './browser-policy.mjs';
 import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
 import {
@@ -143,11 +144,11 @@ function generationStateForTab(lifecycle, tabId) {
   return 'UNKNOWN';
 }
 
-function isChatGptRoot(value) {
+function isAgentPlatformRoot(value) {
   try {
     const url = new URL(String(value || ''));
     return url.protocol === 'https:'
-      && ['chatgpt.com','www.chatgpt.com'].includes(url.hostname.toLowerCase())
+      && isAgentPlatformUrl(url.href)
       && url.pathname.replace(/\/+$/, '') === '';
   } catch {
     return false;
@@ -175,11 +176,11 @@ export async function NativeSupervisorClientFlushUserSpaceStorage(app, { partiti
 }
 
 export function planPostRestoreBlankTabCleanup({ continuityRow, bindings = [], currentTabs = [] } = {}) {
-  const desiredRootCount = (continuityRow?.tabs || []).filter((tab) => isChatGptRoot(tab?.url)).length;
+  const desiredRootCount = (continuityRow?.tabs || []).filter((tab) => isAgentPlatformRoot(tab?.url)).length;
   const boundTabIds = new Set((bindings || []).map((row) => String(row?.tab_id || '')).filter(Boolean));
-  let retainedRoots = (currentTabs || []).filter((tab) => boundTabIds.has(String(tab?.tab_id || '')) && isChatGptRoot(tab?.url)).length;
+  let retainedRoots = (currentTabs || []).filter((tab) => boundTabIds.has(String(tab?.tab_id || '')) && isAgentPlatformRoot(tab?.url)).length;
   const candidates = (currentTabs || [])
-    .filter((tab) => !boundTabIds.has(String(tab?.tab_id || '')) && isChatGptRoot(tab?.url))
+    .filter((tab) => !boundTabIds.has(String(tab?.tab_id || '')) && isAgentPlatformRoot(tab?.url))
     .sort((a, b) => Number(a?.selected === true) - Number(b?.selected === true));
   const closeTabIds = [];
   for (const tab of candidates) {
@@ -194,7 +195,7 @@ export function planPostRestoreBlankTabCleanup({ continuityRow, bindings = [], c
     close_tab_ids: closeTabIds,
     desired_root_count: desiredRootCount,
     bound_tab_count: boundTabIds.size,
-    current_root_count: (currentTabs || []).filter((tab) => isChatGptRoot(tab?.url)).length,
+    current_root_count: (currentTabs || []).filter((tab) => isAgentPlatformRoot(tab?.url)).length,
     arbitrary_tab_close: false,
     authority_effect: false,
   });
@@ -563,7 +564,7 @@ export class NativeSupervisorClient {
   async #capturePreInstallAuthReadback() {
     try {
       const state = await this.#getState();
-      return classifyChatGptAuthReadbackFromTabs(state?.tabs || []);
+      return classifyChatAuthReadbackFromTabs(state?.tabs || []);
     } catch {
       return Object.freeze({
         auth_state: 'UNKNOWN', chatgpt_tab_count: 0, auth_redirect_tab_count: 0, authenticated_tab_count: 0,
@@ -624,7 +625,7 @@ export class NativeSupervisorClient {
     if (restore.state === 'RESTORED' && restore.bindings.some((binding) => binding.generation_state === 'GENERATING')) {
       reconcile = await reconcileRestoredGeneratingChats({
         bindings: restore.bindings,
-        captureTab: async (tabId) => this.#executeCommand({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: 'CHATGPT' }),
+        captureTab: async (tabId) => this.#executeCommand({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: AGENT_PLATFORM_ID }),
         clickControl: async (tabId, control) => this.#executeCommand({
           action: 'TYPED_CLICK',
           payload: {
@@ -633,7 +634,7 @@ export class NativeSupervisorClient {
             accessible_name: String(control?.name || ''),
             semantic_ref: control?.semantic_ref,
           },
-          platform: 'CHATGPT',
+          platform: AGENT_PLATFORM_ID,
         }),
       });
     }

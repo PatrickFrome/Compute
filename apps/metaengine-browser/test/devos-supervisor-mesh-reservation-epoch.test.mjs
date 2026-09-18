@@ -15,8 +15,8 @@ function makeMesh() {
 }
 
 const tabs = [
-  { tab_id: 'tab_primary', url: 'https://chatgpt.com/c/11111111-1111-1111-1111-111111111111', selected: true },
-  { tab_id: 'tab_standby', url: 'https://chatgpt.com/c/22222222-2222-2222-2222-222222222222', selected: false },
+  { tab_id: 'tab_primary', url: 'https://chat.z.ai/c/11111111-1111-1111-1111-111111111111', selected: true },
+  { tab_id: 'tab_standby', url: 'https://chat.z.ai/c/22222222-2222-2222-2222-222222222222', selected: false },
 ];
 
 test('reservation-driven coordinator reassignment advances mesh epoch before fencing', async () => {

@@ -1,7 +1,9 @@
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
+import { AGENT_PLATFORM_ID, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
+const GLM_READINESS_PHASES = new Set(['PRE_TYPE']);
 
 function exact(frame, role, names) {
   const rows = (frame?.semantic_targets || []).filter((row) => {
@@ -20,6 +22,7 @@ export function evaluateFleetSubmitReadiness({
   observed_target_id,
   selected_tab_id,
   phase = 'PRE_CLICK',
+  platform = 'CHATGPT',
 } = {}) {
   const expectedTab = String(expected_tab_id || '');
   const frameTab = String(frame?.tab_id || '');
@@ -29,9 +32,12 @@ export function evaluateFleetSubmitReadiness({
   const observedTarget = String(observed_target_id || '').toLowerCase();
   const selectedTab = String(selected_tab_id || '');
   const readinessPhase = String(phase || 'PRE_CLICK').toUpperCase();
+  const semanticPlatform = String(platform || 'CHATGPT').toUpperCase();
+  const glmLane = semanticPlatform === AGENT_PLATFORM_ID;
+  const phases = glmLane ? GLM_READINESS_PHASES : READINESS_PHASES;
 
-  if (!READINESS_PHASES.has(readinessPhase)) {
-    return Object.freeze({ ready: false, reason: 'READINESS_PHASE_INVALID', authority_effect: false });
+  if (!phases.has(readinessPhase)) {
+    return Object.freeze({ ready: false, reason: glmLane ? 'GLM_LANE_IS_SINGLE_PHASE_PRE_TYPE_ONLY' : 'READINESS_PHASE_INVALID', authority_effect: false });
   }
   if (!expectedTab || !frameTab || frameTab !== expectedTab || observedTab !== expectedTab || selectedTab !== expectedTab) {
     return Object.freeze({ ready: false, reason: 'TAB_NOT_FOREGROUND_EXACT', authority_effect: false });
@@ -39,13 +45,42 @@ export function evaluateFleetSubmitReadiness({
   if (!expectedTarget || !frameTarget || frameTarget !== expectedTarget || observedTarget !== expectedTarget) {
     return Object.freeze({ ready: false, reason: 'TARGET_INCARNATION_MISMATCH', authority_effect: false });
   }
-  if (chatGptControlCount(frame, 'STOP') > 0) {
-    return Object.freeze({ ready: false, reason: 'GENERATION_ALREADY_ACTIVE', authority_effect: false });
-  }
   const width = Number(frame?.viewport?.width || 0);
   const height = Number(frame?.viewport?.height || 0);
   if (!(width > 0 && height > 0)) {
     return Object.freeze({ ready: false, reason: 'VIEWPORT_NOT_RENDERABLE', authority_effect: false });
+  }
+
+  // GLM agent platform lane: chat.z.ai exposes no named STOP/SEND controls, so
+  // readiness is the exact foreground/incarnation/viewport plus a unique
+  // textbox composer addressable through its semantic_ref. Submit is the
+  // SEMANTIC_TYPE Enter path with composer-cleared / new-conversation readback
+  // inside the native control contract — there is no PRE_CLICK phase.
+  if (glmLane) {
+    const composer = resolveAgentPlatformComposer(frame);
+    if (!composer) {
+      return Object.freeze({ ready: false, reason: 'COMPOSER_NOT_UNIQUE', authority_effect: false });
+    }
+    return Object.freeze({
+      ready: true,
+      reason: 'READY_FOR_ENTER_SUBMIT',
+      phase: readinessPhase,
+      platform: AGENT_PLATFORM_ID,
+      composer,
+      send_control: null,
+      viewport: Object.freeze({ width, height }),
+      submit_strategy: 'TYPE_WITH_ENTER_SUBMIT_READBACK',
+      send_required_before_type: false,
+      send_required_before_click: false,
+      named_send_control_exists: false,
+      automatic_retry_allowed: false,
+      page_data_authority: false,
+      authority_effect: false,
+    });
+  }
+
+  if (chatGptControlCount(frame, 'STOP') > 0) {
+    return Object.freeze({ ready: false, reason: 'GENERATION_ALREADY_ACTIVE', authority_effect: false });
   }
   const composer = exact(frame, 'textbox', COMPOSER_NAMES);
   if (!composer) {
@@ -71,6 +106,7 @@ export function evaluateFleetSubmitReadiness({
     ready: true,
     reason: readinessPhase === 'PRE_TYPE' ? 'READY_FOR_TYPE_THEN_SEND_REOBSERVE' : 'READY_FOR_TWO_PHASE_SEND',
     phase: readinessPhase,
+    platform: 'CHATGPT',
     composer,
     send_control: send ? structuredClone(send) : null,
     viewport: Object.freeze({ width, height }),

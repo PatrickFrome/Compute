@@ -20,7 +20,7 @@ const lease = {
   automatic_retry_allowed: false,
   task_spec: { schema: 'metaengine.devos.task.v1', objective: 'Implement the safe slice.', constraints: ['no main merge'], deliverable: 'commit tests' },
 };
-const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
 const conversationHash = crypto.createHash('sha256').update(conversationUrl).digest('hex');
 const promptHash = crypto.createHash('sha256').update(renderDevosTaskPrompt(lease)).digest('hex');
 const fleet = {
@@ -47,9 +47,9 @@ const fleet = {
     authority_effect: false,
   }],
 };
-const composer = { role: 'textbox', name: 'Message ChatGPT' };
-const send = { role: 'button', name: 'Send prompt' };
-const stop = { role: 'button', name: 'Stop generating' };
+const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
+const send = { role: 'button', name: 'Send Message' };
+const stop = { role: 'button', name: 'Stop' };
 const supervisorTab = 'tab_supervisor';
 
 const response = (status, body) => ({ status, ok: status >= 200 && status < 300, async json() { return structuredClone(body); } });
@@ -61,7 +61,7 @@ const state = (selected) => ({
 const frame = ({ sent = false } = {}) => ({
   tab_id: lease.tab_id,
   target_id: lease.target_id,
-  url: sent ? conversationUrl : 'https://chatgpt.com/',
+  url: sent ? conversationUrl : 'https://chat.z.ai/',
   viewport: { width: 1200, height: 700 },
   semantic_targets: sent ? [composer, stop] : [composer, send],
   authority_effect: false,
@@ -89,10 +89,13 @@ function commandHarness(calls, selectedRef, { sentInitially = false } = {}) {
     if (command.action === 'SELECT_TAB') { selectedRef.value = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      const sent = sentInitially || captureCount >= 3;
+      const sent = sentInitially || captureCount >= 2;
       return frame({ sent });
     }
-    if (command.action === 'SEMANTIC_TYPE' || command.action === 'TYPED_CLICK') return { authority_effect: true };
+    if (command.action === 'SEMANTIC_TYPE') {
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: !sentInitially, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
 }
@@ -119,7 +122,8 @@ test('lost DB receipt survives restart and redelivers receipt without replaying 
   assert.equal(first.dispatch.state, 'DELIVERY_PENDING');
   assert.equal(firstMarkRunning, 1);
   assert.equal(firstCalls.filter((x) => x === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(firstCalls.filter((x) => x === 'TYPED_CLICK').length, 1);
+  // GLM lane: submit is the SEMANTIC_TYPE Enter path — no separate Send click.
+  assert.equal(firstCalls.filter((x) => x === 'TYPED_CLICK').length, 0);
 
   const persistedAfterLoss = new DevOsEffectDeliveryJournal({ statePath });
   await persistedAfterLoss.init();

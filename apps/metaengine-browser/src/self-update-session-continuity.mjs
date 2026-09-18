@@ -2,11 +2,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  classifyChatGptAuthReadbackFromTabs,
-  classifyChatGptAuthUrl,
+  classifyChatAuthReadbackFromTabs,
+  classifyChatAuthUrl,
   compareUserSessionContinuity,
   checkTabCardinalityContinuity,
-  isChatGptUrl,
+  isChatSurfaceUrl,
 } from './chatgpt-auth-readback.mjs';
 
 export const SELF_UPDATE_SESSION_CONTINUITY_SCHEMA = 'metaengine.self-update-session-continuity.v1';
@@ -159,7 +159,7 @@ export async function restoreSelfUpdateSessionContinuity({
       const tab = (snapshot?.tabs || []).find((item) => String(item?.tab_id || '') === String(tabId));
       if (tab?.url) {
         lastUrl = String(tab.url);
-        if (classifyChatGptAuthUrl(lastUrl) === 'AUTH_REQUIRED') return lastUrl;
+        if (classifyChatAuthUrl(lastUrl) === 'AUTH_REQUIRED') return lastUrl;
       }
     }
     return lastUrl;
@@ -180,7 +180,7 @@ export async function restoreSelfUpdateSessionContinuity({
     // more ChatGPT tabs would only mint more login pages (the exact
     // 7 -> 14 -> 21 -> 28 -> 32 amplifier of the 2026-09-17 incident).
     // Non-ChatGPT tabs are unaffected and still restore.
-    if (authRequiredLatched && isChatGptUrl(url)) { skippedAuthRequiredTabs += 1; continue; }
+    if (authRequiredLatched && isChatSurfaceUrl(url)) { skippedAuthRequiredTabs += 1; continue; }
     let current = byUrl.get(url) || null;
     if (!current) {
       try {
@@ -205,9 +205,9 @@ export async function restoreSelfUpdateSessionContinuity({
         failedTabs += 1;
         continue;
       }
-      if (isChatGptUrl(url)) {
+      if (isChatSurfaceUrl(url)) {
         const observedUrl = await readbackTabUrl(current.tab_id);
-        if (observedUrl != null && classifyChatGptAuthUrl(observedUrl) === 'AUTH_REQUIRED') {
+        if (observedUrl != null && classifyChatAuthUrl(observedUrl) === 'AUTH_REQUIRED') {
           authRequiredLatched = true;
         }
       }
@@ -228,10 +228,10 @@ export async function restoreSelfUpdateSessionContinuity({
   }
 
   const finalState = await getState();
-  const postReadback = classifyChatGptAuthReadbackFromTabs(finalState?.tabs);
-  const hadChatGptTabs = row.tabs.some((tab) => isChatGptUrl(String(tab?.url || '')));
+  const postReadback = classifyChatAuthReadbackFromTabs(finalState?.tabs);
+  const hadChatTabs = row.tabs.some((tab) => isChatSurfaceUrl(String(tab?.url || '')));
   const authRequiredTerminal = authRequiredLatched
-    || (hadChatGptTabs && postReadback.auth_state === 'AUTH_REQUIRED');
+    || (hadChatTabs && postReadback.auth_state === 'AUTH_REQUIRED');
   const cardinality = checkTabCardinalityContinuity({
     preTabCount: Number.isSafeInteger(Number(row.pre_tab_count)) && Number(row.pre_tab_count) > 0
       ? Number(row.pre_tab_count)

@@ -23,11 +23,12 @@ import {
 } from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
+import { isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-agent-platform.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
-const CHATGPT_SUBMIT_OUTCOME_METHODS = new Set([
+const CDP_SUBMIT_OUTCOME_METHODS = new Set([
   'Accessibility.nodesUpdated',
   'DOM.documentUpdated',
   'Page.frameNavigated',
@@ -95,11 +96,22 @@ function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
     const role = axValue(node, 'role').toLowerCase();
     const name = axValue(node, 'name');
     const backendNodeId = Number(node?.backendDOMNodeId || 0);
-    if (!SAFE_ROLES.has(role) || !name || !Number.isInteger(backendNodeId) || backendNodeId <= 0) continue;
+    // GLM agent platform (2026-09-19): the chat.z.ai composer is a textarea
+    // whose accessible name is a localized placeholder — it can be unnamed in
+    // other locales or conversation surfaces. Unnamed text inputs stay
+    // addressable through the exact semantic_ref (backend node id); unnamed
+    // non-input controls stay hidden so there is no ambiguous click authority.
+    if (!SAFE_ROLES.has(role) || (!name && !TEXT_INPUT_ROLES.has(role)) || !Number.isInteger(backendNodeId) || backendNodeId <= 0) continue;
     const key = `${role}\u0000${name}`;
-    counts.set(key, Number(counts.get(key) || 0) + 1);
+    if (name) counts.set(key, Number(counts.get(key) || 0) + 1);
     const frameId = frameIds.get(String(node?.nodeId || '')) || null;
-    const row = { role, name: clip(name, 240), backend_node_id: backendNodeId, frame_id: frameId };
+    const row = {
+      role,
+      name: name ? clip(name, 240) : null,
+      backend_node_id: backendNodeId,
+      frame_id: frameId,
+      selector_mode: name ? 'ROLE_NAME_OR_BACKEND_NODE_ID' : 'BACKEND_NODE_ID_REQUIRED',
+    };
     if (
       semanticRefContext
       && frameId
@@ -128,7 +140,7 @@ function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
   // bound with link/button nodes alone, truncating the composer textbox out of the
   // semantic projection. Every unique text-input row is therefore reserved ahead of
   // the bound; the total projection stays capped at 120 rows.
-  const uniqueRows = candidates.filter((row) => counts.get(`${row.role}\u0000${row.name}`) === 1);
+  const uniqueRows = candidates.filter((row) => !row.name || counts.get(`${row.role}\u0000${row.name}`) === 1);
   const inputRows = uniqueRows.filter((row) => TEXT_INPUT_ROLES.has(row.role));
   const otherRows = uniqueRows.filter((row) => !TEXT_INPUT_ROLES.has(row.role));
   return [...inputRows, ...otherRows].slice(0, 120);
@@ -166,6 +178,75 @@ function isExactChatGptComposer(target, command) {
   return String(command?.platform || '').toUpperCase() === 'CHATGPT'
     && target?.role === 'textbox'
     && CHATGPT_COMPOSER_NAMES.has(String(target?.name || ''));
+}
+
+// The GLM composer gate. The target already comes from an exact semantic_ref
+// (backend node identity is pinned by the ref), so the gate adds the platform,
+// the live host and the text-input role. The composer's accessible name is a
+// localized placeholder and is deliberately NOT part of the gate.
+function isExactGlmComposer(webContents, target, command) {
+  if (String(command?.platform || '').toUpperCase() !== 'GLM_ZAI') return false;
+  let host = '';
+  try { host = new URL(String(webContents?.getURL?.() || '')).hostname.toLowerCase(); } catch {}
+  return isAgentPlatformHost(host) && TEXT_INPUT_ROLES.has(String(target?.role || ''));
+}
+
+// GLM submit readback: the composer's AX value returning to '' proves the
+// site consumed the typed prompt; a root -> /c/<id> transition proves a new
+// conversation was created. Both are URL/metadata-class proofs — no named
+// control exists on chat.z.ai to hang a GENERATING observation on.
+async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}) {
+  const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  const node = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId || 0) === Number(backendNodeId));
+  const value = node ? axRawValue(node, 'value') : null;
+  const url = clip(webContents.getURL?.() || '', 1200);
+  const composerCleared = node != null && value === '';
+  const rootToConversation = !isAgentPlatformConversationUrl(preUrl) && isAgentPlatformConversationUrl(url);
+  if (composerCleared || rootToConversation) {
+    return {
+      resolved: true,
+      effect_state: composerCleared ? 'PROVEN_COMPOSER_CLEARED' : 'PROVEN_NEW_CONVERSATION',
+      stop_observed: false,
+      composer_cleared: composerCleared,
+      new_conversation_observed: rootToConversation,
+      post_url_sha256: url ? sha256(url) : null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+  }
+  return {
+    resolved: false,
+    effect_state: 'PENDING_AFTER_ENTER',
+    stop_observed: false,
+    composer_cleared: false,
+    new_conversation_observed: false,
+    post_url_sha256: url ? sha256(url) : null,
+    observation_error: null,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+}
+
+function openGlmSubmitOutcomeLatch(dbg, webContents, { preUrl, backendNodeId, timeoutMs = 2000 } = {}) {
+  return openCdpOutcomeLatch({
+    subscribe: (listener) => nativeBrowserCdpPool.subscribe(webContents, listener),
+    inspect: () => inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId }),
+    isResolved: (row) => row?.resolved === true,
+    onDeadline: (last, lastError) => ({
+      resolved: false,
+      effect_state: 'AMBIGUOUS_AFTER_ENTER',
+      stop_observed: false,
+      composer_cleared: last?.composer_cleared === true,
+      new_conversation_observed: last?.new_conversation_observed === true,
+      post_url_sha256: last?.post_url_sha256 || null,
+      observation_error: lastError || null,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    }),
+    eventFilter: (event) => CDP_SUBMIT_OUTCOME_METHODS.has(String(event?.method || '')),
+    timeoutMs,
+  });
 }
 
 async function inspectChatGptSubmit(dbg, webContents, { preUrl } = {}) {
@@ -216,7 +297,7 @@ function openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl, timeoutMs = 2
       automatic_retry_allowed: false,
       authority_effect: false,
     }),
-    eventFilter: (event) => CHATGPT_SUBMIT_OUTCOME_METHODS.has(String(event?.method || '')),
+    eventFilter: (event) => CDP_SUBMIT_OUTCOME_METHODS.has(String(event?.method || '')),
     timeoutMs,
   });
 }
@@ -281,6 +362,7 @@ export async function captureSemanticFrame(webContents) {
       url,
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: semanticTargets,
+      unnamed_text_inputs_addressable_by_backend_node_id: true,
       semantic_refs_issued: semanticTargets.filter((row) => row.semantic_ref).length,
       semantic_ref_context_complete: semanticRefContext != null,
       semantic_input_values_exposed: false,
@@ -455,6 +537,18 @@ export async function executeSemanticCommand(webContents, command) {
     }
 
     if (action === 'STOP_GENERATION') {
+      if (String(command?.platform || '').toUpperCase() === 'GLM_ZAI') {
+        // The GLM stop control is an unnamed morphing send button (live recon
+        // 2026-09-19): only an exact semantic_ref to a freshly captured button
+        // target can authorize the click. Named-control resolution — the
+        // ChatGPT path below — does not exist on chat.z.ai.
+        const stopRef = command?.payload?.semantic_ref || null;
+        if (!stopRef) throw new Error('native_glm_stop_requires_semantic_ref_button');
+        const stopTarget = await exactTarget(webContents, dbg, command?.payload?.role || 'button', command?.payload?.accessible_name, stopRef);
+        if (stopTarget.role !== 'button') throw new Error('native_glm_stop_requires_button_target');
+        const stopPoint = await clickBackendNode(dbg, stopTarget.backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
+        return { action, target: stopTarget, point: stopPoint, platform: 'GLM_ZAI', authority_effect: true };
+      }
       const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const targets = exactChatGptControls(tree?.nodes || [], 'STOP');
       if (targets.length !== 1) throw new Error(targets.length ? `native_stop_target_ambiguous:${targets.length}` : 'native_stop_target_not_found');
@@ -486,8 +580,15 @@ export async function executeSemanticCommand(webContents, command) {
     if (action === 'SEMANTIC_TYPE') {
       const text = String(command?.payload?.text ?? '');
       if (!text || text.length > 120000) throw new Error('native_semantic_text_invalid');
+      if (!TEXT_INPUT_ROLES.has(target.role)) throw new Error('native_semantic_type_requires_text_input');
       const submitAfterType = command?.payload?.submit_after_type === true;
-      if (submitAfterType && !isExactChatGptComposer(target, command)) throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
+      const semanticPlatform = String(command?.platform || '').toUpperCase();
+      if (submitAfterType && semanticPlatform === 'GLM_ZAI' && !isExactGlmComposer(webContents, target, command)) {
+        throw new Error('native_semantic_submit_requires_exact_glm_composer');
+      }
+      if (submitAfterType && semanticPlatform !== 'GLM_ZAI' && !isExactChatGptComposer(target, command)) {
+        throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
+      }
       const preUrl = clip(webContents.getURL?.() || '', 1200);
       assertCurrentSemanticRef(webContents, dbg, semanticRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
@@ -503,6 +604,45 @@ export async function executeSemanticCommand(webContents, command) {
       await dbg.sendCommand('Input.insertText', { text });
       if (!submitAfterType) {
         return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, prompt_sha256: sha256(text), prompt_included: false, authority_effect: true };
+      }
+
+      if (semanticPlatform === 'GLM_ZAI') {
+        // GLM submit: Enter-first with composer-cleared / new-conversation
+        // readback. The send control is an unnamed button inside a named
+        // wrapper (live recon 2026-09-19) — name-based click authority is
+        // impossible, so there is deliberately NO click fallback here: an
+        // Enter that provably did not submit stays AMBIGUOUS and fails closed
+        // (observed live: a logged-out chat.z.ai keeps the prompt in the
+        // composer, which is exactly the session-auth signal the caller needs).
+        const outcomeLatch = openGlmSubmitOutcomeLatch(dbg, webContents, { preUrl, backendNodeId: target.backend_node_id });
+        try {
+          assertCurrentSemanticRef(webContents, dbg, semanticRef);
+          assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+          await dbg.sendCommand('Input.dispatchKeyEvent', {
+            type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+          });
+          await dbg.sendCommand('Input.dispatchKeyEvent', {
+            type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
+          });
+          const observed = await outcomeLatch.wait();
+          const { resolved: _glmResolved, ...glmObservation } = observed || {};
+          return {
+            action,
+            target,
+            inserted_chars: text.length,
+            replace_existing: command?.payload?.replace_existing !== false,
+            submit_after_type: true,
+            prompt_sha256: sha256(text),
+            prompt_included: false,
+            platform: 'GLM_ZAI',
+            ...glmObservation,
+            event_driven_readback: true,
+            readback_poll_timer_required: false,
+            authority_effect: true,
+          };
+        } finally {
+          outcomeLatch.close();
+        }
       }
 
       const readyTree = await dbg.sendCommand('Accessibility.getFullAXTree');

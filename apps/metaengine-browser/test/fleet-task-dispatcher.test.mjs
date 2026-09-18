@@ -8,12 +8,14 @@ const TAB_ID = 'tab_11111111-2222-3333-4444-555555555555';
 const TARGET_ID = 'webcontents:77';
 const BASE_SHA = '0123456789abcdef0123456789abcdef01234567';
 
-function frame({ url = 'https://chatgpt.com/', stop = false } = {}) {
+const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'b'.repeat(64) };
+
+function frame({ url = 'https://chat.z.ai/', stop = false } = {}) {
   return {
     url,
     semantic_targets: [
-      { role: 'textbox', name: 'Чат с ChatGPT', backend_node_id: 3 },
-      ...(stop ? [{ role: 'button', name: 'Остановить ответ', backend_node_id: 9 }] : []),
+      { role: 'textbox', name: null, backend_node_id: 3, semantic_ref: COMPOSER_REF },
+      ...(stop ? [{ role: 'button', name: 'Stop', backend_node_id: 9 }] : []),
     ],
     authority_effect: false,
   };
@@ -21,7 +23,7 @@ function frame({ url = 'https://chatgpt.com/', stop = false } = {}) {
 
 function harness({
   submitEffect = 'PROVEN_GENERATING',
-  postFrame = frame({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', stop: true }),
+  postFrame = frame({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', stop: true }),
   liveWebContentsId = 77,
   replacementOnSecondLookup = null,
 } = {}) {
@@ -69,7 +71,9 @@ function harness({
       captureSemanticFrame: async () => {
         captureCount += 1;
         calls.push(['capture', captureCount]);
-        return captureCount === 1 ? frame() : structuredClone(postFrame);
+        // GLM busy probe (2 captures) + pre-effect capture stay on the quiet
+        // root frame; the post-submit capture returns the conversation frame.
+        return captureCount <= 3 ? frame() : structuredClone(postFrame);
       },
       executeSemanticCommand: async (_wc, command) => {
         calls.push(['execute', structuredClone(command)]);
@@ -107,10 +111,10 @@ test('fleet dispatcher uses one geometry-independent submit and promotes exact b
   assert.equal(executeCalls.length, 1);
   const command = executeCalls[0][1];
   assert.equal(command.action, 'SEMANTIC_TYPE');
-  assert.equal(command.platform, 'CHATGPT');
+  assert.equal(command.platform, 'GLM_ZAI');
   assert.equal(command.payload.submit_after_type, true);
   assert.equal(command.payload.role, 'textbox');
-  assert.equal(command.payload.accessible_name, 'Чат с ChatGPT');
+  assert.equal(command.payload.accessible_name, null);
   assert.equal(result.schema, 'metaengine.browser.fleet-task-dispatch.v2');
   assert.equal(result.selected_tab_mutation, false);
   assert.equal(result.viewport_geometry_required, false);
@@ -125,14 +129,14 @@ test('fleet dispatcher uses one geometry-independent submit and promotes exact b
     tab_id: TAB_ID,
     target_id: TARGET_ID,
     generation_epoch: 4,
-    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   });
 });
 
 test('ambiguous Enter result never promotes and never retries', async () => {
   const h = harness({
     submitEffect: 'AMBIGUOUS_AFTER_ENTER',
-    postFrame: frame({ url: 'https://chatgpt.com/', stop: false }),
+    postFrame: frame({ url: 'https://chat.z.ai/', stop: false }),
   });
   await assert.rejects(
     () => dispatchFleetTask({ payload: payload(), ...h.deps }),
@@ -167,7 +171,7 @@ test('target replacement between capture and effect persistently fences and abor
     () => dispatchFleetTask({ payload: payload(), ...h.deps }),
     /fleet_task_target_incarnation_mismatch/,
   );
-  assert.equal(h.calls.filter(([kind]) => kind === 'capture').length, 1);
+  assert.equal(h.calls.filter(([kind]) => kind === 'capture').length, 3);
   assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 0);
   assert.equal(h.getMarked(), null);
   assert.deepEqual(h.getFenced(), {

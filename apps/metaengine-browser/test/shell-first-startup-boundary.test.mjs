@@ -31,8 +31,8 @@ test('initial remote navigation and Fleet persistence cannot close a healthy loc
   const createWindowAt = text.indexOf('async function createWindow()', bootstrapAt);
   const bootstrap = text.slice(bootstrapAt, createWindowAt);
   assert.match(bootstrap, /runDegradableStartupStep\('USER_SESSION'/);
-  assert.match(bootstrap, /createTab\('https:\/\/chatgpt\.com\/',\s*\{\s*select:\s*true,\s*load:\s*false\s*\}\)/);
-  assert.match(bootstrap, /setImmediate\(\(\)\s*=>\s*\{[\s\S]*loadTab\(initialTab\.tab_id,\s*'https:\/\/chatgpt\.com\/'\)/);
+  assert.match(bootstrap, /createTab\(AGENT_PLATFORM_HOME_URL,\s*\{\s*select:\s*true,\s*load:\s*false\s*\}\)/);
+  assert.match(bootstrap, /setImmediate\(\(\)\s*=>\s*\{[\s\S]*loadTab\(initialTab\.tab_id,\s*AGENT_PLATFORM_HOME_URL\)/);
   assert.match(bootstrap, /runDegradableStartupStep\('FLEET'/);
   assert.match(bootstrap, /fleet\s*=\s*null/);
   assert.doesNotMatch(bootstrap, /resetFailedWindow\(/);

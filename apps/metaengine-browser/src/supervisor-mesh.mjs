@@ -1,23 +1,25 @@
 import crypto from 'node:crypto';
+import { normalizeAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 
 export const SUPERVISOR_MESH_VERSION = '1.2.0-devos';
 export const SUPERVISOR_MESH_SCHEMA = 'metaengine.supervisor-mesh.state.v2';
 export const SUPERVISOR_MESH_MAX_DEFAULT = 16;
 
-const CHATGPT_CONVERSATION_RE = /^\/c\/([a-z0-9-]+)$/i;
 const EVENT_STATES = new Set(['RESERVED','SENT','AMBIGUOUS','NO_EFFECT']);
 
 const clone = (value) => value == null ? value : structuredClone(value);
 const nowIso = (clock) => new Date(clock()).toISOString();
 
 export function normalizeSupervisorConversationUrl(value) {
-  const url = new URL(String(value || '').trim());
-  if (url.protocol !== 'https:' || !['chatgpt.com','www.chatgpt.com'].includes(url.hostname.toLowerCase())) {
-    throw new Error('supervisor_mesh_conversation_origin_invalid');
+  try {
+    return normalizeAgentPlatformConversationUrl(value);
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (message === 'fleet_transport_conversation_origin_invalid') {
+      throw new Error('supervisor_mesh_conversation_origin_invalid');
+    }
+    throw new Error('supervisor_mesh_conversation_path_invalid');
   }
-  const match = CHATGPT_CONVERSATION_RE.exec(url.pathname.replace(/\/+$/, ''));
-  if (!match) throw new Error('supervisor_mesh_conversation_path_invalid');
-  return `https://chatgpt.com/c/${match[1].toLowerCase()}`;
 }
 
 export function supervisorInstanceIdForUrl(value) {

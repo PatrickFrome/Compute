@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { classifyAgentPlatformSurface } from './browser-agent-platform.mjs';
 
 let fleetRuntime = null;
 
@@ -12,12 +13,9 @@ function generationFloor(value) {
 
 function transportUrl(value) {
   try {
-    const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) return null;
-    const path = url.pathname.replace(/\/+$/, '');
-    if (path === '') return Object.freeze({ url: 'https://chatgpt.com/', stage: 'PRECONVERSATION_ROOT' });
-    if (!/^\/c\/[a-z0-9-]+$/i.test(path)) return null;
-    return Object.freeze({ url: `https://chatgpt.com${path.toLowerCase()}`, stage: 'CONVERSATION' });
+    const surface = classifyAgentPlatformSurface(String(value || ''));
+    if (!surface || surface.stage === 'OTHER') return null;
+    return Object.freeze({ url: surface.url, stage: surface.stage });
   } catch {
     return null;
   }

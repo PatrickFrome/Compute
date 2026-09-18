@@ -12,8 +12,8 @@ test('ambiguous delivery is terminal for the same event key', async () => {
   });
   await mesh.init();
   await mesh.reconcile({ tabs: [
-    { tab_id: 'a', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true },
-    { tab_id: 'b', url: 'https://chatgpt.com/c/bbbbbbbb-1111-2222-3333-444444444444' },
+    { tab_id: 'a', url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true },
+    { tab_id: 'b', url: 'https://chat.z.ai/c/bbbbbbbb-1111-2222-3333-444444444444' },
   ] });
   const reserved = await mesh.reserveCoordination({ eventKey: 'effect-1', reason: 'PRIMARY_WAKE_AMBIGUOUS_RECOVERY' });
   const d = reserved.deliveries[0];

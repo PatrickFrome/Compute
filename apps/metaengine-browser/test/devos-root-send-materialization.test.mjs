@@ -40,10 +40,10 @@ const fleet = {
     authority_effect: false,
   }],
 };
-const composer = { role: 'textbox', name: 'Message ChatGPT' };
+const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'c'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
-const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
 function response(status, body) {
@@ -53,7 +53,7 @@ function frame({ sendVisible, conversation = false } = {}) {
   return {
     tab_id: lease.tab_id,
     target_id: lease.target_id,
-    url: conversation ? conversationUrl : 'https://chatgpt.com/',
+    url: conversation ? conversationUrl : 'https://chat.z.ai/',
     viewport: { width: 1200, height: 640 },
     semantic_targets: [composer, ...(sendVisible ? [send] : []), ...(conversation ? [stop] : [])],
     authority_effect: false,
@@ -70,7 +70,7 @@ function state(selected) {
   };
 }
 
-test('root dispatch types before Send exists, then requires fresh Send and clicks once', async () => {
+test('root dispatch proves the composer, submits once through Enter and proves the conversation', async () => {
   const calls = [];
   let selected = supervisorTab;
   let captures = 0;
@@ -86,12 +86,11 @@ test('root dispatch types before Send exists, then requires fresh Send and click
       if (command.action === 'CAPTURE') {
         captures += 1;
         if (captures === 1) return frame({ sendVisible: false });
-        if (captures === 2) return frame({ sendVisible: true });
         return frame({ sendVisible: false, conversation: true });
       }
       if (command.action === 'SEMANTIC_TYPE') {
-        assert.equal(command.payload.submit_after_type, false);
-        return { authority_effect: true };
+        assert.equal(command.payload.submit_after_type, true);
+        return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
       }
       if (command.action === 'TYPED_CLICK') return { authority_effect: true };
       throw new Error('unexpected_action');
@@ -107,9 +106,8 @@ test('root dispatch types before Send exists, then requires fresh Send and click
 
   const result = await cycle.cycle();
   assert.equal(result.dispatch.state, 'RUNNING');
-  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_GENERATING');
+  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
   assert.equal(calls.filter((x) => x === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(calls.filter((x) => x === 'TYPED_CLICK').length, 1);
-  assert.ok(calls.indexOf('TYPED_CLICK') > calls.indexOf('SEMANTIC_TYPE'));
+  assert.equal(calls.filter((x) => x === 'TYPED_CLICK').length, 0);
   assert.equal(selected, supervisorTab);
 });
