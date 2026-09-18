@@ -163,6 +163,13 @@ export function createRsiSharedExperienceAdmission({
     evaluator_cost_units:checked.evaluator_cost_units,
     expected_information_gain:checked.expected_information_gain,
     information_gain_per_cost:checked.information_gain_per_cost,
+    supporting_evidence_verified:supporting_evidence_verified===true,
+    counterevidence_reviewed:counterevidence_reviewed===true,
+    falsification_test_precommitted:falsification_test_precommitted===true,
+    hidden_data_non_disclosure_pass:hidden_data_non_disclosure_pass===true,
+    scope_precision_pass:scope_precision_pass===true,
+    evaluator_budget_available:evaluator_budget_available===true,
+    marginal_information_gain_certified:marginal_information_gain_certified===true,
     blockers:Object.freeze(blockers.sort()),
     state:pass?'ELIGIBLE_FOR_SHARED_EXPERIENCE_BUS':'SHARED_EXPERIENCE_REJECTED',
     eligible_for_shared_experience_bus:pass,
@@ -190,9 +197,21 @@ export function verifyRsiSharedExperienceAdmission(admission,{hypothesis}={}){
     ||admission.consumer_must_revalidate_locally!==true||admission.consumer_must_preserve_source_provenance!==true)throw new Error('rsi_experience_admission_policy_invalid');
   const checked=verifyRsiSharedExperienceHypothesis(hypothesis);
   if(admission.hypothesis_digest!==checked.hypothesis_digest)throw new Error('rsi_experience_admission_binding_mismatch');
-  const clone=structuredClone(admission);delete clone.admission_digest;
-  if(digest(clone)!==exactDigest(admission.admission_digest,'admission'))throw new Error('rsi_experience_admission_digest_mismatch');
-  return Object.freeze(structuredClone(admission));
+  const canonical=createRsiSharedExperienceAdmission({
+    admission_id:admission.admission_id,
+    hypothesis:checked,
+    supporting_evidence_verified:admission.supporting_evidence_verified,
+    counterevidence_reviewed:admission.counterevidence_reviewed,
+    falsification_test_precommitted:admission.falsification_test_precommitted,
+    hidden_data_non_disclosure_pass:admission.hidden_data_non_disclosure_pass,
+    scope_precision_pass:admission.scope_precision_pass,
+    evaluator_budget_available:admission.evaluator_budget_available,
+    marginal_information_gain_certified:admission.marginal_information_gain_certified,
+    external_reviewer:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.admission_digest!==exactDigest(admission.admission_digest,'admission'))throw new Error('rsi_experience_admission_digest_mismatch');
+  return canonical;
 }
 
 function busState(sourceSha,rows){
@@ -238,19 +257,23 @@ export class RsiSharedExperienceBus{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'bus'))throw new Error('rsi_experience_bus_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_experience_bus_rows_invalid');
       const ids=new Set();
+      const checkedRows=[];
       for(const row of p.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_experience_bus_source_mismatch');
-        const hc=structuredClone(row.hypothesis);delete hc.hypothesis_digest;if(digest(hc)!==exactDigest(row.hypothesis.hypothesis_digest,'bus_hypothesis'))throw new Error('rsi_experience_bus_hypothesis_digest_mismatch');
-        const ac=structuredClone(row.admission);delete ac.admission_digest;if(digest(ac)!==exactDigest(row.admission.admission_digest,'bus_admission'))throw new Error('rsi_experience_bus_admission_digest_mismatch');
-        if(row.admission.hypothesis_digest!==row.hypothesis.hypothesis_digest)throw new Error('rsi_experience_bus_binding_mismatch');
-        if(ids.has(row.hypothesis.hypothesis_digest))throw new Error('rsi_experience_bus_hypothesis_duplicate');
-        ids.add(row.hypothesis.hypothesis_digest);
+        const hypothesis=verifyRsiSharedExperienceHypothesis(row.hypothesis);
+        const admission=verifyRsiSharedExperienceAdmission(row.admission,{hypothesis});
+        if(hypothesis.source_sha!==this.#sourceSha||admission.source_sha!==this.#sourceSha)throw new Error('rsi_experience_bus_source_mismatch');
+        if(ids.has(hypothesis.hypothesis_digest))throw new Error('rsi_experience_bus_hypothesis_duplicate');
+        ids.add(hypothesis.hypothesis_digest);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,hypothesis,admission}));
       }
-      this.#rows=p.rows;
+      const canonicalState=busState(this.#sourceSha,checkedRows);
+      if(canonicalState.state_digest!==p.state_digest)throw new Error('rsi_experience_bus_derived_state_mismatch');
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){const s=busState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
+  async #persist(rows=this.#rows){const s=busState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
   async add({hypothesis,admission}={}){
     if(!this.#initialized)throw new Error('rsi_experience_bus_not_initialized');
     const h=verifyRsiSharedExperienceHypothesis(hypothesis);
@@ -262,8 +285,9 @@ export class RsiSharedExperienceBus{
       return zero({state:'IDEMPOTENT',admission_digest:a.admission_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_experience_bus_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,hypothesis:structuredClone(h),admission:structuredClone(a)}));
-    await this.#persist();
+    const nextRows=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,hypothesis:structuredClone(h),admission:structuredClone(a)})];
+    await this.#persist(nextRows);
+    this.#rows=nextRows;
     return zero({state:a.state,admission_digest:a.admission_digest});
   }
   eligibleForRecipient(recipientTag){
