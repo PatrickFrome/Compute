@@ -60,6 +60,8 @@ function verifyBridgeSnapshot(bridge,{revision_envelope,revision_proposal}={}){
   const checked=verifyRsiBoundedRevisionDevosBridge(bridge,{
     envelope:revision_envelope,
     proposal:revision_proposal,
+    experiment_intent:revision_envelope?.experiment_intent_snapshot,
+    experiment_receipt:revision_envelope?.experiment_receipt_snapshot,
   });
   assertZero(checked,'bridge');
   if(checked.external_implementation_reviewer!==true||checked.uses_existing_devos_scheduler!==true
