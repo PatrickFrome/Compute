@@ -22,7 +22,7 @@ import {
   planPostRestoreDuplicateTabCleanup,
   restoreSelfUpdateSessionContinuity,
 } from './self-update-session-continuity.mjs';
-import { classifyChatGptAuthReadbackFromTabs } from './chatgpt-auth-readback.mjs';
+import { classifyChatAuthReadbackFromTabs } from './chatgpt-auth-readback.mjs';
 import { SECURITY_POLICY } from './browser-policy.mjs';
 import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
 import {
@@ -564,7 +564,7 @@ export class NativeSupervisorClient {
   async #capturePreInstallAuthReadback() {
     try {
       const state = await this.#getState();
-      return classifyChatGptAuthReadbackFromTabs(state?.tabs || []);
+      return classifyChatAuthReadbackFromTabs(state?.tabs || []);
     } catch {
       return Object.freeze({
         auth_state: 'UNKNOWN', chatgpt_tab_count: 0, auth_redirect_tab_count: 0, authenticated_tab_count: 0,

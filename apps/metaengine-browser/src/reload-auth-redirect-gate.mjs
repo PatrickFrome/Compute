@@ -14,13 +14,16 @@
 // supervisor path). It throws a typed error so the refusal is observable,
 // classified fail-closed and never silently swallowed.
 
-import { isChatGptAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
+import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 
 export const RELOAD_AUTH_REDIRECT_FORBIDDEN = 'reload_auth_redirect_forbidden';
 
 export function reloadBlockedByAuthRedirect({ action, url } = {}) {
   if (String(action || '').toUpperCase() !== 'RELOAD') return false;
-  return isChatGptAuthRedirectUrl(url);
+  // GLM agent platform (2026-09-19): the gate covers every monitored chat
+  // surface — chatgpt.com/auth/* (legacy operator lane) AND chat.z.ai/auth*
+  // (the fleet's platform). The amplifier logic is platform-independent.
+  return isChatAuthRedirectUrl(url);
 }
 
 export function assertReloadAllowed({ action, url } = {}) {

@@ -117,3 +117,44 @@ test('agent platform composer resolution requires exactly one textbox with a sem
   }), null);
   assert.equal(resolveAgentPlatformComposer(null), null);
 });
+
+test('combined chat auth readback watches both chat platforms', async () => {
+  const { classifyChatAuthReadbackFromTabs, classifyChatAuthUrl, isChatAuthRedirectUrl } = await import('../src/chatgpt-auth-readback.mjs');
+  assert.equal(classifyChatAuthUrl('https://chat.z.ai/auth'), 'AUTH_REQUIRED');
+  assert.equal(classifyChatAuthUrl('https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db'), 'AUTHENTICATED');
+  assert.equal(classifyChatAuthUrl('https://chatgpt.com/auth/login'), 'AUTH_REQUIRED');
+  assert.equal(classifyChatAuthUrl('https://example.com/'), 'NOT_CHAT');
+  assert.equal(isChatAuthRedirectUrl('https://chat.z.ai/auth?next=%2Fc%2Fabc'), true);
+  assert.equal(isChatAuthRedirectUrl('https://chatgpt.com/auth/login'), true);
+  assert.equal(isChatAuthRedirectUrl('https://chat.z.ai/c/abc'), false);
+
+  const mixed = classifyChatAuthReadbackFromTabs([
+    { url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db' },
+    { url: 'https://chatgpt.com/' },
+    { url: 'https://example.com/' },
+  ]);
+  assert.equal(mixed.schema, 'metaengine.chat-auth-readback.v2');
+  assert.equal(mixed.auth_state, 'AUTHENTICATED');
+  assert.equal(mixed.agent_platform_tab_count, 1);
+  assert.equal(mixed.chatgpt_tab_count, 1);
+
+  const loggedOut = classifyChatAuthReadbackFromTabs([
+    { url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db' },
+    { url: 'https://chat.z.ai/auth' },
+  ]);
+  assert.equal(loggedOut.auth_state, 'AUTH_REQUIRED');
+  assert.equal(loggedOut.agent_platform_auth_redirect_tab_count, 1);
+  assert.deepEqual(loggedOut.auth_redirect_url_samples, ['https://chat.z.ai/auth']);
+
+  const empty = classifyChatAuthReadbackFromTabs([{ url: 'https://example.com/' }]);
+  assert.equal(empty.auth_state, 'NO_CHAT_TABS');
+});
+
+test('reload auth-redirect gate fences the GLM platform auth surface too', async () => {
+  const { reloadBlockedByAuthRedirect } = await import('../src/reload-auth-redirect-gate.mjs');
+  assert.equal(reloadBlockedByAuthRedirect({ action: 'RELOAD', url: 'https://chat.z.ai/auth' }), true);
+  assert.equal(reloadBlockedByAuthRedirect({ action: 'RELOAD', url: 'https://chat.z.ai/auth?next=%2Fc%2Fabc' }), true);
+  assert.equal(reloadBlockedByAuthRedirect({ action: 'RELOAD', url: 'https://chatgpt.com/auth/login' }), true);
+  assert.equal(reloadBlockedByAuthRedirect({ action: 'RELOAD', url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db' }), false);
+  assert.equal(reloadBlockedByAuthRedirect({ action: 'NAVIGATE', url: 'https://chat.z.ai/auth' }), false);
+});
