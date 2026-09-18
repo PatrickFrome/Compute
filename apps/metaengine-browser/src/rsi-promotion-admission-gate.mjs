@@ -71,6 +71,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-bounded-revision-devos-bridge.mjs',
   'apps/metaengine-browser/src/rsi-materialized-candidate-evaluation-handoff.mjs',
   'apps/metaengine-browser/src/rsi-generation-scoped-outcome-frontier.mjs',
+  'apps/metaengine-browser/src/rsi-slow-knowledge-consolidation.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
