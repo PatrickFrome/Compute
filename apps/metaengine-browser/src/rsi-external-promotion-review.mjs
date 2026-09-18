@@ -212,6 +212,17 @@ export function verifyRsiExternalPromotionReviewResult(result,request){
   exactDigest(result.archive_admission_digest,'archive_admission');
   exactDigest(result.gate_digest,'gate');
   if(result.gate_result?.gate_digest!==result.gate_digest||result.gate_result?.state!==result.state)throw new Error('rsi_promotion_review_result_gate_mismatch');
+  assertZeroAuthority(result.gate_result,'gate_result');
+  if(
+    result.gate_result?.candidate_id!==checked.candidate_id
+    || result.gate_result?.candidate_sha!==checked.candidate_sha
+    || result.gate_result?.parent_sha!==checked.parent_sha
+    || result.gate_result?.existing_self_update_handoff_authorized!==false
+    || result.gate_result?.direct_install_authorized!==false
+    || result.gate_result?.promotion_token!==null
+  )throw new Error('rsi_promotion_review_result_gate_policy_invalid');
+  const gateCore={...structuredClone(result.gate_result)};delete gateCore.gate_digest;
+  if(digest(gateCore)!==result.gate_digest)throw new Error('rsi_promotion_review_result_gate_digest_invalid');
   const core={...structuredClone(result)};delete core.result_digest;
   if(digest(core)!==exactDigest(result.result_digest,'result'))throw new Error('rsi_promotion_review_result_digest_mismatch');
   return result;
