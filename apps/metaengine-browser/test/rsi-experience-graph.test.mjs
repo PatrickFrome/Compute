@@ -300,7 +300,7 @@ test('similarity diffusion can surface a cross-task case but never makes semanti
   assert.equal(result.candidate_can_select_thresholds, false);
 });
 
-test('utility is contextual append-only evidence and can improve ranking only for that exact target context', () => {
+test('utility keeps exact-context dominance while verified cross-context evidence contributes only a discounted prior', () => {
   const context = d('f');
   const helpful = createRsiExperienceUtilityReceipt({
     receipt_id: 'utility.command.fixed.1',
@@ -330,6 +330,7 @@ test('utility is contextual append-only evidence and can improve ranking only fo
   const fixed = result.items.find((row) => row.case_id === 'case.command.2');
   assert.equal(fixed.contextual_utility.helpful, 1);
   assert.equal(fixed.contextual_utility.evidence_count, 1);
+  assert.equal(fixed.contextual_utility.cross_context_evidence_count, 0);
   assert.ok(fixed.contextual_utility.posterior_mean > 0.5);
 
   const otherContext = createRsiExperienceGraphQuery({
@@ -345,7 +346,13 @@ test('utility is contextual append-only evidence and can improve ranking only fo
   const otherResult = retrieveRsiExperienceGraph({ snapshot: graph, query: otherContext });
   const otherFixed = otherResult.items.find((row) => row.case_id === 'case.command.2');
   assert.equal(otherFixed.contextual_utility.evidence_count, 0);
-  assert.equal(otherFixed.contextual_utility.posterior_mean, 0.5);
+  assert.equal(otherFixed.contextual_utility.cross_context_helpful, 1);
+  assert.equal(otherFixed.contextual_utility.cross_context_evidence_count, 1);
+  assert.equal(otherFixed.contextual_utility.cross_context_discount_weight, 0.25);
+  assert.equal(otherFixed.contextual_utility.exact_context_utility_dominates, true);
+  assert.equal(otherFixed.contextual_utility.cross_context_utility_is_advisory_prior, true);
+  assert.ok(otherFixed.contextual_utility.posterior_mean > 0.5);
+  assert.ok(otherFixed.contextual_utility.posterior_mean < fixed.contextual_utility.posterior_mean);
 });
 
 test('candidate cannot forge utility or mutate retrieval thresholds by tampering with digested artifacts', () => {
@@ -385,6 +392,10 @@ test('experience graph trust root fixes writer, portability, privacy and authori
   assert.equal(root.case_nodes, true);
   assert.equal(root.correction_fixed_by_edges, true);
   assert.equal(root.contextual_utility_receipts, true);
+  assert.equal(root.cross_context_utility_prior_enabled, true);
+  assert.equal(root.cross_context_utility_discount_weight, 0.25);
+  assert.equal(root.exact_context_utility_dominates, true);
+  assert.equal(root.cross_context_utility_is_advisory_prior, true);
   assert.equal(root.source_context_truth_is_portable, false);
   assert.equal(root.external_transfer_validation_required, true);
   assert.equal(root.candidate_can_write_graph, false);
@@ -400,4 +411,37 @@ test('experience graph trust root fixes writer, portability, privacy and authori
   assert.equal(root.execution_authority, false);
   assert.equal(root.authority_effect, false);
   assert.match(root.graph_root_digest, /^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('harmful cross-context utility decreases retrieval confidence without becoming global truth or authority', () => {
+  const harmful = createRsiExperienceUtilityReceipt({
+    receipt_id: 'utility.command.fixed.harmful.cross',
+    case_id: 'case.command.2',
+    target_context_digest: d('f'),
+    outcome: 'HARMFUL',
+    evidence_digest: d('2'),
+    evidence_refs: ['POST_DEPLOY_REGRESSION_1'],
+    external_evaluator: true,
+    authored_by_candidate: false,
+  });
+  const graph = baseGraph({ utility: [harmful] });
+  const query = createRsiExperienceGraphQuery({
+    query_id: 'query.utility.harmful.other',
+    target_context_digest: d('e'),
+    task_signature_digest: d('1'),
+    challenge_family: 'COMMAND_LIVENESS',
+    environment_fingerprint: 'WINDOWS_BROWSER',
+    model_family: 'GPT_5_6_SOL',
+    external_query_context: true,
+    authored_by_candidate: false,
+  });
+  const result = retrieveRsiExperienceGraph({ snapshot: graph, query });
+  const fixed = result.items.find((row) => row.case_id === 'case.command.2');
+  assert.equal(fixed.contextual_utility.evidence_count, 0);
+  assert.equal(fixed.contextual_utility.cross_context_harmful, 1);
+  assert.equal(fixed.contextual_utility.cross_context_evidence_count, 1);
+  assert.ok(fixed.contextual_utility.posterior_mean < 0.5);
+  assert.equal(result.retrieval_is_execution_authority, false);
+  assert.equal(result.retrieval_is_promotion_authority, false);
 });
