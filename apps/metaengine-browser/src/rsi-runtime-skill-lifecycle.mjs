@@ -49,7 +49,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     append_attempt_count:appendAttempts.length,
     window_seq_by_skill:Object.fromEntries([...windowSeqBySkill.entries()].sort(([a],[b])=>a.localeCompare(b))),
     evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,max_append_attempts:MAX_APPEND_ATTEMPTS,
-    append_attempts_are_durable_before_effect:true,ambiguous_append_retry_allowed:false,
+    append_attempts_are_durable_before_effect:true,pre_effect_state_readback_after_attempt_persist_required:true,ambiguous_append_retry_allowed:false,
     admission_exposure_holds_force_dormant:true,admission_exposure_hold_release_requires_external_governance:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     credit_required_for_lifecycle_update:true,contextual_credit_not_global_truth:true,
@@ -200,8 +200,33 @@ export class RsiRuntimeSkillLifecycle{
       one_attempt_only:true,ambiguous_retry_allowed:false,retrieval_exposure_change_authorized:false,authority_effect:false,
     });
     this.#appendAttempts=[...this.#appendAttempts,prepared];await this.#persist();
-    const started=Object.freeze({...prepared,state:'ATTEMPT_STARTED',attempt_started_at:this.#now()});
+    const started=Object.freeze({...prepared,state:'ATTEMPT_STARTED',attempt_started_at:this.#now(),pre_effect_readback_required:true});
     this.#replaceAppendAttempt(started);await this.#persist();
+
+    const preEffectGovernance=this.governance();
+    const preEffectLibraryDigest=this.#library?.library_digest||null;
+    const preEffectGovernanceDigest=preEffectGovernance?.governance_digest||null;
+    if(preEffectLibraryDigest!==expectedLibrary||preEffectGovernanceDigest!==expectedGovernance){
+      const aborted=Object.freeze({
+        ...started,
+        state:'PRE_EFFECT_DRIFT',
+        reconciled_at:this.#now(),
+        observed_library_digest:preEffectLibraryDigest,
+        observed_governance_digest:preEffectGovernanceDigest,
+        effect_started:false,
+      });
+      this.#replaceAppendAttempt(aborted);await this.#persist();
+      return zero({
+        state:'PRE_EFFECT_DRIFT',
+        attempt_id:attemptId,
+        observed_library_digest:preEffectLibraryDigest,
+        observed_governance_digest:preEffectGovernanceDigest,
+        effect_started:false,
+        automatic_retry_allowed:false,
+        retrieval_exposure_changed:false,
+      });
+    }
+
     const adoption=await this.adoptVerifiedLibrary({
       library:checked,admission_exposure_hold_skill_digests:holds,external_library_owner:true,authored_by_candidate:false,
     });
@@ -337,7 +362,7 @@ export class RsiRuntimeSkillLifecycle{
       active_count:governance?.active_count||0,quarantined_count:governance?.quarantined_count||0,
       retired_count:governance?.retired_count||0,dormant_count:governance?.dormant_count||0,
       evidence_append_only:true,pending_is_bounded:true,contextual_credit_not_global_truth:true,
-      append_attempts_are_durable_before_effect:true,ambiguous_append_retry_allowed:false,
+      append_attempts_are_durable_before_effect:true,pre_effect_state_readback_after_attempt_persist_required:true,ambiguous_append_retry_allowed:false,
       admission_exposure_holds_force_dormant:true,admission_exposure_hold_release_requires_external_governance:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
       execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
@@ -353,7 +378,7 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     verified_library_required:true,library_updates_append_only:true,
     append_new_skills_require_exposure_hold:true,admission_exposure_holds_force_dormant:true,
     admission_exposure_hold_release_requires_external_governance:true,
-    one_attempt_append_journal_durable_before_effect:true,ambiguous_append_retry_allowed:false,
+    one_attempt_append_journal_durable_before_effect:true,pre_effect_state_readback_after_attempt_persist_required:true,ambiguous_append_retry_allowed:false,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
