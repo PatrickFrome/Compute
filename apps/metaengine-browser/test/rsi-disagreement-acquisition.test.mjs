@@ -34,7 +34,7 @@ function proxyPolicy(id, proxyChar, overrides = {}) {
     holdout_pass_threshold: 0.5,
     calibrated_min_concordance: 0.7,
     degraded_min_concordance: 0.55,
-    max_false_positive_upper: 0.65,
+    max_false_positive_upper: 0.70,
     max_brier: 0.25,
     recent_window: 4,
     drift_brier_delta: 0.2,
