@@ -81,6 +81,7 @@ function principalDigests(certificate){
     certificate.source_qualification_owner_identity_digest,
     certificate.least_privilege_reviewer_identity_digest,
     certificate.governance_reviewer_identity_digest,
+    certificate.benchmark_security_attestor_identity_digest,
   ].map((x,i)=>exactDigest(x,'certificate_principal_'+i)));
 }
 
@@ -144,6 +145,12 @@ export function createRsiStorageOnlyAppendEffectPlan({
     phase33_policy_source_sha:exactSha(certificate.phase33_policy_source_sha,'phase33_policy_source'),
     phase34_admission_certificate_digest:certificate.admission_certificate_digest,
     phase34_admission_proposal_digest:certificate.admission_proposal_digest,
+    source_evaluation_contract_digest:certificate.source_evaluation_contract_digest,
+    consumer_task_set_digest:certificate.consumer_task_set_digest,
+    consumer_retrieval_profile_digest:certificate.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest:certificate.current_consumer_plane_digest,
+    current_verified_library_digest:certificate.current_verified_library_digest,
+    consumer_evaluation_contract_digest:certificate.consumer_evaluation_contract_digest,
     predecessor_source_qualification_digest:certificate.predecessor_source_qualification_digest,
     admission_epoch_digest:certificate.admission_epoch_digest,
     current_governance_digest:certificate.current_governance_digest,
@@ -168,6 +175,10 @@ export function createRsiStorageOnlyAppendEffectPlan({
     certificate_source_qualification_owner_identity_digest:principals[2],
     certificate_least_privilege_reviewer_identity_digest:principals[3],
     certificate_governance_reviewer_identity_digest:principals[4],
+    certificate_benchmark_security_attestor_identity_digest:principals[5],
+    exact_consumer_state_lineage_preserved:true,
+    exact_retrieval_profile_lineage_preserved:true,
+    exact_current_library_lineage_preserved:true,
     external_effect_planner:true,
     authored_by_candidate:false,
     existing_verified_skill_library_schema_reused:true,
@@ -199,6 +210,8 @@ export function verifyRsiStorageOnlyAppendEffectPlan(plan,args={}){
   if(!plan||plan.schema!==RSI_STORAGE_ONLY_APPEND_EFFECT_PLAN_SCHEMA||plan.version!==1)throw new Error('rsi_phase34_effect_plan_invalid');
   assertZero(plan,'plan');
   if(plan.external_effect_planner!==true||plan.authored_by_candidate!==false
+    ||plan.exact_consumer_state_lineage_preserved!==true||plan.exact_retrieval_profile_lineage_preserved!==true
+    ||plan.exact_current_library_lineage_preserved!==true
     ||plan.existing_verified_skill_library_schema_reused!==true||plan.second_skill_library_created!==false
     ||plan.exact_single_skill_append_required!==true||plan.predecessor_entries_preserved!==true
     ||plan.append_is_storage_only!==true||plan.effect_attempt_limit!==1||plan.effect_attempted!==false
@@ -669,6 +682,10 @@ export function rsiStorageOnlyAppendEffectTrustRootSnapshot(){
     schema:'metaengine.rsi.storage-only-append-effect-root.v1',
     version:1,
     phase34_anytime_admission_certificate_required:true,
+    exact_consumer_state_lineage_required:true,
+    exact_retrieval_profile_lineage_required:true,
+    exact_current_library_lineage_required:true,
+    benchmark_security_attestor_inherited_from_admission:true,
     existing_verified_skill_library_schema_reused:true,
     second_skill_library_allowed:false,
     exact_predecessor_library_binding_required:true,
