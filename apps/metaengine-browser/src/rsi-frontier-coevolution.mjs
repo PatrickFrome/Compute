@@ -474,6 +474,8 @@ export function finalizeRsiFrontierTask({
     state: 'ADMITTED_SYNTHETIC_FRONTIER_CURRICULUM',
     proposal_id: checkedProposal.proposal_id,
     proposal_digest: checkedProposal.proposal_digest,
+    mode: checkedProposal.mode,
+    family: checkedProposal.family,
     materialization_digest: checkedMaterialization.materialization_digest,
     learnability_digest: checkedLearnability.learnability_digest,
     challenge,
