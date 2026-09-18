@@ -48,3 +48,20 @@ test('publisher topic/privacy contract matches wait-batch subscriber and durable
   assert.match(edge, /const afterSubscribe=await leaseBatch\(req,body\)/);
   assert.match(edge, /const wake=await subscription\.wake;\s*const afterWake=await leaseBatch\(req,body\)/s);
 });
+
+
+test('modern non-JWT service keys use the existing Postgres NOTIFY channel instead of a fixed 15s poll', () => {
+  assert.match(edge, /REALTIME_ACCESS_TOKEN=SERVICE_ROLE\.split\('\.'\)\.length===3\?SERVICE_ROLE:''/);
+  assert.match(edge, /const wakeSql=postgres\(DB_URL,\{max:1,/,
+    'LISTEN must use a dedicated connection rather than consuming the durable query pool');
+  assert.match(edge, /createPostgresCommandWakeHub\(\{listen:\(channel:string,onNotify:\(payload:string\)=>void\)=>wakeSql\.listen\(channel,onNotify\)\}\)/);
+  assert.match(edge, /if\(!REALTIME_API_KEY\|\|!REALTIME_ACCESS_TOKEN\)\{[\s\S]*postgresWakeHub\.open\(\{clientId:client,timeoutMs:waitMs\}\)/);
+  assert.match(edge, /const afterSubscribe=await leaseBatch\(req,body\)/,
+    'durable queue must be re-read after LISTEN becomes active to close the subscribe race');
+  assert.match(edge, /const wake=await subscription\.wake;\s*const afterWake=await leaseBatch\(req,body\)/s,
+    'NOTIFY is wake-only; durable DB leasing remains authoritative after wake');
+  assert.match(edge, /await sleep\(waitMs\);\s*const fallback=await leaseBatch\(req,body\)/s,
+    'LISTEN degradation must retain a bounded idle wait instead of creating a hot poll loop');
+  assert.match(edge, /command_wait_batch:REALTIME_ACCESS_TOKEN\?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY'/);
+  assert.match(edge, /postgres_notify_delivery_is_authority:false/);
+});
