@@ -80,6 +80,14 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
+import {
+  RsiExactOwnerReviewArchive,
+  createRsiExactConsumerOwnerReviewBundle,
+  verifyRsiExactConsumerOwnerReviewBundle,
+  createRsiExactSkillPrecommitCertificate,
+  verifyRsiExactSkillPrecommitCertificate,
+  rsiExactExistingConsumerOwnerReviewTrustRootSnapshot,
+} from '../src/rsi-exact-existing-consumer-owner-review.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -2902,4 +2910,395 @@ test('Phase32 forbids reuse of a Phase31 transfer-contract digest as local refer
   assert.throws(()=>phase32Fixture('transfer-contract-freshness',{
     handoffOverrides:{local_revalidation_protocol_digest:transferContract},
   }),/source_transfer_contract_reuse_forbidden/);
+});
+
+
+function phase33ExactOwnerFixture(label='phase33-owner'){
+  const skillFx=phase32ExactSkillReviewFixture(label);
+  const skillReviewArgs=phase32ExactSkillEvidenceReviewArgs(skillFx,label);
+  const skillEvidenceReview=createRsiConsolidatedKnowledgeSkillEvidenceReview(skillReviewArgs);
+  assert.equal(skillEvidenceReview.state,'READY_FOR_EXTERNAL_EXISTING_LIBRARY_APPEND_REVIEW');
+
+  const handoff=createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:'phase33.consumer.handoff.'+label,
+    proposal:skillFx.proposal,
+    validations:skillFx.validations,
+    admission:skillFx.admission,
+    source_rows:skillFx.rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(label+'-consumer-context'),
+    consumer_task_set_digest:labelDigest(label+'-consumer-task-set'),
+    consumer_harness_digest:labelDigest(label+'-consumer-harness'),
+    consumer_retrieval_profile_digest:labelDigest(label+'-consumer-retrieval-profile'),
+    consumer_evaluator_root_digest:skillEvidenceReview.local_evaluator_root_digest,
+    consumer_evaluator_generation_digest:skillFx.proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:skillFx.proposal.evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:skillFx.proposal.evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:skillFx.proposal.evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:skillFx.proposal.evaluation_epoch_digest,
+    consumer_holdout_digest:skillEvidenceReview.local_hidden_holdout_digest,
+    matched_reference_plan_digest:labelDigest(label+'-matched-reference-plan'),
+    local_revalidation_protocol_digest:labelDigest(label+'-consumer-revalidation-protocol'),
+    current_consumer_plane_digest:labelDigest(label+'-consumer-plane'),
+    current_verified_library_digest:skillFx.currentLibrary.library_digest,
+    external_consumer_router:true,
+    authored_by_candidate:false,
+  });
+
+  const receipt=createRsiConsumerLocalRevalidationReceipt({
+    receipt_id:'phase33.consumer.receipt.'+label,
+    handoff,
+    matched_control_receipt_digest:labelDigest(label+'-consumer-control'),
+    treatment_receipt_digest:labelDigest(label+'-consumer-treatment'),
+    local_evidence_digest:labelDigest(label+'-consumer-local-evidence'),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    consumer_state_integrity_pass:true,
+    retrieval_profile_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    hard_invariants_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    process_non_regression:true,
+    outcome_non_regression:true,
+    efficiency_non_regression:true,
+    strict_consumer_improvement:true,
+    constraint_prediction_confirmed:false,
+    diagnostic_discrimination_pass:false,
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  });
+
+  const phase32Evidence={
+    handoff,receipt,proposal:skillFx.proposal,validations:skillFx.validations,
+    admission:skillFx.admission,source_rows:skillFx.rows,
+  };
+
+  const bundle=createRsiExactConsumerOwnerReviewBundle({
+    bundle_id:'phase33.owner.bundle.'+label,
+    ...phase32Evidence,
+    current_consumer_snapshot_digest:handoff.current_consumer_plane_digest,
+    consumer_owner_policy_digest:labelDigest(label+'-owner-policy'),
+    consumer_owner_identity_digest:labelDigest(label+'-owner-identity'),
+    external_consumer_owner:true,
+    authored_by_candidate:false,
+  });
+
+  return {skillFx,skillReviewArgs,skillEvidenceReview,handoff,receipt,phase32Evidence,bundle};
+}
+
+function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
+  return {
+    certificate_id:'phase33.owner.certificate.'+label,
+    bundle:fx.bundle,
+    phase32_evidence:fx.phase32Evidence,
+    skill_evidence_review:fx.skillEvidenceReview,
+    skill_evidence_review_args:fx.skillReviewArgs,
+    current_library_snapshot_digest:fx.skillFx.currentLibrary.library_digest,
+    structural_critic_identity_digest:labelDigest(label+'-critic-structural-id'),
+    structural_critic_receipt_digest:labelDigest(label+'-critic-structural-receipt'),
+    behavioral_critic_identity_digest:labelDigest(label+'-critic-behavior-id'),
+    behavioral_critic_receipt_digest:labelDigest(label+'-critic-behavior-receipt'),
+    semantic_critic_identity_digest:labelDigest(label+'-critic-semantic-id'),
+    semantic_critic_receipt_digest:labelDigest(label+'-critic-semantic-receipt'),
+    coalition_ablation_receipt_digest:labelDigest(label+'-coalition-ablation'),
+    no_skill_ablation_receipt_digest:labelDigest(label+'-no-skill-ablation'),
+    mechanical_artifact_audit_digest:labelDigest(label+'-mechanical-artifact-audit'),
+    artifact_noop_ablation_receipt_digest:labelDigest(label+'-artifact-noop-ablation'),
+    benchmark_provenance_attestation_digest:labelDigest(label+'-benchmark-provenance'),
+    evaluator_provenance_attestation_digest:labelDigest(label+'-evaluator-provenance'),
+    contamination_attestation_digest:labelDigest(label+'-contamination-attestation'),
+    active_cap_policy_digest:labelDigest(label+'-active-cap-policy'),
+    marginal_subset_selection_policy_digest:labelDigest(label+'-marginal-subset-policy'),
+    anytime_valid_certificate_digest:labelDigest(label+'-anytime-valid-certificate'),
+    false_admission_error_budget_policy_digest:labelDigest(label+'-false-admission-budget'),
+    paired_instance_manifest_digest:labelDigest(label+'-paired-instance-manifest'),
+    stopping_policy_digest:labelDigest(label+'-stopping-policy'),
+    artifact_auditor_identity_digest:labelDigest(label+'-artifact-auditor-id'),
+    benchmark_provenance_attestor_identity_digest:labelDigest(label+'-benchmark-attestor-id'),
+    evaluator_provenance_attestor_identity_digest:labelDigest(label+'-evaluator-attestor-id'),
+    contamination_attestor_identity_digest:labelDigest(label+'-contamination-attestor-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
+    false_admission_alpha_ppm:50000,
+    anytime_valid_e_value_microunits:25000000,
+    paired_sample_count:64,
+    minimum_paired_sample_count:32,
+    active_retrieval_cap:32,
+    current_active_retrieval_count:12,
+    projected_active_retrieval_count:13,
+    structural_validity_pass:true,
+    behavioral_harmlessness_pass:true,
+    semantic_consistency_pass:true,
+    coalition_ablation_pass:true,
+    no_skill_ablation_pass:true,
+    mechanical_artifact_audit_pass:true,
+    artifact_noop_ablation_pass:true,
+    benchmark_provenance_pass:true,
+    evaluator_provenance_pass:true,
+    contamination_clear:true,
+    marginal_gain_subset_pass:true,
+    active_cap_pass:true,
+    external_owner_reviewer:true,
+    external_critics:true,
+    external_artifact_auditor:true,
+    external_provenance_attestor:true,
+    external_statistical_acceptor:true,
+    authored_by_candidate:false,
+    ...overrides,
+  };
+}
+
+test('Phase33 owner bundle exact-binds consumer state retrieval task-set and current library',()=>{
+  const fx=phase33ExactOwnerFixture('exact-consumer-state');
+  const checked=verifyRsiExactConsumerOwnerReviewBundle(fx.bundle,fx.phase32Evidence);
+  assert.equal(checked.bundle_digest,fx.bundle.bundle_digest);
+  assert.equal(fx.bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT');
+  assert.equal(fx.bundle.source_evaluation_contract_digest,fx.handoff.source_evaluation_contract_digest);
+  assert.equal(fx.bundle.consumer_task_set_digest,fx.handoff.consumer_task_set_digest);
+  assert.equal(fx.bundle.consumer_retrieval_profile_digest,fx.handoff.consumer_retrieval_profile_digest);
+  assert.equal(fx.bundle.current_consumer_plane_digest,fx.handoff.current_consumer_plane_digest);
+  assert.equal(fx.bundle.current_verified_library_digest,fx.handoff.current_verified_library_digest);
+  assert.equal(fx.bundle.current_consumer_snapshot_digest,fx.handoff.current_consumer_plane_digest);
+  assert.equal(fx.bundle.consumer_state_integrity_pass,true);
+  assert.equal(fx.bundle.retrieval_profile_integrity_pass,true);
+  assert.equal(fx.bundle.process_non_regression,true);
+  assert.equal(fx.bundle.outcome_non_regression,true);
+  assert.equal(fx.bundle.current_consumer_plane_exact_binding_required,true);
+  assert.equal(fx.bundle.consumer_retrieval_profile_exact_binding_required,true);
+  assert.equal(fx.bundle.consumer_task_set_exact_binding_required,true);
+  assert.equal(fx.bundle.current_verified_library_exact_binding_required_for_recipe,true);
+  assert.equal(fx.bundle.library_append_performed,false);
+  assert.equal(fx.bundle.retrieval_exposure_changed,false);
+  assert.equal(fx.bundle.authority_effect,false);
+});
+
+test('Phase33 owner bundle rejects stale consumer-plane snapshot before any owner certificate',()=>{
+  const fx=phase33ExactOwnerFixture('stale-consumer-plane');
+  assert.throws(()=>createRsiExactConsumerOwnerReviewBundle({
+    bundle_id:'phase33.owner.bundle.stale-consumer-plane.bad',
+    ...fx.phase32Evidence,
+    current_consumer_snapshot_digest:labelDigest('phase33-stale-different-consumer-plane'),
+    consumer_owner_policy_digest:labelDigest('phase33-stale-owner-policy'),
+    consumer_owner_identity_digest:labelDigest('phase33-stale-owner-identity'),
+    external_consumer_owner:true,
+    authored_by_candidate:false,
+  }),/current_consumer_snapshot_drift/);
+});
+
+test('Phase33 precommit emits only zero-authority existing-library owner-admission eligibility',()=>{
+  const fx=phase33ExactOwnerFixture('positive');
+  const args=phase33CertificateArgs(fx,'positive');
+  const cert=createRsiExactSkillPrecommitCertificate(args);
+  assert.equal(cert.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
+  assert.equal(cert.blockers.length,0);
+  assert.equal(cert.source_evaluation_contract_digest,fx.handoff.source_evaluation_contract_digest);
+  assert.equal(cert.consumer_task_set_digest,fx.handoff.consumer_task_set_digest);
+  assert.equal(cert.consumer_retrieval_profile_digest,fx.handoff.consumer_retrieval_profile_digest);
+  assert.equal(cert.current_consumer_plane_digest,fx.handoff.current_consumer_plane_digest);
+  assert.equal(cert.current_verified_library_digest,fx.skillFx.currentLibrary.library_digest);
+  assert.equal(cert.current_library_digest,fx.skillFx.currentLibrary.library_digest);
+  assert.equal(cert.exact_consumer_state_binding_required,true);
+  assert.equal(cert.exact_retrieval_profile_binding_required,true);
+  assert.equal(cert.exact_current_library_binding_required,true);
+  assert.equal(cert.local_process_outcome_non_regression_required,true);
+  assert.equal(cert.consumer_state_integrity_required,true);
+  assert.equal(cert.retrieval_profile_integrity_required,true);
+  assert.equal(cert.library_append_performed,false);
+  assert.equal(cert.retrieval_exposure_changed,false);
+  assert.equal(cert.skill_activation_performed,false);
+  assert.equal(cert.meta_skill_profile_mutated,false);
+  assert.equal(cert.anytime_valid_threshold_microunits,20000000);
+  assert.equal(cert.anytime_valid_acceptance_pass,true);
+  assert.equal(cert.library_admission_token,null);
+  assert.equal(cert.authority_effect,false);
+  assert.equal(verifyRsiExactSkillPrecommitCertificate(cert,args).certificate_digest,cert.certificate_digest);
+});
+
+test('Phase33 current library drift invalidates a previously prepared owner certificate',()=>{
+  const fx=phase33ExactOwnerFixture('library-drift');
+  const args=phase33CertificateArgs(fx,'library-drift');
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...args,
+    current_library_snapshot_digest:labelDigest('phase33-library-drift-new-library'),
+  }),/library_snapshot_drift/);
+});
+
+test('Phase33 keeps three independent critics, artifact audit, coalition ablation and provenance as hard precommit gates',()=>{
+  const fx=phase33ExactOwnerFixture('hard-gates');
+
+  const duplicate=phase33CertificateArgs(fx,'duplicate-critics');
+  duplicate.behavioral_critic_identity_digest=duplicate.structural_critic_identity_digest;
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate(duplicate),/three_independent_critics_required/);
+
+  for(const [label,overrides,blocker] of [
+    ['structural',{structural_validity_pass:false},'STRUCTURAL_VALIDITY_FAILED'],
+    ['behavior',{behavioral_harmlessness_pass:false},'BEHAVIORAL_HARMLESSNESS_FAILED'],
+    ['semantic',{semantic_consistency_pass:false},'SEMANTIC_CONSISTENCY_FAILED'],
+    ['coalition',{coalition_ablation_pass:false},'COALITION_ABLATION_FAILED'],
+    ['no-skill',{no_skill_ablation_pass:false},'NO_SKILL_ABLATION_FAILED'],
+    ['artifact',{mechanical_artifact_audit_pass:false},'MECHANICAL_ARTIFACT_AUDIT_FAILED'],
+    ['artifact-noop',{artifact_noop_ablation_pass:false},'ARTIFACT_NOOP_ABLATION_FAILED'],
+    ['benchmark',{benchmark_provenance_pass:false},'BENCHMARK_PROVENANCE_FAILED'],
+    ['evaluator',{evaluator_provenance_pass:false},'EVALUATOR_PROVENANCE_FAILED'],
+    ['contamination',{contamination_clear:false},'CONTAMINATION_DETECTED'],
+    ['subset',{marginal_gain_subset_pass:false},'MARGINAL_SUBSET_SELECTION_FAILED'],
+    ['cap',{projected_active_retrieval_count:33},'ACTIVE_CAP_POLICY_FAILED'],
+  ]){
+    const cert=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'gate-'+label,overrides));
+    assert.equal(cert.state,'REJECTED_PRECOMMIT_OWNER_REVIEW',label);
+    assert.ok(cert.blockers.includes(blocker),blocker);
+    assert.equal(cert.library_append_performed,false);
+    assert.equal(cert.retrieval_exposure_changed,false);
+  }
+});
+
+test('Phase33 anytime-valid acceptance abstains on insufficient evidence under fixed error budget',()=>{
+  const fx=phase33ExactOwnerFixture('anytime');
+  const insufficient=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-insufficient',{
+    anytime_valid_e_value_microunits:19000000,
+  }));
+  assert.equal(insufficient.anytime_valid_threshold_microunits,20000000);
+  assert.equal(insufficient.anytime_valid_acceptance_pass,false);
+  assert.equal(insufficient.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+  assert.equal(insufficient.blockers.length,0);
+  assert.equal(insufficient.library_append_performed,false);
+
+  const tooFewPairs=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-too-few',{
+    paired_sample_count:31,
+  }));
+  assert.equal(tooFewPairs.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'bad-alpha',{
+    false_admission_alpha_ppm:1000001,
+  })),/false_admission_alpha_ppm_invalid/);
+});
+
+test('Phase33 process or outcome regression is stopped in Phase32 and cannot become positive owner review',()=>{
+  for(const [label,overrides] of [
+    ['process',{process_non_regression:false}],
+    ['outcome',{outcome_non_regression:false}],
+    ['consumer-state',{consumer_state_integrity_pass:false}],
+    ['retrieval',{retrieval_profile_integrity_pass:false}],
+  ]){
+    const fx=phase33ExactOwnerFixture('clean-'+label);
+    const receipt=createRsiConsumerLocalRevalidationReceipt({
+      receipt_id:'phase33.consumer.regression.'+label,
+      handoff:fx.handoff,
+      matched_control_receipt_digest:labelDigest('phase33-regression-'+label+'-control'),
+      treatment_receipt_digest:labelDigest('phase33-regression-'+label+'-treatment'),
+      local_evidence_digest:labelDigest('phase33-regression-'+label+'-evidence'),
+      same_instances_pass:true,same_harness_pass:true,same_budget_pass:true,
+      evaluator_integrity_pass:true,consumer_state_integrity_pass:true,retrieval_profile_integrity_pass:true,
+      hidden_holdout_pass:true,contamination_clear:true,from_scratch_replay_pass:true,hard_invariants_pass:true,
+      task_non_regression:true,safety_non_regression:true,security_non_regression:true,
+      process_non_regression:true,outcome_non_regression:true,efficiency_non_regression:true,
+      strict_consumer_improvement:true,
+      external_consumer_evaluator:true,authored_by_candidate:false,
+      ...overrides,
+    });
+    const evidence={...fx.phase32Evidence,receipt};
+    const bundle=createRsiExactConsumerOwnerReviewBundle({
+      bundle_id:'phase33.owner.bundle.regression.'+label,
+      ...evidence,
+      current_consumer_snapshot_digest:fx.handoff.current_consumer_plane_digest,
+      consumer_owner_policy_digest:labelDigest('phase33-regression-'+label+'-owner-policy'),
+      consumer_owner_identity_digest:labelDigest('phase33-regression-'+label+'-owner-id'),
+      external_consumer_owner:true,authored_by_candidate:false,
+    });
+    assert.notEqual(bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT');
+    assert.equal(bundle.eligible_for_existing_consumer_owner_review,false);
+  }
+});
+
+test('Phase33 negative or diagnostic consumer evidence cannot enter positive skill precommit',()=>{
+  for(const [label,state] of [
+    ['negative','CANDIDATE_EXPERIMENT_REJECTED'],
+    ['diagnostic','INCONCLUSIVE_ENVIRONMENT'],
+  ]){
+    const fx=phase32Fixture('phase33-'+label,{state});
+    const receipt=phase32Receipt(fx,'phase33-'+label);
+    const phase32Evidence={
+      handoff:fx.handoff,receipt,proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    };
+    const bundle=createRsiExactConsumerOwnerReviewBundle({
+      bundle_id:'phase33.owner.bundle.nonrecipe.'+label,
+      ...phase32Evidence,
+      current_consumer_snapshot_digest:fx.handoff.current_consumer_plane_digest,
+      consumer_owner_policy_digest:labelDigest('phase33-nonrecipe-'+label+'-owner-policy'),
+      consumer_owner_identity_digest:labelDigest('phase33-nonrecipe-'+label+'-owner-id'),
+      external_consumer_owner:true,authored_by_candidate:false,
+    });
+    assert.notEqual(bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT');
+    assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+      ...phase33CertificateArgs(phase33ExactOwnerFixture('unrelated-'+label),'nonrecipe-block-'+label),
+      bundle,phase32_evidence:phase32Evidence,
+    }),/recipe_bundle_required/);
+  }
+});
+
+test('Phase33 archive is durable-before-visible and re-verifies exact Phase32 consumer state after restart',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase33-consumer-state-owner-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'owner.json');
+  const fx=phase33ExactOwnerFixture('archive');
+  const certArgs=phase33CertificateArgs(fx,'archive');
+  const cert=createRsiExactSkillPrecommitCertificate(certArgs);
+  const resolver=async()=>({
+    phase32_evidence:fx.phase32Evidence,
+    certificate_args:certArgs,
+  });
+  const archive=new RsiExactOwnerReviewArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({
+    bundle:fx.bundle,certificate:cert,phase32_evidence:fx.phase32Evidence,certificate_args:certArgs,
+  }));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.add({
+    bundle:fx.bundle,certificate:cert,phase32_evidence:fx.phase32Evidence,certificate_args:certArgs,
+  })).state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
+  const snap=archive.snapshot();
+  assert.equal(snap.row_count,1);
+  assert.equal(snap.archive_can_write_skill_library,false);
+  assert.equal(snap.archive_can_change_retrieval_exposure,false);
+  assert.equal(snap.archive_can_activate_skill,false);
+
+  const restored=new RsiExactOwnerReviewArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+});
+
+test('Phase33 trust root freezes exact consumer-state precommit without authority expansion',()=>{
+  const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
+  assert.equal(root.exact_phase32_consumer_identity_required,true);
+  assert.equal(root.exact_consumer_task_set_required,true);
+  assert.equal(root.exact_consumer_retrieval_profile_required,true);
+  assert.equal(root.current_consumer_plane_exact_binding_required,true);
+  assert.equal(root.current_verified_library_exact_binding_required,true);
+  assert.equal(root.three_independent_critics_required,true);
+  assert.equal(root.reviewer_separation_of_duties_required,true);
+  assert.equal(root.coalition_aware_ablation_required,true);
+  assert.equal(root.no_skill_paired_intervention_required,true);
+  assert.equal(root.local_process_outcome_non_regression_required,true);
+  assert.equal(root.consumer_state_integrity_required,true);
+  assert.equal(root.retrieval_profile_integrity_required,true);
+  assert.equal(root.mechanical_artifact_audit_required,true);
+  assert.equal(root.artifact_noop_ablation_required,true);
+  assert.equal(root.anytime_valid_acceptance_required,true);
+  assert.equal(root.insufficient_evidence_abstain_required,true);
+  assert.equal(root.append_does_not_imply_active_retrieval,true);
+  assert.equal(root.direct_library_append,false);
+  assert.equal(root.direct_retrieval_exposure_change,false);
+  assert.equal(root.direct_skill_activation,false);
+  assert.equal(root.direct_scheduler_action,false);
+  assert.equal(root.authority_effect,false);
 });
