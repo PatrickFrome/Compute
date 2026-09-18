@@ -101,6 +101,14 @@ import {
   verifyRsiAnytimeLibraryAdmissionCertificate,
   rsiAnytimeLibraryAdmissionTrustRootSnapshot,
 } from '../src/rsi-anytime-library-admission.mjs';
+import {
+  RsiStorageOnlyAppendEffectArchive,
+  createRsiStorageOnlyAppendEffectPlan,
+  verifyRsiStorageOnlyAppendEffectPlan,
+  createRsiStorageOnlyAppendEffectReadback,
+  verifyRsiStorageOnlyAppendEffectReadback,
+  rsiStorageOnlyAppendEffectTrustRootSnapshot,
+} from '../src/rsi-storage-only-append-effect.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -3394,4 +3402,263 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.direct_scheduler_action,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.phase34_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+function phase34EffectFixture(label='phase34-effect'){
+  const admission=phase34Fixture(label);
+  const certificate=createRsiAnytimeLibraryAdmissionCertificate(admission.certificateArgs);
+  assert.equal(certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF');
+  const currentLibrary=admission.p33.skillFx.currentLibrary;
+  const skill=admission.p33.skillFx.skill;
+  const skillEvidence=admission.p33.skillEvidenceReview.standard_skill_evidence;
+  const planArgs={
+    admission_certificate:certificate,
+    admission_certificate_args:admission.certificateArgs,
+    current_library:currentLibrary,
+    skill_capsule:skill,
+    skill_evidence:skillEvidence,
+  };
+  const plan=createRsiStorageOnlyAppendEffectPlan({
+    plan_id:'phase34.effect.plan.'+label,
+    ...planArgs,
+    append_effect_id_digest:labelDigest(label+'-effect-id'),
+    idempotency_key_digest:labelDigest(label+'-idempotency'),
+    effect_journal_policy_digest:labelDigest(label+'-journal-policy'),
+    effect_planner_identity_digest:labelDigest(label+'-effect-planner'),
+    external_effect_planner:true,
+    authored_by_candidate:false,
+  });
+  const successorLibrary=createRsiVerifiedSkillLibrary({
+    library_id:currentLibrary.library_id,
+    entries:[
+      ...currentLibrary.entries.map(row=>({capsule:row.capsule,evidence:row.evidence})),
+      {capsule:skill,evidence:skillEvidence},
+    ],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  return {admission,certificate,currentLibrary,skill,skillEvidence,planArgs,plan,successorLibrary};
+}
+
+function phase34EffectReadback(fx,label='phase34-effect-readback',overrides={}){
+  return createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.readback.'+label,
+    plan:fx.plan,
+    plan_args:fx.planArgs,
+    effect_outcome:'CONFIRMED_APPLIED',
+    observed_library:fx.successorLibrary,
+    effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest(label+'-journal-entry'),
+    effect_executor_identity_digest:labelDigest(label+'-executor'),
+    readback_owner_identity_digest:labelDigest(label+'-readback-owner'),
+    external_effect_executor:true,
+    external_readback_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+}
+
+test('Phase34 effect plan consumes only an eligible admission certificate and precommits one exact storage-only successor',()=>{
+  const fx=phase34EffectFixture('plan');
+  const checked=verifyRsiStorageOnlyAppendEffectPlan(fx.plan,fx.planArgs);
+  assert.equal(checked.plan_digest,fx.plan.plan_digest);
+  assert.equal(fx.plan.current_library_digest,fx.currentLibrary.library_digest);
+  assert.equal(fx.plan.proposed_skill_digest,fx.skill.skill_digest);
+  assert.equal(fx.plan.proposed_skill_evidence_digest,fx.skillEvidence.evidence_digest);
+  assert.equal(fx.plan.expected_successor_library_digest,fx.successorLibrary.library_digest);
+  assert.equal(fx.plan.expected_successor_entry_count,fx.currentLibrary.entry_count+1);
+  assert.equal(fx.plan.existing_verified_skill_library_schema_reused,true);
+  assert.equal(fx.plan.second_skill_library_created,false);
+  assert.equal(fx.plan.exact_single_skill_append_required,true);
+  assert.equal(fx.plan.effect_attempt_limit,1);
+  assert.equal(fx.plan.effect_attempted,false);
+  assert.equal(fx.plan.library_append_performed,false);
+  assert.equal(fx.plan.blind_retry_forbidden,true);
+  assert.equal(fx.plan.governance_recompute_performed,false);
+  assert.equal(fx.plan.activation_view_rebuilt,false);
+  assert.equal(fx.plan.retrieval_exposure_changed,false);
+  assert.equal(fx.plan.skill_activation_performed,false);
+  assert.equal(fx.plan.lifecycle_mutation_performed,false);
+  assert.equal(fx.plan.authority_effect,false);
+});
+
+test('Phase34 applied readback proves the exact single append but leaves the new skill storage-only pending governance',()=>{
+  const fx=phase34EffectFixture('applied');
+  const receipt=phase34EffectReadback(fx,'applied');
+  assert.equal(verifyRsiStorageOnlyAppendEffectReadback(receipt,{
+    plan:fx.plan,plan_args:fx.planArgs,observed_library:fx.successorLibrary,
+  }).receipt_digest,receipt.receipt_digest);
+  assert.equal(receipt.state,'APPEND_CONFIRMED_STORAGE_ONLY_PENDING_GOVERNANCE');
+  assert.equal(receipt.observed_library_kind,'SUCCESSOR');
+  assert.equal(receipt.append_confirmed,true);
+  assert.equal(receipt.storage_only_pending_governance,true);
+  assert.equal(receipt.same_effect_id_retry_allowed,false);
+  assert.equal(receipt.reconciliation_required,false);
+  assert.equal(receipt.governance_recompute_performed,false);
+  assert.equal(receipt.activation_view_rebuilt,false);
+  assert.equal(receipt.retrieval_exposure_changed,false);
+  assert.equal(receipt.skill_activation_performed,false);
+  assert.equal(receipt.lifecycle_mutation_performed,false);
+  assert.equal(receipt.authority_effect,false);
+});
+
+test('Phase34 effect ambiguity cannot hide a readback that already resolves predecessor or successor state',()=>{
+  const fx=phase34EffectFixture('ambiguity');
+  assert.throws(()=>createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.ambiguous.resolved-successor',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'AMBIGUOUS',
+    observed_library:fx.successorLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-ambiguous-successor-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-ambiguous-successor-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-ambiguous-successor-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  }),/ambiguous_outcome_resolved_by_readback/);
+  assert.throws(()=>createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.ambiguous.resolved-predecessor',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'AMBIGUOUS',
+    observed_library:fx.currentLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-ambiguous-predecessor-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-ambiguous-predecessor-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-ambiguous-predecessor-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  }),/ambiguous_outcome_resolved_by_readback/);
+
+  const unresolved=createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.ambiguous.unresolved',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'AMBIGUOUS',
+    observed_library:null,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-ambiguous-unresolved-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-ambiguous-unresolved-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-ambiguous-unresolved-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(unresolved.state,'APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED');
+  assert.equal(unresolved.reconciliation_required,true);
+  assert.equal(unresolved.same_effect_id_retry_allowed,false);
+  assert.equal(unresolved.new_plan_required_for_future_attempt,false);
+});
+
+test('Phase34 confirmed-not-applied requires exact predecessor readback and a new plan for any future attempt',()=>{
+  const fx=phase34EffectFixture('not-applied');
+  const receipt=createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.not-applied',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'CONFIRMED_NOT_APPLIED',
+    observed_library:fx.currentLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-not-applied-effect-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-not-applied-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-not-applied-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(receipt.state,'APPEND_CONFIRMED_NOT_APPLIED_NEW_PLAN_REQUIRED');
+  assert.equal(receipt.observed_library_kind,'PREDECESSOR');
+  assert.equal(receipt.append_confirmed,false);
+  assert.equal(receipt.new_plan_required_for_future_attempt,true);
+  assert.equal(receipt.same_effect_id_retry_allowed,false);
+  assert.equal(receipt.blind_retry_forbidden,true);
+
+  assert.throws(()=>createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.not-applied-wrong',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'CONFIRMED_NOT_APPLIED',
+    observed_library:fx.successorLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-not-applied-wrong-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-not-applied-wrong-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-not-applied-wrong-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  }),/confirmed_not_applied_readback_mismatch/);
+});
+
+test('Phase34 effect planner, executor and readback identities are separated from admission reviewers',()=>{
+  const fx=phase34EffectFixture('separation');
+  assert.throws(()=>createRsiStorageOnlyAppendEffectPlan({
+    plan_id:'phase34.effect.plan.separation-collapse',
+    ...fx.planArgs,
+    append_effect_id_digest:labelDigest('phase34-separation-collapse-effect'),
+    idempotency_key_digest:labelDigest('phase34-separation-collapse-idempotency'),
+    effect_journal_policy_digest:labelDigest('phase34-separation-collapse-policy'),
+    effect_planner_identity_digest:fx.certificate.library_owner_identity_digest,
+    external_effect_planner:true,authored_by_candidate:false,
+  }),/planner_separation_of_duties_required/);
+
+  assert.throws(()=>createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.readback.separation-collapse',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'CONFIRMED_APPLIED',
+    observed_library:fx.successorLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-separation-collapse-journal'),
+    effect_executor_identity_digest:fx.certificate.statistical_acceptor_identity_digest,
+    readback_owner_identity_digest:labelDigest('phase34-separation-collapse-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  }),/execution_readback_separation_required/);
+});
+
+test('Phase34 effect archive is durable-before-visible and retains unresolved effects without retry authority',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34-effect-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'effect.json');
+  const fx=phase34EffectFixture('archive');
+  const ambiguous=createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.archive.ambiguous',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'AMBIGUOUS',
+    observed_library:null,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-effect-archive-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-effect-archive-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-effect-archive-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  const resolver=async({event_type})=>event_type==='PLAN'
+    ?{plan_args:fx.planArgs}
+    :{plan_args:fx.planArgs,observed_library:null};
+  const archive=new RsiStorageOnlyAppendEffectArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.recordPlan({plan:fx.plan,plan_args:fx.planArgs}));
+  assert.equal(archive.snapshot().event_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.recordPlan({plan:fx.plan,plan_args:fx.planArgs})).state,'PLAN_DURABLE_EFFECT_NOT_ATTEMPTED');
+  assert.equal((await archive.recordReadback({
+    plan:fx.plan,receipt:ambiguous,plan_args:fx.planArgs,observed_library:null,
+  })).state,'APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED');
+  const snap=archive.snapshot();
+  assert.equal(snap.event_count,2);
+  assert.equal(snap.plan_count,1);
+  assert.equal(snap.readback_count,1);
+  assert.equal(snap.ambiguous_effects_retained,true);
+  assert.equal(snap.archive_can_write_skill_library,false);
+  assert.equal(snap.archive_can_recompute_governance,false);
+  assert.equal(snap.archive_can_change_retrieval_exposure,false);
+  assert.equal(snap.archive_can_activate_skill,false);
+
+  const restored=new RsiStorageOnlyAppendEffectArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().event_count,2);
+  assert.equal((await restored.recordPlan({plan:fx.plan,plan_args:fx.planArgs})).state,'IDEMPOTENT');
+  assert.equal((await restored.recordReadback({
+    plan:fx.plan,receipt:ambiguous,plan_args:fx.planArgs,observed_library:null,
+  })).state,'IDEMPOTENT');
+});
+
+test('Phase34 storage-only effect trust root keeps append distinct from governance and retrieval exposure',()=>{
+  const root=rsiStorageOnlyAppendEffectTrustRootSnapshot();
+  assert.equal(root.phase34_anytime_admission_certificate_required,true);
+  assert.equal(root.existing_verified_skill_library_schema_reused,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.exact_predecessor_library_binding_required,true);
+  assert.equal(root.exact_successor_library_binding_required,true);
+  assert.equal(root.durable_plan_before_effect_required,true);
+  assert.equal(root.effect_attempt_limit,1);
+  assert.equal(root.blind_retry_forbidden,true);
+  assert.equal(root.ambiguous_effect_requires_reconciliation,true);
+  assert.equal(root.resolved_readback_cannot_be_classified_ambiguous,true);
+  assert.equal(root.planner_executor_readback_separation_required,true);
+  assert.equal(root.append_is_storage_only,true);
+  assert.equal(root.governance_recompute_forbidden,true);
+  assert.equal(root.activation_view_rebuild_forbidden,true);
+  assert.equal(root.retrieval_exposure_change_forbidden,true);
+  assert.equal(root.skill_activation_forbidden,true);
+  assert.equal(root.lifecycle_mutation_forbidden,true);
+  assert.equal(root.future_governance_revalidation_required,true);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.storage_only_append_effect_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
