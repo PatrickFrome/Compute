@@ -5,6 +5,7 @@ import { createMetaSupervisorRoutes } from './meta-routes.mjs';
 import { createCognitiveDeltaRoutes } from './cognitive-delta-routes.mjs';
 import { projectNativeSupervisorRuntimeCapabilityHealth, runtimeCapabilityHealthResponseFields } from './runtime-capability-health.mjs';
 import { openRealtimeCommandWake } from './realtime-command-wake.mjs';
+import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
 
 const DB_URL=Deno.env.get('SUPABASE_DB_URL')||'';
 const SERVICE_ROLE=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
@@ -36,6 +37,10 @@ const cors={'access-control-allow-origin':'*','access-control-allow-methods':'GE
 const json=(status:number,body:any)=>new Response(JSON.stringify(body),{status,headers:{...cors,'content-type':'application/json; charset=utf-8'}});
 if(!DB_URL)throw new Error('supabase_db_url_missing');
 const sql=postgres(DB_URL,{max:2,prepare:false,connect_timeout:4,idle_timeout:20});
+// LISTEN holds a dedicated connection. Keep it isolated from the query pool so a
+// held command-wake subscription cannot starve durable lease/heartbeat queries.
+const wakeSql=postgres(DB_URL,{max:1,prepare:false,connect_timeout:4,idle_timeout:20});
+const postgresWakeHub=createPostgresCommandWakeHub({listen:(channel:string,onNotify:(payload:string)=>void)=>wakeSql.listen(channel,onNotify)});
 const rpcMetaCache=new Map<string,any>();
 const sleep=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -125,12 +130,50 @@ async function lease(req:Request,body:any){return rpc(LEASE_RPC,{p_workspace_id:
 async function leaseBatch(req:Request,body:any){return rpc(BATCH_LEASE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_supervisor_mode:modeOf(body?.supervisor_mode),p_lease_timeout_seconds:120,p_max_batch:Math.max(1,Math.min(64,Number(body?.max_batch)||64)),p_max_tab_mutations:Math.max(1,Math.min(16,Number(body?.max_tab_mutations)||8))})}
 function realtimeTopic(client:string){return`metaengine-control:${WORKSPACE_ID}:${client}`}
 function realtimeAllTopic(){return`metaengine-control:${WORKSPACE_ID}:all`}
-async function waitBatch(req:Request,body:any){const initial=await leaseBatch(req,body);if(Array.isArray(initial?.commands)&&initial.commands.length>0)return{...initial,wake_reason:'IMMEDIATE',transport_delivery_is_authority:false,authority_effect:false};const waitMs=Math.max(250,Math.min(MAX_REALTIME_WAIT_MS,Number(body?.wait_ms)||4000));if(!REALTIME_API_KEY||!REALTIME_ACCESS_TOKEN){await sleep(waitMs);const fallback=await leaseBatch(req,body);return{...fallback,wake_reason:'DB_POLL_TIMEOUT_FALLBACK',transport_delivery_is_authority:false,authority_effect:false}}const client=clientId(req);const wsUrl=`${String(Deno.env.get('SUPABASE_URL')||'').replace(/^https:/,'wss:').replace(/\/+$/,'')}/realtime/v1/websocket?apikey=${encodeURIComponent(REALTIME_API_KEY)}&vsn=1.0.0`;const subscription=openRealtimeCommandWake({createSocket:()=>new WebSocket(wsUrl),topics:[realtimeTopic(client),realtimeAllTopic()],accessToken:REALTIME_ACCESS_TOKEN,timeoutMs:waitMs});try{const joined=await subscription.subscribed;if(joined?.ok!==true){const fallback=await leaseBatch(req,body);return{...fallback,wake_reason:String(joined?.reason||'SUBSCRIBE_FAILED'),transport_delivery_is_authority:false,authority_effect:false}}const afterSubscribe=await leaseBatch(req,body);if(Array.isArray(afterSubscribe?.commands)&&afterSubscribe.commands.length>0)return{...afterSubscribe,wake_reason:'SUBSCRIBED_RECHECK',transport_delivery_is_authority:false,authority_effect:false};const wake=await subscription.wake;const afterWake=await leaseBatch(req,body);return{...afterWake,wake_reason:String(wake?.reason||'UNKNOWN'),transport_delivery_is_authority:false,authority_effect:false}}finally{subscription.close()}}
+async function waitBatch(req:Request,body:any){
+  const initial=await leaseBatch(req,body);
+  if(Array.isArray(initial?.commands)&&initial.commands.length>0)return{...initial,wake_reason:'IMMEDIATE',transport_delivery_is_authority:false,authority_effect:false};
+  const waitMs=Math.max(250,Math.min(MAX_REALTIME_WAIT_MS,Number(body?.wait_ms)||4000));
+  const client=clientId(req);
+
+  if(!REALTIME_API_KEY||!REALTIME_ACCESS_TOKEN){
+    const subscription=postgresWakeHub.open({clientId:client,timeoutMs:waitMs});
+    try{
+      const joined=await subscription.subscribed;
+      const afterSubscribe=await leaseBatch(req,body);
+      if(Array.isArray(afterSubscribe?.commands)&&afterSubscribe.commands.length>0){
+        return{...afterSubscribe,wake_reason:'POSTGRES_SUBSCRIBED_RECHECK',transport_delivery_is_authority:false,authority_effect:false};
+      }
+      if(joined?.ok!==true){
+        // LISTEN degradation must not create a zero-delay lease spin. Burn one
+        // bounded idle wait, then perform the same durable DB recheck as before.
+        await sleep(waitMs);
+        const fallback=await leaseBatch(req,body);
+        return{...fallback,wake_reason:`POSTGRES_${String(joined?.reason||'LISTEN_UNAVAILABLE')}_DB_POLL_FALLBACK`,transport_delivery_is_authority:false,authority_effect:false};
+      }
+      const wake=await subscription.wake;
+      const afterWake=await leaseBatch(req,body);
+      return{...afterWake,wake_reason:String(wake?.reason||'POSTGRES_UNKNOWN'),transport_delivery_is_authority:false,authority_effect:false};
+    }finally{subscription.close()}
+  }
+
+  const wsUrl=`${String(Deno.env.get('SUPABASE_URL')||'').replace(/^https:/,'wss:').replace(/\/+$/,'')}/realtime/v1/websocket?apikey=${encodeURIComponent(REALTIME_API_KEY)}&vsn=1.0.0`;
+  const subscription=openRealtimeCommandWake({createSocket:()=>new WebSocket(wsUrl),topics:[realtimeTopic(client),realtimeAllTopic()],accessToken:REALTIME_ACCESS_TOKEN,timeoutMs:waitMs});
+  try{
+    const joined=await subscription.subscribed;
+    if(joined?.ok!==true){const fallback=await leaseBatch(req,body);return{...fallback,wake_reason:String(joined?.reason||'SUBSCRIBE_FAILED'),transport_delivery_is_authority:false,authority_effect:false}}
+    const afterSubscribe=await leaseBatch(req,body);
+    if(Array.isArray(afterSubscribe?.commands)&&afterSubscribe.commands.length>0)return{...afterSubscribe,wake_reason:'SUBSCRIBED_RECHECK',transport_delivery_is_authority:false,authority_effect:false};
+    const wake=await subscription.wake;
+    const afterWake=await leaseBatch(req,body);
+    return{...afterWake,wake_reason:String(wake?.reason||'UNKNOWN'),transport_delivery_is_authority:false,authority_effect:false}
+  }finally{subscription.close()}
+}
 async function bindEffect(req:Request,commandId:string,body:any){const binding=boundedObject(body?.binding,16384);if(!binding)return json(400,{accepted:false,error:'effect_binding_required',authority_effect:false});if(!EFFECT_BINDING_SCHEMAS.has(String(binding.schema||'')))return json(400,{accepted:false,error:'effect_binding_schema_invalid',authority_effect:false});if(String(binding.command_id||'').toLowerCase()!==String(commandId||'').toLowerCase())return json(409,{accepted:false,error:'effect_binding_command_mismatch',authority_effect:false});if(String(binding.client_id||'')!==clientId(req))return json(409,{accepted:false,error:'effect_binding_client_mismatch',authority_effect:false});try{const result=await rpc(BIND_EFFECT_RPC,{p_workspace_id:WORKSPACE_ID,p_command_id:commandId,p_client_id:clientId(req),p_binding:binding,p_authority_effect:false});if(!result||typeof result!=='object'||result.accepted!==true||!result.effect_binding)return json(409,{accepted:false,error:'effect_binding_not_accepted',authority_effect:false});return json(200,{...result,authority_effect:false})}catch{return json(409,{accepted:false,error:'effect_binding_rejected',authority_effect:false})}}
 async function complete(req:Request,commandId:string,body:any){const rows=await commandLookup(commandId);if(!rows[0])return json(404,{error:'command_not_found'});const r=await rpc(COMPLETE_RPC,{p_workspace_id:WORKSPACE_ID,p_command_id:commandId,p_client_id:clientId(req),p_ok:body?.ok===true,p_receipt:body?.receipt&&typeof body.receipt==='object'?body.receipt:{},p_error:body?.ok===true?null:String(body?.error||'command_failed').slice(0,500),p_authority_effect:false});return json(r?.accepted===true?200:409,r)}
 async function completeBatch(req:Request,body:any){if(!Array.isArray(body?.results)||body.results.length>64)return json(400,{error:'command_batch_results_invalid'});const r=await rpc(BATCH_COMPLETE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_results:body.results});return json(200,r)}
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:REALTIME_ACCESS_TOKEN?'REALTIME_BROADCAST_PROXY':'BOUNDED_DB_POLL',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
-async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:REALTIME_ACCESS_TOKEN?'REALTIME_BROADCAST_PROXY':'BOUNDED_DB_POLL',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,states,commands}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:REALTIME_ACCESS_TOKEN?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:REALTIME_ACCESS_TOKEN?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
