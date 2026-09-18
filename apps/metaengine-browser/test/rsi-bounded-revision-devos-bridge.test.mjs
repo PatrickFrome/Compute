@@ -81,6 +81,9 @@ import {
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
 import {
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
+import {
   RsiExactOwnerReviewArchive,
   createRsiExactConsumerOwnerReviewBundle,
   verifyRsiExactConsumerOwnerReviewBundle,
@@ -88,6 +91,14 @@ import {
   verifyRsiExactSkillPrecommitCertificate,
   rsiExactExistingConsumerOwnerReviewTrustRootSnapshot,
 } from '../src/rsi-exact-existing-consumer-owner-review.mjs';
+import {
+  RsiExternalLibraryAdmissionArchive,
+  createRsiExternalLibraryAdmissionProposal,
+  verifyRsiExternalLibraryAdmissionProposal,
+  createRsiExternalLibraryAppendReadback,
+  verifyRsiExternalLibraryAppendReadback,
+  rsiExternalLibraryAdmissionTrustRootSnapshot,
+} from '../src/rsi-external-library-admission.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
