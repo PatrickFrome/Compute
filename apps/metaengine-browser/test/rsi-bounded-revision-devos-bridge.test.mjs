@@ -42,6 +42,12 @@ import {
   prepareRsiIsolatedCandidateBuild,
   verifyRsiIsolatedCandidateBuildPlan,
 } from '../src/rsi-isolated-candidate-builder.mjs';
+import {
+  RsiGenerationScopedOutcomeArchive,
+  createRsiGenerationScopedOutcomeEntry,
+  verifyRsiGenerationScopedOutcomeEntry,
+  rsiGenerationScopedOutcomeFrontierTrustRootSnapshot,
+} from '../src/rsi-generation-scoped-outcome-frontier.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -1057,4 +1063,291 @@ test('Phase29 handoff history rejects self-rehashed candidate authority and requ
     /handoff_digest_mismatch/,
   );
   assert.equal(ledger.snapshot().row_count,1);
+});
+
+
+function phase30OutcomeEvidence(label='phase30',{state='SUPPORTED_FOR_BOUNDED_REVISION',sharedEvaluation=null,treatmentOverrides={}}={}){
+  const fx=phase28ArtifactFixture(label);
+  const shared=sharedEvaluation||{};
+  const handoff=phase29Handoff(fx,label,{
+    ...(shared.evaluator_root_digest?{evaluator_root_digest:shared.evaluator_root_digest}:{}),
+    ...(shared.evaluator_generation_digest?{evaluator_generation_digest:shared.evaluator_generation_digest}:{}),
+    ...(shared.evaluation_epoch_digest?{evaluation_epoch_digest:shared.evaluation_epoch_digest}:{}),
+    ...(shared.sealed_task_set_digest?{sealed_task_set_digest:shared.sealed_task_set_digest}:{}),
+    ...(shared.evaluation_harness_digest?{evaluation_harness_digest:shared.evaluation_harness_digest}:{}),
+    ...(shared.trial_worker_image_digest?{trial_worker_image_digest:shared.trial_worker_image_digest}:{}),
+    ...(shared.resource_budget_digest?{resource_budget_digest:shared.resource_budget_digest}:{}),
+    ...(shared.task_order_digest?{task_order_digest:shared.task_order_digest}:{}),
+    ...(shared.acceptance_policy_digest?{acceptance_policy_digest:shared.acceptance_policy_digest}:{}),
+    ...(shared.stopping_policy_digest?{stopping_policy_digest:shared.stopping_policy_digest}:{}),
+    ...(shared.hidden_holdout_root_digest?{hidden_holdout_root_digest:shared.hidden_holdout_root_digest}:{}),
+    ...(shared.safety_suite_root_digest?{safety_suite_root_digest:shared.safety_suite_root_digest}:{}),
+    ...(shared.security_suite_root_digest?{security_suite_root_digest:shared.security_suite_root_digest}:{}),
+  });
+  const request=handoff.fresh_evaluation_request;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:`phase30.eval.plan.${label}`,
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  const intent=createRsiMaterializedCandidateExperimentIntent({
+    handoff,
+    handoff_verification:{artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification},
+    fresh_budget_plan:plan,
+    fresh_plan_requests:[request],
+    intent_id:`phase30.intent.${label}`,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  });
+  const control={
+    task_utility:0.70,safety:0.95,security:0.95,
+    process_integrity:0.90,outcome_integrity:0.90,efficiency:0.70,
+  };
+  let treatment={
+    task_utility:0.80,safety:0.95,security:0.96,
+    process_integrity:0.92,outcome_integrity:0.91,efficiency:0.72,
+    ...treatmentOverrides,
+  };
+  const flags={
+    environment_blocker_detected:false,
+    controllable_failure_detected:false,
+    ambiguous_effect:false,
+  };
+  if(state==='CANDIDATE_EXPERIMENT_REJECTED')treatment={...treatment,safety:0.80};
+  if(state==='NO_MATERIAL_IMPROVEMENT')treatment={...control};
+  if(state==='INCONCLUSIVE_ENVIRONMENT')flags.environment_blocker_detected=true;
+  if(state==='INCONCLUSIVE_AMBIGUOUS')flags.ambiguous_effect=true;
+  const receipt=createRsiCandidateExperimentReceipt({
+    receipt_id:`phase30.receipt.${label}`,
+    intent,
+    control_metrics:control,
+    treatment_metrics:treatment,
+    control_attempts:1,treatment_attempts:1,retry_count:0,
+    same_tasks_pass:true,same_task_order_pass:true,harness_identity_pass:true,
+    resource_budget_identity_pass:true,evaluator_integrity_pass:true,trial_isolation_pass:true,
+    from_scratch_replay_pass:true,contamination_clear:true,reward_hack_detected:false,
+    blind_retry_detected:false,...flags,
+    evidence_digest:labelDigest(`phase30-evidence-${label}`),
+    external_runner:true,external_evaluator:true,authored_by_candidate:false,
+  });
+  assert.equal(receipt.state,state);
+  const handoffRow={
+    handoff_seq:1,
+    source_sha:SOURCE,
+    handoff,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    rotation:null,
+  };
+  return {fx,handoff,request,plan,intent,receipt,handoffRow};
+}
+
+function phase30Entry(evidence,label,{niches=['CONTROL_FLOW'],...overrides}={}){
+  const byState={
+    SUPPORTED_FOR_BOUNDED_REVISION:{
+      recipe_digest:labelDigest(`phase30-recipe-${label}`),
+      watch_out_digest:labelDigest(`phase30-watchout-${label}`),
+    },
+    CANDIDATE_EXPERIMENT_REJECTED:{
+      negative_constraint_digest:labelDigest(`phase30-negative-${label}`),
+      watch_out_digest:labelDigest(`phase30-watchout-${label}`),
+    },
+    NO_MATERIAL_IMPROVEMENT:{
+      low_yield_constraint_digest:labelDigest(`phase30-low-yield-${label}`),
+    },
+    INCONCLUSIVE_ENVIRONMENT:{
+      environment_diagnostic_digest:labelDigest(`phase30-environment-${label}`),
+    },
+    INCONCLUSIVE_AMBIGUOUS:{
+      ambiguity_diagnostic_digest:labelDigest(`phase30-ambiguity-${label}`),
+    },
+  };
+  return createRsiGenerationScopedOutcomeEntry({
+    entry_id:`phase30.outcome.${label}`,
+    handoff_row:evidence.handoffRow,
+    experiment_intent:evidence.intent,
+    experiment_receipt:evidence.receipt,
+    niche_tags:niches,
+    summary_digest:labelDigest(`phase30-summary-${label}`),
+    applicability_digest:labelDigest(`phase30-applicability-${label}`),
+    counterevidence_digest:labelDigest(`phase30-counterevidence-${label}`),
+    ...byState[evidence.receipt.state],
+    external_learning_reviewer:true,
+    external_niche_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+}
+
+test('Phase30 derives typed learning artifacts from every immutable Phase26 outcome class',()=>{
+  const cases=[
+    ['supported','SUPPORTED_FOR_BOUNDED_REVISION','REUSABLE_RECIPE_CANDIDATE'],
+    ['rejected','CANDIDATE_EXPERIMENT_REJECTED','NEGATIVE_CONSTRAINT'],
+    ['flat','NO_MATERIAL_IMPROVEMENT','LOW_YIELD_CONSTRAINT'],
+    ['environment','INCONCLUSIVE_ENVIRONMENT','ENVIRONMENT_DIAGNOSTIC'],
+    ['ambiguous','INCONCLUSIVE_AMBIGUOUS','AMBIGUITY_DIAGNOSTIC'],
+  ];
+  for(const [label,state,kind] of cases){
+    const evidence=phase30OutcomeEvidence(`typed-${label}`,{state});
+    const entry=phase30Entry(evidence,`typed-${label}`);
+    verifyRsiGenerationScopedOutcomeEntry(entry,{
+      handoff_row:evidence.handoffRow,
+      experiment_intent:evidence.intent,
+      experiment_receipt:evidence.receipt,
+    });
+    assert.equal(entry.outcome_class,state);
+    assert.equal(entry.learning_kind,kind);
+    assert.equal(entry.experiment_receipt_digest,evidence.receipt.receipt_digest);
+    assert.equal(entry.handoff_digest,evidence.handoff.evaluation_handoff_digest);
+    assert.equal(entry.evaluator_generation_digest,evidence.handoff.evaluator_generation_digest);
+    assert.equal(entry.evaluation_epoch_digest,evidence.handoff.evaluation_epoch_digest);
+    assert.equal(entry.source_outcome_receipt_stored,false);
+    assert.equal(entry.raw_trajectory_stored,false);
+    assert.equal(entry.raw_hidden_holdout_stored,false);
+    assert.equal(entry.entry_can_mutate_candidate,false);
+    assert.equal(entry.entry_can_change_budget,false);
+    assert.equal(entry.entry_can_promote,false);
+    assert.equal(entry.authority_effect,false);
+  }
+});
+
+test('Phase30 archive stores only derived references and preserves a generation-scoped Pareto frontier',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase30-frontier-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'frontier.json');
+  const shared={
+    evaluator_root_digest:labelDigest('phase30-shared-evaluator'),
+    evaluator_generation_digest:labelDigest('phase30-shared-generation'),
+    evaluation_epoch_digest:labelDigest('phase30-shared-epoch'),
+    sealed_task_set_digest:labelDigest('phase30-shared-tasks'),
+    evaluation_harness_digest:labelDigest('phase30-shared-harness'),
+    trial_worker_image_digest:labelDigest('phase30-shared-worker'),
+    resource_budget_digest:labelDigest('phase30-shared-budget'),
+    task_order_digest:labelDigest('phase30-shared-order'),
+    acceptance_policy_digest:labelDigest('phase30-shared-acceptance'),
+    stopping_policy_digest:labelDigest('phase30-shared-stopping'),
+    hidden_holdout_root_digest:labelDigest('phase30-shared-holdout'),
+    safety_suite_root_digest:labelDigest('phase30-shared-safety'),
+    security_suite_root_digest:labelDigest('phase30-shared-security'),
+  };
+  const a=phase30OutcomeEvidence('frontier-a',{sharedEvaluation:shared,treatmentOverrides:{task_utility:0.86,security:0.96}});
+  const b=phase30OutcomeEvidence('frontier-b',{sharedEvaluation:shared,treatmentOverrides:{task_utility:0.80,security:1.00}});
+  const rejected=phase30OutcomeEvidence('frontier-rejected',{state:'CANDIDATE_EXPERIMENT_REJECTED',sharedEvaluation:shared});
+  const ea=phase30Entry(a,'frontier-a',{niches:['CONTROL_FLOW','VALIDATION']});
+  const eb=phase30Entry(b,'frontier-b',{niches:['CONTROL_FLOW']});
+  const er=phase30Entry(rejected,'frontier-rejected',{niches:['CONTROL_FLOW']});
+  const evidenceByReceipt=new Map([
+    [a.receipt.receipt_digest,{handoff_row:a.handoffRow,experiment_intent:a.intent,experiment_receipt:a.receipt}],
+    [b.receipt.receipt_digest,{handoff_row:b.handoffRow,experiment_intent:b.intent,experiment_receipt:b.receipt}],
+    [rejected.receipt.receipt_digest,{handoff_row:rejected.handoffRow,experiment_intent:rejected.intent,experiment_receipt:rejected.receipt}],
+  ]);
+  const archive=new RsiGenerationScopedOutcomeArchive({
+    statePath,source_sha:SOURCE,
+    evidenceResolver:async({experiment_receipt_digest})=>evidenceByReceipt.get(experiment_receipt_digest),
+  });
+  await archive.init();
+  await archive.add({entry:ea,...evidenceByReceipt.get(a.receipt.receipt_digest)});
+  await archive.add({entry:eb,...evidenceByReceipt.get(b.receipt.receipt_digest)});
+  await archive.add({entry:er,...evidenceByReceipt.get(rejected.receipt.receipt_digest)});
+
+  const frontier=archive.frontier();
+  const controlFlow=frontier.find(x=>x.niche==='CONTROL_FLOW');
+  assert.ok(controlFlow);
+  assert.equal(controlFlow.scalar_winner,null);
+  assert.deepEqual(controlFlow.entry_digests.sort(),[ea.entry_digest,eb.entry_digest].sort());
+  assert.equal(controlFlow.entry_digests.includes(er.entry_digest),false);
+
+  const snap=archive.snapshot();
+  assert.equal(snap.row_count,3);
+  assert.equal(snap.outcome_counts.SUPPORTED_FOR_BOUNDED_REVISION,2);
+  assert.equal(snap.outcome_counts.CANDIDATE_EXPERIMENT_REJECTED,1);
+  assert.equal(snap.source_outcome_receipts_stored_here,false);
+  assert.equal(snap.scalar_global_winner_forbidden,true);
+  assert.equal(snap.cross_generation_dominance_forbidden,true);
+  assert.equal(snap.archive_can_change_budget,false);
+
+  const persisted=await fs.readFile(statePath,'utf8');
+  assert.equal(persisted.includes('control_metrics'),false);
+  assert.equal(persisted.includes('treatment_metrics'),false);
+  assert.equal(persisted.includes('raw_trajectory'),true);
+  assert.equal(persisted.includes(ea.experiment_receipt_digest),true);
+
+  const restored=new RsiGenerationScopedOutcomeArchive({
+    statePath,source_sha:SOURCE,
+    evidenceResolver:async({experiment_receipt_digest})=>evidenceByReceipt.get(experiment_receipt_digest),
+  });
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,3);
+  assert.equal((await restored.add({entry:ea,...evidenceByReceipt.get(a.receipt.receipt_digest)})).state,'IDEMPOTENT');
+});
+
+test('Phase30 archive is durable-before-visible and restart rejects self-rehashed outcome forgery',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase30-replay-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'frontier.json');
+  const evidence=phase30OutcomeEvidence('replay',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const entry=phase30Entry(evidence,'replay');
+  const resolver=async()=>({handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
+  const archive=new RsiGenerationScopedOutcomeArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({
+    entry,handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt,
+  }));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  await archive.add({entry,handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.rows[0].outcome_class='SUPPORTED_FOR_BOUNDED_REVISION';
+  raw.rows[0].learning_kind='REUSABLE_RECIPE_CANDIDATE';
+  raw.rows[0].recipe_digest=labelDigest('forged-recipe');
+  const entryCore=structuredClone(raw.rows[0]);delete entryCore.entry_digest;
+  raw.rows[0].entry_digest=dg(entryCore);
+  raw.outcome_counts={
+    SUPPORTED_FOR_BOUNDED_REVISION:1,
+    CANDIDATE_EXPERIMENT_REJECTED:0,
+    NO_MATERIAL_IMPROVEMENT:0,
+    INCONCLUSIVE_ENVIRONMENT:0,
+    INCONCLUSIVE_AMBIGUOUS:0,
+  };
+  const stateCore=structuredClone(raw);delete stateCore.state_digest;
+  raw.state_digest=dg(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(raw)}\n`,'utf8');
+
+  const restored=new RsiGenerationScopedOutcomeArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await assert.rejects(()=>restored.init(),/entry_digest_mismatch|outcome|negative_constraint|recipe/);
+});
+
+test('Phase30 rejects candidate-authored learning authority and keeps maturity statistics advisory',async(t)=>{
+  const evidence=phase30OutcomeEvidence('ownership');
+  assert.throws(()=>phase30Entry(evidence,'ownership',{
+    authored_by_candidate:true,
+    external_learning_reviewer:false,
+  }),/external_learning_ownership_required/);
+
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase30-stats-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const entry=phase30Entry(evidence,'ownership');
+  const resolver=async()=>({handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
+  const archive=new RsiGenerationScopedOutcomeArchive({statePath:path.join(dir,'frontier.json'),source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await archive.add({entry,handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
+  const stats=archive.nicheStats();
+  assert.equal(stats[0].budget_recommendation,null);
+  assert.equal(stats[0].automatic_plasticity_change_authorized,false);
+
+  const root=rsiGenerationScopedOutcomeFrontierTrustRootSnapshot();
+  assert.equal(root.existing_candidate_experiment_ledger_is_only_outcome_truth,true);
+  assert.equal(root.source_outcome_receipts_not_duplicated,true);
+  assert.equal(root.quality_diverse_frontier_required,true);
+  assert.equal(root.scalar_global_winner_forbidden,true);
+  assert.equal(root.cross_generation_dominance_forbidden,true);
+  assert.equal(root.maturity_stats_advisory_only,true);
+  assert.equal(root.automatic_plasticity_change_authorized,false);
+  assert.equal(root.authority_effect,false);
 });
