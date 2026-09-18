@@ -71,6 +71,7 @@ export function createRsiRevisionLibraryAdmission({
 
   const parent=library.entries.find(row=>row.skill_digest===scope.parent_skill_digest);
   if(!parent)throw new Error('rsi_revision_library_parent_missing');
+  if(evidence.hidden_holdout_digest===parent.evidence.hidden_holdout_digest)throw new Error('rsi_revision_library_parent_holdout_reuse_forbidden');
   if(skill.parent_skill_digest!==parent.skill_digest)throw new Error('rsi_revision_library_parent_lineage_mismatch');
   if(skill.skill_id!==parent.skill_id)throw new Error('rsi_revision_library_skill_id_drift');
   if(skill.skill_version!==parent.skill_version+1)throw new Error('rsi_revision_library_non_adjacent_version');
@@ -108,6 +109,7 @@ export function createRsiRevisionLibraryAdmission({
     exact_interface_preservation_required:true,
     exact_capability_preservation_required:true,
     sealed_external_library_holdout_required:true,
+    successor_holdout_distinct_from_parent:true,
     candidate_can_read_library_holdout:false,
     candidate_can_self_certify_skill:false,
     candidate_can_replace_parent_in_place:false,
@@ -129,6 +131,7 @@ export function verifyRsiRevisionLibraryAdmission(row,args={}){
   if(row.append_only_library_update!==true||row.parent_retained!==true||row.parent_activation_state_unchanged!==true
     ||row.stable_versioning_required!==true||row.exact_interface_preservation_required!==true
     ||row.exact_capability_preservation_required!==true||row.sealed_external_library_holdout_required!==true
+    ||row.successor_holdout_distinct_from_parent!==true
     ||row.candidate_can_read_library_holdout!==false||row.candidate_can_self_certify_skill!==false
     ||row.candidate_can_replace_parent_in_place!==false||row.direct_browser_execution_authority!==false
     ||row.admission_is_promotion_authority!==false||row.external_library_owner!==true||row.authored_by_candidate!==false){
@@ -152,7 +155,7 @@ export function rsiRevisionLibraryAdmissionTrustRootSnapshot(){
     policy_path:'apps/metaengine-browser/src/rsi-revision-library-admission.mjs',
     prior_scope_preservation_required:true,
     independent_external_skill_evidence_required:true,
-    sealed_external_library_holdout_required:true,
+    sealed_external_library_holdout_required:true,successor_holdout_distinct_from_parent:true,
     append_only_library_update:true,parent_retained:true,
     parent_activation_state_unchanged:true,stable_versioning_required:true,
     exact_interface_preservation_required:true,exact_capability_preservation_required:true,
