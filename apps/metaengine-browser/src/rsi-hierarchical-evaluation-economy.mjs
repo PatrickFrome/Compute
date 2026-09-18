@@ -218,7 +218,7 @@ export function createRsiHierarchicalEvaluationPlan({
   let active = source.entrants.length;
   const plannedStages = stages.map((stage, index) => {
     const cap = survivorCap(active, stage, finalCap);
-    const rescueSlots = Math.min(cap, stage.uncertainty_rescue_slots + stage.novelty_rescue_slots);
+    const rescueSlots = Math.min(Math.max(0, cap - 1), stage.uncertainty_rescue_slots + stage.novelty_rescue_slots);
     const row = Object.freeze({
       ...stage,
       ordinal: index + 1,
