@@ -53,13 +53,13 @@ function digest(value) {
 
 function exactSha(value, label) {
   const out = String(value || '').trim().toLowerCase();
-  if (!SHA40_RE.test(out)) throw new Error(\`rsi_episode_eval_\${label}_sha_invalid\`);
+  if (!SHA40_RE.test(out)) throw new Error(`rsi_episode_eval_${label}_sha_invalid`);
   return out;
 }
 
 function exactDigest(value, label) {
   const out = String(value || '').trim().toLowerCase();
-  if (!DIGEST_RE.test(out)) throw new Error(\`rsi_episode_eval_\${label}_digest_invalid\`);
+  if (!DIGEST_RE.test(out)) throw new Error(`rsi_episode_eval_${label}_digest_invalid`);
   return out.startsWith('sha256:') ? out.slice(7) : out;
 }
 
@@ -81,11 +81,11 @@ function assertZeroAuthority(value, label) {
     'authority_effect',
   ]) {
     if (Object.hasOwn(value || {}, field) && value[field] !== false) {
-      throw new Error(\`rsi_episode_eval_\${label}_\${field}_invalid\`);
+      throw new Error(`rsi_episode_eval_${label}_${field}_invalid`);
     }
   }
   if (Object.hasOwn(value || {}, 'automatic_retry_allowed') && value.automatic_retry_allowed !== false) {
-    throw new Error(\`rsi_episode_eval_\${label}_automatic_retry_invalid\`);
+    throw new Error(`rsi_episode_eval_${label}_automatic_retry_invalid`);
   }
 }
 
@@ -338,7 +338,7 @@ export function createRsiEpisodeEvaluationEvidenceBundle({
     ['TOURNAMENT', tournament.tournament],
   ].map(([kind, row]) => Object.freeze({
     evidence_kind: kind,
-    evidence_id: \`episode-eval:\${identity.episode_id}:\${identity.candidate_id}:\${kind.toLowerCase()}\`,
+    evidence_id: `episode-eval:${identity.episode_id}:${identity.candidate_id}:${kind.toLowerCase()}`,
     evidence_digest: row.evidence_digest,
     source_artifact_digest: row.source_digest,
     result: row.result,
