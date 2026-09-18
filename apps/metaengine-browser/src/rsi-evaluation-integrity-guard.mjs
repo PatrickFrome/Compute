@@ -7,6 +7,7 @@ export const RSI_EVALUATION_INTEGRITY_ASSESSMENT_SCHEMA='metaengine.rsi.evaluati
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
+const CANDIDATE_ID_RE=/^candidate_sha256_[0-9a-f]{64}$/;
 const MAX_REFS=32;
 const STATES=new Set(['INTEGRITY_VERIFIED','SPECIFICATION_GAMING_SUSPECT','REWARD_HACKING_DETECTED','INSUFFICIENT_EVIDENCE']);
 
@@ -16,6 +17,7 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 function exactDigest(v,l){const o=String(v||'').toLowerCase();if(!SHA256_RE.test(o))throw new Error(`rsi_integrity_${l}_digest_invalid`);return o}
 function exactSha(v,l){const o=String(v||'').toLowerCase();if(!SHA40_RE.test(o))throw new Error(`rsi_integrity_${l}_sha_invalid`);return o}
 function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))throw new Error(`rsi_integrity_${l}_invalid`);return o}
+function exactCandidateId(v,l){const o=String(v||'').toLowerCase();if(!CANDIDATE_ID_RE.test(o))throw new Error(`rsi_integrity_${l}_candidate_id_invalid`);return o}
 function probability(v,l){const o=Number(v);if(!Number.isFinite(o)||o<0||o>1)throw new Error(`rsi_integrity_${l}_invalid`);return o}
 function refs(v){if(!Array.isArray(v)||v.length<1||v.length>MAX_REFS)throw new Error('rsi_integrity_evidence_refs_invalid');const s=new Set();return v.map(x=>{const r=boundedId(x,'evidence_ref');if(s.has(r))throw new Error('rsi_integrity_evidence_ref_duplicate');s.add(r);return r}).sort()}
 function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
@@ -119,7 +121,7 @@ export function createRsiEvaluationIntegrityReceipt({
   const core={
     schema:RSI_EVALUATION_INTEGRITY_RECEIPT_SCHEMA,version:1,
     receipt_id:boundedId(receipt_id,'receipt_id'),policy_id:checked.policy_id,policy_digest:checked.policy_digest,
-    candidate_id:boundedId(candidate_id,'candidate_id'),candidate_sha:exactSha(candidate_sha,'candidate'),
+    candidate_id:exactCandidateId(candidate_id,'candidate'),candidate_sha:exactSha(candidate_sha,'candidate'),
     visible_suite_digest:checked.visible_suite_digest,compositional_holdout_digest:checked.compositional_holdout_digest,
     visible_pass_rate:visible,holdout_pass_rate:holdout,visible_holdout_gap:Math.max(0,visible-holdout),
     evaluator_root_digest:checked.evaluator_root_digest,workspace_before_digest:before,
