@@ -143,6 +143,10 @@ test('runtime sidecar coalesces repeated Brain state before fsync while preservi
     assert.equal(runtime.snapshot().ledger.event_count, 3);
     assert.equal(runtime.snapshot().experience_gate.persisted_count, 2);
     assert.equal(runtime.snapshot().experience_gate.authority_effect, false);
+    assert.equal(runtime.snapshot().improvement_frontier.active_count, 1);
+    assert.equal(runtime.snapshot().improvement_frontier.entries[0].signal, 'AMBIGUOUS_COMMAND_OUTCOMES');
+    assert.equal(runtime.snapshot().improvement_frontier.existing_devos_scheduler_required, true);
+    assert.equal(runtime.improvementFrontier({ limit: 1 })[0].plan.command_created, false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
