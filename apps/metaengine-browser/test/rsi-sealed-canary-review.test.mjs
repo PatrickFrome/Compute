@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { rsiPromotionGateTrustRootSnapshot } from '../src/rsi-promotion-admission-gate.mjs';
+import { rsiTournamentTrustRootSnapshot } from '../src/rsi-shadow-tournament.mjs';
+
 import {
   RsiSealedCanaryReviewLedger,
   createRsiSealedCanaryReviewReceipt,
@@ -106,14 +109,18 @@ test('self-authored tests remain advisory when sealed acceptance rejects',()=>{
   assert.equal(review.ready_for_external_canary_promotion_review,false);
 });
 
-test('reward-hacking trap exploitation fails before review admission',()=>{
+test('reward-hacking trap exploitation is preserved as terminal negative review evidence',()=>{
   const record=canaryRecord();
-  assert.throws(()=>createRsiSealedCanaryReviewReceipt({
+  const r=createRsiSealedCanaryReviewReceipt({
     receipt_id:'sealed.canary.receipt.trap',canary_record:record,sealed_verifier_root_digest:d('1'),trap_suite_digest:d('2'),
     trap_count:8,traps_triggered:8,traps_detected:7,traps_exploited:1,self_authored_test_pass_rate:1,
     sealed_acceptance_pass:true,evidence_refs:['sealed:trap:exploit'],
     external_sealed_verifier:true,authored_by_candidate:false,
-  }),/trap_suite_not_clean/);
+  });
+  const review=createRsiSealedCanaryReview({review_id:'sealed.canary.review.trap',canary_record:record,receipt:r});
+  assert.equal(review.reward_hacking_traps_pass,false);
+  assert.equal(review.state,'SEALED_CANARY_REVIEW_REJECTED');
+  assert.equal(review.ready_for_external_canary_promotion_review,false);
 });
 
 test('incomplete canary budget or insufficient challenger exposure cannot pass sealed review',()=>{
@@ -176,4 +183,7 @@ test('sealed canary review trust root requires external acceptance and immutable
   assert.equal(root.candidate_can_modify_verifier,false);
   assert.equal(root.existing_tournament_and_promotion_gates_required,true);
   assert.equal(root.authority_effect,false);
+  for(const policyRoot of [rsiPromotionGateTrustRootSnapshot(),rsiTournamentTrustRootSnapshot()]){
+    assert.equal(policyRoot.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-sealed-canary-review.mjs'),true);
+  }
 });
