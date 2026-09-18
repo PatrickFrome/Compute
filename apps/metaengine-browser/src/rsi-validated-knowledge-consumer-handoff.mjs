@@ -379,10 +379,11 @@ function archiveState(sourceSha,rows){
 }
 
 export class RsiConsumerRevalidationArchive{
-  #path;#sourceSha;#rows=[];#initialized=false;
-  constructor({statePath,source_sha}={}){
+  #path;#sourceSha;#resolver;#rows=[];#initialized=false;
+  constructor({statePath,source_sha,evidenceResolver}={}){
     if(!statePath)throw new Error('rsi_consumer_archive_path_required');
-    this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'archive_source');
+    if(typeof evidenceResolver!=='function')throw new Error('rsi_consumer_archive_evidence_resolver_required');
+    this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'archive_source');this.#resolver=evidenceResolver;
   }
   async init(){
     if(this.#initialized)return this.snapshot();
@@ -400,18 +401,23 @@ export class RsiConsumerRevalidationArchive{
       if(digest(clone)!==exactDigest(p.state_digest,'archive'))throw new Error('rsi_consumer_archive_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_consumer_archive_rows_invalid');
       const identities=new Set();
+      const checkedRows=[];
       for(const row of p.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_consumer_archive_source_mismatch');
-        const hc=structuredClone(row.handoff);delete hc.handoff_digest;
-        const rc=structuredClone(row.receipt);delete rc.receipt_digest;
-        if(digest(hc)!==exactDigest(row.handoff.handoff_digest,'archive_handoff'))throw new Error('rsi_consumer_archive_handoff_digest_mismatch');
-        if(digest(rc)!==exactDigest(row.receipt.receipt_digest,'archive_receipt'))throw new Error('rsi_consumer_archive_receipt_digest_mismatch');
-        if(row.receipt.handoff_digest!==row.handoff.handoff_digest)throw new Error('rsi_consumer_archive_binding_mismatch');
-        const key=`${row.handoff.phase31_admission_digest}|${row.handoff.consumer_model_family}|${row.handoff.consumer_environment_family}|${row.handoff.consumer_context_digest}|${row.handoff.consumer_harness_digest}|${row.handoff.consumer_evaluator_generation_digest}`;
+        const evidence=await this.#resolver({
+          phase31_admission_digest:row.handoff.phase31_admission_digest,
+          handoff_digest:row.handoff.handoff_digest,
+          receipt_digest:row.receipt.receipt_digest,
+        });
+        const handoff=verifyRsiValidatedKnowledgeConsumerHandoff(row.handoff,evidence||{});
+        const receipt=verifyRsiConsumerLocalRevalidationReceipt(row.receipt,{handoff});
+        const key=`${handoff.phase31_admission_digest}|${handoff.consumer_model_family}|${handoff.consumer_environment_family}|${handoff.consumer_context_digest}|${handoff.consumer_harness_digest}|${handoff.consumer_evaluator_generation_digest}`;
         if(identities.has(key))throw new Error('rsi_consumer_archive_identity_duplicate');
         identities.add(key);
+        if(row.consumer_identity!==key)throw new Error('rsi_consumer_archive_consumer_identity_mismatch');
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,consumer_identity:key,handoff,receipt}));
       }
-      this.#rows=p.rows;
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
@@ -420,16 +426,11 @@ export class RsiConsumerRevalidationArchive{
     try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}
     await fs.rename(tmp,this.#path);
   }
-  async add({handoff,receipt}={}){
+  async add({handoff,receipt,proposal,validations,admission,source_rows}={}){
     if(!this.#initialized)throw new Error('rsi_consumer_archive_not_initialized');
-    if(!handoff||handoff.schema!==RSI_VALIDATED_KNOWLEDGE_CONSUMER_HANDOFF_SCHEMA||!receipt||receipt.schema!==RSI_CONSUMER_LOCAL_REVALIDATION_RECEIPT_SCHEMA){
-      throw new Error('rsi_consumer_archive_input_invalid');
-    }
-    assertZero(handoff,'archive_handoff');assertZero(receipt,'archive_receipt');
-    const hc=structuredClone(handoff);delete hc.handoff_digest;
-    const rc=structuredClone(receipt);delete rc.receipt_digest;
-    if(digest(hc)!==exactDigest(handoff.handoff_digest,'archive_handoff'))throw new Error('rsi_consumer_handoff_digest_mismatch');
-    if(digest(rc)!==exactDigest(receipt.receipt_digest,'archive_receipt'))throw new Error('rsi_consumer_receipt_digest_mismatch');
+    const checkedHandoff=verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,validations,admission,source_rows});
+    const checkedReceipt=verifyRsiConsumerLocalRevalidationReceipt(receipt,{handoff:checkedHandoff});
+    handoff=checkedHandoff;receipt=checkedReceipt;
     if(handoff.source_sha!==this.#sourceSha||receipt.source_sha!==this.#sourceSha||receipt.handoff_digest!==handoff.handoff_digest){
       throw new Error('rsi_consumer_archive_binding_mismatch');
     }
