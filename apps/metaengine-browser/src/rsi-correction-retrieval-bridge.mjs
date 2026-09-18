@@ -87,6 +87,7 @@ export function createRsiCorrectionRetrievalBridge({
     selector_id:safeId(selection.selector_id,'selector_id'),
     selection_id:safeId(selection.selection_id,'selection_id'),
     base_context_plan_digest:sha256(plan.context_plan_digest,'base_context_plan'),
+    base_context_plan:plan,
     base_query_digest:sha256(plan.query_digest,'base_query'),
     opportunity_id:safeId(plan.opportunity_id,'opportunity_id'),
     target_context_digest:sha256(plan.target_context_digest,'target_context'),
@@ -134,7 +135,9 @@ export function verifyRsiCorrectionRetrievalBridge(row,baseContextPlan,experienc
     || row.raw_user_input_exposed!==false
     || row.secret_material_exposed!==false
   )throw new Error('rsi_correction_bridge_policy_invalid');
-  const plan=verifyRsiExperienceContextPlan(baseContextPlan);
+  const embeddedPlan=verifyRsiExperienceContextPlan(row.base_context_plan);
+  const plan=baseContextPlan==null?embeddedPlan:verifyRsiExperienceContextPlan(baseContextPlan);
+  if(plan.context_plan_digest!==embeddedPlan.context_plan_digest)throw new Error('rsi_correction_bridge_embedded_plan_mismatch');
   const graph=verifyRsiExperienceGraphSnapshot(experienceGraphSnapshot);
   if(
     row.source_sha!==plan.source_sha
