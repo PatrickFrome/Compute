@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -17,6 +18,43 @@ const COORDINATION_WORKSPACE_ID = '22222222-2222-4222-8222-222222222222';
 const TASK_ID = '33333333-3333-4333-8333-333333333333';
 const AGENT_ID = 'agent_00000000-0000-4000-8000-000000000001';
 const TAB_ID = 'tab_00000000-0000-4000-8000-000000000001';
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+}
+function dg(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)), 'utf8').digest('hex')}`;
+}
+function labelDigest(label) { return dg({ label }); }
+function revisionProvenanceContract(label='revision') {
+  return {
+    builder_identity_digest: labelDigest(`builder-${label}`),
+    toolchain_image_digest: labelDigest(`toolchain-${label}`),
+    dependency_material_manifest_digest: labelDigest(`materials-${label}`),
+    harness_manifest_digest: labelDigest(`harness-${label}`),
+    capability_manifest_digest: labelDigest(`capabilities-${label}`),
+    build_provenance_policy_digest: labelDigest(`provenance-policy-${label}`),
+    artifact_signature_policy_digest: labelDigest(`signature-policy-${label}`),
+    immutable_materials_required: true,
+    network_deny_required: true,
+    private_writable_layer_required: true,
+    materials_complete_required: true,
+    artifact_reconstruction_required: true,
+    protected_root_diff_audit_required: true,
+    preserved_behavior_review_required: true,
+    external_build_attestation_required: true,
+    artifact_signature_required: true,
+    transparency_log_inclusion_required: true,
+    candidate_can_choose_builder: false,
+    candidate_can_choose_toolchain: false,
+    candidate_can_choose_dependencies: false,
+    candidate_can_choose_harness: false,
+    candidate_can_choose_capabilities: false,
+    candidate_can_sign_artifact: false,
+    provenance_is_activation_authority: false,
+  };
+}
 const SOURCE_SNAPSHOT = Object.freeze({
   schema: 'metaengine.devos.packaged-source-snapshot.v1',
   repository: 'PatrickFrome/Compute',
@@ -79,6 +117,43 @@ function goodBuildPlan(extra = {}) {
     sequence: 1,
     requested_backend: 'VERCEL_SANDBOX',
     ...extra,
+  });
+}
+
+function revisionExperimentPlan(label='revision') {
+  const base=experimentPlan();
+  const provenance=revisionProvenanceContract(label);
+  base.task_spec=structuredClone(base.task_spec);
+  base.task_spec.rsi={
+    ...base.task_spec.rsi,
+    revision_limits:{
+      envelope_digest:labelDigest(`envelope-${label}`),
+      proposal_digest:labelDigest(`proposal-${label}`),
+      approved_mutation_manifest_digest:labelDigest(`manifest-${label}`),
+      implementation_reviewer_root_digest:labelDigest(`reviewer-${label}`),
+      max_mutated_files:2,
+      max_edit_operations:5,
+      max_changed_bytes:8192,
+      protected_policy_roots_digest:labelDigest(`protected-${label}`),
+      editable_scope_digest:labelDigest(`scope-${label}`),
+      preserved_behavior_digest:labelDigest(`preserved-${label}`),
+      negative_evidence_root_digest:labelDigest(`negative-${label}`),
+      regression_budget_digest:labelDigest(`regression-${label}`),
+      validation_plan_digest:labelDigest(`validation-${label}`),
+      implementation_provenance_contract_digest:dg(provenance),
+    },
+    implementation_provenance_contract:provenance,
+  };
+  return base;
+}
+
+function goodRevisionBuildPlan(label='revision') {
+  return prepareRsiIsolatedCandidateBuild({
+    experiment_plan:revisionExperimentPlan(label),
+    source_snapshot:SOURCE_SNAPSHOT,
+    mutations:[{path:'apps/metaengine-browser/src/browser-brain-routing-v2.mjs',change:'MODIFY'}],
+    sequence:1,
+    requested_backend:'FIRECRACKER',
   });
 }
 
@@ -164,6 +239,36 @@ function goodMaterialization(plan, extra = {}) {
   };
 }
 
+function goodRevisionMaterialization(plan,label='revision',extra={}) {
+  const provenance=revisionProvenanceContract(label);
+  return goodMaterialization(plan,{
+    materialized_edit_operations:3,
+    implementation_provenance:{
+      builder_identity_digest:provenance.builder_identity_digest,
+      toolchain_image_digest:provenance.toolchain_image_digest,
+      dependency_material_manifest_digest:provenance.dependency_material_manifest_digest,
+      harness_manifest_digest:provenance.harness_manifest_digest,
+      capability_manifest_digest:provenance.capability_manifest_digest,
+      build_provenance_digest:labelDigest(`build-provenance-${label}`),
+      artifact_signature_digest:labelDigest(`artifact-signature-${label}`),
+      transparency_log_inclusion_digest:labelDigest(`transparency-${label}`),
+      artifact_reconstruction_digest:labelDigest(`reconstruction-${label}`),
+      protected_root_diff_audit_digest:labelDigest(`protected-audit-${label}`),
+      preserved_behavior_review_digest:labelDigest(`preserved-review-${label}`),
+      materials_complete:true,
+      network_isolation_pass:true,
+      private_writable_layer_pass:true,
+      artifact_reconstruction_pass:true,
+      protected_root_diff_audit_pass:true,
+      preserved_behavior_review_pass:true,
+      external_build_attestation_verified:true,
+      artifact_signature_verified:true,
+      transparency_log_inclusion_verified:true,
+    },
+    ...extra,
+  });
+}
+
 test('prepare phase is deterministic, exact-source, pre-lease and zero-authority', () => {
   const first = goodBuildPlan();
   const second = goodBuildPlan();
@@ -212,6 +317,46 @@ test('tampering with a prepared plan invalidates its digest', () => {
   const tampered = structuredClone(plan);
   tampered.workspace_contract.host_repository_mount_allowed = true;
   assert.throws(() => verifyRsiIsolatedCandidateBuildPlan(tampered), /digest_mismatch/);
+});
+
+
+test('Phase28 provenance-bound materialization yields only an evaluation handoff with signed build evidence', () => {
+  const plan=goodRevisionBuildPlan('provenance-pass');
+  assert.equal(plan.materialization_contract.max_mutated_files,2);
+  assert.equal(plan.materialization_contract.max_edit_operations,5);
+  assert.equal(plan.materialization_contract.implementation_provenance_contract.candidate_can_sign_artifact,false);
+  const handoff=finalizeRsiIsolatedCandidateBuild({
+    build_plan:plan,
+    materialization_receipt:goodRevisionMaterialization(plan,'provenance-pass'),
+  });
+  assert.equal(handoff.eligible_for_evaluation,true);
+  assert.equal(handoff.eligible_for_promotion,false);
+  const names=new Set(handoff.candidate_capsule.evidence.map(row=>row.name));
+  assert.equal(names.has('BUILD_PROVENANCE'),true);
+  assert.equal(names.has('ARTIFACT_SIGNATURE'),true);
+  assert.equal(names.has('TRANSPARENCY_LOG_INCLUSION'),true);
+  assert.equal(names.has('CAPABILITY_MANIFEST'),true);
+  assert.equal(handoff.execution_authority,false);
+  assert.equal(handoff.self_update_authority,false);
+});
+
+test('Phase28 materialization fails closed on missing, mismatched or unverified provenance', () => {
+  const plan=goodRevisionBuildPlan('provenance-fail');
+
+  const missing=goodMaterialization(plan,{materialized_edit_operations:3});
+  assert.throws(()=>finalizeRsiIsolatedCandidateBuild({build_plan:plan,materialization_receipt:missing}),/materialization_provenance_required/);
+
+  const mismatch=goodRevisionMaterialization(plan,'provenance-fail');
+  mismatch.implementation_provenance.toolchain_image_digest=labelDigest('wrong-toolchain');
+  assert.throws(()=>finalizeRsiIsolatedCandidateBuild({build_plan:plan,materialization_receipt:mismatch}),/provenance_identity_mismatch/);
+
+  const unsigned=goodRevisionMaterialization(plan,'provenance-fail');
+  unsigned.implementation_provenance.artifact_signature_verified=false;
+  assert.throws(()=>finalizeRsiIsolatedCandidateBuild({build_plan:plan,materialization_receipt:unsigned}),/provenance_evidence_invalid/);
+
+  const noTransparency=goodRevisionMaterialization(plan,'provenance-fail');
+  noTransparency.implementation_provenance.transparency_log_inclusion_verified=false;
+  assert.throws(()=>finalizeRsiIsolatedCandidateBuild({build_plan:plan,materialization_receipt:noTransparency}),/provenance_evidence_invalid/);
 });
 
 test('finalize binds exact workspace base readback, Candidate Capsule and PREPARE_ONLY sandbox', () => {
