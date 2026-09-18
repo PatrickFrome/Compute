@@ -186,6 +186,12 @@ export class RsiSkillRevisionIntegrityLedger{
     this.#admissions.push(structuredClone(admission));await this.#persist();
     return zero({state:admission.state,admission_digest:admission.admission_digest});
   }
+  admissionByRequest(request_id){
+    this.#assertInit();
+    const id=boundedId(request_id,'request_id');
+    const row=this.#admissions.find(x=>x.request_id===id);
+    return row ? Object.freeze(structuredClone(row)) : null;
+  }
   admitted({parent_skill_digest=null}={}){
     this.#assertInit();
     const parent=parent_skill_digest==null?null:exactDigest(parent_skill_digest,'parent_skill');

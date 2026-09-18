@@ -49,6 +49,7 @@ import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRoute
 import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
 import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
 import { RsiSkillRevisionIntegrityLedger, createRsiSkillRevisionIntegrityAdmission, rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot } from './rsi-skill-revision-integrity-admission.mjs';
+import { createRsiIntegrityBoundSkillReliability, rsiIntegrityBoundSkillReliabilityTrustRootSnapshot } from './rsi-integrity-bound-skill-reliability.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -121,6 +122,7 @@ function trustRoots() {
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
     skill_revision_integrity: rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot(),
+    integrity_bound_skill_reliability: rsiIntegrityBoundSkillReliabilityTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -156,6 +158,9 @@ export class RsiRuntimeService {
   #browserOutcomeLearningEligibleCount = 0;
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
+  #skillReliabilityEvaluationCount = 0;
+  #skillReliabilityPassCount = 0;
+  #lastSkillReliabilityBindingDigest = null;
 
   constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -806,6 +811,76 @@ export class RsiRuntimeService {
     return this.#skillRevisionIntegrity.admitted({ parent_skill_digest });
   }
 
+  async recordSkillRevisionReliability({
+    request_id,
+    binding_id,
+    baseline_dataset,
+    baseline_trajectory_receipts,
+    successor_skill_evidence,
+    successor_dataset,
+    successor_trajectory_receipts,
+    contrast_codes,
+    contrast_evidence_digest,
+    revision_evidence_refs,
+    reliability_evidence_refs,
+    hard_invariants_pass,
+    max_potential_regression = 0,
+    external_curator = false,
+    external_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const admission = this.#skillRevisionIntegrity.admissionByRequest(request_id);
+    if (!admission || admission.state !== 'INTEGRITY_ADMITTED') {
+      throw new Error('rsi_runtime_skill_revision_integrity_admission_required');
+    }
+    const record = this.#skillCuration.record(request_id);
+    if (!record?.request || !record?.evaluation) throw new Error('rsi_runtime_skill_curation_evaluation_unavailable');
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    if (!library) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const parentEntry = library.entries.find((entry) => entry.skill_digest === record.request.parent_skill_digest);
+    if (!parentEntry) throw new Error('rsi_runtime_parent_skill_not_in_verified_library');
+    const successorSkill = record.evaluation.successor_skill;
+    const binding = createRsiIntegrityBoundSkillReliability({
+      source_sha: this.#sourceSha,
+      binding_id,
+      integrity_admission: admission,
+      parent_skill: parentEntry.capsule,
+      parent_skill_evidence: parentEntry.evidence,
+      baseline_dataset,
+      baseline_trajectory_receipts,
+      successor_skill: successorSkill,
+      successor_skill_evidence,
+      successor_dataset,
+      successor_trajectory_receipts,
+      contrast_codes,
+      contrast_evidence_digest,
+      revision_evidence_refs,
+      reliability_evidence_refs,
+      hard_invariants_pass,
+      max_potential_regression,
+      external_curator,
+      external_evaluator,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_REVISION_RELIABILITY_EVALUATED', {
+      request_id,
+      binding_id: binding.binding_id,
+      binding_digest: binding.binding_digest,
+      integrity_admission_digest: binding.integrity_admission_digest,
+      successor_skill_digest: binding.successor_skill_digest,
+      reliability_result_digest: binding.reliability_result.result_digest,
+      state: binding.state,
+      eligible_for_existing_scope_preservation_gate: binding.eligible_for_existing_scope_preservation_gate,
+      direct_library_replacement_allowed: false,
+      authority_effect: false,
+    });
+    this.#skillReliabilityEvaluationCount += 1;
+    if (binding.eligible_for_existing_scope_preservation_gate) this.#skillReliabilityPassCount += 1;
+    this.#lastSkillReliabilityBindingDigest = binding.binding_digest;
+    return binding;
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -864,6 +939,16 @@ export class RsiRuntimeService {
       skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
       skill_revision_integrity: this.#skillRevisionIntegrity.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
+      skill_revision_reliability: Object.freeze({
+        evaluation_count: this.#skillReliabilityEvaluationCount,
+        pass_count: this.#skillReliabilityPassCount,
+        last_binding_digest: this.#lastSkillReliabilityBindingDigest,
+        prior_integrity_admission_required: true,
+        existing_contrastive_reliability_gate_reused: true,
+        existing_scope_preservation_gate_required: true,
+        direct_library_replacement_allowed: false,
+        authority_effect: false,
+      }),
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
         outcome_count: this.#browserOutcomeCount,
