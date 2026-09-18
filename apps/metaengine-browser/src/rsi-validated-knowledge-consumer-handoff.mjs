@@ -34,6 +34,7 @@ function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.t
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_consumer_${l}_digest_invalid`);return x;}
 function id(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_consumer_${l}_invalid`);return x;}
 function token(v,l){const x=String(v||'').trim().toUpperCase();if(!SAFE_TOKEN_RE.test(x))throw new Error(`rsi_consumer_${l}_invalid`);return x;}
+function positiveInt(v,l){if(!Number.isInteger(v)||v<1)throw new Error(`rsi_consumer_${l}_invalid`);return v;}
 function assertZero(v,l){
   for(const f of ['execution_authority','browser_authority','task_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect']){
     if(v?.[f]!==false)throw new Error(`rsi_consumer_${l}_${f}_invalid`);
@@ -74,6 +75,10 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
   consumer_harness_digest,
   consumer_evaluator_root_digest,
   consumer_evaluator_generation_digest,
+  consumer_evaluator_generation_seq,
+  consumer_evaluator_generation_history_anchor_digest,
+  consumer_evaluation_epoch_seq,
+  consumer_evaluation_epoch_digest,
   consumer_holdout_digest,
   matched_reference_plan_digest,
   local_revalidation_protocol_digest,
@@ -84,6 +89,12 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
   const phase31=verifyPhase31({proposal,validations,admission,source_rows});
   const route=ROUTE_BY_CLASS[phase31.proposal.knowledge_class];
   if(!route)throw new Error('rsi_consumer_knowledge_class_unsupported');
+  const modelFamily=token(consumer_model_family,'model_family');
+  const environmentFamily=token(consumer_environment_family,'environment_family');
+  const generationSeq=positiveInt(consumer_evaluator_generation_seq,'evaluator_generation_seq');
+  const generationAnchor=exactDigest(consumer_evaluator_generation_history_anchor_digest,'evaluator_generation_history_anchor');
+  const epochSeq=positiveInt(consumer_evaluation_epoch_seq,'evaluation_epoch_seq');
+  const epochDigest=exactDigest(consumer_evaluation_epoch_digest,'evaluation_epoch');
   const roots=[
     exactDigest(consumer_context_digest,'context'),
     exactDigest(consumer_harness_digest,'harness'),
@@ -96,7 +107,53 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     phase31.proposal.proposal_digest,
   ];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_consumer_independent_roots_required');
-  const crossGeneration=roots[3]!==phase31.proposal.evaluator_generation_digest;
+
+  // Consumer-local validation must use evidence assets that are fresh relative
+  // to the Phase31 transfer quorum. Replaying a source context, harness,
+  // evaluator, holdout or transfer plan can create self-confirming evidence and
+  // hide negative transfer.
+  const sourceContexts=new Set(phase31.validations.map(v=>v.heldout_context_digest));
+  const sourceTaskSets=new Set(phase31.validations.map(v=>v.heldout_task_set_digest));
+  const sourceHarnesses=new Set(phase31.validations.map(v=>v.transfer_harness_digest));
+  const sourceHoldouts=new Set(phase31.validations.map(v=>v.hidden_holdout_root_digest));
+  const sourceEvaluators=new Set(phase31.validations.map(v=>v.external_evaluator_root_digest));
+  if(sourceContexts.has(roots[0]))throw new Error('rsi_consumer_source_context_reuse_forbidden');
+  if(sourceHarnesses.has(roots[1]))throw new Error('rsi_consumer_source_harness_reuse_forbidden');
+  if(sourceEvaluators.has(roots[2]))throw new Error('rsi_consumer_source_evaluator_reuse_forbidden');
+  if(sourceTaskSets.has(roots[4])||sourceHoldouts.has(roots[4]))throw new Error('rsi_consumer_source_holdout_reuse_forbidden');
+  if(roots[5]===phase31.proposal.transfer_validation_plan_digest)throw new Error('rsi_consumer_source_reference_plan_reuse_forbidden');
+  if(roots[6]===phase31.proposal.transfer_validation_plan_digest)throw new Error('rsi_consumer_source_revalidation_protocol_reuse_forbidden');
+
+  const sameGenerationDigest=roots[3]===phase31.proposal.evaluator_generation_digest;
+  if(sameGenerationDigest&&(generationSeq!==phase31.proposal.evaluator_generation_seq
+    ||generationAnchor!==phase31.proposal.evaluator_generation_history_anchor_digest)){
+    throw new Error('rsi_consumer_evaluator_generation_identity_drift');
+  }
+  const sameEpochDigest=epochDigest===phase31.proposal.evaluation_epoch_digest;
+  if(sameEpochDigest&&epochSeq!==phase31.proposal.evaluation_epoch_seq){
+    throw new Error('rsi_consumer_evaluation_epoch_identity_drift');
+  }
+  const crossGeneration=!sameGenerationDigest
+    ||generationSeq!==phase31.proposal.evaluator_generation_seq
+    ||generationAnchor!==phase31.proposal.evaluator_generation_history_anchor_digest;
+  const consumerEvaluationContractDigest=digest({
+    schema:'metaengine.rsi.consumer-evaluation-contract.v1',
+    source_sha:phase31.proposal.source_sha,
+    phase31_admission_digest:phase31.admission.admission_digest,
+    consumer_model_family:modelFamily,
+    consumer_environment_family:environmentFamily,
+    consumer_context_digest:roots[0],
+    consumer_harness_digest:roots[1],
+    consumer_evaluator_root_digest:roots[2],
+    consumer_evaluator_generation_digest:roots[3],
+    consumer_evaluator_generation_seq:generationSeq,
+    consumer_evaluator_generation_history_anchor_digest:generationAnchor,
+    consumer_evaluation_epoch_seq:epochSeq,
+    consumer_evaluation_epoch_digest:epochDigest,
+    consumer_holdout_digest:roots[4],
+    matched_reference_plan_digest:roots[5],
+    local_revalidation_protocol_digest:roots[6],
+  });
   const core=zero({
     schema:RSI_VALIDATED_KNOWLEDGE_CONSUMER_HANDOFF_SCHEMA,
     version:1,
@@ -106,15 +163,25 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     phase31_admission_digest:phase31.admission.admission_digest,
     phase31_validation_digests:Object.freeze(phase31.admission.validation_digests.slice()),
     source_evaluator_generation_digest:phase31.proposal.evaluator_generation_digest,
+    source_evaluator_generation_seq:phase31.proposal.evaluator_generation_seq,
+    source_evaluator_generation_history_anchor_digest:phase31.proposal.evaluator_generation_history_anchor_digest,
     source_evaluation_epoch_digest:phase31.proposal.evaluation_epoch_digest,
+    source_evaluation_epoch_seq:phase31.proposal.evaluation_epoch_seq,
+    source_evaluation_contract_digest:phase31.proposal.evaluation_contract_digest,
+    phase31_transfer_evaluation_contract_digests:Object.freeze(phase31.admission.transfer_evaluation_contract_digests.slice()),
     knowledge_class:phase31.proposal.knowledge_class,
     consumer_route:route,
-    consumer_model_family:token(consumer_model_family,'model_family'),
-    consumer_environment_family:token(consumer_environment_family,'environment_family'),
+    consumer_model_family:modelFamily,
+    consumer_environment_family:environmentFamily,
     consumer_context_digest:roots[0],
     consumer_harness_digest:roots[1],
     consumer_evaluator_root_digest:roots[2],
     consumer_evaluator_generation_digest:roots[3],
+    consumer_evaluator_generation_seq:generationSeq,
+    consumer_evaluator_generation_history_anchor_digest:generationAnchor,
+    consumer_evaluation_epoch_seq:epochSeq,
+    consumer_evaluation_epoch_digest:epochDigest,
+    consumer_evaluation_contract_digest:consumerEvaluationContractDigest,
     consumer_holdout_digest:roots[4],
     matched_reference_plan_digest:roots[5],
     local_revalidation_protocol_digest:roots[6],
@@ -166,6 +233,10 @@ export function verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,val
     consumer_harness_digest:handoff.consumer_harness_digest,
     consumer_evaluator_root_digest:handoff.consumer_evaluator_root_digest,
     consumer_evaluator_generation_digest:handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:handoff.consumer_evaluation_epoch_digest,
     consumer_holdout_digest:handoff.consumer_holdout_digest,
     matched_reference_plan_digest:handoff.matched_reference_plan_digest,
     local_revalidation_protocol_digest:handoff.local_revalidation_protocol_digest,
@@ -276,6 +347,12 @@ export function createRsiConsumerLocalRevalidationReceipt({
     consumer_harness_digest:handoff.consumer_harness_digest,
     consumer_evaluator_root_digest:handoff.consumer_evaluator_root_digest,
     consumer_evaluator_generation_digest:handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:handoff.consumer_evaluation_epoch_digest,
+    consumer_evaluation_contract_digest:handoff.consumer_evaluation_contract_digest,
+    source_evaluation_contract_digest:handoff.source_evaluation_contract_digest,
     consumer_holdout_digest:handoff.consumer_holdout_digest,
     matched_reference_plan_digest:handoff.matched_reference_plan_digest,
     matched_control_receipt_digest:roots[0],
@@ -353,6 +430,22 @@ export function verifyRsiConsumerLocalRevalidationReceipt(receipt,{handoff}={}){
   return canonical;
 }
 
+function consumerIdentity(handoff){
+  return digest({
+    phase31_admission_digest:handoff.phase31_admission_digest,
+    consumer_model_family:handoff.consumer_model_family,
+    consumer_environment_family:handoff.consumer_environment_family,
+    consumer_context_digest:handoff.consumer_context_digest,
+    consumer_harness_digest:handoff.consumer_harness_digest,
+    consumer_evaluator_root_digest:handoff.consumer_evaluator_root_digest,
+    consumer_evaluator_generation_digest:handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:handoff.consumer_evaluation_epoch_digest,
+  });
+}
+
 function archiveState(sourceSha,rows){
   const states={};
   for(const row of rows)states[row.receipt.state]=(states[row.receipt.state]||0)+1;
@@ -411,7 +504,7 @@ export class RsiConsumerRevalidationArchive{
         });
         const handoff=verifyRsiValidatedKnowledgeConsumerHandoff(row.handoff,evidence||{});
         const receipt=verifyRsiConsumerLocalRevalidationReceipt(row.receipt,{handoff});
-        const key=`${handoff.phase31_admission_digest}|${handoff.consumer_model_family}|${handoff.consumer_environment_family}|${handoff.consumer_context_digest}|${handoff.consumer_harness_digest}|${handoff.consumer_evaluator_generation_digest}`;
+        const key=consumerIdentity(handoff);
         if(identities.has(key))throw new Error('rsi_consumer_archive_identity_duplicate');
         identities.add(key);
         if(row.consumer_identity!==key)throw new Error('rsi_consumer_archive_consumer_identity_mismatch');
@@ -434,7 +527,7 @@ export class RsiConsumerRevalidationArchive{
     if(handoff.source_sha!==this.#sourceSha||receipt.source_sha!==this.#sourceSha||receipt.handoff_digest!==handoff.handoff_digest){
       throw new Error('rsi_consumer_archive_binding_mismatch');
     }
-    const key=`${handoff.phase31_admission_digest}|${handoff.consumer_model_family}|${handoff.consumer_environment_family}|${handoff.consumer_context_digest}|${handoff.consumer_harness_digest}|${handoff.consumer_evaluator_generation_digest}`;
+    const key=consumerIdentity(handoff);
     const existing=this.#rows.find(r=>r.consumer_identity===key);
     if(existing){
       if(existing.handoff.handoff_digest!==handoff.handoff_digest||existing.receipt.receipt_digest!==receipt.receipt_digest)throw new Error('rsi_consumer_archive_identity_conflict');
@@ -472,6 +565,17 @@ export function rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot(){
     matched_no_skill_or_reference_required_for_recipes:true,
     consumer_specific_model_harness_context_binding_required:true,
     consumer_evaluator_generation_binding_required:true,
+    consumer_evaluator_generation_sequence_binding_required:true,
+    consumer_evaluator_history_anchor_binding_required:true,
+    consumer_evaluation_epoch_binding_required:true,
+    consumer_evaluation_contract_binding_required:true,
+    source_evaluation_contract_preserved:true,
+    archive_consumer_identity_exact_lineage_bound:true,
+    phase31_context_reuse_forbidden:true,
+    phase31_harness_reuse_forbidden:true,
+    phase31_holdout_reuse_forbidden:true,
+    phase31_evaluator_root_reuse_forbidden:true,
+    phase31_transfer_plan_reuse_forbidden:true,
     cross_generation_revalidation_required:true,
     source_generation_verdict_inherited:false,
     negative_transfer_retained:true,
