@@ -377,7 +377,7 @@ export class NativeSupervisorClient {
       : [1000, 3000];
     this.#resultDeliveryAdapter = rsiResultReceiptReconciliation === true
       ? createSupervisorRsiResultDeliveryAdapter({
-          signedRequest: (requestPath, options = {}) => this.#signedRequest(requestPath, options),
+          signedRequest: (path, options = {}) => this.#signedRequest(path, options),
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           attempts: this.#resultDeliveryAttempts,
           backoffMs: this.#resultDeliveryBackoffMs,
