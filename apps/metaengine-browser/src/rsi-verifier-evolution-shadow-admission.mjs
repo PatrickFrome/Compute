@@ -265,15 +265,15 @@ export class RsiVerifierEvolutionShadowLedger{
       this.#rows=p.rows.map(row=>{
         if(!row||typeof row!=='object'||!row.candidate||!row.predecessor_receipt||!row.secondary_receipt||!row.admission)throw new Error('rsi_verifier_evolution_ledger_row_invalid');
         const candidate=verifyStoredCandidate(row.candidate);
-        const predecessor=verifyStoredReceipt(row.predecessor_receipt);
-        const secondary=verifyStoredReceipt(row.secondary_receipt);
-        const admission=verifyStoredAdmission(row.admission);
+        const predecessor=verifyRsiVerifierEvolutionExternalReceipt(row.predecessor_receipt,{candidate});
+        const secondary=verifyRsiVerifierEvolutionExternalReceipt(row.secondary_receipt,{candidate});
+        const admission=verifyRsiVerifierEvolutionShadowAdmission(row.admission,{
+          candidate,
+          predecessor_receipt:predecessor,
+          secondary_receipt:secondary,
+        });
         if(candidate.source_sha!==this.#sourceSha||admission.source_sha!==this.#sourceSha
           ||predecessor.source_sha!==this.#sourceSha||secondary.source_sha!==this.#sourceSha)throw new Error('rsi_verifier_evolution_ledger_source_mismatch');
-        if(predecessor.candidate_digest!==candidate.candidate_digest||secondary.candidate_digest!==candidate.candidate_digest
-          ||admission.candidate_digest!==candidate.candidate_digest
-          ||admission.predecessor_receipt_digest!==predecessor.receipt_digest
-          ||admission.secondary_receipt_digest!==secondary.receipt_digest)throw new Error('rsi_verifier_evolution_ledger_binding_mismatch');
         return Object.freeze({candidate,predecessor_receipt:predecessor,secondary_receipt:secondary,admission});
       });
     }catch(e){if(e?.code!=='ENOENT')throw e}
