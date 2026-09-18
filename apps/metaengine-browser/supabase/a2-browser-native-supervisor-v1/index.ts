@@ -12,8 +12,9 @@ const SERVICE_ROLE=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'';
 const REALTIME_API_KEY=Deno.env.get('SUPABASE_PUBLISHABLE_KEY')||Deno.env.get('SUPABASE_ANON_KEY')||'';
 // Modern Supabase sb_secret_* values are API keys, not JWT access tokens. Realtime
 // private-channel auth therefore stays disabled unless a legacy JWT-shaped token is
-// explicitly present. Durable DB leasing remains the authority and bounded DB polling
-// is the compatibility wake path.
+// explicitly present. Durable DB leasing remains the authority; when private Realtime
+// auth is unavailable the existing Postgres NOTIFY pulse becomes a wake-only hint,
+// followed by the same authoritative lease recheck.
 const REALTIME_ACCESS_TOKEN=SERVICE_ROLE.split('.').length===3?SERVICE_ROLE:'';
 const WORKSPACE_ID='2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 const PROFILE='A2_DEVICE_HTTP_SIGNATURE_V1';
