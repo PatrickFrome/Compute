@@ -109,6 +109,35 @@ test('typed admission envelopes bind exact prepared requests without granting sc
   }
 });
 
+test('runtime preparation exposes admission envelopes but never invokes the service-role RPC', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-admission-'));
+  try {
+    const runtime = new RsiRuntimeService({ source_sha: SOURCE_SHA, ledgerPath: path.join(root, 'rsi.jsonl') });
+    await runtime.start();
+    const obs = observation();
+    const opportunity = obs.opportunities.find((row) => row.signal === 'AMBIGUOUS_COMMAND_OUTCOMES');
+    const prepared = await runtime.prepareAutonomousDevosAdmissions({
+      workspace_id: WORKSPACE_ID,
+      observation: obs,
+      opportunity_id: opportunity.opportunity_id,
+      search_context: searchContext(),
+      cycle_generation: 1,
+      max_candidates: 4,
+      proposal_budget_units: 100,
+      exploration_fraction: 0.2,
+    });
+    assert.equal(prepared.envelope_count, 2);
+    assert.equal(prepared.rpc_name, 'rsi_devos_admit_prepared_request_v1');
+    assert.equal(prepared.rpc_invoked, false);
+    assert.equal(prepared.scheduler_action_authorized, false);
+    assert.equal(prepared.task_created, false);
+    assert.equal(prepared.lease_created, false);
+    assert.equal(prepared.execution_authority, false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('admission envelope rejects workspace, request material and task-spec tampering', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-admission-tamper-'));
   try {
