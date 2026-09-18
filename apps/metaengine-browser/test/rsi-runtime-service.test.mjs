@@ -212,3 +212,82 @@ test('runtime ingests only terminal verified Browser receipts into the durable z
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('trusted command attribution converts an evaluated runtime candidate into receipt-bound learning credit', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-attribution-'));
+  try {
+    const source = 'a'.repeat(40);
+    const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
+    await runtime.start();
+    const candidate = await runtime.proposeCandidate({
+      candidate_id: 'candidate.runtime.credit.1',
+      parent_sha: source,
+      candidate_sha: 'b'.repeat(40),
+      mutation_surface: 'BROWSER_RUNTIME',
+      hypothesis: 'candidate behavior is credited only after exact stored receipt',
+    });
+    await runtime.beginEvaluation(candidate.candidate_id);
+
+    const commandId = '22222222-2222-4222-8222-222222222222';
+    const d = (char) => `sha256:${char.repeat(64)}`;
+    const binding = await runtime.bindBrowserCommandAttribution({
+      command_id: commandId,
+      action: 'SCROLL',
+      platform: 'CHATGPT',
+      effect_key: 'effect-credit-1',
+      task_id: 'task.runtime.credit.1',
+      task_signature_digest: d('1'),
+      environment_fingerprint: 'env.browser.chatgpt.v1',
+      model_family: 'GPT_5_6_SOL',
+      candidate_id: candidate.candidate_id,
+      proposal_digest: d('2'),
+      skill_digests: [d('3')],
+      external_planner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(binding.runtime_candidate_id, candidate.candidate_id);
+    assert.equal(binding.candidate_id, `candidate_sha256_${candidate.candidate_digest}`);
+    assert.equal(runtime.snapshot().command_attribution.pending_count, 1);
+
+    const episode = await runtime.ingestBrowserOutcome({
+      readback: {
+        schema: 'metaengine.rsi.result-receipt-readback.v1',
+        command_id: commandId,
+        found: true,
+        terminal: true,
+        status: 'COMPLETED',
+        receipt: {
+          schema: 'metaengine.native-supervisor.command-receipt.v2',
+          command_id: commandId,
+          action: 'SCROLL',
+          platform: 'CHATGPT',
+          result: { moved: true },
+          effect_outcome: 'CONFIRMED',
+          lane: 'MUTATION',
+          effect_key: 'effect-credit-1',
+          execution_ms: 9.5,
+          recorded_at: '2026-09-18T17:10:00.000Z',
+          authority_effect: false,
+        },
+        error: null,
+        execution_authority: false,
+        production_mutation_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    });
+    assert.equal(episode.candidate_id, binding.candidate_id);
+    assert.equal(episode.proposal_digest, d('2'));
+    assert.deepEqual(episode.skill_digests, [d('3')]);
+    assert.equal(episode.eligible_for_experience_graph, true);
+    assert.equal(episode.eligible_for_skill_evidence, true);
+    assert.equal(runtime.snapshot().command_attribution.pending_count, 0);
+    assert.equal(runtime.snapshot().command_attribution.consumed_count, 1);
+    assert.equal(runtime.snapshot().ledger.last_event_type, 'COMMAND_ATTRIBUTION_CONSUMED');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

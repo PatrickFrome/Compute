@@ -1059,7 +1059,8 @@ export class NativeSupervisorClient {
   }
 
   async #postResult(command, ok, result, error = null, effectOutcome = null) {
-    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, recorded_at: new Date().toISOString(), authority_effect: false }, error };
+    const receiptDescriptor = classifyNativeSupervisorCommand(command);
+    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, lane: receiptDescriptor.lane, effect_key: receiptDescriptor.effect_key, recorded_at: new Date().toISOString(), authority_effect: false }, error };
     if (this.#resultDeliveryAdapter) {
       const outcome = await this.#resultDeliveryAdapter.deliver({
         commandId: command.command_id,

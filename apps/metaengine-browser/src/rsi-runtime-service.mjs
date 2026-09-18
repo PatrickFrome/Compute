@@ -41,6 +41,7 @@ import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integr
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
+import { RsiCommandAttributionRegistry, RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA, rsiCommandAttributionTrustRootSnapshot } from './rsi-command-attribution-registry.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -105,6 +106,7 @@ function trustRoots() {
     search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
     browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
+    command_attribution: rsiCommandAttributionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -120,6 +122,7 @@ export class RsiRuntimeService {
   #clock;
   #ledger;
   #experienceGate;
+  #commandAttribution;
   #archive;
   #observer;
   #verifiedArchive;
@@ -134,11 +137,17 @@ export class RsiRuntimeService {
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
 
-  constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
     this.#ledger = new RsiRuntimeLedger({ ledgerPath, source_sha: this.#sourceSha, clock });
+    const commandAttributionPath = attributionPath || (ledgerPath ? `${ledgerPath}.command-attribution.json` : null);
+    this.#commandAttribution = new RsiCommandAttributionRegistry({
+      statePath: commandAttributionPath,
+      source_sha: this.#sourceSha,
+      clock,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -148,6 +157,7 @@ export class RsiRuntimeService {
 
   async start() {
     if (this.#running) return this.snapshot();
+    await this.#commandAttribution.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -156,6 +166,7 @@ export class RsiRuntimeService {
       source_sha: this.#sourceSha,
       trust_root_set_digest: digest(this.#roots),
       experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
+      command_attribution_registry: RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -273,12 +284,74 @@ export class RsiRuntimeService {
     return candidate;
   }
 
-  async ingestBrowserOutcome({ readback, attribution } = {}) {
+  async bindBrowserCommandAttribution({
+    command_id, action, platform = null, effect_key = null,
+    task_id, task_signature_digest, environment_fingerprint, model_family,
+    candidate_id, proposal_digest, skill_digests = [],
+    external_planner = false, authored_by_candidate = true,
+  } = {}) {
     this.#assertRunning();
+    const candidate = this.#archive.get(candidate_id);
+    if (['REJECTED', 'BLOCKED'].includes(String(candidate.state || '').toUpperCase())) {
+      throw new Error('rsi_runtime_candidate_not_attribution_eligible');
+    }
+    const binding = await this.#commandAttribution.bind({
+      command_id, action, platform, effect_key,
+      task_id, task_signature_digest, environment_fingerprint, model_family,
+      runtime_candidate_id: candidate.candidate_id,
+      candidate_digest: candidate.candidate_digest,
+      candidate_sha: candidate.candidate_sha,
+      proposal_digest,
+      skill_digests,
+      external_planner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('COMMAND_ATTRIBUTION_BOUND', {
+      command_id: binding.command_id,
+      binding_digest: binding.binding_digest,
+      runtime_candidate_id: binding.runtime_candidate_id,
+      candidate_id: binding.candidate_id,
+      candidate_sha: binding.candidate_sha,
+      proposal_digest: binding.proposal_digest,
+      skill_digests: binding.skill_digests,
+      task_signature_digest: binding.task_signature_digest,
+      binding_is_effect_authority: false,
+      authority_effect: false,
+    });
+    return binding;
+  }
+
+  async ingestBrowserOutcome({ readback, attribution = null } = {}) {
+    this.#assertRunning();
+    const receipt = readback?.receipt;
+    let trustedAttribution = attribution;
+    let commandBinding = null;
+    if (trustedAttribution == null && receipt && typeof receipt === 'object') {
+      commandBinding = this.#commandAttribution.resolve({
+        command_id: receipt.command_id,
+        action: receipt.action,
+        platform: receipt.platform ?? null,
+        effect_key: receipt.effect_key ?? null,
+      });
+      if (commandBinding) {
+        trustedAttribution = {
+          task_id: commandBinding.task_id,
+          task_signature_digest: commandBinding.task_signature_digest,
+          environment_fingerprint: commandBinding.environment_fingerprint,
+          model_family: commandBinding.model_family,
+          candidate_id: commandBinding.candidate_id,
+          candidate_sha: commandBinding.candidate_sha,
+          proposal_digest: commandBinding.proposal_digest,
+          skill_digests: commandBinding.skill_digests,
+          external_attribution: true,
+          authored_by_candidate: false,
+        };
+      }
+    }
     const episode = createRsiBrowserOutcomeEpisode({
       source_sha: this.#sourceSha,
       readback,
-      attribution,
+      attribution: trustedAttribution,
     });
     await this.#ledger.append('BROWSER_OUTCOME_INGESTED', {
       episode_digest: episode.episode_digest,
@@ -293,6 +366,7 @@ export class RsiRuntimeService {
       candidate_sha: episode.candidate_sha,
       proposal_digest: episode.proposal_digest,
       skill_digests: episode.skill_digests,
+      command_attribution_binding_digest: commandBinding?.binding_digest || null,
       eligible_for_experience_graph: episode.eligible_for_experience_graph,
       eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
       quarantined: episode.quarantined,
@@ -301,6 +375,18 @@ export class RsiRuntimeService {
       physical_effect_replay_allowed: false,
       authority_effect: false,
     });
+    if (commandBinding) {
+      await this.#commandAttribution.consume({
+        command_id: episode.command_id,
+        episode_digest: episode.episode_digest,
+      });
+      await this.#ledger.append('COMMAND_ATTRIBUTION_CONSUMED', {
+        command_id: episode.command_id,
+        binding_digest: commandBinding.binding_digest,
+        episode_digest: episode.episode_digest,
+        authority_effect: false,
+      });
+    }
     this.#browserOutcomeCount += 1;
     if (episode.eligible_for_experience_graph) this.#browserOutcomeLearningEligibleCount += 1;
     if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
@@ -358,6 +444,7 @@ export class RsiRuntimeService {
       last_observation_at: this.#lastObservationAt,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       experience_gate: this.#experienceGate.snapshot(),
+      command_attribution: this.#commandAttribution.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
