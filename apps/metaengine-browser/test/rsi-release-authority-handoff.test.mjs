@@ -611,7 +611,7 @@ test('exact QUALIFIED successor independently proves the physical effect even wh
   const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
   const command=createRsiReleaseEffectCommandReadback({
     verifier_id:'native-command-reconciler-1',
-    observed_at:'2026-09-18T18:13:30.000Z',
+    observed_at:'2026-09-18T18:14:05.000Z',
     workspace_id:admission.workspace_id,
     command_id:admission.command_id,
     leased_by:admission.leased_by,
@@ -631,14 +631,14 @@ test('exact QUALIFIED successor independently proves the physical effect even wh
   const tx=transactionRow(releaseHandoff,{state:'QUALIFIED',effect:true});
   const transaction=createRsiSelfUpdateTransactionReadback({
     verifier_id:'journal-reconciler-1',
-    observed_at:'2026-09-18T18:13:30.000Z',
+    observed_at:'2026-09-18T18:14:05.000Z',
     transaction_present:true,
     transaction:tx,
     filesystem_read_verified:true,
   });
   const successor=createRsiSuccessorRuntimeReadback({
     verifier_id:'successor-runtime-verifier-1',
-    observed_at:'2026-09-18T18:13:31.000Z',
+    observed_at:'2026-09-18T18:14:06.000Z',
     transaction_id:tx.transaction_id,
     running_version:releaseHandoff.trusted_release.version,
     running_git_sha:CANDIDATE,
@@ -654,7 +654,7 @@ test('exact QUALIFIED successor independently proves the physical effect even wh
     executor_admission:admission,release_handoff:releaseHandoff,
     promotion_review_result:review,promotion_review_request:request,
     command_readback:command,transaction_readback:transaction,
-    successor_runtime_readback:successor,reconciled_at:'2026-09-18T18:13:32.000Z',
+    successor_runtime_readback:successor,reconciled_at:'2026-09-18T18:14:07.000Z',
   });
   assert.equal(row.result,'CONFIRMED');
   assert.equal(row.physical_effect_confirmed,true);
