@@ -1,0 +1,570 @@
+import crypto from 'node:crypto';
+
+import {
+  RsiShadowArchive,
+  RSI_HARD_INVARIANTS,
+} from './rsi-shadow-core.mjs';
+import { RsiShadowObserver } from './rsi-shadow-observer.mjs';
+import { RsiVerifiedEvolutionArchive } from './rsi-verified-evolution-archive.mjs';
+import { rsiTournamentTrustRootSnapshot } from './rsi-shadow-tournament.mjs';
+import { rsiPromotionGateTrustRootSnapshot } from './rsi-promotion-admission-gate.mjs';
+import { rsiEvaluatorRootSnapshot } from './rsi-evaluator-mesh.mjs';
+import { rsiOpenEndedSearchTrustRootSnapshot } from './rsi-open-ended-search-policy.mjs';
+import { rsiAdaptiveRetrievalTrustRootSnapshot } from './rsi-adaptive-experience-retrieval.mjs';
+import { rsiAdversarialChallengeTrustRootSnapshot } from './rsi-adversarial-challenge-producer.mjs';
+import { rsiAgentArchitectureSearchTrustRootSnapshot } from './rsi-agent-architecture-search.mjs';
+import { rsiAsynchronousIslandTrustRootSnapshot } from './rsi-asynchronous-island-portfolio.mjs';
+import { rsiBenchmarkProvenanceTrustRootSnapshot } from './rsi-benchmark-provenance-guard.mjs';
+import { rsiCladeMetaproductivityTrustRootSnapshot } from './rsi-clade-metaproductivity.mjs';
+import { rsiComparativeLineageTrustRootSnapshot } from './rsi-comparative-lineage-operators.mjs';
+import { rsiComponentAttributionTrustRootSnapshot } from './rsi-component-attribution.mjs';
+import { rsiContrastiveSkillReliabilityTrustRootSnapshot } from './rsi-contrastive-skill-reliability.mjs';
+import { rsiDisagreementAcquisitionTrustRootSnapshot } from './rsi-disagreement-acquisition.mjs';
+import { rsiExperienceGraphTrustRootSnapshot } from './rsi-experience-graph.mjs';
+import { rsiFrontierCoevolutionTrustRootSnapshot } from './rsi-frontier-coevolution.mjs';
+import { rsiGroupExperienceTrustRootSnapshot } from './rsi-group-experience-exchange.mjs';
+import { rsiHierarchicalEvaluationEconomyTrustRootSnapshot } from './rsi-hierarchical-evaluation-economy.mjs';
+import { rsiMetaSkillEvolutionTrustRootSnapshot } from './rsi-meta-skill-evolution.mjs';
+import { rsiProxyCalibrationTrustRootSnapshot } from './rsi-proxy-reliability-calibration.mjs';
+import { rsiRecursiveDepthTrustRootSnapshot } from './rsi-recursive-depth-controller.mjs';
+import { rsiRecursiveRiskTrustRootSnapshot } from './rsi-recursive-risk-budget.mjs';
+import { rsiRegressionReplayTrustRootSnapshot } from './rsi-regression-replay.mjs';
+import { rsiSkillLibraryGovernanceTrustRootSnapshot } from './rsi-skill-library-governance.mjs';
+import { rsiSkillScopeExpansionTrustRootSnapshot } from './rsi-skill-scope-expansion.mjs';
+import { rsiTraceGuidedHarnessRepairTrustRootSnapshot } from './rsi-trace-guided-harness-repair.mjs';
+import { rsiVerifiedSkillLibraryTrustRootSnapshot } from './rsi-verified-skill-library.mjs';
+import { rsiMemoryGovernanceTrustRootSnapshot } from './rsi-memory-governance.mjs';
+import { rsiOperationalDistillationTrustRootSnapshot } from './rsi-operational-knowledge-distillation.mjs';
+import { rsiFixedSkeletonTrustRootSnapshot } from './rsi-fixed-skeleton-mutation.mjs';
+import { rsiSearchModeRouterTrustRootSnapshot } from './rsi-search-mode-router.mjs';
+import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integrity-guard.mjs';
+import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
+import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
+import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
+import { createRsiRuntimeSkillAdvisory, verifyRsiRuntimeSkillAdvisory } from './rsi-runtime-skill-advisory.mjs';
+import { createRsiRuntimeSkillNeedDecision, createRsiRuntimeSkillFeedback } from './rsi-runtime-skill-need-gate.mjs';
+
+export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
+export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
+
+const SHA40 = /^[0-9a-f]{40}$/;
+const DIGEST64 = /^[0-9a-f]{64}$/;
+
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+}
+
+function digest(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(stable(value))).digest('hex');
+}
+
+function exactSha(value, field = 'source_sha') {
+  const sha = String(value || '').trim().toLowerCase();
+  if (!SHA40.test(sha)) throw new Error(`rsi_runtime_${field}_invalid`);
+  return sha;
+}
+
+function exactDigest(value, field) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!DIGEST64.test(v)) throw new Error(`rsi_runtime_${field}_invalid`);
+  return v;
+}
+
+function trustRoots() {
+  const roots = {
+    evaluator: rsiEvaluatorRootSnapshot(),
+    tournament: rsiTournamentTrustRootSnapshot(),
+    promotion_gate: rsiPromotionGateTrustRootSnapshot(),
+    open_ended_search: rsiOpenEndedSearchTrustRootSnapshot(),
+    adaptive_retrieval: rsiAdaptiveRetrievalTrustRootSnapshot(),
+    adversarial_curriculum: rsiAdversarialChallengeTrustRootSnapshot(),
+    architecture_search: rsiAgentArchitectureSearchTrustRootSnapshot(),
+    asynchronous_islands: rsiAsynchronousIslandTrustRootSnapshot(),
+    benchmark_provenance: rsiBenchmarkProvenanceTrustRootSnapshot(),
+    clade_metaproductivity: rsiCladeMetaproductivityTrustRootSnapshot(),
+    comparative_lineage: rsiComparativeLineageTrustRootSnapshot(),
+    component_attribution: rsiComponentAttributionTrustRootSnapshot(),
+    contrastive_skill_reliability: rsiContrastiveSkillReliabilityTrustRootSnapshot(),
+    disagreement_acquisition: rsiDisagreementAcquisitionTrustRootSnapshot(),
+    experience_graph: rsiExperienceGraphTrustRootSnapshot(),
+    frontier_coevolution: rsiFrontierCoevolutionTrustRootSnapshot(),
+    group_experience: rsiGroupExperienceTrustRootSnapshot(),
+    evaluation_economy: rsiHierarchicalEvaluationEconomyTrustRootSnapshot(),
+    meta_skill_evolution: rsiMetaSkillEvolutionTrustRootSnapshot(),
+    proxy_calibration: rsiProxyCalibrationTrustRootSnapshot(),
+    recursive_depth: rsiRecursiveDepthTrustRootSnapshot(),
+    recursive_risk: rsiRecursiveRiskTrustRootSnapshot(),
+    regression_replay: rsiRegressionReplayTrustRootSnapshot(),
+    skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
+    skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
+    skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
+    trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
+    memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
+    operational_distillation: rsiOperationalDistillationTrustRootSnapshot(),
+    fixed_skeleton_mutation: rsiFixedSkeletonTrustRootSnapshot(),
+    search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
+    evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
+  };
+  return Object.freeze(Object.fromEntries(
+    Object.entries(roots).map(([name, root]) => [name, Object.freeze({
+      schema: root?.schema || null,
+      digest: digest(root),
+      authority_effect: false,
+    })]),
+  ));
+}
+
+export class RsiRuntimeService {
+  #sourceSha;
+  #clock;
+  #ledger;
+  #experienceGate;
+  #improvementFrontier;
+  #archive;
+  #observer;
+  #verifiedArchive;
+  #roots;
+  #running = false;
+  #startedAt = null;
+  #lastObservationDigest = null;
+  #lastObservationAt = null;
+  #promotionNominationCount = 0;
+  #skillAdvisory = null;
+  #lastSkillDecision = null;
+  #lastSkillFeedback = null;
+
+  constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
+    this.#sourceSha = exactSha(source_sha);
+    if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
+    this.#clock = clock;
+    this.#ledger = new RsiRuntimeLedger({ ledgerPath, source_sha: this.#sourceSha, clock });
+    this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
+    this.#improvementFrontier = new RsiRuntimeImprovementFrontier();
+    this.#archive = new RsiShadowArchive({ clock });
+    this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
+    this.#verifiedArchive = new RsiVerifiedEvolutionArchive({ clock });
+    this.#roots = trustRoots();
+  }
+
+  async start() {
+    if (this.#running) return this.snapshot();
+    await this.#ledger.init();
+    this.#startedAt = new Date(this.#clock()).toISOString();
+    await this.#ledger.append('RUNTIME_BOUND', {
+      runtime_schema: RSI_RUNTIME_SERVICE_SCHEMA,
+      runtime_mode: RSI_RUNTIME_MODE,
+      source_sha: this.#sourceSha,
+      trust_root_set_digest: digest(this.#roots),
+      experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
+      improvement_frontier_schema: RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA,
+      observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
+      candidate_effect_executor_exposed: false,
+      direct_promotion_enabled: false,
+      self_update_authority: false,
+      authority_effect: false,
+    });
+    this.#running = true;
+    return this.snapshot();
+  }
+
+  #assertRunning() {
+    if (!this.#running) throw new Error('rsi_runtime_not_started');
+  }
+
+  async #persistObservationAdmission(admission) {
+    if (admission?.action !== 'PERSIST' || !admission?.observation) {
+      throw new Error('rsi_runtime_observation_admission_invalid');
+    }
+    const observation = admission.observation;
+    const prepared = this.#improvementFrontier.prepare(observation);
+    await this.#ledger.append('BRAIN_OBSERVATION', {
+      observation_schema: observation?.schema || null,
+      observation_digest: observation.observation_digest,
+      experience_signature_digest: admission.signature_digest,
+      admission_reason: admission.reason,
+      critical: admission.critical === true,
+      opportunity_count: Array.isArray(observation?.opportunities) ? observation.opportunities.length : 0,
+      observation,
+      prepared_experiments: prepared.map((entry) => ({
+        opportunity_id: entry.opportunity_id,
+        signal: entry.signal,
+        priority: entry.priority,
+        mutation_surface: entry.mutation_surface,
+        hypothesis_id: entry.hypothesis.hypothesis_id,
+        hypothesis_digest: entry.hypothesis.hypothesis_digest,
+        experiment_id: entry.plan.experiment_id,
+        plan_digest: entry.plan.plan_digest,
+        target_branch: entry.plan.target_branch,
+        authority_effect: false,
+      })),
+      authority_effect: false,
+    });
+    this.#experienceGate.commitPersist(admission);
+    this.#improvementFrontier.commit(prepared);
+    return observation;
+  }
+
+  async observeBrainSnapshot(snapshot) {
+    this.#assertRunning();
+    const observation = this.#observer.observeBrainSnapshot(snapshot);
+    this.#lastObservationDigest = digest(observation);
+    this.#lastObservationAt = new Date(this.#clock()).toISOString();
+    const admission = this.#experienceGate.offer(observation);
+    if (admission.action === 'PERSIST') await this.#persistObservationAdmission(admission);
+    return observation;
+  }
+
+  async flushObservations() {
+    this.#assertRunning();
+    const admission = this.#experienceGate.flush();
+    if (!admission) return false;
+    await this.#persistObservationAdmission(admission);
+    return true;
+  }
+
+  async proposeCandidate(input = {}) {
+    this.#assertRunning();
+    const parentSha = exactSha(input.parent_sha || this.#sourceSha, 'parent_sha');
+    if (parentSha !== this.#sourceSha) throw new Error('rsi_runtime_candidate_parent_not_bound_source');
+    const candidate = this.#archive.propose({ ...input, parent_sha: parentSha });
+    await this.#ledger.append('CANDIDATE_PROPOSED', {
+      candidate_id: candidate.candidate_id,
+      parent_sha: candidate.parent_sha,
+      candidate_sha: candidate.candidate_sha,
+      mutation_surface: candidate.mutation_surface,
+      candidate_digest: candidate.candidate_digest,
+      shadow_only: true,
+      authority_effect: false,
+    });
+    return candidate;
+  }
+
+  async beginEvaluation(candidateId) {
+    this.#assertRunning();
+    const candidate = this.#archive.beginEvaluation(candidateId);
+    await this.#ledger.append('EVALUATION_STARTED', {
+      candidate_id: candidate.candidate_id,
+      candidate_sha: candidate.candidate_sha,
+      authority_effect: false,
+    });
+    return candidate;
+  }
+
+  async recordInvariant(candidateId, evidence) {
+    this.#assertRunning();
+    const row = this.#archive.recordInvariant(candidateId, evidence);
+    await this.#ledger.append('INVARIANT_RECORDED', {
+      candidate_id: candidateId,
+      invariant: row.invariant,
+      result: row.result,
+      evidence_digest: row.evidence_digest,
+      authority_effect: false,
+    });
+    return row;
+  }
+
+  async recordObjective(candidateId, evidence) {
+    this.#assertRunning();
+    const row = this.#archive.recordObjective(candidateId, evidence);
+    await this.#ledger.append('OBJECTIVE_RECORDED', {
+      candidate_id: candidateId,
+      objective: row.objective?.name || null,
+      improved: row.improved === true,
+      evidence_digest: row.evidence_digest,
+      authority_effect: false,
+    });
+    return row;
+  }
+
+  async finalizeCandidate(candidateId) {
+    this.#assertRunning();
+    const candidate = this.#archive.finalize(candidateId);
+    await this.#ledger.append('CANDIDATE_FINALIZED', {
+      candidate_id: candidate.candidate_id,
+      candidate_sha: candidate.candidate_sha,
+      state: candidate.state,
+      final_digest: candidate.final_digest,
+      authority_effect: false,
+    });
+    return candidate;
+  }
+
+  async nominatePromotion({ candidate_id, qualification_digest } = {}) {
+    this.#assertRunning();
+    const candidate = this.#archive.get(candidate_id);
+    if (candidate.state !== 'SHADOW_QUALIFIED') throw new Error('rsi_runtime_candidate_not_shadow_qualified');
+    const qualificationDigest = exactDigest(qualification_digest, 'qualification_digest');
+    const nomination = Object.freeze({
+      schema: 'metaengine.rsi.promotion-nomination.v1',
+      candidate_id: candidate.candidate_id,
+      candidate_sha: candidate.candidate_sha,
+      parent_sha: candidate.parent_sha,
+      candidate_final_digest: candidate.final_digest,
+      qualification_digest: qualificationDigest,
+      source_sha: this.#sourceSha,
+      requires_external_promotion_gate: true,
+      direct_promotion_enabled: false,
+      self_update_authority: false,
+      execution_authority: false,
+      authority_effect: false,
+    });
+    await this.#ledger.append('PROMOTION_NOMINATED', nomination);
+    this.#promotionNominationCount += 1;
+    return nomination;
+  }
+
+  async bindSkillAdvisory(input = {}) {
+    this.#assertRunning();
+    const advisory = createRsiRuntimeSkillAdvisory(input);
+    verifyRsiRuntimeSkillAdvisory(advisory, input);
+    if (advisory.source_parent_sha !== this.#sourceSha) throw new Error('rsi_runtime_skill_source_parent_mismatch');
+    await this.#ledger.append('SKILL_ADVISORY_BOUND', {
+      advisory_schema: advisory.schema,
+      advisory_digest: advisory.advisory_digest,
+      lineage_skill_admission_digest: advisory.lineage_skill_admission_digest,
+      library_digest: advisory.library_digest,
+      governance_digest: advisory.governance_digest,
+      activation_digest: advisory.activation_digest,
+      skill_id: advisory.skill_id,
+      skill_version: advisory.skill_version,
+      skill_digest: advisory.skill_digest,
+      governance_state: advisory.governance_state,
+      role: advisory.role,
+      runtime_use_mode: advisory.runtime_use_mode,
+      raw_skill_implementation_exposed: false,
+      direct_tool_execution_allowed: false,
+      browser_actuation_allowed: false,
+      scheduler_dispatch_allowed: false,
+      authority_effect: false,
+    });
+    this.#skillAdvisory = advisory;
+    this.#lastSkillDecision = null;
+    this.#lastSkillFeedback = null;
+    return advisory;
+  }
+
+  async decideSkillAdvisory(context) {
+    this.#assertRunning();
+    if (!this.#skillAdvisory) throw new Error('rsi_runtime_skill_advisory_not_bound');
+    const decision = createRsiRuntimeSkillNeedDecision({
+      advisory: this.#skillAdvisory,
+      context,
+      external_router: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_ADVISORY_DECISION', {
+      advisory_digest: decision.advisory_digest,
+      decision_digest: decision.decision_digest,
+      skill_id: decision.skill_id,
+      skill_digest: decision.skill_digest,
+      context_digest: decision.context_digest,
+      decision: decision.decision,
+      blockers: decision.blockers,
+      injected_metadata_only: decision.decision === 'INJECT_ADVISORY_METADATA',
+      raw_skill_implementation_injected: false,
+      direct_tool_execution_allowed: false,
+      browser_actuation_allowed: false,
+      scheduler_dispatch_allowed: false,
+      authority_effect: false,
+    });
+    this.#lastSkillDecision = decision;
+    return decision;
+  }
+
+  async recordSkillAdvisoryFeedback(input = {}) {
+    this.#assertRunning();
+    if (!this.#skillAdvisory) throw new Error('rsi_runtime_skill_advisory_not_bound');
+    if (!this.#lastSkillDecision) throw new Error('rsi_runtime_skill_decision_missing');
+    if (input?.decision?.decision_digest !== this.#lastSkillDecision.decision_digest) {
+      throw new Error('rsi_runtime_skill_feedback_stale_decision');
+    }
+    const feedback = createRsiRuntimeSkillFeedback({
+      ...input,
+      advisory: this.#skillAdvisory,
+    });
+    await this.#ledger.append('SKILL_ADVISORY_FEEDBACK', {
+      advisory_digest: feedback.advisory_digest,
+      decision_digest: feedback.decision_digest,
+      feedback_digest: feedback.feedback_digest,
+      skill_digest: feedback.skill_digest,
+      usage_receipt_digest: feedback.usage_receipt_digest,
+      outcome: feedback.outcome,
+      measured_delta: feedback.measured_delta,
+      hard_invariants_pass: feedback.hard_invariants_pass,
+      governance_updated_automatically: false,
+      library_updated_automatically: false,
+      external_lifecycle_governance_ingest_required: true,
+      authority_effect: false,
+    });
+    this.#lastSkillFeedback = feedback;
+    return feedback;
+  }
+
+  async clearSkillAdvisory() {
+    this.#assertRunning();
+    if (!this.#skillAdvisory) return false;
+    await this.#ledger.append('SKILL_ADVISORY_CLEARED', {
+      advisory_digest: this.#skillAdvisory.advisory_digest,
+      skill_id: this.#skillAdvisory.skill_id,
+      skill_digest: this.#skillAdvisory.skill_digest,
+      source_parent_sha: this.#skillAdvisory.source_parent_sha,
+      authority_effect: false,
+    });
+    this.#skillAdvisory = null;
+    this.#lastSkillDecision = null;
+    this.#lastSkillFeedback = null;
+    return true;
+  }
+
+  skillAdvisory() {
+    return this.#skillAdvisory ? structuredClone(this.#skillAdvisory) : null;
+  }
+
+  verifiedArchive() {
+    return this.#verifiedArchive;
+  }
+
+  improvementFrontier(options = {}) {
+    return this.#improvementFrontier.entries(options);
+  }
+
+  controlPlaneProjection({ limit = 4 } = {}) {
+    const bounded = Math.max(0, Math.min(8, Number(limit) || 0));
+    const entries = this.#improvementFrontier.entries({ limit: bounded });
+    return Object.freeze({
+      schema: 'metaengine.rsi.runtime-control-projection.v1',
+      state: this.#state,
+      source_sha: this.#sourceSha,
+      last_observation_digest: this.#lastObservationDigest,
+      last_observation_at: this.#lastObservationAt,
+      frontier_count: entries.length,
+      frontier: Object.freeze(entries.map((entry) => Object.freeze({
+        opportunity_id: entry.opportunity_id,
+        signal: entry.signal,
+        priority: entry.priority,
+        mutation_surface: entry.mutation_surface,
+        observation_digest: entry.observation_digest,
+        hypothesis: structuredClone(entry.hypothesis),
+        experiment_plan: structuredClone(entry.plan),
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      }))),
+      skill_advisory: this.#skillAdvisory ? Object.freeze({
+        schema: this.#skillAdvisory.schema,
+        advisory_digest: this.#skillAdvisory.advisory_digest,
+        source_parent_sha: this.#skillAdvisory.source_parent_sha,
+        source_candidate_sha: this.#skillAdvisory.source_candidate_sha,
+        library_digest: this.#skillAdvisory.library_digest,
+        governance_digest: this.#skillAdvisory.governance_digest,
+        activation_digest: this.#skillAdvisory.activation_digest,
+        composition_plan_digest: this.#skillAdvisory.composition_plan_digest,
+        skill_id: this.#skillAdvisory.skill_id,
+        skill_version: this.#skillAdvisory.skill_version,
+        skill_digest: this.#skillAdvisory.skill_digest,
+        governance_state: this.#skillAdvisory.governance_state,
+        role: this.#skillAdvisory.role,
+        capabilities: Object.freeze([...this.#skillAdvisory.capabilities]),
+        runtime_use_mode: 'ADVISORY_CONTEXT_ONLY',
+        direct_tool_execution_allowed: false,
+        browser_actuation_allowed: false,
+        scheduler_dispatch_allowed: false,
+        last_decision: this.#lastSkillDecision ? Object.freeze({
+          decision_digest: this.#lastSkillDecision.decision_digest,
+          context_digest: this.#lastSkillDecision.context_digest,
+          decision: this.#lastSkillDecision.decision,
+          blocker_count: this.#lastSkillDecision.blockers.length,
+          authority_effect: false,
+        }) : null,
+        last_feedback: this.#lastSkillFeedback ? Object.freeze({
+          feedback_digest: this.#lastSkillFeedback.feedback_digest,
+          usage_receipt_digest: this.#lastSkillFeedback.usage_receipt_digest,
+          outcome: this.#lastSkillFeedback.outcome,
+          hard_invariants_pass: this.#lastSkillFeedback.hard_invariants_pass,
+          governance_updated_automatically: false,
+          authority_effect: false,
+        }) : null,
+        authority_effect: false,
+      }) : null,
+      source_binding_exact: true,
+      existing_devos_scheduler_required: true,
+      browser_can_enqueue_devos_tasks: false,
+      direct_execution_enabled: false,
+      direct_promotion_enabled: false,
+      direct_self_update_enabled: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  snapshot() {
+    const shadow = this.#archive.snapshot();
+    return Object.freeze({
+      schema: RSI_RUNTIME_SERVICE_SCHEMA,
+      version: 1,
+      state: this.#running ? 'READY' : 'CREATED',
+      mode: RSI_RUNTIME_MODE,
+      source_sha: this.#sourceSha,
+      started_at: this.#startedAt,
+      trust_roots: this.#roots,
+      trust_root_count: Object.keys(this.#roots).length,
+      trust_root_set_digest: digest(this.#roots),
+      hard_invariants: [...RSI_HARD_INVARIANTS],
+      candidate_count: shadow.candidate_count,
+      candidate_state_counts: shadow.candidates.reduce((acc, row) => {
+        acc[row.state] = (acc[row.state] || 0) + 1;
+        return acc;
+      }, {}),
+      last_observation_digest: this.#lastObservationDigest,
+      last_observation_at: this.#lastObservationAt,
+      observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
+      experience_gate: this.#experienceGate.snapshot(),
+      improvement_frontier: this.#improvementFrontier.snapshot(),
+      skill_advisory_bound: this.#skillAdvisory != null,
+      skill_advisory: this.#skillAdvisory ? Object.freeze({
+        advisory_digest: this.#skillAdvisory.advisory_digest,
+        source_parent_sha: this.#skillAdvisory.source_parent_sha,
+        source_candidate_sha: this.#skillAdvisory.source_candidate_sha,
+        skill_id: this.#skillAdvisory.skill_id,
+        skill_version: this.#skillAdvisory.skill_version,
+        skill_digest: this.#skillAdvisory.skill_digest,
+        governance_state: this.#skillAdvisory.governance_state,
+        role: this.#skillAdvisory.role,
+        runtime_use_mode: 'ADVISORY_CONTEXT_ONLY',
+        direct_tool_execution_allowed: false,
+        browser_actuation_allowed: false,
+        scheduler_dispatch_allowed: false,
+        last_decision_digest: this.#lastSkillDecision?.decision_digest || null,
+        last_feedback_digest: this.#lastSkillFeedback?.feedback_digest || null,
+        governance_updated_automatically: false,
+        library_updated_automatically: false,
+        authority_effect: false,
+      }) : null,
+      promotion_nomination_count: this.#promotionNominationCount,
+      ledger: this.#ledger.snapshot(),
+      shadow_only: true,
+      candidate_effect_executor_exposed: false,
+      physical_effect_replay_allowed: false,
+      direct_promotion_enabled: false,
+      direct_self_update_enabled: false,
+      page_model_text_authority: false,
+      browser_authority: false,
+      scheduler_authority: false,
+      task_authority: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+}
