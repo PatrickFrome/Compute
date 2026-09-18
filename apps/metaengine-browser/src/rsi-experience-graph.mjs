@@ -918,8 +918,12 @@ export function verifyRsiExperienceGraphRetrieval(row, snapshot, query) {
     || row.raw_user_input_exposed !== false
     || row.secret_material_exposed !== false
   ) throw new Error('rsi_exg_retrieval_policy_invalid');
+  const self = structuredClone(row);
+  delete self.retrieval_digest;
+  if (exactDigest(row.retrieval_digest, 'retrieval') !== digest(self)) throw new Error('rsi_exg_retrieval_digest_mismatch');
+
   const canonical = retrieveRsiExperienceGraph({ snapshot, query });
-  if (canonical.retrieval_digest !== exactDigest(row.retrieval_digest, 'retrieval')) throw new Error('rsi_exg_retrieval_digest_mismatch');
+  if (canonical.retrieval_digest !== row.retrieval_digest) throw new Error('rsi_exg_retrieval_digest_mismatch');
   if (JSON.stringify(canonical.items) !== JSON.stringify(row.items)) throw new Error('rsi_exg_retrieval_items_mismatch');
   return canonical;
 }
