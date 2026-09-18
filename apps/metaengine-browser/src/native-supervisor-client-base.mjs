@@ -805,11 +805,16 @@ export class NativeSupervisorClient {
 
   async #heartbeat() {
     const state = nativeSupervisorTransportState(await this.#getState());
+    const lifecycleStatus = this.#lifecycle?.statusSnapshot?.() || this.#lifecycle?.snapshot() || null;
+    const devosRuntime = state?.supervisor_lifecycle?.devos_runtime || null;
+    const supervisorLifecycle = lifecycleStatus && typeof lifecycleStatus === 'object'
+      ? { ...lifecycleStatus, ...(devosRuntime ? { devos_runtime: structuredClone(devosRuntime) } : {}) }
+      : (devosRuntime ? { devos_runtime: structuredClone(devosRuntime) } : null);
     const payload = {
       state: {
         ...state, shell_version: this.#version, supervisor_mode: 'CONTROL', armed: true,
         operator_mode: 'CONTROL', started_at: this.#startedAt, last_error: this.#lastError,
-        supervisor_lifecycle: this.#lifecycle?.statusSnapshot?.() || this.#lifecycle?.snapshot() || null,
+        supervisor_lifecycle: supervisorLifecycle,
         self_update: this.#selfUpdate?.snapshot() || null,
         self_update_session_continuity: structuredClone(this.#continuityStatus),
       },
