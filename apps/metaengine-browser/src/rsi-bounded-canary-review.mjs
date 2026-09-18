@@ -280,15 +280,21 @@ export class RsiBoundedCanaryReviewLedger{
         throw new Error('rsi_canary_review_ledger_digest_mismatch');
       }
       this.#rows=persisted.rows.map((row)=>{
-        assertZero(row,'persisted_review');
-        if(row.source_sha!==this.#sourceSha||row.schema!==RSI_BOUNDED_CANARY_REVIEW_SCHEMA){
+        if(!row||typeof row!=='object'||!row.review||!row.shadow_review_evidence){
           throw new Error('rsi_canary_review_ledger_row_invalid');
         }
-        const copy=structuredClone(row);delete copy.review_digest;
-        if(digest(copy)!==exactDigest(row.review_digest,'persisted_review')){
-          throw new Error('rsi_canary_review_ledger_row_digest_mismatch');
+        const evidence=verifyRsiShadowReviewEvidence(row.shadow_review_evidence);
+        const review=verifyRsiBoundedCanaryReview(row.review,{shadow_review_evidence:evidence});
+        if(review.source_sha!==this.#sourceSha){
+          throw new Error('rsi_canary_review_ledger_source_mismatch');
         }
-        return row;
+        if(review.shadow_review_evidence_digest!==evidence.review_evidence_digest){
+          throw new Error('rsi_canary_review_ledger_evidence_binding_mismatch');
+        }
+        return Object.freeze({
+          review:structuredClone(review),
+          shadow_review_evidence:structuredClone(evidence),
+        });
       });
     }catch(error){
       if(error?.code!=='ENOENT')throw error;
@@ -310,27 +316,43 @@ export class RsiBoundedCanaryReviewLedger{
     await fs.rename(temp,this.#path);
   }
 
-  async append(review){
+  async append({review,shadow_review_evidence}={}){
     if(!this.#initialized)throw new Error('rsi_canary_review_ledger_not_initialized');
-    if(!review||review.schema!==RSI_BOUNDED_CANARY_REVIEW_SCHEMA)throw new Error('rsi_canary_review_invalid');
-    assertZero(review,'review');
-    if(review.source_sha!==this.#sourceSha)throw new Error('rsi_canary_review_source_mismatch');
-    const copy=structuredClone(review);delete copy.review_digest;
-    if(digest(copy)!==exactDigest(review.review_digest,'review'))throw new Error('rsi_canary_review_digest_mismatch');
-    const existing=this.#rows.find((row)=>row.review_id===review.review_id||row.review_digest===review.review_digest);
+    const evidence=verifyRsiShadowReviewEvidence(shadow_review_evidence);
+    const checked=verifyRsiBoundedCanaryReview(review,{shadow_review_evidence:evidence});
+    if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_canary_review_source_mismatch');
+    if(checked.shadow_review_evidence_digest!==evidence.review_evidence_digest){
+      throw new Error('rsi_canary_review_ledger_evidence_binding_mismatch');
+    }
+    const existing=this.#rows.find((row)=>row.review.review_id===checked.review_id||row.review.review_digest===checked.review_digest);
     if(existing){
-      if(existing.review_digest!==review.review_digest)throw new Error('rsi_canary_review_identity_conflict');
-      return zero({state:'IDEMPOTENT',review_digest:review.review_digest});
+      if(existing.review.review_digest!==checked.review_digest){
+        throw new Error('rsi_canary_review_identity_conflict');
+      }
+      if(existing.shadow_review_evidence.review_evidence_digest!==evidence.review_evidence_digest){
+        throw new Error('rsi_canary_review_evidence_identity_conflict');
+      }
+      return zero({state:'IDEMPOTENT',review_digest:checked.review_digest});
     }
     if(this.#rows.length>=MAX_REVIEWS)throw new Error('rsi_canary_review_ledger_capacity_exceeded');
-    this.#rows.push(structuredClone(review));
+    this.#rows.push(Object.freeze({
+      review:structuredClone(checked),
+      shadow_review_evidence:structuredClone(evidence),
+    }));
     await this.#persist();
-    return zero({state:'READY_FOR_EXTERNAL_CANARY_CONTROLLER_REVIEW',review_digest:review.review_digest});
+    return zero({state:'READY_FOR_EXTERNAL_CANARY_CONTROLLER_REVIEW',review_digest:checked.review_digest});
   }
 
   reviews(){
     if(!this.#initialized)throw new Error('rsi_canary_review_ledger_not_initialized');
-    return Object.freeze(this.#rows.map((row)=>Object.freeze(structuredClone(row))));
+    return Object.freeze(this.#rows.map((row)=>Object.freeze(structuredClone(row.review))));
+  }
+
+  evidenceForReview(reviewDigest){
+    if(!this.#initialized)throw new Error('rsi_canary_review_ledger_not_initialized');
+    const wanted=exactDigest(reviewDigest,'review_lookup');
+    const row=this.#rows.find((entry)=>entry.review.review_digest===wanted);
+    return row?Object.freeze(structuredClone(row.shadow_review_evidence)):null;
   }
 
   snapshot(){
