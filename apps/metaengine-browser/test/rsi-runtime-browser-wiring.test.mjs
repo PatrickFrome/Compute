@@ -38,3 +38,40 @@ test('durable RSI ledger rejects authority-bearing and sensitive payloads', () =
   assert.match(ledger, /hash_chained: true/);
   assert.match(ledger, /automatic_retry_allowed: false/);
 });
+
+
+test('Browser enables trusted result reconciliation and feeds only stored receipt readback into RSI runtime', () => {
+  assert.match(main, /rsiResultReceiptReconciliation:\s*true/);
+  assert.match(main, /onRsiOutcomeReadback:\s*async \(\{ command, readback \}\)/);
+  assert.match(main, /await initRsiRuntime\(\)/);
+  assert.match(main, /await rsiRuntime\.ingestBrowserOutcome\(\{/);
+  assert.match(main, /readback,/);
+  assert.match(main, /attribution:\s*rsiOutcomeAttributionForCommand\(command\)/);
+});
+
+test('generic Browser command attribution cannot manufacture candidate or skill credit', () => {
+  const start = main.indexOf('function rsiOutcomeAttributionForCommand(command)');
+  const end = main.indexOf('async function initNativeSupervisor()', start);
+  assert.ok(start >= 0 && end > start, 'Browser outcome attribution boundary missing');
+  const binding = main.slice(start, end);
+  assert.match(binding, /task_signature_digest:\s*taskSignature/);
+  assert.match(binding, /model_family:\s*'NATIVE_SUPERVISOR'/);
+  assert.match(binding, /candidate_id:\s*null/);
+  assert.match(binding, /candidate_sha:\s*null/);
+  assert.match(binding, /proposal_digest:\s*null/);
+  assert.match(binding, /skill_digests:\s*\[\]/);
+  assert.match(binding, /external_attribution:\s*true/);
+  assert.match(binding, /authored_by_candidate:\s*false/);
+  assert.doesNotMatch(binding, /payload|result|page_text|input_value/);
+});
+
+test('Browser outcome bridge does not give RSI a Browser effect executor', () => {
+  const start = main.indexOf('onRsiOutcomeReadback: async');
+  const end = main.indexOf('if (nativeSupervisor.snapshot()?.running !== true)', start);
+  assert.ok(start >= 0 && end > start, 'Browser RSI sidecar wiring missing');
+  const bridge = main.slice(start, end);
+  assert.doesNotMatch(bridge, /executeNativeSupervisorCommand|executeSemanticCommand|handleCommand\(/);
+  assert.match(bridge, /rsiRuntime\.ingestBrowserOutcome/);
+  assert.match(runtime, /candidate_effect_executor_exposed: false/);
+  assert.match(runtime, /physical_effect_replay_allowed: false/);
+});
