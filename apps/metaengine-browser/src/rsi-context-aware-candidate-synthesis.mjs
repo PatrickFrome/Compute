@@ -262,21 +262,6 @@ export function prepareRsiContextAwareCandidateBuild({
 }={}){
   const request=verifyRsiCandidateSynthesisRequest(synthesis_request);
   const proposal=verifyRsiCandidateMutationProposal(mutation_proposal,request);
-  const context={
-    schema:'metaengine.rsi.experience-context-plan.v1',
-    version:1,
-    source_sha:request.source_sha,
-    opportunity_id:request.opportunity_id,
-    signal:request.signal,
-    mutation_surface:request.mutation_surface,
-    observation_digest:request.observation_digest,
-    hypothesis_digest:request.hypothesis_digest,
-    experiment_plan_digest:request.experiment_plan_digest,
-    experiment_id:request.experiment_id,
-    target_branch:request.target_branch,
-    context_plan_digest:request.context_plan_digest,
-    search_context_digest:request.search_context_digest,
-  };
   if(!frontier_entry||frontier_entry.opportunity_id!==request.opportunity_id)throw new Error('rsi_synthesis_build_frontier_mismatch');
   const sourceFiles=new Set(Array.isArray(source_snapshot?.source_files)?source_snapshot.source_files:[]);
   for(const row of proposal.mutations){
