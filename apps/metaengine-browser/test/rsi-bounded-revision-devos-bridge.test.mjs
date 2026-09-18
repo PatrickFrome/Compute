@@ -2872,6 +2872,11 @@ function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
     false_admission_error_budget_policy_digest:labelDigest(label+'-false-admission-budget'),
     paired_instance_manifest_digest:labelDigest(label+'-paired-instance-manifest'),
     stopping_policy_digest:labelDigest(label+'-stopping-policy'),
+    artifact_auditor_identity_digest:labelDigest(label+'-artifact-auditor-id'),
+    benchmark_provenance_attestor_identity_digest:labelDigest(label+'-benchmark-attestor-id'),
+    evaluator_provenance_attestor_identity_digest:labelDigest(label+'-evaluator-attestor-id'),
+    contamination_attestor_identity_digest:labelDigest(label+'-contamination-attestor-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
     active_retrieval_cap:32,
     current_active_retrieval_count:12,
     projected_active_retrieval_count:13,
@@ -2913,6 +2918,9 @@ test('Phase33 precommit owner review emits only a zero-authority existing-librar
   assert.equal(cert.retrieval_exposure_changed,false);
   assert.equal(cert.skill_activation_performed,false);
   assert.equal(cert.meta_skill_profile_mutated,false);
+  assert.equal(cert.reviewer_separation_of_duties_required,true);
+  assert.notEqual(cert.owner_reviewer_identity_digest,cert.structural_critic_identity_digest);
+  assert.notEqual(cert.artifact_auditor_identity_digest,cert.statistical_acceptor_identity_digest);
   assert.equal(cert.library_admission_token,null);
   assert.equal(cert.authority_effect,false);
   assert.equal(verifyRsiExactSkillPrecommitCertificate(cert,args).certificate_digest,cert.certificate_digest);
@@ -3024,4 +3032,29 @@ test('Phase33 trust root freezes precommit gatekeeping without creating a second
   assert.equal(root.direct_skill_activation,false);
   assert.equal(root.direct_scheduler_action,false);
   assert.equal(root.authority_effect,false);
+});
+
+
+test('Phase33 reviewer separation of duties rejects owner, critic and attestor identity collapse',()=>{
+  const fx=phase33ExactOwnerFixture('separation');
+  const base=phase33CertificateArgs(fx,'separation');
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    structural_critic_identity_digest:fx.bundle.consumer_owner_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    artifact_auditor_identity_digest:base.behavioral_critic_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    benchmark_provenance_attestor_identity_digest:base.evaluator_provenance_attestor_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate({
+    ...base,
+    contamination_attestor_identity_digest:base.statistical_acceptor_identity_digest,
+  }),/reviewer_separation_of_duties_required/);
+
+  const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
+  assert.equal(root.reviewer_separation_of_duties_required,true);
 });
