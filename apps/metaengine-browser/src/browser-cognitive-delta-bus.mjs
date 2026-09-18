@@ -109,6 +109,7 @@ export class BrowserCognitiveDeltaBus {
   #droppedTotal = 0;
   #droppedIncoming = 0;
   #droppedRetained = 0;
+  #droppedP3Unsequenced = 0;
   #droppedThroughSequence = 0;
 
   constructor({
@@ -126,8 +127,28 @@ export class BrowserCognitiveDeltaBus {
   }
 
   publish(input = {}) {
-    this.#sequence += 1;
     const priority = classifyCognitiveDeltaPriority(input);
+
+    // P3 is periodic metrics telemetry, not causal process/semantic state. When the
+    // bounded ring is already full, discard that sample BEFORE allocating a stream
+    // sequence. Otherwise every intentionally dropped metrics sample creates a
+    // synthetic sequence hole and forces an unnecessary full-state resync.
+    if (this.#events.length >= this.#maxEvents && priority === 'P3') {
+      this.#droppedTotal += 1;
+      this.#droppedIncoming += 1;
+      this.#droppedP3Unsequenced += 1;
+      return Object.freeze({
+        accepted: false,
+        stream_id: this.#streamId,
+        sequence: null,
+        priority,
+        reason: 'P3_METRICS_DROPPED_WITHOUT_STREAM_GAP',
+        resync_required: false,
+        authority_effect: false,
+      });
+    }
+
+    this.#sequence += 1;
     const projected = safeDeltaProjection(input);
     const event = Object.freeze({
       schema: BROWSER_COGNITIVE_DELTA_SCHEMA,
@@ -150,6 +171,7 @@ export class BrowserCognitiveDeltaBus {
           sequence: event.sequence,
           priority,
           reason: 'LOWER_PRIORITY_DROPPED_UNDER_PRESSURE',
+          resync_required: true,
           authority_effect: false,
         });
       }
@@ -208,6 +230,8 @@ export class BrowserCognitiveDeltaBus {
       dropped_total: this.#droppedTotal,
       dropped_incoming: this.#droppedIncoming,
       dropped_retained: this.#droppedRetained,
+      dropped_p3_unsequenced: this.#droppedP3Unsequenced,
+      p3_pressure_drop_creates_stream_gap: false,
       dropped_through_sequence: this.#droppedThroughSequence,
       dedupe_key: 'stream_id+sequence',
       stream_scope: 'BROWSER_PROCESS_INCARNATION',
