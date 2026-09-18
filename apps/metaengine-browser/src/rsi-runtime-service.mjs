@@ -56,6 +56,7 @@ import { RsiSkillCoalitionAuditStore, createRsiSkillCoalitionObservation, rsiSki
 import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGraphTrustRootSnapshot } from './rsi-skill-relation-graph.mjs';
 import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntimeMetaSkillArchiveTrustRootSnapshot } from './rsi-runtime-meta-skill-archive.mjs';
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
+import { RsiShadowProfileBindingLedger, createRsiShadowProfileBinding, rsiShadowProfileBindingTrustRootSnapshot } from './rsi-shadow-profile-binding.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -135,6 +136,7 @@ function trustRoots() {
     skill_relation_graph: rsiSkillRelationGraphTrustRootSnapshot(),
     runtime_meta_skill_archive: rsiRuntimeMetaSkillArchiveTrustRootSnapshot(),
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
+    shadow_profile_binding: rsiShadowProfileBindingTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -163,6 +165,7 @@ export class RsiRuntimeService {
   #skillRelationStore;
   #metaSkillArchive;
   #metaProfileQualification;
+  #shadowProfileBinding;
   #archive;
   #observer;
   #verifiedArchive;
@@ -180,7 +183,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, shadowProfileBindingPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -252,6 +255,11 @@ export class RsiRuntimeService {
       statePath: runtimeMetaProfileQualificationPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeShadowProfileBindingPath = shadowProfileBindingPath || (ledgerPath ? `${ledgerPath}.shadow-profile-binding.json` : null);
+    this.#shadowProfileBinding = new RsiShadowProfileBindingLedger({
+      statePath: runtimeShadowProfileBindingPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -274,6 +282,7 @@ export class RsiRuntimeService {
     await this.#skillRelationStore.init();
     await this.#metaSkillArchive.init();
     await this.#metaProfileQualification.init();
+    await this.#shadowProfileBinding.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -295,6 +304,7 @@ export class RsiRuntimeService {
       skill_relation_store_schema: this.#skillRelationStore.snapshot().schema,
       runtime_meta_skill_archive_schema: this.#metaSkillArchive.snapshot().schema,
       meta_profile_qualification_schema: this.#metaProfileQualification.snapshot().schema,
+      shadow_profile_binding_schema: this.#shadowProfileBinding.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -907,6 +917,52 @@ export class RsiRuntimeService {
     return this.#metaProfileQualification.qualified();
   }
 
+  async bindQualifiedMetaProfileForShadow({
+    qualification_digest,
+    binding_id,
+    verified_context_digest,
+    comparator_root_digest,
+    external_shadow_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const qualification = this.#metaProfileQualification
+      .qualified()
+      .find((row) => row.qualification_digest === qualification_digest);
+    if (!qualification) throw new Error('rsi_runtime_qualified_meta_profile_required');
+
+    const binding = createRsiShadowProfileBinding({
+      binding_id,
+      qualification,
+      verified_context_digest,
+      comparator_root_digest,
+      external_shadow_owner,
+      authored_by_candidate,
+    });
+    const stored = await this.#shadowProfileBinding.add(binding, qualification);
+    await this.#ledger.append('META_PROFILE_SHADOW_BOUND', {
+      binding_id: binding.binding_id,
+      binding_digest: binding.binding_digest,
+      qualification_id: binding.qualification_id,
+      qualification_digest: binding.qualification_digest,
+      champion_profile_digest: binding.champion_profile_digest,
+      challenger_profile_digest: binding.challenger_profile_digest,
+      verified_context_digest: binding.verified_context_digest,
+      comparator_root_digest: binding.comparator_root_digest,
+      comparison_mode: binding.comparison_mode,
+      browser_effects_allowed: false,
+      active_profile_replaced: false,
+      canary_activation_authorized: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ binding, stored });
+  }
+
+  shadowProfileBindings() {
+    this.#assertRunning();
+    return this.#shadowProfileBinding.bindings();
+  }
+
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
     this.#assertRunning();
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
@@ -1304,6 +1360,7 @@ export class RsiRuntimeService {
       skill_relation_store: this.#skillRelationStore.snapshot(),
       runtime_meta_skill_archive: this.#metaSkillArchive.snapshot(),
       meta_profile_qualification: this.#metaProfileQualification.snapshot(),
+      shadow_profile_binding: this.#shadowProfileBinding.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
         evaluation_count: this.#skillReliabilityEvaluationCount,
