@@ -145,6 +145,8 @@ test('runtime carries a qualified meta profile into shadow-only dual-plan compar
     assert.equal(runtime.currentShadowMetaProfile().selection_digest,selected.selection.selection_digest);
 
     const compared=await runtime.compareShadowMetaProfileRoute({
+      comparator_root_digest:d('d'),
+      external_comparator_owner:true,
       context_id:'runtime.shadow.context.1',
       task_signature_digest:d('c'),
       environment_fingerprint:'env.browser.chatgpt.v1',
@@ -159,6 +161,13 @@ test('runtime carries a qualified meta profile into shadow-only dual-plan compar
       external_planner:true,
       authored_by_candidate:false,
     });
+    assert.equal(compared.comparison_binding.comparison_mode,'READ_ONLY_DUAL_PLAN');
+    assert.equal(compared.comparison_binding.context_source,'BASELINE_PLAN');
+    assert.equal(compared.comparison_binding.verified_context_digest,compared.baseline_plan.context_digest);
+    assert.equal(compared.comparison_binding.baseline_plan_digest,compared.baseline_plan.plan_digest);
+    assert.equal(compared.comparison_binding.comparator_root_digest,d('d'));
+    assert.equal(compared.comparison_binding.comparison_can_activate_profile,false);
+    assert.equal(compared.comparison_binding.comparison_can_authorize_canary,false);
     assert.equal(compared.shadow_projection.shadow_only,true);
     assert.equal(compared.shadow_projection.baseline_execution_path_unchanged,true);
     assert.equal(compared.shadow_projection.projection_can_add_skill_to_execution,false);
