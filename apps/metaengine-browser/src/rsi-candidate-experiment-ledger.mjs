@@ -123,7 +123,10 @@ export function createRsiCandidateExperimentIntent({
       phase28_artifact_receipt_digest:routed.request.phase28_artifact_receipt_digest,
       provenance_root_digest:routed.request.provenance_root_digest,
       evaluator_generation_digest:routed.request.evaluator_generation_digest,
+      evaluator_generation_seq:routed.request.evaluator_generation_seq,
+      evaluator_generation_history_anchor_digest:routed.request.evaluator_generation_history_anchor_digest,
       evaluation_epoch_digest:routed.request.evaluation_epoch_digest,
+      evaluation_epoch_seq:routed.request.evaluation_epoch_seq,
       threshold_policy_digest:routed.request.threshold_policy_digest,
       stopping_policy_digest:routed.request.stopping_policy_digest,
       hidden_holdout_root_digest:routed.request.hidden_holdout_root_digest,
@@ -191,7 +194,10 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
       ||intent.phase28_artifact_receipt_digest!==embeddedRequest.phase28_artifact_receipt_digest
       ||intent.provenance_root_digest!==embeddedRequest.provenance_root_digest
       ||intent.evaluator_generation_digest!==embeddedRequest.evaluator_generation_digest
+      ||intent.evaluator_generation_seq!==embeddedRequest.evaluator_generation_seq
+      ||intent.evaluator_generation_history_anchor_digest!==embeddedRequest.evaluator_generation_history_anchor_digest
       ||intent.evaluation_epoch_digest!==embeddedRequest.evaluation_epoch_digest
+      ||intent.evaluation_epoch_seq!==embeddedRequest.evaluation_epoch_seq
       ||intent.threshold_policy_digest!==embeddedRequest.threshold_policy_digest
       ||intent.stopping_policy_digest!==embeddedRequest.stopping_policy_digest
       ||intent.hidden_holdout_root_digest!==embeddedRequest.hidden_holdout_root_digest
@@ -361,7 +367,8 @@ const MATERIALIZED_OUTCOME_STATES=Object.freeze([
 
 function deriveEvaluationGenerationHistory(rows){
   const history=[];
-  const seenGenerations=new Set();
+  const seenGenerationDigests=new Set();
+  const seenGenerationSeqs=new Set();
   let current=null;
   let materializedOutcomeCount=0;
   for(const row of rows){
@@ -371,7 +378,12 @@ function deriveEvaluationGenerationHistory(rows){
     materializedOutcomeCount+=1;
     const generation=exactDigest(intent.evaluator_generation_digest,'history_evaluator_generation');
     const evaluatorRoot=exactDigest(intent.evaluator_root_digest,'history_evaluator_root');
+    const generationSeq=Number(intent.evaluator_generation_seq);
+    if(!Number.isSafeInteger(generationSeq)||generationSeq<1)throw new Error('rsi_experiment_generation_history_generation_seq_invalid');
+    const generationAnchor=exactDigest(intent.evaluator_generation_history_anchor_digest,'history_generation_anchor');
     const epoch=exactDigest(intent.evaluation_epoch_digest,'history_evaluation_epoch');
+    const epochSeq=Number(intent.evaluation_epoch_seq);
+    if(!Number.isSafeInteger(epochSeq)||epochSeq<1)throw new Error('rsi_experiment_generation_history_epoch_seq_invalid');
     const artifactReceipt=exactDigest(intent.phase28_artifact_receipt_digest,'history_artifact_receipt');
     const provenance=exactDigest(intent.provenance_root_digest,'history_provenance_root');
     const hiddenHoldout=exactDigest(intent.hidden_holdout_root_digest,'history_hidden_holdout');
@@ -381,13 +393,26 @@ function deriveEvaluationGenerationHistory(rows){
     if(!MATERIALIZED_OUTCOME_STATES.includes(receipt.state))throw new Error('rsi_experiment_generation_history_outcome_state_invalid');
 
     if(!current||current.evaluator_generation_digest!==generation){
-      if(seenGenerations.has(generation))throw new Error('rsi_experiment_generation_history_rollback_detected');
-      seenGenerations.add(generation);
+      if(seenGenerationDigests.has(generation)||seenGenerationSeqs.has(generationSeq))throw new Error('rsi_experiment_generation_history_rollback_detected');
+      if(current){
+        if(generationSeq!==current.evaluator_generation_seq+1)throw new Error('rsi_experiment_generation_history_generation_sequence_gap');
+        if(epochSeq!==1)throw new Error('rsi_experiment_generation_history_new_generation_epoch_must_start_at_one');
+        if(evaluatorRoot===current.evaluator_root_digest)throw new Error('rsi_experiment_generation_history_new_generation_root_required');
+        if(generationAnchor===current.evaluator_generation_history_anchor_digest)throw new Error('rsi_experiment_generation_history_new_generation_anchor_required');
+      }else{
+        if(generationSeq!==1||epochSeq!==1)throw new Error('rsi_experiment_generation_history_genesis_sequence_invalid');
+      }
+      seenGenerationDigests.add(generation);
+      seenGenerationSeqs.add(generationSeq);
       current={
-        generation_sequence:history.length+1,
+        generation_sequence:generationSeq,
+        evaluator_generation_seq:generationSeq,
         evaluator_generation_digest:generation,
+        evaluator_generation_history_anchor_digest:generationAnchor,
         evaluator_root_digest:evaluatorRoot,
-        evaluation_epoch_digests:[],
+        evaluation_epoch_digests:[epoch],
+        evaluation_epoch_sequences:[epochSeq],
+        latest_evaluation_epoch_seq:epochSeq,
         artifact_receipt_digests:[],
         provenance_root_digests:[],
         protected_suite_root_sets:[],
@@ -403,11 +428,23 @@ function deriveEvaluationGenerationHistory(rows){
         negative_outcomes_retained:true,
       };
       history.push(current);
-    }else if(current.evaluator_root_digest!==evaluatorRoot){
-      throw new Error('rsi_experiment_generation_history_evaluator_root_drift');
+    }else{
+      if(current.evaluator_generation_seq!==generationSeq)throw new Error('rsi_experiment_generation_history_generation_seq_drift');
+      if(current.evaluator_root_digest!==evaluatorRoot)throw new Error('rsi_experiment_generation_history_evaluator_root_drift');
+      if(current.evaluator_generation_history_anchor_digest!==generationAnchor)throw new Error('rsi_experiment_generation_history_anchor_drift');
+      const latestSeq=current.latest_evaluation_epoch_seq;
+      const existingIndex=current.evaluation_epoch_sequences.indexOf(epochSeq);
+      if(existingIndex>=0){
+        if(current.evaluation_epoch_digests[existingIndex]!==epoch)throw new Error('rsi_experiment_generation_history_epoch_identity_drift');
+      }else{
+        if(epochSeq!==latestSeq+1)throw new Error('rsi_experiment_generation_history_epoch_sequence_gap');
+        if(current.evaluation_epoch_digests.includes(epoch))throw new Error('rsi_experiment_generation_history_new_epoch_digest_required');
+        current.evaluation_epoch_sequences.push(epochSeq);
+        current.evaluation_epoch_digests.push(epoch);
+        current.latest_evaluation_epoch_seq=epochSeq;
+      }
     }
 
-    if(!current.evaluation_epoch_digests.includes(epoch))current.evaluation_epoch_digests.push(epoch);
     if(!current.artifact_receipt_digests.includes(artifactReceipt))current.artifact_receipt_digests.push(artifactReceipt);
     if(!current.provenance_root_digests.includes(provenance))current.provenance_root_digests.push(provenance);
     const suiteSet=digest({hidden_holdout_root_digest:hiddenHoldout,safety_suite_root_digest:safetySuite,security_suite_root_digest:securitySuite});
@@ -423,6 +460,7 @@ function deriveEvaluationGenerationHistory(rows){
   const frozen=history.map(entry=>Object.freeze({
     ...entry,
     evaluation_epoch_digests:Object.freeze([...entry.evaluation_epoch_digests]),
+    evaluation_epoch_sequences:Object.freeze([...entry.evaluation_epoch_sequences]),
     artifact_receipt_digests:Object.freeze([...entry.artifact_receipt_digests]),
     provenance_root_digests:Object.freeze([...entry.provenance_root_digests]),
     protected_suite_root_sets:Object.freeze([...entry.protected_suite_root_sets]),
@@ -457,6 +495,9 @@ function ledgerState(sourceSha,rows){
     evaluation_generation_count:generationHistory.generation_count,
     materialized_candidate_outcome_count:generationHistory.materialized_outcome_count,
     generation_history_append_only:true,
+    externally_owned_generation_sequence_required:true,
+    externally_owned_epoch_sequence_required:true,
+    generation_history_anchor_required:true,
     evaluator_generation_rollback_allowed:false,
     evaluator_dependent_verdict_reuse_across_generation_allowed:false,
     all_materialized_outcome_classes_retained:true,
@@ -484,6 +525,9 @@ export class RsiCandidateExperimentLedger{
         ||p.rejected_evidence_retained!==true||p.inconclusive_evidence_retained!==true
         ||(p.evaluation_generation_history!==undefined&&(
           p.generation_history_append_only!==true
+          ||p.externally_owned_generation_sequence_required!==true
+          ||p.externally_owned_epoch_sequence_required!==true
+          ||p.generation_history_anchor_required!==true
           ||p.evaluator_generation_rollback_allowed!==false
           ||p.evaluator_dependent_verdict_reuse_across_generation_allowed!==false
           ||p.all_materialized_outcome_classes_retained!==true
@@ -559,6 +603,10 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     safety_suite_binding_required:true,
     security_suite_binding_required:true,
     evaluation_generation_history_append_only:true,
+    exact_external_generation_sequence_required:true,
+    exact_external_epoch_sequence_required:true,
+    generation_history_anchor_binding_required:true,
+    generation_and_epoch_gaps_forbidden:true,
     evaluator_generation_rollback_allowed:false,
     evaluator_dependent_verdict_reuse_across_generation_allowed:false,
     all_materialized_outcome_classes_retained:true,
