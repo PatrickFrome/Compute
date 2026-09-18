@@ -146,6 +146,29 @@ export function verifyRsiQdBoundedCanaryReview(row,{comparison_pairs}={}){
   return canonical;
 }
 
+function verifyStoredReview(row){
+  if(!plain(row)||row.schema!==RSI_QD_BOUNDED_CANARY_REVIEW_SCHEMA||row.version!==1)throw new Error('rsi_qd_canary_review_invalid');
+  zero(row,'review');sha(row.source_sha,'review_source');id(row.review_id,'review_id');
+  if(row.minimum_comparisons!==MIN_COMPARISONS||row.minimum_contexts!==MIN_CONTEXTS||row.max_canary_decisions!==MAX_CANARY_DECISIONS
+    ||row.canary_surface!=='READ_ONLY_DECISION_SUPPORT'||row.incumbent_remains_default!==true||row.incumbent_is_mandatory_fallback!==true
+    ||row.challenger_is_advisory_only!==true||row.cohort_is_externally_fixed!==true
+    ||row.candidate_can_choose_cohort!==false||row.candidate_can_choose_budget!==false||row.candidate_can_activate_canary!==false
+    ||row.candidate_can_clear_rollback!==false||row.identity_stable!==true||row.clean_shadow_evidence_required!==true
+    ||row.ready_for_external_bounded_canary_review!==true||row.external_canary_controller_required!==true
+    ||row.canary_token!==null||row.canary_activation_authorized!==false||row.live_profile_activation_authorized!==false
+    ||row.profile_replacement_authorized!==false||row.external_review_owner!==true||row.authored_by_candidate!==false
+    ||!Array.isArray(row.comparison_digests)||row.comparison_digests.length<MIN_COMPARISONS
+    ||!Array.isArray(row.context_digests)||row.context_digests.length<MIN_CONTEXTS
+    ||row.comparison_count!==row.comparison_digests.length||row.context_count!==row.context_digests.length
+    ||!Number.isSafeInteger(row.divergence_count)||row.divergence_count<1)throw new Error('rsi_qd_canary_review_policy_invalid');
+  for(const [v,l] of [[row.qualification_digest,'qualification'],[row.champion_profile_digest,'champion'],[row.challenger_profile_digest,'challenger'],[row.comparator_root_digest,'comparator'],[row.cohort_digest,'cohort']])dg(v,l);
+  for(const value of row.comparison_digests)dg(value,'comparison');
+  for(const value of row.context_digests)dg(value,'context');
+  if(new Set(row.comparison_digests).size!==row.comparison_digests.length||new Set(row.context_digests).size!==row.context_digests.length)throw new Error('rsi_qd_canary_review_duplicate_evidence');
+  const rc=structuredClone(row);delete rc.review_digest;if(digest(rc)!==dg(row.review_digest,'review'))throw new Error('rsi_qd_canary_review_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
 function state(sourceSha,rows){
   const core={schema:RSI_QD_BOUNDED_CANARY_REVIEW_LEDGER_SCHEMA,version:1,source_sha:sourceSha,rows,row_count:rows.length,
     append_only:true,active_canary_digest:null,ledger_can_activate_canary:false,ledger_can_clear_rollback:false,
@@ -167,22 +190,19 @@ export class RsiQdBoundedCanaryReviewLedger{
         ||!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_qd_canary_ledger_state_invalid');
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==dg(p.state_digest,'ledger'))throw new Error('rsi_qd_canary_ledger_digest_mismatch');
       const ids=new Set();
-      for(const row of p.rows){zero(row,'stored_review');if(row.schema!==RSI_QD_BOUNDED_CANARY_REVIEW_SCHEMA||row.source_sha!==this.#sourceSha)throw new Error('rsi_qd_canary_ledger_row_invalid');if(ids.has(row.review_id))throw new Error('rsi_qd_canary_ledger_duplicate');ids.add(row.review_id);const rc=structuredClone(row);delete rc.review_digest;if(digest(rc)!==dg(row.review_digest,'review'))throw new Error('rsi_qd_canary_ledger_row_digest_mismatch')}
-      this.#rows=p.rows;
+      const checkedRows=p.rows.map((row)=>{const checked=verifyStoredReview(row);if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_qd_canary_ledger_row_invalid');if(ids.has(checked.review_id))throw new Error('rsi_qd_canary_ledger_duplicate');ids.add(checked.review_id);return checked});
+      this.#rows=checkedRows;
     }catch(e){if(e?.code!=='ENOENT')throw e}
     this.#initialized=true;return this.snapshot();
   }
   async #persist(){const s=state(this.#sourceSha,this.#rows);const t=`${this.#path}.tmp`;const h=await fs.open(t,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync()}finally{await h.close()}await fs.rename(t,this.#path)}
   async add(review){
     if(!this.#initialized)throw new Error('rsi_qd_canary_ledger_not_initialized');
-    if(!plain(review)||review.schema!==RSI_QD_BOUNDED_CANARY_REVIEW_SCHEMA||review.version!==1)throw new Error('rsi_qd_canary_review_invalid');
-    zero(review,'review');if(review.source_sha!==this.#sourceSha)throw new Error('rsi_qd_canary_review_source_mismatch');
-    const rc=structuredClone(review);delete rc.review_digest;if(digest(rc)!==dg(review.review_digest,'review'))throw new Error('rsi_qd_canary_review_digest_mismatch');
-    if(review.ready_for_external_bounded_canary_review!==true||review.canary_activation_authorized!==false||review.canary_token!==null)throw new Error('rsi_qd_canary_review_policy_invalid');
-    const existing=this.#rows.find(x=>x.review_id===review.review_id);
-    if(existing){if(existing.review_digest!==review.review_digest)throw new Error('rsi_qd_canary_review_identity_conflict');return Object.freeze({state:'IDEMPOTENT',review_digest:review.review_digest,authority_effect:false})}
+    const checked=verifyStoredReview(review);if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_qd_canary_review_source_mismatch');
+    const existing=this.#rows.find(x=>x.review_id===checked.review_id);
+    if(existing){if(existing.review_digest!==checked.review_digest)throw new Error('rsi_qd_canary_review_identity_conflict');return Object.freeze({state:'IDEMPOTENT',review_digest:checked.review_digest,authority_effect:false})}
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_qd_canary_ledger_capacity_exceeded');
-    this.#rows.push(structuredClone(review));await this.#persist();return Object.freeze({state:'REVIEW_RECORDED',review_digest:review.review_digest,authority_effect:false});
+    this.#rows.push(structuredClone(checked));await this.#persist();return Object.freeze({state:'REVIEW_RECORDED',review_digest:checked.review_digest,authority_effect:false});
   }
   snapshot(){const s=state(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,append_only:true,active_canary_digest:null,ledger_can_activate_canary:false,authority_effect:false})}
 }
