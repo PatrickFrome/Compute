@@ -152,6 +152,12 @@ import {
   verifyRsiPostAdoptionCausalMeasurement,
   rsiPostAdoptionCausalMeasurementTrustRootSnapshot,
 } from './rsi-post-adoption-causal-measurement.mjs';
+import {
+  createRsiPostAdoptionExperienceAdmission,
+  verifyRsiPostAdoptionExperienceAdmission,
+  applyRsiPostAdoptionExperienceAdmission,
+  rsiPostAdoptionExperienceAdmissionTrustRootSnapshot,
+} from './rsi-post-adoption-experience-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -177,6 +183,7 @@ const MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS = 128;
 const MAX_SELF_UPDATE_POST_EFFECT_READBACKS = 256;
 const MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS = 256;
 const MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS = 256;
+const MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -266,6 +273,7 @@ function trustRoots() {
     self_update_final_apply_readback: rsiSelfUpdateFinalApplyReadbackTrustRootSnapshot(),
     self_update_successor_verification: rsiSelfUpdateSuccessorVerificationTrustRootSnapshot(),
     post_adoption_causal_measurement: rsiPostAdoptionCausalMeasurementTrustRootSnapshot(),
+    post_adoption_experience_admission: rsiPostAdoptionExperienceAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -343,6 +351,8 @@ export class RsiRuntimeService {
   #lastSelfUpdateSuccessorVerificationDigest = null;
   #postAdoptionCausalMeasurementDigests = new Set();
   #lastPostAdoptionCausalMeasurementDigest = null;
+  #postAdoptionExperienceAdmissionDigests = new Set();
+  #lastPostAdoptionExperienceAdmissionDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -543,6 +553,18 @@ export class RsiRuntimeService {
           }
           this.#postAdoptionCausalMeasurementDigests.add(measurement.measurement_digest);
           this.#lastPostAdoptionCausalMeasurementDigest = measurement.measurement_digest;
+        }
+        if (row?.type === 'RSI_POST_ADOPTION_EXPERIENCE_ADMISSION_RECORDED' && row?.payload?.post_adoption_experience_admission) {
+          const admission = verifyRsiPostAdoptionExperienceAdmission(row.payload.post_adoption_experience_admission);
+          if (this.#postAdoptionExperienceAdmissionDigests.size >= MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS) {
+            throw new Error('rsi_runtime_post_adoption_experience_replay_capacity_exhausted');
+          }
+          this.#experienceGraphSnapshot = applyRsiPostAdoptionExperienceAdmission({
+            previous_snapshot: this.#experienceGraphSnapshot,
+            admission,
+          });
+          this.#postAdoptionExperienceAdmissionDigests.add(admission.admission_digest);
+          this.#lastPostAdoptionExperienceAdmissionDigest = admission.admission_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -2161,6 +2183,68 @@ export class RsiRuntimeService {
     return Object.freeze({ measurement, already_recorded: false, authority_effect: false });
   }
 
+  async recordPostAdoptionExperienceAdmission({
+    post_adoption_measurement,
+    episode_promotion_review,
+    model_family = 'METAENGINE_BROWSER',
+    evidence_refs,
+  } = {}) {
+    this.#assertRunning();
+    const measurement = verifyRsiPostAdoptionCausalMeasurement(post_adoption_measurement);
+    if (!this.#postAdoptionCausalMeasurementDigests.has(measurement.measurement_digest)) {
+      throw new Error('rsi_runtime_post_adoption_measurement_not_persisted');
+    }
+    const review = verifyRsiEpisodePromotionReview(episode_promotion_review);
+    if (!this.#episodePromotionReviewDigests.has(review.review_digest)) {
+      throw new Error('rsi_runtime_episode_promotion_review_not_persisted');
+    }
+    const admission = createRsiPostAdoptionExperienceAdmission({
+      post_adoption_measurement: measurement,
+      episode_promotion_review: review,
+      model_family,
+      evidence_refs,
+      external_graph_writer: true,
+      authored_by_candidate: false,
+    });
+    verifyRsiPostAdoptionExperienceAdmission(admission);
+    if (this.#postAdoptionExperienceAdmissionDigests.has(admission.admission_digest)) {
+      return Object.freeze({
+        admission,
+        graph_snapshot_digest: this.#experienceGraphSnapshot?.snapshot_digest || null,
+        already_recorded: true,
+        authority_effect: false,
+      });
+    }
+    if (this.#postAdoptionExperienceAdmissionDigests.size >= MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS) {
+      throw new Error('rsi_runtime_post_adoption_experience_capacity_exhausted');
+    }
+    const nextGraph = applyRsiPostAdoptionExperienceAdmission({
+      previous_snapshot: this.#experienceGraphSnapshot,
+      admission,
+    });
+    await this.#ledger.append('RSI_POST_ADOPTION_EXPERIENCE_ADMISSION_RECORDED', {
+      post_adoption_experience_admission: admission,
+      experience_case_digest: admission.experience_case.case_digest,
+      predecessor_graph_snapshot_digest: this.#experienceGraphSnapshot?.snapshot_digest || null,
+      next_graph_snapshot_digest: nextGraph.snapshot_digest,
+      candidate_can_write_graph: false,
+      candidate_can_edit_case: false,
+      skill_library_write_performed: false,
+      next_episode_created: false,
+      graph_write_authorizes_execution: false,
+      authority_effect: false,
+    });
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#postAdoptionExperienceAdmissionDigests.add(admission.admission_digest);
+    this.#lastPostAdoptionExperienceAdmissionDigest = admission.admission_digest;
+    return Object.freeze({
+      admission,
+      graph_snapshot_digest: nextGraph.snapshot_digest,
+      already_recorded: false,
+      authority_effect: false,
+    });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2533,6 +2617,22 @@ export class RsiRuntimeService {
         experience_graph_write_performed_here: false,
         skill_library_write_performed_here: false,
         next_episode_created_here: false,
+        authority_effect: false,
+      }),
+      post_adoption_experience_admission: Object.freeze({
+        count: this.#postAdoptionExperienceAdmissionDigests.size,
+        capacity: MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS,
+        last_digest: this.#lastPostAdoptionExperienceAdmissionDigest,
+        existing_experience_graph_only: true,
+        append_only_graph_admission: true,
+        only_pareto_or_verified_regression_measurements: true,
+        exact_candidate_id_from_promotion_review_required: true,
+        candidate_can_write_graph: false,
+        candidate_can_edit_case: false,
+        contextual_measurement_not_global_truth: true,
+        skill_library_write_performed_here: false,
+        next_episode_created_here: false,
+        graph_write_authorizes_execution: false,
         authority_effect: false,
       }),
       devos_materialization: Object.freeze({
