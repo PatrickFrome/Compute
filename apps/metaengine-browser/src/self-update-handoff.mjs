@@ -8,7 +8,10 @@ import {
   readSelfUpdateTransaction,
   transitionSelfUpdateTransaction,
 } from './self-update-transaction-journal.mjs';
-import { recoverAmbiguousInstalledSuccessor } from './self-update-ambiguous-successor-recovery.mjs';
+import {
+  recoverAmbiguousInstalledSuccessor,
+  recoverQuarantinedInstalledSuccessor,
+} from './self-update-ambiguous-successor-recovery.mjs';
 import { resolveExactTrustedMetaengineDevRelease } from './trusted-dev-release-resolver.mjs';
 
 const require = createRequire(import.meta.url);
@@ -260,10 +263,33 @@ export async function inspectSelfUpdateStartup(app, {
     });
   }
   if (journal?.state === 'QUARANTINED') {
+    const recovery = await recoverQuarantinedInstalledSuccessor({
+      app,
+      resolveTrustedInstalledRelease,
+      executablePath,
+      ...(typeof hashExecutable === 'function' ? { hashExecutable } : {}),
+      clock,
+    });
+    if (recovery.state === 'SUPERSEDED') {
+      return {
+        schema: 'metaengine.self-update.startup-inspection.v1',
+        state: 'SUPERSEDED',
+        transaction_state: 'SUPERSEDED',
+        current_version: String(app.getVersion() || ''),
+        target_version: journal.target_version || null,
+        reason: 'trusted_newer_installed_successor_superseded_quarantine',
+        successor_relationship: recovery.relationship || null,
+        prior_quarantine_reason: recovery.prior_quarantine_reason || null,
+        installed_executable_sha256: recovery.installed_executable_sha256 || null,
+        physical_installer_launch_count: 0,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      };
+    }
     return startupHold({
       app,
       journal,
-      reason: journal.evidence?.quarantine_reason || journal.evidence?.reason || 'durable_transaction_hold',
+      reason: `quarantined_transaction_hold:${String(recovery.reason || journal.evidence?.quarantine_reason || journal.evidence?.reason || 'successor_unproven').slice(0, 180)}`,
     });
   }
 
