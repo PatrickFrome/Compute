@@ -1274,7 +1274,7 @@ test('Phase29 evaluator generations advance monotonically and cannot roll back o
   });
   await assert.rejects(
     ()=>ledger.add({intent:drift.intent,receipt:drift.receipt}),
-    /generation_history_generation_identity_drift/,
+    /evaluator_root_drift/,
   );
   assert.equal(ledger.snapshot().row_count,2);
 });
@@ -1337,7 +1337,7 @@ test('Phase29 outcome history rejects sequence gaps and generation-anchor drift'
     evaluatorRoot:g1.intent.evaluator_root_digest,
     epochDigest:epoch2.intent.evaluation_epoch_digest,
   });
-  await assert.rejects(()=>ledger.add({intent:anchorDrift.intent,receipt:anchorDrift.receipt}),/generation_identity_drift/);
+  await assert.rejects(()=>ledger.add({intent:anchorDrift.intent,receipt:anchorDrift.receipt}),/anchor_drift/);
 
   const snap=ledger.snapshot();
   assert.equal(snap.evaluation_generation_count,1);
