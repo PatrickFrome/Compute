@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { BROWSER_BRAIN_WORKING_MEMORY_SCHEMA } from '../src/browser-brain-working-memory.mjs';
 import { RSI_HARD_INVARIANTS } from '../src/rsi-shadow-core.mjs';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 
@@ -96,6 +97,52 @@ test('runtime fences candidates to the exact installed source identity', async (
       mutation_surface: 'RSI_IMPROVER',
       hypothesis: 'wrong parent must be rejected',
     }), /parent_not_bound_source/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('runtime sidecar coalesces repeated Brain state before fsync while preserving critical changes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-observation-'));
+  try {
+    let now = 1_800_000_000_000;
+    const runtime = new RsiRuntimeService({
+      source_sha: 'a'.repeat(40),
+      ledgerPath: path.join(root, 'rsi.jsonl'),
+      clock: () => now,
+    });
+    await runtime.start();
+
+    const brain = (overrides = {}) => ({
+      schema: BROWSER_BRAIN_WORKING_MEMORY_SCHEMA,
+      cells: [{ status: 'READY', last_command: { status: 'COMPLETED', effect_outcome: 'CONFIRMED' } }],
+      global: { process_revision: 1, cognitive_sequence: 1, dropped_events: 0 },
+      execution_authority: false,
+      authority_effect: false,
+      raw_dom_stored: false,
+      page_text_stored: false,
+      input_values_stored: false,
+      ...overrides,
+    });
+
+    await runtime.observeBrainSnapshot(brain());
+    assert.equal(runtime.snapshot().ledger.event_count, 2);
+    assert.equal(runtime.snapshot().experience_gate.persisted_count, 1);
+
+    now += 10;
+    await runtime.observeBrainSnapshot(brain({ global: { process_revision: 1, cognitive_sequence: 2, dropped_events: 0 } }));
+    assert.equal(runtime.snapshot().ledger.event_count, 2);
+    assert.equal(runtime.snapshot().experience_gate.deduplicated_count, 1);
+
+    now += 10;
+    await runtime.observeBrainSnapshot(brain({
+      cells: [{ status: 'READY', last_command: { status: 'AMBIGUOUS', effect_outcome: 'AMBIGUOUS' } }],
+      global: { process_revision: 1, cognitive_sequence: 3, dropped_events: 0 },
+    }));
+    assert.equal(runtime.snapshot().ledger.event_count, 3);
+    assert.equal(runtime.snapshot().experience_gate.persisted_count, 2);
+    assert.equal(runtime.snapshot().experience_gate.authority_effect, false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
