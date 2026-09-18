@@ -7,6 +7,10 @@ import {
   createRsiSkillActivationView,
   verifyRsiSkillActivationView,
 } from './rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillCompositionPlan,
+  verifyRsiSkillCompositionPlan,
+} from './rsi-verified-skill-library.mjs';
 
 export const RSI_RUNTIME_SKILL_ADVISORY_SCHEMA='metaengine.rsi.runtime-skill-advisory.v1';
 
@@ -53,6 +57,26 @@ export function createRsiRuntimeSkillAdvisory({
 
   const libraryEntry=admission.library.entries.find((row)=>row.skill_digest===admission.skill_digest);
   if(!libraryEntry)throw new Error('rsi_runtime_skill_library_entry_missing');
+  const compositionPlan=createRsiSkillCompositionPlan({
+    plan_id:`runtime.skill.${admission.skill_id}.${admission.skill_version}`,
+    library:admission.library,
+    input_schema_digest:libraryEntry.input_schema_digest,
+    output_schema_digest:libraryEntry.output_schema_digest,
+    nodes:[{
+      node_id:'skill',
+      skill_id:admission.skill_id,
+      skill_version:admission.skill_version,
+      skill_digest:admission.skill_digest,
+      max_invocations:1,
+    }],
+    edges:[],
+    max_total_context_tokens:libraryEntry.max_context_tokens,
+    max_total_output_tokens:libraryEntry.max_output_tokens,
+    external_planner:true,
+    authored_by_candidate:false,
+  });
+  verifyRsiSkillCompositionPlan(compositionPlan,admission.library);
+  zeroAuthority(compositionPlan,'composition_plan');
   const core={
     schema:RSI_RUNTIME_SKILL_ADVISORY_SCHEMA,
     version:1,
@@ -64,6 +88,9 @@ export function createRsiRuntimeSkillAdvisory({
     governance_id:admission.governance_id,
     governance_digest:admission.governance_digest,
     activation_digest:activation.activation_digest,
+    composition_plan_id:compositionPlan.plan_id,
+    composition_plan_digest:compositionPlan.plan_digest,
+    composition_plan:compositionPlan,
     skill_id:admission.skill_id,
     skill_version:admission.skill_version,
     skill_digest:admission.skill_digest,
