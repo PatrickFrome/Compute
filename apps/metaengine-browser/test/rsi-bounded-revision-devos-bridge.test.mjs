@@ -60,6 +60,26 @@ import {
   verifyRsiKnowledgeConsolidationAdmission,
   rsiSlowKnowledgeConsolidationTrustRootSnapshot,
 } from '../src/rsi-slow-knowledge-consolidation.mjs';
+import {
+  RsiConsumerRevalidationArchive,
+  createRsiValidatedKnowledgeConsumerHandoff,
+  verifyRsiValidatedKnowledgeConsumerHandoff,
+  createRsiConsumerLocalRevalidationReceipt,
+  verifyRsiConsumerLocalRevalidationReceipt,
+  rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot,
+} from '../src/rsi-validated-knowledge-consumer-handoff.mjs';
+import {
+  createRsiConsolidatedKnowledgeSkillReview,
+  verifyRsiConsolidatedKnowledgeSkillReview,
+  createRsiConsolidatedKnowledgeSkillEvidenceReview,
+  verifyRsiConsolidatedKnowledgeSkillEvidenceReview,
+  rsiConsolidatedKnowledgeSkillReviewTrustRootSnapshot,
+} from '../src/rsi-consolidated-knowledge-skill-review.mjs';
+import {
+  createRsiSkillCapsule,
+  createRsiSkillEvidence,
+  createRsiVerifiedSkillLibrary,
+} from '../src/rsi-verified-skill-library.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
