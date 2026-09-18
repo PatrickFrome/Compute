@@ -1966,14 +1966,24 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
   assert.equal(proposal.knowledge_class,'REUSABLE_RECIPE_CANDIDATE');
   assert.equal(proposal.source_entry_count,2);
   assert.equal(proposal.source_candidate_count,2);
+  assert.equal(proposal.same_evaluator_root_required,true);
+  assert.equal(proposal.evaluator_root_digest,rows[0].entry.evaluator_root_digest);
   assert.equal(proposal.same_evaluator_generation_required,true);
   assert.equal(proposal.same_evaluator_generation_sequence_required,true);
   assert.equal(proposal.same_generation_history_anchor_required,true);
   assert.equal(proposal.same_evaluation_epoch_required,true);
   assert.equal(proposal.same_evaluation_epoch_sequence_required,true);
   assert.equal(proposal.same_evaluation_contract_required,true);
+  assert.equal(proposal.cross_contract_consolidation_allowed,false);
+  assert.equal(proposal.cross_generation_consolidation_allowed,false);
+  assert.equal(proposal.cross_generation_revalidation_required_before_new_proposal,true);
   assert.match(proposal.evaluation_contract_digest,/^sha256:/);
   assert.equal(proposal.source_evidence_preserved_by_digest,true);
+  assert.equal(proposal.source_provenance_roots_preserved,true);
+  assert.equal(proposal.source_external_acceptance_evidence_preserved,true);
+  assert.equal(proposal.source_counterevidence_preserved,true);
+  assert.equal(proposal.source_failure_attribution_preserved,true);
+  assert.equal(proposal.slow_loop_distinct_from_fast_candidate_loop,true);
   assert.equal(proposal.raw_source_trajectory_copied,false);
   assert.equal(proposal.raw_hidden_holdout_copied,false);
   assert.equal(proposal.proposal_can_write_skill_library,false);
@@ -2020,9 +2030,21 @@ test('Phase31 reusable recipe requires strict held-out transfer improvement plus
   assert.equal(validation.eligible_for_advisory_knowledge_archive,true);
   assert.equal(validation.strict_transfer_improvement,true);
   assert.equal(validation.candidate_can_choose_holdout,false);
+  assert.equal(validation.candidate_can_view_hidden_holdout,false);
+  assert.equal(validation.candidate_can_choose_task_family,false);
+  assert.equal(validation.candidate_can_choose_transfer_harness,false);
+  assert.equal(validation.candidate_can_choose_acceptance_policy,false);
   assert.equal(validation.candidate_can_choose_evaluator,false);
   assert.equal(validation.candidate_can_choose_reference,false);
+  assert.equal(validation.candidate_can_view_sealed_transfer_acceptance,false);
+  assert.equal(validation.external_reference_owner,true);
+  assert.equal(validation.external_acceptance_owner,true);
   assert.equal(validation.matched_reference_required,true);
+  assert.equal(validation.matched_reference_integrity_pass,true);
+  assert.equal(validation.sealed_transfer_acceptance_required,true);
+  assert.equal(validation.sealed_transfer_acceptance_pass,true);
+  assert.match(validation.matched_reference_plan_digest,/^sha256:/);
+  assert.match(validation.sealed_transfer_acceptance_digest,/^sha256:/);
   assert.equal(validation.transfer_evaluation_contract_bound,true);
   assert.match(validation.transfer_evaluation_contract_digest,/^sha256:/);
   assert.equal(validation.validation_can_write_skill_library,false);
@@ -2072,6 +2094,10 @@ test('Phase31 requires at least two distinct passed transfer contexts before lib
   assert.equal(verifyRsiKnowledgeConsolidationAdmission(admission,{proposal,validations:[v1,v2]}).admission_digest,admission.admission_digest);
   assert.equal(admission.state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
   assert.equal(admission.passed_transfer_context_count,2);
+  assert.equal(admission.matched_reference_quorum_satisfied,true);
+  assert.equal(admission.sealed_transfer_acceptance_quorum_satisfied,true);
+  assert.equal(admission.matched_reference_plan_digests.length,2);
+  assert.equal(admission.sealed_transfer_acceptance_digests.length,2);
   assert.equal(admission.zero_observed_negative_transfer,true);
   assert.equal(admission.evaluator_generation_seq,proposal.evaluator_generation_seq);
   assert.equal(admission.evaluation_epoch_seq,proposal.evaluation_epoch_seq);
@@ -2119,11 +2145,15 @@ test('Phase31 consolidation archive is durable-before-visible, source-revalidate
   await fs.mkdir(statePath);
   await assert.rejects(()=>archive.add({proposal,validations,admission,source_rows:rows}));
   assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().validation_attempt_count,0);
+  assert.equal(archive.snapshot().rejected_validation_count,0);
   await fs.rm(statePath,{recursive:true,force:true});
 
   assert.equal((await archive.add({proposal,validations,admission,source_rows:rows})).state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
   const snap=archive.snapshot();
   assert.equal(snap.row_count,1);
+  assert.equal(snap.validation_attempt_count,2);
+  assert.equal(snap.rejected_validation_count,0);
   assert.equal(snap.validated_count,1);
   assert.equal(snap.source_outcome_rows_not_copied,true);
   assert.equal(snap.exact_source_evaluation_contract_required,true);
@@ -2144,6 +2174,7 @@ test('Phase31 consolidation archive is durable-before-visible, source-revalidate
   const restored=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
   await restored.init();
   assert.equal(restored.snapshot().row_count,1);
+  assert.equal(restored.snapshot().validation_attempt_count,2);
   assert.equal((await restored.add({proposal,validations,admission,source_rows:rows})).state,'IDEMPOTENT');
 });
 
@@ -2152,21 +2183,44 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.phase30_generation_scoped_outcome_evidence_required,true);
   assert.equal(root.min_source_entries,2);
   assert.equal(root.source_candidate_diversity_required,true);
+  assert.equal(root.same_evaluator_root_required,true);
   assert.equal(root.same_evaluator_generation_required,true);
   assert.equal(root.same_evaluator_generation_sequence_required,true);
   assert.equal(root.same_generation_history_anchor_required,true);
   assert.equal(root.same_evaluation_epoch_required,true);
   assert.equal(root.same_evaluation_epoch_sequence_required,true);
   assert.equal(root.same_evaluation_contract_required,true);
+  assert.equal(root.cross_contract_consolidation_allowed,false);
+  assert.equal(root.cross_generation_consolidation_allowed,false);
+  assert.equal(root.cross_generation_revalidation_required_before_new_proposal,true);
   assert.equal(root.mixed_learning_kind_forbidden,true);
   assert.equal(root.source_evidence_preserved_by_digest,true);
+  assert.equal(root.source_provenance_roots_preserved,true);
+  assert.equal(root.source_external_acceptance_evidence_preserved,true);
+  assert.equal(root.source_counterevidence_preserved,true);
+  assert.equal(root.source_failure_attribution_preserved,true);
+  assert.equal(root.slow_loop_distinct_from_fast_candidate_loop,true);
   assert.equal(root.external_consolidator_required,true);
   assert.equal(root.external_transfer_validator_required,true);
+  assert.equal(root.external_holdout_owner_required,true);
+  assert.equal(root.external_reference_owner_required,true);
+  assert.equal(root.external_acceptance_owner_required,true);
   assert.equal(root.matched_reference_required,true);
+  assert.equal(root.matched_reference_integrity_required,true);
+  assert.equal(root.sealed_transfer_acceptance_required,true);
+  assert.equal(root.candidate_can_view_hidden_holdout,false);
+  assert.equal(root.candidate_can_choose_reference,false);
+  assert.equal(root.candidate_can_view_sealed_transfer_acceptance,false);
   assert.equal(root.transfer_evaluation_contract_binding_required,true);
   assert.equal(root.min_distinct_passed_transfer_contexts,2);
   assert.equal(root.distinct_heldout_task_sets_required,true);
   assert.equal(root.distinct_task_families_required,true);
+  assert.equal(root.distinct_transfer_evaluation_contracts_required,true);
+  assert.equal(root.distinct_matched_reference_plans_required,true);
+  assert.equal(root.distinct_sealed_transfer_acceptance_required,true);
+  assert.equal(root.validation_attempt_history_append_only,true);
+  assert.equal(root.rejected_transfer_evidence_retained,true);
+  assert.equal(root.validation_attempts_share_same_archive,true);
   assert.equal(root.zero_observed_negative_transfer_required,true);
   assert.equal(root.heldout_source_context_exclusion_required,true);
   assert.equal(root.common_non_regression_floor_required,true);
@@ -2200,6 +2254,120 @@ test('Phase31 refuses consolidation across different fixed Phase30 evaluation co
   );
 });
 
+
+
+test('Phase31 transfer assurance requires external matched reference and sealed acceptance evidence',()=>{
+  const rows=phase31SourceRows('phase31-assurance');
+  const proposal=phase31Proposal(rows,'phase31-assurance');
+
+  assert.throws(()=>phase31Validation(proposal,'phase31-assurance-owner',{
+    external_reference_owner:false,
+  }),/external_transfer_validation_required/);
+
+  const badReference=phase31Validation(proposal,'phase31-assurance-reference',{
+    matched_reference_integrity_pass:false,
+  });
+  assert.equal(badReference.state,'KNOWLEDGE_TRANSFER_REJECTED');
+  assert.ok(badReference.blockers.includes('MATCHED_REFERENCE_INTEGRITY_FAILURE'));
+
+  const badAcceptance=phase31Validation(proposal,'phase31-assurance-acceptance',{
+    sealed_transfer_acceptance_pass:false,
+  });
+  assert.equal(badAcceptance.state,'KNOWLEDGE_TRANSFER_REJECTED');
+  assert.ok(badAcceptance.blockers.includes('SEALED_TRANSFER_ACCEPTANCE_FAILURE'));
+});
+
+test('Phase31 admission rejects reused matched-reference or sealed-acceptance evidence across transfer contexts',()=>{
+  const rows=phase31SourceRows('phase31-evidence-reuse');
+  const proposal=phase31Proposal(rows,'phase31-evidence-reuse');
+  const v1=phase31Validation(proposal,'phase31-evidence-reuse-a');
+  const v2=phase31Validation(proposal,'phase31-evidence-reuse-b',{
+    matched_reference_plan_digest:v1.matched_reference_plan_digest,
+  });
+  assert.throws(()=>createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.reference-reuse',
+    proposal,validations:[v1,v2],
+    external_admission_owner:true,authored_by_candidate:false,
+  }),/transfer_evidence_reuse_forbidden/);
+
+  const v3=phase31Validation(proposal,'phase31-evidence-reuse-c');
+  const v4=phase31Validation(proposal,'phase31-evidence-reuse-d',{
+    sealed_transfer_acceptance_digest:v3.sealed_transfer_acceptance_digest,
+  });
+  assert.throws(()=>createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.acceptance-reuse',
+    proposal,validations:[v3,v4],
+    external_admission_owner:true,authored_by_candidate:false,
+  }),/transfer_evidence_reuse_forbidden/);
+});
+
+test('Phase31 rejected transfer validation remains append-only counterevidence after later successful transfer quorum',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase31-rejected-transfer-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'knowledge.json');
+  const rows=phase31SourceRows('phase31-rejected-transfer');
+  const proposal=phase31Proposal(rows,'phase31-rejected-transfer');
+  const resolver=async({source_entry_digests})=>{
+    const wanted=new Set(source_entry_digests);
+    return rows.filter(r=>wanted.has(r.entry.entry_digest));
+  };
+  const archive=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  const rejected=phase31Validation(proposal,'phase31-rejected-bad',{safety_non_regression:false});
+  assert.equal(rejected.state,'KNOWLEDGE_TRANSFER_REJECTED');
+  const first=await archive.recordValidationAttempt({proposal,validation:rejected,source_rows:rows});
+  assert.equal(first.state,'VALIDATION_ATTEMPT_RECORDED');
+  assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().validation_attempt_count,1);
+  assert.equal(archive.snapshot().rejected_validation_count,1);
+  assert.ok(archive.validationAttempts({rejectedOnly:true})[0].blockers.includes('SAFETY_REGRESSION'));
+
+  const restarted=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restarted.init();
+  assert.equal(restarted.snapshot().rejected_validation_count,1);
+
+  const v1=phase31Validation(proposal,'phase31-rejected-good-a');
+  const v2=phase31Validation(proposal,'phase31-rejected-good-b');
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.rejected-memory',
+    proposal,validations:[v1,v2],
+    external_admission_owner:true,authored_by_candidate:false,
+  });
+  await restarted.add({proposal,validations:[v1,v2],admission,source_rows:rows});
+  assert.equal(restarted.snapshot().row_count,1);
+  assert.equal(restarted.snapshot().validation_attempt_count,3);
+  assert.equal(restarted.snapshot().rejected_validation_count,1);
+
+  const finalRestart=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await finalRestart.init();
+  assert.equal(finalRestart.snapshot().row_count,1);
+  assert.equal(finalRestart.snapshot().validation_attempt_count,3);
+  assert.equal(finalRestart.snapshot().rejected_validation_count,1);
+});
+
+test('Phase31 transfer-attempt persistence failure creates no phantom negative evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase31-transfer-persist-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'knowledge.json');
+  const rows=phase31SourceRows('phase31-transfer-persist');
+  const proposal=phase31Proposal(rows,'phase31-transfer-persist');
+  const rejected=phase31Validation(proposal,'phase31-transfer-persist-bad',{security_non_regression:false});
+  const archive=new RsiKnowledgeConsolidationArchive({
+    statePath,source_sha:SOURCE,evidenceResolver:async()=>rows,
+  });
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.recordValidationAttempt({proposal,validation:rejected,source_rows:rows}));
+  assert.equal(archive.snapshot().validation_attempt_count,0);
+  assert.equal(archive.snapshot().rejected_validation_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  await archive.recordValidationAttempt({proposal,validation:rejected,source_rows:rows});
+  assert.equal(archive.snapshot().validation_attempt_count,1);
+  assert.equal(archive.snapshot().rejected_validation_count,1);
+});
 
 function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null,consumerGenerationSeq=null,consumerGenerationAnchor=null,consumerEpochSeq=null,consumerEpochDigest=null}={}){
   const rows=phase31SourceRows(`${label}-source`,{state});
