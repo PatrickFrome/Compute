@@ -16,6 +16,8 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stable(value){if(Array.isArray(value))return value.map(stable);if(!value||typeof value!=='object')return value;return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));}
+function structuralDigest(value){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;}
 
 function hypothesis(label='one',overrides={}){
   return createRsiSharedExperienceHypothesis({
@@ -196,4 +198,63 @@ test('shared experience trust root preserves evidence boundaries and zero author
   assert.equal(root.bus_can_execute_browser_effect,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.shared_experience_bus_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('self-rehashed shared experience cannot weaken hypothesis or admission policy',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-shared-experience-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const bus=new RsiSharedExperienceBus({statePath:path.join(dir,'bus.json'),source_sha:SOURCE});
+  await bus.init();
+  const h=hypothesis('policy');
+  const a=admission(h,'policy');
+
+  const badHypothesisCore={...h,candidate_can_choose_recipients:true};
+  delete badHypothesisCore.hypothesis_digest;
+  const badHypothesis={...badHypothesisCore,hypothesis_digest:structuralDigest(badHypothesisCore)};
+  await assert.rejects(()=>bus.add({hypothesis:badHypothesis,admission:a}),/hypothesis_policy_invalid/);
+
+  const badAdmissionCore={...a,eligible_for_shared_experience_bus:false,state:'SHARED_EXPERIENCE_REJECTED'};
+  delete badAdmissionCore.admission_digest;
+  const badAdmission={...badAdmissionCore,admission_digest:structuralDigest(badAdmissionCore)};
+  await assert.rejects(()=>bus.add({hypothesis:h,admission:badAdmission}),/admission_digest_mismatch/);
+  assert.equal(bus.snapshot().row_count,0);
+});
+
+test('failed durable shared-experience write creates no phantom in-memory evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-shared-experience-persist-fail-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'bus.json');
+  const bus=new RsiSharedExperienceBus({statePath,source_sha:SOURCE});
+  await bus.init();
+  const h=hypothesis('persist-fail');
+  const a=admission(h,'persist-fail');
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>bus.add({hypothesis:h,admission:a}));
+  assert.equal(bus.snapshot().row_count,0);
+  assert.equal(bus.snapshot().eligible_count,0);
+  assert.deepEqual(bus.eligibleForRecipient('CODING'),[]);
+});
+
+test('restart rejects self-rehashed persisted shared-experience policy downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-shared-experience-restart-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'bus.json');
+  const bus=new RsiSharedExperienceBus({statePath,source_sha:SOURCE});
+  await bus.init();
+  const h=hypothesis('restart');
+  const a=admission(h,'restart');
+  await bus.add({hypothesis:h,admission:a});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const badAdmissionCore={...persisted.rows[0].admission,shared_experience_can_mutate_verifier:true};
+  delete badAdmissionCore.admission_digest;
+  persisted.rows[0].admission={...badAdmissionCore,admission_digest:structuralDigest(badAdmissionCore)};
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiSharedExperienceBus({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/admission_policy_invalid/);
 });
