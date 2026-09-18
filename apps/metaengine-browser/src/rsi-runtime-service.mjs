@@ -41,6 +41,8 @@ import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integr
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
+import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
+import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -104,6 +106,8 @@ function trustRoots() {
     fixed_skeleton_mutation: rsiFixedSkeletonTrustRootSnapshot(),
     search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
+    browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
+    episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -120,6 +124,7 @@ export class RsiRuntimeService {
   #ledger;
   #experienceGate;
   #improvementFrontier;
+  #episodes;
   #archive;
   #observer;
   #verifiedArchive;
@@ -129,6 +134,10 @@ export class RsiRuntimeService {
   #lastObservationDigest = null;
   #lastObservationAt = null;
   #promotionNominationCount = 0;
+  #browserOutcomeCount = 0;
+  #browserOutcomeLearningEligibleCount = 0;
+  #browserOutcomeQuarantinedCount = 0;
+  #lastBrowserOutcomeDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -141,11 +150,25 @@ export class RsiRuntimeService {
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
     this.#verifiedArchive = new RsiVerifiedEvolutionArchive({ clock });
     this.#roots = trustRoots();
+    this.#episodes = new RsiEpisodeOrchestrator({
+      source_sha: this.#sourceSha,
+      trust_root_set_digest: digest(this.#roots),
+    });
   }
 
   async start() {
     if (this.#running) return this.snapshot();
     await this.#ledger.init();
+    let replayCursor = 0;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: replayCursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
+      }
+      replayCursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
       runtime_schema: RSI_RUNTIME_SERVICE_SCHEMA,
@@ -155,6 +178,7 @@ export class RsiRuntimeService {
       experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
       improvement_frontier_schema: RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
+      episode_orchestration_mode: 'DURABLE_EVENT_SOURCED_ZERO_AUTHORITY',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
       self_update_authority: false,
@@ -217,6 +241,32 @@ export class RsiRuntimeService {
     if (!admission) return false;
     await this.#persistObservationAdmission(admission);
     return true;
+  }
+
+  async openEpisode(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareOpen(input);
+    await this.#ledger.append('RSI_EPISODE_OPENED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  async registerEpisodeCandidate(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareCandidate(input);
+    await this.#ledger.append('RSI_EPISODE_CANDIDATE_REGISTERED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  async recordEpisodeEvidence(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareEvidence(input);
+    await this.#ledger.append('RSI_EPISODE_EVIDENCE_RECORDED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  episodeNominationReadiness(input = {}) {
+    this.#assertRunning();
+    return this.#episodes.nominationReadiness(input);
   }
 
   async proposeCandidate(input = {}) {
@@ -284,6 +334,41 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return candidate;
+  }
+
+  async ingestBrowserOutcome({ readback, attribution } = {}) {
+    this.#assertRunning();
+    const episode = createRsiBrowserOutcomeEpisode({
+      source_sha: this.#sourceSha,
+      readback,
+      attribution,
+    });
+    await this.#ledger.append('BROWSER_OUTCOME_INGESTED', {
+      episode_digest: episode.episode_digest,
+      receipt_digest: episode.receipt_digest,
+      context_digest: episode.context_digest,
+      command_id: episode.command_id,
+      terminal_status: episode.terminal_status,
+      action: episode.action,
+      effect_outcome: episode.effect_outcome,
+      outcome_state: episode.outcome_state,
+      candidate_id: episode.candidate_id,
+      candidate_sha: episode.candidate_sha,
+      proposal_digest: episode.proposal_digest,
+      skill_digests: episode.skill_digests,
+      eligible_for_experience_graph: episode.eligible_for_experience_graph,
+      eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
+      quarantined: episode.quarantined,
+      raw_result_stored: false,
+      raw_error_stored: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#browserOutcomeCount += 1;
+    if (episode.eligible_for_experience_graph) this.#browserOutcomeLearningEligibleCount += 1;
+    if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
+    this.#lastBrowserOutcomeDigest = episode.episode_digest;
+    return episode;
   }
 
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
@@ -381,6 +466,17 @@ export class RsiRuntimeService {
       experience_gate: this.#experienceGate.snapshot(),
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
+      browser_outcome_ingest: Object.freeze({
+        terminal_receipt_readback_required: true,
+        outcome_count: this.#browserOutcomeCount,
+        learning_eligible_count: this.#browserOutcomeLearningEligibleCount,
+        quarantined_count: this.#browserOutcomeQuarantinedCount,
+        last_episode_digest: this.#lastBrowserOutcomeDigest,
+        ambiguous_outcome_learning_allowed: false,
+        raw_result_stored: false,
+        authority_effect: false,
+      }),
+      episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
       candidate_effect_executor_exposed: false,

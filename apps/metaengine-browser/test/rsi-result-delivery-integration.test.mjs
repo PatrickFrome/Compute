@@ -212,3 +212,66 @@ test('failed command reconciliation requires exact FAILED status and exact error
   assert.equal(outcome.execution_authority, false);
   assert.equal(outcome.self_update_authority, false);
 });
+
+
+test('sidecar readStoredReceipt performs bounded exact readback only and never posts a result', async () => {
+  const calls = [];
+  const adapter = createSupervisorRsiResultDeliveryAdapter({
+    deadlineMs: 50,
+    attempts: 1,
+    backoffMs: [0],
+    sleep: async () => {},
+    signedRequest: async (path, options) => {
+      calls.push({ path, method: options.method, has_signal: options.signal instanceof AbortSignal });
+      return response(200, terminalReadback());
+    },
+  });
+  const observed = await adapter.readStoredReceipt({ commandId: COMMAND_ID, payload: OK_PAYLOAD });
+  assert.equal(observed?.terminal, true);
+  assert.equal(observed?.status, 'COMPLETED');
+  assert.deepEqual(observed?.receipt, RECEIPT);
+  assert.deepEqual(calls.map((call) => call.method), ['GET']);
+  assert.equal(calls[0].has_signal, true);
+});
+
+test('sidecar readStoredReceipt fails closed on receipt mismatch without replaying transport', async () => {
+  let calls = 0;
+  const adapter = createSupervisorRsiResultDeliveryAdapter({
+    deadlineMs: 50,
+    attempts: 3,
+    backoffMs: [0],
+    sleep: async () => {},
+    signedRequest: async (_path, options) => {
+      calls += 1;
+      assert.equal(options.method, 'GET');
+      return response(200, terminalReadback({ receipt: { ...RECEIPT, result: { moved: false } } }));
+    },
+  });
+  const observed = await adapter.readStoredReceipt({ commandId: COMMAND_ID, payload: OK_PAYLOAD });
+  assert.equal(observed, null);
+  assert.equal(calls, 1);
+});
+
+test('sidecar readStoredReceipt timeout is bounded and resolves null without physical-effect retry', async () => {
+  let calls = 0;
+  let abortObserved = false;
+  const adapter = createSupervisorRsiResultDeliveryAdapter({
+    deadlineMs: 50,
+    attempts: 3,
+    backoffMs: [0],
+    sleep: async () => {},
+    signedRequest: async (_path, options) => {
+      calls += 1;
+      assert.equal(options.method, 'GET');
+      options.signal?.addEventListener('abort', () => { abortObserved = true; }, { once: true });
+      return new Promise(() => {});
+    },
+  });
+  const started = Date.now();
+  const observed = await adapter.readStoredReceipt({ commandId: COMMAND_ID, payload: OK_PAYLOAD });
+  const elapsed = Date.now() - started;
+  assert.equal(observed, null);
+  assert.equal(calls, 1);
+  assert.equal(abortObserved, true);
+  assert.ok(elapsed >= 40 && elapsed < 1000, `bounded readback elapsed=${elapsed}ms`);
+});
