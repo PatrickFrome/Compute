@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -20,6 +21,10 @@ import {
   admitRsiLineageSkill,
   verifyRsiLineageSkillAdmission,
 } from '../src/rsi-lineage-skill-admission.mjs';
+import {
+  createRsiRuntimeSkillAdvisory,
+  verifyRsiRuntimeSkillAdvisory,
+} from '../src/rsi-runtime-skill-advisory.mjs';
 
 const CANDIDATE='b'.repeat(40);
 const CANDIDATE_ID=`candidate_sha256_${'c'.repeat(64)}`;
@@ -179,6 +184,23 @@ test('verified lineage skill enters append-only library only after independent c
   assert.equal(row.skill_memory_is_execution_authority,false);
   assert.equal(row.eligible_for_promotion,false);
   assert.equal(verifyRsiLineageSkillAdmission(row,inputs).admission_digest,row.admission_digest);
+
+  const advisoryInputs={
+    lineage_skill_admission:row,
+    lineage_skill_admission_inputs:inputs,
+    external_planner:true,
+    authored_by_candidate:false,
+  };
+  const advisory=createRsiRuntimeSkillAdvisory(advisoryInputs);
+  assert.equal(advisory.source_parent_sha,'a'.repeat(40));
+  assert.equal(advisory.source_candidate_sha,CANDIDATE);
+  assert.equal(advisory.runtime_use_mode,'ADVISORY_CONTEXT_ONLY');
+  assert.equal(advisory.raw_skill_implementation_exposed,false);
+  assert.equal(advisory.direct_tool_execution_allowed,false);
+  assert.equal(advisory.browser_actuation_allowed,false);
+  assert.equal(advisory.scheduler_dispatch_allowed,false);
+  assert.equal(advisory.authority_effect,false);
+  assert.equal(verifyRsiRuntimeSkillAdvisory(advisory,advisoryInputs).advisory_digest,advisory.advisory_digest);
 });
 
 test('negative transfer is a hard admission blocker and cannot be averaged away',()=>{
@@ -243,4 +265,18 @@ test('post-admission harmful lifecycle evidence quarantines then retires without
   assert.equal(governed.retained_in_evidence_archive,true);
   assert.equal(governed.hard_deleted,false);
   assert.equal(retired.retired_or_quarantined_reactivation_allowed,false);
+});
+
+
+test('runtime service source-fences and durably records advisory bind/clear without execution authority',async()=>{
+  const source=await fs.readFile(new URL('../src/rsi-runtime-service.mjs',import.meta.url),'utf8');
+  assert.match(source,/advisory\.source_parent_sha !== this\.#sourceSha/);
+  assert.match(source,/await this\.#ledger\.append\('SKILL_ADVISORY_BOUND'/);
+  assert.match(source,/this\.#skillAdvisory = advisory/);
+  assert.ok(source.indexOf("await this.#ledger.append('SKILL_ADVISORY_BOUND'")<source.indexOf('this.#skillAdvisory = advisory'));
+  assert.match(source,/await this\.#ledger\.append\('SKILL_ADVISORY_CLEARED'/);
+  assert.match(source,/runtime_use_mode: 'ADVISORY_CONTEXT_ONLY'/);
+  assert.match(source,/direct_tool_execution_allowed: false/);
+  assert.match(source,/browser_actuation_allowed: false/);
+  assert.match(source,/scheduler_dispatch_allowed: false/);
 });
