@@ -2124,11 +2124,15 @@ test('Phase31 consolidation archive is durable-before-visible, source-revalidate
   await fs.mkdir(statePath);
   await assert.rejects(()=>archive.add({proposal,validations,admission,source_rows:rows}));
   assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().validation_attempt_count,0);
+  assert.equal(archive.snapshot().rejected_validation_count,0);
   await fs.rm(statePath,{recursive:true,force:true});
 
   assert.equal((await archive.add({proposal,validations,admission,source_rows:rows})).state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
   const snap=archive.snapshot();
   assert.equal(snap.row_count,1);
+  assert.equal(snap.validation_attempt_count,2);
+  assert.equal(snap.rejected_validation_count,0);
   assert.equal(snap.validated_count,1);
   assert.equal(snap.source_outcome_rows_not_copied,true);
   assert.equal(snap.active_skill_library_digest,null);
@@ -2147,6 +2151,7 @@ test('Phase31 consolidation archive is durable-before-visible, source-revalidate
   const restored=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
   await restored.init();
   assert.equal(restored.snapshot().row_count,1);
+  assert.equal(restored.snapshot().validation_attempt_count,2);
   assert.equal((await restored.add({proposal,validations,admission,source_rows:rows})).state,'IDEMPOTENT');
 });
 
@@ -2187,6 +2192,9 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.distinct_task_families_required,true);
   assert.equal(root.distinct_matched_reference_plans_required,true);
   assert.equal(root.distinct_sealed_transfer_acceptance_required,true);
+  assert.equal(root.validation_attempt_history_append_only,true);
+  assert.equal(root.rejected_transfer_evidence_retained,true);
+  assert.equal(root.validation_attempts_share_same_archive,true);
   assert.equal(root.zero_observed_negative_transfer_required,true);
   assert.equal(root.heldout_source_context_exclusion_required,true);
   assert.equal(root.common_non_regression_floor_required,true);
@@ -2322,4 +2330,79 @@ test('Phase31 admission refuses reuse of transfer reference or sealed acceptance
     proposal,validations:[v3,v4],
     external_admission_owner:true,authored_by_candidate:false,
   }),/transfer_evidence_reuse_forbidden/);
+});
+
+
+test('Phase31 rejected transfer validation remains durable counterevidence after later successful quorum',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase31-rejected-transfer-memory-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'knowledge.json');
+  const rows=phase31SourceRows('rejected-memory');
+  const proposal=phase31Proposal(rows,'rejected-memory');
+  const resolver=async({source_entry_digests})=>{
+    const wanted=new Set(source_entry_digests);
+    return rows.filter(r=>wanted.has(r.entry.entry_digest));
+  };
+  const archive=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  const rejected=phase31Validation(proposal,'rejected-memory-bad',{
+    safety_non_regression:false,
+  });
+  assert.equal(rejected.state,'KNOWLEDGE_TRANSFER_REJECTED');
+  assert.ok(rejected.blockers.includes('SAFETY_REGRESSION'));
+  const recorded=await archive.recordValidationAttempt({proposal,validation:rejected,source_rows:rows});
+  assert.equal(recorded.state,'VALIDATION_ATTEMPT_RECORDED');
+  assert.equal(recorded.validation_state,'KNOWLEDGE_TRANSFER_REJECTED');
+  assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().validation_attempt_count,1);
+  assert.equal(archive.snapshot().rejected_validation_count,1);
+  assert.equal(archive.validationAttempts({rejectedOnly:true})[0].validation_digest,rejected.validation_digest);
+
+  const restoredBeforeSuccess=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restoredBeforeSuccess.init();
+  assert.equal(restoredBeforeSuccess.snapshot().rejected_validation_count,1);
+  assert.ok(restoredBeforeSuccess.validationAttempts({rejectedOnly:true})[0].blockers.includes('SAFETY_REGRESSION'));
+
+  const v1=phase31Validation(proposal,'rejected-memory-good-a');
+  const v2=phase31Validation(proposal,'rejected-memory-good-b');
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.rejected-memory',
+    proposal,validations:[v1,v2],
+    external_admission_owner:true,authored_by_candidate:false,
+  });
+  await restoredBeforeSuccess.add({proposal,validations:[v1,v2],admission,source_rows:rows});
+  const snap=restoredBeforeSuccess.snapshot();
+  assert.equal(snap.row_count,1);
+  assert.equal(snap.validation_attempt_count,3);
+  assert.equal(snap.rejected_validation_count,1);
+  assert.equal(restoredBeforeSuccess.validationAttempts({rejectedOnly:true})[0].validation_digest,rejected.validation_digest);
+
+  const finalRestart=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await finalRestart.init();
+  assert.equal(finalRestart.snapshot().row_count,1);
+  assert.equal(finalRestart.snapshot().validation_attempt_count,3);
+  assert.equal(finalRestart.snapshot().rejected_validation_count,1);
+});
+
+test('Phase31 rejected transfer persistence failure creates no phantom counterevidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase31-rejected-persist-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'knowledge.json');
+  const rows=phase31SourceRows('rejected-persist');
+  const proposal=phase31Proposal(rows,'rejected-persist');
+  const rejected=phase31Validation(proposal,'rejected-persist-attempt',{security_non_regression:false});
+  const resolver=async()=>rows;
+  const archive=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.recordValidationAttempt({proposal,validation:rejected,source_rows:rows}));
+  assert.equal(archive.snapshot().validation_attempt_count,0);
+  assert.equal(archive.snapshot().rejected_validation_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  await archive.recordValidationAttempt({proposal,validation:rejected,source_rows:rows});
+  assert.equal(archive.snapshot().validation_attempt_count,1);
+  assert.equal(archive.snapshot().rejected_validation_count,1);
 });
