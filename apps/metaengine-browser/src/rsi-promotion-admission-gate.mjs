@@ -58,6 +58,8 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-meta-profile-qualification.mjs',
   'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
   'apps/metaengine-browser/src/rsi-meta-profile-shadow-comparison.mjs',
+  'apps/metaengine-browser/src/rsi-qd-bounded-canary-review.mjs',
+  'apps/metaengine-browser/src/rsi-qd-multidimensional-canary-evidence.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',

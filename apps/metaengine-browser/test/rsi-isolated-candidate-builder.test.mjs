@@ -202,6 +202,8 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-meta-profile-qualification.mjs',
     'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
     'apps/metaengine-browser/src/rsi-meta-profile-shadow-comparison.mjs',
+    'apps/metaengine-browser/src/rsi-qd-bounded-canary-review.mjs',
+    'apps/metaengine-browser/src/rsi-qd-multidimensional-canary-evidence.mjs',
     'apps/metaengine-browser/supabase/rsi-shadow-archive-v1.sql',
   ]) {
     assert.throws(() => goodBuildPlan({ mutations: [{ path, change: 'MODIFY' }] }), /mutation_|immutable_/);
