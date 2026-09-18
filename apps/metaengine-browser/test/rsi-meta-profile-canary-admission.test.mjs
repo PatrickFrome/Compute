@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import {
+  createRsiBoundedCanaryShadowEvidence,
+  createRsiBoundedCanaryAdmission,
+} from '../src/rsi-bounded-canary-admission.mjs';
 import {
   RsiMetaProfileCanaryLedger,
   createRsiMetaProfileCanaryAdmission,
@@ -17,13 +22,22 @@ import {
 
 const SOURCE='a'.repeat(40);
 const d=(char)=>`sha256:${char.repeat(64)}`;
+function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
+const dg=(v)=>`sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`;
 
 function fixture(){
-  const selection={
+  const selectionCore={
     schema:'metaengine.rsi.meta-profile-shadow-selection.v1',version:1,source_sha:SOURCE,
-    selection_digest:d('1'),qualification_digest:d('2'),meta_record_digest:d('3'),
-    library_digest:d('4'),incumbent_profile_digest:d('5'),challenger_profile_digest:d('6'),mode:'SHADOW_ONLY',
+    selection_id:'shadow.selection.canary.test',
+    qualification_digest:d('2'),meta_record_digest:d('3'),library_digest:d('4'),
+    incumbent_profile_digest:d('5'),challenger_profile_digest:d('6'),mode:'SHADOW_ONLY',
+    external_selector:true,authored_by_candidate:false,candidate_can_select_profile:false,
+    selection_can_change_execution:false,selection_can_replace_incumbent:false,selection_can_grant_skill_activity:false,
+    continuous_shadow_review_required:true,canary_gate_still_required:true,
+    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
+  const selection={...selectionCore,selection_digest:dg(selectionCore)};
   const qualification={
     schema:'metaengine.rsi.meta-profile-qualification.v1',version:1,source_sha:SOURCE,
     qualification_digest:d('2'),meta_record_digest:d('3'),
@@ -35,20 +49,35 @@ function fixture(){
   };
   const library={library_digest:d('4')};
   const governance={library_digest:d('4'),governance_digest:d('7')};
+  const shadowEvidence=createRsiBoundedCanaryShadowEvidence({
+    evidence_id:'canary.shadow.evidence.test',shadow_selection:selection,context_cohort_digest:d('8'),
+    shadow_observation_count:32,matched_count:24,divergence_count:8,ambiguity_count:0,incident_count:0,
+    hard_invariant_violation_count:0,identity_drift_count:0,outcome_evidence_digest:d('9'),
+    safety_evidence_digest:d('a'),security_evidence_digest:d('b'),awareness_evidence_digest:d('c'),utility_evidence_digest:d('d'),
+    evidence_refs:['canary:shadow:evidence:test'],external_observer:true,authored_by_candidate:false,
+  });
+  const boundedAdmission=createRsiBoundedCanaryAdmission({
+    admission_id:'bounded.canary.handoff.test',shadow_selection:selection,shadow_evidence:shadowEvidence,
+    fixed_cohort_digest:d('8'),decision_budget:16,external_admission_owner:true,authored_by_candidate:false,
+  });
   const admission=createRsiMetaProfileCanaryAdmission({
     source_sha:SOURCE,canary_id:'canary.readonly.1',selection,qualification,meta_record:record,
-    current_library:library,current_governance:governance,cohort_digest:d('8'),
-    max_decisions:32,action_surface:'READ_ONLY_DECISION_SUPPORT',
+    current_library:library,current_governance:governance,bounded_canary_admission:boundedAdmission,
+    bounded_shadow_evidence:shadowEvidence,cohort_digest:d('8'),
+    max_decisions:16,action_surface:'READ_ONLY_DECISION_SUPPORT',
     external_canary_owner:true,authored_by_candidate:false,
   });
-  return {selection,qualification,record,library,governance,admission};
+  return {selection,qualification,record,library,governance,shadowEvidence,boundedAdmission,admission};
 }
 
 test('canary admission is identity-stable, fixed-budget and read-only advisory',()=>{
   const fx=fixture();
   const a=verifyRsiMetaProfileCanaryAdmission(fx.admission);
   assert.equal(a.action_surface,'READ_ONLY_DECISION_SUPPORT');
-  assert.equal(a.max_decisions,32);
+  assert.equal(a.max_decisions,16);
+  assert.equal(a.clean_shadow_evidence_required,true);
+  assert.equal(a.minimum_shadow_observations_required,32);
+  assert.equal(a.bounded_handoff_required,true);
   assert.equal(a.baseline_is_default,true);
   assert.equal(a.baseline_fallback_required,true);
   assert.equal(a.candidate_can_choose_cohort,false);
@@ -167,7 +196,10 @@ test('ledger requires one externally evaluated outcome before next canary decisi
 test('canary trust root freezes exposure and preserves baseline authority',()=>{
   const root=rsiMetaProfileCanaryTrustRootSnapshot();
   assert.equal(root.allowed_surface,'READ_ONLY_DECISION_SUPPORT');
-  assert.equal(root.max_canary_decisions,32);
+  assert.equal(root.max_canary_decisions,16);
+  assert.equal(root.clean_shadow_evidence_required,true);
+  assert.equal(root.minimum_shadow_observations_required,32);
+  assert.equal(root.bounded_handoff_required,true);
   assert.equal(root.exact_library_and_governance_identity_required,true);
   assert.equal(root.baseline_is_default,true);
   assert.equal(root.baseline_fallback_required,true);
