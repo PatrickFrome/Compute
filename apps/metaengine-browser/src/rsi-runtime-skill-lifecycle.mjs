@@ -97,6 +97,7 @@ export class RsiRuntimeSkillLifecycle{
   #libraryContainsAll(skillDigests){return !!this.#library&&skillDigests.every(d=>this.#library.entries.some(e=>e.skill_digest===d))}
   #assertAppendOnlyLibrary(next){
     if(!this.#library)return;
+    if(next.library_id!==this.#library.library_id)throw new Error('rsi_runtime_skill_library_identity_drift');
     const current=new Map(this.#library.entries.map(e=>[e.skill_digest,e]));
     const incoming=new Map(next.entries.map(e=>[e.skill_digest,e]));
     for(const [skillDigest,row] of current){
