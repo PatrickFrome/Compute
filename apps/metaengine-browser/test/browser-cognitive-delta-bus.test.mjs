@@ -69,27 +69,39 @@ test('critical causal edges evict lower-priority telemetry under pressure', () =
   assert.equal(snap.automatic_retry_allowed, false);
 });
 
-test('low-priority telemetry can never evict an all-critical ring', () => {
+test('saturated P3 telemetry is discarded without consuming stream sequence or forcing resync', () => {
   const bus = new BrowserCognitiveDeltaBus({ maxEvents: 8 });
   for (let i = 0; i < 8; i += 1) bus.publish({ seq: i + 1, type: 'WEB_CONTENTS_DESTROYED', web_contents_id: i + 1 });
   const telemetry = bus.publish({ seq: 9, type: 'METRICS_SAMPLE' });
   assert.equal(telemetry.accepted, false);
-  assert.equal(telemetry.reason, 'LOWER_PRIORITY_DROPPED_UNDER_PRESSURE');
+  assert.equal(telemetry.reason, 'P3_METRICS_DROPPED_WITHOUT_STREAM_GAP');
+  assert.equal(telemetry.sequence, null);
+  assert.equal(telemetry.resync_required, false);
+
   const snap = bus.snapshot();
+  assert.equal(snap.sequence, 8);
   assert.equal(snap.priority_counts.P0, 8);
   assert.equal(snap.priority_counts.P3, 0);
   assert.equal(snap.dropped_incoming, 1);
+  assert.equal(snap.dropped_p3_unsequenced, 1);
+  assert.equal(snap.p3_pressure_drop_creates_stream_gap, false);
+
+  const caughtUp = bus.readSince(8, 32);
+  assert.equal(caughtUp.gap, false);
+  assert.equal(caughtUp.resync_required, false);
+  assert.deepEqual(caughtUp.events, []);
 });
 
-test('any lost delta is explicit gap and requires full snapshot resync', () => {
+test('lost retained causal delta is still an explicit gap and requires full snapshot resync', () => {
   const bus = new BrowserCognitiveDeltaBus({ maxEvents: 8 });
   for (let i = 0; i < 8; i += 1) bus.publish({ seq: i + 1, type: 'WEB_CONTENTS_DESTROYED' });
-  bus.publish({ seq: 9, type: 'METRICS_SAMPLE' }); // dropped sequence 9
-  bus.publish({ seq: 10, type: 'WEB_CONTENTS_CREATED' }); // evicts one retained P0 only as last resort
+  bus.publish({ seq: 9, type: 'METRICS_SAMPLE' }); // intentionally unsequenced under pressure
+  bus.publish({ seq: 10, type: 'WEB_CONTENTS_CREATED' }); // sequence 9; evicts one retained P0
 
   const stale = bus.readSince(0, 32);
   assert.equal(stale.gap, true);
   assert.equal(stale.resync_required, true);
+  assert.equal(stale.latest_sequence, 9);
   assert.equal(stale.snapshot_is_recovery_authority, true);
   assert.equal(stale.delta_is_execution_authority, false);
 
