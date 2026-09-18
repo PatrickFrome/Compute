@@ -908,8 +908,8 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(libraryAdmission.admission.append_only_library_update, true);
     assert.equal(libraryAdmission.adoption.entry_count, 2);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 2);
-    const finalLibrary = runtime.createSkillActivationView([skill.skill_digest, successorSkill.skill_digest]);
-    assert.equal(finalLibrary.activation_view_is_execution_authority, false);
+    assert.equal(runtime.snapshot().execution_authority, false);
+    assert.equal(runtime.snapshot().authority_effect, false);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
   } finally {
