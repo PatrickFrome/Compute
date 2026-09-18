@@ -40,6 +40,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-devos-materialization-handoff.mjs',
   'apps/metaengine-browser/src/rsi-verified-candidate-materialization.mjs',
   'apps/metaengine-browser/src/rsi-external-evaluation-evidence-adapter.mjs',
+  'apps/metaengine-browser/src/rsi-external-promotion-review.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
   'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-open-ended-search-policy.mjs',
