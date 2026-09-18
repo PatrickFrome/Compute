@@ -51,6 +51,7 @@ import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiS
 import { RsiSkillRevisionIntegrityLedger, createRsiSkillRevisionIntegrityAdmission, rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot } from './rsi-skill-revision-integrity-admission.mjs';
 import { createRsiIntegrityBoundSkillReliability, rsiIntegrityBoundSkillReliabilityTrustRootSnapshot } from './rsi-integrity-bound-skill-reliability.mjs';
 import { RsiRevisionScopeLedger, createRsiRevisionScopeAdmission, rsiRevisionScopeAdmissionTrustRootSnapshot } from './rsi-revision-scope-admission.mjs';
+import { createRsiRevisionLibraryAdmission, rsiRevisionLibraryAdmissionTrustRootSnapshot } from './rsi-revision-library-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -125,6 +126,7 @@ function trustRoots() {
     skill_revision_integrity: rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot(),
     integrity_bound_skill_reliability: rsiIntegrityBoundSkillReliabilityTrustRootSnapshot(),
     revision_scope_admission: rsiRevisionScopeAdmissionTrustRootSnapshot(),
+    revision_library_admission: rsiRevisionLibraryAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -933,6 +935,55 @@ export class RsiRuntimeService {
   scopeEligibleSkillRevisions() {
     this.#assertRunning();
     return this.#revisionScopeLedger.eligible();
+  }
+
+  async admitScopeQualifiedSkillRevisionToLibrary({
+    scope_admission_digest,
+    admission_id,
+    successor_skill,
+    successor_evidence,
+    sealed_library_holdout = false,
+    external_library_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const scopeAdmission = this.#revisionScopeLedger.admissionByDigest(scope_admission_digest);
+    if (!scopeAdmission || scopeAdmission.state !== 'ELIGIBLE_FOR_EXTERNAL_LIBRARY_EVIDENCE') {
+      throw new Error('rsi_runtime_scope_eligible_revision_required');
+    }
+    const currentLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
+    if (!currentLibrary) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const admission = createRsiRevisionLibraryAdmission({
+      source_sha: this.#sourceSha,
+      admission_id,
+      scope_admission: scopeAdmission,
+      current_library: currentLibrary,
+      successor_skill,
+      successor_evidence,
+      sealed_library_holdout,
+      external_library_owner,
+      authored_by_candidate,
+    });
+    const adoption = await this.#skillLifecycle.adoptVerifiedLibrary({
+      library: admission.proposed_library,
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_REVISION_LIBRARY_ADMITTED', {
+      admission_id: admission.admission_id,
+      admission_digest: admission.admission_digest,
+      scope_admission_digest: admission.scope_admission_digest,
+      parent_skill_digest: admission.parent_skill_digest,
+      successor_skill_digest: admission.successor_skill_digest,
+      successor_evidence_digest: admission.successor_evidence_digest,
+      previous_library_digest: admission.current_library_digest,
+      adopted_library_digest: admission.proposed_library_digest,
+      append_only_library_update: true,
+      parent_retained: true,
+      direct_browser_execution_authority: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ admission, adoption });
   }
 
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
