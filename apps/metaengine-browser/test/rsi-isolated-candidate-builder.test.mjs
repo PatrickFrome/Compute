@@ -212,6 +212,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-verified-candidate-materialization.mjs',
     'apps/metaengine-browser/src/rsi-episode-promotion-review.mjs',
     'apps/metaengine-browser/src/rsi-external-release-handoff-intent.mjs',
+    'apps/metaengine-browser/src/rsi-published-release-reconciliation.mjs',
     'controller/rsi/promotion_attestation.py',
     '.github/workflows/rsi-promotion-attestation-contract.yml',
     'apps/metaengine-browser/src/rsi-devos-admission-adapter.mjs',
