@@ -96,6 +96,23 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     phase31.proposal.proposal_digest,
   ];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_consumer_independent_roots_required');
+
+  // Phase32 is a consumer-local revalidation boundary, not a replay of Phase31
+  // transfer evidence. Reusing source holdouts, harnesses or evaluator roots can
+  // make a knowledge item appear portable without testing it in the consumer's
+  // actual local regime, so fail closed on any such overlap.
+  const sourceContexts=new Set(phase31.validations.map(v=>v.heldout_context_digest));
+  const sourceTaskSets=new Set(phase31.validations.map(v=>v.heldout_task_set_digest));
+  const sourceHarnesses=new Set(phase31.validations.map(v=>v.transfer_harness_digest));
+  const sourceHoldouts=new Set(phase31.validations.map(v=>v.hidden_holdout_root_digest));
+  const sourceEvaluators=new Set(phase31.validations.map(v=>v.external_evaluator_root_digest));
+  if(sourceContexts.has(roots[0]))throw new Error('rsi_consumer_source_context_reuse_forbidden');
+  if(sourceHarnesses.has(roots[1]))throw new Error('rsi_consumer_source_harness_reuse_forbidden');
+  if(sourceEvaluators.has(roots[2]))throw new Error('rsi_consumer_source_evaluator_reuse_forbidden');
+  if(sourceTaskSets.has(roots[4])||sourceHoldouts.has(roots[4]))throw new Error('rsi_consumer_source_holdout_reuse_forbidden');
+  if(roots[5]===phase31.proposal.transfer_validation_plan_digest)throw new Error('rsi_consumer_source_reference_plan_reuse_forbidden');
+  if(roots[6]===phase31.proposal.transfer_validation_plan_digest)throw new Error('rsi_consumer_source_revalidation_protocol_reuse_forbidden');
+
   const crossGeneration=roots[3]!==phase31.proposal.evaluator_generation_digest;
   const core=zero({
     schema:RSI_VALIDATED_KNOWLEDGE_CONSUMER_HANDOFF_SCHEMA,
@@ -472,6 +489,11 @@ export function rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot(){
     matched_no_skill_or_reference_required_for_recipes:true,
     consumer_specific_model_harness_context_binding_required:true,
     consumer_evaluator_generation_binding_required:true,
+    phase31_context_reuse_forbidden:true,
+    phase31_harness_reuse_forbidden:true,
+    phase31_holdout_reuse_forbidden:true,
+    phase31_evaluator_root_reuse_forbidden:true,
+    phase31_transfer_plan_reuse_forbidden:true,
     cross_generation_revalidation_required:true,
     source_generation_verdict_inherited:false,
     negative_transfer_retained:true,
