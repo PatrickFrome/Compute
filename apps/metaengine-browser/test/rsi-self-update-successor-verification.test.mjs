@@ -244,6 +244,22 @@ test('startup, transaction or recovery identity drift cannot verify a successor'
   }),/recovery_binding_mismatch/);
 });
 
+test('successor transaction requires a positive attempt count and ordered durable timestamps',()=>{
+  for(const badTxn of [
+    {...transaction('QUALIFIED'),attempt_count:0},
+    {...transaction('QUALIFIED'),attempt_count:1.5},
+    {...transaction('QUALIFIED'),created_at:'2026-09-18T19:41:01.000Z',updated_at:'2026-09-18T19:41:00.000Z'},
+  ]){
+    assert.throws(()=>createRsiSelfUpdateSuccessorVerification({
+      final_install_admission:finalAdmission(),post_effect_readback:postEffect('QUALIFIED_SUCCESSOR'),
+      startup_inspection:startup('QUALIFIED'),transaction_readback:badTxn,
+      successor_receipt:receipt(),recovery_diagnostic:recovery('QUALIFIED'),
+      installed_executable_readback:executable(),observed_at:'2026-09-18T19:42:00.000Z',
+      observer_id:'trusted-successor-verifier-v1',
+    }),/(attempt_count_invalid|time_order_invalid)/);
+  }
+});
+
 test('ambiguous and quarantined outcomes stay out of deployment learning and cannot trigger installer retry',()=>{
   const ambiguous=createRsiSelfUpdateSuccessorVerification({
     final_install_admission:finalAdmission(),
