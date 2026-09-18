@@ -143,7 +143,18 @@ function normalizeBlock(row) {
     'start_anchor_digest',
     'end_anchor_digest',
     'max_bytes',
-  ], [], 'block');
+  ], [
+    'raw_source_exposed_as_authority',
+    'block_materialization_authority',
+  ], 'block');
+  if (
+    Object.prototype.hasOwnProperty.call(row, 'raw_source_exposed_as_authority')
+      && row.raw_source_exposed_as_authority !== false
+  ) throw new Error('rsi_skeleton_block_raw_source_authority_forbidden');
+  if (
+    Object.prototype.hasOwnProperty.call(row, 'block_materialization_authority')
+      && row.block_materialization_authority !== false
+  ) throw new Error('rsi_skeleton_block_materialization_authority_forbidden');
   const filePath = assertNonAuthorityPath(boundedPath(row.file_path, 'block'));
   const language = boundedToken(row.language, 'block_language');
   if (!LANGUAGES.has(language)) throw new Error('rsi_skeleton_block_language_invalid');
