@@ -167,6 +167,14 @@ import {
   verifyRsiExperienceContextUtilityFeedback,
   rsiExperienceContextUtilityFeedbackTrustRootSnapshot,
 } from './rsi-experience-context-utility-feedback.mjs';
+import {
+  createRsiExperienceContextAttributionPlan,
+  verifyRsiExperienceContextAttributionPlan,
+  verifyRsiExperienceContextAblationReceipt,
+  finalizeRsiExperienceContextAttribution,
+  verifyRsiExperienceContextAttributionResult,
+  rsiExperienceContextAttributionTrustRootSnapshot,
+} from './rsi-experience-context-ablation-attribution.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -195,6 +203,7 @@ const MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS = 256;
 const MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS = 256;
 const MAX_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLES = 256;
 const MAX_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK = 1024;
+const MAX_EXPERIENCE_CONTEXT_ATTRIBUTIONS = 512;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -286,6 +295,7 @@ function trustRoots() {
     post_adoption_causal_measurement: rsiPostAdoptionCausalMeasurementTrustRootSnapshot(),
     post_adoption_experience_admission: rsiPostAdoptionExperienceAdmissionTrustRootSnapshot(),
     experience_context_utility_feedback: rsiExperienceContextUtilityFeedbackTrustRootSnapshot(),
+    experience_context_attribution: rsiExperienceContextAttributionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -371,6 +381,9 @@ export class RsiRuntimeService {
   #lastExperienceContextUtilityFeedbackDigest = null;
   #experienceContextHarmfulReceiptCount = 0;
   #experienceContextHelpfulReceiptCount = 0;
+  #experienceContextAttributionDigests = new Set();
+  #lastExperienceContextAttributionDigest = null;
+  #experienceContextAttributionAmbiguousCount = 0;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -608,6 +621,24 @@ export class RsiRuntimeService {
           this.#lastExperienceContextUtilityFeedbackDigest = feedback.feedback_digest;
           this.#experienceContextHarmfulReceiptCount += feedback.harmful_count;
           this.#experienceContextHelpfulReceiptCount += feedback.helpful_count;
+        }
+        if (row?.type === 'RSI_EXPERIENCE_CONTEXT_ATTRIBUTION_RECORDED' && row?.payload?.attribution_result) {
+          const plan = verifyRsiExperienceContextAttributionPlan(row.payload.attribution_plan);
+          const receipts = (row.payload.ablation_receipts || []).map((receipt) =>
+            verifyRsiExperienceContextAblationReceipt(receipt, plan));
+          const canonical = finalizeRsiExperienceContextAttribution({ plan, receipts });
+          const result = verifyRsiExperienceContextAttributionResult(row.payload.attribution_result);
+          if (canonical.result_digest !== result.result_digest) {
+            throw new Error('rsi_runtime_experience_attribution_replay_digest_mismatch');
+          }
+          if (this.#experienceContextAttributionDigests.size >= MAX_EXPERIENCE_CONTEXT_ATTRIBUTIONS) {
+            throw new Error('rsi_runtime_experience_attribution_replay_capacity_exhausted');
+          }
+          this.#experienceContextAttributionDigests.add(result.result_digest);
+          this.#lastExperienceContextAttributionDigest = result.result_digest;
+          if (result.state === 'AMBIGUOUS_INTERACTIONS_HOLD') {
+            this.#experienceContextAttributionAmbiguousCount += 1;
+          }
         }
       }
       replayCursor = page.at(-1).seq;
@@ -2395,6 +2426,115 @@ export class RsiRuntimeService {
     });
   }
 
+  prepareExperienceContextAttribution({
+    cycle_digest,
+    autonomous_controller_plan,
+    evaluation_protocol_digest,
+    objective_spec,
+  } = {}) {
+    this.#assertRunning();
+    const cycle = this.#findExperienceGuidedCycle(cycle_digest);
+    if (!cycle) throw new Error('rsi_runtime_experience_guided_cycle_not_persisted');
+    const contextPlan = verifyRsiExperienceContextPlan(cycle.experience_context_plan);
+    const controllerPlan = verifyRsiAutonomousEpisodePlan(autonomous_controller_plan);
+    if (
+      controllerPlan.controller_plan_digest !== cycle.controller_plan_digest
+      || contextPlan.context_plan_digest !== cycle.experience_context_plan_digest
+      || controllerPlan.experience_context_digest !== contextPlan.context_plan_digest.slice(7)
+    ) {
+      throw new Error('rsi_runtime_experience_attribution_cycle_binding_mismatch');
+    }
+    return createRsiExperienceContextAttributionPlan({
+      experience_context_plan: contextPlan,
+      autonomous_controller_plan: controllerPlan,
+      evaluation_protocol_digest,
+      objective_spec,
+      external_planner: true,
+      authored_by_candidate: false,
+    });
+  }
+
+  async recordAttributedExperienceContextUtilityFeedback({
+    cycle_digest,
+    autonomous_controller_plan,
+    attribution_plan,
+    ablation_receipts,
+  } = {}) {
+    this.#assertRunning();
+    const cycle = this.#findExperienceGuidedCycle(cycle_digest);
+    if (!cycle) throw new Error('rsi_runtime_experience_guided_cycle_not_persisted');
+    const contextPlan = verifyRsiExperienceContextPlan(cycle.experience_context_plan);
+    const controllerPlan = verifyRsiAutonomousEpisodePlan(autonomous_controller_plan);
+    const plan = verifyRsiExperienceContextAttributionPlan(attribution_plan);
+    if (
+      controllerPlan.controller_plan_digest !== cycle.controller_plan_digest
+      || contextPlan.context_plan_digest !== cycle.experience_context_plan_digest
+      || plan.context_plan_digest !== contextPlan.context_plan_digest
+      || plan.controller_plan_digest !== controllerPlan.controller_plan_digest
+    ) {
+      throw new Error('rsi_runtime_experience_attribution_cycle_binding_mismatch');
+    }
+    const receipts = (ablation_receipts || []).map((receipt) =>
+      verifyRsiExperienceContextAblationReceipt(receipt, plan));
+    const result = finalizeRsiExperienceContextAttribution({ plan, receipts });
+    verifyRsiExperienceContextAttributionResult(result);
+
+    let attributionAlreadyRecorded = this.#experienceContextAttributionDigests.has(result.result_digest);
+    if (!attributionAlreadyRecorded) {
+      if (this.#experienceContextAttributionDigests.size >= MAX_EXPERIENCE_CONTEXT_ATTRIBUTIONS) {
+        throw new Error('rsi_runtime_experience_attribution_capacity_exhausted');
+      }
+      await this.#ledger.append('RSI_EXPERIENCE_CONTEXT_ATTRIBUTION_RECORDED', {
+        cycle_digest: exactDigest(cycle_digest, 'experience_guided_cycle_digest'),
+        attribution_plan: plan,
+        ablation_receipts: receipts,
+        attribution_result: result,
+        matched_single_memory_ablation: true,
+        interaction_claims_require_separate_evidence: true,
+        attribution_is_contextual_not_global_truth: true,
+        attribution_is_skill_evidence: false,
+        attribution_is_scheduler_authority: false,
+        attribution_is_promotion_authority: false,
+        graph_write_performed: false,
+        authority_effect: false,
+      });
+      this.#experienceContextAttributionDigests.add(result.result_digest);
+      this.#lastExperienceContextAttributionDigest = result.result_digest;
+      if (result.state === 'AMBIGUOUS_INTERACTIONS_HOLD') {
+        this.#experienceContextAttributionAmbiguousCount += 1;
+      }
+    }
+
+    if (result.eligible_for_context_utility_feedback !== true) {
+      return Object.freeze({
+        attribution: result,
+        utility_feedback: null,
+        graph_snapshot_digest: this.#experienceGraphSnapshot?.snapshot_digest || null,
+        attribution_already_recorded: attributionAlreadyRecorded,
+        utility_feedback_recorded: false,
+        authority_effect: false,
+      });
+    }
+    const evaluatorId = receipts[0]?.evaluator_id;
+    const utility = await this.recordExperienceContextUtilityFeedback({
+      cycle_digest,
+      autonomous_controller_plan: controllerPlan,
+      evaluation_digest: result.result_digest,
+      evaluation_kind: 'MATCHED_SINGLE_MEMORY_ABLATION',
+      evaluator_id: evaluatorId,
+      judgments: result.utility_judgments,
+    });
+    return Object.freeze({
+      attribution: result,
+      utility_feedback: utility.feedback,
+      graph_snapshot_digest: utility.graph_snapshot_digest,
+      attribution_already_recorded: attributionAlreadyRecorded,
+      utility_feedback_recorded: true,
+      utility_feedback_already_recorded: utility.already_recorded,
+      authority_effect: false,
+    });
+  }
+
   async recordExperienceContextUtilityFeedback({
     cycle_digest,
     autonomous_controller_plan,
@@ -2901,6 +3041,22 @@ export class RsiRuntimeService {
         candidate_can_edit_utility: false,
         utility_is_scheduler_authority: false,
         utility_is_promotion_authority: false,
+        authority_effect: false,
+      }),
+      experience_context_attribution: Object.freeze({
+        count: this.#experienceContextAttributionDigests.size,
+        capacity: MAX_EXPERIENCE_CONTEXT_ATTRIBUTIONS,
+        last_digest: this.#lastExperienceContextAttributionDigest,
+        ambiguous_interaction_count: this.#experienceContextAttributionAmbiguousCount,
+        matched_single_memory_ablation: true,
+        all_selected_cases_attributed: true,
+        matched_workload_seed_budget_evaluator_required: true,
+        interaction_claims_require_separate_evidence: true,
+        ambiguous_interactions_block_utility_feedback: true,
+        attribution_is_contextual_not_global_truth: true,
+        attribution_is_skill_evidence: false,
+        attribution_is_scheduler_authority: false,
+        attribution_is_promotion_authority: false,
         authority_effect: false,
       }),
       devos_materialization: Object.freeze({
