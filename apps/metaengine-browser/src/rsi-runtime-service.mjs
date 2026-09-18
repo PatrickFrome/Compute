@@ -42,6 +42,11 @@ import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
 import { rsiEpisodeDevosBridgeTrustRootSnapshot } from './rsi-episode-devos-bridge.mjs';
+import {
+  createRsiEpisodeEvaluationEvidenceBundle,
+  verifyRsiEpisodeEvaluationEvidenceBundle,
+  rsiEpisodeEvaluationIngestTrustRootSnapshot,
+} from './rsi-episode-evaluation-ingest.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -107,6 +112,7 @@ function trustRoots() {
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
     episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
     episode_devos_bridge: rsiEpisodeDevosBridgeTrustRootSnapshot(),
+    episode_evaluation_ingest: rsiEpisodeEvaluationIngestTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -244,6 +250,62 @@ export class RsiRuntimeService {
   episodeNominationReadiness(input = {}) {
     this.#assertRunning();
     return this.#episodes.nominationReadiness(input);
+  }
+
+  async ingestEpisodeEvaluationBundle(input = {}) {
+    this.#assertRunning();
+    const episodeId = String(input.episode_id || '').trim();
+    const candidateId = String(input.candidate_id || '').trim().toLowerCase();
+    const episode = this.#episodes.episode(episodeId);
+    const bundle = createRsiEpisodeEvaluationEvidenceBundle({
+      ...input,
+      episode,
+      candidate_id: candidateId,
+    });
+    verifyRsiEpisodeEvaluationEvidenceBundle(bundle);
+
+    for (const evidence of bundle.evidence) {
+      const current = this.#episodes.episode(episodeId).candidates?.[candidateId]?.evidence?.[evidence.evidence_kind] || null;
+      if (current) {
+        if (current.evidence_digest !== evidence.evidence_digest || current.result !== evidence.result) {
+          throw new Error(`rsi_runtime_episode_evaluation_conflict:${evidence.evidence_kind}`);
+        }
+        continue;
+      }
+      await this.recordEpisodeEvidence({
+        episode_id: episodeId,
+        candidate_id: candidateId,
+        evidence_id: evidence.evidence_id,
+        evidence_kind: evidence.evidence_kind,
+        evidence_digest: evidence.evidence_digest,
+        result: evidence.result,
+        source_sha: bundle.source_sha,
+        trust_root_set_digest: bundle.trust_root_set_digest,
+        ambiguous_effect: evidence.ambiguous_effect,
+      });
+    }
+
+    await this.#ledger.append('RSI_EPISODE_EVALUATION_BUNDLE_ACCEPTED', {
+      episode_id: bundle.episode_id,
+      candidate_id: bundle.candidate_id,
+      candidate_sha: bundle.candidate_sha,
+      bundle_digest: bundle.bundle_digest,
+      evidence: bundle.evidence.map((row) => ({
+        evidence_kind: row.evidence_kind,
+        evidence_digest: row.evidence_digest,
+        source_artifact_digest: row.source_artifact_digest,
+        result: row.result,
+      })),
+      external_promotion_gate_still_required: true,
+      authority_effect: false,
+    });
+
+    return Object.freeze({
+      bundle,
+      readiness: this.#episodes.nominationReadiness({ episode_id: episodeId, candidate_id: candidateId }),
+      authority_effect: false,
+      automatic_retry_allowed: false,
+    });
   }
 
   async proposeCandidate(input = {}) {
