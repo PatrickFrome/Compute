@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const { execFileSync, spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { buildDevOSSourceSnapshot } = require('./devos-source-snapshot-builder.cjs');
+const { buildMonacoAssets } = require('./build-monaco-assets.cjs');
 
 const TRUST_ROOT_SCHEMA = 'metaengine.emergency-maintenance-trust-root.v1';
 const BUILD_SHA_RE = /^[0-9a-f]{40}$/;
@@ -59,12 +60,14 @@ function buildEmergencyTrustRootMetadata({ appRoot, repoRoot }) {
 }
 
 async function metaengineGuardianNativeBeforePack(context) {
+  const appRoot = path.resolve(__dirname, '..');
+  await buildMonacoAssets({ appRoot });
+
   if (!context || context.electronPlatformName !== 'win32') return;
   if (process.platform !== 'win32') {
     throw new Error('guardian_native_staging_windows_toolchain_required');
   }
 
-  const appRoot = path.resolve(__dirname, '..');
   const repoRoot = path.resolve(appRoot, '../..');
   const trustRoot = buildEmergencyTrustRootMetadata({ appRoot, repoRoot });
   const priorMetadata = context.packager?.config?.extraMetadata;
