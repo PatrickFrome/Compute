@@ -75,15 +75,21 @@ function normalizeSourceRows(rows){
   const checked=rows.map(verifySourceRow);
   const sourceSha=checked[0].entry.source_sha;
   const generation=checked[0].entry.evaluator_generation_digest;
+  const generationSeq=checked[0].entry.evaluator_generation_seq;
+  const generationAnchor=checked[0].entry.evaluator_generation_history_anchor_digest;
   const epoch=checked[0].entry.evaluation_epoch_digest;
+  const epochSeq=checked[0].entry.evaluation_epoch_seq;
+  const evaluationContract=checked[0].entry.evaluation_contract_digest;
   const kind=checked[0].entry.learning_kind;
   if(!KNOWLEDGE_CLASSES.has(kind))throw new Error('rsi_consolidation_knowledge_class_invalid');
   const ids=new Set(), receipts=new Set(), candidates=new Set();
   for(const row of checked){
     const e=row.entry;
     if(e.source_sha!==sourceSha)throw new Error('rsi_consolidation_source_sha_mismatch');
-    if(e.evaluator_generation_digest!==generation)throw new Error('rsi_consolidation_cross_generation_forbidden');
-    if(e.evaluation_epoch_digest!==epoch)throw new Error('rsi_consolidation_cross_epoch_forbidden');
+    if(e.evaluator_generation_digest!==generation||e.evaluator_generation_seq!==generationSeq)throw new Error('rsi_consolidation_cross_generation_forbidden');
+    if(e.evaluator_generation_history_anchor_digest!==generationAnchor)throw new Error('rsi_consolidation_generation_anchor_drift');
+    if(e.evaluation_epoch_digest!==epoch||e.evaluation_epoch_seq!==epochSeq)throw new Error('rsi_consolidation_cross_epoch_forbidden');
+    if(e.evaluation_contract_digest!==evaluationContract)throw new Error('rsi_consolidation_cross_evaluation_contract_forbidden');
     if(e.learning_kind!==kind)throw new Error('rsi_consolidation_mixed_learning_kind_forbidden');
     if(ids.has(e.entry_digest)||receipts.has(e.experiment_receipt_digest))throw new Error('rsi_consolidation_duplicate_source_evidence');
     ids.add(e.entry_digest);receipts.add(e.experiment_receipt_digest);candidates.add(e.candidate_artifact_digest);
@@ -93,7 +99,11 @@ function normalizeSourceRows(rows){
     rows:Object.freeze(checked),
     source_sha:sourceSha,
     evaluator_generation_digest:generation,
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:generationAnchor,
     evaluation_epoch_digest:epoch,
+    evaluation_epoch_seq:epochSeq,
+    evaluation_contract_digest:evaluationContract,
     knowledge_class:kind,
     source_entry_digests:Object.freeze([...ids].sort()),
     source_receipt_digests:Object.freeze([...receipts].sort()),
@@ -132,7 +142,11 @@ export function createRsiKnowledgeConsolidationProposal({
     proposal_id:id(proposal_id,'proposal_id'),
     source_sha:exactSha(source.source_sha,'source'),
     evaluator_generation_digest:source.evaluator_generation_digest,
+    evaluator_generation_seq:source.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:source.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:source.evaluation_epoch_digest,
+    evaluation_epoch_seq:source.evaluation_epoch_seq,
+    evaluation_contract_digest:source.evaluation_contract_digest,
     knowledge_class:source.knowledge_class,
     source_entry_digests:source.source_entry_digests,
     source_experiment_receipt_digests:source.source_receipt_digests,
@@ -149,7 +163,11 @@ export function createRsiKnowledgeConsolidationProposal({
     external_scope_owner:true,
     authored_by_candidate:false,
     same_evaluator_generation_required:true,
+    same_evaluator_generation_sequence_required:true,
+    same_generation_history_anchor_required:true,
     same_evaluation_epoch_required:true,
+    same_evaluation_epoch_sequence_required:true,
+    same_evaluation_contract_required:true,
     source_diversity_required:true,
     source_evidence_preserved_by_digest:true,
     raw_source_trajectory_copied:false,
@@ -169,7 +187,9 @@ export function verifyRsiKnowledgeConsolidationProposal(proposal,{source_rows}={
   if(!proposal||proposal.schema!==RSI_KNOWLEDGE_CONSOLIDATION_PROPOSAL_SCHEMA||proposal.version!==1)throw new Error('rsi_consolidation_proposal_invalid');
   assertZero(proposal,'proposal');
   if(proposal.external_consolidator!==true||proposal.external_scope_owner!==true||proposal.authored_by_candidate!==false
-    ||proposal.same_evaluator_generation_required!==true||proposal.same_evaluation_epoch_required!==true
+    ||proposal.same_evaluator_generation_required!==true||proposal.same_evaluator_generation_sequence_required!==true
+    ||proposal.same_generation_history_anchor_required!==true||proposal.same_evaluation_epoch_required!==true
+    ||proposal.same_evaluation_epoch_sequence_required!==true||proposal.same_evaluation_contract_required!==true
     ||proposal.source_diversity_required!==true||proposal.source_evidence_preserved_by_digest!==true
     ||proposal.raw_source_trajectory_copied!==false||proposal.raw_hidden_holdout_copied!==false
     ||proposal.raw_evaluator_assets_copied!==false||proposal.proposal_can_write_skill_library!==false
@@ -251,6 +271,15 @@ export function createRsiKnowledgeTransferValidation({
     proposal.transfer_validation_plan_digest,
   ];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_consolidation_transfer_roots_must_be_independent');
+  const transferEvaluationContractDigest=digest({
+    heldout_context_digest:roots[0],
+    heldout_task_set_digest:roots[1],
+    task_family_digest:roots[2],
+    transfer_harness_digest:roots[3],
+    acceptance_policy_digest:roots[4],
+    hidden_holdout_root_digest:roots[5],
+    external_evaluator_root_digest:roots[6],
+  });
   const blockers=[];
   if(source_context_exclusion_pass!==true)blockers.push('SOURCE_CONTEXT_OVERLAP');
   if(hidden_holdout_pass!==true)blockers.push('HIDDEN_HOLDOUT_FAILURE');
@@ -277,7 +306,11 @@ export function createRsiKnowledgeTransferValidation({
     source_sha:proposal.source_sha,
     proposal_digest:proposal.proposal_digest,
     evaluator_generation_digest:proposal.evaluator_generation_digest,
+    evaluator_generation_seq:proposal.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:proposal.evaluator_generation_history_anchor_digest,
     source_evaluation_epoch_digest:proposal.evaluation_epoch_digest,
+    source_evaluation_epoch_seq:proposal.evaluation_epoch_seq,
+    source_evaluation_contract_digest:proposal.evaluation_contract_digest,
     knowledge_class:proposal.knowledge_class,
     heldout_context_digest:roots[0],
     heldout_task_set_digest:roots[1],
@@ -289,6 +322,7 @@ export function createRsiKnowledgeTransferValidation({
     control_receipt_digest:roots[7],
     treatment_receipt_digest:roots[8],
     transfer_evidence_digest:roots[9],
+    transfer_evaluation_contract_digest:transferEvaluationContractDigest,
     source_context_exclusion_pass:source_context_exclusion_pass===true,
     hidden_holdout_pass:hidden_holdout_pass===true,
     evaluator_integrity_pass:evaluator_integrity_pass===true,
@@ -311,6 +345,9 @@ export function createRsiKnowledgeTransferValidation({
     authored_by_candidate:false,
     candidate_can_choose_holdout:false,
     candidate_can_choose_evaluator:false,
+    candidate_can_choose_reference:false,
+    matched_reference_required:true,
+    transfer_evaluation_contract_bound:true,
     validation_can_write_skill_library:false,
     validation_can_write_experience_graph:false,
     validation_can_modify_meta_skill_profile:false,
@@ -325,6 +362,8 @@ export function verifyRsiKnowledgeTransferValidation(validation,{proposal}={}){
   assertZero(validation,'validation');
   if(validation.external_transfer_validator!==true||validation.external_holdout_owner!==true||validation.authored_by_candidate!==false
     ||validation.candidate_can_choose_holdout!==false||validation.candidate_can_choose_evaluator!==false
+    ||validation.candidate_can_choose_reference!==false||validation.matched_reference_required!==true
+    ||validation.transfer_evaluation_contract_bound!==true
     ||validation.validation_can_write_skill_library!==false||validation.validation_can_write_experience_graph!==false
     ||validation.validation_can_modify_meta_skill_profile!==false||validation.validation_can_activate_knowledge!==false
     ||validation.validation_can_schedule_work!==false)throw new Error('rsi_consolidation_validation_policy_invalid');
@@ -374,13 +413,14 @@ export function createRsiKnowledgeConsolidationAdmission({
   if(external_admission_owner!==true||authored_by_candidate!==false)throw new Error('rsi_consolidation_external_admission_owner_required');
   if(!Array.isArray(validations)||validations.length<2||validations.length>8)throw new Error('rsi_consolidation_transfer_validation_quorum_invalid');
   const checked=validations.map(v=>verifyRsiKnowledgeTransferValidation(v,{proposal}));
-  const contexts=new Set(), tasks=new Set(), families=new Set(), harnesses=new Set();
+  const contexts=new Set(), tasks=new Set(), families=new Set(), harnesses=new Set(), transferContracts=new Set();
   for(const v of checked){
     if(v.state!=='TRANSFER_VALIDATED_ADVISORY_KNOWLEDGE'||v.eligible_for_advisory_knowledge_archive!==true){
       throw new Error('rsi_consolidation_only_passed_transfer_validations_admissible');
     }
     if(contexts.has(v.heldout_context_digest))throw new Error('rsi_consolidation_distinct_target_contexts_required');
-    contexts.add(v.heldout_context_digest);tasks.add(v.heldout_task_set_digest);families.add(v.task_family_digest);harnesses.add(v.transfer_harness_digest);
+    contexts.add(v.heldout_context_digest);tasks.add(v.heldout_task_set_digest);families.add(v.task_family_digest);
+    harnesses.add(v.transfer_harness_digest);transferContracts.add(v.transfer_evaluation_contract_digest);
   }
   if(contexts.size<2||tasks.size<2||families.size<2)throw new Error('rsi_consolidation_transfer_diversity_required');
   const core=zero({
@@ -390,13 +430,18 @@ export function createRsiKnowledgeConsolidationAdmission({
     source_sha:proposal.source_sha,
     proposal_digest:proposal.proposal_digest,
     evaluator_generation_digest:proposal.evaluator_generation_digest,
+    evaluator_generation_seq:proposal.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:proposal.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:proposal.evaluation_epoch_digest,
+    evaluation_epoch_seq:proposal.evaluation_epoch_seq,
+    evaluation_contract_digest:proposal.evaluation_contract_digest,
     knowledge_class:proposal.knowledge_class,
     validation_digests:Object.freeze(checked.map(v=>v.validation_digest).sort()),
     target_context_digests:Object.freeze([...contexts].sort()),
     heldout_task_set_digests:Object.freeze([...tasks].sort()),
     task_family_digests:Object.freeze([...families].sort()),
     transfer_harness_digests:Object.freeze([...harnesses].sort()),
+    transfer_evaluation_contract_digests:Object.freeze([...transferContracts].sort()),
     passed_transfer_context_count:contexts.size,
     all_transfer_validations_passed:true,
     zero_observed_negative_transfer:true,
@@ -448,6 +493,8 @@ function archiveState(sourceSha,rows){
     durable_before_visible:true,
     source_outcome_rows_not_copied:true,
     source_evidence_resolver_required:true,
+    exact_source_evaluation_contract_required:true,
+    transfer_evaluation_contracts_preserved:true,
     active_skill_library_digest:null,
     active_meta_skill_profile_digest:null,
     archive_can_write_skill_library:false,
@@ -475,7 +522,8 @@ export class RsiKnowledgeConsolidationArchive{
       const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'archive');
       if(p.schema!==RSI_KNOWLEDGE_CONSOLIDATION_ARCHIVE_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
         ||p.append_only!==true||p.durable_before_visible!==true||p.source_outcome_rows_not_copied!==true
-        ||p.source_evidence_resolver_required!==true||p.active_skill_library_digest!==null||p.active_meta_skill_profile_digest!==null
+        ||p.source_evidence_resolver_required!==true||p.exact_source_evaluation_contract_required!==true
+        ||p.transfer_evaluation_contracts_preserved!==true||p.active_skill_library_digest!==null||p.active_meta_skill_profile_digest!==null
         ||p.archive_can_write_skill_library!==false||p.archive_can_write_experience_graph!==false
         ||p.archive_can_modify_meta_skill_profile!==false||p.archive_can_activate_knowledge!==false
         ||p.archive_can_schedule_work!==false||p.candidate_can_delete!==false||p.candidate_can_rewrite!==false){
@@ -540,6 +588,7 @@ export class RsiKnowledgeConsolidationArchive{
       schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,
       row_count:s.row_count,validated_count:s.validated_count,knowledge_class_counts:s.knowledge_class_counts,
       append_only:true,durable_before_visible:true,source_outcome_rows_not_copied:true,
+      exact_source_evaluation_contract_required:true,transfer_evaluation_contracts_preserved:true,
       active_skill_library_digest:null,active_meta_skill_profile_digest:null,
       archive_can_write_skill_library:false,archive_can_write_experience_graph:false,
       archive_can_modify_meta_skill_profile:false,archive_can_activate_knowledge:false,
@@ -557,7 +606,11 @@ export function rsiSlowKnowledgeConsolidationTrustRootSnapshot(){
     max_source_entries:MAX_SOURCE_ROWS,
     source_candidate_diversity_required:true,
     same_evaluator_generation_required:true,
+    same_evaluator_generation_sequence_required:true,
+    same_generation_history_anchor_required:true,
     same_evaluation_epoch_required:true,
+    same_evaluation_epoch_sequence_required:true,
+    same_evaluation_contract_required:true,
     mixed_learning_kind_forbidden:true,
     source_evidence_preserved_by_digest:true,
     raw_trajectory_copy_forbidden:true,
@@ -567,6 +620,8 @@ export function rsiSlowKnowledgeConsolidationTrustRootSnapshot(){
     external_scope_owner_required:true,
     external_transfer_validator_required:true,
     external_holdout_owner_required:true,
+    matched_reference_required:true,
+    transfer_evaluation_contract_binding_required:true,
     min_distinct_passed_transfer_contexts:2,
     distinct_heldout_task_sets_required:true,
     distinct_task_families_required:true,
