@@ -1054,6 +1054,24 @@ export class RsiRuntimeService {
     return this.#skillLifecycle.activationView(requested_skill_digests);
   }
 
+  verifiedSkillStateReadback() {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    return Object.freeze({
+      library,
+      governance,
+      library_digest: library.library_digest,
+      governance_digest: governance.governance_digest,
+      admission_exposure_hold_skill_digests: Object.freeze([
+        ...(this.#skillLifecycle.snapshot().admission_exposure_hold_skill_digests || []),
+      ]),
+      readback_is_execution_authority: false,
+      authority_effect: false,
+    });
+  }
+
   async applyAnytimeLibraryAdmission({
     attempt_id,
     admission_proposal,
