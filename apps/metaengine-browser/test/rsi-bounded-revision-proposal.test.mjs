@@ -409,3 +409,74 @@ test('restart rejects self-rehashed revision policy weakening and forged archive
   const forgedArchive=new RsiBoundedRevisionProposalArchive({statePath:forgedPath,source_sha:SOURCE});
   await assert.rejects(()=>forgedArchive.init(),/archive_derived_state_mismatch/);
 });
+
+
+test('revision envelope rejects self-rehashed Phase26 intent authority drift',()=>{
+  const fx=experimentFixture('intent-policy-tamper');
+  const badCore={...fx.intent,candidate_can_execute_experiment:true};
+  delete badCore.intent_digest;
+  const badIntent={...badCore,intent_digest:objectDigest(badCore)};
+  assert.throws(()=>createRsiBoundedRevisionEnvelope({
+    envelope_id:'revision.envelope.intent-policy-tamper',
+    intent:badIntent,
+    receipt:fx.receipt,
+    experiment_ledger_state_digest:dg('ledger-state-intent-policy-tamper'),
+    editable_scope_digest:dg('editable-scope-intent-policy-tamper'),
+    preserved_behavior_digest:dg('preserved-behavior-intent-policy-tamper'),
+    negative_evidence_root_digest:dg('negative-evidence-intent-policy-tamper'),
+    regression_budget_digest:dg('regression-budget-intent-policy-tamper'),
+    validation_plan_digest:dg('validation-plan-intent-policy-tamper'),
+    trust_root_policy_digest:dg('trust-root-intent-policy-tamper'),
+    evaluator_policy_digest:dg('evaluator-policy-intent-policy-tamper'),
+    scheduler_policy_digest:dg('scheduler-policy-intent-policy-tamper'),
+    self_update_policy_digest:dg('self-update-policy-intent-policy-tamper'),
+    production_authority_policy_digest:dg('production-authority-intent-policy-tamper'),
+    security_boundary_digest:dg('security-boundary-intent-policy-tamper'),
+    external_revision_controller:true,
+  }),/intent_policy_invalid/);
+});
+
+test('archive rejects duplicate proposal ids even when child identities differ',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-revision-proposal-id-conflict-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+
+  const fx1=experimentFixture('proposal-id-one');
+  const env1=envelope(fx1,'proposal-id-one');
+  const p1=proposal(env1,'proposal-id-one',{proposal_id:'revision.proposal.shared-id'});
+  await archive.add({envelope:env1,proposal:p1});
+
+  const fx2=experimentFixture('proposal-id-two');
+  const env2=envelope(fx2,'proposal-id-two');
+  const p2=proposal(env2,'proposal-id-two',{proposal_id:'revision.proposal.shared-id'});
+  await assert.rejects(()=>archive.add({envelope:env2,proposal:p2}),/identity_conflict/);
+  assert.equal(archive.snapshot().row_count,1);
+});
+
+test('restart rejects reordered or non-monotonic append-only proposal history',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-revision-sequence-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+
+  for(const label of ['seq-one','seq-two']){
+    const fx=experimentFixture(label);
+    const env=envelope(fx,label);
+    const p=proposal(env,label);
+    await archive.add({envelope:env,proposal:p});
+  }
+  assert.equal(archive.snapshot().last_archive_seq,2);
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  persisted.rows.reverse();
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=objectDigest(stateCore);
+  const reorderedPath=path.join(dir,'reordered.json');
+  await fs.writeFile(reorderedPath,JSON.stringify(persisted),'utf8');
+  const restored=new RsiBoundedRevisionProposalArchive({statePath:reorderedPath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/archive_sequence_invalid/);
+});
