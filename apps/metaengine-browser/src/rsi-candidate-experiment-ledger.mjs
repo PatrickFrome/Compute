@@ -104,6 +104,7 @@ export function createRsiCandidateExperimentIntent({
     if(roots[5]!==routed.request.trial_worker_image_digest)throw new Error('rsi_experiment_artifact_worker_mismatch');
     if(roots[6]!==routed.request.resource_budget_digest)throw new Error('rsi_experiment_artifact_resource_budget_mismatch');
     if(roots[7]!==routed.request.task_order_digest)throw new Error('rsi_experiment_artifact_task_order_mismatch');
+    if(routed.plan.plan_digest===routed.request.prior_budget_plan_digest)throw new Error('rsi_experiment_prior_budget_reuse_forbidden');
   }
   const identity={
     source_sha:routed.request.source_sha,
@@ -126,6 +127,10 @@ export function createRsiCandidateExperimentIntent({
       evaluation_epoch_digest:routed.request.evaluation_epoch_digest,
       threshold_policy_digest:routed.request.threshold_policy_digest,
       stopping_policy_digest:routed.request.stopping_policy_digest,
+      prior_budget_plan_digest:routed.request.prior_budget_plan_digest,
+      hidden_holdout_root_digest:routed.request.hidden_holdout_root_digest,
+      safety_suite_root_digest:routed.request.safety_suite_root_digest,
+      security_suite_root_digest:routed.request.security_suite_root_digest,
       acceptance_assets_frozen:true,
       fresh_budget_epoch_required:true,
     }:{}),
@@ -191,6 +196,10 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
       ||intent.evaluation_epoch_digest!==embeddedRequest.evaluation_epoch_digest
       ||intent.threshold_policy_digest!==embeddedRequest.threshold_policy_digest
       ||intent.stopping_policy_digest!==embeddedRequest.stopping_policy_digest
+      ||intent.prior_budget_plan_digest!==embeddedRequest.prior_budget_plan_digest
+      ||intent.hidden_holdout_root_digest!==embeddedRequest.hidden_holdout_root_digest
+      ||intent.safety_suite_root_digest!==embeddedRequest.safety_suite_root_digest
+      ||intent.security_suite_root_digest!==embeddedRequest.security_suite_root_digest
       ||intent.acceptance_assets_frozen!==true
       ||intent.fresh_budget_epoch_required!==true)throw new Error('rsi_experiment_artifact_request_binding_invalid');
   }
@@ -437,6 +446,8 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     fresh_budget_epoch_required_for_materialized_candidate:true,
     evaluator_generation_binding_required:true,
     evaluator_root_binding_required:true,
+    prior_budget_reuse_forbidden:true,
+    protected_suite_root_binding_required:true,
     sealed_task_set_binding_required:true,
     harness_binding_required:true,
     trial_worker_binding_required:true,
