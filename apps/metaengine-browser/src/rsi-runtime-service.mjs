@@ -461,6 +461,7 @@ export class RsiRuntimeService {
     const governance = this.#skillLifecycle.governance();
     if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
     const context = createRsiSkillRouteContext({
+      source_sha: this.#sourceSha,
       context_id,
       task_signature_digest,
       environment_fingerprint,
