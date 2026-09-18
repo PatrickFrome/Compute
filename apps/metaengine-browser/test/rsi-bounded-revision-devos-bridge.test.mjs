@@ -94,6 +94,10 @@ import {
   rsiAnytimeLibraryAdmissionTrustRootSnapshot,
 } from '../src/rsi-anytime-library-admission.mjs';
 import {
+  RsiRuntimeSkillLifecycle,
+  rsiRuntimeSkillLifecycleTrustRootSnapshot,
+} from '../src/rsi-runtime-skill-lifecycle.mjs';
+import {
   RsiExactOwnerReviewArchive,
   createRsiExactConsumerOwnerReviewBundle,
   verifyRsiExactConsumerOwnerReviewBundle,
