@@ -111,7 +111,7 @@ export function verifyRsiSkillContextEvidence(row){
 }
 
 export function createRsiSkillRouteContext({
-  context_id,task_signature_digest,environment_fingerprint,model_family,
+  source_sha,context_id,task_signature_digest,environment_fingerprint,model_family,
   challenge_family,required_role=null,required_capabilities=[],
   input_schema_digest=null,output_schema_digest=null,
   external_planner=false,authored_by_candidate=true,
@@ -119,6 +119,7 @@ export function createRsiSkillRouteContext({
   if(external_planner!==true||authored_by_candidate!==false)throw new Error('rsi_skill_router_context_external_origin_required');
   const core={
     schema:RSI_SKILL_ROUTE_CONTEXT_SCHEMA,version:1,
+    source_sha:exactSha(source_sha,'source'),
     context_id:boundedId(context_id,'context_id'),
     task_signature_digest:exactDigest(task_signature_digest,'task_signature'),
     environment_fingerprint:boundedId(environment_fingerprint,'environment_fingerprint'),
@@ -141,7 +142,7 @@ function verifyContext(context){
   assertZero(context,'context');
   if(context.external_planner!==true||context.authored_by_candidate!==false||context.candidate_can_choose_router_thresholds!==false)throw new Error('rsi_skill_router_context_policy_invalid');
   const canonical=createRsiSkillRouteContext({
-    context_id:context.context_id,task_signature_digest:context.task_signature_digest,
+    source_sha:context.source_sha,context_id:context.context_id,task_signature_digest:context.task_signature_digest,
     environment_fingerprint:context.environment_fingerprint,model_family:context.model_family,
     challenge_family:context.challenge_family,required_role:context.required_role,
     required_capabilities:context.required_capabilities,input_schema_digest:context.input_schema_digest,
@@ -208,6 +209,7 @@ export function createRsiSkillRoutingPlan({
   const seenEvidence=new Set();
   const checkedEvidence=evidence.map(row=>{
     const checked=verifyRsiSkillContextEvidence(row);
+    if(checked.source_sha!==checkedContext.source_sha)throw new Error('rsi_skill_router_context_evidence_source_mismatch');
     if(seenEvidence.has(checked.evidence_digest))throw new Error('rsi_skill_router_context_evidence_duplicate');
     seenEvidence.add(checked.evidence_digest);return checked;
   });
