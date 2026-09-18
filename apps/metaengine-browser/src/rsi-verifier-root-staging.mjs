@@ -164,7 +164,7 @@ export function verifyRsiVerifierRootStagingManifest(row){
     active_verifier_root_digest:m.active_verifier_root_digest,
     staged_candidate_root_digest:m.staged_candidate_root_digest,
     overlap_root_digests:m.overlap_root_digests,
-    root_history_digest:m.next_root_history_digest,
+    root_history_digest:observedHistory,
     constitution_digest:m.constitution_digest,
   });
   if(expectedBundle!==m.staging_bundle_digest)throw new Error('rsi_root_staging_bundle_digest_mismatch');
@@ -194,14 +194,17 @@ export function createRsiVerifierRootPropagationReceipt({
   const root=exactDigest(validator_root_digest,'validator_root');
   if(root!==m.validator_roots[domain])throw new Error('rsi_root_staging_validator_root_mismatch');
   const generation=positiveInt(observed_bundle_generation,'observed_generation');
+  const observedBundle=exactDigest(observed_staging_bundle_digest,'observed_bundle');
+  const observedActive=exactDigest(observed_active_verifier_root_digest,'observed_active');
+  const observedHistory=exactDigest(root_history_digest,'root_history');
   const observedRoots=Array.isArray(observed_root_digests)?[...new Set(observed_root_digests.map(x=>exactDigest(x,'observed_root')))].sort():[];
   if(observedRoots.length!==2)throw new Error('rsi_root_staging_overlap_readback_required');
   const expectedRoots=[m.predecessor_verifier_root_digest,m.candidate_verifier_root_digest].sort();
   const overlapMatch=JSON.stringify(observedRoots)===JSON.stringify(expectedRoots);
   const generationMatch=generation===m.staging_bundle_generation;
-  const bundleMatch=exactDigest(observed_staging_bundle_digest,'observed_bundle')===m.staging_bundle_digest;
-  const activeMatch=exactDigest(observed_active_verifier_root_digest,'observed_active')===m.predecessor_verifier_root_digest;
-  const historyMatch=exactDigest(root_history_digest,'root_history')===m.next_root_history_digest;
+  const bundleMatch=observedBundle===m.staging_bundle_digest;
+  const activeMatch=observedActive===m.predecessor_verifier_root_digest;
+  const historyMatch=observedHistory===m.next_root_history_digest;
   const propagated=generationMatch&&bundleMatch&&activeMatch&&overlapMatch&&historyMatch;
   const refs=Array.isArray(evidence_refs)?[...new Set(evidence_refs.map(x=>id(x,'evidence_ref')))].sort():[];
   if(refs.length<1||refs.length!==evidence_refs.length)throw new Error('rsi_root_staging_evidence_refs_invalid');
@@ -214,8 +217,8 @@ export function createRsiVerifierRootPropagationReceipt({
     validator_domain:domain,
     validator_root_digest:root,
     observed_bundle_generation:generation,
-    observed_staging_bundle_digest:m.staging_bundle_digest,
-    observed_active_verifier_root_digest:m.predecessor_verifier_root_digest,
+    observed_staging_bundle_digest:observedBundle,
+    observed_active_verifier_root_digest:observedActive,
     observed_root_digests:Object.freeze(observedRoots),
     root_history_digest:m.next_root_history_digest,
     generation_match:generationMatch,bundle_match:bundleMatch,active_root_match:activeMatch,
