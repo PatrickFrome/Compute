@@ -321,6 +321,44 @@ test('typed prerequisite relation can suppress a dependent skill but never auto-
   assert.equal(plan.relation_graph_cannot_grant_skill_activity,true);
 });
 
+test('prerequisite suppression closes transitively without auto-adding missing ancestors',()=>{
+  const {good,bad,explore,library,governance}=fixture();
+  const b=episode({command:'cccccccc-cccc-4ccc-8ccc-cccccccccccc',skillDigest:bad.capsule.skill_digest,sign:'POSITIVE',step:1});
+  const x=episode({command:'dddddddd-dddd-4ddd-8ddd-dddddddddddd',skillDigest:explore.capsule.skill_digest,sign:'POSITIVE',step:2});
+  const evidence=[
+    createRsiSkillContextEvidence({source_sha:SOURCE,episode:b.ep,credit_receipt:b.credit,skill_digest:bad.capsule.skill_digest,external_evaluator:true,authored_by_candidate:false}),
+    createRsiSkillContextEvidence({source_sha:SOURCE,episode:x.ep,credit_receipt:x.credit,skill_digest:explore.capsule.skill_digest,external_evaluator:true,authored_by_candidate:false}),
+  ];
+  const edges=[
+    createRsiSkillRelationEdge({
+      relation_id:'relation.router.good-prerequisite-bad.chain',library,
+      from_skill_digest:good.capsule.skill_digest,to_skill_digest:bad.capsule.skill_digest,
+      relation_type:'PREREQUISITE',scope:'GLOBAL_VERIFIED',
+      evidence_digest:d('e'),evidence_refs:['relation:router:chain:good-bad'],
+      external_evaluator:true,authored_by_candidate:false,
+    }),
+    createRsiSkillRelationEdge({
+      relation_id:'relation.router.bad-prerequisite-explore.chain',library,
+      from_skill_digest:bad.capsule.skill_digest,to_skill_digest:explore.capsule.skill_digest,
+      relation_type:'PREREQUISITE',scope:'GLOBAL_VERIFIED',
+      evidence_digest:d('f'),evidence_refs:['relation:router:chain:bad-explore'],
+      external_evaluator:true,authored_by_candidate:false,
+    }),
+  ];
+  const graph=createRsiSkillRelationGraph({
+    graph_id:'graph.router.prerequisite-chain',library,edges,
+    external_graph_owner:true,authored_by_candidate:false,
+  });
+  const plan=createRsiSkillRoutingPlan({
+    library,governance,context:context(),evidence,relation_graph:graph,
+    max_selected:2,exploration_slots:0,external_planner:true,authored_by_candidate:false,
+  });
+  assert.equal(plan.selected_count,0);
+  assert.ok(plan.relation_suppressed.some(row=>row.skill_digest===bad.capsule.skill_digest));
+  assert.ok(plan.relation_suppressed.some(row=>row.skill_digest===explore.capsule.skill_digest));
+  assert.ok(!plan.selected.some(row=>row.skill_digest===good.capsule.skill_digest));
+});
+
 test('typed antagonism relation retains the higher-ranked selected skill and suppresses the conflicting lower-ranked peer',()=>{
   const {good,bad,library,governance}=fixture();
   const g=episode({command:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',skillDigest:good.capsule.skill_digest,sign:'POSITIVE',step:1});
