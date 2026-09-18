@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 
+import { verifyRsiVerifiedCandidateMaterialization } from './rsi-verified-candidate-materialization.mjs';
+
 import {
   applyRsiEvaluatorMesh,
   createRsiEvaluatorMeshPlan,
@@ -76,7 +78,7 @@ function assertIdentity(row,identity,label){
   if(exactSha(row?.candidate_sha,label)!==identity.candidate_sha)throw new Error(`rsi_external_eval_${label}_candidate_sha_mismatch`);
 }
 function verifiedMaterializationIdentity(row){
-  if(!row||typeof row!=='object'||Array.isArray(row)||row.schema!=='metaengine.rsi.verified-candidate-materialization.v1'||row.version!==1)throw new Error('rsi_external_eval_verified_materialization_invalid');
+  verifyRsiVerifiedCandidateMaterialization(row);
   assertZeroAuthority(row,'verified_materialization');
   if(
     row.exact_workspace_incarnation_verified!==true
