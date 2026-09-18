@@ -58,11 +58,51 @@ function shadowSelection() {
   };
   return Object.freeze({ ...core, selection_digest: dg(core) });
 }
+function comparisonBinding(selection, index, comparatorRoot) {
+  const core = {
+    schema: 'metaengine.rsi.shadow-comparison-binding.v1',
+    version: 1,
+    source_sha: SOURCE,
+    selection_digest: selection.selection_digest,
+    qualification_digest: selection.qualification_digest,
+    champion_profile_digest: selection.incumbent_profile_digest,
+    challenger_profile_digest: selection.challenger_profile_digest,
+    verified_context_digest: tagged(`context-${index}`),
+    baseline_plan_digest: tagged(`baseline-${index}`),
+    comparator_root_digest: comparatorRoot,
+    comparison_mode: 'READ_ONLY_DUAL_PLAN',
+    context_source: 'BASELINE_PLAN',
+    champion_challenger_roles_fixed: true,
+    same_verified_context_required: true,
+    external_comparator_owner: true,
+    authored_by_candidate: false,
+    candidate_can_choose_context: false,
+    candidate_can_choose_comparator: false,
+    candidate_can_swap_roles: false,
+    raw_context_exposed_to_candidate: false,
+    browser_effects_allowed: false,
+    plan_execution_allowed: false,
+    baseline_execution_path_unchanged: true,
+    comparison_can_change_execution: false,
+    comparison_can_activate_profile: false,
+    comparison_can_authorize_canary: false,
+    external_canary_gate_still_required: true,
+    execution_authority: false,
+    production_mutation_authority: false,
+    promotion_authority: false,
+    self_update_authority: false,
+    scheduler_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+  return Object.freeze({ ...core, binding_digest: dg(core) });
+}
 function manifest(selection = shadowSelection(), overrides = {}) {
   return createRsiMetaProfileCanaryManifest({
     manifest_id: overrides.manifest_id || 'canary.manifest.one',
     selection,
     cohort_digest: overrides.cohort_digest || tagged('cohort-a'),
+    comparator_root_digest: overrides.comparator_root_digest || tagged('comparator-root'),
     decision_budget: overrides.decision_budget || 3,
     window_budget: overrides.window_budget || 2,
     external_canary_owner: true,
@@ -76,8 +116,7 @@ function observation(manifestRow, selection, index, overrides = {}) {
     selection,
     decision_index: index,
     window_index: overrides.window_index || Math.min(index, manifestRow.window_budget),
-    context_digest: overrides.context_digest || tagged(`context-${index}`),
-    baseline_plan_digest: overrides.baseline_plan_digest || tagged(`baseline-${index}`),
+    comparison_binding: overrides.comparison_binding || comparisonBinding(selection, index, manifestRow.comparator_root_digest),
     challenger_plan_digest: overrides.challenger_plan_digest || tagged(`challenger-${index}`),
     identity_match: overrides.identity_match ?? true,
     outcome_safety: overrides.outcome_safety || 'PASS',
@@ -94,13 +133,15 @@ function observation(manifestRow, selection, index, overrides = {}) {
   });
 }
 
-test('canary manifest freezes identity, cohort and budget while keeping the incumbent default', () => {
+test('canary manifest freezes identity, cohort and comparator while keeping the incumbent default', () => {
   const selection = shadowSelection();
   const row = manifest(selection);
   assert.equal(verifyRsiMetaProfileCanaryManifest(row, { selection }).manifest_digest, row.manifest_digest);
   assert.equal(row.mode, 'READ_ONLY_DECISION_SUPPORT_CANARY');
   assert.equal(row.baseline_profile_remains_default, true);
   assert.equal(row.baseline_profile_is_fallback, true);
+  assert.equal(row.external_comparator_root_fixed, true);
+  assert.equal(row.candidate_can_choose_comparator, false);
   assert.equal(row.challenger_output_is_advisory_only, true);
   assert.equal(row.browser_effects_allowed, false);
   assert.equal(row.profile_replacement_allowed, false);
@@ -114,6 +155,7 @@ test('candidate cannot own the cohort or turn a canary observation into an effec
     manifest_id: 'canary.bad-owner',
     selection,
     cohort_digest: tagged('cohort-a'),
+    comparator_root_digest: tagged('comparator-root'),
     decision_budget: 2,
     window_budget: 1,
     external_canary_owner: false,
@@ -127,8 +169,7 @@ test('candidate cannot own the cohort or turn a canary observation into an effec
     selection,
     decision_index: 1,
     window_index: 1,
-    context_digest: tagged('context'),
-    baseline_plan_digest: tagged('baseline'),
+    comparison_binding: comparisonBinding(selection, 1, row.comparator_root_digest),
     challenger_plan_digest: tagged('challenger'),
     identity_match: true,
     outcome_safety: 'PASS',
@@ -143,12 +184,30 @@ test('candidate cannot own the cohort or turn a canary observation into an effec
   }), /read_only_observation_required/);
 });
 
+test('each decision is bound to an exact external comparison context and comparator root', () => {
+  const selection = shadowSelection();
+  const row = manifest(selection, { decision_budget: 2, window_budget: 1 });
+  const first = observation(row, selection, 1);
+  assert.equal(first.context_digest, first.comparison_binding.verified_context_digest);
+  assert.equal(first.baseline_plan_digest, first.comparison_binding.baseline_plan_digest);
+  assert.equal(first.comparison_binding.comparator_root_digest, row.comparator_root_digest);
+
+  const drifted = comparisonBinding(selection, 2, tagged('different-comparator'));
+  assert.throws(
+    () => observation(row, selection, 2, { comparison_binding: drifted }),
+    /comparator_root_drift/,
+  );
+});
+
 test('complete safe trajectory evidence yields review readiness but never activation authority', () => {
   const selection = shadowSelection();
   const row = manifest(selection);
   const observations = [1, 2, 3].map((index) => observation(row, selection, index));
   observations.forEach((entry) => {
-    assert.equal(verifyRsiMetaProfileCanaryObservation(entry, { manifest: row, selection }).observation_digest, entry.observation_digest);
+    assert.equal(
+      verifyRsiMetaProfileCanaryObservation(entry, { manifest: row, selection }).observation_digest,
+      entry.observation_digest,
+    );
   });
   const admission = assessRsiMetaProfileCanary({
     admission_id: 'admission.safe',
@@ -257,6 +316,9 @@ test('trust root fixes safe-exploration boundaries and exposes no authority', ()
   const root = rsiMetaProfileCanaryAdmissionTrustRootSnapshot();
   assert.equal(root.phase18_shadow_selection_required, true);
   assert.equal(root.identity_stable_canary_manifest_required, true);
+  assert.equal(root.fixed_external_cohort_required, true);
+  assert.equal(root.fixed_external_comparator_root_required, true);
+  assert.equal(root.exact_context_comparison_binding_required_per_decision, true);
   assert.equal(root.baseline_profile_remains_default, true);
   assert.equal(root.first_canary_surface_read_only_decision_support_only, true);
   assert.equal(root.trajectory_outcome_safety_required, true);
@@ -264,6 +326,7 @@ test('trust root fixes safe-exploration boundaries and exposes no authority', ()
   assert.equal(root.trajectory_task_utility_required, true);
   assert.equal(root.identity_drift_blocks_canary, true);
   assert.equal(root.ambiguous_evidence_blocks_canary, true);
+  assert.equal(root.candidate_can_choose_comparator, false);
   assert.equal(root.candidate_can_self_admit, false);
   assert.equal(root.canary_token_minted, false);
   assert.equal(root.profile_activation_authorized, false);
