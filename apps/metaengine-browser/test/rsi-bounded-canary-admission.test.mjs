@@ -304,6 +304,7 @@ test('bounded canary root is immutable to candidates and downstream promotion/to
     'apps/metaengine-browser/src/rsi-meta-profile-qualification.mjs',
     'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
     'apps/metaengine-browser/src/rsi-bounded-canary-admission.mjs',
+    'apps/metaengine-browser/src/rsi-meta-profile-canary-admission.mjs',
   ];
   for(const root of [rsiPromotionGateTrustRootSnapshot(),rsiTournamentTrustRootSnapshot()]){
     for(const p of required)assert.equal(root.immutable_component_paths.includes(p),true,p);
