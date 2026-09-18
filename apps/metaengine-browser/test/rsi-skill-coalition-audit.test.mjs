@@ -87,6 +87,7 @@ test('coalition audit trust root keeps masking contextual and non-authoritative'
   assert.equal(root.candidate_can_choose_coalition,false);
   assert.equal(root.candidate_can_write_utility,false);
   assert.equal(root.candidate_can_choose_threshold,false);
+  assert.equal(root.min_negative_pairs,2);
   assert.equal(root.mask_is_execution_authority,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.coalition_root_digest,/^sha256:[0-9a-f]{64}$/);
