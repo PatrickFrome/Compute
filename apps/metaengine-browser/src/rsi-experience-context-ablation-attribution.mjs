@@ -270,6 +270,9 @@ export function createRsiExperienceContextAblationReceipt({
   if(external_evaluator!==true||authored_by_candidate!==false)throw new Error('rsi_memattr_external_evaluator_required');
   const ablation=checked.ablations.find(x=>x.ablation_id===String(ablation_id||''));
   if(!ablation)throw new Error('rsi_memattr_ablation_id_invalid');
+  if(typeof baseline_hard_invariants_pass!=='boolean'||typeof ablated_hard_invariants_pass!=='boolean'){
+    throw new Error('rsi_memattr_hard_invariant_result_required');
+  }
   const baseline=objectiveValues(baseline_objectives,checked.objective_spec,'baseline');
   const ablated=objectiveValues(ablated_objectives,checked.objective_spec,'ablated');
   const classification=classify(
