@@ -51,6 +51,21 @@ function optionalIso(value,label){return value==null?null:iso(value,label)}
 function bool(value,label){if(value!==true&&value!==false)throw new Error(`rsi_effect_reconcile_${label}_boolean_invalid`);return value}
 function plain(value){return value&&typeof value==='object'&&!Array.isArray(value)}
 function boundedError(value){if(value==null)return null;const out=String(value).slice(0,500);return out||null}
+function safeSelfUpdateResult(value){
+  if(value==null)return null;
+  if(!plain(value))return Object.freeze({});
+  const allowed=[
+    'state','current_version','available_version','downloaded_version','install_attempted_version',
+    'version','resolved_git_sha','metadata_verified','restart_gate_safe','pre_install_receipt_persisted',
+    'installer_handoff_prepared','pending_prior_qualification','last_error','effect_outcome',
+  ];
+  const out={};
+  for(const key of allowed){
+    const raw=value[key];
+    if(raw==null||['string','number','boolean'].includes(typeof raw))out[key]=raw??null;
+  }
+  return Object.freeze(out);
+}
 
 function canonicalReceipt(receipt,commandId){
   if(receipt==null)return null;
@@ -64,7 +79,7 @@ function canonicalReceipt(receipt,commandId){
     command_id:commandId,
     action:'SELF_UPDATE_APPLY',
     platform:receipt.platform==null?null:String(receipt.platform).slice(0,64),
-    result:plain(receipt.result)?Object.freeze(structuredClone(receipt.result)):receipt.result??null,
+    result:safeSelfUpdateResult(receipt.result),
     effect_outcome:outcome,
     lane:receipt.lane==null?null:String(receipt.lane).toUpperCase(),
     effect_key:receipt.effect_key==null?null:String(receipt.effect_key),
