@@ -200,6 +200,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-shadow-core.mjs',
     'apps/metaengine-browser/src/rsi-benchmark-coevolution-admission.mjs',
     'apps/metaengine-browser/src/rsi-shared-experience-bus.mjs',
+    'apps/metaengine-browser/src/rsi-evaluation-budget-router.mjs',
     'apps/metaengine-browser/supabase/rsi-shadow-archive-v1.sql',
   ]) {
     assert.throws(() => goodBuildPlan({ mutations: [{ path, change: 'MODIFY' }] }), /mutation_|immutable_/);
