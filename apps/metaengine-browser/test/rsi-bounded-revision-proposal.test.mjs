@@ -28,6 +28,14 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stableForDigest(v){
+  if(Array.isArray(v))return v.map(stableForDigest);
+  if(!v||typeof v!=='object')return v;
+  return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stableForDigest(v[k])]));
+}
+function objectDigest(v){
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableForDigest(v)),'utf8').digest('hex')}`;
+}
 
 function experimentFixture(label='one',{supported=true}={}){
   const hypothesis=createRsiSharedExperienceHypothesis({
@@ -293,4 +301,76 @@ test('revision trust root preserves external boundaries and zero authority',()=>
   assert.equal(root.archive_can_apply_revision,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.bounded_revision_proposal_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('failed archive rename never exposes a phantom bounded revision proposal',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-revision-proposal-crash-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+
+  const fx=experimentFixture('crash');
+  const env=envelope(fx,'crash');
+  const p=proposal(env,'crash');
+
+  const originalRename=fs.rename;
+  fs.rename=async()=>{throw Object.assign(new Error('injected_revision_archive_rename_failure'),{code:'EIO'});};
+  try{
+    await assert.rejects(
+      ()=>archive.add({envelope:env,proposal:p}),
+      /injected_revision_archive_rename_failure/,
+    );
+  }finally{
+    fs.rename=originalRename;
+  }
+
+  assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().represented_mutation_categories.length,0);
+
+  const restored=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,0);
+
+  assert.equal((await archive.add({envelope:env,proposal:p})).state,'ARCHIVED_FOR_EXTERNAL_IMPLEMENTATION_REVIEW');
+  assert.equal(archive.snapshot().row_count,1);
+});
+
+test('restart rejects self-rehashed revision policy weakening and forged archive summaries',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-revision-proposal-replay-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiBoundedRevisionProposalArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+
+  const fx=experimentFixture('replay');
+  const env=envelope(fx,'replay');
+  const p=proposal(env,'replay',{mutation_categories:['VALIDATION']});
+  await archive.add({envelope:env,proposal:p});
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+
+  const weakened=structuredClone(raw);
+  weakened.rows[0].proposal.proposal_can_write_repository=true;
+  const weakenedProposal=structuredClone(weakened.rows[0].proposal);
+  delete weakenedProposal.proposal_digest;
+  weakened.rows[0].proposal.proposal_digest=objectDigest(weakenedProposal);
+  const weakenedState=structuredClone(weakened);
+  delete weakenedState.state_digest;
+  weakened.state_digest=objectDigest(weakenedState);
+  const weakenedPath=path.join(dir,'weakened.json');
+  await fs.writeFile(weakenedPath,JSON.stringify(weakened),'utf8');
+  const weakenedArchive=new RsiBoundedRevisionProposalArchive({statePath:weakenedPath,source_sha:SOURCE});
+  await assert.rejects(()=>weakenedArchive.init(),/proposal_policy_invalid/);
+
+  const forged=structuredClone(raw);
+  forged.represented_mutation_categories=['FORGED_CATEGORY'];
+  const forgedState=structuredClone(forged);
+  delete forgedState.state_digest;
+  forged.state_digest=objectDigest(forgedState);
+  const forgedPath=path.join(dir,'forged.json');
+  await fs.writeFile(forgedPath,JSON.stringify(forged),'utf8');
+  const forgedArchive=new RsiBoundedRevisionProposalArchive({statePath:forgedPath,source_sha:SOURCE});
+  await assert.rejects(()=>forgedArchive.init(),/archive_derived_state_mismatch/);
 });
