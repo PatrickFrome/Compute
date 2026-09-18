@@ -7,10 +7,12 @@ import {
   RsiRecursiveRiskLedger,
   createRsiExternalStatisticalCertificate,
   createRsiRecursiveRiskBudget,
+  evaluateRsiRiskControlledPromotionReview,
   rsiRecursiveRiskTrustRootSnapshot,
   rsiRiskAllocationForConfirmation,
   verifyRsiExternalStatisticalCertificate,
   verifyRsiRecursiveRiskBudget,
+  verifyRsiRiskConfirmation,
 } from '../src/rsi-recursive-risk-budget.mjs';
 
 const sha = (char) => char.repeat(40);
@@ -74,6 +76,38 @@ function certificate({
     external_verifier: external,
     authored_by_candidate: authored,
   });
+}
+
+function promotionGate(char = '1', overrides = {}) {
+  const core = {
+    schema: 'metaengine.rsi.promotion-admission-gate-result.v1',
+    version: 1,
+    state: 'READY_FOR_EXTERNAL_PROMOTION_REVIEW',
+    blockers: [],
+    candidate_id: candidateId(char),
+    candidate_sha: sha(char),
+    parent_sha: sha('0'),
+    handoff_digest: d('1'),
+    tournament_plan_digest: d('4'),
+    tournament_result_digest: d('2'),
+    archive_admission_digest: d('3'),
+    qualification_digest: d('7'),
+    artifact_digest: d('8'),
+    provenance_digest: d('9'),
+    ready_for_external_promotion_review: true,
+    existing_self_update_handoff_authorized: false,
+    direct_install_authorized: false,
+    promotion_token: null,
+    scalar_winner: null,
+    execution_authority: false,
+    production_mutation_authority: false,
+    promotion_authority: false,
+    self_update_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+    ...overrides,
+  };
+  return Object.freeze({ ...core, gate_digest: digest(core) });
 }
 
 function binding(char = '1', holdout = d('6')) {
@@ -286,4 +320,59 @@ test('risk trust root freezes budget/certificate control outside the candidate m
   assert.equal(root.statistical_gate_is_promotion_authority, false);
   assert.equal(root.authority_effect, false);
   assert.match(root.risk_root_digest, /^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('risk-controlled promotion review requires both ordinary promotion readiness and statistical confirmation for the same exact candidate', () => {
+  const budget = finiteBudget();
+  const ledger = new RsiRecursiveRiskLedger({ budget });
+  const confirmation = ledger.confirm({
+    certificate: certificate({ budget, index: 1, char: '1', superiority: true }),
+    ...binding('1'),
+  });
+  verifyRsiRiskConfirmation(confirmation);
+
+  const review = evaluateRsiRiskControlledPromotionReview({
+    promotion_gate_result: promotionGate('1'),
+    risk_confirmation: confirmation,
+  });
+  assert.equal(review.state, 'READY_FOR_RISK_CONTROLLED_EXTERNAL_PROMOTION_REVIEW');
+  assert.equal(review.hard_invariants_already_required_by_promotion_gate, true);
+  assert.equal(review.statistical_confirmation_required, true);
+  assert.equal(review.statistical_gate_is_promotion_authority, false);
+  assert.equal(review.external_promotion_review_required, true);
+  assert.equal(review.direct_promotion_authorized, false);
+  assert.equal(review.existing_self_update_handoff_authorized, false);
+  assert.equal(review.promotion_token, null);
+  assert.equal(review.authority_effect, false);
+  assert.match(review.review_digest, /^sha256:[0-9a-f]{64}$/);
+});
+
+test('risk-controlled promotion review fails closed on rejected statistics, candidate mismatch or tampered ordinary gate', () => {
+  const budget = finiteBudget();
+  const rejectedLedger = new RsiRecursiveRiskLedger({ budget });
+  const rejected = rejectedLedger.confirm({
+    certificate: certificate({ budget, index: 1, char: '2', superiority: false }),
+    ...binding('2'),
+  });
+  assert.throws(() => evaluateRsiRiskControlledPromotionReview({
+    promotion_gate_result: promotionGate('2'),
+    risk_confirmation: rejected,
+  }), /statistical_gate_not_pass/);
+
+  const acceptedLedger = new RsiRecursiveRiskLedger({ budget });
+  const accepted = acceptedLedger.confirm({
+    certificate: certificate({ budget, index: 1, char: '1', superiority: true }),
+    ...binding('1'),
+  });
+  assert.throws(() => evaluateRsiRiskControlledPromotionReview({
+    promotion_gate_result: promotionGate('2'),
+    risk_confirmation: accepted,
+  }), /binding_mismatch/);
+
+  const tampered = { ...promotionGate('1'), ready_for_external_promotion_review: false };
+  assert.throws(() => evaluateRsiRiskControlledPromotionReview({
+    promotion_gate_result: tampered,
+    risk_confirmation: accepted,
+  }), /digest_mismatch/);
 });
