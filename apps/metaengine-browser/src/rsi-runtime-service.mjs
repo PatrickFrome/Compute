@@ -63,6 +63,10 @@ import {
   verifyRsiAnytimeLibraryAdmissionCertificate,
   rsiAnytimeLibraryAdmissionTrustRootSnapshot,
 } from './rsi-anytime-library-admission.mjs';
+import {
+  verifyRsiSkillExposureReleaseCertificate,
+  rsiSkillExposureReleaseTrustRootSnapshot,
+} from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -145,6 +149,7 @@ function trustRoots() {
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
     shadow_comparison_binding: rsiShadowComparisonBindingTrustRootSnapshot(),
     anytime_library_admission: rsiAnytimeLibraryAdmissionTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1144,6 +1149,91 @@ export class RsiRuntimeService {
       retry_performed: false,
       automatic_retry_allowed: false,
       retrieval_exposure_changed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  previewVerifiedSkillExposureRelease({ skill_digest } = {}) {
+    this.#assertRunning();
+    const preview = this.#skillLifecycle.previewAdmissionExposureRelease({ skill_digest });
+    const readback = this.verifiedSkillStateReadback();
+    return Object.freeze({
+      preview,
+      library_digest: readback.library_digest,
+      current_governance_digest: readback.governance_digest,
+      next_governance_digest: preview.next_governance_digest,
+      skill_digest: preview.skill_digest,
+      preview_is_execution_authority: false,
+      authority_effect: false,
+    });
+  }
+
+  async applySkillExposureRelease({
+    attempt_id,
+    certificate,
+    certificate_args = {},
+  } = {}) {
+    this.#assertRunning();
+    const skillDigest = certificate?.skill_digest;
+    const currentLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const currentGovernance = this.#skillLifecycle.governance();
+    if (!currentLibrary || !currentGovernance) throw new Error('rsi_runtime_exposure_release_current_state_unavailable');
+    const preview = this.#skillLifecycle.previewAdmissionExposureRelease({ skill_digest: skillDigest });
+    const checked = verifyRsiSkillExposureReleaseCertificate(certificate, {
+      ...certificate_args,
+      library: currentLibrary,
+      current_governance: currentGovernance,
+      release_preview: preview,
+    });
+    if (checked.state !== 'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE'
+      || checked.eligible_for_one_attempt_exposure_release !== true) {
+      throw new Error('rsi_runtime_exposure_release_certificate_not_eligible');
+    }
+    const result = await this.#skillLifecycle.releaseAdmissionExposureHoldOneAttempt({
+      attempt_id,
+      release_certificate_digest: checked.certificate_digest,
+      skill_digest: checked.skill_digest,
+      expected_current_library_digest: checked.library_digest,
+      expected_current_governance_digest: checked.current_governance_digest,
+      expected_next_governance_digest: checked.next_governance_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_ATTEMPT_RECORDED', {
+      attempt_id,
+      release_certificate_digest: checked.certificate_digest,
+      skill_digest: checked.skill_digest,
+      state: result.state,
+      previous_governance_digest: checked.current_governance_digest,
+      expected_next_governance_digest: checked.next_governance_digest,
+      release_mode: checked.release_mode,
+      retrieval_exposure_changed: result.retrieval_exposure_changed === true,
+      full_activation_authorized: false,
+      browser_authority: false,
+      execution_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  async reconcileSkillExposureRelease({ attempt_id, release_certificate_digest } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.reconcileAdmissionExposureReleaseAttempt({
+      attempt_id,
+      release_certificate_digest,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_RECONCILED', {
+      attempt_id,
+      release_certificate_digest,
+      state: result.state,
+      observed_library_digest: result.observed_library_digest || null,
+      observed_governance_digest: result.observed_governance_digest || null,
+      retry_performed: false,
+      automatic_retry_allowed: false,
+      browser_authority: false,
+      execution_authority: false,
       authority_effect: false,
     });
     return result;
