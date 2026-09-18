@@ -50,6 +50,7 @@ import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntime
 import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
 import { RsiSkillRevisionIntegrityLedger, createRsiSkillRevisionIntegrityAdmission, rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot } from './rsi-skill-revision-integrity-admission.mjs';
 import { createRsiIntegrityBoundSkillReliability, rsiIntegrityBoundSkillReliabilityTrustRootSnapshot } from './rsi-integrity-bound-skill-reliability.mjs';
+import { RsiRevisionScopeLedger, createRsiRevisionScopeAdmission, rsiRevisionScopeAdmissionTrustRootSnapshot } from './rsi-revision-scope-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -123,6 +124,7 @@ function trustRoots() {
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
     skill_revision_integrity: rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot(),
     integrity_bound_skill_reliability: rsiIntegrityBoundSkillReliabilityTrustRootSnapshot(),
+    revision_scope_admission: rsiRevisionScopeAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -145,6 +147,7 @@ export class RsiRuntimeService {
   #skillCuration;
   #skillRevisionFrontier;
   #skillRevisionIntegrity;
+  #revisionScopeLedger;
   #archive;
   #observer;
   #verifiedArchive;
@@ -162,7 +165,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, revisionScopePath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -204,6 +207,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillRevisionIntegrityPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeRevisionScopePath = revisionScopePath || (ledgerPath ? `${ledgerPath}.revision-scope.json` : null);
+    this.#revisionScopeLedger = new RsiRevisionScopeLedger({
+      statePath: runtimeRevisionScopePath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -220,6 +228,7 @@ export class RsiRuntimeService {
     await this.#skillCuration.init();
     await this.#skillRevisionFrontier.init();
     await this.#skillRevisionIntegrity.init();
+    await this.#revisionScopeLedger.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -235,6 +244,7 @@ export class RsiRuntimeService {
       runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
       skill_revision_frontier_schema: this.#skillRevisionFrontier.snapshot().schema,
       skill_revision_integrity_schema: this.#skillRevisionIntegrity.snapshot().schema,
+      revision_scope_admission_schema: this.#revisionScopeLedger.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -881,6 +891,50 @@ export class RsiRuntimeService {
     return binding;
   }
 
+  async recordSkillRevisionScopeAdmission({
+    reliability_binding,
+    admission_id,
+    units,
+    compatibility_receipt,
+    scope_candidate,
+    preservation_receipt,
+    scope_result,
+    external_scope_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const admission = createRsiRevisionScopeAdmission({
+      source_sha: this.#sourceSha,
+      admission_id,
+      reliability_binding,
+      units,
+      compatibility_receipt,
+      scope_candidate,
+      preservation_receipt,
+      scope_result,
+      external_scope_owner,
+      authored_by_candidate,
+    });
+    const stored = await this.#revisionScopeLedger.append(admission);
+    await this.#ledger.append('SKILL_REVISION_SCOPE_PRESERVATION_ASSESSED', {
+      admission_id: admission.admission_id,
+      admission_digest: admission.admission_digest,
+      reliability_binding_digest: admission.reliability_binding_digest,
+      successor_skill_digest: admission.successor_skill_digest,
+      scope_result_digest: admission.scope_result_digest,
+      state: admission.state,
+      eligible_for_external_library_evidence: admission.eligible_for_external_library_evidence,
+      direct_library_replacement_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ admission, stored });
+  }
+
+  scopeEligibleSkillRevisions() {
+    this.#assertRunning();
+    return this.#revisionScopeLedger.eligible();
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -938,6 +992,7 @@ export class RsiRuntimeService {
       runtime_skill_curation: this.#skillCuration.snapshot(),
       skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
       skill_revision_integrity: this.#skillRevisionIntegrity.snapshot(),
+      revision_scope_admission: this.#revisionScopeLedger.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
         evaluation_count: this.#skillReliabilityEvaluationCount,
