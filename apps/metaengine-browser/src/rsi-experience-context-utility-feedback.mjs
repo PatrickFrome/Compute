@@ -15,6 +15,8 @@ export const RSI_EXPERIENCE_CONTEXT_UTILITY_FEEDBACK_SCHEMA =
   'metaengine.rsi.experience-context-utility-feedback.v1';
 
 const SHA256=/^sha256:[0-9a-f]{64}$/;
+const DIGEST64=/^[0-9a-f]{64}$/;
+const SHA40=/^[0-9a-f]{40}$/;
 const SAFE_ID=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const OUTCOMES=new Set(['HELPFUL','HARMFUL','NEUTRAL']);
 const MAX_CASES=12;
@@ -31,6 +33,16 @@ function digest(v){
 function exactDigest(v,l){
   const out=String(v||'').trim().toLowerCase();
   if(!SHA256.test(out))throw new Error('rsi_context_utility_'+l+'_digest_invalid');
+  return out;
+}
+function exactHexDigest(v,l){
+  const out=String(v||'').trim().toLowerCase().replace(/^sha256:/,'');
+  if(!DIGEST64.test(out))throw new Error('rsi_context_utility_'+l+'_digest_invalid');
+  return out;
+}
+function exactSha(v,l){
+  const out=String(v||'').trim().toLowerCase();
+  if(!SHA40.test(out))throw new Error('rsi_context_utility_'+l+'_sha_invalid');
   return out;
 }
 function safeId(v,l){
@@ -245,9 +257,11 @@ export function verifyRsiExperienceContextUtilityFeedback(row){
     ||row.secret_material_present!==false
   )throw new Error('rsi_context_utility_feedback_policy_invalid');
   for(const f of [
-    'context_plan_digest','target_context_digest','graph_snapshot_digest','retrieval_digest',
-    'controller_plan_digest','evaluation_digest',
+    'context_plan_digest','target_context_digest','graph_snapshot_digest','retrieval_digest','evaluation_digest',
   ]) exactDigest(row[f],f);
+  exactHexDigest(row.controller_plan_digest,'controller_plan');
+  exactHexDigest(row.observation_digest,'observation');
+  exactSha(row.source_sha,'source');
   if(!Array.isArray(row.judgments)||!Array.isArray(row.utility_receipts)
     ||row.judgments.length!==row.receipt_count
     ||row.utility_receipts.length!==row.receipt_count
