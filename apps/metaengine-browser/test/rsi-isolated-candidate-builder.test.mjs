@@ -200,6 +200,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-shadow-core.mjs',
     'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
     'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
+    'apps/metaengine-browser/src/rsi-episode-evaluation-ingest.mjs',
     'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
     'apps/metaengine-browser/supabase/rsi-shadow-archive-v1.sql',
   ]) {

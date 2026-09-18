@@ -432,6 +432,7 @@ export function rsiEpisodeOrchestratorTrustRootSnapshot() {
     immutable_component_paths: [
       'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
       'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
+      'apps/metaengine-browser/src/rsi-episode-evaluation-ingest.mjs',
       'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
       'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
       'apps/metaengine-browser/src/rsi-runtime-service.mjs',
