@@ -4,8 +4,8 @@ import {
   verifyRsiBoundedRevisionArtifactReceipt,
 } from './rsi-bounded-revision-devos-bridge.mjs';
 import {
-  createRsiEvaluationRoutingRequest,
-  verifyRsiEvaluationRoutingRequest,
+  createRsiArtifactEvaluationRoutingRequest,
+  verifyRsiArtifactEvaluationRoutingRequest,
   createRsiEvaluationBudgetPlan,
   verifyRsiEvaluationBudgetPlan,
 } from './rsi-evaluation-budget-router.mjs';
@@ -56,18 +56,39 @@ function verifyDigestObject(row){
 function verifiedOriginalIntent(intent){
   return verifyRsiCandidateExperimentIntent(intent);
 }
-function embeddedExperience(intent){
-  const checked=verifiedOriginalIntent(intent);
-  const request=checked.request_snapshot;
-  const hypothesis=request?.hypothesis_snapshot;
-  const admission=request?.admission_snapshot;
-  if(!hypothesis||!admission)throw new Error('rsi_eval_handoff_embedded_experience_required');
-  return Object.freeze({intent:checked,hypothesis,admission});
+function provenanceRoot(receipt){
+  return digest({
+    artifact_receipt_digest:receipt.artifact_receipt_digest,
+    bridge_digest:receipt.bridge_digest,
+    envelope_digest:receipt.envelope_digest,
+    proposal_digest:receipt.proposal_digest,
+    source_sha:receipt.source_sha,
+    candidate_sha:receipt.candidate_sha,
+    artifact_digest:receipt.artifact_digest,
+    workspace_id:receipt.workspace_id,
+    workspace_generation:receipt.workspace_generation,
+    lease_generation:receipt.lease_generation,
+    output_manifest_digest:receipt.output_manifest_digest,
+    builder_identity_digest:receipt.builder_identity_digest,
+    worker_image_digest:receipt.worker_image_digest,
+    toolchain_image_digest:receipt.toolchain_image_digest,
+    dependency_material_manifest_digest:receipt.dependency_material_manifest_digest,
+    harness_manifest_digest:receipt.harness_manifest_digest,
+    capability_manifest_digest:receipt.capability_manifest_digest,
+    build_provenance_digest:receipt.build_provenance_digest,
+    artifact_signature_digest:receipt.artifact_signature_digest,
+    transparency_log_inclusion_digest:receipt.transparency_log_inclusion_digest,
+    artifact_reconstruction_digest:receipt.artifact_reconstruction_digest,
+    protected_root_diff_audit_digest:receipt.protected_root_diff_audit_digest,
+    preserved_behavior_review_digest:receipt.preserved_behavior_review_digest,
+  });
 }
 function assertExternalEvaluationRoots(receipt,{
   sealed_task_set_digest,
   harness_digest,
   evaluator_root_digest,
+  evaluator_generation_digest,
+  evaluation_epoch_digest,
   trial_worker_image_digest,
   resource_budget_digest,
   task_order_digest,
@@ -76,6 +97,8 @@ function assertExternalEvaluationRoots(receipt,{
     exactDigest(sealed_task_set_digest,'sealed_task_set'),
     exactDigest(harness_digest,'evaluation_harness'),
     exactDigest(evaluator_root_digest,'evaluator_root'),
+    exactDigest(evaluator_generation_digest,'evaluator_generation'),
+    exactDigest(evaluation_epoch_digest,'evaluation_epoch'),
     exactDigest(trial_worker_image_digest,'trial_worker_image'),
     exactDigest(resource_budget_digest,'resource_budget'),
     exactDigest(task_order_digest,'task_order'),
@@ -96,6 +119,9 @@ function assertExternalEvaluationRoots(receipt,{
   for(const root of evalRoots){
     if(buildRoots.has(root))throw new Error('rsi_eval_handoff_build_and_evaluation_roots_must_be_independent');
   }
+  if(exactDigest(trial_worker_image_digest,'trial_worker_image')===receipt.worker_image_digest){
+    throw new Error('rsi_eval_handoff_build_and_evaluation_workers_must_be_distinct');
+  }
   return Object.freeze(evalRoots);
 }
 
@@ -114,11 +140,14 @@ export function createRsiProvenanceEvaluationHandoff({
   uncertainty,
   decision_closeness,
   proxy_reliability_gap,
+  evaluator_cost_units,
+  expected_information_gain,
   epoch_budget_units,
-  baseline_artifact_digest,
   sealed_task_set_digest,
   harness_digest,
   evaluator_root_digest,
+  evaluator_generation_digest,
+  evaluation_epoch_digest,
   trial_worker_image_digest,
   resource_budget_digest,
   task_order_digest,
@@ -144,28 +173,49 @@ export function createRsiProvenanceEvaluationHandoff({
     ||receipt.candidate_artifact_replaces_parent!==false
   )throw new Error('rsi_eval_handoff_artifact_not_evaluation_only');
 
-  const experience=embeddedExperience(original_experiment_intent);
-  if(experience.intent.source_sha!==receipt.source_sha){
+  const originalIntent=verifiedOriginalIntent(original_experiment_intent);
+  if(originalIntent.source_sha!==receipt.source_sha){
     throw new Error('rsi_eval_handoff_lineage_source_mismatch');
+  }
+  if(!envelope||envelope.envelope_digest!==receipt.envelope_digest){
+    throw new Error('rsi_eval_handoff_phase27_envelope_binding_required');
   }
 
   const handoffId=id(handoff_id,'handoff_id');
-  const routingRequest=createRsiEvaluationRoutingRequest({
+  const provenance=provenanceRoot(receipt);
+  const evalRoots=assertExternalEvaluationRoots(receipt,{
+    sealed_task_set_digest,
+    harness_digest,
+    evaluator_root_digest,
+    evaluator_generation_digest,
+    evaluation_epoch_digest,
+    trial_worker_image_digest,
+    resource_budget_digest,
+    task_order_digest,
+  });
+  const routingRequest=createRsiArtifactEvaluationRoutingRequest({
     request_id:`${handoffId}.routing`,
-    hypothesis:experience.hypothesis,
-    admission:experience.admission,
+    source_sha:receipt.source_sha,
+    phase28_artifact_receipt_digest:receipt.artifact_receipt_digest,
+    parent_artifact_digest:envelope.parent_candidate_artifact_digest,
+    candidate_artifact_digest:receipt.artifact_digest,
+    provenance_root_digest:provenance,
+    evaluator_root_digest:evalRoots[2],
+    evaluator_generation_digest:evalRoots[3],
+    evaluation_epoch_digest:evalRoots[4],
     external_measurement_digest,
     proxy_score_digest,
     uncertainty,
     decision_closeness,
     proxy_reliability_gap,
+    evaluator_cost_units,
+    expected_information_gain,
+    scope_tags:['HIDDEN_HOLDOUT','MATERIALIZED_CANDIDATE','SAFETY','SECURITY'],
+    recipient_group_tags:['RSI_CANDIDATE_VALIDATION'],
     external_measurement_owner:true,
     authored_by_candidate:false,
   });
-  verifyRsiEvaluationRoutingRequest(routingRequest,{
-    hypothesis:experience.hypothesis,
-    admission:experience.admission,
-  });
+  verifyRsiArtifactEvaluationRoutingRequest(routingRequest);
   if(routingRequest.source_sha!==receipt.source_sha){
     throw new Error('rsi_eval_handoff_routing_source_mismatch');
   }
@@ -185,40 +235,23 @@ export function createRsiProvenanceEvaluationHandoff({
     ||!budgetPlan.selected_request_digests.includes(routingRequest.request_digest)
   )throw new Error('rsi_eval_handoff_fresh_request_not_selected');
 
-  assertExternalEvaluationRoots(receipt,{
-    sealed_task_set_digest,
-    harness_digest,
-    evaluator_root_digest,
-    trial_worker_image_digest,
-    resource_budget_digest,
-    task_order_digest,
-  });
-
   const experimentIntent=createRsiCandidateExperimentIntent({
     intent_id:`${handoffId}.paired`,
     request:routingRequest,
     plan:budgetPlan,
     plan_requests:[routingRequest],
-    hypothesis:experience.hypothesis,
-    admission:experience.admission,
-    baseline_artifact_digest,
+    baseline_artifact_digest:envelope.parent_candidate_artifact_digest,
     candidate_artifact_digest:receipt.artifact_digest,
     sealed_task_set_digest,
     harness_digest,
-    evaluator_root_digest,
-    trial_worker_image_digest,
-    resource_budget_digest,
-    task_order_digest,
+    evaluator_root_digest:evalRoots[2],
+    trial_worker_image_digest:evalRoots[5],
+    resource_budget_digest:evalRoots[6],
+    task_order_digest:evalRoots[7],
     external_experiment_owner:true,
     authored_by_candidate:false,
   });
-  verifyRsiCandidateExperimentIntent(experimentIntent,{
-    request:routingRequest,
-    plan:budgetPlan,
-    plan_requests:[routingRequest],
-    hypothesis:experience.hypothesis,
-    admission:experience.admission,
-  });
+  verifyRsiCandidateExperimentIntent(experimentIntent);
 
   const lineageCore={
     phase28_artifact_receipt_digest:receipt.artifact_receipt_digest,
@@ -228,12 +261,16 @@ export function createRsiProvenanceEvaluationHandoff({
     parent_source_sha:receipt.source_sha,
     child_candidate_sha:receipt.candidate_sha,
     child_artifact_digest:receipt.artifact_digest,
+    provenance_root_digest:provenance,
+    evaluator_root_digest:routingRequest.evaluator_root_digest,
+    evaluator_generation_digest:routingRequest.evaluator_generation_digest,
+    evaluation_epoch_digest:routingRequest.evaluation_epoch_digest,
     build_plan_digest:receipt.build_plan_digest,
     candidate_handoff_digest:receipt.candidate_handoff_digest,
     workspace_id:receipt.workspace_id,
     workspace_generation:receipt.workspace_generation,
     lease_generation:receipt.lease_generation,
-    original_experiment_intent_digest:experience.intent.intent_digest,
+    original_experiment_intent_digest:originalIntent.intent_digest,
     fresh_routing_request_digest:routingRequest.request_digest,
     fresh_budget_plan_digest:budgetPlan.plan_digest,
     fresh_paired_experiment_intent_digest:experimentIntent.intent_digest,
@@ -250,7 +287,10 @@ export function createRsiProvenanceEvaluationHandoff({
     bridge_digest:receipt.bridge_digest,
     envelope_digest:receipt.envelope_digest,
     proposal_digest:receipt.proposal_digest,
-    original_experiment_intent_digest:experience.intent.intent_digest,
+    original_experiment_intent_digest:originalIntent.intent_digest,
+    provenance_root_digest:provenance,
+    evaluator_generation_digest:routingRequest.evaluator_generation_digest,
+    evaluation_epoch_digest:routingRequest.evaluation_epoch_digest,
     lineage_digest:digest(lineageCore),
     routing_request:routingRequest,
     routing_request_digest:routingRequest.request_digest,
@@ -267,7 +307,11 @@ export function createRsiProvenanceEvaluationHandoff({
     task_order_digest:experimentIntent.task_order_digest,
     state:'ELIGIBLE_FOR_EXTERNAL_PAIRED_EVALUATION',
     fresh_evaluation_budget_required:true,
+    previous_evaluation_budget_reuse_allowed:false,
     fresh_external_measurement_required:true,
+    evaluator_generation_frozen:true,
+    evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+    anchor_provenance_survives_evaluator_rotation:true,
     sealed_exogenous_acceptance_required:true,
     build_and_evaluation_roots_independent:true,
     build_worker_and_evaluation_worker_distinct:true,
@@ -276,6 +320,8 @@ export function createRsiProvenanceEvaluationHandoff({
     phase28_provenance_bound:true,
     same_incumbent_child_pair_required:true,
     candidate_can_choose_evaluator:false,
+    candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_evaluation_epoch:false,
     candidate_can_choose_task_set:false,
     candidate_can_choose_harness:false,
     candidate_can_choose_trial_worker:false,
@@ -308,7 +354,11 @@ export function verifyRsiProvenanceEvaluationHandoff(row,args={}){
   if(
     handoff.state!=='ELIGIBLE_FOR_EXTERNAL_PAIRED_EVALUATION'
     ||handoff.fresh_evaluation_budget_required!==true
+    ||handoff.previous_evaluation_budget_reuse_allowed!==false
     ||handoff.fresh_external_measurement_required!==true
+    ||handoff.evaluator_generation_frozen!==true
+    ||handoff.evaluator_dependent_verdict_reuse_across_generation_allowed!==false
+    ||handoff.anchor_provenance_survives_evaluator_rotation!==true
     ||handoff.sealed_exogenous_acceptance_required!==true
     ||handoff.build_and_evaluation_roots_independent!==true
     ||handoff.build_worker_and_evaluation_worker_distinct!==true
@@ -317,6 +367,8 @@ export function verifyRsiProvenanceEvaluationHandoff(row,args={}){
     ||handoff.phase28_provenance_bound!==true
     ||handoff.same_incumbent_child_pair_required!==true
     ||handoff.candidate_can_choose_evaluator!==false
+    ||handoff.candidate_can_choose_evaluator_generation!==false
+    ||handoff.candidate_can_choose_evaluation_epoch!==false
     ||handoff.candidate_can_choose_task_set!==false
     ||handoff.candidate_can_choose_harness!==false
     ||handoff.candidate_can_choose_trial_worker!==false
@@ -342,11 +394,14 @@ export function verifyRsiProvenanceEvaluationHandoff(row,args={}){
     uncertainty:handoff.routing_request.uncertainty,
     decision_closeness:handoff.routing_request.decision_closeness,
     proxy_reliability_gap:handoff.routing_request.proxy_reliability_gap,
+    evaluator_cost_units:handoff.routing_request.evaluator_cost_units,
+    expected_information_gain:handoff.routing_request.expected_information_gain,
     epoch_budget_units:handoff.budget_plan.epoch_budget_units,
-    baseline_artifact_digest:handoff.baseline_artifact_digest,
     sealed_task_set_digest:handoff.sealed_task_set_digest,
     harness_digest:handoff.harness_digest,
     evaluator_root_digest:handoff.evaluator_root_digest,
+    evaluator_generation_digest:handoff.evaluator_generation_digest,
+    evaluation_epoch_digest:handoff.evaluation_epoch_digest,
     trial_worker_image_digest:handoff.trial_worker_image_digest,
     resource_budget_digest:handoff.resource_budget_digest,
     task_order_digest:handoff.task_order_digest,
@@ -366,11 +421,21 @@ export function rsiProvenanceEvaluationHandoffTrustRootSnapshot(){
     existing_paired_candidate_experiment_ledger_only:true,
     fresh_external_measurement_required:true,
     fresh_evaluation_budget_required:true,
+    previous_evaluation_budget_reuse_allowed:false,
+    evaluator_generation_binding_required:true,
+    evaluation_epoch_binding_required:true,
+    evaluator_generation_frozen_per_epoch:true,
+    evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+    anchor_provenance_survives_evaluator_rotation:true,
+    materialized_artifact_request_required:true,
+    protected_scope_floor_required:true,
     sealed_exogenous_acceptance_required:true,
     full_phase27_phase28_lineage_binding_required:true,
     build_and_evaluation_roots_independent:true,
     build_worker_and_evaluation_worker_distinct:true,
     candidate_can_choose_evaluator:false,
+    candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_evaluation_epoch:false,
     candidate_can_choose_task_set:false,
     candidate_can_choose_harness:false,
     candidate_can_choose_trial_worker:false,
