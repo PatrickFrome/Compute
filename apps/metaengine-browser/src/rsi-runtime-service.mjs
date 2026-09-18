@@ -104,6 +104,12 @@ import {
   verifyRsiReleasePromotionJournalIntent,
   rsiReleasePromotionJournalTrustRootSnapshot,
 } from './rsi-release-promotion-journal.mjs';
+import {
+  verifyRsiReleaseAuthorityReadback,
+  createRsiSelfUpdateEligibilityReview,
+  verifyRsiSelfUpdateEligibilityReview,
+  rsiSelfUpdateEligibilityReviewTrustRootSnapshot,
+} from './rsi-release-promotion-outcome-ingest.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -119,6 +125,7 @@ const MAX_EPISODE_PROMOTION_REVIEWS = 256;
 const MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS = 128;
 const MAX_PUBLISHED_RELEASE_RECONCILIATIONS = 128;
 const MAX_RELEASE_PROMOTION_JOURNAL_INTENTS = 128;
+const MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -199,6 +206,7 @@ function trustRoots() {
     external_release_handoff: rsiExternalReleaseHandoffTrustRootSnapshot(),
     published_release_reconciliation: rsiPublishedReleaseReconciliationTrustRootSnapshot(),
     release_promotion_journal: rsiReleasePromotionJournalTrustRootSnapshot(),
+    self_update_eligibility_review: rsiSelfUpdateEligibilityReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -256,6 +264,8 @@ export class RsiRuntimeService {
   #lastPublishedReleaseReconciliationDigest = null;
   #releasePromotionJournalIntentDigests = new Set();
   #lastReleasePromotionJournalIntentDigest = null;
+  #selfUpdateEligibilityReviewDigests = new Set();
+  #lastSelfUpdateEligibilityReviewDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -376,6 +386,14 @@ export class RsiRuntimeService {
           }
           this.#releasePromotionJournalIntentDigests.add(intent.journal_intent_digest);
           this.#lastReleasePromotionJournalIntentDigest = intent.journal_intent_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_ELIGIBILITY_REVIEW_READY' && row?.payload?.self_update_eligibility_review) {
+          const review = verifyRsiSelfUpdateEligibilityReview(row.payload.self_update_eligibility_review);
+          if (this.#selfUpdateEligibilityReviewDigests.size >= MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS) {
+            throw new Error('rsi_runtime_self_update_eligibility_review_replay_capacity_exhausted');
+          }
+          this.#selfUpdateEligibilityReviewDigests.add(review.eligibility_review_digest);
+          this.#lastSelfUpdateEligibilityReviewDigest = review.eligibility_review_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1529,6 +1547,50 @@ export class RsiRuntimeService {
     return Object.freeze({ intent, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateEligibilityReview({
+    journal_intent,
+    journal_events,
+    authority_readback,
+    trusted_release,
+  } = {}) {
+    this.#assertRunning();
+    const intent = verifyRsiReleasePromotionJournalIntent(journal_intent);
+    if (!this.#releasePromotionJournalIntentDigests.has(intent.journal_intent_digest)) {
+      throw new Error('rsi_runtime_release_promotion_journal_intent_not_persisted');
+    }
+    const readback = verifyRsiReleaseAuthorityReadback(authority_readback, {
+      journal_intent: intent,
+      journal_events,
+    });
+    const review = createRsiSelfUpdateEligibilityReview({
+      journal_intent: intent,
+      journal_events,
+      authority_readback: readback,
+      trusted_release,
+    });
+    verifyRsiSelfUpdateEligibilityReview(review);
+    if (this.#selfUpdateEligibilityReviewDigests.has(review.eligibility_review_digest)) {
+      return Object.freeze({ review, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateEligibilityReviewDigests.size >= MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS) {
+      throw new Error('rsi_runtime_self_update_eligibility_review_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_ELIGIBILITY_REVIEW_READY', {
+      authority_readback: readback,
+      self_update_eligibility_review: review,
+      raw_release_promotion_events_persisted: false,
+      external_self_update_controller_required: true,
+      self_update_check_authorized: false,
+      self_update_apply_authorized: false,
+      installer_launch_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateEligibilityReviewDigests.add(review.eligibility_review_digest);
+    this.#lastSelfUpdateEligibilityReviewDigest = review.eligibility_review_digest;
+    return Object.freeze({ review, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1737,6 +1799,23 @@ export class RsiRuntimeService {
         authority_advance_authorized: false,
         independent_readback_required: true,
         ambiguous_reconciliation_only: true,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_eligibility_review: Object.freeze({
+        count: this.#selfUpdateEligibilityReviewDigests.size,
+        capacity: MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS,
+        last_digest: this.#lastSelfUpdateEligibilityReviewDigest,
+        confirmed_release_authority_required: true,
+        trusted_release_reverification_required: true,
+        existing_self_update_runtime_required: true,
+        prior_self_update_transaction_readback_required: true,
+        restart_gate_revalidation_required: true,
+        host_resilience_revalidation_required: true,
+        self_update_check_authorized: false,
+        self_update_apply_authorized: false,
+        installer_launch_authorized: false,
+        raw_release_promotion_events_persisted: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
       }),
