@@ -67,6 +67,8 @@ test('shadow comparison binds qualified challenger to exact baseline context and
   assert.equal(binding.baseline_execution_path_unchanged,true);
   assert.equal(binding.comparison_can_activate_profile,false);
   assert.equal(binding.comparison_can_authorize_canary,false);
+  assert.equal(binding.browser_authority,false);
+  assert.equal(binding.task_authority,false);
   assert.equal(binding.authority_effect,false);
 });
 
