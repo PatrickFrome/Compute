@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { RsiRuntimeService } from './rsi-runtime-service.mjs';
+import { RsiBrowserObservationFeed } from './rsi-browser-observation-feed.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
@@ -59,6 +60,7 @@ let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
 let rsiRuntime = null;
+let rsiObservationFeed = null;
 let nativeSupervisor = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -311,22 +313,28 @@ async function shellSnapshot() {
     development_plane: developmentPlaneSnapshot,
     startup_logs: startupDegradedSnapshot(),
   });
+  const rsiSnapshot = rsiRuntime ? Object.freeze({
+    ...rsiRuntime.snapshot(),
+    observation_feed: rsiObservationFeed?.snapshot() || null,
+    authority_effect: false,
+  }) : Object.freeze({
+    schema: 'metaengine.rsi.runtime-service.v1',
+    state: 'UNAVAILABLE',
+    mode: 'SHADOW_VERIFIED',
+    shadow_only: true,
+    observation_feed: null,
+    candidate_effect_executor_exposed: false,
+    physical_effect_replay_allowed: false,
+    direct_promotion_enabled: false,
+    direct_self_update_enabled: false,
+    authority_effect: false,
+  });
   const workspaces = projectWorkspaceWorkbench({
     tabs,
     fleet: fleetSnapshot,
     owner_safety_gates: ownerSafetyGatesSnapshot,
     development_plane: developmentPlaneSnapshot,
-    rsi: rsiRuntime?.snapshot() || Object.freeze({
-      schema: 'metaengine.rsi.runtime-service.v1',
-      state: 'UNAVAILABLE',
-      mode: 'SHADOW_VERIFIED',
-      shadow_only: true,
-      candidate_effect_executor_exposed: false,
-      physical_effect_replay_allowed: false,
-      direct_promotion_enabled: false,
-      direct_self_update_enabled: false,
-      authority_effect: false,
-    }),
+    rsi: rsiSnapshot,
     supervisor,
     compute,
     presentation_focus: presentationFocus,
@@ -680,7 +688,16 @@ async function initRsiRuntime() {
   }
   const snapshot = rsiRuntime.snapshot();
   if (snapshot.state !== 'READY') await rsiRuntime.start();
-  return rsiRuntime.snapshot();
+  if (!rsiObservationFeed) {
+    rsiObservationFeed = new RsiBrowserObservationFeed({
+      observe: (brainSnapshot) => rsiRuntime.observeBrainSnapshot(brainSnapshot),
+    });
+  }
+  return Object.freeze({
+    ...rsiRuntime.snapshot(),
+    observation_feed: rsiObservationFeed.snapshot(),
+    authority_effect: false,
+  });
 }
 
 async function runDevelopmentPlaneSmoke() {
@@ -985,6 +1002,7 @@ async function initNativeSupervisor() {
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,
       workerObservationBudget: 4,
+      onBrainObservation: (brainSnapshot) => rsiObservationFeed?.offer(brainSnapshot) || null,
       controlStatePath: supervisorControlStatePath(),
     });
   }
@@ -1005,6 +1023,8 @@ function destroyWindowContents() {
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
   shellView = null;
   fleet = null;
+  rsiObservationFeed?.stop?.();
+  rsiObservationFeed = null;
   rsiRuntime = null;
   developmentPlane?.stop();
 }
