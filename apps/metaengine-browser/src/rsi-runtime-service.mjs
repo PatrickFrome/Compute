@@ -47,6 +47,7 @@ import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiR
 import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } from './rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
 import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
+import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -117,6 +118,7 @@ function trustRoots() {
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
+    skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -137,6 +139,7 @@ export class RsiRuntimeService {
   #skillLifecycle;
   #skillRouter;
   #skillCuration;
+  #skillRevisionFrontier;
   #archive;
   #observer;
   #verifiedArchive;
@@ -151,7 +154,7 @@ export class RsiRuntimeService {
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -183,6 +186,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillCurationPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeSkillRevisionFrontierPath = skillRevisionFrontierPath || (ledgerPath ? `${ledgerPath}.skill-revision-frontier.json` : null);
+    this.#skillRevisionFrontier = new RsiSkillRevisionFrontier({
+      statePath: runtimeSkillRevisionFrontierPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -197,6 +205,7 @@ export class RsiRuntimeService {
     await this.#skillLifecycle.init();
     await this.#skillRouter.init();
     await this.#skillCuration.init();
+    await this.#skillRevisionFrontier.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -210,6 +219,7 @@ export class RsiRuntimeService {
       runtime_skill_lifecycle_schema: this.#skillLifecycle.snapshot().schema,
       runtime_skill_router_schema: this.#skillRouter.snapshot().schema,
       runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
+      skill_revision_frontier_schema: this.#skillRevisionFrontier.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -591,6 +601,20 @@ export class RsiRuntimeService {
       external_evaluator,
       authored_by_candidate,
     });
+    let frontier = null;
+    if (outcome.evaluation.accepted_for_existing_reliability_gate === true) {
+      const request = this.#skillCuration.request(request_id);
+      const candidate = createRsiSkillRevisionFrontierCandidate({
+        source_sha: this.#sourceSha,
+        request,
+        evaluation: outcome.evaluation,
+        library,
+        governance,
+        external_frontier_owner: true,
+        authored_by_candidate: false,
+      });
+      frontier = await this.#skillRevisionFrontier.add({ candidate });
+    }
     await this.#ledger.append('SKILL_REVISION_EVALUATED', {
       request_id,
       evaluation_digest: outcome.evaluation.result_digest,
@@ -600,9 +624,11 @@ export class RsiRuntimeService {
       direct_library_replacement_allowed: false,
       existing_reliability_gate_required: true,
       existing_scope_preservation_gate_required: true,
+      revision_frontier_state: frontier?.state || null,
+      revision_frontier_candidate_digest: frontier?.frontier_candidate_digest || null,
       authority_effect: false,
     });
-    return outcome;
+    return Object.freeze({ ...outcome, frontier });
   }
 
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
@@ -712,6 +738,11 @@ export class RsiRuntimeService {
     return Object.freeze({ credit_receipt: creditReceipt, materialization, stored, skill_lifecycle: skillLifecycle, skill_router_evidence: skillRouterEvidence });
   }
 
+  skillRevisionFrontier({ parent_skill_digest = null, max_candidates = 8 } = {}) {
+    this.#assertRunning();
+    return this.#skillRevisionFrontier.frontier({ parent_skill_digest, max_candidates });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -767,6 +798,7 @@ export class RsiRuntimeService {
       runtime_skill_lifecycle: this.#skillLifecycle.snapshot(),
       runtime_skill_router: this.#skillRouter.snapshot(),
       runtime_skill_curation: this.#skillCuration.snapshot(),
+      skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
