@@ -21,6 +21,7 @@ const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const OUTCOME_VALUES = new Set(['PASS', 'FAIL', 'AMBIGUOUS']);
 const UTILITY_VALUES = new Set(['IMPROVED', 'EQUIVALENT', 'REGRESSED', 'UNKNOWN']);
+const STATISTICAL_METHODS = new Set(['E_VALUE_EXTERNAL_V1', 'PAIRED_CONFIDENCE_SEQUENCE_EXTERNAL_V1']);
 const MAX_EVENTS = 512;
 
 function plain(value) {
@@ -290,6 +291,7 @@ export function verifyRsiExternalCanaryRun(run) {
     || run.incident_can_be_cleared !== false
   ) throw new Error('rsi_canary_controller_run_policy_invalid');
   exactSha(run.source_sha, 'verify_source');
+  if (!STATISTICAL_METHODS.has(run.statistical_review_method)) throw new Error('rsi_canary_controller_statistical_method_invalid');
   for (const [field, label] of [
     ['manifest_digest', 'verify_manifest'],
     ['admission_digest', 'verify_admission'],
