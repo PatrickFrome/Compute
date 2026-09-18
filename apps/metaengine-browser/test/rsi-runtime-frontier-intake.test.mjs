@@ -34,6 +34,8 @@ test('frontier intake invokes existing DB policy once with zero authority', asyn
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, RSI_RUNTIME_FRONTIER_INTAKE_RPC);
+  assert.deepEqual(Object.keys(calls[0].args.p_state), ['rsi']);
+  assert.equal(calls[0].args.p_state.rsi.schema, 'metaengine.rsi.runtime-control-projection.v1');
   assert.equal(result.state, 'ACCEPTED');
   assert.equal(result.scheduler, 'DEVOS_EXISTING_ONLY');
   assert.equal(result.browser_enqueue_authority, false);
@@ -55,6 +57,30 @@ test('frontier intake DB failure is fail-soft without retry authority', async ()
   });
   assert.equal(result.state, 'ERROR');
   assert.equal(result.reason, 'INTAKE_RPC_FAILED');
+  assert.equal(result.automatic_retry_allowed, false);
+  assert.equal(result.authority_effect, false);
+});
+
+
+test('frontier intake rejects oversized RSI locally before DB policy', async () => {
+  let calls = 0;
+  const intake = createRsiRuntimeFrontierIntake({
+    rpc: async () => { calls += 1; return { accepted: true }; },
+  });
+  const result = await intake({
+    workspaceId: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    clientId: 'client-4',
+    state: {
+      rsi: {
+        schema: 'metaengine.rsi.runtime-control-projection.v1',
+        padding: 'x'.repeat(70_000),
+        authority_effect: false,
+      },
+    },
+  });
+  assert.equal(calls, 0);
+  assert.equal(result.state, 'REJECTED');
+  assert.equal(result.reason, 'RSI_OVERSIZED');
   assert.equal(result.automatic_retry_allowed, false);
   assert.equal(result.authority_effect, false);
 });
