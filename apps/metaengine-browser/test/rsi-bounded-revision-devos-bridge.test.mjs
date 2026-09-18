@@ -2877,6 +2877,10 @@ function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
     evaluator_provenance_attestor_identity_digest:labelDigest(label+'-evaluator-attestor-id'),
     contamination_attestor_identity_digest:labelDigest(label+'-contamination-attestor-id'),
     statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
+    false_admission_alpha_ppm:50000,
+    anytime_valid_e_value_microunits:25000000,
+    paired_sample_count:64,
+    minimum_paired_sample_count:32,
     active_retrieval_cap:32,
     current_active_retrieval_count:12,
     projected_active_retrieval_count:13,
@@ -2891,7 +2895,6 @@ function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
     evaluator_provenance_pass:true,
     contamination_clear:true,
     marginal_gain_subset_pass:true,
-    anytime_valid_acceptance_pass:true,
     active_cap_pass:true,
     external_owner_reviewer:true,
     external_critics:true,
@@ -2919,6 +2922,10 @@ test('Phase33 precommit owner review emits only a zero-authority existing-librar
   assert.equal(cert.skill_activation_performed,false);
   assert.equal(cert.meta_skill_profile_mutated,false);
   assert.equal(cert.reviewer_separation_of_duties_required,true);
+  assert.equal(cert.false_admission_alpha_ppm,50000);
+  assert.equal(cert.anytime_valid_threshold_microunits,20000000);
+  assert.equal(cert.anytime_valid_acceptance_pass,true);
+  assert.equal(cert.paired_sample_count,64);
   assert.notEqual(cert.owner_reviewer_identity_digest,cert.structural_critic_identity_digest);
   assert.notEqual(cert.artifact_auditor_identity_digest,cert.statistical_acceptor_identity_digest);
   assert.equal(cert.library_admission_token,null);
@@ -2952,7 +2959,6 @@ test('Phase33 blocks benchmark-only success without artifact/no-op, provenance, 
     ['evaluator',{evaluator_provenance_pass:false},'EVALUATOR_PROVENANCE_FAILED'],
     ['contamination',{contamination_clear:false},'CONTAMINATION_DETECTED'],
     ['subset',{marginal_gain_subset_pass:false},'MARGINAL_SUBSET_SELECTION_FAILED'],
-    ['anytime',{anytime_valid_acceptance_pass:false},'ANYTIME_VALID_ACCEPTANCE_FAILED'],
     ['cap',{projected_active_retrieval_count:33},'ACTIVE_CAP_POLICY_FAILED'],
   ]){
     const cert=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'gate-'+label,overrides));
@@ -2961,6 +2967,37 @@ test('Phase33 blocks benchmark-only success without artifact/no-op, provenance, 
     assert.equal(cert.skill_activation_performed,false);
   }
 });
+
+test('Phase33 anytime-valid acceptance is computed from fixed alpha and e-value, with abstain on insufficient evidence',()=>{
+  const fx=phase33ExactOwnerFixture('anytime');
+  const insufficient=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-insufficient',{
+    anytime_valid_e_value_microunits:19000000,
+  }));
+  assert.equal(insufficient.anytime_valid_threshold_microunits,20000000);
+  assert.equal(insufficient.anytime_valid_acceptance_pass,false);
+  assert.equal(insufficient.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+  assert.equal(insufficient.blockers.length,0);
+  assert.equal(insufficient.library_append_performed,false);
+  assert.equal(insufficient.retrieval_exposure_changed,false);
+
+  const tooFewPairs=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-too-few-pairs',{
+    paired_sample_count:31,
+  }));
+  assert.equal(tooFewPairs.anytime_valid_acceptance_pass,false);
+  assert.equal(tooFewPairs.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+
+  const strongerAlpha=createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-stronger-alpha',{
+    false_admission_alpha_ppm:10000,
+    anytime_valid_e_value_microunits:99000000,
+  }));
+  assert.equal(strongerAlpha.anytime_valid_threshold_microunits,100000000);
+  assert.equal(strongerAlpha.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+
+  assert.throws(()=>createRsiExactSkillPrecommitCertificate(phase33CertificateArgs(fx,'anytime-invalid-alpha',{
+    false_admission_alpha_ppm:1000001,
+  })),/false_admission_alpha_ppm_invalid/);
+});
+
 
 test('Phase33 negative-transfer consumer evidence cannot enter positive skill precommit',()=>{
   const fx=phase32Fixture('phase33-negative',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
@@ -3026,6 +3063,8 @@ test('Phase33 trust root freezes precommit gatekeeping without creating a second
   assert.equal(root.mechanical_artifact_audit_required,true);
   assert.equal(root.artifact_noop_ablation_required,true);
   assert.equal(root.anytime_valid_acceptance_required,true);
+  assert.equal(root.numeric_anytime_valid_threshold_required,true);
+  assert.equal(root.insufficient_evidence_abstain_required,true);
   assert.equal(root.append_does_not_imply_active_retrieval,true);
   assert.equal(root.direct_library_append,false);
   assert.equal(root.direct_retrieval_exposure_change,false);
