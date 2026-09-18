@@ -3148,6 +3148,8 @@ function phase33ExactOwnerFixture(label='phase33-owner'){
     bundle_id:'phase33.owner.bundle.'+label,
     ...phase32Evidence,
     current_consumer_snapshot_digest:skillFx.currentLibrary.library_digest,
+    current_consumer_plane_digest:handoff.current_consumer_plane_digest,
+    current_verified_library_digest:handoff.current_verified_library_digest,
     consumer_owner_policy_digest:labelDigest(label+'-owner-policy'),
     consumer_owner_identity_digest:labelDigest(label+'-owner-identity'),
     external_consumer_owner:true,
@@ -3223,6 +3225,10 @@ test('Phase33 precommit owner review emits only a zero-authority existing-librar
   assert.equal(fx.bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT');
   assert.equal(fx.bundle.consumer_evaluation_contract_digest,fx.handoff.consumer_evaluation_contract_digest);
   assert.equal(fx.bundle.consumer_evaluator_generation_seq,fx.handoff.consumer_evaluator_generation_seq);
+  assert.equal(fx.bundle.consumer_task_set_digest,fx.handoff.consumer_task_set_digest);
+  assert.equal(fx.bundle.consumer_retrieval_profile_digest,fx.handoff.consumer_retrieval_profile_digest);
+  assert.equal(fx.bundle.current_consumer_plane_digest,fx.handoff.current_consumer_plane_digest);
+  assert.equal(fx.bundle.current_verified_library_digest,fx.skillFx.currentLibrary.library_digest);
 
   const args=phase33CertificateArgs(fx,'positive');
   const cert=createRsiExactSkillPrecommitCertificate(args);
@@ -3242,6 +3248,30 @@ test('Phase33 precommit owner review emits only a zero-authority existing-librar
   assert.equal(cert.library_admission_token,null);
   assert.equal(cert.authority_effect,false);
   assert.equal(verifyRsiExactSkillPrecommitCertificate(cert,args).certificate_digest,cert.certificate_digest);
+});
+
+test('Phase33 owner review rejects consumer-plane and verified-library drift after Phase32 revalidation',()=>{
+  const fx=phase33ExactOwnerFixture('state-drift');
+  assert.throws(()=>createRsiExactConsumerOwnerReviewBundle({
+    bundle_id:'phase33.owner.bundle.state-drift-plane',
+    ...fx.phase32Evidence,
+    current_consumer_snapshot_digest:fx.skillFx.currentLibrary.library_digest,
+    current_consumer_plane_digest:labelDigest('phase33-owner-drifted-consumer-plane'),
+    current_verified_library_digest:fx.handoff.current_verified_library_digest,
+    consumer_owner_policy_digest:labelDigest('phase33-owner-drift-plane-policy'),
+    consumer_owner_identity_digest:labelDigest('phase33-owner-drift-plane-owner'),
+    external_consumer_owner:true,authored_by_candidate:false,
+  }),/consumer_plane_drift/);
+  assert.throws(()=>createRsiExactConsumerOwnerReviewBundle({
+    bundle_id:'phase33.owner.bundle.state-drift-library',
+    ...fx.phase32Evidence,
+    current_consumer_snapshot_digest:fx.skillFx.currentLibrary.library_digest,
+    current_consumer_plane_digest:fx.handoff.current_consumer_plane_digest,
+    current_verified_library_digest:labelDigest('phase33-owner-drifted-library'),
+    consumer_owner_policy_digest:labelDigest('phase33-owner-drift-library-policy'),
+    consumer_owner_identity_digest:labelDigest('phase33-owner-drift-library-owner'),
+    external_consumer_owner:true,authored_by_candidate:false,
+  }),/verified_library_drift/);
 });
 
 test('Phase33 requires three independent critics and retains failed precommit evidence instead of activating',()=>{
@@ -3320,6 +3350,8 @@ test('Phase33 negative-transfer consumer evidence cannot enter positive skill pr
     bundle_id:'phase33.owner.bundle.negative',
     ...phase32Evidence,
     current_consumer_snapshot_digest:labelDigest('phase33-negative-consumer-snapshot'),
+    current_consumer_plane_digest:fx.handoff.current_consumer_plane_digest,
+    current_verified_library_digest:fx.handoff.current_verified_library_digest,
     consumer_owner_policy_digest:labelDigest('phase33-negative-owner-policy'),
     consumer_owner_identity_digest:labelDigest('phase33-negative-owner-id'),
     external_consumer_owner:true,authored_by_candidate:false,
@@ -3367,6 +3399,10 @@ test('Phase33 archive is durable-before-visible and re-verifies Phase32 plus cer
 test('Phase33 trust root freezes precommit gatekeeping without creating a second lifecycle or authority plane',()=>{
   const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
   assert.equal(root.exact_phase32_consumer_identity_required,true);
+  assert.equal(root.consumer_task_set_binding_required,true);
+  assert.equal(root.consumer_retrieval_profile_binding_required,true);
+  assert.equal(root.current_consumer_plane_exact_readback_required,true);
+  assert.equal(root.current_verified_library_exact_readback_required_for_recipe,true);
   assert.equal(root.existing_verified_skill_library_reused,true);
   assert.equal(root.second_skill_library_allowed,false);
   assert.equal(root.three_independent_critics_required,true);
