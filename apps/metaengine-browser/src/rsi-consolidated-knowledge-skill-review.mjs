@@ -333,11 +333,15 @@ export function createRsiConsolidatedKnowledgeSkillEvidenceReview({
   matched_reference_control_receipt_digest,
   treatment_receipt_digest,
   local_evidence_digest,
+  behavioral_abstraction_digest,
+  behavioral_invariant_set_digest,
+  failure_attribution_digest,
   attempt_count,
   success_count,
   local_acceptance_pass,
   matched_reference_pass,
   skill_specific_value_demonstrated,
+  failure_attribution_clear,
   hard_invariants_pass,
   contamination_clear,
   from_scratch_replay_pass,
@@ -382,6 +386,9 @@ export function createRsiConsolidatedKnowledgeSkillEvidenceReview({
     exactDigest(matched_reference_control_receipt_digest, 'matched_reference_control'),
     exactDigest(treatment_receipt_digest, 'treatment_receipt'),
     exactDigest(local_evidence_digest, 'local_evidence'),
+    exactDigest(behavioral_abstraction_digest, 'behavioral_abstraction'),
+    exactDigest(behavioral_invariant_set_digest, 'behavioral_invariant_set'),
+    exactDigest(failure_attribution_digest, 'failure_attribution'),
   ];
   if (new Set(localRoots).size !== localRoots.length) {
     throw new Error('rsi_phase32_local_validation_roots_must_be_independent');
@@ -394,6 +401,7 @@ export function createRsiConsolidatedKnowledgeSkillEvidenceReview({
   if (local_acceptance_pass !== true) blockers.push('LOCAL_ACCEPTANCE_FAILED');
   if (matched_reference_pass !== true) blockers.push('MATCHED_REFERENCE_FAILED');
   if (skill_specific_value_demonstrated !== true) blockers.push('SKILL_SPECIFIC_VALUE_NOT_DEMONSTRATED');
+  if (failure_attribution_clear !== true) blockers.push('FAILURE_ATTRIBUTION_AMBIGUOUS');
   if (hard_invariants_pass !== true) blockers.push('HARD_INVARIANT_FAILURE');
   if (contamination_clear !== true) blockers.push('CONTAMINATION_DETECTED');
   if (from_scratch_replay_pass !== true) blockers.push('FROM_SCRATCH_REPLAY_FAILURE');
@@ -442,11 +450,15 @@ export function createRsiConsolidatedKnowledgeSkillEvidenceReview({
     matched_reference_control_receipt_digest: localRoots[4],
     treatment_receipt_digest: localRoots[5],
     local_evidence_digest: localRoots[6],
+    behavioral_abstraction_digest: localRoots[7],
+    behavioral_invariant_set_digest: localRoots[8],
+    failure_attribution_digest: localRoots[9],
     attempt_count: standardEvidence.attempt_count,
     success_count: standardEvidence.success_count,
     local_acceptance_pass: local_acceptance_pass === true,
     matched_reference_pass: matched_reference_pass === true,
     skill_specific_value_demonstrated: skill_specific_value_demonstrated === true,
+    failure_attribution_clear: failure_attribution_clear === true,
     hard_invariants_pass: hard_invariants_pass === true,
     contamination_clear: contamination_clear === true,
     from_scratch_replay_pass: from_scratch_replay_pass === true,
@@ -472,6 +484,10 @@ export function createRsiConsolidatedKnowledgeSkillEvidenceReview({
     candidate_can_choose_reference: false,
     candidate_can_choose_holdout: false,
     candidate_can_choose_evaluator: false,
+    structured_behavioral_abstraction_required: true,
+    behavioral_invariant_set_required: true,
+    independent_failure_attribution_required: true,
+    raw_trajectory_stored: false,
     review_can_append_library: false,
     review_can_activate_skill: false,
     review_can_modify_skill_lifecycle: false,
@@ -501,6 +517,10 @@ export function verifyRsiConsolidatedKnowledgeSkillEvidenceReview(
     || evidenceReview.candidate_can_choose_reference !== false
     || evidenceReview.candidate_can_choose_holdout !== false
     || evidenceReview.candidate_can_choose_evaluator !== false
+    || evidenceReview.structured_behavioral_abstraction_required !== true
+    || evidenceReview.behavioral_invariant_set_required !== true
+    || evidenceReview.independent_failure_attribution_required !== true
+    || evidenceReview.raw_trajectory_stored !== false
     || evidenceReview.review_can_append_library !== false
     || evidenceReview.review_can_activate_skill !== false
     || evidenceReview.review_can_modify_skill_lifecycle !== false
@@ -519,11 +539,15 @@ export function verifyRsiConsolidatedKnowledgeSkillEvidenceReview(
       evidenceReview.matched_reference_control_receipt_digest,
     treatment_receipt_digest: evidenceReview.treatment_receipt_digest,
     local_evidence_digest: evidenceReview.local_evidence_digest,
+    behavioral_abstraction_digest: evidenceReview.behavioral_abstraction_digest,
+    behavioral_invariant_set_digest: evidenceReview.behavioral_invariant_set_digest,
+    failure_attribution_digest: evidenceReview.failure_attribution_digest,
     attempt_count: evidenceReview.attempt_count,
     success_count: evidenceReview.success_count,
     local_acceptance_pass: evidenceReview.local_acceptance_pass,
     matched_reference_pass: evidenceReview.matched_reference_pass,
     skill_specific_value_demonstrated: evidenceReview.skill_specific_value_demonstrated,
+    failure_attribution_clear: evidenceReview.failure_attribution_clear,
     hard_invariants_pass: evidenceReview.hard_invariants_pass,
     contamination_clear: evidenceReview.contamination_clear,
     from_scratch_replay_pass: evidenceReview.from_scratch_replay_pass,
@@ -560,6 +584,10 @@ export function rsiConsolidatedKnowledgeSkillReviewTrustRootSnapshot() {
     local_holdout_independent_from_phase31_required: true,
     matched_reference_required: true,
     skill_specific_value_required: true,
+    structured_behavioral_abstraction_required: true,
+    behavioral_invariant_set_required: true,
+    independent_failure_attribution_required: true,
+    raw_trajectory_stored: false,
     all_non_regression_dimensions_required: true,
     contamination_clear_required: true,
     from_scratch_replay_required: true,
