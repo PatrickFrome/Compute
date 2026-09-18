@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   createRsiSharedExperienceAdmission,
@@ -29,6 +32,8 @@ import {
   createRsiMaterializedCandidateEvaluationHandoff,
   verifyRsiMaterializedCandidateEvaluationHandoff,
   createRsiMaterializedCandidateExperimentIntent,
+  RsiMaterializedCandidateEvaluationHandoffLedger,
+  rsiMaterializedEvaluatorGenerationPredecessorAnchor,
   rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot,
 } from '../src/rsi-materialized-candidate-evaluation-handoff.mjs';
 import {
@@ -638,7 +643,10 @@ function phase29Handoff(fx,label='phase29',overrides={}){
     artifact_verification:fx.artifactVerification,
     evaluator_root_digest:labelDigest(`${label}-evaluator-root`),
     evaluator_generation_digest:labelDigest(`${label}-evaluator-generation`),
+    evaluator_generation_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest(`${label}-generation-history-anchor`),
     evaluation_epoch_digest:labelDigest(`${label}-evaluation-epoch`),
+    evaluation_epoch_seq:1,
     sealed_task_set_digest:labelDigest(`${label}-sealed-task-set`),
     evaluation_harness_digest:labelDigest(`${label}-evaluation-harness`),
     trial_worker_image_digest:labelDigest(`${label}-evaluation-worker`),
@@ -837,6 +845,12 @@ test('Phase29 trust root freezes external evaluation assets and zero authority',
   assert.equal(root.prior_budget_reuse_allowed,false);
   assert.equal(root.protected_scope_floor_required,true);
   assert.equal(root.evaluator_generation_frozen_per_epoch,true);
+  assert.equal(root.evaluator_generation_history_append_only,true);
+  assert.equal(root.evaluator_generation_sequence_external,true);
+  assert.equal(root.evaluation_epoch_sequence_external,true);
+  assert.equal(root.generation_transition_must_be_contiguous,true);
+  assert.equal(root.evaluation_epoch_transition_must_be_contiguous,true);
+  assert.equal(root.generation_history_anchor_external,true);
   assert.equal(root.build_and_evaluation_workers_must_differ,true);
   assert.equal(root.existing_evaluation_budget_router_only,true);
   assert.equal(root.existing_candidate_experiment_ledger_only,true);
@@ -847,4 +861,136 @@ test('Phase29 trust root freezes external evaluation assets and zero authority',
   assert.equal(root.promotion_authority,false);
   assert.equal(root.self_update_authority,false);
   assert.equal(root.authority_effect,false);
+});
+
+
+test('Phase29 handoff ledger is durable-before-visible and tracks contiguous evaluator generations',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-handoff-ledger-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'handoffs.json');
+  const ledger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+
+  const fx1=phase28ArtifactFixture('phase29-ledger-g1e1');
+  const h1=phase29Handoff(fx1,'phase29-ledger-g1e1',{
+    evaluator_generation_seq:1,
+    evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest('phase29-ledger-history-root'),
+  });
+  assert.equal((await ledger.add(h1)).state,'HANDOFF_RECORDED_EXTERNAL_EVALUATION_REQUIRED');
+
+  const fx2=phase28ArtifactFixture('phase29-ledger-g1e2');
+  const h2=phase29Handoff(fx2,'phase29-ledger-g1e2',{
+    evaluator_root_digest:h1.evaluator_root_digest,
+    evaluator_generation_digest:h1.evaluator_generation_digest,
+    evaluator_generation_seq:1,
+    evaluator_generation_history_anchor_digest:h1.evaluator_generation_history_anchor_digest,
+    evaluation_epoch_seq:2,
+  });
+  assert.equal((await ledger.add(h2)).handoff_seq,2);
+
+  const fx3=phase28ArtifactFixture('phase29-ledger-g2e1');
+  const h3=phase29Handoff(fx3,'phase29-ledger-g2e1',{
+    evaluator_generation_seq:2,
+    evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:rsiMaterializedEvaluatorGenerationPredecessorAnchor(h2),
+  });
+  assert.equal((await ledger.add(h3)).handoff_seq,3);
+
+  const snap=ledger.snapshot();
+  assert.equal(snap.row_count,3);
+  assert.equal(snap.generation_count,2);
+  assert.equal(snap.latest_generation_seq,2);
+  assert.equal(snap.latest_epoch_seq,1);
+  assert.equal(snap.durable_before_visible,true);
+  assert.equal(snap.experiment_results_stored_here,false);
+  assert.equal(snap.existing_candidate_experiment_ledger_owns_outcomes,true);
+
+  const restored=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,3);
+  assert.equal((await restored.add(h3)).state,'IDEMPOTENT');
+});
+
+test('Phase29 handoff ledger persistence failure cannot publish phantom handoff',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-handoff-crash-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'handoffs.json');
+  const ledger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const fx=phase28ArtifactFixture('phase29-ledger-crash');
+  const handoff=phase29Handoff(fx,'phase29-ledger-crash',{
+    evaluator_generation_seq:1,
+    evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest('phase29-ledger-crash-anchor'),
+  });
+
+  const originalRename=fs.rename;
+  fs.rename=async()=>{throw Object.assign(new Error('injected_phase29_handoff_rename_failure'),{code:'EIO'});};
+  try{
+    await assert.rejects(()=>ledger.add(handoff),/injected_phase29_handoff_rename_failure/);
+  }finally{
+    fs.rename=originalRename;
+  }
+  assert.equal(ledger.snapshot().row_count,0);
+
+  const restored=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,0);
+});
+
+test('Phase29 handoff ledger rejects generation gaps, reorder and self-rehashed policy weakening',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-handoff-replay-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'handoffs.json');
+  const ledger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+
+  const fx1=phase28ArtifactFixture('phase29-replay-g1e1');
+  const h1=phase29Handoff(fx1,'phase29-replay-g1e1',{
+    evaluator_generation_seq:1,evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest('phase29-replay-history'),
+  });
+  await ledger.add(h1);
+
+  const fxGap=phase28ArtifactFixture('phase29-replay-g3e1');
+  const gap=phase29Handoff(fxGap,'phase29-replay-g3e1',{
+    evaluator_generation_seq:3,evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:rsiMaterializedEvaluatorGenerationPredecessorAnchor(h1),
+  });
+  await assert.rejects(()=>ledger.add(gap),/generation_sequence_gap/);
+
+  const fx2=phase28ArtifactFixture('phase29-replay-g1e2');
+  const h2=phase29Handoff(fx2,'phase29-replay-g1e2',{
+    evaluator_root_digest:h1.evaluator_root_digest,
+    evaluator_generation_digest:h1.evaluator_generation_digest,
+    evaluator_generation_seq:1,evaluation_epoch_seq:2,
+    evaluator_generation_history_anchor_digest:h1.evaluator_generation_history_anchor_digest,
+  });
+  await ledger.add(h2);
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+
+  const weakened=structuredClone(raw);
+  weakened.rows[0].handoff.handoff_can_execute_evaluation=true;
+  const handoffCore=structuredClone(weakened.rows[0].handoff);
+  delete handoffCore.evaluation_handoff_digest;
+  weakened.rows[0].handoff.evaluation_handoff_digest=dg(handoffCore);
+  const weakenedCore=structuredClone(weakened);
+  delete weakenedCore.state_digest;
+  weakened.state_digest=dg(weakenedCore);
+  const weakenedPath=path.join(dir,'weakened.json');
+  await fs.writeFile(weakenedPath,JSON.stringify(weakened),'utf8');
+  const weakenedLedger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath:weakenedPath,source_sha:SOURCE});
+  await assert.rejects(()=>weakenedLedger.init(),/handoff_policy_invalid/);
+
+  const reordered=structuredClone(raw);
+  reordered.rows=[reordered.rows[1],reordered.rows[0]];
+  const reorderedCore=structuredClone(reordered);
+  delete reorderedCore.state_digest;
+  reordered.state_digest=dg(reorderedCore);
+  const reorderedPath=path.join(dir,'reordered.json');
+  await fs.writeFile(reorderedPath,JSON.stringify(reordered),'utf8');
+  const reorderedLedger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath:reorderedPath,source_sha:SOURCE});
+  await assert.rejects(()=>reorderedLedger.init(),/handoff_sequence_gap/);
 });
