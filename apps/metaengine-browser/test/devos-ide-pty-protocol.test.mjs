@@ -115,9 +115,14 @@ test('input is byte-bounded, local-UI-only, and explicitly non-idempotent', () =
   assert.equal(receipt.automatic_retry_allowed, false);
 
   assert.throws(() => validateDevOSPtyInputRequest({
-    ...receipt,
+    schema: 'metaengine.devos.pty.input.v1',
+    protocol_version: 1,
     request_id: 'input-oversize',
+    ref: ref(),
+    transport_epoch: 2,
+    input_seq: 10,
     data: new Uint8Array(DEVOS_PTY_BOUNDS.input_frame_bytes + 1),
+    source: 'LOCAL_TERMINAL_UI',
   }), /input_bytes_invalid/);
   assert.throws(() => validateDevOSPtyInputRequest({
     schema: 'metaengine.devos.pty.input.v1',
@@ -174,7 +179,12 @@ test('output is byte-preserving and output ACK represents renderer parse complet
   assert.equal(ack.authority_effect, false);
 
   assert.throws(() => validateDevOSPtyOutputFrame({
-    ...out,
+    schema: 'metaengine.devos.pty.output.v1',
+    protocol_version: 1,
+    ref: ref(),
+    transport_epoch: 2,
+    output_seq: 5,
+    byte_offset: 4100,
     data: new Uint8Array(DEVOS_PTY_BOUNDS.output_frame_bytes + 1),
   }), /output_bytes_invalid/);
 });
@@ -253,8 +263,16 @@ test('exit receipt preserves exact ref, final output boundary and explicit clean
   assert.equal(receipt.authority_effect, false);
 
   assert.throws(() => validateDevOSPtyExitReceipt({
-    ...receipt,
+    schema: 'metaengine.devos.pty.exited.v1',
+    protocol_version: 1,
+    ref: ref(),
+    exit_code: 0,
+    signal: null,
+    reason: 'PROCESS_EXIT',
+    final_output_seq: 33,
+    final_byte_offset: 65536,
     tree_cleanup: 'ASSUMED',
+    observed_at: '2026-09-18T00:00:00.000Z',
   }), /tree_cleanup_invalid/);
 });
 
