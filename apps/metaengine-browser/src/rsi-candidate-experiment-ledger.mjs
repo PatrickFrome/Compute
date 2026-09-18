@@ -98,7 +98,12 @@ export function createRsiCandidateExperimentIntent({
   if(artifactRequest){
     if(roots[0]!==routed.request.parent_artifact_digest)throw new Error('rsi_experiment_artifact_baseline_mismatch');
     if(roots[1]!==routed.request.candidate_artifact_digest)throw new Error('rsi_experiment_artifact_candidate_mismatch');
+    if(roots[2]!==routed.request.sealed_task_set_digest)throw new Error('rsi_experiment_artifact_sealed_tasks_mismatch');
+    if(roots[3]!==routed.request.harness_digest)throw new Error('rsi_experiment_artifact_harness_mismatch');
     if(roots[4]!==routed.request.evaluator_root_digest)throw new Error('rsi_experiment_artifact_evaluator_mismatch');
+    if(roots[5]!==routed.request.trial_worker_image_digest)throw new Error('rsi_experiment_artifact_worker_mismatch');
+    if(roots[6]!==routed.request.resource_budget_digest)throw new Error('rsi_experiment_artifact_resource_budget_mismatch');
+    if(roots[7]!==routed.request.task_order_digest)throw new Error('rsi_experiment_artifact_task_order_mismatch');
   }
   const identity={
     source_sha:routed.request.source_sha,
@@ -119,6 +124,9 @@ export function createRsiCandidateExperimentIntent({
       provenance_root_digest:routed.request.provenance_root_digest,
       evaluator_generation_digest:routed.request.evaluator_generation_digest,
       evaluation_epoch_digest:routed.request.evaluation_epoch_digest,
+      threshold_policy_digest:routed.request.threshold_policy_digest,
+      stopping_policy_digest:routed.request.stopping_policy_digest,
+      acceptance_assets_frozen:true,
       fresh_budget_epoch_required:true,
     }:{}),
   };
@@ -181,6 +189,9 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
       ||intent.provenance_root_digest!==embeddedRequest.provenance_root_digest
       ||intent.evaluator_generation_digest!==embeddedRequest.evaluator_generation_digest
       ||intent.evaluation_epoch_digest!==embeddedRequest.evaluation_epoch_digest
+      ||intent.threshold_policy_digest!==embeddedRequest.threshold_policy_digest
+      ||intent.stopping_policy_digest!==embeddedRequest.stopping_policy_digest
+      ||intent.acceptance_assets_frozen!==true
       ||intent.fresh_budget_epoch_required!==true)throw new Error('rsi_experiment_artifact_request_binding_invalid');
   }
   const canonical=createRsiCandidateExperimentIntent({
@@ -426,6 +437,13 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     fresh_budget_epoch_required_for_materialized_candidate:true,
     evaluator_generation_binding_required:true,
     evaluator_root_binding_required:true,
+    sealed_task_set_binding_required:true,
+    harness_binding_required:true,
+    trial_worker_binding_required:true,
+    resource_budget_binding_required:true,
+    task_order_binding_required:true,
+    threshold_policy_binding_required:true,
+    stopping_policy_binding_required:true,
     paired_control_treatment_required:true,
     unchanged_baseline_artifact_required:true,
     same_sealed_tasks_required:true,
