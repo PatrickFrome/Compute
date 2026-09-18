@@ -65,6 +65,7 @@ import { createRsiVerifierShadowQualification, rsiVerifierShadowQualificationTru
 import { createRsiVerifierRootChangeReview, rsiVerifierRootChangeReviewTrustRootSnapshot } from './rsi-verifier-root-change-review.mjs';
 import { createRsiVerifierRootStagingReview, rsiVerifierRootStagingTrustRootSnapshot } from './rsi-verifier-root-staging.mjs';
 import { createRsiVerifierRootActivationPrepareReview, rsiVerifierRootActivationPrepareTrustRootSnapshot } from './rsi-verifier-root-activation-prepare.mjs';
+import { createRsiVerifierRootActivationCommitReview, rsiVerifierRootActivationCommitReviewTrustRootSnapshot } from './rsi-verifier-root-activation-commit-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -153,6 +154,7 @@ function trustRoots() {
     verifier_root_change_review: rsiVerifierRootChangeReviewTrustRootSnapshot(),
     verifier_root_staging: rsiVerifierRootStagingTrustRootSnapshot(),
     verifier_root_activation_prepare: rsiVerifierRootActivationPrepareTrustRootSnapshot(),
+    verifier_root_activation_commit_review: rsiVerifierRootActivationCommitReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1517,6 +1519,55 @@ export class RsiRuntimeService {
       root_activation_commit_authorized: false,
       verifier_activation_authorized: false,
       activation_commit_token: null,
+      second_scheduler_created: false,
+      authority_effect: false,
+    });
+    return review;
+  }
+
+  async recordVerifierRootActivationCommitReview({
+    review_id,
+    intent,
+    old_root_authorization,
+    new_root_authorization,
+    external_review_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const review = createRsiVerifierRootActivationCommitReview({
+      review_id,
+      intent,
+      old_root_authorization,
+      new_root_authorization,
+      external_review_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('VERIFIER_ROOT_ACTIVATION_COMMIT_REVIEW_RECORDED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      intent_digest: review.intent_digest,
+      commit_intent_id: review.commit_intent_id,
+      effect_key: review.effect_key,
+      prepare_review_digest: review.prepare_review_digest,
+      old_root_authorization_digest: review.old_root_authorization_digest,
+      new_root_authorization_digest: review.new_root_authorization_digest,
+      current_root_generation: review.current_root_generation,
+      prepared_root_generation: review.prepared_root_generation,
+      predecessor_verifier_root_digest: review.predecessor_verifier_root_digest,
+      candidate_verifier_root_digest: review.candidate_verifier_root_digest,
+      next_root_history_digest: review.next_root_history_digest,
+      state: review.state,
+      ready_for_external_root_activation_executor_review: review.ready_for_external_root_activation_executor_review,
+      active_verifier_root_digest: review.active_verifier_root_digest,
+      write_ahead_intent_state: 'PRE_EFFECT_PREPARED',
+      effect_attempt_count: 0,
+      max_effect_attempts: 1,
+      same_intent_reconciliation_required_on_ambiguous: true,
+      blind_retry_allowed: false,
+      predecessor_retirement_authorized: false,
+      root_activation_effect_authorized: false,
+      verifier_activation_authorized: false,
+      effect_executor_token: null,
       second_scheduler_created: false,
       authority_effect: false,
     });
