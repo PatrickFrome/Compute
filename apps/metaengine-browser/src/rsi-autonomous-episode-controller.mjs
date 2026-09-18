@@ -9,6 +9,7 @@ import {
   verifyRsiSearchModeRoutingPlan,
 } from './rsi-search-mode-router.mjs';
 import { verifyRsiHarnessRepairSpec } from './rsi-trace-guided-harness-repair.mjs';
+import { verifyRsiExperienceContextPlan } from './rsi-experience-context-planner.mjs';
 
 export const RSI_AUTONOMOUS_EPISODE_PLAN_SCHEMA = 'metaengine.rsi.autonomous-episode-plan.v1';
 export const RSI_AUTONOMOUS_VARIANT_PLAN_SCHEMA = 'metaengine.rsi.autonomous-variant-plan.v1';
@@ -152,6 +153,66 @@ function harnessRepairSummary(repairSpec) {
   });
 }
 
+function normalizeExperienceContextPlan(plan, {
+  sourceSha,
+  observationDigest,
+  opportunityId,
+  mutationSurface,
+} = {}) {
+  if (plan == null) return null;
+  const checked = verifyRsiExperienceContextPlan(plan);
+  if (exactSha(checked.source_sha, 'experience_context_source') !== sourceSha) {
+    throw new Error('rsi_autonomous_experience_context_source_mismatch');
+  }
+  if (exactDigest(checked.observation_digest, 'experience_context_observation') !== observationDigest) {
+    throw new Error('rsi_autonomous_experience_context_observation_mismatch');
+  }
+  if (String(checked.opportunity_id || '') !== String(opportunityId || '')) {
+    throw new Error('rsi_autonomous_experience_context_opportunity_mismatch');
+  }
+  if (String(checked.mutation_surface || '').toUpperCase() !== String(mutationSurface || '').toUpperCase()) {
+    throw new Error('rsi_autonomous_experience_context_surface_mismatch');
+  }
+  return Object.freeze(structuredClone(checked));
+}
+
+function experienceContextSummary(plan) {
+  if (!plan) return null;
+  return Object.freeze({
+    schema: 'metaengine.rsi.autonomous-experience-context-summary.v1',
+    version: 1,
+    context_plan_digest: plan.context_plan_digest,
+    search_context_digest: plan.search_context_digest,
+    graph_snapshot_digest: plan.graph_snapshot_digest,
+    retrieval_digest: plan.retrieval_digest,
+    mode: plan.mode,
+    selected_case_count: plan.selected_case_count,
+    selected_cases: Object.freeze((plan.selected_cases || []).map((row) => Object.freeze({
+      rank: row.rank,
+      case_id: row.case_id,
+      case_digest: row.case_digest,
+      outcome: row.outcome,
+      candidate_id: row.candidate_id,
+      candidate_sha: row.candidate_sha,
+      failure_codes: Object.freeze([...(row.failure_codes || [])]),
+      mechanism_tags: Object.freeze([...(row.mechanism_tags || [])]),
+      lesson_digests: Object.freeze([...(row.lesson_digests || [])]),
+      contextual_utility: row.contextual_utility,
+      ranking_score: row.ranking_score,
+      authority_effect: false,
+    }))),
+    retrieval_is_advisory_only: true,
+    candidate_can_modify_context: false,
+    candidate_can_select_retrieval_thresholds: false,
+    source_context_truth_is_portable: false,
+    scheduler_action_authorized: false,
+    execution_authority: false,
+    promotion_authority: false,
+    self_update_authority: false,
+    authority_effect: false,
+  });
+}
+
 function normalizeAllocation(allocation, index) {
   if (!allocation || typeof allocation !== 'object' || Array.isArray(allocation)) {
     throw new Error('rsi_autonomous_allocation_invalid');
@@ -168,7 +229,14 @@ function normalizeAllocation(allocation, index) {
   });
 }
 
-function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex, harnessRepairSpec = null }) {
+function variantPlanFrom({
+  basePlan,
+  routingPlan,
+  allocation,
+  variantIndex,
+  harnessRepairSpec = null,
+  experienceContextPlan = null,
+}) {
   if (!basePlan || basePlan.schema !== RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA) {
     throw new Error('rsi_autonomous_base_plan_invalid');
   }
@@ -184,10 +252,14 @@ function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex, harn
   }
 
   const repairSummary = harnessRepairSummary(harnessRepairSpec);
+  const experienceSummary = experienceContextSummary(experienceContextPlan);
   const variantMaterial = {
     base_plan_digest: exactDigest(basePlan.plan_digest, 'base_plan'),
     routing_digest: exactDigest(routingPlan.routing_digest, 'routing'),
     harness_repair_digest: repairSummary ? exactDigest(repairSummary.repair_digest, 'harness_repair') : null,
+    experience_context_digest: experienceSummary
+      ? exactDigest(experienceSummary.context_plan_digest, 'experience_context')
+      : null,
     search_mode: normalized.search_mode,
     allocation_role: normalized.role,
     proposal_budget_units: normalized.proposal_budget_units,
@@ -215,6 +287,16 @@ function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex, harn
     'rsi_search_variant_digest=' + variantDigest,
     'rsi_search_mode_is_proposal_guidance_only',
     'rsi_search_router_has_zero_scheduler_authority',
+    ...(experienceSummary ? [
+      'rsi_experience_context_digest=' + experienceSummary.context_plan_digest,
+      'rsi_experience_context_mode=' + experienceSummary.mode,
+      'rsi_experience_selected_case_count=' + experienceSummary.selected_case_count,
+      'rsi_experience_retrieval_is_advisory_only',
+      'rsi_experience_candidate_cannot_modify_context',
+      ...(experienceSummary.graph_snapshot_digest
+        ? ['rsi_experience_graph_snapshot_digest=' + experienceSummary.graph_snapshot_digest]
+        : []),
+    ] : []),
     ...(repairSummary ? [
       'rsi_harness_repair_digest=' + repairSummary.repair_digest,
       'rsi_harness_component_path=' + repairSummary.component_path,
@@ -229,6 +311,7 @@ function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex, harn
   plan.task_spec.rsi = Object.freeze({
     ...(basePlan.task_spec?.rsi || {}),
     harness_repair: repairSummary,
+    experience_context: experienceSummary,
     search_variant: Object.freeze({
       schema: RSI_AUTONOMOUS_VARIANT_PLAN_SCHEMA,
       version: 1,
@@ -268,6 +351,7 @@ export function createRsiAutonomousEpisodePlan({
   proposal_budget_units = 100,
   exploration_fraction = 0.2,
   harness_repair_spec = null,
+  experience_context_plan = null,
 } = {}) {
   if (!observation || typeof observation !== 'object' || Array.isArray(observation)) {
     throw new Error('rsi_autonomous_observation_invalid');
@@ -292,6 +376,12 @@ export function createRsiAutonomousEpisodePlan({
     mutationSurface,
     hypothesis,
   });
+  const experienceContextPlan = normalizeExperienceContextPlan(experience_context_plan, {
+    sourceSha,
+    observationDigest,
+    opportunityId: opportunity_id,
+    mutationSurface,
+  });
   const basePlan = buildRsiDevosExperimentPlan({
     observation,
     opportunity_id,
@@ -311,6 +401,9 @@ export function createRsiAutonomousEpisodePlan({
       opportunity_id,
       hypothesis_digest: hypothesis.hypothesis_digest,
       harness_repair_digest: repairSpec ? exactDigest(repairSpec.repair_digest, 'harness_repair') : null,
+      experience_context_digest: experienceContextPlan
+        ? exactDigest(experienceContextPlan.context_plan_digest, 'experience_context')
+        : null,
       cycle_generation: generation,
     }).slice(0, 24),
     proposal_budget_units: totalBudget,
@@ -334,6 +427,7 @@ export function createRsiAutonomousEpisodePlan({
       allocation,
       variantIndex: index + 1,
       harnessRepairSpec: repairSpec,
+      experienceContextPlan,
     })
   );
 
@@ -345,6 +439,9 @@ export function createRsiAutonomousEpisodePlan({
     search_context_digest: exactDigest(context.context_digest, 'search_context'),
     routing_digest: exactDigest(routingPlan.routing_digest, 'routing'),
     harness_repair_digest: repairSpec ? exactDigest(repairSpec.repair_digest, 'harness_repair') : null,
+    experience_context_digest: experienceContextPlan
+      ? exactDigest(experienceContextPlan.context_plan_digest, 'experience_context')
+      : null,
     cycle_generation: generation,
   };
   const episodeDigest = digest(episodeMaterial);
@@ -364,6 +461,11 @@ export function createRsiAutonomousEpisodePlan({
     mutation_surface: mutationSurface,
     harness_repair_spec: repairSpec,
     harness_repair_digest: repairSpec ? exactDigest(repairSpec.repair_digest, 'harness_repair') : null,
+    experience_context_plan: experienceContextPlan,
+    experience_context_digest: experienceContextPlan
+      ? exactDigest(experienceContextPlan.context_plan_digest, 'experience_context')
+      : null,
+    experience_context_summary: experienceContextSummary(experienceContextPlan),
     search_context: context,
     search_context_digest: exactDigest(context.context_digest, 'search_context'),
     routing_plan: routingPlan,
@@ -384,6 +486,10 @@ export function createRsiAutonomousEpisodePlan({
     search_routing_is_scheduler_authority: false,
     search_routing_is_promotion_authority: false,
     candidate_can_choose_search_mode: false,
+    experience_context_advisory_only: true,
+    candidate_can_modify_experience_context: false,
+    experience_context_is_scheduler_authority: false,
+    experience_context_is_promotion_authority: false,
     harness_repair_exact_component_scope: true,
     broad_harness_patch_allowed: false,
     candidate_can_modify_harness_repair_spec: false,
@@ -406,6 +512,10 @@ export function verifyRsiAutonomousEpisodePlan(plan) {
     || plan.search_routing_is_scheduler_authority !== false
     || plan.search_routing_is_promotion_authority !== false
     || plan.candidate_can_choose_search_mode !== false
+    || plan.experience_context_advisory_only !== true
+    || plan.candidate_can_modify_experience_context !== false
+    || plan.experience_context_is_scheduler_authority !== false
+    || plan.experience_context_is_promotion_authority !== false
     || plan.direct_dispatch_enabled !== false
     || plan.direct_promotion_enabled !== false
     || plan.physical_effect_replay_allowed !== false
@@ -418,6 +528,25 @@ export function verifyRsiAutonomousEpisodePlan(plan) {
   exactDigest(plan.search_context_digest, 'plan_search_context');
   exactDigest(plan.routing_digest, 'plan_routing');
   verifyRsiSearchContext(plan.search_context);
+  let checkedExperienceContext = null;
+  if (plan.experience_context_plan != null) {
+    checkedExperienceContext = normalizeExperienceContextPlan(plan.experience_context_plan, {
+      sourceSha: plan.source_sha,
+      observationDigest: exactDigest(plan.observation_digest, 'plan_observation'),
+      opportunityId: plan.opportunity_id,
+      mutationSurface: plan.mutation_surface,
+    });
+    const checkedDigest = exactDigest(checkedExperienceContext.context_plan_digest, 'plan_experience_context');
+    if (checkedDigest !== exactDigest(plan.experience_context_digest, 'plan_experience_context_claimed')) {
+      throw new Error('rsi_autonomous_experience_context_digest_mismatch');
+    }
+    const expectedSummary = experienceContextSummary(checkedExperienceContext);
+    if (JSON.stringify(expectedSummary) !== JSON.stringify(plan.experience_context_summary)) {
+      throw new Error('rsi_autonomous_experience_context_summary_mismatch');
+    }
+  } else if (plan.experience_context_digest != null || plan.experience_context_summary != null) {
+    throw new Error('rsi_autonomous_experience_context_plan_missing');
+  }
   let checkedRepair = null;
   if (plan.harness_repair_spec != null) {
     checkedRepair = verifyRsiHarnessRepairSpec(plan.harness_repair_spec);
@@ -455,6 +584,16 @@ export function verifyRsiAutonomousEpisodePlan(plan) {
     }
     if (exactSha(variant.source_sha, 'variant_source') !== plan.source_sha) throw new Error('rsi_autonomous_variant_source_mismatch');
     if (exactDigest(variant.hypothesis_digest, 'variant_hypothesis') !== plan.hypothesis_digest) throw new Error('rsi_autonomous_variant_hypothesis_mismatch');
+    const variantExperienceSummary = variant.task_spec?.rsi?.experience_context || null;
+    if (checkedExperienceContext) {
+      const expectedExperienceSummary = experienceContextSummary(checkedExperienceContext);
+      if (!variantExperienceSummary
+        || JSON.stringify(variantExperienceSummary) !== JSON.stringify(expectedExperienceSummary)) {
+        throw new Error('rsi_autonomous_variant_experience_context_mismatch');
+      }
+    } else if (variantExperienceSummary != null) {
+      throw new Error('rsi_autonomous_variant_unexpected_experience_context');
+    }
     const repairSummary = variant.task_spec?.rsi?.harness_repair || null;
     if (checkedRepair) {
       if (!repairSummary || exactDigest(repairSummary.repair_digest, 'variant_harness_repair') !== exactDigest(checkedRepair.repair_digest, 'checked_harness_repair')) {
@@ -496,6 +635,8 @@ export function rsiAutonomousEpisodeControllerTrustRootSnapshot() {
       'apps/metaengine-browser/src/rsi-evaluation-integrity-guard.mjs',
       'apps/metaengine-browser/src/rsi-trace-guided-harness-repair.mjs',
       'apps/metaengine-browser/src/rsi-verified-search-feedback.mjs',
+      'apps/metaengine-browser/src/rsi-experience-context-planner.mjs',
+      'apps/metaengine-browser/src/rsi-experience-graph.mjs',
     ],
     contextual_search_routing: true,
     explicit_exploration_budget: true,
@@ -504,6 +645,11 @@ export function rsiAutonomousEpisodeControllerTrustRootSnapshot() {
     existing_devos_scheduler_required: true,
     second_scheduler_allowed: false,
     candidate_can_choose_search_mode: false,
+    verified_experience_context_supported: true,
+    experience_context_retrieval_is_advisory_only: true,
+    candidate_can_modify_experience_context: false,
+    experience_context_is_scheduler_authority: false,
+    experience_context_is_promotion_authority: false,
     direct_dispatch_enabled: false,
     direct_promotion_enabled: false,
     self_update_authority: false,
