@@ -324,3 +324,45 @@ test('restart rejects self-rehashed plan policy or accounting downgrade',async(t
   const restored=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
   await assert.rejects(()=>restored.init(),/plan_policy_invalid/);
 });
+
+
+test('restart rejects duplicate budget plan identities even with distinct digests',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-eval-router-duplicate-plan-id-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const rowA=request('duplicate-plan-a',{cost:8}).row;
+  const rowB=request('duplicate-plan-b',{cost:8}).row;
+  const planA=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.duplicate-id',
+    source_sha:SOURCE,
+    requests:[rowA],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  const planB=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.duplicate-id',
+    source_sha:SOURCE,
+    requests:[rowB],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+
+  const ledger=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  await ledger.add(planA);
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  persisted.rows.push({source_sha:SOURCE,plan:planB});
+  persisted.row_count=2;
+  persisted.total_budget_units=16;
+  persisted.total_used_budget_units=16;
+  persisted.total_remaining_budget_units=0;
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/plan_id_duplicate/);
+});
