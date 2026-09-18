@@ -256,6 +256,7 @@ export function createRsiBoundedRevisionDevosBridge({
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
+    scheduler_authority:false,
     automatic_retry_allowed:false,
     authority_effect:false,
   };
