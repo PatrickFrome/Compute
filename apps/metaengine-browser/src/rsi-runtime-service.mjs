@@ -46,7 +46,7 @@ import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from 
 import { RsiBrowserCommandAttributionRegistry, rsiBrowserCommandAttributionTrustRootSnapshot } from './rsi-browser-command-attribution-registry.mjs';
 import { createRsiTrustedCreditReceipt, createRsiExperienceGraphAdmission, applyRsiExperienceGraphAdmission, rsiTrustedCreditTrustRootSnapshot } from './rsi-trusted-credit-assignment.mjs';
 import { createRsiExperienceContextPlan, rsiExperienceContextTrustRootSnapshot } from './rsi-experience-context-planner.mjs';
-import { createRsiCandidateSynthesisRequest, createRsiCandidateMutationProposal, prepareRsiContextAwareCandidateBuild, rsiContextAwareCandidateTrustRootSnapshot } from './rsi-context-aware-candidate-synthesis.mjs';
+import { createRsiCandidateSynthesisRequest, createRsiCandidateMutationProposal, prepareRsiContextAwareCandidateBuild, createRsiContextAwareCandidateLedgerPayload, rsiContextAwareCandidateTrustRootSnapshot } from './rsi-context-aware-candidate-synthesis.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -205,9 +205,9 @@ export class RsiRuntimeService {
           const episodeId = row?.payload?.episode_event?.episode_id;
           if (episodeId) this.#experienceContextPlans.set(episodeId, Object.freeze(structuredClone(row.payload.experience_context_plan)));
         }
-        if (row?.payload?.context_candidate_build) {
+        if (row?.payload?.candidate_synthesis?.context_candidate_build) {
           this.#candidateSynthesisPlanCount += 1;
-          this.#lastContextAwareBuildDigest = row.payload.context_candidate_build.context_aware_build_digest || null;
+          this.#lastContextAwareBuildDigest = row.payload.candidate_synthesis.context_candidate_build.context_aware_build_digest || null;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -437,17 +437,14 @@ export class RsiRuntimeService {
       previous_candidate_id,
       requested_backend,
     });
-    await this.#ledger.append('RSI_CONTEXT_CANDIDATE_BUILD_PLANNED', {
+    const ledgerPayload = createRsiContextAwareCandidateLedgerPayload({
       episode_id: String(episode_id || '').trim(),
       synthesis_request: request,
-      synthesis_request_digest: request.synthesis_request_digest,
       mutation_proposal: mutationProposal,
       context_candidate_build: build,
-      existing_devos_scheduler_required: true,
-      devos_lease_required_before_materialization: true,
-      lease_created: false,
-      workspace_created: false,
-      candidate_materialized: false,
+    });
+    await this.#ledger.append('RSI_CONTEXT_CANDIDATE_BUILD_PLANNED', {
+      candidate_synthesis: ledgerPayload,
       authority_effect: false,
     });
     this.#candidateSynthesisPlanCount += 1;
