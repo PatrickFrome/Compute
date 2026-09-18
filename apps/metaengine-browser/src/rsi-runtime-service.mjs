@@ -51,6 +51,7 @@ import { createRsiDevosMaterializationHandoff, admitRsiDevosMaterialization, rsi
 import { createRsiVerifiedCandidateMaterialization, rsiVerifiedCandidateMaterializationTrustRootSnapshot } from './rsi-verified-candidate-materialization.mjs';
 import { createRsiExternalEvaluationBundle, verifyRsiExternalEvaluationBundle, rsiExternalEvaluationTrustRootSnapshot } from './rsi-external-evaluation-evidence-adapter.mjs';
 import { createRsiExternalPromotionReviewRequest, finalizeRsiExternalPromotionReview, verifyRsiExternalPromotionReviewRequest, verifyRsiExternalPromotionReviewResult, rsiExternalPromotionReviewTrustRootSnapshot } from './rsi-external-promotion-review.mjs';
+import { createRsiReleaseAuthorityHandoff, verifyRsiReleaseAuthorityHandoff, rsiReleaseAuthorityHandoffTrustRootSnapshot } from './rsi-release-authority-handoff.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -126,6 +127,7 @@ function trustRoots() {
     verified_candidate_materialization: rsiVerifiedCandidateMaterializationTrustRootSnapshot(),
     external_evaluation: rsiExternalEvaluationTrustRootSnapshot(),
     external_promotion_review: rsiExternalPromotionReviewTrustRootSnapshot(),
+    release_authority_handoff: rsiReleaseAuthorityHandoffTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -177,6 +179,9 @@ export class RsiRuntimeService {
   #externalPromotionReviewResultCount = 0;
   #lastExternalPromotionReviewRequestDigest = null;
   #lastExternalPromotionReviewResultDigest = null;
+  #releaseAuthorityHandoffCount = 0;
+  #lastReleaseAuthorityHandoffDigest = null;
+  #lastReleaseAuthorityHandoffState = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -433,6 +438,46 @@ export class RsiRuntimeService {
       for (const row of page) {
         const result = row?.payload?.external_promotion_review_result;
         if (result?.request_digest === wanted) found = Object.freeze(structuredClone(result));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findExternalPromotionReviewByResultDigest(resultDigest) {
+    const wanted = String(resultDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const result = row?.payload?.external_promotion_review_result;
+        const request = row?.payload?.external_promotion_review_request;
+        if (result?.result_digest === wanted && request) {
+          found = Object.freeze({
+            result: Object.freeze(structuredClone(result)),
+            request: Object.freeze(structuredClone(request)),
+          });
+        }
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseAuthorityHandoffByReviewResult(resultDigest) {
+    const wanted = String(resultDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const handoff = row?.payload?.release_authority_handoff;
+        if (handoff?.promotion_review_result_digest === wanted) found = Object.freeze(structuredClone(handoff));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -919,6 +964,54 @@ export class RsiRuntimeService {
     });
   }
 
+  async prepareReleaseAuthorityHandoff({
+    promotion_review_result_digest,
+    authority_readback,
+    trusted_release,
+    immutable_release_evidence,
+    provenance_evidence,
+    source_ancestry_evidence,
+    evaluated_at,
+  } = {}) {
+    this.#assertRunning();
+    const reviewDigest = String(promotion_review_result_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(reviewDigest)) throw new Error('rsi_runtime_promotion_review_result_digest_invalid');
+    if (this.#findReleaseAuthorityHandoffByReviewResult(reviewDigest)) {
+      throw new Error('rsi_runtime_release_authority_handoff_already_prepared');
+    }
+    const review = this.#findExternalPromotionReviewByResultDigest(reviewDigest);
+    if (!review) throw new Error('rsi_runtime_external_promotion_review_result_not_persisted');
+    verifyRsiExternalPromotionReviewResult(review.result, review.request);
+    const handoff = createRsiReleaseAuthorityHandoff({
+      promotion_review_result: review.result,
+      promotion_review_request: review.request,
+      authority_readback,
+      trusted_release,
+      immutable_release_evidence,
+      provenance_evidence,
+      source_ancestry_evidence,
+      evaluated_at,
+    });
+    verifyRsiReleaseAuthorityHandoff(handoff, review.result, review.request);
+    await this.#ledger.append('RSI_RELEASE_AUTHORITY_HANDOFF_PREPARED', {
+      release_authority_handoff: handoff,
+      external_release_executor_required: true,
+      separate_journaled_promotion_effect_required: true,
+      exact_live_readback_required_before_effect: true,
+      release_transaction_created: false,
+      installer_effect_started: false,
+      self_update_check_invoked: false,
+      self_update_apply_invoked: false,
+      direct_install_authorized: false,
+      direct_self_update_authorized: false,
+      authority_effect: false,
+    });
+    this.#releaseAuthorityHandoffCount += 1;
+    this.#lastReleaseAuthorityHandoffDigest = handoff.handoff_digest;
+    this.#lastReleaseAuthorityHandoffState = handoff.state;
+    return handoff;
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1216,6 +1309,26 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      release_authority_handoff: Object.freeze({
+        count: this.#releaseAuthorityHandoffCount,
+        last_digest: this.#lastReleaseAuthorityHandoffDigest,
+        last_state: this.#lastReleaseAuthorityHandoffState,
+        external_release_executor_required: true,
+        separate_journaled_promotion_effect_required: true,
+        exact_live_readback_required_before_effect: true,
+        release_transaction_created_by_rsi: false,
+        installer_effect_started_by_rsi: false,
+        self_update_check_invoked_by_rsi: false,
+        self_update_apply_invoked_by_rsi: false,
+        direct_install_authorized: false,
+        direct_self_update_authorized: false,
+        ambiguous_effect_replay_allowed: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       external_promotion_review: Object.freeze({
         request_count: this.#externalPromotionReviewRequestCount,
         result_count: this.#externalPromotionReviewResultCount,
