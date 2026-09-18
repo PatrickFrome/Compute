@@ -41,18 +41,24 @@ import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integr
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
-import { rsiEpisodeDevosBridgeTrustRootSnapshot } from './rsi-episode-devos-bridge.mjs';
+import { createRsiEpisodeDevosCandidateRequest, rsiEpisodeDevosBridgeTrustRootSnapshot } from './rsi-episode-devos-bridge.mjs';
 import {
   createRsiEpisodeEvaluationEvidenceBundle,
   verifyRsiEpisodeEvaluationEvidenceBundle,
   rsiEpisodeEvaluationIngestTrustRootSnapshot,
 } from './rsi-episode-evaluation-ingest.mjs';
+import {
+  createRsiAutonomousEpisodePlan,
+  verifyRsiAutonomousEpisodePlan,
+  rsiAutonomousEpisodeControllerTrustRootSnapshot,
+} from './rsi-autonomous-episode-controller.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const DIGEST64 = /^[0-9a-f]{64}$/;
+const MAX_AUTONOMOUS_PREPARED_REQUESTS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -113,6 +119,7 @@ function trustRoots() {
     episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
     episode_devos_bridge: rsiEpisodeDevosBridgeTrustRootSnapshot(),
     episode_evaluation_ingest: rsiEpisodeEvaluationIngestTrustRootSnapshot(),
+    autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -138,6 +145,7 @@ export class RsiRuntimeService {
   #lastObservationDigest = null;
   #lastObservationAt = null;
   #promotionNominationCount = 0;
+  #preparedRequestDigests = new Set();
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -164,6 +172,12 @@ export class RsiRuntimeService {
       if (page.length === 0) break;
       for (const row of page) {
         if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
+        if (row?.type === 'RSI_AUTONOMOUS_EPISODE_REQUEST_PREPARED' && row?.payload?.request_digest) {
+          if (this.#preparedRequestDigests.size >= MAX_AUTONOMOUS_PREPARED_REQUESTS) {
+            throw new Error('rsi_runtime_autonomous_request_replay_capacity_exhausted');
+          }
+          this.#preparedRequestDigests.add(exactDigest(row.payload.request_digest, 'autonomous_request_digest'));
+        }
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -308,6 +322,92 @@ export class RsiRuntimeService {
     });
   }
 
+  async prepareAutonomousEpisodeCycle(input = {}) {
+    this.#assertRunning();
+    const plan = createRsiAutonomousEpisodePlan(input);
+    verifyRsiAutonomousEpisodePlan(plan);
+
+    let episode;
+    if (!this.#episodes.hasEpisode(plan.episode_id)) {
+      episode = await this.openEpisode(plan.episode_open_spec);
+    } else {
+      episode = this.#episodes.episode(plan.episode_id);
+      if (
+        episode.source_sha !== plan.source_sha
+        || episode.observation_digest !== plan.observation_digest
+        || episode.opportunity_id !== plan.opportunity_id
+        || episode.hypothesis_digest !== plan.hypothesis_digest
+        || episode.mutation_surface !== plan.mutation_surface
+        || episode.search_context_digest !== plan.search_context_digest
+        || episode.max_candidates !== plan.max_candidates
+      ) {
+        throw new Error('rsi_runtime_autonomous_episode_identity_conflict');
+      }
+    }
+
+    const requests = [];
+    let newlyPersisted = 0;
+    for (const variantPlan of plan.variant_plans) {
+      const request = createRsiEpisodeDevosCandidateRequest({
+        episode,
+        experiment_plan: variantPlan,
+        request_generation: 1,
+      });
+      const requestDigest = exactDigest(request.request_digest, 'autonomous_request_digest');
+      const alreadyPrepared = this.#preparedRequestDigests.has(requestDigest);
+      if (!alreadyPrepared) {
+        if (this.#preparedRequestDigests.size >= MAX_AUTONOMOUS_PREPARED_REQUESTS) {
+          throw new Error('rsi_runtime_autonomous_request_capacity_exhausted');
+        }
+        await this.#ledger.append('RSI_AUTONOMOUS_EPISODE_REQUEST_PREPARED', {
+          episode_id: plan.episode_id,
+          controller_plan_digest: plan.controller_plan_digest,
+          routing_digest: plan.routing_digest,
+          request_id: request.request_id,
+          request_digest: request.request_digest,
+          experiment_id: request.experiment_id,
+          target_branch: request.target_branch,
+          variant_id: variantPlan.search_variant.variant_id,
+          variant_digest: variantPlan.search_variant.variant_digest,
+          search_mode: variantPlan.search_variant.search_mode,
+          allocation_role: variantPlan.search_variant.allocation_role,
+          proposal_budget_units: variantPlan.search_variant.proposal_budget_units,
+          dispatch_authorized: false,
+          authority_effect: false,
+        });
+        this.#preparedRequestDigests.add(requestDigest);
+        newlyPersisted += 1;
+      }
+      requests.push(Object.freeze({
+        request,
+        search_variant: variantPlan.search_variant,
+        already_prepared: alreadyPrepared,
+        scheduler_action_authorized: false,
+        authority_effect: false,
+      }));
+    }
+
+    return Object.freeze({
+      schema: 'metaengine.rsi.autonomous-episode-runtime-cycle.v1',
+      controller_plan: plan,
+      episode: this.#episodes.episode(plan.episode_id),
+      requests: Object.freeze(requests),
+      request_count: requests.length,
+      newly_persisted_request_count: newlyPersisted,
+      existing_devos_scheduler_required: true,
+      scheduler_action_authorized: false,
+      task_created: false,
+      lease_created: false,
+      command_created: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
   async proposeCandidate(input = {}) {
     this.#assertRunning();
     const parentSha = exactSha(input.parent_sha || this.#sourceSha, 'parent_sha');
@@ -426,6 +526,8 @@ export class RsiRuntimeService {
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       experience_gate: this.#experienceGate.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
+      autonomous_prepared_request_count: this.#preparedRequestDigests.size,
+      autonomous_prepared_request_capacity: MAX_AUTONOMOUS_PREPARED_REQUESTS,
       episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
