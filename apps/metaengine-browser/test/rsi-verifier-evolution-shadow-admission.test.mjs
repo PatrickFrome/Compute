@@ -13,6 +13,8 @@ import {
   rsiVerifierEvolutionShadowTrustRootSnapshot,
   verifyRsiVerifierEvolutionShadowAdmission,
 } from '../src/rsi-verifier-evolution-shadow-admission.mjs';
+import { rsiPromotionGateTrustRootSnapshot } from '../src/rsi-promotion-admission-gate.mjs';
+import { rsiTournamentTrustRootSnapshot } from '../src/rsi-shadow-tournament.mjs';
 
 const SOURCE='a'.repeat(40);
 const dg=(v)=>`sha256:${crypto.createHash('sha256').update(JSON.stringify(v),'utf8').digest('hex')}`;
@@ -244,4 +246,7 @@ test('verifier evolution trust root freezes independent oversight and no replace
   assert.equal(root.verifier_replacement_authorized,false);
   assert.equal(root.verifier_activation_authorized,false);
   assert.equal(root.authority_effect,false);
+  for(const policyRoot of [rsiPromotionGateTrustRootSnapshot(),rsiTournamentTrustRootSnapshot()]){
+    assert.equal(policyRoot.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-verifier-evolution-shadow-admission.mjs'),true);
+  }
 });
