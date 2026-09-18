@@ -129,6 +129,10 @@ export class BrowserBrainRealtimeObservationBridge {
     return this.#memory.checkpoint();
   }
 
+  workingMemorySnapshot() {
+    return this.#memory.snapshot();
+  }
+
   snapshot() {
     const bindings = this.#bindings.snapshot();
     const memory = this.#memory.snapshot();
