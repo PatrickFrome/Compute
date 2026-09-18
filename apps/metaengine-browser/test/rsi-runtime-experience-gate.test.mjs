@@ -140,3 +140,27 @@ test('experience gate rejects authority-bearing observations', () => {
     /authority_effect_invalid/,
   );
 });
+
+
+test('recovery to the durable state cancels a stale coalesced transient', () => {
+  let now = 4_000;
+  const gate = new RsiRuntimeExperienceGate({
+    source_sha: SOURCE,
+    clock: () => now,
+    min_persist_interval_ms: 10_000,
+  });
+
+  const durable = gate.offer(observation({ digest: '2'.repeat(64), state: 'READY' }));
+  gate.commitPersist(durable);
+
+  now = 4_050;
+  const transient = gate.offer(observation({ digest: '3'.repeat(64), sequence: 2, state: 'WORKING' }));
+  assert.equal(transient.action, 'COALESCE');
+  assert.equal(gate.snapshot().pending, true);
+
+  now = 4_100;
+  const recovered = gate.offer(observation({ digest: '4'.repeat(64), sequence: 3, state: 'READY' }));
+  assert.equal(recovered.action, 'DEDUPLICATE');
+  assert.equal(gate.snapshot().pending, false);
+  assert.equal(gate.flush(), null);
+});
