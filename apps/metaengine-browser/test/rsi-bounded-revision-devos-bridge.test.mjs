@@ -3653,6 +3653,8 @@ test('Phase34 storage-only effect trust root keeps append distinct from governan
   assert.equal(root.blind_retry_forbidden,true);
   assert.equal(root.ambiguous_effect_requires_reconciliation,true);
   assert.equal(root.resolved_readback_cannot_be_classified_ambiguous,true);
+  assert.equal(root.append_only_reconciliation_event_required,true);
+  assert.equal(root.reconciliation_performs_no_second_effect_attempt,true);
   assert.equal(root.planner_executor_readback_separation_required,true);
   assert.equal(root.append_is_storage_only,true);
   assert.equal(root.governance_recompute_forbidden,true);
