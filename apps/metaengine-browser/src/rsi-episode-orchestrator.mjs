@@ -46,19 +46,19 @@ function digest(value) {
 
 function exactSha(value, label) {
   const out = String(value || '').trim().toLowerCase();
-  if (!SHA40_RE.test(out)) throw new Error(\`rsi_episode_\${label}_sha_invalid\`);
+  if (!SHA40_RE.test(out)) throw new Error(`rsi_episode_${label}_sha_invalid`);
   return out;
 }
 
 function exactDigest(value, label) {
   const out = String(value || '').trim().toLowerCase();
-  if (!DIGEST_RE.test(out)) throw new Error(\`rsi_episode_\${label}_digest_invalid\`);
+  if (!DIGEST_RE.test(out)) throw new Error(`rsi_episode_${label}_digest_invalid`);
   return out.startsWith('sha256:') ? out.slice(7) : out;
 }
 
 function safeId(value, label) {
   const out = String(value || '').trim();
-  if (!SAFE_ID_RE.test(out)) throw new Error(\`rsi_episode_\${label}_invalid\`);
+  if (!SAFE_ID_RE.test(out)) throw new Error(`rsi_episode_${label}_invalid`);
   return out;
 }
 
@@ -76,7 +76,7 @@ function surface(value) {
 
 function positiveInt(value, label, max = Number.MAX_SAFE_INTEGER) {
   const out = Number(value);
-  if (!Number.isSafeInteger(out) || out < 1 || out > max) throw new Error(\`rsi_episode_\${label}_invalid\`);
+  if (!Number.isSafeInteger(out) || out < 1 || out > max) throw new Error(`rsi_episode_${label}_invalid`);
   return out;
 }
 
@@ -92,11 +92,11 @@ function assertZeroAuthority(value, label) {
     'authority_effect',
   ]) {
     if (Object.hasOwn(value || {}, key) && value[key] !== false) {
-      throw new Error(\`rsi_episode_\${label}_\${key}_invalid\`);
+      throw new Error(`rsi_episode_${label}_${key}_invalid`);
     }
   }
   if (Object.hasOwn(value || {}, 'automatic_retry_allowed') && value.automatic_retry_allowed !== false) {
-    throw new Error(\`rsi_episode_\${label}_automatic_retry_invalid\`);
+    throw new Error(`rsi_episode_${label}_automatic_retry_invalid`);
   }
 }
 
