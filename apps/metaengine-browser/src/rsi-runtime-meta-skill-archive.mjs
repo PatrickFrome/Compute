@@ -165,6 +165,12 @@ export class RsiRuntimeMetaSkillArchive{
     this.#records.push(checked);await this.#persist();
     return zero({state:checked.state,record_digest:checked.record_digest});
   }
+  recordByDigest(record_digest){
+    if(!this.#initialized)throw new Error('rsi_runtime_meta_archive_not_initialized');
+    const d=exactDigest(record_digest,'record');
+    const row=this.#records.find(x=>x.record_digest===d);
+    return row?Object.freeze(structuredClone(row)):null;
+  }
   eligible(){
     if(!this.#initialized)throw new Error('rsi_runtime_meta_archive_not_initialized');
     return Object.freeze(this.#records.filter(x=>x.eligible_for_meta_archive===true).map(x=>Object.freeze(structuredClone(x))));
