@@ -2193,3 +2193,499 @@ test('Phase31 refuses consolidation across different fixed Phase30 evaluation co
   );
 });
 
+
+function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null}={}){
+  const rows=phase31SourceRows(`${label}-source`,{state});
+  const proposal=phase31Proposal(rows,`${label}-proposal`);
+  const validations=[
+    phase31Validation(proposal,`${label}-transfer-a`),
+    phase31Validation(proposal,`${label}-transfer-b`),
+  ];
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:`phase32.phase31.admission.${label}`,
+    proposal,
+    validations,
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  });
+  const handoff=createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.consumer.handoff.${label}`,
+    proposal,validations,admission,source_rows:rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(`${label}-consumer-context`),
+    consumer_harness_digest:labelDigest(`${label}-consumer-harness`),
+    consumer_evaluator_root_digest:labelDigest(`${label}-consumer-evaluator-root`),
+    consumer_evaluator_generation_digest:consumerGeneration||proposal.evaluator_generation_digest,
+    consumer_holdout_digest:labelDigest(`${label}-consumer-holdout`),
+    matched_reference_plan_digest:labelDigest(`${label}-matched-reference`),
+    local_revalidation_protocol_digest:labelDigest(`${label}-local-revalidation`),
+    external_consumer_router:true,
+    authored_by_candidate:false,
+  });
+  return {rows,proposal,validations,admission,handoff};
+}
+
+function phase32Receipt(fx,label='phase32',overrides={}){
+  const base={
+    receipt_id:`phase32.consumer.receipt.${label}`,
+    handoff:fx.handoff,
+    matched_control_receipt_digest:labelDigest(`${label}-control-receipt`),
+    treatment_receipt_digest:labelDigest(`${label}-treatment-receipt`),
+    local_evidence_digest:labelDigest(`${label}-local-evidence`),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    hard_invariants_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    efficiency_non_regression:true,
+    strict_consumer_improvement:fx.handoff.knowledge_class==='REUSABLE_RECIPE_CANDIDATE',
+    constraint_prediction_confirmed:fx.handoff.knowledge_class==='NEGATIVE_CONSTRAINT'||fx.handoff.knowledge_class==='LOW_YIELD_CONSTRAINT',
+    diagnostic_discrimination_pass:fx.handoff.knowledge_class==='ENVIRONMENT_DIAGNOSTIC'||fx.handoff.knowledge_class==='AMBIGUITY_DIAGNOSTIC',
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  };
+  return createRsiConsumerLocalRevalidationReceipt({...base,...overrides});
+}
+
+test('Phase32 routes transfer-validated recipes only to existing verified-skill consumer revalidation',()=>{
+  const fx=phase32Fixture('recipe');
+  assert.equal(fx.handoff.knowledge_class,'REUSABLE_RECIPE_CANDIDATE');
+  assert.equal(fx.handoff.consumer_route,'VERIFIED_SKILL_CANDIDATE_REVALIDATION');
+  assert.equal(fx.handoff.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+  assert.equal(fx.handoff.existing_verified_skill_library_only,true);
+  assert.equal(fx.handoff.existing_experience_graph_only,true);
+  assert.equal(fx.handoff.existing_adaptive_retrieval_only,true);
+  assert.equal(fx.handoff.existing_meta_skill_plane_only,true);
+  assert.equal(fx.handoff.second_skill_library_created,false);
+  assert.equal(fx.handoff.second_experience_graph_created,false);
+  assert.equal(fx.handoff.second_scheduler_created,false);
+  assert.equal(fx.handoff.matched_no_skill_or_reference_required,true);
+  assert.equal(fx.handoff.consumer_can_inherit_source_success,false);
+  assert.equal(fx.handoff.handoff_can_write_skill_library,false);
+  assert.equal(fx.handoff.handoff_can_activate_knowledge,false);
+  assert.equal(verifyRsiValidatedKnowledgeConsumerHandoff(fx.handoff,fx).handoff_digest,fx.handoff.handoff_digest);
+});
+
+test('Phase32 class-sensitive routing keeps negative constraints and diagnostics out of positive skill path',()=>{
+  const negative=phase32Fixture('negative',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.equal(negative.handoff.knowledge_class,'NEGATIVE_CONSTRAINT');
+  assert.equal(negative.handoff.consumer_route,'EXPERIENCE_COUNTEREVIDENCE_REVALIDATION');
+  assert.equal(negative.handoff.matched_no_skill_or_reference_required,false);
+
+  const diagnostic=phase32Fixture('diagnostic',{state:'INCONCLUSIVE_ENVIRONMENT'});
+  assert.equal(diagnostic.handoff.knowledge_class,'ENVIRONMENT_DIAGNOSTIC');
+  assert.equal(diagnostic.handoff.consumer_route,'ADAPTIVE_RETRIEVAL_DIAGNOSTIC_REVALIDATION');
+  assert.equal(diagnostic.handoff.handoff_can_write_experience_graph,false);
+});
+
+test('Phase32 never inherits source evaluator-generation verdict into a consumer context',()=>{
+  const fx=phase32Fixture('cross-generation',{consumerGeneration:labelDigest('phase32-new-consumer-generation')});
+  assert.notEqual(fx.handoff.consumer_evaluator_generation_digest,fx.handoff.source_evaluator_generation_digest);
+  assert.equal(fx.handoff.cross_generation_revalidation_required,true);
+  assert.equal(fx.handoff.source_generation_verdict_inherited,false);
+  assert.equal(fx.handoff.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+});
+
+test('Phase32 positive recipe requires matched local improvement and hard non-regression before existing skill review',()=>{
+  const fx=phase32Fixture('positive-local');
+  const receipt=phase32Receipt(fx,'positive-local');
+  assert.equal(verifyRsiConsumerLocalRevalidationReceipt(receipt,{handoff:fx.handoff}).receipt_digest,receipt.receipt_digest);
+  assert.equal(receipt.state,'CONSUMER_REVALIDATED_RECIPE');
+  assert.equal(receipt.eligible_existing_consumer_review,'EXISTING_VERIFIED_SKILL_EVIDENCE_REVIEW');
+  assert.equal(receipt.negative_transfer_memory,false);
+  assert.equal(receipt.receipt_can_write_skill_library,false);
+  assert.equal(receipt.receipt_can_activate_skill,false);
+
+  const noBenefit=phase32Receipt(fx,'positive-no-benefit',{strict_consumer_improvement:false});
+  assert.equal(noBenefit.state,'CONSUMER_NO_CLEAR_BENEFIT');
+  assert.equal(noBenefit.eligible_existing_consumer_review,null);
+
+  const regression=phase32Receipt(fx,'positive-regression',{efficiency_non_regression:false});
+  assert.equal(regression.state,'CONSUMER_NEGATIVE_TRANSFER');
+  assert.equal(regression.negative_transfer_memory,true);
+  assert.equal(regression.suppress_repeat_same_consumer_context,true);
+  assert.equal(regression.eligible_existing_consumer_review,null);
+});
+
+test('Phase32 counterevidence and diagnostic paths require local confirmation and never become skills',()=>{
+  const negative=phase32Fixture('counter',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const nr=phase32Receipt(negative,'counter');
+  assert.equal(nr.state,'CONSUMER_REVALIDATED_COUNTEREVIDENCE');
+  assert.equal(nr.eligible_existing_consumer_review,'EXISTING_EXPERIENCE_COUNTEREVIDENCE_REVIEW');
+  assert.equal(nr.receipt_can_write_skill_library,false);
+
+  const diag=phase32Fixture('diag-local',{state:'INCONCLUSIVE_AMBIGUOUS'});
+  const dr=phase32Receipt(diag,'diag-local');
+  assert.equal(dr.state,'CONSUMER_REVALIDATED_DIAGNOSTIC');
+  assert.equal(dr.eligible_existing_consumer_review,'EXISTING_ADAPTIVE_RETRIEVAL_DIAGNOSTIC_REVIEW');
+  assert.equal(dr.receipt_can_write_experience_graph,false);
+});
+
+test('Phase32 local revalidation rejects invalid harness/evaluator/holdout evidence before consumer review',()=>{
+  const fx=phase32Fixture('invalid-local');
+  for(const [label,overrides,blocker] of [
+    ['instances',{same_instances_pass:false},'INSTANCE_MISMATCH'],
+    ['harness',{same_harness_pass:false},'HARNESS_MISMATCH'],
+    ['budget',{same_budget_pass:false},'BUDGET_MISMATCH'],
+    ['evaluator',{evaluator_integrity_pass:false},'EVALUATOR_INTEGRITY_FAILURE'],
+    ['holdout',{hidden_holdout_pass:false},'HIDDEN_HOLDOUT_FAILURE'],
+    ['contamination',{contamination_clear:false},'CONTAMINATION_DETECTED'],
+    ['replay',{from_scratch_replay_pass:false},'FROM_SCRATCH_REPLAY_FAILURE'],
+  ]){
+    const receipt=phase32Receipt(fx,`invalid-${label}`,overrides);
+    assert.equal(receipt.state,'CONSUMER_REVALIDATION_INVALID');
+    assert.ok(receipt.blockers.includes(blocker),blocker);
+    assert.equal(receipt.eligible_existing_consumer_review,null);
+  }
+});
+
+test('Phase32 archive is durable-before-visible, revalidates Phase31 evidence on restart and retains negative transfer',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-consumer-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const fx=phase32Fixture('archive');
+  const receipt=phase32Receipt(fx,'archive',{safety_non_regression:false});
+  const resolver=async()=>({
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+  });
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({...fx,receipt}));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.add({...fx,receipt})).state,'CONSUMER_NEGATIVE_TRANSFER');
+  const snap=archive.snapshot();
+  assert.equal(snap.row_count,1);
+  assert.equal(snap.negative_transfer_retained,true);
+  assert.equal(snap.active_skill_library_digest,null);
+  assert.equal(snap.active_experience_graph_digest,null);
+  assert.equal(snap.active_meta_skill_profile_digest,null);
+  assert.equal(snap.archive_can_write_consumers,false);
+  assert.equal(snap.archive_can_activate_skill,false);
+  assert.equal(snap.archive_can_schedule_work,false);
+
+  const restored=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+  assert.equal((await restored.add({...fx,receipt})).state,'IDEMPOTENT');
+});
+
+test('Phase32 archive restart rejects self-rehashed authority widening',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const fx=phase32Fixture('tamper');
+  const receipt=phase32Receipt(fx,'tamper');
+  const resolver=async()=>({
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+  });
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await archive.add({...fx,receipt});
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.rows[0].handoff.handoff_can_write_skill_library=true;
+  const hc=structuredClone(raw.rows[0].handoff);delete hc.handoff_digest;
+  raw.rows[0].handoff.handoff_digest=dg(hc);
+  raw.rows[0].receipt.handoff_digest=raw.rows[0].handoff.handoff_digest;
+  const rc=structuredClone(raw.rows[0].receipt);delete rc.receipt_digest;
+  raw.rows[0].receipt.receipt_digest=dg(rc);
+  const sc=structuredClone(raw);delete sc.state_digest;
+  raw.state_digest=dg(sc);
+  await fs.writeFile(statePath,`${JSON.stringify(raw)}\n`,'utf8');
+
+  const restored=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await assert.rejects(()=>restored.init(),/handoff_policy_invalid|handoff_digest_mismatch/);
+});
+
+test('Phase32 trust root reuses existing consumer planes and keeps all effects external',()=>{
+  const root=rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot();
+  assert.equal(root.phase31_multi_context_admission_required,true);
+  assert.equal(root.existing_verified_skill_library_only,true);
+  assert.equal(root.existing_experience_graph_only,true);
+  assert.equal(root.existing_adaptive_retrieval_only,true);
+  assert.equal(root.existing_meta_skill_plane_only,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.second_experience_graph_allowed,false);
+  assert.equal(root.second_scheduler_allowed,false);
+  assert.equal(root.consumer_local_paired_validation_required,true);
+  assert.equal(root.matched_no_skill_or_reference_required_for_recipes,true);
+  assert.equal(root.cross_generation_revalidation_required,true);
+  assert.equal(root.source_generation_verdict_inherited,false);
+  assert.equal(root.negative_transfer_retained,true);
+  assert.equal(root.direct_skill_library_write,false);
+  assert.equal(root.direct_experience_graph_write,false);
+  assert.equal(root.direct_meta_skill_profile_mutation,false);
+  assert.equal(root.direct_knowledge_activation,false);
+  assert.equal(root.direct_scheduler_action,false);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.validated_knowledge_consumer_handoff_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+function phase32ExactSkillCapsule({
+  skillId='skill.phase32.exact.recipe',
+  version=1,
+  parent=null,
+  role='PLAN_TRANSFORM',
+  sourceSha=SOURCE,
+  inputDigest=labelDigest('phase32-exact-skill-input'),
+  outputDigest=labelDigest('phase32-exact-skill-output'),
+  implDigest=labelDigest('phase32-exact-skill-impl'),
+  capabilities=['READ_VERIFIED_CONTEXT','PROPOSE_TYPED_TRANSFORM'],
+}={}){
+  return createRsiSkillCapsule({
+    skill_id:skillId,
+    version,
+    parent_skill_digest:parent,
+    source_candidate_sha:sourceSha,
+    role,
+    input_schema_digest:inputDigest,
+    output_schema_digest:outputDigest,
+    implementation_digest:implDigest,
+    components:[{
+      component_id:`${skillId}.component.v${version}`,
+      artifact_digest:labelDigest(`${skillId}-component-${version}`),
+      kind:'PROCEDURAL_RECIPE',
+    }],
+    capabilities,
+    max_context_tokens:8192,
+    max_output_tokens:2048,
+    max_invocations:4,
+    deterministic_interface:true,
+    external_builder:true,
+    authored_by_candidate:false,
+  });
+}
+
+function phase32ExactSkillEvidence(skill,label='phase32-exact-existing'){
+  return createRsiSkillEvidence({
+    capsule:skill,
+    hidden_holdout_digest:labelDigest(`${label}-holdout`),
+    evaluator_root_digest:labelDigest(`${label}-evaluator`),
+    unit_test_digest:labelDigest(`${label}-unit`),
+    runtime_feedback_digest:labelDigest(`${label}-runtime`),
+    attempt_count:8,
+    success_count:8,
+    hard_invariants_pass:true,
+    verified_for_library:true,
+    evidence_refs:[`EVIDENCE_${label.toUpperCase().replace(/[^A-Z0-9]+/g,'_')}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+}
+
+function phase32ExactCurrentLibrary(){
+  const baseline=phase32ExactSkillCapsule({
+    skillId:'skill.phase32.exact.baseline',
+    role:'ANALYZER',
+    sourceSha:'b'.repeat(40),
+    inputDigest:labelDigest('phase32-exact-baseline-input'),
+    outputDigest:labelDigest('phase32-exact-baseline-output'),
+    implDigest:labelDigest('phase32-exact-baseline-impl'),
+    capabilities:['READ_VERIFIED_CONTEXT','ANALYZE_FAILURE_CODES'],
+  });
+  return createRsiVerifiedSkillLibrary({
+    library_id:'rsi.skill.library.phase32.exact',
+    entries:[{capsule:baseline,evidence:phase32ExactSkillEvidence(baseline,'phase32-exact-baseline')}],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+}
+
+function phase32ExactSkillReviewFixture(label='phase32-exact-skill-review'){
+  const rows=phase31SourceRows(`${label}-source`);
+  const proposal=phase31Proposal(rows,`${label}-proposal`);
+  const validations=[
+    phase31Validation(proposal,`${label}-transfer-a`),
+    phase31Validation(proposal,`${label}-transfer-b`),
+  ];
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:`${label}.phase31.admission`,
+    proposal,validations,external_admission_owner:true,authored_by_candidate:false,
+  });
+  const currentLibrary=phase32ExactCurrentLibrary();
+  const skill=phase32ExactSkillCapsule({skillId:`skill.${label}.recipe`,sourceSha:proposal.source_sha});
+  const review=createRsiConsolidatedKnowledgeSkillReview({
+    review_id:`${label}.review`,
+    proposal,validations,admission,
+    current_library:currentLibrary,
+    skill_capsule:skill,
+    knowledge_to_skill_binding_digest:labelDigest(`${label}-knowledge-binding`),
+    external_materialization_receipt_digest:labelDigest(`${label}-materialization`),
+    interface_review_digest:labelDigest(`${label}-interface-review`),
+    capability_review_digest:labelDigest(`${label}-capability-review`),
+    external_skill_builder:true,
+    external_interface_owner:true,
+    external_capability_reviewer:true,
+    authored_by_candidate:false,
+  });
+  return {rows,proposal,validations,admission,currentLibrary,skill,review};
+}
+
+function phase32ExactSkillEvidenceReviewArgs(fx,label='phase32-exact-skill-evidence',overrides={}){
+  return {
+    evidence_review_id:`${label}.evidence.review`,
+    review:fx.review,
+    proposal:fx.proposal,
+    validations:fx.validations,
+    admission:fx.admission,
+    current_library:fx.currentLibrary,
+    skill_capsule:fx.skill,
+    local_hidden_holdout_digest:labelDigest(`${label}-local-holdout`),
+    local_evaluator_root_digest:labelDigest(`${label}-local-evaluator`),
+    local_unit_test_digest:labelDigest(`${label}-local-unit`),
+    local_runtime_feedback_digest:labelDigest(`${label}-local-runtime`),
+    matched_reference_control_receipt_digest:labelDigest(`${label}-matched-control`),
+    treatment_receipt_digest:labelDigest(`${label}-treatment`),
+    local_evidence_digest:labelDigest(`${label}-local-evidence`),
+    attempt_count:12,
+    success_count:11,
+    local_acceptance_pass:true,
+    matched_reference_pass:true,
+    skill_specific_value_demonstrated:true,
+    hard_invariants_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    process_non_regression:true,
+    outcome_non_regression:true,
+    efficiency_non_regression:true,
+    negative_transfer_detected:false,
+    external_library_evaluator:true,
+    external_holdout_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  };
+}
+
+test('Phase32 exact-contract recipe path reuses existing verified-skill schemas without appending the library',()=>{
+  const fx=phase32ExactSkillReviewFixture();
+  const checked=verifyRsiConsolidatedKnowledgeSkillReview(fx.review,{
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,
+    current_library:fx.currentLibrary,skill_capsule:fx.skill,
+  });
+  assert.equal(checked.review_digest,fx.review.review_digest);
+  assert.equal(fx.review.state,'READY_FOR_FRESH_LOCAL_LIBRARY_VALIDATION');
+  assert.equal(fx.review.current_library_digest,fx.currentLibrary.library_digest);
+  assert.equal(fx.review.review_can_write_skill_library,false);
+  assert.equal(fx.review.review_can_activate_skill,false);
+  assert.equal(fx.review.library_admission_token,null);
+
+  const result=createRsiConsolidatedKnowledgeSkillEvidenceReview(phase32ExactSkillEvidenceReviewArgs(fx));
+  assert.equal(result.state,'READY_FOR_EXTERNAL_EXISTING_LIBRARY_APPEND_REVIEW');
+  assert.equal(result.standard_skill_evidence_verified_for_library,true);
+  assert.equal(result.standard_skill_evidence.skill_digest,fx.skill.skill_digest);
+  assert.equal(result.library_append_performed,false);
+  assert.equal(result.review_can_append_library,false);
+  assert.equal(result.review_can_activate_skill,false);
+  assert.equal(result.library_admission_token,null);
+  assert.equal(result.authority_effect,false);
+  assert.equal(verifyRsiConsolidatedKnowledgeSkillEvidenceReview(result,phase32ExactSkillEvidenceReviewArgs(fx)).evidence_review_digest,result.evidence_review_digest);
+});
+
+test('Phase32 exact-contract skill review uses fresh local holdout/evaluator evidence and rejects negative transfer',()=>{
+  const fx=phase32ExactSkillReviewFixture('phase32-exact-independence');
+  assert.throws(()=>createRsiConsolidatedKnowledgeSkillEvidenceReview(
+    phase32ExactSkillEvidenceReviewArgs(fx,'phase32-exact-reused-holdout',{
+      local_hidden_holdout_digest:fx.validations[0].hidden_holdout_root_digest,
+    })
+  ),/reuses_phase31_evidence/);
+
+  const harmful=createRsiConsolidatedKnowledgeSkillEvidenceReview(
+    phase32ExactSkillEvidenceReviewArgs(fx,'phase32-exact-harmful',{
+      matched_reference_pass:false,
+      skill_specific_value_demonstrated:false,
+      efficiency_non_regression:false,
+      negative_transfer_detected:true,
+    })
+  );
+  assert.equal(harmful.state,'LOCAL_LIBRARY_VALIDATION_REJECTED');
+  assert.equal(harmful.standard_skill_evidence_verified_for_library,false);
+  assert.ok(harmful.blockers.includes('MATCHED_REFERENCE_FAILED'));
+  assert.ok(harmful.blockers.includes('SKILL_SPECIFIC_VALUE_NOT_DEMONSTRATED'));
+  assert.ok(harmful.blockers.includes('EFFICIENCY_REGRESSION'));
+  assert.ok(harmful.blockers.includes('NEGATIVE_TRANSFER_DETECTED'));
+  assert.equal(harmful.library_append_performed,false);
+});
+
+test('Phase32 exact-contract positive skill path is reusable-recipe only and exact-library bound',()=>{
+  const negativeRows=phase31SourceRows('phase32-exact-negative',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const negativeProposal=phase31Proposal(negativeRows,'phase32-exact-negative');
+  const negativeValidations=[
+    phase31Validation(negativeProposal,'phase32-exact-negative-a'),
+    phase31Validation(negativeProposal,'phase32-exact-negative-b'),
+  ];
+  const negativeAdmission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase32.exact.negative.admission',
+    proposal:negativeProposal,validations:negativeValidations,
+    external_admission_owner:true,authored_by_candidate:false,
+  });
+  assert.throws(()=>createRsiConsolidatedKnowledgeSkillReview({
+    review_id:'phase32.exact.negative.review',
+    proposal:negativeProposal,validations:negativeValidations,admission:negativeAdmission,
+    current_library:phase32ExactCurrentLibrary(),
+    skill_capsule:phase32ExactSkillCapsule({skillId:'skill.phase32.exact.negative',sourceSha:SOURCE}),
+    knowledge_to_skill_binding_digest:labelDigest('phase32-exact-negative-binding'),
+    external_materialization_receipt_digest:labelDigest('phase32-exact-negative-materialization'),
+    interface_review_digest:labelDigest('phase32-exact-negative-interface'),
+    capability_review_digest:labelDigest('phase32-exact-negative-capability'),
+    external_skill_builder:true,external_interface_owner:true,external_capability_reviewer:true,authored_by_candidate:false,
+  }),/reusable_recipe_required/);
+
+  const fx=phase32ExactSkillReviewFixture('phase32-exact-library-drift');
+  const other=phase32ExactSkillCapsule({
+    skillId:'skill.phase32.exact.other',
+    role:'VERIFIER',sourceSha:'c'.repeat(40),
+    inputDigest:labelDigest('phase32-exact-other-input'),
+    outputDigest:labelDigest('phase32-exact-other-output'),
+    implDigest:labelDigest('phase32-exact-other-impl'),
+    capabilities:['READ_VERIFIED_CONTEXT','CHECK_TYPED_OUTPUT'],
+  });
+  const drifted=createRsiVerifiedSkillLibrary({
+    library_id:fx.currentLibrary.library_id,
+    entries:[
+      ...fx.currentLibrary.entries.map(row=>({capsule:row.capsule,evidence:row.evidence})),
+      {capsule:other,evidence:phase32ExactSkillEvidence(other,'phase32-exact-other')},
+    ],
+    external_library_owner:true,authored_by_candidate:false,
+  });
+  assert.throws(()=>createRsiConsolidatedKnowledgeSkillEvidenceReview({
+    ...phase32ExactSkillEvidenceReviewArgs(fx,'phase32-exact-drift'),
+    current_library:drifted,
+  }),/review_digest_mismatch|library_drift_requires_revalidation/);
+});
+
+test('Phase32 exact consumer convergence freezes both generic revalidation and existing skill-review roots',()=>{
+  const generic=rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot();
+  const skill=rsiConsolidatedKnowledgeSkillReviewTrustRootSnapshot();
+  assert.equal(generic.second_skill_library_allowed,false);
+  assert.equal(generic.second_experience_graph_allowed,false);
+  assert.equal(generic.second_scheduler_allowed,false);
+  assert.equal(generic.cross_generation_revalidation_required,true);
+  assert.equal(generic.direct_skill_library_write,false);
+  assert.equal(skill.existing_verified_skill_library_reused,true);
+  assert.equal(skill.second_skill_library_created,false);
+  assert.equal(skill.current_library_exact_binding_required,true);
+  assert.equal(skill.fresh_local_holdout_required,true);
+  assert.equal(skill.local_holdout_independent_from_phase31_required,true);
+  assert.equal(skill.matched_reference_required,true);
+  assert.equal(skill.skill_specific_value_required,true);
+  assert.equal(skill.zero_negative_transfer_required,true);
+  assert.equal(skill.skill_library_write_performed_here,false);
+  assert.equal(skill.skill_activation_performed_here,false);
+  assert.equal(skill.scheduler_action_performed_here,false);
+  assert.equal(skill.authority_effect,false);
+});
