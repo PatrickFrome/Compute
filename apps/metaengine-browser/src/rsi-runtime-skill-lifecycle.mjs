@@ -21,12 +21,6 @@ const PRIORS=new Set(['VERIFIED_META_SKILL','VERIFIED_DIRECT_SKILL','LEGACY_IMPO
 const MAX_PENDING=4096;
 const MAX_EVIDENCE=16384;
 const MAX_APPEND_ADMISSIONS=512;
-const APPEND_TERMINAL_STATES=new Set([
-  'APPLIED_STORAGE_ONLY_DORMANT',
-  'NOT_APPLIED_REPLAN_REQUIRED',
-  'RECONCILED_APPLIED_STORAGE_ONLY_DORMANT',
-  'RECONCILED_NOT_APPLIED_REPLAN_REQUIRED',
-]);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -479,10 +473,16 @@ export class RsiRuntimeSkillLifecycle{
       schema:RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA,version:1,source_sha:this.#sourceSha,initialized:this.#initialized,
       library_present:this.#library!=null,library_digest:this.#library?.library_digest||null,
       library_entry_count:this.#library?.entry_count||0,lifecycle_evidence_count:this.#evidence.length,pending_count:this.#pending.length,
+      append_admission_count:this.#appendAdmissions.length,
+      ambiguous_append_count:this.#appendAdmissions.filter(row=>row.state==='AMBIGUOUS_RECONCILIATION_REQUIRED').length,
+      append_attempted_count:this.#appendAdmissions.filter(row=>row.effect_attempt_count===1).length,
       governance_digest:governance?.governance_digest||null,
       active_count:governance?.active_count||0,quarantined_count:governance?.quarantined_count||0,
       retired_count:governance?.retired_count||0,dormant_count:governance?.dormant_count||0,
       evidence_append_only:true,pending_is_bounded:true,contextual_credit_not_global_truth:true,
+      append_admission_state_is_bounded:true,append_plan_durable_before_effect:true,append_effect_attempt_limit:1,
+      blind_append_retry_forbidden:true,append_reconciliation_readback_only:true,
+      append_does_not_imply_activation:true,zero_evidence_append_remains_dormant:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
       execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
       automatic_retry_allowed:false,authority_effect:false,
@@ -497,6 +497,11 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     verified_library_required:true,library_updates_append_only:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
+    exact_library_compare_and_swap_required:true,durable_append_plan_before_external_effect:true,
+    one_external_append_attempt_per_plan:true,ambiguous_append_requires_readback_only_reconciliation:true,
+    blind_append_retry_forbidden:true,append_does_not_imply_retrieval_exposure:true,
+    append_does_not_imply_activation:true,zero_evidence_skill_remains_dormant:true,
+    existing_governance_is_only_activation_lifecycle_authority:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     skill_activation_view_is_execution_authority:false,
     execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
