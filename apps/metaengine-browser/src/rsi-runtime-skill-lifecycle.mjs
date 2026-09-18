@@ -112,12 +112,13 @@ export class RsiRuntimeSkillLifecycle{
   }
   #now(){const n=Number(this.#clock());if(!Number.isFinite(n))throw new Error('rsi_runtime_skill_clock_invalid');return new Date(n).toISOString()}
   #governanceId(){return `runtime.skill.governance.${this.#sourceSha.slice(0,16)}`}
-  async #persist(){
-    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,appendAdmissions:this.#appendAdmissions});
+  async #persistSnapshot({library=this.#library,appendAdmissions=this.#appendAdmissions}={}){
+    const state=stateCore({sourceSha:this.#sourceSha,library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,appendAdmissions});
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
     await fs.rename(temp,this.#path);return state;
   }
+  async #persist(){return this.#persistSnapshot();}
   #assertInit(){if(!this.#initialized)throw new Error('rsi_runtime_skill_not_initialized')}
   #libraryContainsAll(skillDigests){return !!this.#library&&skillDigests.every(d=>this.#library.entries.some(e=>e.skill_digest===d))}
   #assertAppendOnlyLibrary(next){
@@ -241,8 +242,9 @@ export class RsiRuntimeSkillLifecycle{
       reconciliation_readback_only:true,retrieval_exposure_changed:false,skill_activation_performed:false,
       lifecycle_mutation_performed:false,governance_recompute_performed:false,library_append_performed_by_lifecycle:false,
     };
-    this.#appendAdmissions.push(Object.freeze(row));
-    await this.#persist();
+    const nextAdmissions=[...this.#appendAdmissions,Object.freeze(row)];
+    await this.#persistSnapshot({appendAdmissions:nextAdmissions});
+    this.#appendAdmissions=nextAdmissions;
     return zero({state:row.state,admission_id:admissionId,append_plan_digest:appendPlanDigest,
       expected_predecessor_library_digest:row.expected_predecessor_library_digest,
       expected_successor_library_digest:row.expected_successor_library_digest});
@@ -263,8 +265,9 @@ export class RsiRuntimeSkillLifecycle{
     const index=this.#appendAdmissions.indexOf(row);
     const next=Object.freeze({...row,effect_attempt_count:1,effect_executor_identity_digest:executor,
       attempt_prepared_at:this.#now(),state:'ATTEMPT_PREPARED_AWAITING_EXTERNAL_EFFECT_READBACK'});
-    this.#appendAdmissions[index]=next;
-    await this.#persist();
+    const nextAdmissions=[...this.#appendAdmissions];nextAdmissions[index]=next;
+    await this.#persistSnapshot({appendAdmissions:nextAdmissions});
+    this.#appendAdmissions=nextAdmissions;
     return zero({state:next.state,admission_id:next.admission_id,append_effect_id_digest:next.append_effect_id_digest,
       idempotency_key_digest:next.idempotency_key_digest,effect_execution_authority:false});
   }
@@ -320,9 +323,11 @@ export class RsiRuntimeSkillLifecycle{
       observed_library_digest:observedDigest,readback_at:this.#now(),state,
       blind_retry_authorized:false,retrieval_exposure_changed:false,skill_activation_performed:false,
       lifecycle_mutation_performed:false,governance_recompute_performed:false,library_append_performed_by_lifecycle:false});
-    this.#appendAdmissions[index]=next;
+    const nextAdmissions=[...this.#appendAdmissions];nextAdmissions[index]=next;
+    const persistedLibrary=state==='APPLIED_STORAGE_ONLY_DORMANT'?nextLibrary:this.#library;
+    await this.#persistSnapshot({library:persistedLibrary,appendAdmissions:nextAdmissions});
+    this.#appendAdmissions=nextAdmissions;
     if(state==='APPLIED_STORAGE_ONLY_DORMANT')this.#library=nextLibrary;
-    await this.#persist();
     return zero({state,admission_id:next.admission_id,observed_library_digest:observedDigest,
       blind_retry_authorized:false,retrieval_exposure_changed:false,skill_activation_performed:false});
   }
@@ -360,8 +365,11 @@ export class RsiRuntimeSkillLifecycle{
       reconciled_at:this.#now(),state,blind_retry_authorized:false,retrieval_exposure_changed:false,
       skill_activation_performed:false,lifecycle_mutation_performed:false,governance_recompute_performed:false,
       library_append_performed_by_lifecycle:false});
-    this.#appendAdmissions[index]=next;
-    await this.#persist();
+    const nextAdmissions=[...this.#appendAdmissions];nextAdmissions[index]=next;
+    const persistedLibrary=state==='RECONCILED_APPLIED_STORAGE_ONLY_DORMANT'?observed:this.#library;
+    await this.#persistSnapshot({library:persistedLibrary,appendAdmissions:nextAdmissions});
+    this.#appendAdmissions=nextAdmissions;
+    await Promise.resolve();
     return zero({state,admission_id:next.admission_id,observed_library_digest:observed.library_digest,
       second_effect_attempt_performed:false,blind_retry_authorized:false});
   }
