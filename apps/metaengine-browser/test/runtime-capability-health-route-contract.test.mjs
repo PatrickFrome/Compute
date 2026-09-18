@@ -20,7 +20,11 @@ test('health route has no local capability-envelope fallback or scheduler loop',
   assert.doesNotMatch(source, /NATIVE_SUPERVISOR_RUNTIME_CAPABILITIES/);
   assert.doesNotMatch(source, /setInterval\s*\(/);
   assert.match(source, /const sleep=\(ms:number\)=>new Promise\(resolve=>setTimeout\(resolve,ms\)\)/);
-  assert.match(source, /if\(!REALTIME_API_KEY\|\|!REALTIME_ACCESS_TOKEN\)\{await sleep\(waitMs\);const fallback=await leaseBatch\(req,body\)/);
+  assert.match(source, /if\(!REALTIME_API_KEY\|\|!REALTIME_ACCESS_TOKEN\)\{[\s\S]*postgresWakeHub\.open\(\{clientId:client,timeoutMs:waitMs\}\)/);
+  assert.match(source, /if\(joined\?\.ok!==true\)\{[\s\S]*await sleep\(waitMs\);[\s\S]*const fallback=await leaseBatch\(req,body\)/,
+    'LISTEN failure must retain bounded idle wait before durable DB polling fallback');
+  assert.match(source, /const wake=await subscription\.wake;\s*const afterWake=await leaseBatch\(req,body\)/s,
+    'wake transport never replaces durable DB lease authority');
   assert.doesNotMatch(source, /automatic_retry_allowed\s*:\s*true/);
   assert.doesNotMatch(source, /physical_dispatch_allowed\s*:\s*true/);
 });
