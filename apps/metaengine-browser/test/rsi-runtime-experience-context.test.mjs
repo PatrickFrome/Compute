@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 import { BROWSER_BRAIN_WORKING_MEMORY_SCHEMA } from '../src/browser-brain-working-memory.mjs';
+import { createRsiSearchContext } from '../src/rsi-search-mode-router.mjs';
 
 const SOURCE='a'.repeat(40);
 
@@ -99,6 +100,76 @@ test('opening the same experience context twice is durable-idempotent under dete
     assert.equal(second.context_plan.context_plan_digest,first.context_plan.context_plan_digest);
     assert.equal(runtime.snapshot().episodes.episode_count,1);
     assert.equal(runtime.snapshot().experience_context.planned_count,1);
+  } finally {
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
+
+
+test('runtime reuses the existing autonomous controller for experience-guided cycles and replays only durable evidence',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-experience-guided-cycle-'));
+  const ledgerPath=path.join(root,'rsi.jsonl');
+  try {
+    const runtime=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
+    await runtime.start();
+    const observation=await runtime.observeBrainSnapshot(ambiguousBrain());
+    const [entry]=runtime.improvementFrontier({limit:32});
+    const searchContext=createRsiSearchContext({
+      context_id:'rsi-context-runtime-experience-guided',
+      mutation_surface:'BROWSER_RUNTIME',
+      problem_class:'AMBIGUITY_RECONCILIATION',
+      budget_class:'NORMAL',
+      skeleton_available:false,
+      trace_history_available:true,
+      lineage_candidate_count:2,
+      failure_class:'TRANSPORT_AMBIGUITY',
+      novelty_pressure:0.35,
+      external_context_owner:true,
+      authored_by_candidate:false,
+    });
+
+    const first=await runtime.prepareExperienceGuidedAutonomousEpisodeCycle({
+      observation,
+      opportunity_id:entry.opportunity_id,
+      search_context:searchContext,
+      cycle_generation:1,
+      max_candidates:4,
+      proposal_budget_units:100,
+      exploration_fraction:0.2,
+    });
+    assert.equal(first.existing_autonomous_controller_reused,true);
+    assert.equal(first.second_scheduler_created,false);
+    assert.equal(first.second_frontier_created,false);
+    assert.equal(first.retrieval_is_advisory_only,true);
+    assert.equal(first.experience_context_plan.mode,'NO_VERIFIED_EXPERIENCE');
+    assert.equal(first.autonomous_cycle.controller_plan.experience_context_digest,
+      first.experience_context_plan.context_plan_digest.slice(7));
+    assert.equal(first.autonomous_cycle.request_count,2);
+    assert.equal(first.autonomous_cycle.scheduler_action_authorized,false);
+    assert.equal(first.authority_effect,false);
+
+    const second=await runtime.prepareExperienceGuidedAutonomousEpisodeCycle({
+      observation,
+      opportunity_id:entry.opportunity_id,
+      search_context:searchContext,
+      cycle_generation:1,
+      max_candidates:4,
+      proposal_budget_units:100,
+      exploration_fraction:0.2,
+    });
+    assert.equal(second.cycle_digest,first.cycle_digest);
+    assert.equal(second.already_recorded,true);
+    assert.equal(second.autonomous_cycle.episode.episode_id,first.autonomous_cycle.episode.episode_id);
+    assert.equal(runtime.snapshot().experience_guided_autonomous_cycle.count,1);
+
+    const replay=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
+    await replay.start();
+    const snapshot=replay.snapshot();
+    assert.equal(snapshot.experience_guided_autonomous_cycle.count,1);
+    assert.equal(snapshot.experience_guided_autonomous_cycle.last_digest,first.cycle_digest);
+    assert.equal(snapshot.experience_guided_autonomous_cycle.existing_autonomous_controller_reused,true);
+    assert.equal(snapshot.experience_guided_autonomous_cycle.second_scheduler_created,false);
+    assert.equal(snapshot.experience_guided_autonomous_cycle.second_frontier_created,false);
   } finally {
     await fs.rm(root,{recursive:true,force:true});
   }
