@@ -165,7 +165,7 @@ test('deterministic NEW_TAB capacity rejection proves no effect without weakenin
   ]) {
     const receipts = [];
     const client = clientFor(
-      { command_id: crypto.randomUUID(), action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/' }, platform: null },
+      { command_id: crypto.randomUUID(), action: 'NEW_TAB', payload: { url: 'https://chat.z.ai/' }, platform: null },
       { receipts, executeCommand: async () => { throw new Error(error); } },
     );
     await client.cycle();

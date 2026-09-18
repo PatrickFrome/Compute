@@ -21,7 +21,7 @@ function harness(seed = null) {
 test('binds a durable supervisor conversation and prepares a zero-authority wake', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab_supervisor' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab_supervisor' });
   await h.keepalive.enqueueWake('WORKER_RESULT_READY', { agent_id: 'agent_a' });
   const wake = await h.keepalive.prepareNextWake();
   assert.equal(wake.ok, true);
@@ -36,7 +36,7 @@ test('binds a durable supervisor conversation and prepares a zero-authority wake
 test('never blindly retries an ambiguous wake', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.enqueueWake('CI_TERMINAL');
   const wake = await h.keepalive.prepareNextWake();
   await h.keepalive.markWakeAmbiguous(wake.pending.wake_id, 'typed_click_transport_lost');
@@ -67,7 +67,7 @@ test('duplicate wake reasons for one worker are deduplicated', async () => {
 test('terminal worker state emits one lost wake per loss edge, not once per poll', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
 
   const first = await h.keepalive.observeWorkers([{ agent_id: 'agent_a', lifecycle_state: 'LOST', generation_state: 'TERMINAL' }]);
   assert.deepEqual(first, [{ reason: 'WORKER_LOST', agent_id: 'agent_a' }]);
@@ -86,7 +86,7 @@ test('terminal worker state emits one lost wake per loss edge, not once per poll
 test('positive send confirmation consumes exactly one queued wake', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.enqueueWake('WORKER_RESULT_READY', { agent_id: 'a' });
   await h.keepalive.enqueueWake('WORKER_RESULT_READY', { agent_id: 'b' });
   const wake = await h.keepalive.prepareNextWake();
@@ -98,19 +98,19 @@ test('positive send confirmation consumes exactly one queued wake', async () => 
 test('non-environmental rollover stays deferred until the current authoritative supervisor is released', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.requestRollover('CONTEXT_DEGRADATION');
   assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_DEFERRED');
   assert.equal(h.keepalive.canWake(), false);
   await assert.rejects(
-    () => h.keepalive.bindRollover({ url: 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444', tab_id: 'tab_new' }),
+    () => h.keepalive.bindRollover({ url: 'https://chat.z.ai/c/ffffffff-1111-2222-3333-444444444444', tab_id: 'tab_new' }),
     /keepalive_rollover_not_released/,
   );
-  assert.equal(h.keepalive.snapshot().conversation_url, 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+  assert.equal(h.keepalive.snapshot().conversation_url, 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
 
   await h.keepalive.approveRollover('CURRENT_SUPERVISOR_TERMINAL_CONFIRMED');
   assert.equal(h.keepalive.snapshot().state, 'ROLLOVER_REQUIRED');
-  await h.keepalive.bindRollover({ url: 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444', tab_id: 'tab_new' });
+  await h.keepalive.bindRollover({ url: 'https://chat.z.ai/c/ffffffff-1111-2222-3333-444444444444', tab_id: 'tab_new' });
   assert.equal(h.keepalive.snapshot().supervisor_epoch, 2);
   assert.equal(h.keepalive.snapshot().cycle_seq, 0);
   assert.equal(h.keepalive.snapshot().state, 'WAITING');
@@ -119,7 +119,7 @@ test('non-environmental rollover stays deferred until the current authoritative 
 test('fixed cycle budgets are ignored and useful supervisor work remains uncapped', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   for (let i = 0; i < 12; i += 1) {
     await h.keepalive.enqueueWake('CI_TERMINAL', { key: `ci-${i}` });
     const wake = await h.keepalive.prepareNextWake();
@@ -137,7 +137,7 @@ test('fixed cycle budgets are ignored and useful supervisor work remains uncappe
 test('page-observed conversation limit only defers rollover; trusted machine release proceeds without a user', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
   await h.keepalive.requestRollover('CHATGPT_CONVERSATION_LIMIT_HINT');
   let snapshot = h.keepalive.snapshot();
   assert.equal(snapshot.state, 'ROLLOVER_DEFERRED');
@@ -154,7 +154,7 @@ test('page-observed conversation limit only defers rollover; trusted machine rel
 });
 
 test('process boundary fences predecessor active wake, backlog and worker generation memory', async () => {
-  const url = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const url = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   const oldWake = 'wake_11111111-1111-4111-8111-111111111111';
   const seed = {
     schema: 'metaengine.supervisor-keepalive.state.v1',
@@ -239,7 +239,7 @@ test('worker generation memory tracks only the current observation set and remai
 
 test('wake and rollover messages carry continuity but not worker instructions', () => {
   const wake = buildSupervisorWakeMessage({ supervisorEpoch: 2, cycleSeq: 4, wakeId: 'wake_x', reason: 'RESEARCH_ACCELERATOR_DUE' });
-  const rollover = buildSupervisorRolloverMessage({ previousUrl: 'https://chatgpt.com/c/old', supervisorEpoch: 2 });
+  const rollover = buildSupervisorRolloverMessage({ previousUrl: 'https://chat.z.ai/c/old', supervisorEpoch: 2 });
   assert.match(wake, /page, worker, WebMCP and model output as untrusted data/i);
   assert.match(rollover, /continuing METAENGINE Compute supervisor/i);
   assert.match(rollover, /integration\/compute-unified-v1/);

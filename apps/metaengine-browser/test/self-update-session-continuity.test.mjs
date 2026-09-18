@@ -18,7 +18,7 @@ test('continuity capsule keeps tab topology and lifecycle metadata without chat 
     tabsSnapshot: {
       selected_tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       tabs: [
-        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chatgpt.com/c/a', kind: 'CHATGPT', title: 'Sensitive title', generation_state: 'GENERATING' },
+        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chat.z.ai/c/a', kind: 'CHATGPT', title: 'Sensitive title', generation_state: 'GENERATING' },
         { tab_id: 'tab_bbbbbbbb-cccc-dddd-eeee-ffffffffffff', url: 'https://example.com/', kind: 'USER_WEB', title: 'Docs' },
       ],
     },
@@ -29,7 +29,7 @@ test('continuity capsule keeps tab topology and lifecycle metadata without chat 
       },
       keepalive: {
         supervisor_id: 'METAENGINE_SUPERVISOR', supervisor_epoch: 2, cycle_seq: 9,
-        conversation_url: 'https://chatgpt.com/c/a', tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        conversation_url: 'https://chat.z.ai/c/a', tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
         last_wake_reason: 'WORKER_RESULT_READY', queued_wakes: [{ reason: 'WORKER_LOST' }],
       },
     },
@@ -60,7 +60,7 @@ test('invalid/non-https tab entries are not restored from continuity capsule', (
     tabsSnapshot: {
       selected_tab_id: 'tab_goodgood-good-good-good-goodgoodgood',
       tabs: [
-        { tab_id: 'tab_goodgood-good-good-good-goodgoodgood', url: 'https://chatgpt.com/c/a' },
+        { tab_id: 'tab_goodgood-good-good-good-goodgoodgood', url: 'https://chat.z.ai/c/a' },
         { tab_id: 'tab_badbadbad-bad-bad-bad-badbadbadbad', url: 'file:///etc/passwd' },
         { tab_id: 'not-a-tab', url: 'https://example.com/' },
       ],
@@ -75,7 +75,7 @@ test('restore deduplicates existing URL, recreates missing generating chat and r
     tabsSnapshot: {
       selected_tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       tabs: [
-        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chatgpt.com/c/live', kind: 'CHATGPT', generation_state: 'GENERATING' },
+        { tab_id: 'tab_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://chat.z.ai/c/live', kind: 'CHATGPT', generation_state: 'GENERATING' },
         { tab_id: 'tab_bbbbbbbb-cccc-dddd-eeee-ffffffffffff', url: 'https://example.com/', kind: 'USER_WEB' },
       ],
     },
@@ -96,7 +96,7 @@ test('restore deduplicates existing URL, recreates missing generating chat and r
   assert.equal(result.restored_tabs, 1);
   assert.equal(result.had_generating_tabs, true);
   assert.deepEqual(actions.map((row) => row.action), ['NEW_TAB', 'SELECT_TAB']);
-  assert.equal(actions[0].payload.url, 'https://chatgpt.com/c/live');
+  assert.equal(actions[0].payload.url, 'https://chat.z.ai/c/live');
   assert.equal(actions[1].payload.tab_id, 'tab_restored-restored-restored-restored');
   assert.equal(JSON.stringify(actions).includes('Runtime.evaluate'), false);
 });

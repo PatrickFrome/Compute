@@ -297,7 +297,7 @@ export function buildSupervisorLifecycleStatusSnapshot(snapshot = {}) {
     } : null,
     supervisor_generation: snapshot?.supervisor_generation ? clip(snapshot.supervisor_generation, 48) : null,
     supervisor_session: session ? {
-      schema: session.schema || 'metaengine.chatgpt-session-monitor.snapshot.v1',
+      schema: session.schema || 'metaengine.agent-session-monitor.snapshot.v1',
       version: session.version || null,
       tabs: sessionSummaries,
       tab_count: sessionRows.length,

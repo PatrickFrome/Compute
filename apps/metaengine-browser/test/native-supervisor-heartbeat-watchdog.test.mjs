@@ -32,7 +32,7 @@ test('watchdog state carries lifecycle mesh projection and self-update instead o
     version: '0.6.3-dev.20260831150000.1',
     startedAt: '2026-08-31T09:59:00.000Z',
     state: {
-      tabs: [{ tab_id: 'tab-live', url: 'https://chatgpt.com/c/abc', title: 'Supervisor', kind: 'CHATGPT', selected: true }],
+      tabs: [{ tab_id: 'tab-live', url: 'https://chat.z.ai/c/abc', title: 'Supervisor', kind: 'CHATGPT', selected: true }],
       supervisor_mesh: { schema: 'metaengine.supervisor-mesh-runtime.v1', running: true, authority_effect: false, mesh: { schema: 'metaengine.supervisor-mesh.state.v1', version: '1', mesh_epoch: 2, preferred_supervisor_id: null, supervisors: [], authority_effect: false } },
     },
     supervisor: {

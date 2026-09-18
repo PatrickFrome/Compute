@@ -34,8 +34,8 @@ function runtime(peers) {
 }
 
 test('current local mesh v2 projects exactly to the deployed bounded v1 wire contract', () => {
-  const a = peer('https://chatgpt.com/c/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ACTIVE', true, 'tab_a');
-  const b = peer('https://chatgpt.com/c/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'LOST', false, 'tab_stale');
+  const a = peer('https://chat.z.ai/c/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'ACTIVE', true, 'tab_a');
+  const b = peer('https://chat.z.ai/c/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'LOST', false, 'tab_stale');
   const wire = buildSupervisorMeshWireProjectionV1(runtime([a, b]));
   assert.equal(wire.schema, 'metaengine.supervisor-mesh-runtime.v1');
   assert.equal(wire.mesh.schema, 'metaengine.supervisor-mesh.state.v1');
@@ -48,12 +48,12 @@ test('current local mesh v2 projects exactly to the deployed bounded v1 wire con
 });
 
 test('wire projection never silently truncates a local mesh larger than live DB capacity', () => {
-  const peers = Array.from({ length: 17 }, (_, i) => peer(`https://chatgpt.com/c/${String(i).padStart(8, '0')}-1111-4111-8111-111111111111`, 'ACTIVE', i === 0, `tab_${i}`));
+  const peers = Array.from({ length: 17 }, (_, i) => peer(`https://chat.z.ai/c/${String(i).padStart(8, '0')}-1111-4111-8111-111111111111`, 'ACTIVE', i === 0, `tab_${i}`));
   assert.throws(() => buildSupervisorMeshWireProjectionV1(runtime(peers)), /supervisor_mesh_wire_capacity_exceeded/);
 });
 
 test('wire projection rejects identity laundering and authoritative page/model flags', () => {
-  const p = peer('https://chatgpt.com/c/cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'ACTIVE', true, 'tab_c');
+  const p = peer('https://chat.z.ai/c/cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'ACTIVE', true, 'tab_c');
   assert.throws(() => buildSupervisorMeshWireProjectionV1(runtime([{ ...p, supervisor_id: 'sup_000000000000000000000000' }])), /identity_mismatch/);
   assert.throws(() => buildSupervisorMeshWireProjectionV1(runtime([{ ...p, authority_effect: true }])), /state_invalid/);
 });

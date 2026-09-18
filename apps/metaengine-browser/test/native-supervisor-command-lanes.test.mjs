@@ -149,7 +149,7 @@ test('same-tab read-after-write is causal while unrelated tab read stays hot', a
   const scheduler = new NativeSupervisorCommandLaneScheduler({ readConcurrency: 8, mutationConcurrency: 8, maxBatch: 16 });
   const events = [];
   const rows = [
-    command('NAVIGATE', { tab_id: tab(1), url: 'https://chatgpt.com/' }, 'write-a'),
+    command('NAVIGATE', { tab_id: tab(1), url: 'https://chat.z.ai/' }, 'write-a'),
     command('CAPTURE', { tab_id: tab(1) }, 'read-a'),
     command('CAPTURE', { tab_id: tab(2) }, 'read-b'),
   ];
@@ -168,7 +168,7 @@ test('same-tab write-after-read is causal while cross-tab mutation may overlap',
   const events = [];
   const rows = [
     command('CAPTURE', { tab_id: tab(1) }, 'read-a'),
-    command('NAVIGATE', { tab_id: tab(1), url: 'https://chatgpt.com/' }, 'write-a'),
+    command('NAVIGATE', { tab_id: tab(1), url: 'https://chat.z.ai/' }, 'write-a'),
     command('SCROLL', { tab_id: tab(2) }, 'write-b'),
   ];
   await scheduler.drain(rows, async (row) => {

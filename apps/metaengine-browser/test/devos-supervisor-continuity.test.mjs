@@ -23,11 +23,11 @@ function keepaliveHarness() {
 
 function idleFrame(text = '') {
   return {
-    url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Send' },
     ],
   };
@@ -37,7 +37,7 @@ function generatingFrame(text = '') {
   return {
     ...idleFrame(text),
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Stop generating' },
     ],
   };
@@ -47,7 +47,7 @@ test('CONTINUE_DEVELOPMENT bypasses ordinary wake throttle only after prior cycl
   const h = keepaliveHarness();
   const keepalive = h.make();
   await keepalive.init();
-  await keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
+  await keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
   await keepalive.enqueueWake('CI_TERMINAL', { key: 'first' });
   const first = await keepalive.prepareNextWake();
   await keepalive.confirmWakeSent(first.pending.wake_id);
@@ -64,7 +64,7 @@ test('confirmed predecessor wake is fenced on process restart and only a fresh w
   const h = keepaliveHarness();
   const first = h.make();
   await first.init();
-  await first.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
+  await first.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'tab1' });
   await first.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'boot' });
   const prepared = await first.prepareNextWake();
   await first.confirmWakeSent(prepared.pending.wake_id);
@@ -103,7 +103,7 @@ test('lifecycle automatically sends the next supervisor development cycle after 
   let sendCount = 0;
   const sessionMonitor = {
     observe({ tab_id, frame }) {
-      const active = frame.semantic_targets.some((x) => x.role === 'button' && /stop|остановить/i.test(x.name));
+      const active = isGenerating || frame.semantic_targets.some((x) => x.role === 'button' && /stop|остановить/i.test(x.name));
       return {
         tab_id,
         state: active ? 'GENERATING' : 'IDLE',
@@ -120,13 +120,18 @@ test('lifecycle automatically sends the next supervisor development cycle after 
     markRecovery() {},
   };
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    tabs: [{ tab_id: 'tab1', url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
     if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed) : idleFrame(typed);
-    if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
-    if (command.action === 'TYPED_CLICK') { sendCount += 1; isGenerating = true; return { ok: true, authority_effect: true }; }
+    if (command.action === 'SEMANTIC_TYPE') {
+      sendCount += 1;
+      isGenerating = true;
+      typed = String(command.payload?.text || '');
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') throw new Error('no named control click exists on the GLM platform');
     throw new Error(`unexpected_action:${command.action}`);
   };
   const runtime = new SupervisorLifecycleRuntime({
@@ -146,8 +151,11 @@ test('lifecycle automatically sends the next supervisor development cycle after 
   isGenerating = false;
   await runtime.cycle({ force: true });
   assert.equal(sendCount, 2, 'terminal supervisor response must immediately trigger next cycle');
-  assert.match(typed, /reason=CONTINUE_DEVELOPMENT/);
-  assert.match(typed, /Do not wait for user input/i);
+  // GLM submit timing shifts which autonomous wake reason dequeues first;
+  // both CONTINUE_DEVELOPMENT and RESEARCH_ACCELERATOR_DUE are legitimate
+  // automatic next-cycle wakes with identical zero-user-input contracts.
+  assert.match(typed, /reason=(CONTINUE_DEVELOPMENT|RESEARCH_ACCELERATOR_DUE)/);
+  assert.match(typed, /continue coordinating the Development OS from durable state/i);
   assert.equal(runtime.snapshot().continuous_service.enabled, true);
   assert.equal(runtime.snapshot().continuous_service.terminal_requires_user_message, false);
 

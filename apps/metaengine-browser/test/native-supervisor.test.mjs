@@ -289,7 +289,7 @@ test('native semantic perception exposes unique accessibility targets and typed 
     emitMessage(method, params={}) { for (const fn of listeners.get('message')||[]) fn({},method,params,null); },
     async sendCommand(method, params) {
       calls.push([method, params || null]);
-      if (method === 'Page.getFrameTree') return { frameTree:{ frame:{ id:'frame-101', url:'https://chatgpt.com/c/test' } } };
+      if (method === 'Page.getFrameTree') return { frameTree:{ frame:{ id:'frame-101', url:'https://chat.z.ai/c/test' } } };
       if (method === 'Runtime.enable') this.emitMessage('Runtime.executionContextCreated',{context:{id:1,uniqueId:'context-101',auxData:{frameId:'frame-101',isDefault:true}}});
       if (method === 'Accessibility.getFullAXTree') return { nodes };
       if (method === 'Page.getLayoutMetrics') return { cssVisualViewport:{ clientWidth:1000, clientHeight:700, pageX:0, pageY:0, scale:1 } };
@@ -297,7 +297,7 @@ test('native semantic perception exposes unique accessibility targets and typed 
       return {};
     },
   };
-  const webContents = { id:101, debugger:dbg, isDestroyed:()=>false, getOSProcessId:()=>9101, getOrCreateDevToolsTargetId:()=> 'target-101', getURL:()=> 'https://chatgpt.com/c/test', getTitle:()=> 'ChatGPT' };
+  const webContents = { id:101, debugger:dbg, isDestroyed:()=>false, getOSProcessId:()=>9101, getOrCreateDevToolsTargetId:()=> 'target-101', getURL:()=> 'https://chat.z.ai/c/test', getTitle:()=> 'ChatGPT' };
   const frame = await captureSemanticFrame(webContents);
   assert.equal(frame.semantic_targets.length, 2);
   assert.equal(frame.text_excerpt, 'Visible response text');

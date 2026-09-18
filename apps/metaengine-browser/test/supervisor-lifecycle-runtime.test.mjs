@@ -3,41 +3,34 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ChatGptSessionMonitor } from '../src/chatgpt-session-monitor.mjs';
+import { AgentSessionMonitor } from '../src/agent-session-monitor.mjs';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
-function idleFrame(text = '') {
+const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const COMPOSER_REF = { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'e'.repeat(64) };
+
+function glmFrame(text = '') {
+  // GLM surface: placeholder-named (or unnamed) composer addressed by its
+  // semantic_ref; no named Send/Stop controls exist on chat.z.ai.
   return {
-    url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-    title: 'ChatGPT',
+    url: CONVERSATION,
+    title: 'Z.ai',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
-      { role: 'button', name: 'Send' },
+      { role: 'textbox', name: null, semantic_ref: COMPOSER_REF, backend_node_id: 3 },
     ],
   };
 }
 
-function generatingFrame(text = '', stopLabel = 'Stop generating') {
-  return {
-    url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-    title: 'ChatGPT',
-    text_excerpt: text,
-    semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
-      { role: 'button', name: stopLabel },
-    ],
-  };
-}
-
-test('trusted supervisor wake stops and retries same conversation after adaptive stall', async () => {
+test('trusted supervisor wake submits via Enter and an adaptive hard stall escalates without a stop effect', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-'));
   const statePath = path.join(dir, 'keepalive.json');
-  let monitorNow = Date.parse('2026-08-29T15:00:00Z');
-  let isGenerating = false;
+  let monitorNow = Date.parse('2026-09-19T15:00:00Z');
   let typed = '';
+  let digestSeq = 0;
+  let frozen = false;
   const actions = [];
-  const sessionMonitor = new ChatGptSessionMonitor({
+  const sessionMonitor = new AgentSessionMonitor({
     clock: () => monitorNow,
     softStallFloorMs: 30_000,
     hardStallFloorMs: 60_000,
@@ -45,15 +38,20 @@ test('trusted supervisor wake stops and retries same conversation after adaptive
     settleMs: 1500,
   });
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
     actions.push(command.action);
-    if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed) : idleFrame(typed);
-    if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
-    if (command.action === 'TYPED_CLICK') { isGenerating = true; return { ok: true, authority_effect: true }; }
-    if (command.action === 'STOP_GENERATION') { isGenerating = false; return { ok: true, authority_effect: true }; }
+    if (command.action === 'CAPTURE') return glmFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`);
+    if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(command.platform, 'GLM_ZAI');
+      assert.equal(command.payload.submit_after_type, true);
+      typed = String(command.payload?.text || '');
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
+    if (command.action === 'TYPED_CLICK') throw new Error('no named control click exists on the GLM platform');
+    if (command.action === 'STOP_GENERATION') throw new Error('GLM stop requires an exact semantic-ref button and is never auto-dispatched');
     throw new Error(`unexpected_action:${command.action}`);
   };
 
@@ -68,49 +66,76 @@ test('trusted supervisor wake stops and retries same conversation after adaptive
   });
 
   await runtime.start();
-  assert.equal(isGenerating, true);
   assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
+  assert.equal(actions.filter((row) => row === 'SEMANTIC_TYPE').length, 1);
+  assert.equal(actions.includes('TYPED_CLICK'), false);
   assert.equal(runtime.snapshot().active_request?.same_chat_retry_attempt, 0);
 
+  // Advance past the adaptive hard-stall floor with a frozen digest: the GLM
+  // session monitor escalates instead of dispatching a stop effect. The first
+  // frozen cycle absorbs the churn-to-quiet digest transition; the second one
+  // crosses the hard-stall floor with a proven-quiet surface.
+  frozen = true;
+  monitorNow += 20_000;
   await runtime.cycle({ force: true });
   monitorNow += 61_000;
   await runtime.cycle({ force: true });
 
   const snap = runtime.snapshot();
-  assert.ok(actions.includes('STOP_GENERATION'));
-  assert.equal(isGenerating, true);
-  assert.match(typed, /METAENGINE_SAME_WAKE_RETRY_V1/);
-  assert.match(typed, /Never repeat an observed or ambiguous effect/);
-  assert.equal(snap.active_request?.same_chat_retry_attempt, 1);
-  assert.equal(snap.last_recovery?.action, 'STOP_AND_RETRY_SAME_CONVERSATION');
-  assert.equal(snap.last_recovery?.confirmed, true);
+  assert.equal(actions.includes('STOP_GENERATION'), false, 'chat.z.ai exposes no addressable stop control — a stall must escalate, never auto-stop');
+  assert.equal(snap.supervisor_generation, 'STALLED');
   assert.equal(JSON.stringify(snap).includes(typed), false, 'trusted prompt body must not be persisted in lifecycle snapshot');
 
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('lifecycle recognizes current Russian stop-response control as active generation', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-ru-'));
+test('GLM session generation runs on digest churn and settles terminal-ready', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-glm-digest-'));
   const statePath = path.join(dir, 'keepalive.json');
+  let monitorNow = Date.parse('2026-09-19T15:00:00Z');
   let typed = '';
-  let isGenerating = false;
+  let digestSeq = 0;
+  let frozen = false;
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return isGenerating ? generatingFrame(typed, 'Остановить ответ') : idleFrame(typed);
-    if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
-    if (command.action === 'TYPED_CLICK') { isGenerating = true; return { ok: true, authority_effect: true }; }
+    if (command.action === 'CAPTURE') return glmFrame(frozen ? typed : `${typed}#chunk${digestSeq++}`);
+    if (command.action === 'SEMANTIC_TYPE') {
+      typed = String(command.payload?.text || '');
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
     throw new Error(`unexpected_action:${command.action}`);
   };
-  const runtime = new SupervisorLifecycleRuntime({ getState, executeCommand, canActuate: () => true, statePath, monitorMs: 5000, researchMs: 5 * 60 * 1000 });
+  const runtime = new SupervisorLifecycleRuntime({
+    getState,
+    executeCommand,
+    canActuate: () => true,
+    statePath,
+    monitorMs: 1000,
+    researchMs: 5 * 60 * 1000,
+    sessionMonitor: new AgentSessionMonitor({ clock: () => monitorNow, settleMs: 1500 }),
+  });
   await runtime.start();
   await runtime.cycle({ force: true });
-  const snap = runtime.snapshot();
+  let snap = runtime.snapshot();
   assert.equal(snap.supervisor_generation, 'GENERATING');
   assert.equal(snap.quiescent, false);
-  assert.equal(snap.supervisor_session.tabs[0].controls.stop, 1);
+  assert.equal(snap.supervisor_session.tabs[0].controls.stop, 0, 'no named control signals exist on the GLM platform');
+
+  monitorNow += 2000;
+  await runtime.cycle({ force: true });
+  snap = runtime.snapshot();
+  assert.equal(snap.supervisor_generation, 'GENERATING', 'digest churn keeps the generation active');
+
+  frozen = true;
+  monitorNow += 2000;
+  await runtime.cycle({ force: true });
+  monitorNow += 4000;
+  await runtime.cycle({ force: true });
+  snap = runtime.snapshot();
+  assert.equal(snap.supervisor_generation, 'IDLE', 'a quiet settle window flips the session terminal-ready');
   await fs.rm(dir, { recursive: true, force: true });
 });
 
@@ -118,19 +143,17 @@ test('supervisor wake uses one semantic submit and trusts its event-driven gener
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-lifecycle-submit-latch-'));
   const statePath = path.join(dir, 'keepalive.json');
   const commands = [];
-  let generating = false;
   const getState = async () => ({
-    tabs: [{ tab_id: 'tab1', url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
+    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
     commands.push(structuredClone(command));
-    if (command.action === 'CAPTURE') return generating ? generatingFrame() : idleFrame();
+    if (command.action === 'CAPTURE') return glmFrame();
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.platform, 'CHATGPT');
+      assert.equal(command.platform, 'GLM_ZAI');
       assert.equal(command.payload.submit_after_type, true);
-      generating = true;
-      return { effect_state: 'PROVEN_GENERATING', event_driven_readback: true, authority_effect: true };
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') throw new Error('second send effect must not be dispatched');
     throw new Error(`unexpected_action:${command.action}`);
@@ -159,7 +182,7 @@ test('process restart fences predecessor wake and backlog before emitting one fr
   const statePath = path.join(dir, 'keepalive.json');
   const oldWake = 'wake_66af3fcf-849c-4d7f-b7e9-7b7f60ddcae2';
   const predecessorProcess = 'process_predecessor_20260831';
-  const url = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const url = CONVERSATION;
   await fs.writeFile(statePath, JSON.stringify({
     schema: 'metaengine.supervisor-keepalive.state.v1',
     version: '1.4.0',
@@ -203,17 +226,19 @@ test('process restart fences predecessor wake and backlog before emitting one fr
     authority_effect: false,
   }), 'utf8');
 
-  let generating = false;
   let typed = '';
-  let sendCount = 0;
+  let submitCount = 0;
   const getState = async () => ({
     tabs: [{ tab_id: 'tab_new', url, selected: true }],
     fleet: { agents: [] },
   });
   const executeCommand = async (command) => {
-    if (command.action === 'CAPTURE') return generating ? generatingFrame(typed) : idleFrame(typed);
-    if (command.action === 'SEMANTIC_TYPE') { typed = String(command.payload?.text || ''); return { ok: true, authority_effect: true }; }
-    if (command.action === 'TYPED_CLICK') { sendCount += 1; generating = true; return { ok: true, authority_effect: true }; }
+    if (command.action === 'CAPTURE') return glmFrame(typed);
+    if (command.action === 'SEMANTIC_TYPE') {
+      submitCount += 1;
+      typed = String(command.payload?.text || '');
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
     throw new Error(`unexpected_action:${command.action}`);
   };
 
@@ -228,8 +253,7 @@ test('process restart fences predecessor wake and backlog before emitting one fr
   await runtime.start();
 
   const snap = runtime.snapshot();
-  assert.equal(sendCount, 1, 'only one fresh current-process wake may be emitted');
-  assert.equal(generating, true);
+  assert.equal(submitCount, 1, 'only one fresh current-process wake may be emitted');
   assert.notEqual(snap.keepalive.active_wake?.wake_id, oldWake);
   assert.equal(snap.keepalive.state, 'ACTIVE');
   assert.equal(snap.keepalive.tab_id, 'tab_new');

@@ -50,7 +50,7 @@ function wakeMessage() {
 
 function composerFrame({ marker = false, composerSha = null } = {}) {
   return {
-    url: 'https://chatgpt.com/',
+    url: 'https://chat.z.ai/',
     title: 'ChatGPT',
     text_excerpt: marker ? `message ${WAKE_ID}` : '',
     semantic_targets: [
@@ -60,7 +60,7 @@ function composerFrame({ marker = false, composerSha = null } = {}) {
   };
 }
 
-async function makeRuntime({ tabs, frame, onClick = null }) {
+async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-r4-'));
   const statePath = path.join(dir, 'keepalive.json');
   await fs.writeFile(statePath, `${JSON.stringify(seedState(), null, 2)}\n`);
@@ -68,6 +68,10 @@ async function makeRuntime({ tabs, frame, onClick = null }) {
   const executeCommand = async ({ action, payload }) => {
     actions.push(action);
     if (action === 'CAPTURE') return typeof frame === 'function' ? frame() : structuredClone(frame);
+    if (action === 'SEMANTIC_TYPE') {
+      if (onSubmit) return onSubmit({ action, payload });
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
     if (action === 'TYPED_CLICK') {
       if (onClick) return onClick({ action, payload });
       return { ok: true };
@@ -86,7 +90,7 @@ async function makeRuntime({ tabs, frame, onClick = null }) {
 
 test('bare bootstrap root transcript marker resolves ambiguity without a write effect', async () => {
   const { runtime, actions } = await makeRuntime({
-    tabs: [{ tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false }],
+    tabs: [{ tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false }],
     frame: composerFrame({ marker: true }),
   });
   const snap = await runtime.start();
@@ -100,18 +104,18 @@ test('bare bootstrap root transcript marker resolves ambiguity without a write e
 
 test('exact composer continuation is durably fenced before click and never repeated', async () => {
   const composerSha = crypto.createHash('sha256').update(wakeMessage(), 'utf8').digest('hex');
-  let clicks = 0;
+  let submits = 0;
   const { runtime, actions, statePath } = await makeRuntime({
-    tabs: [{ tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false }],
+    tabs: [{ tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false }],
     frame: composerFrame({ composerSha }),
-    onClick: () => {
-      clicks += 1;
-      throw new Error('simulated_transport_loss_after_click_boundary');
+    onSubmit: () => {
+      submits += 1;
+      throw new Error('simulated_transport_loss_after_submit_boundary');
     },
   });
   let snap = await runtime.start();
   assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
-  assert.equal(clicks, 1);
+  assert.equal(submits, 1);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
   assert.equal(durable.pending_wake.ambiguity_continuation_tab_id, 'root-1');
   assert.equal(durable.pending_wake.ambiguity_continuation_composer_sha256, composerSha);
@@ -119,8 +123,8 @@ test('exact composer continuation is durably fenced before click and never repea
 
   snap = await runtime.cycle({ force: true });
   assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
-  assert.equal(clicks, 1);
-  assert.equal(actions.includes('SEMANTIC_TYPE'), false);
+  assert.equal(submits, 1);
+  assert.equal(actions.filter((row) => row === 'SEMANTIC_TYPE').length, 1);
   assert.equal(actions.includes('NEW_TAB'), false);
 });
 
@@ -128,8 +132,8 @@ test('duplicate bootstrap candidates fail closed with zero effect continuation',
   const composerSha = crypto.createHash('sha256').update(wakeMessage(), 'utf8').digest('hex');
   const { runtime, actions } = await makeRuntime({
     tabs: [
-      { tab_id: 'root-1', url: 'https://chatgpt.com/', selected: false },
-      { tab_id: 'root-2', url: 'https://chatgpt.com/', selected: false },
+      { tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false },
+      { tab_id: 'root-2', url: 'https://chat.z.ai/', selected: false },
     ],
     frame: composerFrame({ composerSha }),
   });

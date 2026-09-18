@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { isChatGptAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
-import { ChatGptSessionMonitor } from './chatgpt-session-monitor.mjs';
+import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
+import { AgentSessionMonitor } from './agent-session-monitor.mjs';
+import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID } from './browser-agent-platform.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
@@ -14,8 +15,8 @@ import {
   unavailableDevosRuntimeControl,
 } from './devos-runtime-control.mjs';
 
-const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
-const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
+const CHAT_RE = /^https:\/\/chat\.z\.ai\/c\/[a-z0-9-]+/i;
+const CHAT_ROOT_RE = /^https:\/\/chat\.z\.ai\/?$/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
 const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -73,7 +74,7 @@ export class SupervisorLifecycleRuntime {
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
-    this.#sessionMonitor = sessionMonitor || new ChatGptSessionMonitor();
+    this.#sessionMonitor = sessionMonitor || new AgentSessionMonitor();
     this.#requireAuthoritativeAdmission = requireAuthoritativeAdmission === true;
   }
 
@@ -227,7 +228,7 @@ export class SupervisorLifecycleRuntime {
       // way). Reuse the existing auth-redirect tab as the observation target instead:
       // the session monitor classifies it (NOT_CHATGPT_CONVERSATION) and every
       // navigation-class recovery stays gated on auth surfaces. Zero new tabs.
-      const authRedirected = tabs.filter((t) => !fleetTabs.has(String(t?.tab_id || '')) && isChatGptAuthRedirectUrl(String(t?.url || '')));
+      const authRedirected = tabs.filter((t) => !fleetTabs.has(String(t?.tab_id || '')) && isChatAuthRedirectUrl(String(t?.url || '')));
       if (authRedirected.length > 0) {
         return authRedirected.find((t) => t?.selected === true) || authRedirected[0];
       }
@@ -287,15 +288,21 @@ export class SupervisorLifecycleRuntime {
     if (row.terminal_ready === true
       && composer?.value_sha256 === sha256(message)
       && this.#canActuate() === true) {
-      const send = uniqueChatGptControl(frame, 'SEND');
-      if (!send) return false;
+      // GLM platform: the composer still holding the exact message is the
+      // proof the prior Enter never submitted; the continuation re-submits the
+      // same logical wake through the Enter lane (no named SEND control).
+      if (!composer?.semantic_ref) return false;
       const continuationArmed = await this.#keepalive.markAmbiguousContinuationAttempt({
         wake_id: pending.wake_id,
         tab_id: tab.tab_id,
         composer_sha256: composer.value_sha256,
       });
       if (!continuationArmed) return false;
-      await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
+      await this.#execute({
+        action: 'SEMANTIC_TYPE',
+        payload: { tab_id: String(tab.tab_id), role: 'textbox', accessible_name: composer.name, semantic_ref: composer.semantic_ref, text: message, replace_existing: true, submit_after_type: true },
+        platform: AGENT_PLATFORM_ID,
+      });
       const readback = await this.#observeSendReadback(tab.tab_id, pending.wake_id);
       if (readback.ok) {
         await this.#keepalive.resolveAmbiguous({ observed_sent: true });
@@ -420,7 +427,7 @@ export class SupervisorLifecycleRuntime {
         replace_existing: true,
         submit_after_type: true,
       },
-      platform: 'CHATGPT',
+      platform: AGENT_PLATFORM_ID,
     });
     if (submitted?.suppressed === true) {
       const reason = String(submitted.reason || 'SEMANTIC_SUBMIT_SUPPRESSED');
@@ -428,7 +435,10 @@ export class SupervisorLifecycleRuntime {
       return { ok: false, reason, clicked: !preEffect, event_driven_readback: true };
     }
     const submitState = String(submitted?.effect_state || '').toUpperCase();
-    if (['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION'].includes(submitState)) {
+    if (['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','PROVEN_COMPOSER_CLEARED'].includes(submitState)) {
+      // The GLM monitor's only authoritative GENERATING entry: the proven
+      // Enter submit. Digest churn then tracks streaming; settle flips IDLE.
+      this.#sessionMonitor.markGenerationStarted(tabId);
       return { ok: true, clicked: true, observed: submitted, event_driven_readback: true };
     }
     if (submitState) {
@@ -440,9 +450,16 @@ export class SupervisorLifecycleRuntime {
 
     // Compatibility only for injected/legacy executors that do not advertise a
     // submit effect state. Current Browser executors never take this branch.
-    const send = uniqueChatGptControl(await this.#capture(tabId), 'SEND');
-    if (!send) throw new Error('supervisor_send_not_unique');
-    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: tabId, role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
+    // GLM platform: there is no named SEND control — the compatibility path
+    // re-submits through the same Enter lane using the live composer ref.
+    const compatFrame = await this.#capture(tabId);
+    const compatComposer = unique(compatFrame, 'textbox');
+    if (!compatComposer?.semantic_ref) throw new Error('supervisor_composer_not_unique');
+    await this.#execute({
+      action: 'SEMANTIC_TYPE',
+      payload: { tab_id: tabId, role: 'textbox', accessible_name: compatComposer.name, semantic_ref: compatComposer.semantic_ref, text: message, replace_existing: true, submit_after_type: true },
+      platform: AGENT_PLATFORM_ID,
+    });
     const readback = await this.#observeSendReadback(tabId, positiveMarker);
     return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
   }
@@ -515,7 +532,7 @@ export class SupervisorLifecycleRuntime {
       } else {
         // Normal first bootstrap retains the dedicated-root invariant. Existing roots
         // are reusable only for the explicit process-boundary recovery path above.
-        tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+        tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
         createdHere = true;
       }
       if (!tab?.tab_id) throw new Error('supervisor_bootstrap_tab_creation_no_readback');
@@ -745,7 +762,7 @@ export class SupervisorLifecycleRuntime {
     if (!req || req.blocked_ambiguous || this.#canActuate() !== true) return false;
     let tab = null;
     try {
-      tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+      tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
       const nextAttempt = req.retry_attempt + 1;
       const sent = await this.#typeAndSend(tab.tab_id, retryEnvelope(req.message, req.wake_id, nextAttempt), req.wake_id);
       req.retry_attempt = nextAttempt;
@@ -861,9 +878,15 @@ export class SupervisorLifecycleRuntime {
     if (composerMatchesRows.length !== 1 || this.#canActuate() !== true) return false;
     const { tab, frame } = composerMatchesRows[0];
     if (!attempt.tab_id) await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
-    const send = uniqueChatGptControl(frame, 'SEND');
-    if (!send) return false;
-    await this.#execute({ action: 'TYPED_CLICK', payload: { tab_id: String(tab.tab_id), role: 'button', accessible_name: send.name, semantic_ref: send.semantic_ref }, platform: null });
+    // GLM platform: composer sha256 match proves the typed rollover message
+    // never submitted; re-submit through the Enter lane (no named SEND).
+    const rolloverComposer = unique(frame, 'textbox');
+    if (!rolloverComposer?.semantic_ref) return false;
+    await this.#execute({
+      action: 'SEMANTIC_TYPE',
+      payload: { tab_id: String(tab.tab_id), role: 'textbox', accessible_name: rolloverComposer.name, semantic_ref: rolloverComposer.semantic_ref, text: message, replace_existing: true, submit_after_type: true },
+      platform: AGENT_PLATFORM_ID,
+    });
     const readback = await this.#observeSendReadback(tab.tab_id, attempt.attempt_id);
     if (readback.ok) return this.#bindRecoveredRollover(tab.tab_id, readback.observed);
     this.#lastRecovery = {
@@ -887,7 +910,7 @@ export class SupervisorLifecycleRuntime {
         supervisorEpoch: before.supervisor_epoch,
         rolloverAttemptId: attempt.attempt_id,
       });
-      tab = await this.#execute({ action: 'NEW_TAB', payload: { url: 'https://chatgpt.com/', select: false }, platform: null });
+      tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
       if (!tab?.tab_id) throw new Error('rollover_tab_creation_no_readback');
       await this.#keepalive.bindRolloverAttemptTab(tab.tab_id);
       const sent = await this.#typeAndSend(tab.tab_id, message, attempt.attempt_id);
