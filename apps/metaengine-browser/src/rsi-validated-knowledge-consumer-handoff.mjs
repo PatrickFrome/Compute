@@ -79,6 +79,9 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
   consumer_evaluator_root_digest,
   consumer_evaluator_generation_digest,
   consumer_evaluator_generation_seq,
+  consumer_evaluator_generation_history_anchor_digest,
+  consumer_evaluation_epoch_seq,
+  consumer_evaluation_epoch_digest,
   consumer_holdout_digest,
   matched_reference_plan_digest,
   local_revalidation_protocol_digest,
@@ -98,6 +101,9 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
   const evaluatorRoot=exactDigest(consumer_evaluator_root_digest,'evaluator_root');
   const evaluatorGeneration=exactDigest(consumer_evaluator_generation_digest,'evaluator_generation');
   const evaluatorGenerationSeq=positiveInt(consumer_evaluator_generation_seq,'evaluator_generation_seq');
+  const evaluatorGenerationAnchor=exactDigest(consumer_evaluator_generation_history_anchor_digest,'evaluator_generation_history_anchor');
+  const evaluationEpochSeq=positiveInt(consumer_evaluation_epoch_seq,'evaluation_epoch_seq');
+  const evaluationEpochDigest=exactDigest(consumer_evaluation_epoch_digest,'evaluation_epoch');
   const holdout=exactDigest(consumer_holdout_digest,'holdout');
   const referencePlan=exactDigest(matched_reference_plan_digest,'reference_plan');
   const localProtocol=exactDigest(local_revalidation_protocol_digest,'revalidation_protocol');
@@ -105,7 +111,8 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
   const verifiedLibrary=optionalDigest(current_verified_library_digest,'verified_library');
   if(route==='VERIFIED_SKILL_CANDIDATE_REVALIDATION'&&!verifiedLibrary)throw new Error('rsi_consumer_current_verified_library_required');
   const roots=[
-    context,taskSet,harness,retrievalProfile,evaluatorRoot,evaluatorGeneration,holdout,referencePlan,localProtocol,consumerPlane,
+    context,taskSet,harness,retrievalProfile,evaluatorRoot,evaluatorGeneration,evaluatorGenerationAnchor,evaluationEpochDigest,
+    holdout,referencePlan,localProtocol,consumerPlane,
     phase31.admission.admission_digest,phase31.proposal.proposal_digest,phase31.proposal.evaluation_contract_digest,
   ];
   if(verifiedLibrary)roots.push(verifiedLibrary);
@@ -121,6 +128,9 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     consumer_evaluator_root_digest:evaluatorRoot,
     consumer_evaluator_generation_digest:evaluatorGeneration,
     consumer_evaluator_generation_seq:evaluatorGenerationSeq,
+    consumer_evaluator_generation_history_anchor_digest:evaluatorGenerationAnchor,
+    consumer_evaluation_epoch_seq:evaluationEpochSeq,
+    consumer_evaluation_epoch_digest:evaluationEpochDigest,
     consumer_holdout_digest:holdout,
     matched_reference_plan_digest:referencePlan,
     local_revalidation_protocol_digest:localProtocol,
@@ -147,8 +157,18 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     throw new Error('rsi_consumer_source_transfer_contract_reuse_forbidden');
   }
 
-  const crossGeneration=evaluatorGeneration!==phase31.proposal.evaluator_generation_digest
-    ||evaluatorGenerationSeq!==phase31.proposal.evaluator_generation_seq;
+  const sameGenerationDigest=evaluatorGeneration===phase31.proposal.evaluator_generation_digest;
+  if(sameGenerationDigest&&(evaluatorGenerationSeq!==phase31.proposal.evaluator_generation_seq
+    ||evaluatorGenerationAnchor!==phase31.proposal.evaluator_generation_history_anchor_digest)){
+    throw new Error('rsi_consumer_evaluator_generation_identity_drift');
+  }
+  const sameEpochDigest=evaluationEpochDigest===phase31.proposal.evaluation_epoch_digest;
+  if(sameEpochDigest&&evaluationEpochSeq!==phase31.proposal.evaluation_epoch_seq){
+    throw new Error('rsi_consumer_evaluation_epoch_identity_drift');
+  }
+  const crossGeneration=!sameGenerationDigest
+    ||evaluatorGenerationSeq!==phase31.proposal.evaluator_generation_seq
+    ||evaluatorGenerationAnchor!==phase31.proposal.evaluator_generation_history_anchor_digest;
   const core=zero({
     schema:RSI_VALIDATED_KNOWLEDGE_CONSUMER_HANDOFF_SCHEMA,
     version:1,
@@ -175,6 +195,9 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     consumer_evaluator_root_digest:evaluatorRoot,
     consumer_evaluator_generation_digest:evaluatorGeneration,
     consumer_evaluator_generation_seq:evaluatorGenerationSeq,
+    consumer_evaluator_generation_history_anchor_digest:evaluatorGenerationAnchor,
+    consumer_evaluation_epoch_seq:evaluationEpochSeq,
+    consumer_evaluation_epoch_digest:evaluationEpochDigest,
     consumer_holdout_digest:holdout,
     matched_reference_plan_digest:referencePlan,
     local_revalidation_protocol_digest:localProtocol,
@@ -198,6 +221,8 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     consumer_retrieval_profile_binding_required:true,
     consumer_evaluator_generation_binding_required:true,
     consumer_evaluator_generation_sequence_binding_required:true,
+    consumer_evaluator_history_anchor_binding_required:true,
+    consumer_evaluation_epoch_binding_required:true,
     source_phase30_evaluation_contract_binding_required:true,
     phase31_transfer_contracts_bound:true,
     consumer_evaluation_contract_bound:true,
@@ -211,6 +236,8 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     candidate_can_choose_retrieval_profile:false,
     candidate_can_choose_consumer_evaluator:false,
     candidate_can_choose_consumer_evaluator_generation_seq:false,
+    candidate_can_choose_consumer_evaluator_history_anchor:false,
+    candidate_can_choose_consumer_evaluation_epoch:false,
     candidate_can_choose_consumer_holdout:false,
     candidate_can_choose_reference_plan:false,
     candidate_can_choose_revalidation_protocol:false,
@@ -236,6 +263,8 @@ export function verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,val
     ||handoff.consumer_task_set_binding_required!==true||handoff.consumer_retrieval_profile_binding_required!==true
     ||handoff.consumer_evaluator_generation_binding_required!==true
     ||handoff.consumer_evaluator_generation_sequence_binding_required!==true
+    ||handoff.consumer_evaluator_history_anchor_binding_required!==true
+    ||handoff.consumer_evaluation_epoch_binding_required!==true
     ||handoff.source_phase30_evaluation_contract_binding_required!==true
     ||handoff.phase31_transfer_contracts_bound!==true||handoff.consumer_evaluation_contract_bound!==true
     ||handoff.current_consumer_state_binding_required!==true||handoff.fresh_consumer_assets_required!==true
@@ -243,6 +272,7 @@ export function verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,val
     ||handoff.candidate_can_choose_consumer_context!==false||handoff.candidate_can_choose_consumer_task_set!==false
     ||handoff.candidate_can_choose_consumer_harness!==false||handoff.candidate_can_choose_retrieval_profile!==false
     ||handoff.candidate_can_choose_consumer_evaluator!==false||handoff.candidate_can_choose_consumer_evaluator_generation_seq!==false
+    ||handoff.candidate_can_choose_consumer_evaluator_history_anchor!==false||handoff.candidate_can_choose_consumer_evaluation_epoch!==false
     ||handoff.candidate_can_choose_consumer_holdout!==false||handoff.candidate_can_choose_reference_plan!==false
     ||handoff.candidate_can_choose_revalidation_protocol!==false||handoff.handoff_can_write_skill_library!==false
     ||handoff.handoff_can_write_experience_graph!==false||handoff.handoff_can_modify_meta_skill_profile!==false
@@ -260,6 +290,9 @@ export function verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,val
     consumer_evaluator_root_digest:handoff.consumer_evaluator_root_digest,
     consumer_evaluator_generation_digest:handoff.consumer_evaluator_generation_digest,
     consumer_evaluator_generation_seq:handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:handoff.consumer_evaluation_epoch_digest,
     consumer_holdout_digest:handoff.consumer_holdout_digest,
     matched_reference_plan_digest:handoff.matched_reference_plan_digest,
     local_revalidation_protocol_digest:handoff.local_revalidation_protocol_digest,
@@ -384,6 +417,9 @@ export function createRsiConsumerLocalRevalidationReceipt({
     consumer_evaluator_root_digest:handoff.consumer_evaluator_root_digest,
     consumer_evaluator_generation_digest:handoff.consumer_evaluator_generation_digest,
     consumer_evaluator_generation_seq:handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:handoff.consumer_evaluation_epoch_digest,
     consumer_holdout_digest:handoff.consumer_holdout_digest,
     matched_reference_plan_digest:handoff.matched_reference_plan_digest,
     current_consumer_plane_digest:handoff.current_consumer_plane_digest,
@@ -599,6 +635,8 @@ export function rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot(){
     consumer_retrieval_profile_binding_required:true,
     consumer_evaluator_generation_binding_required:true,
     consumer_evaluator_generation_sequence_binding_required:true,
+    consumer_evaluator_history_anchor_binding_required:true,
+    consumer_evaluation_epoch_binding_required:true,
     source_phase30_evaluation_contract_binding_required:true,
     phase31_transfer_contracts_bound:true,
     consumer_evaluation_contract_bound:true,
