@@ -555,6 +555,20 @@ export class RsiBoundedCanaryAdmissionLedger{
     return zero({state:'ELIGIBLE_FOR_EXTERNAL_BOUNDED_CANARY_HANDOFF',admission_digest:checkedAdmission.admission_digest});
   }
 
+  evidenceByDigest(evidence_digest){
+    if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');
+    const d=exactDigest(evidence_digest,'shadow_evidence');
+    const row=this.#rows.find((entry)=>entry.shadow_evidence?.evidence_digest===d);
+    return row?Object.freeze(structuredClone(row.shadow_evidence)):null;
+  }
+
+  admissionByDigest(admission_digest){
+    if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');
+    const d=exactDigest(admission_digest,'admission');
+    const row=this.#rows.find((entry)=>entry.admission?.admission_digest===d);
+    return row?.admission?Object.freeze(structuredClone(row.admission)):null;
+  }
+
   snapshot(){
     const state=ledgerState(this.#sourceSha,this.#rows);
     return Object.freeze({
