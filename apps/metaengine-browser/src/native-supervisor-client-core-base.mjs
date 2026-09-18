@@ -257,7 +257,13 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       const workerObserver = localSnapshot?.worker_observer || null;
       return {
         ...state,
-        ...(supervisorMesh ? { supervisor_mesh: supervisorMesh } : {}),
+        // P1-2 multi-writer repair: the Edge now merges /v1/state per plane
+        // (present keys — including explicit null — overwrite, absent keys are
+        // preserved). The mesh plane must therefore ALWAYS be present on the
+        // wire: a running mesh carries its projection, a stopped mesh carries
+        // an explicit null so the stored state reflects reality instead of
+        // retaining a stale mesh from a previous writer.
+        supervisor_mesh: supervisorMesh,
         ...(workerObserver ? { worker_observer: workerObserver } : {}),
       };
     };
