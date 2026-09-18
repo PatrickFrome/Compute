@@ -8,6 +8,7 @@ import {
   createRsiSearchModeRoutingPlan,
   verifyRsiSearchModeRoutingPlan,
 } from './rsi-search-mode-router.mjs';
+import { verifyRsiHarnessRepairSpec } from './rsi-trace-guided-harness-repair.mjs';
 
 export const RSI_AUTONOMOUS_EPISODE_PLAN_SCHEMA = 'metaengine.rsi.autonomous-episode-plan.v1';
 export const RSI_AUTONOMOUS_VARIANT_PLAN_SCHEMA = 'metaengine.rsi.autonomous-variant-plan.v1';
@@ -18,6 +19,16 @@ const SAFE_MODE_RE = /^[A-Z0-9][A-Z0-9_.:-]{0,95}$/;
 const SAFE_ROLE_RE = /^(EXPLOIT|EXPLORE|ONLY_COMPATIBLE)$/;
 const MAX_VARIANTS = 2;
 const MAX_CANDIDATES = 4;
+
+const HARNESS_LAYER_TO_MUTATION_SURFACE = Object.freeze({
+  EXECUTION: 'BROWSER_RUNTIME',
+  TOOLS: 'TOOL_INTERFACE',
+  CONTEXT: 'PROMPT_ROUTING',
+  LIFECYCLE: 'BROWSER_RUNTIME',
+  OBSERVABILITY: 'BROWSER_RUNTIME',
+  VERIFICATION: 'RSI_IMPROVER',
+  GOVERNANCE: 'RSI_IMPROVER',
+});
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -94,6 +105,53 @@ function zeroAuthority(extra = {}) {
   });
 }
 
+function normalizeHarnessRepairSpec(repairSpec, { sourceSha, mutationSurface, hypothesis } = {}) {
+  if (repairSpec == null) return null;
+  const checked = verifyRsiHarnessRepairSpec(repairSpec);
+  if (exactSha(checked.source_sha, 'harness_repair_source') !== sourceSha) {
+    throw new Error('rsi_autonomous_harness_repair_source_mismatch');
+  }
+  const layer = String(checked.component_layer || '').trim().toUpperCase();
+  const mappedSurface = HARNESS_LAYER_TO_MUTATION_SURFACE[layer];
+  if (!mappedSurface) throw new Error('rsi_autonomous_harness_repair_layer_unmapped');
+  if (mappedSurface !== mutationSurface) throw new Error('rsi_autonomous_harness_repair_surface_mismatch');
+
+  const suspected = Array.isArray(hypothesis?.suspected_components)
+    ? hypothesis.suspected_components.map((value) => String(value || '').trim()).filter(Boolean)
+    : [];
+  if (suspected.length > 0 && !suspected.includes(checked.component_path)) {
+    throw new Error('rsi_autonomous_harness_repair_component_not_suspected');
+  }
+  return Object.freeze(structuredClone(checked));
+}
+
+function harnessRepairSummary(repairSpec) {
+  if (!repairSpec) return null;
+  return Object.freeze({
+    repair_id: repairSpec.repair_id,
+    repair_digest: repairSpec.repair_digest,
+    flaw_id: repairSpec.flaw_id,
+    flaw_digest: repairSpec.flaw_digest,
+    component_id: repairSpec.component_id,
+    component_path: repairSpec.component_path,
+    component_layer: repairSpec.component_layer,
+    repair_operator: repairSpec.repair_operator,
+    predicted_failure_code_reduction: repairSpec.predicted_failure_code_reduction,
+    predicted_objective_codes: Object.freeze([...(repairSpec.predicted_objective_codes || [])]),
+    regression_guard_codes: Object.freeze([...(repairSpec.regression_guard_codes || [])]),
+    heldout_suite_digest: repairSpec.heldout_suite_digest,
+    matched_budget_digest: repairSpec.matched_budget_digest,
+    exact_component_scope_required: true,
+    broad_patch_forbidden: true,
+    matched_feedback_budget_baseline_required: true,
+    heldout_generalization_required: true,
+    candidate_can_modify_repair_spec: false,
+    patch_materialization_external: true,
+    scheduler_action_authorized: false,
+    authority_effect: false,
+  });
+}
+
 function normalizeAllocation(allocation, index) {
   if (!allocation || typeof allocation !== 'object' || Array.isArray(allocation)) {
     throw new Error('rsi_autonomous_allocation_invalid');
@@ -110,7 +168,7 @@ function normalizeAllocation(allocation, index) {
   });
 }
 
-function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex }) {
+function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex, harnessRepairSpec = null }) {
   if (!basePlan || basePlan.schema !== RSI_DEVOS_EXPERIMENT_PLAN_SCHEMA) {
     throw new Error('rsi_autonomous_base_plan_invalid');
   }
@@ -125,9 +183,11 @@ function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex }) {
     throw new Error('rsi_autonomous_allocation_not_in_routing_plan');
   }
 
+  const repairSummary = harnessRepairSummary(harnessRepairSpec);
   const variantMaterial = {
     base_plan_digest: exactDigest(basePlan.plan_digest, 'base_plan'),
     routing_digest: exactDigest(routingPlan.routing_digest, 'routing'),
+    harness_repair_digest: repairSummary ? exactDigest(repairSummary.repair_digest, 'harness_repair') : null,
     search_mode: normalized.search_mode,
     allocation_role: normalized.role,
     proposal_budget_units: normalized.proposal_budget_units,
@@ -155,9 +215,20 @@ function variantPlanFrom({ basePlan, routingPlan, allocation, variantIndex }) {
     'rsi_search_variant_digest=' + variantDigest,
     'rsi_search_mode_is_proposal_guidance_only',
     'rsi_search_router_has_zero_scheduler_authority',
+    ...(repairSummary ? [
+      'rsi_harness_repair_digest=' + repairSummary.repair_digest,
+      'rsi_harness_component_path=' + repairSummary.component_path,
+      'rsi_harness_repair_operator=' + repairSummary.repair_operator,
+      'rsi_harness_exact_component_scope_required',
+      'rsi_harness_broad_patch_forbidden',
+      'rsi_harness_matched_budget_baseline_required',
+      'rsi_harness_heldout_generalization_required',
+      'rsi_harness_candidate_cannot_modify_repair_spec',
+    ] : []),
   ]);
   plan.task_spec.rsi = Object.freeze({
     ...(basePlan.task_spec?.rsi || {}),
+    harness_repair: repairSummary,
     search_variant: Object.freeze({
       schema: RSI_AUTONOMOUS_VARIANT_PLAN_SCHEMA,
       version: 1,
@@ -196,6 +267,7 @@ export function createRsiAutonomousEpisodePlan({
   max_candidates = MAX_CANDIDATES,
   proposal_budget_units = 100,
   exploration_fraction = 0.2,
+  harness_repair_spec = null,
 } = {}) {
   if (!observation || typeof observation !== 'object' || Array.isArray(observation)) {
     throw new Error('rsi_autonomous_observation_invalid');
@@ -214,6 +286,12 @@ export function createRsiAutonomousEpisodePlan({
   }
 
   const hypothesis = buildRsiExperimentHypothesis({ observation, opportunity_id });
+  const mutationSurface = String(opportunity.mutation_surface || '').toUpperCase();
+  const repairSpec = normalizeHarnessRepairSpec(harness_repair_spec, {
+    sourceSha,
+    mutationSurface,
+    hypothesis,
+  });
   const basePlan = buildRsiDevosExperimentPlan({
     observation,
     opportunity_id,
@@ -232,6 +310,7 @@ export function createRsiAutonomousEpisodePlan({
       observation_digest: observationDigest,
       opportunity_id,
       hypothesis_digest: hypothesis.hypothesis_digest,
+      harness_repair_digest: repairSpec ? exactDigest(repairSpec.repair_digest, 'harness_repair') : null,
       cycle_generation: generation,
     }).slice(0, 24),
     proposal_budget_units: totalBudget,
@@ -254,6 +333,7 @@ export function createRsiAutonomousEpisodePlan({
       routingPlan,
       allocation,
       variantIndex: index + 1,
+      harnessRepairSpec: repairSpec,
     })
   );
 
@@ -264,6 +344,7 @@ export function createRsiAutonomousEpisodePlan({
     hypothesis_digest: exactDigest(hypothesis.hypothesis_digest, 'hypothesis'),
     search_context_digest: exactDigest(context.context_digest, 'search_context'),
     routing_digest: exactDigest(routingPlan.routing_digest, 'routing'),
+    harness_repair_digest: repairSpec ? exactDigest(repairSpec.repair_digest, 'harness_repair') : null,
     cycle_generation: generation,
   };
   const episodeDigest = digest(episodeMaterial);
@@ -280,7 +361,9 @@ export function createRsiAutonomousEpisodePlan({
     opportunity_id,
     hypothesis,
     hypothesis_digest: exactDigest(hypothesis.hypothesis_digest, 'hypothesis'),
-    mutation_surface: String(opportunity.mutation_surface || '').toUpperCase(),
+    mutation_surface: mutationSurface,
+    harness_repair_spec: repairSpec,
+    harness_repair_digest: repairSpec ? exactDigest(repairSpec.repair_digest, 'harness_repair') : null,
     search_context: context,
     search_context_digest: exactDigest(context.context_digest, 'search_context'),
     routing_plan: routingPlan,
@@ -293,7 +376,7 @@ export function createRsiAutonomousEpisodePlan({
       observation_digest: observationDigest,
       opportunity_id,
       hypothesis_digest: exactDigest(hypothesis.hypothesis_digest, 'hypothesis'),
-      mutation_surface: String(opportunity.mutation_surface || '').toUpperCase(),
+      mutation_surface: mutationSurface,
       search_context_digest: exactDigest(context.context_digest, 'search_context'),
       max_candidates: candidateLimit,
     }),
@@ -301,6 +384,11 @@ export function createRsiAutonomousEpisodePlan({
     search_routing_is_scheduler_authority: false,
     search_routing_is_promotion_authority: false,
     candidate_can_choose_search_mode: false,
+    harness_repair_exact_component_scope: true,
+    broad_harness_patch_allowed: false,
+    candidate_can_modify_harness_repair_spec: false,
+    harness_repair_requires_matched_budget_baseline: true,
+    harness_repair_requires_heldout_generalization: true,
     direct_dispatch_enabled: false,
     direct_promotion_enabled: false,
     physical_effect_replay_allowed: false,
@@ -330,6 +418,25 @@ export function verifyRsiAutonomousEpisodePlan(plan) {
   exactDigest(plan.search_context_digest, 'plan_search_context');
   exactDigest(plan.routing_digest, 'plan_routing');
   verifyRsiSearchContext(plan.search_context);
+  let checkedRepair = null;
+  if (plan.harness_repair_spec != null) {
+    checkedRepair = verifyRsiHarnessRepairSpec(plan.harness_repair_spec);
+    const normalizedRepairDigest = exactDigest(checkedRepair.repair_digest, 'plan_harness_repair');
+    if (normalizedRepairDigest !== exactDigest(plan.harness_repair_digest, 'plan_harness_repair_claimed')) {
+      throw new Error('rsi_autonomous_harness_repair_digest_mismatch');
+    }
+    if (exactSha(checkedRepair.source_sha, 'plan_harness_repair_source') !== plan.source_sha) {
+      throw new Error('rsi_autonomous_harness_repair_source_mismatch');
+    }
+    const mappedSurface = HARNESS_LAYER_TO_MUTATION_SURFACE[String(checkedRepair.component_layer || '').toUpperCase()];
+    if (mappedSurface !== plan.mutation_surface) throw new Error('rsi_autonomous_harness_repair_surface_mismatch');
+    const suspected = Array.isArray(plan.hypothesis?.suspected_components) ? plan.hypothesis.suspected_components : [];
+    if (suspected.length > 0 && !suspected.includes(checkedRepair.component_path)) {
+      throw new Error('rsi_autonomous_harness_repair_component_not_suspected');
+    }
+  } else if (plan.harness_repair_digest != null) {
+    throw new Error('rsi_autonomous_harness_repair_spec_missing');
+  }
   verifyRsiSearchModeRoutingPlan(plan.routing_plan);
   if (exactDigest(plan.routing_plan.routing_digest, 'routing_plan') !== exactDigest(plan.routing_digest, 'routing')) {
     throw new Error('rsi_autonomous_routing_digest_mismatch');
@@ -348,6 +455,21 @@ export function verifyRsiAutonomousEpisodePlan(plan) {
     }
     if (exactSha(variant.source_sha, 'variant_source') !== plan.source_sha) throw new Error('rsi_autonomous_variant_source_mismatch');
     if (exactDigest(variant.hypothesis_digest, 'variant_hypothesis') !== plan.hypothesis_digest) throw new Error('rsi_autonomous_variant_hypothesis_mismatch');
+    const repairSummary = variant.task_spec?.rsi?.harness_repair || null;
+    if (checkedRepair) {
+      if (!repairSummary || exactDigest(repairSummary.repair_digest, 'variant_harness_repair') !== exactDigest(checkedRepair.repair_digest, 'checked_harness_repair')) {
+        throw new Error('rsi_autonomous_variant_harness_repair_mismatch');
+      }
+      if (
+        repairSummary.component_path !== checkedRepair.component_path
+        || repairSummary.repair_operator !== checkedRepair.repair_operator
+        || repairSummary.candidate_can_modify_repair_spec !== false
+        || repairSummary.patch_materialization_external !== true
+        || repairSummary.scheduler_action_authorized !== false
+      ) throw new Error('rsi_autonomous_variant_harness_repair_policy_invalid');
+    } else if (repairSummary != null) {
+      throw new Error('rsi_autonomous_variant_unexpected_harness_repair');
+    }
     const clone = structuredClone(variant);
     const claimed = exactDigest(clone.plan_digest, 'variant_plan');
     delete clone.plan_digest;
@@ -372,6 +494,7 @@ export function rsiAutonomousEpisodeControllerTrustRootSnapshot() {
       'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
       'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
       'apps/metaengine-browser/src/rsi-evaluation-integrity-guard.mjs',
+      'apps/metaengine-browser/src/rsi-trace-guided-harness-repair.mjs',
     ],
     contextual_search_routing: true,
     explicit_exploration_budget: true,
