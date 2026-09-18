@@ -18,9 +18,11 @@ import {
 
 export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff.v1';
 export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_LEDGER_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff-ledger.v1';
+export const RSI_EVALUATOR_GENERATION_ROTATION_SCHEMA='metaengine.rsi.evaluator-generation-rotation.v1';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
+const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const MAX_HANDOFF_ROWS=2048;
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]));}
@@ -28,6 +30,7 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_sha_invalid`);return x;}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_digest_invalid`);return x;}
 function positiveInt(v,l){const n=Number(v);if(!Number.isSafeInteger(n)||n<1)throw new Error(`rsi_materialized_eval_${l}_invalid`);return n;}
+function safeId(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_invalid`);return x;}
 function assertZero(v,l){for(const f of ['execution_authority','browser_authority','task_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_materialized_eval_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_materialized_eval_${l}_retry_invalid`);}
 function zero(extra={}){return Object.freeze({...extra,execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false});}
 
@@ -318,6 +321,116 @@ export function createRsiMaterializedCandidateExperimentIntent({
 }
 
 
+
+export function createRsiEvaluatorGenerationRotation({
+  rotation_id,
+  source_sha,
+  previous_evaluator_root_digest,
+  previous_evaluator_generation_digest,
+  previous_evaluator_generation_seq,
+  previous_evaluation_epoch_digest,
+  previous_evaluation_epoch_seq,
+  next_evaluator_root_digest,
+  next_evaluator_generation_digest,
+  next_evaluator_generation_seq,
+  next_evaluation_epoch_digest,
+  next_evaluation_epoch_seq,
+  next_generation_history_anchor_digest,
+  anchor_recalibration_digest,
+  external_rotation_receipt_digest,
+  external_generation_owner=false,
+  authored_by_candidate=true,
+}={}){
+  if(external_generation_owner!==true||authored_by_candidate!==false)throw new Error('rsi_materialized_eval_external_generation_owner_required');
+  const roots=[
+    exactDigest(previous_evaluator_root_digest,'rotation_previous_root'),
+    exactDigest(previous_evaluator_generation_digest,'rotation_previous_generation'),
+    exactDigest(previous_evaluation_epoch_digest,'rotation_previous_epoch'),
+    exactDigest(next_evaluator_root_digest,'rotation_next_root'),
+    exactDigest(next_evaluator_generation_digest,'rotation_next_generation'),
+    exactDigest(next_evaluation_epoch_digest,'rotation_next_epoch'),
+    exactDigest(next_generation_history_anchor_digest,'rotation_history_anchor'),
+    exactDigest(anchor_recalibration_digest,'rotation_anchor_recalibration'),
+    exactDigest(external_rotation_receipt_digest,'rotation_external_receipt'),
+  ];
+  if(new Set(roots).size!==roots.length)throw new Error('rsi_materialized_eval_rotation_independent_roots_required');
+  const previousGenerationSeq=positiveInt(previous_evaluator_generation_seq,'rotation_previous_generation_seq');
+  const previousEpochSeq=positiveInt(previous_evaluation_epoch_seq,'rotation_previous_epoch_seq');
+  const nextGenerationSeq=positiveInt(next_evaluator_generation_seq,'rotation_next_generation_seq');
+  const nextEpochSeq=positiveInt(next_evaluation_epoch_seq,'rotation_next_epoch_seq');
+  if(nextGenerationSeq!==previousGenerationSeq+1)throw new Error('rsi_materialized_eval_rotation_generation_sequence_invalid');
+  if(nextEpochSeq!==1)throw new Error('rsi_materialized_eval_rotation_new_generation_epoch_invalid');
+  if(roots[0]===roots[3]||roots[1]===roots[4])throw new Error('rsi_materialized_eval_rotation_identity_must_change');
+  const core=zero({
+    schema:RSI_EVALUATOR_GENERATION_ROTATION_SCHEMA,
+    version:1,
+    rotation_id:safeId(rotation_id,'rotation_id'),
+    source_sha:exactSha(source_sha,'rotation_source'),
+    previous_evaluator_root_digest:roots[0],
+    previous_evaluator_generation_digest:roots[1],
+    previous_evaluator_generation_seq:previousGenerationSeq,
+    previous_evaluation_epoch_digest:roots[2],
+    previous_evaluation_epoch_seq:previousEpochSeq,
+    next_evaluator_root_digest:roots[3],
+    next_evaluator_generation_digest:roots[4],
+    next_evaluator_generation_seq:nextGenerationSeq,
+    next_evaluation_epoch_digest:roots[5],
+    next_evaluation_epoch_seq:nextEpochSeq,
+    next_generation_history_anchor_digest:roots[6],
+    anchor_recalibration_digest:roots[7],
+    external_rotation_receipt_digest:roots[8],
+    transition_kind:'EXTERNAL_ROTATION',
+    external_generation_owner:true,
+    authored_by_candidate:false,
+    candidate_can_rotate_evaluator:false,
+    candidate_can_choose_anchor:false,
+    rotation_can_execute_evaluation:false,
+    rotation_can_activate_candidate:false,
+  });
+  return Object.freeze({...core,rotation_digest:digest(core)});
+}
+
+export function verifyRsiEvaluatorGenerationRotation(row){
+  if(!row||row.schema!==RSI_EVALUATOR_GENERATION_ROTATION_SCHEMA||row.version!==1)throw new Error('rsi_materialized_eval_rotation_invalid');
+  assertZero(row,'rotation');
+  if(row.transition_kind!=='EXTERNAL_ROTATION'||row.external_generation_owner!==true||row.authored_by_candidate!==false
+    ||row.candidate_can_rotate_evaluator!==false||row.candidate_can_choose_anchor!==false
+    ||row.rotation_can_execute_evaluation!==false||row.rotation_can_activate_candidate!==false){
+    throw new Error('rsi_materialized_eval_rotation_policy_invalid');
+  }
+  const canonical=createRsiEvaluatorGenerationRotation({
+    rotation_id:row.rotation_id,
+    source_sha:row.source_sha,
+    previous_evaluator_root_digest:row.previous_evaluator_root_digest,
+    previous_evaluator_generation_digest:row.previous_evaluator_generation_digest,
+    previous_evaluator_generation_seq:row.previous_evaluator_generation_seq,
+    previous_evaluation_epoch_digest:row.previous_evaluation_epoch_digest,
+    previous_evaluation_epoch_seq:row.previous_evaluation_epoch_seq,
+    next_evaluator_root_digest:row.next_evaluator_root_digest,
+    next_evaluator_generation_digest:row.next_evaluator_generation_digest,
+    next_evaluator_generation_seq:row.next_evaluator_generation_seq,
+    next_evaluation_epoch_digest:row.next_evaluation_epoch_digest,
+    next_evaluation_epoch_seq:row.next_evaluation_epoch_seq,
+    next_generation_history_anchor_digest:row.next_generation_history_anchor_digest,
+    anchor_recalibration_digest:row.anchor_recalibration_digest,
+    external_rotation_receipt_digest:row.external_rotation_receipt_digest,
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.rotation_digest!==exactDigest(row.rotation_digest,'rotation'))throw new Error('rsi_materialized_eval_rotation_digest_mismatch');
+  return canonical;
+}
+
+function verifyPersistedHandoffEvidence({handoff,artifact_receipt,artifact_verification}={}){
+  const checked=verifyRsiMaterializedCandidateEvaluationHandoff(handoff,{artifact_receipt,artifact_verification});
+  if(checked.phase28_artifact_receipt_digest!==artifact_receipt?.artifact_receipt_digest)throw new Error('rsi_materialized_eval_history_artifact_binding_mismatch');
+  return Object.freeze({
+    handoff:checked,
+    artifact_receipt:Object.freeze(structuredClone(artifact_receipt)),
+    artifact_verification:Object.freeze(structuredClone(artifact_verification)),
+  });
+}
+
 function verifyStoredMaterializedCandidateEvaluationHandoff(row){
   if(!row||row.schema!==RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA||row.version!==1)throw new Error('rsi_materialized_eval_handoff_invalid');
   assertZero(row,'stored_handoff');
@@ -426,6 +539,9 @@ function handoffLedgerState(sourceSha,rows){
     generation_history_monotonic:true,
     generation_transition_contiguous:true,
     epoch_transition_contiguous:true,
+    exact_phase28_evidence_replay_required:true,
+    external_rotation_receipt_required:true,
+    anchor_recalibration_required_on_rotation:true,
     experiment_results_stored_here:false,
     existing_candidate_experiment_ledger_owns_outcomes:true,
     candidate_can_delete:false,
@@ -453,7 +569,9 @@ export class RsiMaterializedCandidateEvaluationHandoffLedger{
       if(persisted.schema!==RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_LEDGER_SCHEMA||persisted.version!==1
         ||persisted.source_sha!==this.#sourceSha||persisted.append_only!==true||persisted.durable_before_visible!==true
         ||persisted.generation_history_monotonic!==true||persisted.generation_transition_contiguous!==true
-        ||persisted.epoch_transition_contiguous!==true||persisted.experiment_results_stored_here!==false
+        ||persisted.epoch_transition_contiguous!==true||persisted.exact_phase28_evidence_replay_required!==true
+        ||persisted.external_rotation_receipt_required!==true||persisted.anchor_recalibration_required_on_rotation!==true
+        ||persisted.experiment_results_stored_here!==false
         ||persisted.existing_candidate_experiment_ledger_owns_outcomes!==true||persisted.candidate_can_delete!==false
         ||persisted.candidate_can_rewrite!==false||persisted.ledger_can_schedule_evaluation!==false
         ||persisted.ledger_can_execute_evaluation!==false||persisted.ledger_can_promote!==false)throw new Error('rsi_materialized_eval_handoff_ledger_state_invalid');
@@ -467,15 +585,42 @@ export class RsiMaterializedCandidateEvaluationHandoffLedger{
       for(let i=0;i<persisted.rows.length;i+=1){
         const raw=persisted.rows[i];
         if(!raw||raw.handoff_seq!==i+1)throw new Error('rsi_materialized_eval_handoff_sequence_gap');
-        const handoff=verifyStoredMaterializedCandidateEvaluationHandoff(raw.handoff);
+        const evidence=verifyPersistedHandoffEvidence(raw);
+        const handoff=evidence.handoff;
         if(handoff.source_sha!==this.#sourceSha)throw new Error('rsi_materialized_eval_handoff_ledger_source_mismatch');
         if(digests.has(handoff.evaluation_handoff_digest))throw new Error('rsi_materialized_eval_handoff_duplicate');
         const identity=`${handoff.phase28_artifact_receipt_digest}:${handoff.evaluator_generation_seq}:${handoff.evaluation_epoch_seq}`;
         if(identities.has(identity))throw new Error('rsi_materialized_eval_handoff_identity_duplicate');
         assertGenerationTransition(previous,handoff);
+        let rotation=null;
+        if(previous&&handoff.evaluator_generation_seq!==previous.evaluator_generation_seq){
+          rotation=verifyRsiEvaluatorGenerationRotation(raw.rotation);
+          if(rotation.source_sha!==this.#sourceSha
+            ||rotation.previous_evaluator_root_digest!==previous.evaluator_root_digest
+            ||rotation.previous_evaluator_generation_digest!==previous.evaluator_generation_digest
+            ||rotation.previous_evaluator_generation_seq!==previous.evaluator_generation_seq
+            ||rotation.previous_evaluation_epoch_digest!==previous.evaluation_epoch_digest
+            ||rotation.previous_evaluation_epoch_seq!==previous.evaluation_epoch_seq
+            ||rotation.next_evaluator_root_digest!==handoff.evaluator_root_digest
+            ||rotation.next_evaluator_generation_digest!==handoff.evaluator_generation_digest
+            ||rotation.next_evaluator_generation_seq!==handoff.evaluator_generation_seq
+            ||rotation.next_evaluation_epoch_digest!==handoff.evaluation_epoch_digest
+            ||rotation.next_evaluation_epoch_seq!==handoff.evaluation_epoch_seq
+            ||rotation.next_generation_history_anchor_digest!==handoff.evaluator_generation_history_anchor_digest){
+            throw new Error('rsi_materialized_eval_rotation_binding_mismatch');
+          }
+        }else if(raw.rotation!==null&&raw.rotation!==undefined){
+          throw new Error('rsi_materialized_eval_rotation_unexpected');
+        }
         digests.add(handoff.evaluation_handoff_digest);
         identities.add(identity);
-        checked.push(Object.freeze({handoff_seq:i+1,handoff}));
+        checked.push(Object.freeze({
+          handoff_seq:i+1,
+          handoff,
+          artifact_receipt:evidence.artifact_receipt,
+          artifact_verification:evidence.artifact_verification,
+          rotation:rotation?Object.freeze(structuredClone(rotation)):null,
+        }));
         previous=handoff;
       }
       const canonical=handoffLedgerState(this.#sourceSha,checked);
@@ -495,9 +640,10 @@ export class RsiMaterializedCandidateEvaluationHandoffLedger{
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync();}finally{await handle.close();}
     await fs.rename(tmp,this.#path);
   }
-  async add(handoff){
+  async add({handoff,artifact_receipt,artifact_verification,rotation=null}={}){
     if(!this.#initialized)throw new Error('rsi_materialized_eval_handoff_ledger_not_initialized');
-    const checked=verifyStoredMaterializedCandidateEvaluationHandoff(handoff);
+    const evidence=verifyPersistedHandoffEvidence({handoff,artifact_receipt,artifact_verification});
+    const checked=evidence.handoff;
     if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_materialized_eval_handoff_ledger_source_mismatch');
     const existing=this.#rows.find(row=>row.handoff.evaluation_handoff_digest===checked.evaluation_handoff_digest);
     if(existing)return zero({state:'IDEMPOTENT',handoff_seq:existing.handoff_seq,evaluation_handoff_digest:checked.evaluation_handoff_digest});
@@ -506,8 +652,35 @@ export class RsiMaterializedCandidateEvaluationHandoffLedger{
       throw new Error('rsi_materialized_eval_handoff_identity_conflict');
     }
     if(this.#rows.length>=MAX_HANDOFF_ROWS)throw new Error('rsi_materialized_eval_handoff_ledger_capacity_exceeded');
-    assertGenerationTransition(this.#rows.at(-1)?.handoff??null,checked);
-    const next=[...this.#rows,Object.freeze({handoff_seq:this.#rows.length+1,handoff:structuredClone(checked)})];
+    const previous=this.#rows.at(-1)?.handoff??null;
+    assertGenerationTransition(previous,checked);
+    let checkedRotation=null;
+    if(previous&&checked.evaluator_generation_seq!==previous.evaluator_generation_seq){
+      checkedRotation=verifyRsiEvaluatorGenerationRotation(rotation);
+      if(checkedRotation.source_sha!==this.#sourceSha
+        ||checkedRotation.previous_evaluator_root_digest!==previous.evaluator_root_digest
+        ||checkedRotation.previous_evaluator_generation_digest!==previous.evaluator_generation_digest
+        ||checkedRotation.previous_evaluator_generation_seq!==previous.evaluator_generation_seq
+        ||checkedRotation.previous_evaluation_epoch_digest!==previous.evaluation_epoch_digest
+        ||checkedRotation.previous_evaluation_epoch_seq!==previous.evaluation_epoch_seq
+        ||checkedRotation.next_evaluator_root_digest!==checked.evaluator_root_digest
+        ||checkedRotation.next_evaluator_generation_digest!==checked.evaluator_generation_digest
+        ||checkedRotation.next_evaluator_generation_seq!==checked.evaluator_generation_seq
+        ||checkedRotation.next_evaluation_epoch_digest!==checked.evaluation_epoch_digest
+        ||checkedRotation.next_evaluation_epoch_seq!==checked.evaluation_epoch_seq
+        ||checkedRotation.next_generation_history_anchor_digest!==checked.evaluator_generation_history_anchor_digest){
+        throw new Error('rsi_materialized_eval_rotation_binding_mismatch');
+      }
+    }else if(rotation!==null&&rotation!==undefined){
+      throw new Error('rsi_materialized_eval_rotation_unexpected');
+    }
+    const next=[...this.#rows,Object.freeze({
+      handoff_seq:this.#rows.length+1,
+      handoff:structuredClone(checked),
+      artifact_receipt:structuredClone(evidence.artifact_receipt),
+      artifact_verification:structuredClone(evidence.artifact_verification),
+      rotation:checkedRotation?structuredClone(checkedRotation):null,
+    })];
     await this.#persist(next);
     this.#rows=next;
     return zero({state:'HANDOFF_RECORDED_EXTERNAL_EVALUATION_REQUIRED',handoff_seq:next.length,evaluation_handoff_digest:checked.evaluation_handoff_digest});
@@ -518,7 +691,8 @@ export class RsiMaterializedCandidateEvaluationHandoffLedger{
       schema:state.schema,version:state.version,source_sha:state.source_sha,initialized:this.#initialized,
       row_count:state.row_count,generation_count:state.generation_count,latest_generation_seq:state.latest_generation_seq,
       latest_epoch_seq:state.latest_epoch_seq,append_only:true,durable_before_visible:true,generation_history_monotonic:true,
-      generation_transition_contiguous:true,epoch_transition_contiguous:true,experiment_results_stored_here:false,
+      generation_transition_contiguous:true,epoch_transition_contiguous:true,exact_phase28_evidence_replay_required:true,
+      external_rotation_receipt_required:true,anchor_recalibration_required_on_rotation:true,experiment_results_stored_here:false,
       existing_candidate_experiment_ledger_owns_outcomes:true,ledger_can_schedule_evaluation:false,
       ledger_can_execute_evaluation:false,ledger_can_promote:false,authority_effect:false,
     });
@@ -541,6 +715,9 @@ export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
     generation_transition_must_be_contiguous:true,
     evaluation_epoch_transition_must_be_contiguous:true,
     generation_history_anchor_external:true,
+    exact_phase28_evidence_replay_required:true,
+    external_rotation_receipt_required:true,
+    anchor_recalibration_required_on_rotation:true,
     build_and_evaluation_workers_must_differ:true,
     sealed_task_set_external:true,
     evaluation_harness_external:true,
