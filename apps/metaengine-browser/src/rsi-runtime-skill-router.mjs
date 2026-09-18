@@ -19,6 +19,8 @@ const MAX_EVIDENCE=16384;
 const MAX_REQUIRED_CAPABILITIES=16;
 const MAX_SELECTED=8;
 const NEGATIVE_TRANSFER_EXACT_MIN=2;
+const CREDIT_SIGNS=new Set(['POSITIVE','NEGATIVE','NEUTRAL']);
+const CREDIT_METHODS=new Set(['EXTERNAL_STEP_EVALUATOR','COUNTERFACTUAL_ABLATION','TD_REFERENCE_MODEL','MARGINAL_SHAPLEY']);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -102,8 +104,13 @@ export function verifyRsiSkillContextEvidence(row){
   token(row.action,'action');
   boundedId(row.trajectory_id,'trajectory_id');
   positiveInt(row.step_index,'step_index',10000);
-  token(row.credit_sign,'credit_sign');
-  token(row.credit_method,'credit_method');
+  const sign=token(row.credit_sign,'credit_sign');
+  if(!CREDIT_SIGNS.has(sign))throw new Error('rsi_skill_router_credit_sign_invalid');
+  const score=Number(row.credit_score);
+  if(!Number.isFinite(score)||score < -1||score > 1)throw new Error('rsi_skill_router_credit_score_invalid');
+  if((sign==='POSITIVE'&&score<=0)||(sign==='NEGATIVE'&&score>=0)||(sign==='NEUTRAL'&&score!==0))throw new Error('rsi_skill_router_credit_sign_score_mismatch');
+  const method=token(row.credit_method,'credit_method');
+  if(!CREDIT_METHODS.has(method))throw new Error('rsi_skill_router_credit_method_invalid');
   exactDigest(row.evaluator_digest,'evaluator');
   const clone=structuredClone(row);delete clone.evidence_digest;
   if(digest(clone)!==exactDigest(row.evidence_digest,'evidence'))throw new Error('rsi_skill_router_context_evidence_digest_mismatch');
