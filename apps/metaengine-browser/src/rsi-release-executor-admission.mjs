@@ -264,7 +264,22 @@ export function verifyRsiReleaseExecutorAdmission(row){
     || authorityReadback.browser_generation!==row.browser_generation
     || lease.current_authority_sha!==row.current_authority_sha
     || authorityReadback.current_authority_sha!==row.current_authority_sha
+    || row.current_authority_sha!==row.parent_sha
   )throw new Error('rsi_release_executor_admission_readback_binding_mismatch');
+  if(row.idempotency_key!==expectedRsiReleaseExecutorIdempotencyKey({
+    handoff_digest:row.release_handoff_digest,
+    candidate_sha:row.candidate_sha,
+  }))throw new Error('rsi_release_executor_admission_idempotency_binding_mismatch');
+  const evaluatedMs=ms(row.evaluated_at,'evaluated_at');
+  const leaseVerifiedMs=ms(lease.verified_at,'lease_verified_at');
+  const authorityVerifiedMs=ms(authorityReadback.verified_at,'authority_verified_at');
+  if(
+    evaluatedMs<leaseVerifiedMs
+    || evaluatedMs<authorityVerifiedMs
+    || evaluatedMs-leaseVerifiedMs>MAX_FRESHNESS_MS
+    || evaluatedMs-authorityVerifiedMs>MAX_FRESHNESS_MS
+    || evaluatedMs>=ms(lease.expires_at,'lease_expires_at')
+  )throw new Error('rsi_release_executor_admission_freshness_invalid');
   for(const [value,label] of [
     [row.release_handoff_digest,'release_handoff'],[row.promotion_review_result_digest,'promotion_review'],
     [row.executor_readback_digest,'executor_readback'],[row.pre_effect_authority_readback_digest,'authority_readback'],
