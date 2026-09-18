@@ -49,6 +49,7 @@ import { createRsiExperienceContextPlan, rsiExperienceContextTrustRootSnapshot }
 import { createRsiCandidateSynthesisRequest, createRsiCandidateMutationProposal, prepareRsiContextAwareCandidateBuild, createRsiContextAwareCandidateLedgerPayload, rsiContextAwareCandidateTrustRootSnapshot } from './rsi-context-aware-candidate-synthesis.mjs';
 import { createRsiDevosMaterializationHandoff, admitRsiDevosMaterialization, rsiDevosMaterializationTrustRootSnapshot } from './rsi-devos-materialization-handoff.mjs';
 import { createRsiVerifiedCandidateMaterialization, rsiVerifiedCandidateMaterializationTrustRootSnapshot } from './rsi-verified-candidate-materialization.mjs';
+import { createRsiExternalEvaluationBundle, verifyRsiExternalEvaluationBundle, rsiExternalEvaluationTrustRootSnapshot } from './rsi-external-evaluation-evidence-adapter.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -122,6 +123,7 @@ function trustRoots() {
     context_aware_candidate: rsiContextAwareCandidateTrustRootSnapshot(),
     devos_materialization: rsiDevosMaterializationTrustRootSnapshot(),
     verified_candidate_materialization: rsiVerifiedCandidateMaterializationTrustRootSnapshot(),
+    external_evaluation: rsiExternalEvaluationTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -167,6 +169,8 @@ export class RsiRuntimeService {
   #lastMaterializationAdmissionDigest = null;
   #verifiedCandidateMaterializationCount = 0;
   #lastVerifiedCandidateMaterializationDigest = null;
+  #externalEvaluationBundleCount = 0;
+  #lastExternalEvaluationBundleDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -195,6 +199,9 @@ export class RsiRuntimeService {
       if (page.length === 0) break;
       for (const row of page) {
         if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
+        if (Array.isArray(row?.payload?.episode_events)) {
+          for (const event of row.payload.episode_events) this.#episodes.apply(event);
+        }
         if (row?.payload?.command_attribution_event) this.#commandAttributions.apply(row.payload.command_attribution_event);
         if (row?.payload?.learning_episode) this.#rememberLearningOutcome(row.payload.learning_episode);
         if (row?.payload?.observation?.observation_digest && row?.type === 'BRAIN_OBSERVATION') {
@@ -317,6 +324,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const verified = row?.payload?.verified_candidate_materialization;
         if (verified?.materialization_admission_digest === wanted) found = Object.freeze(structuredClone(verified));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findVerifiedMaterializationByCandidate(candidateId) {
+    const wanted = String(candidateId || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const verified = row?.payload?.verified_candidate_materialization;
+        if (verified?.candidate_id === wanted) found = Object.freeze(structuredClone(verified));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findExternalEvaluationBundleByCandidate(candidateId) {
+    const wanted = String(candidateId || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const bundle = row?.payload?.external_evaluation_bundle;
+        if (bundle?.candidate_id === wanted) found = Object.freeze(structuredClone(bundle));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -645,6 +686,66 @@ export class RsiRuntimeService {
     return found ? Object.freeze(structuredClone(found)) : null;
   }
 
+  async recordExternalEvaluationEvidence({
+    candidate_id,
+    candidate_handoff,
+    evaluator_receipts,
+    holdout,
+    regression,
+    integrity,
+    tournament,
+  } = {}) {
+    this.#assertRunning();
+    const id = String(candidate_id || '').trim().toLowerCase();
+    if (this.#findExternalEvaluationBundleByCandidate(id)) {
+      throw new Error('rsi_runtime_external_evaluation_already_recorded');
+    }
+    const verifiedMaterialization = this.#findVerifiedMaterializationByCandidate(id);
+    if (!verifiedMaterialization) throw new Error('rsi_runtime_verified_materialization_not_persisted');
+    const bundle = createRsiExternalEvaluationBundle({
+      verified_materialization: verifiedMaterialization,
+      candidate_handoff,
+      evaluator_receipts,
+      holdout,
+      regression,
+      integrity,
+      tournament,
+    });
+    verifyRsiExternalEvaluationBundle(bundle);
+    const trustRootSetDigest = digest(this.#roots);
+    const events = bundle.evidence_classes.map((row) => this.#episodes.prepareEvidence({
+      episode_id: bundle.episode_id,
+      candidate_id: bundle.candidate_id,
+      evidence_id: row.evidence_id,
+      evidence_kind: row.evidence_kind,
+      evidence_digest: row.evidence_digest,
+      result: row.result,
+      source_sha: this.#sourceSha,
+      trust_root_set_digest: trustRootSetDigest,
+      ambiguous_effect: false,
+    }));
+    await this.#ledger.append('RSI_EXTERNAL_EVALUATION_EVIDENCE_RECORDED', {
+      external_evaluation_bundle: bundle,
+      episode_events: events,
+      durable_before_episode_apply: true,
+      candidate_can_self_certify: false,
+      direct_promotion_enabled: false,
+      authority_effect: false,
+    });
+    let episode = null;
+    for (const event of events) episode = this.#episodes.apply(event);
+    this.#externalEvaluationBundleCount += 1;
+    this.#lastExternalEvaluationBundleDigest = bundle.bundle_digest;
+    return Object.freeze({
+      bundle,
+      episode,
+      nomination_readiness: this.#episodes.nominationReadiness({
+        episode_id: bundle.episode_id,
+        candidate_id: bundle.candidate_id,
+      }),
+    });
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -942,6 +1043,18 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      external_evaluation: Object.freeze({
+        bundle_count: this.#externalEvaluationBundleCount,
+        last_bundle_digest: this.#lastExternalEvaluationBundleDigest,
+        required_evidence_kinds: ['HARD_INVARIANTS','OBJECTIVES','HOLDOUT','REGRESSION_REPLAY','EVALUATION_INTEGRITY','TOURNAMENT'],
+        durable_before_episode_apply: true,
+        candidate_can_self_certify: false,
+        direct_promotion_enabled: false,
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       verified_candidate_materialization: Object.freeze({
         count: this.#verifiedCandidateMaterializationCount,
         last_digest: this.#lastVerifiedCandidateMaterializationDigest,
