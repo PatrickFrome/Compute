@@ -474,7 +474,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           started_at: base?.started_at || null,
           last_error: base?.last_error || null,
           supervisor_lifecycle: base?.lifecycle ? buildSupervisorLifecycleStatusSnapshot(base.lifecycle) : null,
-          ...(supervisorMesh ? { supervisor_mesh: supervisorMesh } : {}),
+          // P1-2 multi-writer repair: always present; explicit null when the
+          // mesh is not running so the per-plane server merge clears it
+          // instead of preserving a stale projection.
+          supervisor_mesh: supervisorMesh,
           self_update: base?.self_update || null,
           realtime_process_plane: processPlane,
           control_latency: this.#controlLatencySnapshot?.() || null,
