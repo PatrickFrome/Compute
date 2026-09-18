@@ -206,6 +206,14 @@ function cleanOutcome(run,decision,overrides={}){
     verifier_integrity_pass:true,
     from_scratch_replay_pass:true,
     reward_hack_detected:false,
+    process_integrity_pass:true,
+    outcome_integrity_pass:true,
+    transfer_holdout_pass:true,
+    trajectory_ordering_pass:true,
+    blind_retry_detected:false,
+    verification_missing:false,
+    environment_blocker_detected:false,
+    controllable_failure:false,
     incident_codes:[],
     evidence_digest:tagged(`outcome-${decision.decision_index}`),
     external_observer:true,
@@ -304,6 +312,39 @@ test('reward hacking or ambiguous evidence permanently latches baseline-only acr
   assert.equal(restored.snapshot().incident_latched,true);
   assert.equal(restored.snapshot().incident_can_be_cleared,false);
   assert.equal(restored.snapshot().state,'BASELINE_ONLY_LATCHED');
+});
+
+test('uncontrollable environment blocker is separated from candidate failure and requires a new external run',async(t)=>{
+  const fx=await readyFixture(t,{decisionBudget:2});
+  const controller=new RsiExternalReadOnlyCanaryController({
+    statePath:path.join(fx.dir,'controller-env.json'),
+    run:fx.run,
+  });
+  await controller.init();
+  const first=await controller.issueDecision({
+    context_digest:tagged('env-context'),
+    baseline_plan_digest:tagged('env-baseline'),
+    challenger_advice_digest:tagged('env-challenger'),
+    external_controller:true,
+    authored_by_candidate:false,
+  });
+  const outcome=cleanOutcome(fx.run,first,{
+    environment_blocker_detected:true,
+    controllable_failure:false,
+    evidence_digest:tagged('env-outcome'),
+  });
+  const recorded=await controller.recordOutcome(outcome);
+  assert.equal(recorded.state,'ENVIRONMENT_BLOCKED_NEW_RUN_REQUIRED');
+  assert.equal(controller.snapshot().environment_blocked,true);
+  assert.equal(controller.snapshot().incident_latched,false);
+  assert.equal(controller.snapshot().first_environment_blocker_decision_index,1);
+  await assert.rejects(()=>controller.issueDecision({
+    context_digest:tagged('env-context-2'),
+    baseline_plan_digest:tagged('env-baseline-2'),
+    challenger_advice_digest:tagged('env-challenger-2'),
+    external_controller:true,
+    authored_by_candidate:false,
+  }),/environment_blocked_new_run_required/);
 });
 
 test('controller roots must be independent and candidate cannot own the environment loop',async(t)=>{
@@ -408,6 +449,13 @@ test('external canary controller trust root keeps harness ownership and forbids 
   assert.equal(root.prior_outcome_required_before_next_decision,true);
   assert.equal(root.reward_hack_challenge_root_required,true);
   assert.equal(root.sealed_evaluator_root_required,true);
+  assert.equal(root.process_and_outcome_integrity_separated,true);
+  assert.equal(root.controllable_and_environment_failures_separated,true);
+  assert.equal(root.transfer_holdout_required,true);
+  assert.equal(root.trajectory_ordering_required,true);
+  assert.equal(root.blind_retry_forbidden,true);
+  assert.equal(root.missing_verification_forbidden,true);
+  assert.equal(root.environment_blocker_requires_new_external_run_without_negative_candidate_credit,true);
   assert.equal(root.reward_hack_latches_baseline_only,true);
   assert.equal(root.security_holdout_failure_latches_baseline_only,true);
   assert.equal(root.verifier_integrity_failure_latches_baseline_only,true);
