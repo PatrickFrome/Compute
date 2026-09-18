@@ -120,6 +120,11 @@ import {
   verifyRsiSelfUpdateDownloadReadiness,
   rsiSelfUpdateDownloadReadinessTrustRootSnapshot,
 } from './rsi-self-update-download-readiness.mjs';
+import {
+  createRsiSelfUpdateRestartGateProbeAdmission,
+  verifyRsiSelfUpdateRestartGateProbeAdmission,
+  rsiSelfUpdateRestartGateProbeTrustRootSnapshot,
+} from './rsi-self-update-restart-gate-probe-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -138,6 +143,7 @@ const MAX_RELEASE_PROMOTION_JOURNAL_INTENTS = 128;
 const MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS = 128;
 const MAX_SELF_UPDATE_CHECK_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_DOWNLOAD_READINESS = 128;
+const MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -221,6 +227,7 @@ function trustRoots() {
     self_update_eligibility_review: rsiSelfUpdateEligibilityReviewTrustRootSnapshot(),
     self_update_check_admission: rsiSelfUpdateCheckAdmissionTrustRootSnapshot(),
     self_update_download_readiness: rsiSelfUpdateDownloadReadinessTrustRootSnapshot(),
+    self_update_restart_gate_probe: rsiSelfUpdateRestartGateProbeTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -284,6 +291,8 @@ export class RsiRuntimeService {
   #lastSelfUpdateCheckAdmissionDigest = null;
   #selfUpdateDownloadReadinessDigests = new Set();
   #lastSelfUpdateDownloadReadinessDigest = null;
+  #selfUpdateRestartGateProbeDigests = new Set();
+  #lastSelfUpdateRestartGateProbeDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -428,6 +437,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateDownloadReadinessDigests.add(readiness.readiness_digest);
           this.#lastSelfUpdateDownloadReadinessDigest = readiness.readiness_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSION_READY' && row?.payload?.restart_gate_probe_admission) {
+          const admission = verifyRsiSelfUpdateRestartGateProbeAdmission(row.payload.restart_gate_probe_admission);
+          if (this.#selfUpdateRestartGateProbeDigests.size >= MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS) {
+            throw new Error('rsi_runtime_restart_gate_probe_admission_replay_capacity_exhausted');
+          }
+          this.#selfUpdateRestartGateProbeDigests.add(admission.probe_admission_digest);
+          this.#lastSelfUpdateRestartGateProbeDigest = admission.probe_admission_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1711,6 +1728,47 @@ export class RsiRuntimeService {
     return Object.freeze({ readiness, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateRestartGateProbeAdmission({
+    download_readiness,
+    fresh_runtime_snapshot,
+    prior_transaction = null,
+    observed_at,
+    observer_id,
+  } = {}) {
+    this.#assertRunning();
+    const readiness = verifyRsiSelfUpdateDownloadReadiness(download_readiness);
+    if (!this.#selfUpdateDownloadReadinessDigests.has(readiness.readiness_digest)) {
+      throw new Error('rsi_runtime_self_update_download_readiness_not_persisted');
+    }
+    const admission = createRsiSelfUpdateRestartGateProbeAdmission({
+      download_readiness: readiness,
+      fresh_runtime_snapshot,
+      prior_transaction,
+      observed_at,
+      observer_id,
+    });
+    verifyRsiSelfUpdateRestartGateProbeAdmission(admission);
+    if (this.#selfUpdateRestartGateProbeDigests.has(admission.probe_admission_digest)) {
+      return Object.freeze({ admission, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateRestartGateProbeDigests.size >= MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS) {
+      throw new Error('rsi_runtime_restart_gate_probe_admission_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSION_READY', {
+      restart_gate_probe_admission: admission,
+      external_self_update_controller_required: true,
+      probe_cycle_invoked: false,
+      probe_cycle_authorized_by_rsi: false,
+      second_cycle_authorized: false,
+      installer_launch_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateRestartGateProbeDigests.add(admission.probe_admission_digest);
+    this.#lastSelfUpdateRestartGateProbeDigest = admission.probe_admission_digest;
+    return Object.freeze({ admission, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1973,6 +2031,23 @@ export class RsiRuntimeService {
         host_resilience_recheck_required: true,
         apply_cycle_invoked: false,
         apply_cycle_authorized_by_rsi: false,
+        installer_launch_authorized: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_restart_gate_probe: Object.freeze({
+        count: this.#selfUpdateRestartGateProbeDigests.size,
+        capacity: MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS,
+        last_digest: this.#lastSelfUpdateRestartGateProbeDigest,
+        precondition_ready_restart: true,
+        precondition_restart_gate_clear: true,
+        single_probe_cycle_only: true,
+        first_cycle_must_not_launch_installer: true,
+        post_probe_readback_required: true,
+        external_self_update_controller_required: true,
+        probe_cycle_invoked: false,
+        probe_cycle_authorized_by_rsi: false,
+        second_cycle_authorized: false,
         installer_launch_authorized: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
