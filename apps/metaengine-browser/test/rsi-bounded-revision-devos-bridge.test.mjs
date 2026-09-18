@@ -23,6 +23,7 @@ import {
   verifyRsiBoundedRevisionDevosBridge,
   createRsiBoundedRevisionArtifactReceipt,
   verifyRsiBoundedRevisionArtifactReceipt,
+  rsiBoundedRevisionDevosBridgeTrustRootSnapshot,
 } from '../src/rsi-bounded-revision-devos-bridge.mjs';
 import {
   RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA,
@@ -559,4 +560,28 @@ test('Phase28 provenance receipt rejects candidate self-attestation and non-herm
   assert.throws(()=>createRsiBoundedRevisionArtifactReceipt({
     ...common,hermetic_build:false,network_denied:true,external_attestor:true,authored_by_candidate:false,
   }),/build_isolation_required/);
+});
+
+
+test('Phase28 bridge trust root freezes provenance and authority boundaries',()=>{
+  const root=rsiBoundedRevisionDevosBridgeTrustRootSnapshot();
+  assert.equal(root.existing_devos_scheduler_only,true);
+  assert.equal(root.existing_isolated_candidate_builder_only,true);
+  assert.equal(root.second_scheduler_allowed,false);
+  assert.equal(root.second_builder_allowed,false);
+  assert.equal(root.exact_phase27_envelope_required,true);
+  assert.equal(root.approved_mutation_manifest_required,true);
+  assert.equal(root.protected_policy_roots_immutable,true);
+  assert.equal(root.network_deny_by_default_required,true);
+  assert.equal(root.provenance_predicate_type,'https://slsa.dev/provenance/v1');
+  assert.equal(root.external_provenance_attestation_required,true);
+  assert.equal(root.transparency_log_inclusion_required,true);
+  assert.equal(root.candidate_self_attestation_allowed,false);
+  assert.equal(root.workspace_generation_binding_required,true);
+  assert.equal(root.lease_generation_binding_required,true);
+  assert.equal(root.fresh_paired_evaluation_required,true);
+  assert.equal(root.direct_active_replacement_allowed,false);
+  assert.equal(root.direct_promotion_allowed,false);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.bridge_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
