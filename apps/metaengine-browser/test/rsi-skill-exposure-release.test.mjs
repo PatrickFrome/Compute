@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,8 @@ import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 
 const SOURCE='a'.repeat(40);
 const d=(c)=>`sha256:${c.repeat(64)}`;
+function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
+function stateDigest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
 
 function verifiedSkill({id,sourceChar,implChar}){
   const capsule=createRsiSkillCapsule({
@@ -161,6 +164,40 @@ test('Phase36 runtime releases exactly one held skill into exploration without f
   assert.equal(duplicate.attempt_state,'CONFIRMED');
   assert.equal(duplicate.retrieval_exposure_changed,true);
   assert.equal(fx.runtime.verifiedSkillStateReadback().governance_digest,preview.next_governance_digest);
+});
+
+test('Phase36 ambiguous release is reconciled from hold/governance readback without replay',async(t)=>{
+  const fx=await heldRuntime(t,'reconcile');
+  const before=fx.runtime.verifiedSkillStateReadback();
+  const preview=fx.runtime.previewVerifiedSkillExposureRelease({skill_digest:fx.second.capsule.skill_digest}).preview;
+  const args=certificateArgs({library:before.library,currentGovernance:before.governance,preview,skillDigest:fx.second.capsule.skill_digest,label:'reconcile'});
+  const cert=createRsiSkillExposureReleaseCertificate(args);
+  await fx.runtime.applySkillExposureRelease({
+    attempt_id:'phase36.exposure.release.reconcile.1',certificate:cert,certificate_args:args,
+  });
+
+  const statePath=path.join(fx.dir,'runtime.jsonl.skill-lifecycle.json');
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  persisted.exposure_release_attempts[0].state='ATTEMPT_STARTED';
+  persisted.exposure_release_attempts[0].confirmed_at=null;
+  delete persisted.state_digest;
+  persisted.state_digest=stateDigest(persisted);
+  await fs.writeFile(statePath,JSON.stringify(persisted),'utf8');
+
+  const restored=new RsiRuntimeService({source_sha:SOURCE,ledgerPath:path.join(fx.dir,'runtime.jsonl'),clock:()=>1_800_000_000_500});
+  await restored.start();
+  await assert.rejects(()=>restored.applySkillExposureRelease({
+    attempt_id:'phase36.exposure.release.reconcile.1',certificate:cert,certificate_args:args,
+  }),/ambiguous_reconcile_required/);
+  const reconciled=await restored.reconcileSkillExposureRelease({
+    attempt_id:'phase36.exposure.release.reconcile.1',
+    release_certificate_digest:cert.certificate_digest,
+  });
+  assert.equal(reconciled.state,'CONFIRMED_BY_READBACK');
+  assert.equal(reconciled.retry_performed,false);
+  assert.equal(reconciled.automatic_retry_allowed,false);
+  assert.equal(reconciled.retrieval_exposure_changed,true);
+  assert.equal(restored.verifiedSkillStateReadback().governance_digest,preview.next_governance_digest);
 });
 
 test('Phase36 preview refuses unheld skills and certificate requires reviewer separation of duties',async(t)=>{
