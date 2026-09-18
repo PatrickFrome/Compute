@@ -295,8 +295,6 @@ export function createRsiExternalCanaryDecision({
   }
   if (checkedRun.state !== 'READY') throw new Error('rsi_canary_controller_run_not_ready');
   const index = positiveInt(decision_index, 'decision_index', checkedRun.decision_budget);
-  if (index !== checkedRun.completed_decisions + 1) throw new Error('rsi_canary_controller_decision_sequence_invalid');
-  if (checkedRun.pending_decision_index !== null) throw new Error('rsi_canary_controller_prior_outcome_required');
   const core = zero({
     schema: RSI_EXTERNAL_CANARY_DECISION_SCHEMA,
     version: 1,
@@ -515,16 +513,8 @@ export class RsiExternalReadOnlyCanaryController {
     if (state.incident_latched) throw new Error('rsi_canary_controller_baseline_only_latched');
     if (state.pending_decision_index !== null) throw new Error('rsi_canary_controller_prior_outcome_required');
     if (state.completed_decisions >= this.#run.decision_budget) throw new Error('rsi_canary_controller_budget_exhausted');
-    const runForDecision = {
-      ...this.#run,
-      state: 'READY',
-      completed_decisions: state.completed_decisions,
-      pending_decision_index: null,
-    };
-    delete runForDecision.run_digest;
-    const normalizedRun = Object.freeze({ ...runForDecision, run_digest: digest(runForDecision) });
     const decision = createRsiExternalCanaryDecision({
-      run: normalizedRun,
+      run: this.#run,
       decision_index: state.completed_decisions + 1,
       context_digest,
       baseline_plan_digest,
