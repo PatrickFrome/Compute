@@ -131,6 +131,32 @@ export function createRsiRuntimeSkillAdvisory({
   return Object.freeze({...core,advisory_digest:digest(core)});
 }
 
+export function verifyBoundRsiRuntimeSkillAdvisory(row){
+  if(!row||typeof row!=='object'||Array.isArray(row)||row.schema!==RSI_RUNTIME_SKILL_ADVISORY_SCHEMA||row.version!==1){
+    throw new Error('rsi_runtime_skill_advisory_invalid');
+  }
+  zeroAuthority(row,'advisory');
+  if(
+    row.runtime_use_mode!=='ADVISORY_CONTEXT_ONLY'
+    ||row.raw_skill_implementation_exposed!==false
+    ||row.raw_trajectory_exposed!==false
+    ||row.raw_model_transcript_exposed!==false
+    ||row.direct_tool_execution_allowed!==false
+    ||row.browser_actuation_allowed!==false
+    ||row.scheduler_dispatch_allowed!==false
+    ||row.skill_may_write_library!==false
+    ||row.skill_may_change_governance!==false
+    ||row.skill_may_self_update!==false
+    ||row.activation_view_is_execution_authority!==false
+    ||row.external_planner!==true
+    ||row.authored_by_candidate!==false
+  )throw new Error('rsi_runtime_skill_advisory_policy_invalid');
+  const clone=structuredClone(row);
+  delete clone.advisory_digest;
+  if(row.advisory_digest!==digest(clone))throw new Error('rsi_runtime_skill_advisory_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
 export function verifyRsiRuntimeSkillAdvisory(row,inputs={}){
   if(!row||typeof row!=='object'||Array.isArray(row)||row.schema!==RSI_RUNTIME_SKILL_ADVISORY_SCHEMA||row.version!==1){
     throw new Error('rsi_runtime_skill_advisory_invalid');
