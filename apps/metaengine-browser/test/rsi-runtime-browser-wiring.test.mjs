@@ -5,6 +5,8 @@ import test from 'node:test';
 const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const runtime = await fs.readFile(new URL('../src/rsi-runtime-service.mjs', import.meta.url), 'utf8');
 const ledger = await fs.readFile(new URL('../src/rsi-runtime-ledger.mjs', import.meta.url), 'utf8');
+const sidecar = await fs.readFile(new URL('../src/rsi-runtime-observation-sidecar.mjs', import.meta.url), 'utf8');
+const supervisor = await fs.readFile(new URL('../src/native-supervisor-client.mjs', import.meta.url), 'utf8');
 
 test('Browser lifecycle starts RSI only after exact Development Plane source binding', () => {
   assert.match(main, /import \{ RsiRuntimeService \} from '\.\/rsi-runtime-service\.mjs'/);
@@ -37,4 +39,23 @@ test('durable RSI ledger rejects authority-bearing and sensitive payloads', () =
   assert.match(ledger, /handle\.sync\(\)/);
   assert.match(ledger, /hash_chained: true/);
   assert.match(ledger, /automatic_retry_allowed: false/);
+});
+
+
+test('Browser binds RSI observation to the existing Brain cadence and quit durability path', () => {
+  assert.match(main, /RsiRuntimeObservationSidecar/);
+  assert.match(main, /runtimeProvider: \(\) => rsiRuntime/);
+  assert.match(main, /onBrainWorkingMemory: \(snapshot\) =>/);
+  assert.match(main, /rsiObservationSidecar\.submit\(snapshot\)/);
+  assert.match(main, /flushBrainWorkingMemory: async \(\) =>/);
+  assert.match(main, /rsiObservationSidecar\.flush\(\)/);
+  assert.doesNotMatch(main, /rsiRuntime = null;/);
+  assert.match(supervisor, /onBrainSnapshot: this\.#brainObservationSink/);
+  assert.match(supervisor, /await this\.#brainObservationFlush\?\.\(\)/);
+  assert.match(supervisor, /await options\.flushBrainWorkingMemory\?\.\(\)/);
+  assert.match(sidecar, /queueMicrotask\(/);
+  assert.match(sidecar, /max_pending_snapshots: 1/);
+  assert.match(sidecar, /independent_timer: false/);
+  assert.match(sidecar, /second_scheduler: false/);
+  assert.doesNotMatch(sidecar, /setInterval|setTimeout/);
 });
