@@ -84,6 +84,11 @@ import {
 } from './rsi-context-aware-candidate-synthesis.mjs';
 import { createRsiDevosMaterializationHandoff, admitRsiDevosMaterialization, rsiDevosMaterializationTrustRootSnapshot } from './rsi-devos-materialization-handoff.mjs';
 import { createRsiVerifiedCandidateMaterialization, rsiVerifiedCandidateMaterializationTrustRootSnapshot } from './rsi-verified-candidate-materialization.mjs';
+import {
+  createRsiEpisodePromotionReview,
+  verifyRsiEpisodePromotionReview,
+  rsiEpisodePromotionReviewTrustRootSnapshot,
+} from './rsi-episode-promotion-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -95,6 +100,7 @@ const MAX_HARNESS_EVIDENCE_DIGESTS = 1024;
 const MAX_VERIFIED_SEARCH_FEEDBACK = 512;
 const PREFIXED_SHA256 = /^sha256:[0-9a-f]{64}$/;
 const MAX_PENDING_LEARNING_OUTCOMES = 4096;
+const MAX_EPISODE_PROMOTION_REVIEWS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -171,6 +177,7 @@ function trustRoots() {
     context_aware_candidate: rsiContextAwareCandidateTrustRootSnapshot(),
     devos_materialization: rsiDevosMaterializationTrustRootSnapshot(),
     verified_candidate_materialization: rsiVerifiedCandidateMaterializationTrustRootSnapshot(),
+    episode_promotion_review: rsiEpisodePromotionReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -220,6 +227,8 @@ export class RsiRuntimeService {
   #lastMaterializationAdmissionDigest = null;
   #verifiedCandidateMaterializationCount = 0;
   #lastVerifiedCandidateMaterializationDigest = null;
+  #episodePromotionReviewDigests = new Set();
+  #lastEpisodePromotionReviewDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -308,6 +317,14 @@ export class RsiRuntimeService {
         if (row?.payload?.verified_candidate_materialization) {
           this.#verifiedCandidateMaterializationCount += 1;
           this.#lastVerifiedCandidateMaterializationDigest = row.payload.verified_candidate_materialization.verified_materialization_digest || null;
+        }
+        if (row?.type === 'RSI_EPISODE_PROMOTION_REVIEW_READY' && row?.payload?.review_digest) {
+          if (this.#episodePromotionReviewDigests.size >= MAX_EPISODE_PROMOTION_REVIEWS) {
+            throw new Error('rsi_runtime_episode_promotion_review_replay_capacity_exhausted');
+          }
+          const reviewDigest = exactPrefixedDigest(row.payload.review_digest, 'episode_promotion_review_digest');
+          this.#episodePromotionReviewDigests.add(reviewDigest);
+          this.#lastEpisodePromotionReviewDigest = reviewDigest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1284,6 +1301,62 @@ export class RsiRuntimeService {
     return admission;
   }
 
+  async prepareEpisodePromotionReview({
+    episode_id,
+    candidate_id,
+    evaluation_bundle,
+    candidate_handoff,
+    tournament_plan,
+    tournament_result,
+    archive_admission,
+    qualification,
+    risk_confirmation,
+  } = {}) {
+    this.#assertRunning();
+    const readiness = this.#episodes.nominationReadiness({ episode_id, candidate_id });
+    const review = createRsiEpisodePromotionReview({
+      episode_readiness: readiness,
+      evaluation_bundle,
+      candidate_handoff,
+      tournament_plan,
+      tournament_result,
+      archive_admission,
+      qualification,
+      risk_confirmation,
+    });
+    verifyRsiEpisodePromotionReview(review);
+    const reviewDigest = exactPrefixedDigest(review.review_digest, 'episode_promotion_review_digest');
+    if (this.#episodePromotionReviewDigests.has(reviewDigest)) return review;
+    if (this.#episodePromotionReviewDigests.size >= MAX_EPISODE_PROMOTION_REVIEWS) {
+      throw new Error('rsi_runtime_episode_promotion_review_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_EPISODE_PROMOTION_REVIEW_READY', {
+      episode_id: review.episode_id,
+      candidate_id: review.candidate_id,
+      candidate_sha: review.candidate_sha,
+      parent_sha: review.parent_sha,
+      review_digest: review.review_digest,
+      evaluation_bundle_digest: review.evaluation_bundle_digest,
+      promotion_gate_digest: review.promotion_gate_digest,
+      risk_review_digest: review.risk_review_digest,
+      risk_confirmation_digest: review.risk_confirmation_digest,
+      artifact_digest: review.artifact_digest,
+      provenance_digest: review.provenance_digest,
+      rollback: review.rollback,
+      external_release_handoff_review_required: true,
+      release_handoff_authorized: false,
+      direct_install_authorized: false,
+      direct_promotion_authorized: false,
+      existing_self_update_handoff_authorized: false,
+      promotion_token: null,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#episodePromotionReviewDigests.add(reviewDigest);
+    this.#lastEpisodePromotionReviewDigest = reviewDigest;
+    return review;
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1430,6 +1503,19 @@ export class RsiRuntimeService {
         execution_authority: false,
         promotion_authority: false,
         self_update_authority: false,
+        authority_effect: false,
+      }),
+      episode_promotion_review: Object.freeze({
+        count: this.#episodePromotionReviewDigests.size,
+        capacity: MAX_EPISODE_PROMOTION_REVIEWS,
+        last_digest: this.#lastEpisodePromotionReviewDigest,
+        external_release_handoff_review_required: true,
+        release_handoff_authorized: false,
+        direct_install_authorized: false,
+        direct_promotion_authorized: false,
+        self_update_authority: false,
+        promotion_token_minted: false,
+        physical_effect_replay_allowed: false,
         authority_effect: false,
       }),
       devos_materialization: Object.freeze({
