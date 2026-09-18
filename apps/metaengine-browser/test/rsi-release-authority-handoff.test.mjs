@@ -42,6 +42,13 @@ import {
   verifyRsiReleaseEffectReconciliation,
   rsiReleaseEffectReconciliationTrustRootSnapshot,
 } from '../src/rsi-release-effect-reconciliation.mjs';
+import {
+  createRsiExternalReleaseAuthorityReadback,
+  verifyRsiExternalReleaseAuthorityReadback,
+  createRsiReleaseAuthorityConvergence,
+  verifyRsiReleaseAuthorityConvergence,
+  rsiReleaseAuthorityConvergenceTrustRootSnapshot,
+} from '../src/rsi-release-authority-convergence.mjs';
 
 const PARENT='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -712,4 +719,193 @@ test('release effect reconciliation root encodes at-most-once no-retry semantics
   assert.equal(root.retry_authorized,false);
   assert.equal(root.ambiguous_effect_replay_allowed,false);
   assert.equal(root.external_release_authority_convergence_required_after_confirmed_success,true);
+});
+
+
+function confirmedReconciliationFixture(){
+  const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
+  const command=createRsiReleaseEffectCommandReadback({
+    verifier_id:'native-command-reconciler-1',
+    observed_at:'2026-09-18T18:14:05.000Z',
+    workspace_id:admission.workspace_id,
+    command_id:admission.command_id,
+    leased_by:admission.leased_by,
+    action:'SELF_UPDATE_APPLY',
+    status:'EXPIRED',
+    idempotency_key:admission.idempotency_key,
+    command_lane:'GLOBAL_MUTATION',
+    effect_key:'global:control-plane',
+    leased_at:admission.leased_at,
+    expires_at:admission.expires_at,
+    completed_at:'2026-09-18T18:14:01.000Z',
+    receipt:null,
+    error:'lease_timeout_no_retry',
+    command_row_authority_effect:false,
+    db_row_externally_verified:true,
+  });
+  const tx=transactionRow(releaseHandoff,{state:'QUALIFIED',effect:true});
+  const transaction=createRsiSelfUpdateTransactionReadback({
+    verifier_id:'journal-reconciler-1',
+    observed_at:'2026-09-18T18:14:05.000Z',
+    transaction_present:true,
+    transaction:tx,
+    filesystem_read_verified:true,
+  });
+  const successor=createRsiSuccessorRuntimeReadback({
+    verifier_id:'successor-runtime-verifier-1',
+    observed_at:'2026-09-18T18:14:06.000Z',
+    transaction_id:tx.transaction_id,
+    running_version:releaseHandoff.trusted_release.version,
+    running_git_sha:CANDIDATE,
+    installed_executable_sha256:releaseHandoff.trusted_release.installed_executable_sha256,
+    browser_generation:29,
+    successor_qualification_state:'QUALIFIED',
+    exact_runtime_identity:true,
+    installed_executable_hash_verified:true,
+    trusted_release_verified:true,
+    external_successor_verifier:true,
+  });
+  const reconciliation=createRsiReleaseEffectReconciliation({
+    executor_admission:admission,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    command_readback:command,
+    transaction_readback:transaction,
+    successor_runtime_readback:successor,
+    reconciled_at:'2026-09-18T18:14:07.000Z',
+  });
+  assert.equal(reconciliation.result,'CONFIRMED');
+  return {request,review,releaseHandoff,admission,reconciliation,successor};
+}
+
+function externalAuthorityReadback(releaseHandoff,successor,overrides={}){
+  return createRsiExternalReleaseAuthorityReadback({
+    verifier_id:'release-authority-observer-1',
+    observed_at:'2026-09-18T18:14:10.000Z',
+    authority_source_id:'release-authority-journal-v1',
+    authority_journal_ref:'release-journal:entry:0123456789abcdef',
+    authority_journal_digest:d('f'),
+    authority_sha:CANDIDATE,
+    release_version:releaseHandoff.trusted_release.version,
+    release_tag:releaseHandoff.trusted_release.tag,
+    installed_executable_sha256:releaseHandoff.trusted_release.installed_executable_sha256,
+    browser_generation:successor.browser_generation,
+    authoritative_source_readback:true,
+    journal_append_verified:true,
+    external_release_authority_verified:true,
+    ...overrides,
+  });
+}
+
+test('confirmed physical successor converges only after exact external release-authority journal readback',()=>{
+  const {request,review,releaseHandoff,reconciliation,successor}=confirmedReconciliationFixture();
+  const readback=externalAuthorityReadback(releaseHandoff,successor);
+  verifyRsiExternalReleaseAuthorityReadback(readback);
+  const row=createRsiReleaseAuthorityConvergence({
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    external_authority_readback:readback,
+    converged_at:'2026-09-18T18:14:12.000Z',
+  });
+  verifyRsiReleaseAuthorityConvergence(row);
+  assert.equal(row.state,'EXTERNAL_RELEASE_AUTHORITY_CONVERGED');
+  assert.equal(row.physical_successor_exact,true);
+  assert.equal(row.external_authority_exact,true);
+  assert.equal(row.source_and_physical_authority_converged,true);
+  assert.equal(row.convergence_is_observation_only,true);
+  assert.equal(row.authority_store_mutated_by_rsi,false);
+  assert.equal(row.release_authority_advanced_by_rsi,false);
+  assert.equal(row.self_update_effect_invoked_by_rsi,false);
+  assert.equal(row.rollback_effect_invoked_by_rsi,false);
+  assert.equal(row.post_deployment_learning_allowed_from_verified_outcome,true);
+  assert.equal(row.direct_release_or_install_action_allowed,false);
+  assert.equal(row.release_authority,false);
+});
+
+test('convergence fails on authority SHA, version, installed executable or generation drift',()=>{
+  const {request,review,releaseHandoff,reconciliation,successor}=confirmedReconciliationFixture();
+  for(const readback of [
+    externalAuthorityReadback(releaseHandoff,successor,{authority_sha:'f'.repeat(40)}),
+    externalAuthorityReadback(releaseHandoff,successor,{release_version:'0.7.0-dev.1000.1'}),
+    externalAuthorityReadback(releaseHandoff,successor,{installed_executable_sha256:hx('9')}),
+    externalAuthorityReadback(releaseHandoff,successor,{browser_generation:successor.browser_generation+1}),
+  ]){
+    assert.throws(()=>createRsiReleaseAuthorityConvergence({
+      release_effect_reconciliation:reconciliation,
+      release_handoff:releaseHandoff,
+      promotion_review_result:review,
+      promotion_review_request:request,
+      external_authority_readback:readback,
+      converged_at:'2026-09-18T18:14:12.000Z',
+    }),/authority_successor_mismatch/);
+  }
+});
+
+test('non-CONFIRMED physical outcome cannot be converted into release-authority convergence',()=>{
+  const {request,review,releaseHandoff,admission}=executorAdmissionFixture();
+  const ambiguous=createRsiReleaseEffectReconciliation({
+    executor_admission:admission,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    command_readback:postCommandReadback(admission),
+    transaction_readback:createRsiSelfUpdateTransactionReadback({
+      verifier_id:'journal-reconciler-1',
+      observed_at:'2026-09-18T18:13:00.000Z',
+      transaction_present:true,
+      transaction:transactionRow(releaseHandoff,{state:'INSTALLING',effect:true}),
+      filesystem_read_verified:true,
+    }),
+    successor_runtime_readback:null,
+    reconciled_at:'2026-09-18T18:13:02.000Z',
+  });
+  const fakeSuccessor={
+    browser_generation:29,
+  };
+  const readback=createRsiExternalReleaseAuthorityReadback({
+    verifier_id:'release-authority-observer-1',
+    observed_at:'2026-09-18T18:14:10.000Z',
+    authority_source_id:'release-authority-journal-v1',
+    authority_journal_ref:'release-journal:entry:0123456789abcdef',
+    authority_journal_digest:d('f'),
+    authority_sha:CANDIDATE,
+    release_version:releaseHandoff.trusted_release.version,
+    release_tag:releaseHandoff.trusted_release.tag,
+    installed_executable_sha256:releaseHandoff.trusted_release.installed_executable_sha256,
+    browser_generation:fakeSuccessor.browser_generation,
+    authoritative_source_readback:true,
+    journal_append_verified:true,
+    external_release_authority_verified:true,
+  });
+  assert.throws(()=>createRsiReleaseAuthorityConvergence({
+    release_effect_reconciliation:ambiguous,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    external_authority_readback:readback,
+    converged_at:'2026-09-18T18:14:12.000Z',
+  }),/confirmed_effect_required/);
+});
+
+test('release authority convergence trust root keeps authority mutation outside RSI',()=>{
+  const root=rsiReleaseAuthorityConvergenceTrustRootSnapshot();
+  assert.equal(root.confirmed_physical_effect_required,true);
+  assert.equal(root.exact_qualified_successor_required,true);
+  assert.equal(root.trusted_release_version_sha_and_installed_executable_required,true);
+  assert.equal(root.external_authority_source_readback_required,true);
+  assert.equal(root.external_authority_journal_append_proof_required,true);
+  assert.equal(root.successor_and_authority_browser_generation_exact,true);
+  assert.equal(root.page_or_model_output_is_authority,false);
+  assert.equal(root.convergence_is_observation_only,true);
+  assert.equal(root.no_new_release_authority_store_created,true);
+  assert.equal(root.authority_store_mutated_by_rsi,false);
+  assert.equal(root.release_authority_advanced_by_rsi,false);
+  assert.equal(root.post_deployment_learning_allowed_only_after_convergence,true);
+  assert.equal(root.direct_release_or_install_action_allowed,false);
+  assert.equal(root.effect_reexecution_authorized,false);
+  assert.equal(root.retry_authorized,false);
+  assert.equal(root.ambiguous_effect_replay_allowed,false);
 });

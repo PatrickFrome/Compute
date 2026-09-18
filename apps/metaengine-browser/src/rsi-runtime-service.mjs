@@ -54,6 +54,7 @@ import { createRsiExternalPromotionReviewRequest, finalizeRsiExternalPromotionRe
 import { createRsiReleaseAuthorityHandoff, verifyRsiReleaseAuthorityHandoff, rsiReleaseAuthorityHandoffTrustRootSnapshot } from './rsi-release-authority-handoff.mjs';
 import { createRsiReleaseExecutorAdmission, verifyRsiReleaseExecutorAdmission, rsiReleaseExecutorAdmissionTrustRootSnapshot } from './rsi-release-executor-admission.mjs';
 import { createRsiReleaseEffectReconciliation, verifyRsiReleaseEffectReconciliation, rsiReleaseEffectReconciliationTrustRootSnapshot } from './rsi-release-effect-reconciliation.mjs';
+import { createRsiReleaseAuthorityConvergence, verifyRsiReleaseAuthorityConvergence, rsiReleaseAuthorityConvergenceTrustRootSnapshot } from './rsi-release-authority-convergence.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -132,6 +133,7 @@ function trustRoots() {
     release_authority_handoff: rsiReleaseAuthorityHandoffTrustRootSnapshot(),
     release_executor_admission: rsiReleaseExecutorAdmissionTrustRootSnapshot(),
     release_effect_reconciliation: rsiReleaseEffectReconciliationTrustRootSnapshot(),
+    release_authority_convergence: rsiReleaseAuthorityConvergenceTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -192,6 +194,9 @@ export class RsiRuntimeService {
   #releaseEffectReconciliationCount = 0;
   #lastReleaseEffectReconciliationDigest = null;
   #lastReleaseEffectOutcome = null;
+  #releaseAuthorityConvergenceCount = 0;
+  #lastReleaseAuthorityConvergenceDigest = null;
+  #lastConvergedReleaseSha = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -556,6 +561,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const reconciliation = row?.payload?.release_effect_reconciliation;
         if (reconciliation?.executor_admission_digest === wanted) found = Object.freeze(structuredClone(reconciliation));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseEffectReconciliationByDigest(reconciliationDigest) {
+    const wanted = String(reconciliationDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const reconciliation = row?.payload?.release_effect_reconciliation;
+        if (reconciliation?.reconciliation_digest === wanted) found = Object.freeze(structuredClone(reconciliation));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseAuthorityConvergenceByReconciliation(reconciliationDigest) {
+    const wanted = String(reconciliationDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const convergence = row?.payload?.release_authority_convergence;
+        if (convergence?.release_effect_reconciliation_digest === wanted) found = Object.freeze(structuredClone(convergence));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -1187,6 +1226,52 @@ export class RsiRuntimeService {
     return reconciliation;
   }
 
+  async recordReleaseAuthorityConvergence({
+    release_effect_reconciliation_digest,
+    external_authority_readback,
+    converged_at,
+  } = {}) {
+    this.#assertRunning();
+    const reconciliationDigest = String(release_effect_reconciliation_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(reconciliationDigest)) throw new Error('rsi_runtime_release_reconciliation_digest_invalid');
+    if (this.#findReleaseAuthorityConvergenceByReconciliation(reconciliationDigest)) {
+      throw new Error('rsi_runtime_release_authority_convergence_already_recorded');
+    }
+    const reconciliation = this.#findReleaseEffectReconciliationByDigest(reconciliationDigest);
+    if (!reconciliation) throw new Error('rsi_runtime_release_effect_reconciliation_not_persisted');
+    verifyRsiReleaseEffectReconciliation(reconciliation);
+    if (reconciliation.result !== 'CONFIRMED') throw new Error('rsi_runtime_confirmed_release_effect_required');
+    const releaseHandoff = this.#findReleaseAuthorityHandoffByDigest(reconciliation.release_handoff_digest);
+    if (!releaseHandoff) throw new Error('rsi_runtime_release_authority_handoff_not_persisted');
+    const review = this.#findExternalPromotionReviewByResultDigest(releaseHandoff.promotion_review_result_digest);
+    if (!review) throw new Error('rsi_runtime_external_promotion_review_result_not_persisted');
+    verifyRsiExternalPromotionReviewResult(review.result, review.request);
+    verifyRsiReleaseAuthorityHandoff(releaseHandoff, review.result, review.request);
+    const convergence = createRsiReleaseAuthorityConvergence({
+      release_effect_reconciliation: reconciliation,
+      release_handoff: releaseHandoff,
+      promotion_review_result: review.result,
+      promotion_review_request: review.request,
+      external_authority_readback,
+      converged_at,
+    });
+    verifyRsiReleaseAuthorityConvergence(convergence);
+    await this.#ledger.append('RSI_RELEASE_AUTHORITY_CONVERGENCE_RECORDED', {
+      release_authority_convergence: convergence,
+      convergence_is_observation_only: true,
+      authority_store_mutated_by_rsi: false,
+      release_authority_advanced_by_rsi: false,
+      self_update_effect_invoked_by_rsi: false,
+      rollback_effect_invoked_by_rsi: false,
+      direct_release_or_install_action_allowed: false,
+      authority_effect: false,
+    });
+    this.#releaseAuthorityConvergenceCount += 1;
+    this.#lastReleaseAuthorityConvergenceDigest = convergence.convergence_digest;
+    this.#lastConvergedReleaseSha = convergence.candidate_sha;
+    return convergence;
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1484,6 +1569,25 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      release_authority_convergence: Object.freeze({
+        count: this.#releaseAuthorityConvergenceCount,
+        last_digest: this.#lastReleaseAuthorityConvergenceDigest,
+        last_converged_release_sha: this.#lastConvergedReleaseSha,
+        confirmed_physical_effect_required: true,
+        external_authority_journal_readback_required: true,
+        convergence_is_observation_only: true,
+        authority_store_mutated_by_rsi: false,
+        release_authority_advanced_by_rsi: false,
+        self_update_effect_invoked_by_rsi: false,
+        rollback_effect_invoked_by_rsi: false,
+        post_deployment_learning_allowed_only_after_convergence: true,
+        direct_release_or_install_action_allowed: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       release_effect_reconciliation: Object.freeze({
         count: this.#releaseEffectReconciliationCount,
         last_digest: this.#lastReleaseEffectReconciliationDigest,

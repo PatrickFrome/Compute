@@ -41,6 +41,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-release-authority-handoff.mjs',
   'apps/metaengine-browser/src/rsi-release-executor-admission.mjs',
   'apps/metaengine-browser/src/rsi-release-effect-reconciliation.mjs',
+  'apps/metaengine-browser/src/rsi-release-authority-convergence.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
   'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
