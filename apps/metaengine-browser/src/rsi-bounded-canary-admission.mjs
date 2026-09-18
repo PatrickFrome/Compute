@@ -316,7 +316,7 @@ export function verifyRsiBoundedCanaryAdmission(admission,{shadow_selection,shad
     throw new Error('rsi_canary_admission_policy_invalid');
   }
   const canonical=createRsiBoundedCanaryAdmission({
-    admission_id:admission.admission_id,
+    admission_id:checkedAdmission.admission_id,
     shadow_selection,
     shadow_evidence,
     fixed_cohort_digest:admission.fixed_cohort_digest,
@@ -324,10 +324,86 @@ export function verifyRsiBoundedCanaryAdmission(admission,{shadow_selection,shad
     external_admission_owner:true,
     authored_by_candidate:false,
   });
-  if(canonical.admission_digest!==exactDigest(admission.admission_digest,'admission')){
+  if(canonical.admission_digest!==exactDigest(checkedAdmission.admission_digest,'admission')){
     throw new Error('rsi_canary_admission_digest_mismatch');
   }
   return canonical;
+}
+
+function verifyStoredShadowEvidence(evidence){
+  if(!evidence||evidence.schema!==RSI_BOUNDED_CANARY_EVIDENCE_SCHEMA||evidence.version!==1){
+    throw new Error('rsi_canary_shadow_evidence_invalid');
+  }
+  assertZero(evidence,'shadow_evidence');
+  if(
+    evidence.external_observer!==true
+    ||evidence.authored_by_candidate!==false
+    ||evidence.evidence_is_activation_authority!==false
+    ||evidence.minimum_shadow_observations!==MIN_SHADOW_OBSERVATIONS
+  ){
+    throw new Error('rsi_canary_shadow_evidence_policy_invalid');
+  }
+  const total=positiveInt(evidence.shadow_observation_count,'observation_count');
+  const matched=nonNegativeInt(evidence.matched_count,'matched_count');
+  const diverged=nonNegativeInt(evidence.divergence_count,'divergence_count');
+  const ambiguous=nonNegativeInt(evidence.ambiguity_count,'ambiguity_count');
+  const incidents=nonNegativeInt(evidence.incident_count,'incident_count');
+  const hardFailures=nonNegativeInt(evidence.hard_invariant_violation_count,'hard_invariant_violation_count');
+  const identityDrift=nonNegativeInt(evidence.identity_drift_count,'identity_drift_count');
+  if(matched+diverged+ambiguous!==total)throw new Error('rsi_canary_shadow_counts_inconsistent');
+  const rollbackRequired=ambiguous>0||incidents>0||hardFailures>0||identityDrift>0;
+  if(evidence.rollback_required_latched!==rollbackRequired)throw new Error('rsi_canary_rollback_latch_mismatch');
+  if(evidence.identity_stable!==(identityDrift===0)||evidence.hard_invariants_pass!==(hardFailures===0)){
+    throw new Error('rsi_canary_shadow_evidence_status_mismatch');
+  }
+  const eligible=total>=MIN_SHADOW_OBSERVATIONS&&!rollbackRequired;
+  if(evidence.eligible_for_bounded_canary_admission!==eligible){
+    throw new Error('rsi_canary_shadow_evidence_eligibility_mismatch');
+  }
+  const clone=structuredClone(evidence);delete clone.evidence_digest;
+  if(digest(clone)!==exactDigest(evidence.evidence_digest,'shadow_evidence')){
+    throw new Error('rsi_canary_shadow_evidence_digest_mismatch');
+  }
+  return Object.freeze(structuredClone(evidence));
+}
+
+function verifyStoredAdmission(admission){
+  if(!admission||admission.schema!==RSI_BOUNDED_CANARY_ADMISSION_SCHEMA||admission.version!==1){
+    throw new Error('rsi_canary_admission_invalid');
+  }
+  assertZero(admission,'admission');
+  if(
+    admission.decision_budget!==MAX_READ_ONLY_DECISIONS
+    ||admission.canary_surface!=='READ_ONLY_DECISION_SUPPORT'
+    ||admission.incumbent_remains_default!==true
+    ||admission.incumbent_is_mandatory_fallback!==true
+    ||admission.challenger_may_only_supply_advisory_decision_support!==true
+    ||admission.canary_mutations_allowed!==false
+    ||admission.canary_browser_effects_allowed!==false
+    ||admission.canary_tool_execution_allowed!==false
+    ||admission.canary_profile_replacement_allowed!==false
+    ||admission.cohort_is_externally_fixed!==true
+    ||admission.candidate_can_choose_cohort!==false
+    ||admission.candidate_can_choose_budget!==false
+    ||admission.identity_drift_fails_closed!==true
+    ||admission.ambiguity_fails_closed!==true
+    ||admission.hard_invariant_failure_fails_closed!==true
+    ||admission.incident_fails_closed!==true
+    ||admission.rollback_required_is_terminal_for_this_admission!==true
+    ||admission.eligible_for_external_bounded_canary_handoff!==true
+    ||admission.canary_activation_authorized!==false
+    ||admission.live_profile_activation_authorized!==false
+    ||admission.external_activation_gate_still_required!==true
+    ||admission.external_admission_owner!==true
+    ||admission.authored_by_candidate!==false
+  ){
+    throw new Error('rsi_canary_admission_policy_invalid');
+  }
+  const clone=structuredClone(admission);delete clone.admission_digest;
+  if(digest(clone)!==exactDigest(checkedAdmission.admission_digest,'admission')){
+    throw new Error('rsi_canary_admission_digest_mismatch');
+  }
+  return Object.freeze(structuredClone(admission));
 }
 
 function ledgerState(sourceSha,rows){
@@ -393,18 +469,10 @@ export class RsiBoundedCanaryAdmissionLedger{
         if(!row.shadow_evidence||row.shadow_evidence.schema!==RSI_BOUNDED_CANARY_EVIDENCE_SCHEMA){
           throw new Error('rsi_canary_ledger_evidence_missing');
         }
-        assertZero(row.shadow_evidence,'shadow_evidence');
-        const evidenceClone=structuredClone(row.shadow_evidence);delete evidenceClone.evidence_digest;
-        if(digest(evidenceClone)!==exactDigest(row.shadow_evidence.evidence_digest,'shadow_evidence')){
-          throw new Error('rsi_canary_ledger_evidence_digest_mismatch');
-        }
+        verifyStoredShadowEvidence(row.shadow_evidence);
         if(row.admission!==null){
-          assertZero(row.admission,'admission');
-          const admissionClone=structuredClone(row.admission);delete admissionClone.admission_digest;
-          if(digest(admissionClone)!==exactDigest(row.admission.admission_digest,'admission')){
-            throw new Error('rsi_canary_ledger_admission_digest_mismatch');
-          }
-          if(row.admission.shadow_evidence_digest!==row.shadow_evidence.evidence_digest){
+          verifyStoredAdmission(row.admission);
+          if(row.checkedAdmission.shadow_evidence_digest!==row.checkedEvidence.evidence_digest){
             throw new Error('rsi_canary_ledger_evidence_binding_mismatch');
           }
         }
@@ -435,14 +503,14 @@ export class RsiBoundedCanaryAdmissionLedger{
     if(!shadow_evidence||shadow_evidence.schema!==RSI_BOUNDED_CANARY_EVIDENCE_SCHEMA){
       throw new Error('rsi_canary_shadow_evidence_invalid');
     }
-    assertZero(shadow_evidence,'shadow_evidence');
-    if(shadow_evidence.source_sha!==this.#sourceSha)throw new Error('rsi_canary_ledger_source_mismatch');
-    const existing=this.#rows.find((row)=>row.shadow_evidence.evidence_id===shadow_evidence.evidence_id);
+    const checkedEvidence=verifyStoredShadowEvidence(shadow_evidence);
+    if(checkedEvidence.source_sha!==this.#sourceSha)throw new Error('rsi_canary_ledger_source_mismatch');
+    const existing=this.#rows.find((row)=>row.checkedEvidence.evidence_id===checkedEvidence.evidence_id);
     if(existing){
-      if(existing.shadow_evidence.evidence_digest!==shadow_evidence.evidence_digest){
+      if(existing.checkedEvidence.evidence_digest!==checkedEvidence.evidence_digest){
         throw new Error('rsi_canary_evidence_identity_conflict');
       }
-      return zero({state:'IDEMPOTENT',evidence_digest:shadow_evidence.evidence_digest});
+      return zero({state:'IDEMPOTENT',evidence_digest:checkedEvidence.evidence_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_canary_ledger_capacity_exceeded');
     this.#rows.push(Object.freeze({
@@ -453,7 +521,7 @@ export class RsiBoundedCanaryAdmissionLedger{
     await this.#persist();
     return zero({
       state:shadow_evidence.rollback_required_latched===true?'ROLLBACK_REQUIRED_LATCHED':'SHADOW_EVIDENCE_RECORDED',
-      evidence_digest:shadow_evidence.evidence_digest,
+      evidence_digest:checkedEvidence.evidence_digest,
     });
   }
 
@@ -461,30 +529,30 @@ export class RsiBoundedCanaryAdmissionLedger{
     if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');
     if(!admission||admission.schema!==RSI_BOUNDED_CANARY_ADMISSION_SCHEMA)throw new Error('rsi_canary_admission_invalid');
     if(!shadow_evidence||shadow_evidence.schema!==RSI_BOUNDED_CANARY_EVIDENCE_SCHEMA)throw new Error('rsi_canary_shadow_evidence_invalid');
-    assertZero(admission,'admission');
-    assertZero(shadow_evidence,'shadow_evidence');
-    if(admission.source_sha!==this.#sourceSha||shadow_evidence.source_sha!==this.#sourceSha){
+    const checkedAdmission=verifyStoredAdmission(admission);
+    const checkedEvidence=verifyStoredShadowEvidence(shadow_evidence);
+    if(checkedAdmission.source_sha!==this.#sourceSha||checkedEvidence.source_sha!==this.#sourceSha){
       throw new Error('rsi_canary_ledger_source_mismatch');
     }
-    if(admission.shadow_evidence_digest!==shadow_evidence.evidence_digest){
+    if(checkedAdmission.shadow_evidence_digest!==checkedEvidence.evidence_digest){
       throw new Error('rsi_canary_ledger_evidence_binding_mismatch');
     }
     if(this.#rows.some((row)=>row.shadow_evidence.rollback_required_latched===true)){
       throw new Error('rsi_canary_rollback_latch_active');
     }
-    const existing=this.#rows.find((row)=>row.admission&&(row.admission.admission_id===admission.admission_id||row.admission.admission_digest===admission.admission_digest));
+    const existing=this.#rows.find((row)=>row.admission&&(row.checkedAdmission.admission_id===checkedAdmission.admission_id||row.checkedAdmission.admission_digest===checkedAdmission.admission_digest));
     if(existing){
-      if(existing.admission.admission_digest!==admission.admission_digest)throw new Error('rsi_canary_admission_identity_conflict');
-      return zero({state:'IDEMPOTENT',admission_digest:admission.admission_digest});
+      if(existing.checkedAdmission.admission_digest!==checkedAdmission.admission_digest)throw new Error('rsi_canary_admission_identity_conflict');
+      return zero({state:'IDEMPOTENT',admission_digest:checkedAdmission.admission_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_canary_ledger_capacity_exceeded');
     this.#rows.push(Object.freeze({
       source_sha:this.#sourceSha,
-      admission:structuredClone(admission),
-      shadow_evidence:structuredClone(shadow_evidence),
+      admission:structuredClone(checkedAdmission),
+      shadow_evidence:structuredClone(checkedEvidence),
     }));
     await this.#persist();
-    return zero({state:'ELIGIBLE_FOR_EXTERNAL_BOUNDED_CANARY_HANDOFF',admission_digest:admission.admission_digest});
+    return zero({state:'ELIGIBLE_FOR_EXTERNAL_BOUNDED_CANARY_HANDOFF',admission_digest:checkedAdmission.admission_digest});
   }
 
   snapshot(){
