@@ -264,16 +264,16 @@ function normalizeExperimentPlan(plan) {
       candidate_can_choose_transparency_log: rawProvenance.candidate_can_choose_transparency_log === false ? false : true,
       provenance_is_activation_authority: rawProvenance.provenance_is_activation_authority === false ? false : true,
     });
-    if (Object.values(implementationProvenanceContract).slice(7,17).some(v=>v!==true)
-      || implementationProvenanceContract.candidate_can_choose_builder!==false
-      || implementationProvenanceContract.candidate_can_choose_toolchain!==false
-      || implementationProvenanceContract.candidate_can_choose_dependencies!==false
-      || implementationProvenanceContract.candidate_can_choose_harness!==false
-      || implementationProvenanceContract.candidate_can_choose_capabilities!==false
-      || implementationProvenanceContract.candidate_can_sign_artifact!==false
-      || implementationProvenanceContract.provenance_is_activation_authority!==false) {
-      throw new Error('rsi_candidate_provenance_contract_policy_invalid');
-    }
+    for (const field of [
+      'immutable_materials_required','network_deny_required','private_writable_layer_required','materials_complete_required',
+      'artifact_reconstruction_required','protected_root_diff_audit_required','preserved_behavior_review_required',
+      'external_build_attestation_required','artifact_signature_required','transparency_log_inclusion_required',
+    ]) if (implementationProvenanceContract[field]!==true) throw new Error('rsi_candidate_provenance_contract_policy_invalid');
+    for (const field of [
+      'candidate_can_choose_builder','candidate_can_choose_worker','candidate_can_choose_toolchain','candidate_can_choose_dependencies',
+      'candidate_can_choose_harness','candidate_can_choose_capabilities','candidate_can_sign_artifact',
+      'candidate_can_choose_transparency_log','provenance_is_activation_authority',
+    ]) if (implementationProvenanceContract[field]!==false) throw new Error('rsi_candidate_provenance_contract_policy_invalid');
   }
   if ((revisionLimits == null) !== (implementationProvenanceContract == null)) throw new Error('rsi_candidate_revision_provenance_pair_required');
   if (revisionLimits && sha256(implementationProvenanceContract) !== revisionLimits.implementation_provenance_contract_digest) throw new Error('rsi_candidate_revision_provenance_contract_digest_mismatch');
@@ -626,7 +626,11 @@ function normalizeMaterializationReceipt(receipt, plan) {
       artifact_signature_verified:actual.artifact_signature_verified===true,
       transparency_log_inclusion_verified:actual.transparency_log_inclusion_verified===true,
     });
-    if (Object.values(implementationProvenance).slice(11).some(v=>v!==true)) throw new Error('rsi_candidate_materialization_provenance_evidence_invalid');
+    for (const field of [
+      'materials_complete','network_isolation_pass','private_writable_layer_pass','artifact_reconstruction_pass',
+      'protected_root_diff_audit_pass','preserved_behavior_review_pass','external_build_attestation_verified',
+      'artifact_signature_verified','transparency_log_inclusion_verified',
+    ]) if (implementationProvenance[field]!==true) throw new Error('rsi_candidate_materialization_provenance_evidence_invalid');
   }
   return Object.freeze({
     schema: RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA,
