@@ -199,6 +199,12 @@ export class RsiRevisionScopeLedger{
     this.#rows.push(structuredClone(admission));await this.#persist();
     return zero({state:admission.state,admission_digest:admission.admission_digest});
   }
+  admissionByDigest(admission_digest){
+    this.#assertInit();
+    const d=exactDigest(admission_digest,'admission');
+    const row=this.#rows.find(x=>x.admission_digest===d);
+    return row ? Object.freeze(structuredClone(row)) : null;
+  }
   eligible(){
     this.#assertInit();
     return Object.freeze(this.#rows.filter(x=>x.state==='ELIGIBLE_FOR_EXTERNAL_LIBRARY_EVIDENCE').map(x=>Object.freeze(structuredClone(x))));
