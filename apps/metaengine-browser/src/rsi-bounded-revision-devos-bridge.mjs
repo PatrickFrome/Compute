@@ -166,7 +166,14 @@ function verifyCandidateHandoff(handoff,bridge){
     ||handoff.parent_sha!==bridge.source_sha
     ||handoff.target_branch!==bridge.devos_experiment_plan.target_branch
     ||handoff.eligible_for_evaluation!==true||handoff.eligible_for_promotion!==false
-    ||handoff.materialization_replay_authorized!==false)throw new Error('rsi_revision_bridge_handoff_policy_invalid');
+    ||handoff.materialization_replay_authorized!==false
+    ||handoff.candidate_verification?.ok!==true||handoff.candidate_verification?.executable!==false
+    ||handoff.candidate_verification?.promotion_authorized!==false
+    ||handoff.sandbox_plan?.mode!=='PREPARE_ONLY'
+    ||handoff.sandbox_plan?.filesystem?.host_repository_mounted!==false
+    ||handoff.sandbox_plan?.network?.deny_by_default!==true
+    ||!Array.isArray(handoff.sandbox_plan?.network?.allowed_hosts)||handoff.sandbox_plan.network.allowed_hosts.length!==0
+    ||handoff.sandbox_plan_verification?.execution_authorized!==false)throw new Error('rsi_revision_bridge_handoff_policy_invalid');
   exactSha(handoff.parent_sha,'handoff_parent');
   exactSha(handoff.candidate_sha,'handoff_candidate');
   const clone=structuredClone(handoff);delete clone.handoff_digest;
