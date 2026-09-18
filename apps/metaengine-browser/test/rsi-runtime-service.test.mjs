@@ -614,7 +614,15 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(revision.evaluation.state, 'ELIGIBLE_FOR_EXISTING_RELIABILITY_GATE');
     assert.equal(revision.evaluation.accepted_for_existing_reliability_gate, true);
     assert.equal(revision.evaluation.direct_library_replacement_allowed, false);
+    assert.equal(revision.frontier.state, 'ARCHIVED');
+    assert.equal(revision.frontier.pareto_frontier, true);
     assert.equal(runtime.snapshot().runtime_skill_curation.accepted_count, 1);
+    assert.equal(runtime.snapshot().skill_revision_frontier.archive_count, 1);
+    assert.equal(runtime.snapshot().skill_revision_frontier.frontier_count, 1);
+    const revisionFrontier = runtime.skillRevisionFrontier({ parent_skill_digest: skill.skill_digest });
+    assert.equal(revisionFrontier.length, 1);
+    assert.equal(revisionFrontier[0].successor_skill_digest, successorSkill.skill_digest);
+    assert.equal(revisionFrontier[0].frontier_is_execution_authority, false);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 1);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
