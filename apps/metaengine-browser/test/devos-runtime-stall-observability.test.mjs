@@ -111,7 +111,10 @@ test('DevOS runtime observability keeps bounded task-cycle and last-failure evid
   const wire = JSON.stringify(runtime);
   assert.doesNotMatch(wire, /do-not-export/);
   assert.doesNotMatch(wire, /prompt_sha256/);
-  assert.doesNotMatch(wire, /proof/);
+  assert.doesNotMatch(wire, /"proof"\s*:/);
+  assert.doesNotMatch(wire, /"positive_effect_proof"\s*:/);
+  assert.equal(runtime.task_cycle.raw_effect_proof_exposed, false);
+  assert.equal(runtime.last_failure.task_cycle.raw_effect_proof_exposed, false);
   assert.doesNotMatch(wire, /task_spec/);
 });
 
