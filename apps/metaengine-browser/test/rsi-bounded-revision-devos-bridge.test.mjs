@@ -79,6 +79,19 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
+import {
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
+import {
+  RsiAnytimeValidLibraryAdmissionArchive,
+  createRsiAnytimeValidLibraryAdmissionPlan,
+  verifyRsiAnytimeValidLibraryAdmissionPlan,
+  createRsiLeastPrivilegeSkillScopeReceipt,
+  verifyRsiLeastPrivilegeSkillScopeReceipt,
+  createRsiAnytimeValidLibraryAdmissionCertificate,
+  verifyRsiAnytimeValidLibraryAdmissionCertificate,
+  rsiAnytimeValidLibraryAdmissionTrustRootSnapshot,
+} from '../src/rsi-anytime-valid-library-admission.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
