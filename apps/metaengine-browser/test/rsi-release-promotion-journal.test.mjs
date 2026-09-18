@@ -11,10 +11,9 @@ import {
 } from '../src/rsi-release-promotion-journal.mjs';
 import {
   createFabricLedgerEvent,
-  fabricCapabilitySigningBytes,
 } from '../src/browser-fabric-effect-ledger.mjs';
 import {
-  fabricCapabilityDigest,
+  fabricCapabilitySigningBytes,
   BROWSER_FABRIC_CAPABILITY_SCHEMA,
   BROWSER_FABRIC_CAPABILITY_ALG,
 } from '../src/browser-fabric-capability.mjs';
@@ -22,9 +21,16 @@ import {
 const CANDIDATE_ID='candidate_sha256_'+'c'.repeat(64);
 const CANDIDATE_SHA='b'.repeat(40);
 const PARENT_SHA='a'.repeat(40);
-const RECONCILIATION_DIGEST='sha256:'+'1'.repeat(64);
 const NOW='2026-09-18T18:30:00.000Z';
 
+function stable(value){
+  if(Array.isArray(value)) return value.map(stable);
+  if(!value||typeof value!=='object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));
+}
+function hashHex(value){
+  return crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex');
+}
 function reconciliation(overrides={}) {
   const core={
     schema:'metaengine.rsi.published-release-reconciliation.v1',
@@ -75,9 +81,7 @@ function reconciliation(overrides={}) {
     authority_effect:false,
     ...overrides,
   };
-  const copy=structuredClone(core);
-  delete copy.reconciliation_digest;
-  return {...core,reconciliation_digest:RECONCILIATION_DIGEST};
+  return {...core,reconciliation_digest:'sha256:'+hashHex(core)};
 }
 
 function exactIntent() {
