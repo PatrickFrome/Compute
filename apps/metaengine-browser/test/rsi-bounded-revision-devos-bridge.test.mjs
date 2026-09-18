@@ -2787,15 +2787,20 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
     handoff_id:`phase32.freshness.${label}`,
     ...base,
     consumer_context_digest:labelDigest(`${label}-context`),
+    consumer_task_set_digest:labelDigest(`${label}-tasks`),
     consumer_harness_digest:labelDigest(`${label}-harness`),
+    consumer_retrieval_profile_digest:labelDigest(`${label}-retrieval`),
     consumer_evaluator_root_digest:labelDigest(`${label}-evaluator`),
     consumer_holdout_digest:labelDigest(`${label}-holdout`),
     matched_reference_plan_digest:labelDigest(`${label}-reference`),
     local_revalidation_protocol_digest:labelDigest(`${label}-protocol`),
+    current_consumer_plane_digest:labelDigest(`${label}-consumer-plane`),
+    current_verified_library_digest:labelDigest(`${label}-verified-library`),
     ...overrides,
   });
   const source=fx.validations[0];
   assert.throws(()=>build('reuse-context',{consumer_context_digest:source.heldout_context_digest}),/source_context_reuse_forbidden/);
+  assert.throws(()=>build('reuse-task-set',{consumer_task_set_digest:source.heldout_task_set_digest}),/source_task_set_reuse_forbidden/);
   assert.throws(()=>build('reuse-harness',{consumer_harness_digest:source.transfer_harness_digest}),/source_harness_reuse_forbidden/);
   assert.throws(()=>build('reuse-evaluator',{consumer_evaluator_root_digest:source.external_evaluator_root_digest}),/source_evaluator_reuse_forbidden/);
   assert.throws(()=>build('reuse-task',{consumer_holdout_digest:source.heldout_task_set_digest}),/source_holdout_reuse_forbidden/);
@@ -2891,10 +2896,10 @@ test('Phase32 reusable recipe route requires an exact current verified-library d
 test('Phase32 forbids reuse of a Phase31 transfer-contract digest as local reference or protocol',()=>{
   const fx=phase32Fixture('transfer-contract-freshness');
   const transferContract=fx.validations[0].transfer_evaluation_contract_digest;
-  assert.throws(()=>phase32Fixture('transfer-contract-reference',{
+  assert.throws(()=>phase32Fixture('transfer-contract-freshness',{
     handoffOverrides:{matched_reference_plan_digest:transferContract},
   }),/source_transfer_contract_reuse_forbidden/);
-  assert.throws(()=>phase32Fixture('transfer-contract-protocol',{
+  assert.throws(()=>phase32Fixture('transfer-contract-freshness',{
     handoffOverrides:{local_revalidation_protocol_digest:transferContract},
   }),/source_transfer_contract_reuse_forbidden/);
 });
