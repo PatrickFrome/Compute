@@ -26,7 +26,7 @@ function binding(overrides={}){
     environment_fingerprint:'env.browser.chatgpt.v1',
     model_family:'GPT_5_6_SOL',
     runtime_candidate_id:'candidate.runtime.1',
-    candidate_digest:d('b'),
+    candidate_digest:'b'.repeat(64),
     candidate_sha:'c'.repeat(40),
     proposal_digest:d('2'),
     skill_digests:[d('3'),d('4')],
