@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -14,6 +15,16 @@ import {
   verifyRsiRecursiveRiskBudget,
   verifyRsiRiskConfirmation,
 } from '../src/rsi-recursive-risk-budget.mjs';
+
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+}
+
+function digest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)), 'utf8').digest('hex')}`;
+}
 
 const sha = (char) => char.repeat(40);
 const d = (char) => `sha256:${char.repeat(64)}`;
