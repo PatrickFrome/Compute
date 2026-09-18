@@ -193,6 +193,17 @@ export function createRsiValidatedKnowledgeConsumerHandoff({
     second_scheduler_created:false,
     consumer_local_paired_validation_required:true,
     matched_no_skill_or_reference_required:route==='VERIFIED_SKILL_CANDIDATE_REVALIDATION',
+    consumer_specific_model_harness_context_binding_required:true,
+    consumer_task_set_binding_required:true,
+    consumer_retrieval_profile_binding_required:true,
+    consumer_evaluator_generation_binding_required:true,
+    consumer_evaluator_generation_sequence_binding_required:true,
+    source_phase30_evaluation_contract_binding_required:true,
+    phase31_transfer_contracts_bound:true,
+    consumer_evaluation_contract_bound:true,
+    current_consumer_state_binding_required:true,
+    current_verified_library_binding_required_for_recipe:route==='VERIFIED_SKILL_CANDIDATE_REVALIDATION',
+    fresh_consumer_assets_required:true,
     consumer_can_inherit_source_success:false,
     candidate_can_choose_consumer_context:false,
     candidate_can_choose_consumer_task_set:false,
@@ -227,6 +238,8 @@ export function verifyRsiValidatedKnowledgeConsumerHandoff(handoff,{proposal,val
     ||handoff.consumer_evaluator_generation_sequence_binding_required!==true
     ||handoff.source_phase30_evaluation_contract_binding_required!==true
     ||handoff.phase31_transfer_contracts_bound!==true||handoff.consumer_evaluation_contract_bound!==true
+    ||handoff.current_consumer_state_binding_required!==true||handoff.fresh_consumer_assets_required!==true
+    ||handoff.current_verified_library_binding_required_for_recipe!==(handoff.consumer_route==='VERIFIED_SKILL_CANDIDATE_REVALIDATION')
     ||handoff.candidate_can_choose_consumer_context!==false||handoff.candidate_can_choose_consumer_task_set!==false
     ||handoff.candidate_can_choose_consumer_harness!==false||handoff.candidate_can_choose_retrieval_profile!==false
     ||handoff.candidate_can_choose_consumer_evaluator!==false||handoff.candidate_can_choose_consumer_evaluator_generation_seq!==false
@@ -589,6 +602,9 @@ export function rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot(){
     source_phase30_evaluation_contract_binding_required:true,
     phase31_transfer_contracts_bound:true,
     consumer_evaluation_contract_bound:true,
+    current_consumer_state_binding_required:true,
+    current_verified_library_binding_required_for_recipe:true,
+    fresh_consumer_assets_required:true,
     phase31_context_reuse_forbidden:true,
     phase31_task_set_reuse_forbidden:true,
     phase31_harness_reuse_forbidden:true,
