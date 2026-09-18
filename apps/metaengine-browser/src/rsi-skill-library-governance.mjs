@@ -476,6 +476,7 @@ export function createRsiSkillLibraryGovernance({
     active_view_is_bounded: true,
     outcome_driven_retirement: true,
     premature_retirement_protected_by_minimum_evidence: true,
+    zero_evidence_skill_activation_forbidden: true,
     meta_skill_authoring_prior_is_tiebreak_only: true,
     candidate_can_change_governance: false,
     candidate_can_reactivate_skill: false,
@@ -506,6 +507,7 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     || governance.active_view_is_bounded !== true
     || governance.outcome_driven_retirement !== true
     || governance.premature_retirement_protected_by_minimum_evidence !== true
+    || governance.zero_evidence_skill_activation_forbidden !== true
     || governance.meta_skill_authoring_prior_is_tiebreak_only !== true
     || governance.candidate_can_change_governance !== false
     || governance.candidate_can_reactivate_skill !== false
@@ -528,6 +530,9 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     if (!STATES.has(row.state)) throw new Error('rsi_skill_governance_entry_state_invalid');
     findEntry(checkedLibrary, row.skill_digest);
     const shouldActive = row.state === 'ACTIVE' || row.state === 'EXPLORATION_ACTIVE';
+    if (row.evidence_window_count === 0 && shouldActive) {
+      throw new Error('rsi_skill_governance_zero_evidence_skill_activation_forbidden');
+    }
     if (row.active_for_composition !== shouldActive
       || row.retained_in_evidence_archive !== true
       || row.hard_deleted !== false
