@@ -2689,3 +2689,37 @@ test('Phase32 exact consumer convergence freezes both generic revalidation and e
   assert.equal(skill.scheduler_action_performed_here,false);
   assert.equal(skill.authority_effect,false);
 });
+
+test('Phase32 consumer-local revalidation rejects Phase31 transfer-evidence replay',()=>{
+  const fx=phase32Fixture('fresh-consumer-evidence');
+  const build=(label,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:'phase32.consumer.freshness.'+label,
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(label+'-context'),
+    consumer_harness_digest:labelDigest(label+'-harness'),
+    consumer_evaluator_root_digest:labelDigest(label+'-evaluator'),
+    consumer_evaluator_generation_digest:fx.proposal.evaluator_generation_digest,
+    consumer_holdout_digest:labelDigest(label+'-holdout'),
+    matched_reference_plan_digest:labelDigest(label+'-reference'),
+    local_revalidation_protocol_digest:labelDigest(label+'-protocol'),
+    external_consumer_router:true,authored_by_candidate:false,
+    ...overrides,
+  });
+  const source=fx.validations[0];
+  assert.throws(()=>build('reuse-context',{consumer_context_digest:source.heldout_context_digest}),/source_context_reuse_forbidden/);
+  assert.throws(()=>build('reuse-harness',{consumer_harness_digest:source.transfer_harness_digest}),/source_harness_reuse_forbidden/);
+  assert.throws(()=>build('reuse-evaluator',{consumer_evaluator_root_digest:source.external_evaluator_root_digest}),/source_evaluator_reuse_forbidden/);
+  assert.throws(()=>build('reuse-task-holdout',{consumer_holdout_digest:source.heldout_task_set_digest}),/source_holdout_reuse_forbidden/);
+  assert.throws(()=>build('reuse-hidden-holdout',{consumer_holdout_digest:source.hidden_holdout_root_digest}),/source_holdout_reuse_forbidden/);
+  assert.throws(()=>build('reuse-reference',{matched_reference_plan_digest:fx.proposal.transfer_validation_plan_digest}),/source_reference_plan_reuse_forbidden/);
+  assert.throws(()=>build('reuse-protocol',{local_revalidation_protocol_digest:fx.proposal.transfer_validation_plan_digest}),/source_revalidation_protocol_reuse_forbidden/);
+
+  const root=rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot();
+  assert.equal(root.phase31_context_reuse_forbidden,true);
+  assert.equal(root.phase31_harness_reuse_forbidden,true);
+  assert.equal(root.phase31_holdout_reuse_forbidden,true);
+  assert.equal(root.phase31_evaluator_root_reuse_forbidden,true);
+  assert.equal(root.phase31_transfer_plan_reuse_forbidden,true);
+});
