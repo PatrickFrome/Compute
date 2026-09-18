@@ -270,6 +270,26 @@ export function verifyRsiBenchmarkCoevolutionAdmission(admission,{proposal,recei
   return canonical;
 }
 
+function verifyStoredBenchmarkRow(row,sourceSha){
+  if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('rsi_benchmark_ledger_row_invalid');
+  const p=verifyRsiBenchmarkGenerationProposal(row.proposal);
+  const r=verifyRsiBenchmarkValidityReceipt(row.receipt,{proposal:p});
+  const a=verifyRsiBenchmarkCoevolutionAdmission(row.admission,{proposal:p,receipt:r});
+  const expectedSource=exactSha(sourceSha,'ledger_source');
+  if(row.source_sha!==expectedSource||p.source_sha!==expectedSource||r.source_sha!==expectedSource||a.source_sha!==expectedSource){
+    throw new Error('rsi_benchmark_ledger_source_mismatch');
+  }
+  if(r.proposal_digest!==p.proposal_digest||a.proposal_digest!==p.proposal_digest||a.receipt_digest!==r.receipt_digest){
+    throw new Error('rsi_benchmark_ledger_binding_mismatch');
+  }
+  return Object.freeze({
+    source_sha:expectedSource,
+    proposal:structuredClone(p),
+    receipt:structuredClone(r),
+    admission:structuredClone(a),
+  });
+}
+
 function ledgerState(sourceSha,rows){
   const core=zero({
     schema:RSI_BENCHMARK_COEVOLUTION_LEDGER_SCHEMA,
@@ -302,20 +322,23 @@ export class RsiBenchmarkCoevolutionLedger{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_benchmark_ledger_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_benchmark_ledger_rows_invalid');
       const generations=new Set();
-      for(const row of p.rows){
-        if(row.source_sha!==this.#sourceSha)throw new Error('rsi_benchmark_ledger_source_mismatch');
-        const pc=structuredClone(row.proposal);delete pc.proposal_digest;if(digest(pc)!==exactDigest(row.proposal.proposal_digest,'ledger_proposal'))throw new Error('rsi_benchmark_ledger_proposal_digest_mismatch');
-        const rc=structuredClone(row.receipt);delete rc.receipt_digest;if(digest(rc)!==exactDigest(row.receipt.receipt_digest,'ledger_receipt'))throw new Error('rsi_benchmark_ledger_receipt_digest_mismatch');
-        const ac=structuredClone(row.admission);delete ac.admission_digest;if(digest(ac)!==exactDigest(row.admission.admission_digest,'ledger_admission'))throw new Error('rsi_benchmark_ledger_admission_digest_mismatch');
-        if(row.receipt.proposal_digest!==row.proposal.proposal_digest||row.admission.proposal_digest!==row.proposal.proposal_digest||row.admission.receipt_digest!==row.receipt.receipt_digest)throw new Error('rsi_benchmark_ledger_binding_mismatch');
-        if(generations.has(row.proposal.proposed_generation_digest))throw new Error('rsi_benchmark_ledger_generation_duplicate');
-        generations.add(row.proposal.proposed_generation_digest);
-      }
-      this.#rows=p.rows;
+      const proposalIds=new Set();
+      const admissionIds=new Set();
+      const checkedRows=p.rows.map((row)=>{
+        const checked=verifyStoredBenchmarkRow(row,this.#sourceSha);
+        if(generations.has(checked.proposal.proposed_generation_digest))throw new Error('rsi_benchmark_ledger_generation_duplicate');
+        if(proposalIds.has(checked.proposal.proposal_id))throw new Error('rsi_benchmark_ledger_proposal_duplicate');
+        if(admissionIds.has(checked.admission.admission_id))throw new Error('rsi_benchmark_ledger_admission_duplicate');
+        generations.add(checked.proposal.proposed_generation_digest);
+        proposalIds.add(checked.proposal.proposal_id);
+        admissionIds.add(checked.admission.admission_id);
+        return checked;
+      });
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){const s=ledgerState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
+  async #persist(rows=this.#rows){const s=ledgerState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
   async add({proposal,receipt,admission}={}){
     if(!this.#initialized)throw new Error('rsi_benchmark_ledger_not_initialized');
     const p=verifyRsiBenchmarkGenerationProposal(proposal);
@@ -328,8 +351,15 @@ export class RsiBenchmarkCoevolutionLedger{
       return zero({state:'IDEMPOTENT',admission_digest:a.admission_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_benchmark_ledger_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,proposal:structuredClone(p),receipt:structuredClone(r),admission:structuredClone(a)}));
-    await this.#persist();
+    const nextRow=verifyStoredBenchmarkRow({
+      source_sha:this.#sourceSha,
+      proposal:structuredClone(p),
+      receipt:structuredClone(r),
+      admission:structuredClone(a),
+    },this.#sourceSha);
+    const preview=Object.freeze([...this.#rows,nextRow]);
+    await this.#persist(preview);
+    this.#rows=preview;
     return zero({state:a.state,admission_digest:a.admission_digest});
   }
   qualified(){if(!this.#initialized)throw new Error('rsi_benchmark_ledger_not_initialized');return Object.freeze(this.#rows.filter(r=>r.admission.qualified_for_benchmark_shadow===true).map(r=>Object.freeze(structuredClone(r.admission))));}
