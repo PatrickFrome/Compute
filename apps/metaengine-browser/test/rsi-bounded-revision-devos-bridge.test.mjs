@@ -3190,6 +3190,9 @@ function phase34Fixture(label='phase34'){
     source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
     least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
     governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
+    benchmark_security_attestor_identity_digest:labelDigest(label+'-benchmark-security-attestor-id'),
+    benchmark_ancestry_attestation_digest:labelDigest(label+'-benchmark-ancestry-attestation'),
+    clean_room_requalification_digest:labelDigest(label+'-clean-room-requalification'),
     anytime_valid_admission_pass:true,
     error_budget_available:true,
     paired_instance_replay_pass:true,
@@ -3197,11 +3200,14 @@ function phase34Fixture(label='phase34'){
     current_library_still_exact:true,
     current_governance_still_exact:true,
     no_new_negative_transfer:true,
+    benchmark_poisoning_scan_pass:true,
+    clean_room_requalification_pass:true,
     external_library_owner:true,
     external_statistical_acceptor:true,
     external_source_qualification_owner:true,
     external_least_privilege_reviewer:true,
     external_governance_reviewer:true,
+    external_benchmark_security_attestor:true,
     authored_by_candidate:false,
   };
   return {p33,p33Args,p33Certificate,currentGovernance,proposalArgs,proposal,sourceQualification,certificateArgs};
@@ -3341,6 +3347,26 @@ test('Phase34 proposal blocks least-privilege scope or maturity-envelope failure
   }
 });
 
+test('Phase34 blocks benchmark poisoning or failed clean-room requalification without authorizing rollback effects',()=>{
+  const fx=phase34Fixture('benchmark-security');
+  const poisoned=createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    benchmark_poisoning_scan_pass:false,
+  });
+  assert.equal(poisoned.state,'REJECTED_LIBRARY_ADMISSION');
+  assert.ok(poisoned.blockers.includes('BENCHMARK_POISONING_SCAN_FAILED'));
+  assert.equal(poisoned.rollback_or_quarantine_effect_authorized,false);
+  assert.equal(poisoned.append_effect_performed,false);
+
+  const contaminatedLineage=createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    clean_room_requalification_pass:false,
+  });
+  assert.equal(contaminatedLineage.state,'REJECTED_LIBRARY_ADMISSION');
+  assert.ok(contaminatedLineage.blockers.includes('CLEAN_ROOM_REQUALIFICATION_FAILED'));
+  assert.equal(contaminatedLineage.skill_activation_authorized,false);
+});
+
 test('Phase34 reviewer separation of duties prevents owner acceptor and reviewers collapsing into one identity',()=>{
   const fx=phase34Fixture('separation');
   assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
@@ -3350,6 +3376,10 @@ test('Phase34 reviewer separation of duties prevents owner acceptor and reviewer
   assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
     ...fx.certificateArgs,
     governance_reviewer_identity_digest:fx.certificateArgs.least_privilege_reviewer_identity_digest,
+  }),/certificate_separation_of_duties_required/);
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    benchmark_security_attestor_identity_digest:fx.certificateArgs.statistical_acceptor_identity_digest,
   }),/certificate_separation_of_duties_required/);
 });
 
@@ -3412,6 +3442,9 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.maturity_sensitive_change_envelope_required,true);
   assert.equal(root.paired_anytime_valid_admission_required,true);
   assert.equal(root.fixed_false_admission_error_budget_required,true);
+  assert.equal(root.independent_benchmark_security_attestor_required,true);
+  assert.equal(root.clean_room_requalification_required,true);
+  assert.equal(root.benchmark_poisoning_scan_required,true);
   assert.equal(root.append_handoff_one_attempt_only,true);
   assert.equal(root.ambiguous_append_retry_allowed,false);
   assert.equal(root.append_does_not_imply_retrieval_exposure,true);
