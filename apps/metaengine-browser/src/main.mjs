@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { RsiRuntimeService } from './rsi-runtime-service.mjs';
+import { RsiRuntimeObservationSidecar } from './rsi-runtime-observation-sidecar.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
@@ -59,6 +60,7 @@ let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
 let rsiRuntime = null;
+let rsiObservationSidecar = null;
 let nativeSupervisor = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -680,6 +682,9 @@ async function initRsiRuntime() {
   }
   const snapshot = rsiRuntime.snapshot();
   if (snapshot.state !== 'READY') await rsiRuntime.start();
+  if (!rsiObservationSidecar) {
+    rsiObservationSidecar = new RsiRuntimeObservationSidecar({ runtimeProvider: () => rsiRuntime });
+  }
   return rsiRuntime.snapshot();
 }
 
@@ -985,6 +990,15 @@ async function initNativeSupervisor() {
       executeCommand: executeNativeSupervisorCommand,
       observeLocalTarget,
       workerObservationBudget: 4,
+      onBrainWorkingMemory: (snapshot) => {
+        if (!rsiObservationSidecar) return false;
+        rsiObservationSidecar.submit(snapshot);
+        return true;
+      },
+      flushBrainWorkingMemory: async () => {
+        if (!rsiObservationSidecar) return false;
+        return rsiObservationSidecar.flush();
+      },
       controlStatePath: supervisorControlStatePath(),
     });
   }
@@ -1005,7 +1019,9 @@ function destroyWindowContents() {
   if (shellView && !shellView.webContents.isDestroyed()) shellView.webContents.close();
   shellView = null;
   fleet = null;
-  rsiRuntime = null;
+  // RSI is process-scoped rather than window-scoped. Keep its exact-source service
+  // alive across window recreation so the supervisor quit barrier can flush the
+  // bounded observation sidecar before the process actually exits.
   developmentPlane?.stop();
 }
 
