@@ -3540,6 +3540,11 @@ function phase34Fixture(label='phase34',{p33_override=null,current_governance_ov
     source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
     least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
     governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
+    benchmark_security_attestor_identity_digest:labelDigest(label+'-benchmark-security-attestor-id'),
+    harness_security_attestor_identity_digest:labelDigest(label+'-harness-security-attestor-id'),
+    benchmark_ancestry_attestation_digest:labelDigest(label+'-benchmark-ancestry-attestation'),
+    clean_room_requalification_digest:labelDigest(label+'-clean-room-requalification'),
+    harness_integrity_attestation_digest:labelDigest(label+'-harness-integrity-attestation'),
     anytime_valid_admission_pass:true,
     error_budget_available:true,
     paired_instance_replay_pass:true,
@@ -3547,11 +3552,16 @@ function phase34Fixture(label='phase34',{p33_override=null,current_governance_ov
     current_library_still_exact:true,
     current_governance_still_exact:true,
     no_new_negative_transfer:true,
+    benchmark_poisoning_scan_pass:true,
+    clean_room_requalification_pass:true,
+    harness_tampering_scan_pass:true,
     external_library_owner:true,
     external_statistical_acceptor:true,
     external_source_qualification_owner:true,
     external_least_privilege_reviewer:true,
     external_governance_reviewer:true,
+    external_benchmark_security_attestor:true,
+    external_harness_security_attestor:true,
     authored_by_candidate:false,
   };
   return {p33,p33Args,p33Certificate,currentGovernance,proposalArgs,proposal,sourceQualification,certificateArgs};
@@ -3568,6 +3578,14 @@ test('Phase34 builds only an append-only successor-library proposal and preserve
   assert.equal(fx.proposal.second_lifecycle_created,false);
   assert.equal(fx.proposal.proposed_successor_library_entry_count,fx.p33.skillFx.currentLibrary.entry_count+1);
   assert.notEqual(fx.proposal.proposed_successor_library_digest,fx.p33.skillFx.currentLibrary.library_digest);
+  assert.equal(fx.proposal.consumer_task_set_digest,fx.p33.bundle.consumer_task_set_digest);
+  assert.equal(fx.proposal.consumer_retrieval_profile_digest,fx.p33.bundle.consumer_retrieval_profile_digest);
+  assert.equal(fx.proposal.current_consumer_plane_digest,fx.p33.bundle.current_consumer_plane_digest);
+  assert.equal(fx.proposal.current_verified_library_digest,fx.p33.bundle.current_verified_library_digest);
+  assert.equal(fx.proposal.exact_consumer_state_lineage_preserved,true);
+  assert.equal(fx.proposal.exact_retrieval_profile_lineage_preserved,true);
+  assert.equal(fx.proposal.exact_current_library_lineage_preserved,true);
+  assert.equal(fx.proposal.phase33_reviewer_lineage_bound,true);
   assert.equal(fx.proposal.proposed_successor_is_not_active_runtime_state,true);
   assert.equal(fx.proposal.library_append_performed,false);
   assert.equal(fx.proposal.retrieval_exposure_changed,false);
@@ -3575,6 +3593,17 @@ test('Phase34 builds only an append-only successor-library proposal and preserve
   assert.equal(fx.proposal.skill_lifecycle_mutated,false);
   assert.equal(fx.proposal.library_append_token,null);
   assert.equal(fx.proposal.authority_effect,false);
+});
+
+test('Phase34 verification rejects a forged successor-library payload even when attacker preserves the advertised digest',()=>{
+  const fx=phase34Fixture('forged-successor');
+  const forged=structuredClone(fx.proposal);
+  forged.proposed_successor_library.entries=[];
+  forged.proposed_successor_library.entry_count=0;
+  assert.throws(
+    ()=>verifyRsiAnytimeLibraryAdmissionProposal(forged,fx.proposalArgs),
+    /skill_library_entries_invalid|successor_library_digest_mismatch/,
+  );
 });
 
 test('Phase34 source qualification requires the exact seven terminal workflows on one exact head',()=>{
@@ -3632,6 +3661,13 @@ test('Phase34 emits a one-attempt handoff certificate only after anytime-valid, 
   assert.equal(cert.predecessor_source_qualification_pass,true);
   assert.equal(cert.append_handoff_one_attempt_only,true);
   assert.equal(cert.ambiguous_append_retry_allowed,false);
+  assert.equal(cert.consumer_task_set_digest,fx.p33.bundle.consumer_task_set_digest);
+  assert.equal(cert.consumer_retrieval_profile_digest,fx.p33.bundle.consumer_retrieval_profile_digest);
+  assert.equal(cert.current_consumer_plane_digest,fx.p33.bundle.current_consumer_plane_digest);
+  assert.equal(cert.current_verified_library_digest,fx.p33.bundle.current_verified_library_digest);
+  assert.equal(cert.exact_consumer_state_lineage_required,true);
+  assert.equal(cert.exact_retrieval_profile_lineage_required,true);
+  assert.equal(cert.exact_current_library_lineage_required,true);
   assert.equal(cert.append_effect_performed,false);
   assert.equal(cert.retrieval_exposure_change_authorized,false);
   assert.equal(cert.skill_activation_authorized,false);
@@ -3701,6 +3737,41 @@ test('Phase34 proposal blocks least-privilege scope or maturity-envelope failure
   }
 });
 
+test('Phase34 blocks benchmark poisoning or failed clean-room requalification without authorizing rollback effects',()=>{
+  const fx=phase34Fixture('benchmark-security');
+  const poisoned=createRsiAnytimeLibraryAdmissionCertificate({...fx.certificateArgs,benchmark_poisoning_scan_pass:false});
+  assert.equal(poisoned.state,'REJECTED_LIBRARY_ADMISSION');
+  assert.ok(poisoned.blockers.includes('BENCHMARK_POISONING_SCAN_FAILED'));
+  assert.equal(poisoned.rollback_or_quarantine_effect_authorized,false);
+  assert.equal(poisoned.append_effect_performed,false);
+
+  const contaminated=createRsiAnytimeLibraryAdmissionCertificate({...fx.certificateArgs,clean_room_requalification_pass:false});
+  assert.equal(contaminated.state,'REJECTED_LIBRARY_ADMISSION');
+  assert.ok(contaminated.blockers.includes('CLEAN_ROOM_REQUALIFICATION_FAILED'));
+  assert.equal(contaminated.skill_activation_authorized,false);
+});
+
+test('Phase34 blocks harness tampering and preserves the zero-effect path',()=>{
+  const fx=phase34Fixture('harness-security');
+  const tampered=createRsiAnytimeLibraryAdmissionCertificate({...fx.certificateArgs,harness_tampering_scan_pass:false});
+  assert.equal(tampered.state,'REJECTED_LIBRARY_ADMISSION');
+  assert.ok(tampered.blockers.includes('HARNESS_TAMPERING_SCAN_FAILED'));
+  assert.equal(tampered.append_effect_performed,false);
+  assert.equal(tampered.skill_activation_authorized,false);
+});
+
+test('Phase34 requires reviewer independence across Phase33 and Phase34',()=>{
+  const fx=phase34Fixture('cross-stage-separation');
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    library_owner_identity_digest:fx.p33Certificate.owner_reviewer_identity_digest,
+  }),/cross_stage_reviewer_separation_required/);
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    harness_security_attestor_identity_digest:fx.p33Certificate.artifact_auditor_identity_digest,
+  }),/cross_stage_reviewer_separation_required/);
+});
+
 test('Phase34 reviewer separation of duties prevents owner acceptor and reviewers collapsing into one identity',()=>{
   const fx=phase34Fixture('separation');
   assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
@@ -3710,6 +3781,14 @@ test('Phase34 reviewer separation of duties prevents owner acceptor and reviewer
   assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
     ...fx.certificateArgs,
     governance_reviewer_identity_digest:fx.certificateArgs.least_privilege_reviewer_identity_digest,
+  }),/certificate_separation_of_duties_required/);
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    benchmark_security_attestor_identity_digest:fx.certificateArgs.statistical_acceptor_identity_digest,
+  }),/certificate_separation_of_duties_required/);
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    harness_security_attestor_identity_digest:fx.certificateArgs.governance_reviewer_identity_digest,
   }),/certificate_separation_of_duties_required/);
 });
 
@@ -3852,6 +3931,7 @@ test('Phase35 applies an eligible Phase34 append exactly once through the existi
 test('Phase34 trust root preserves external admission without creating activation or lifecycle authority',()=>{
   const root=rsiAnytimeLibraryAdmissionTrustRootSnapshot();
   assert.equal(root.phase33_exact_owner_precommit_required,true);
+  assert.equal(root.phase33_reviewer_lineage_binding_required,true);
   assert.equal(root.exact_phase33_policy_source_binding_required,true);
   assert.equal(root.exact_terminal_phase33_source_qualification_required,true);
   assert.equal(root.ci_readback_manifest_binding_required,true);
@@ -3861,11 +3941,19 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.existing_skill_library_governance_reused,true);
   assert.equal(root.second_skill_library_allowed,false);
   assert.equal(root.second_lifecycle_allowed,false);
+  assert.equal(root.exact_consumer_state_lineage_required,true);
+  assert.equal(root.exact_retrieval_profile_lineage_required,true);
+  assert.equal(root.exact_current_library_lineage_required,true);
   assert.equal(root.least_privilege_recheck_required,true);
   assert.equal(root.scope_replay_required,true);
   assert.equal(root.maturity_sensitive_change_envelope_required,true);
   assert.equal(root.paired_anytime_valid_admission_required,true);
   assert.equal(root.fixed_false_admission_error_budget_required,true);
+  assert.equal(root.independent_benchmark_security_attestor_required,true);
+  assert.equal(root.clean_room_requalification_required,true);
+  assert.equal(root.benchmark_poisoning_scan_required,true);
+  assert.equal(root.harness_tampering_scan_required,true);
+  assert.equal(root.cross_stage_reviewer_separation_required,true);
   assert.equal(root.append_handoff_one_attempt_only,true);
   assert.equal(root.ambiguous_append_retry_allowed,false);
   assert.equal(root.append_does_not_imply_retrieval_exposure,true);
