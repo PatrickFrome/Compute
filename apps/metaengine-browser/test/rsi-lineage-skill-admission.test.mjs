@@ -25,6 +25,11 @@ import {
   createRsiRuntimeSkillAdvisory,
   verifyRsiRuntimeSkillAdvisory,
 } from '../src/rsi-runtime-skill-advisory.mjs';
+import {
+  createRsiRuntimeSkillNeedDecision,
+  createRsiRuntimeSkillFeedback,
+  RSI_RUNTIME_SKILL_NEED_CONTEXT_SCHEMA,
+} from '../src/rsi-runtime-skill-need-gate.mjs';
 
 const CANDIDATE='b'.repeat(40);
 const CANDIDATE_ID=`candidate_sha256_${'c'.repeat(64)}`;
@@ -201,6 +206,104 @@ test('verified lineage skill enters append-only library only after independent c
   assert.equal(advisory.scheduler_dispatch_allowed,false);
   assert.equal(advisory.authority_effect,false);
   assert.equal(verifyRsiRuntimeSkillAdvisory(advisory,advisoryInputs).advisory_digest,advisory.advisory_digest);
+  assert.match(advisory.composition_plan_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(advisory.composition_plan.direct_execution_allowed,false);
+});
+
+test('runtime need gate injects only bounded advisory metadata and external feedback stays lifecycle-only',()=>{
+  const s=skill(),e=evidence(s),receipts=portableSet(s,e);
+  const admissionInputs={
+    lineage_admission:lineage(),skill:s,skill_evidence:e,portability_receipts:receipts,
+    library_id:'rsi.skill.library.lineage.1',existing_entries:[],lifecycle_evidence:[],
+    governance_id:'governance.lineage.1',max_active_skills:4,exploration_slots:1,
+    external_library_owner:true,authored_by_candidate:false,
+  };
+  const admission=admitRsiLineageSkill(admissionInputs);
+  const advisory=createRsiRuntimeSkillAdvisory({
+    lineage_skill_admission:admission,
+    lineage_skill_admission_inputs:admissionInputs,
+    external_planner:true,
+    authored_by_candidate:false,
+  });
+  const context={
+    schema:RSI_RUNTIME_SKILL_NEED_CONTEXT_SCHEMA,version:1,
+    source_sha:'a'.repeat(40),
+    context_digest:d('1'),
+    input_schema_digest:d('7'),
+    requested_role:'ANALYZER',
+    need_kind:'FAILURE_ANALYSIS',
+    need_demonstrated:true,
+    baseline_sufficient:false,
+    negative_transfer_signal:false,
+    hard_invariant_alert:false,
+    stale_evidence_signal:false,
+    evidence_digest:d('2'),
+    evidence_refs:['FAILURE_CLUSTER','ROUTER_NEED'],
+    raw_page_text_present:false,raw_model_text_present:false,raw_user_input_present:false,raw_network_present:false,
+    page_model_worker_authority:false,context_is_execution_authority:false,
+  };
+  const decision=createRsiRuntimeSkillNeedDecision({
+    advisory,context,external_router:true,authored_by_candidate:false,
+  });
+  assert.equal(decision.decision,'INJECT_ADVISORY_METADATA');
+  assert.equal(decision.injected_payload.skill_digest,s.skill_digest);
+  assert.equal(decision.raw_skill_implementation_injected,false);
+  assert.equal(decision.direct_tool_execution_allowed,false);
+  assert.equal(decision.browser_actuation_allowed,false);
+  assert.equal(decision.scheduler_dispatch_allowed,false);
+
+  const feedback=createRsiRuntimeSkillFeedback({
+    advisory,decision,context,
+    lineage_skill_admission:admission,
+    lineage_skill_admission_inputs:admissionInputs,
+    hidden_holdout_digest:d('3'),
+    evaluator_root_digest:d('4'),
+    outcome:'HELPFUL',
+    measured_delta:0.12,
+    hard_invariants_pass:true,
+    evidence_refs:['USAGE_HOLDOUT','USAGE_EVALUATOR'],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(feedback.outcome,'HELPFUL');
+  assert.equal(feedback.feedback_updates_governance_automatically,false);
+  assert.equal(feedback.feedback_updates_library_automatically,false);
+  assert.equal(feedback.external_lifecycle_governance_ingest_required,true);
+  assert.equal(feedback.feedback_is_skill_memory_only,true);
+  assert.equal(feedback.authority_effect,false);
+});
+
+test('runtime need gate skips redundant or unsafe injection and skipped decisions cannot emit usage credit',()=>{
+  const s=skill(),e=evidence(s),receipts=portableSet(s,e);
+  const admissionInputs={
+    lineage_admission:lineage(),skill:s,skill_evidence:e,portability_receipts:receipts,
+    library_id:'rsi.skill.library.lineage.1',existing_entries:[],lifecycle_evidence:[],
+    governance_id:'governance.lineage.1',max_active_skills:4,exploration_slots:1,
+    external_library_owner:true,authored_by_candidate:false,
+  };
+  const admission=admitRsiLineageSkill(admissionInputs);
+  const advisory=createRsiRuntimeSkillAdvisory({
+    lineage_skill_admission:admission,lineage_skill_admission_inputs:admissionInputs,
+    external_planner:true,authored_by_candidate:false,
+  });
+  const context={
+    schema:RSI_RUNTIME_SKILL_NEED_CONTEXT_SCHEMA,version:1,
+    source_sha:'a'.repeat(40),context_digest:d('5'),input_schema_digest:d('7'),
+    requested_role:'ANALYZER',need_kind:'FAILURE_ANALYSIS',need_demonstrated:true,
+    baseline_sufficient:true,negative_transfer_signal:false,hard_invariant_alert:false,stale_evidence_signal:false,
+    evidence_digest:d('6'),evidence_refs:['BASELINE_ALREADY_GOOD'],
+    raw_page_text_present:false,raw_model_text_present:false,raw_user_input_present:false,raw_network_present:false,
+    page_model_worker_authority:false,context_is_execution_authority:false,
+  };
+  const decision=createRsiRuntimeSkillNeedDecision({advisory,context,external_router:true,authored_by_candidate:false});
+  assert.equal(decision.decision,'SKIP');
+  assert.ok(decision.blockers.includes('BASELINE_ALREADY_SUFFICIENT'));
+  assert.equal(decision.injected_payload,null);
+  assert.throws(()=>createRsiRuntimeSkillFeedback({
+    advisory,decision,context,lineage_skill_admission:admission,lineage_skill_admission_inputs:admissionInputs,
+    hidden_holdout_digest:d('3'),evaluator_root_digest:d('4'),outcome:'NEUTRAL',measured_delta:0,
+    hard_invariants_pass:true,evidence_refs:['NO_USE'],external_evaluator:true,authored_by_candidate:false,
+  }),/feedback_for_skipped_decision/);
 });
 
 test('negative transfer is a hard admission blocker and cannot be averaged away',()=>{
