@@ -124,7 +124,14 @@ function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
     }
     candidates.push(row);
   }
-  return candidates.filter((row) => counts.get(`${row.role}\u0000${row.name}`) === 1).slice(0, 120);
+  // D-P1 (2026-09-18): a sidebar-heavy ChatGPT surface can saturate the 120-target
+  // bound with link/button nodes alone, truncating the composer textbox out of the
+  // semantic projection. Every unique text-input row is therefore reserved ahead of
+  // the bound; the total projection stays capped at 120 rows.
+  const uniqueRows = candidates.filter((row) => counts.get(`${row.role}\u0000${row.name}`) === 1);
+  const inputRows = uniqueRows.filter((row) => TEXT_INPUT_ROLES.has(row.role));
+  const otherRows = uniqueRows.filter((row) => !TEXT_INPUT_ROLES.has(row.role));
+  return [...inputRows, ...otherRows].slice(0, 120);
 }
 
 function textExcerpt(nodes = []) {
@@ -511,7 +518,36 @@ export async function executeSemanticCommand(webContents, command) {
         await dbg.sendCommand('Input.dispatchKeyEvent', {
           type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
         });
-        const observed = await outcomeLatch.wait();
+        let observed = await outcomeLatch.wait();
+        // D-P2 (2026-09-18): the current ChatGPT composer ignores a synthetic
+        // Enter keypress (live-observed: the typed prompt stayed in the composer
+        // and only a physical SEND-control click submitted it). When the
+        // event-driven latch misses the Enter, re-resolve the single SEND
+        // control from a fresh tree and click it through the same bounded
+        // backend-node path used by STOP_GENERATION, then observe a fresh
+        // latch. Enter-first preserves the zero-geometry background-submit
+        // contract; the click fallback runs only when Enter provably produced
+        // no submit. If Enter did submit but the latch missed it, the SEND
+        // control is already gone and the re-resolution fails closed — no
+        // second physical effect is possible.
+        if (observed?.resolved !== true) {
+          const fallbackTree = await dbg.sendCommand('Accessibility.getFullAXTree');
+          const fallbackSends = exactChatGptControls(fallbackTree?.nodes || [], 'SEND');
+          if (fallbackSends.length !== 1) throw new Error(fallbackSends.length ? `native_semantic_send_target_ambiguous:${fallbackSends.length}` : 'native_semantic_send_target_not_found');
+          const fallbackLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
+          try {
+            assertCurrentSemanticRef(webContents, dbg, semanticRef);
+            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+            await clickBackendNode(dbg, fallbackSends[0].backend_node_id, () => {
+              assertCurrentSemanticRef(webContents, dbg, semanticRef);
+              assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+            });
+            const fallbackObserved = await fallbackLatch.wait();
+            if (fallbackObserved?.resolved === true) observed = fallbackObserved;
+          } finally {
+            fallbackLatch.close();
+          }
+        }
         const { resolved: _resolved, ...observation } = observed || {};
         return {
           action,
