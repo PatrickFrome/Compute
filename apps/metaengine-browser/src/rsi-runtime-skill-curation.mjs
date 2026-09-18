@@ -323,6 +323,33 @@ export class RsiRuntimeSkillCurationQueue{
     await this.#persist();
     return zero({state:'QUEUED',request_digest:checked.request_digest});
   }
+  request(request_id){
+    this.#assertInit();
+    const id=boundedId(request_id,'request_id');
+    const record=this.#records.find(x=>x.request.request_id===id);
+    return record ? structuredClone(record.request) : null;
+  }
+  async evaluateRevision({
+    request_id,library,governance,successor_skill,
+    baseline_validation_score,candidate_validation_score,
+    baseline_meta_score,candidate_meta_score,
+    hard_invariants_pass,evaluator_digest,evaluation_digest,evidence_refs,
+    external_evaluator=false,authored_by_candidate=true,
+  }={}){
+    this.#assertInit();
+    const request=this.request(request_id);
+    if(!request)throw new Error('rsi_curation_request_not_found');
+    const evaluation=createRsiSkillRevisionEvaluation({
+      evaluation_id:`evaluation.${request.request_id}`,
+      request,library,governance,successor_skill,
+      baseline_validation_score,candidate_validation_score,
+      baseline_meta_score,candidate_meta_score,
+      hard_invariants_pass,evaluator_digest,evaluation_digest,evidence_refs,
+      external_evaluator,authored_by_candidate,
+    });
+    const result=await this.recordEvaluation({request_id:request.request_id,evaluation,library,governance});
+    return Object.freeze({evaluation,result});
+  }
   async recordEvaluation({request_id,evaluation,library,governance}={}){
     this.#assertInit();
     const id=boundedId(request_id,'request_id');
