@@ -42,6 +42,8 @@ const MATERIALITY = Object.freeze({
 const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
   'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
+  'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
+  'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
   'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-evaluator-mesh.mjs',

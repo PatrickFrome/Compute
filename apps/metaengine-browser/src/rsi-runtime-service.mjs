@@ -41,6 +41,7 @@ import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integr
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
+import { rsiEpisodeDevosBridgeTrustRootSnapshot } from './rsi-episode-devos-bridge.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -105,6 +106,7 @@ function trustRoots() {
     search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
     episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
+    episode_devos_bridge: rsiEpisodeDevosBridgeTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
