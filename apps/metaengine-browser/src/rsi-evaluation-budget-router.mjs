@@ -122,6 +122,67 @@ export function verifyRsiEvaluationRoutingRequest(request,{hypothesis,admission}
   return canonical;
 }
 
+function verifyStoredRoutingRequest(request){
+  if(!request||request.schema!==RSI_EVALUATION_ROUTING_REQUEST_SCHEMA||request.version!==1)throw new Error('rsi_eval_router_stored_request_invalid');
+  assertZero(request,'stored_request');
+  if(request.external_measurement_owner!==true||request.authored_by_candidate!==false
+    ||request.cheap_proxy_is_final_truth!==false||request.independent_audit_required!==true
+    ||request.candidate_can_set_priority!==false||request.candidate_can_set_uncertainty!==false
+    ||request.candidate_can_set_proxy_reliability!==false||request.request_can_schedule_evaluation!==false
+    ||request.request_can_execute_evaluation!==false)throw new Error('rsi_eval_router_stored_request_policy_invalid');
+  id(request.request_id,'stored_request_id');
+  exactSha(request.source_sha,'stored_request_source');
+  for(const [field,label] of [
+    ['hypothesis_digest','stored_hypothesis'],['admission_digest','stored_admission'],
+    ['origin_candidate_digest','stored_origin_candidate'],['origin_lineage_digest','stored_origin_lineage'],
+    ['external_measurement_digest','stored_measurement'],['proxy_score_digest','stored_proxy_score'],
+  ]) exactDigest(request[field],label);
+  const cost=boundedInt(request.evaluator_cost_units,'stored_cost',64);
+  const info=unit(request.expected_information_gain,'stored_information_gain');
+  const uncertainty=unit(request.uncertainty,'stored_uncertainty');
+  const closeness=unit(request.decision_closeness,'stored_decision_closeness',{allowZero:true});
+  const gap=unit(request.proxy_reliability_gap,'stored_proxy_reliability_gap',{allowZero:true});
+  const expected=(info*uncertainty*(1+closeness)*(1+gap))/cost;
+  if(!Number.isFinite(request.routing_priority_score)||Math.abs(request.routing_priority_score-expected)>1e-15)throw new Error('rsi_eval_router_stored_request_priority_mismatch');
+  const clone=structuredClone(request);delete clone.request_digest;
+  if(digest(clone)!==exactDigest(request.request_digest,'stored_request'))throw new Error('rsi_eval_router_stored_request_digest_mismatch');
+  return Object.freeze(structuredClone(request));
+}
+
+function verifyStoredBudgetPlan(plan){
+  if(!plan||plan.schema!==RSI_EVALUATION_BUDGET_PLAN_SCHEMA||plan.version!==1)throw new Error('rsi_eval_router_stored_plan_invalid');
+  assertZero(plan,'stored_plan');
+  if(plan.external_budget_owner!==true||plan.authored_by_candidate!==false||plan.deterministic_priority_routing!==true
+    ||plan.uncertainty_aware!==true||plan.information_gain_aware!==true||plan.proxy_bias_aware!==true
+    ||plan.close_decision_priority!==true||plan.budget_fail_closed!==true||plan.cheap_proxy_is_final_truth!==false
+    ||plan.selected_requests_are_execution_authority!==false||plan.selected_requests_are_scheduler_authority!==false
+    ||plan.candidate_can_override_budget!==false||plan.candidate_can_override_priority!==false
+    ||plan.plan_can_schedule_evaluation!==false||plan.plan_can_execute_evaluation!==false)throw new Error('rsi_eval_router_stored_plan_policy_invalid');
+  id(plan.plan_id,'stored_plan_id');
+  exactSha(plan.source_sha,'stored_plan_source');
+  const budget=boundedInt(plan.epoch_budget_units,'stored_epoch_budget_units',MAX_PLAN_BUDGET_UNITS);
+  const requestCount=boundedInt(plan.request_count,'stored_request_count',MAX_REQUESTS);
+  const used=Number(plan.used_budget_units);
+  const remaining=Number(plan.remaining_budget_units);
+  if(!Number.isSafeInteger(used)||used<0||used>budget||!Number.isSafeInteger(remaining)||remaining<0||used+remaining!==budget)throw new Error('rsi_eval_router_stored_budget_accounting_invalid');
+  const normalize=(value,label)=>{
+    if(!Array.isArray(value))throw new Error(`rsi_eval_router_${label}_invalid`);
+    const out=value.map(v=>exactDigest(v,label));
+    if(new Set(out).size!==out.length)throw new Error(`rsi_eval_router_${label}_duplicate`);
+    return out;
+  };
+  const selected=normalize(plan.selected_request_digests,'stored_selected_request');
+  const deferred=normalize(plan.deferred_request_digests,'stored_deferred_request');
+  const order=normalize(plan.routing_order,'stored_routing_order');
+  if(selected.length+deferred.length!==requestCount||order.length!==requestCount)throw new Error('rsi_eval_router_stored_request_count_mismatch');
+  const union=[...selected,...deferred];
+  if(new Set(union).size!==union.length)throw new Error('rsi_eval_router_stored_selection_overlap');
+  if(order.some((v,i)=>v!==union[i]))throw new Error('rsi_eval_router_stored_routing_order_mismatch');
+  const clone=structuredClone(plan);delete clone.plan_digest;
+  if(digest(clone)!==exactDigest(plan.plan_digest,'stored_plan'))throw new Error('rsi_eval_router_stored_plan_digest_mismatch');
+  return Object.freeze(structuredClone(plan));
+}
+
 function selectRequests(rows,budgetUnits){
   const sorted=[...rows].sort((a,b)=>{
     if(b.routing_priority_score!==a.routing_priority_score)return b.routing_priority_score-a.routing_priority_score;
@@ -152,14 +213,11 @@ export function createRsiEvaluationBudgetPlan({
   if(!Array.isArray(requests)||requests.length<1||requests.length>MAX_REQUESTS)throw new Error('rsi_eval_router_requests_invalid');
   const seen=new Set();
   const rows=requests.map(row=>{
-    if(!row||row.schema!==RSI_EVALUATION_ROUTING_REQUEST_SCHEMA)throw new Error('rsi_eval_router_request_invalid');
-    assertZero(row,'plan_request');
-    const clone=structuredClone(row);delete clone.request_digest;
-    if(digest(clone)!==exactDigest(row.request_digest,'plan_request'))throw new Error('rsi_eval_router_request_digest_mismatch');
-    if(row.source_sha!==source)throw new Error('rsi_eval_router_request_source_mismatch');
-    if(seen.has(row.request_digest))throw new Error('rsi_eval_router_request_duplicate');
-    seen.add(row.request_digest);
-    return Object.freeze(structuredClone(row));
+    const checked=verifyStoredRoutingRequest(row);
+    if(checked.source_sha!==source)throw new Error('rsi_eval_router_request_source_mismatch');
+    if(seen.has(checked.request_digest))throw new Error('rsi_eval_router_request_duplicate');
+    seen.add(checked.request_digest);
+    return checked;
   });
   const budget=boundedInt(epoch_budget_units,'epoch_budget_units',MAX_PLAN_BUDGET_UNITS);
   const routed=selectRequests(rows,budget);
@@ -251,32 +309,39 @@ export class RsiEvaluationBudgetLedger{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_eval_router_ledger_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_REQUESTS)throw new Error('rsi_eval_router_ledger_rows_invalid');
       const ids=new Set();
-      for(const row of p.rows){
-        if(row.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
-        const pc=structuredClone(row.plan);delete pc.plan_digest;if(digest(pc)!==exactDigest(row.plan.plan_digest,'ledger_plan'))throw new Error('rsi_eval_router_ledger_plan_digest_mismatch');
-        if(ids.has(row.plan.plan_digest))throw new Error('rsi_eval_router_ledger_plan_duplicate');
-        ids.add(row.plan.plan_digest);
+      const planIds=new Set();
+      const checkedRows=[];
+      for(const raw of p.rows){
+        if(raw.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
+        const plan=verifyStoredBudgetPlan(raw.plan);
+        if(plan.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
+        if(ids.has(plan.plan_digest))throw new Error('rsi_eval_router_ledger_plan_duplicate');
+        if(planIds.has(plan.plan_id))throw new Error('rsi_eval_router_ledger_plan_id_duplicate');
+        ids.add(plan.plan_digest);planIds.add(plan.plan_id);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,plan}));
       }
-      this.#rows=p.rows;
+      const canonical=ledgerState(this.#sourceSha,checkedRows);
+      if(p.total_budget_units!==canonical.total_budget_units||p.total_used_budget_units!==canonical.total_used_budget_units
+        ||p.total_remaining_budget_units!==canonical.total_remaining_budget_units||p.row_count!==canonical.row_count)throw new Error('rsi_eval_router_ledger_summary_mismatch');
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){const s=ledgerState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
+  async #persist(rows=this.#rows){const s=ledgerState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
   async add(plan){
     if(!this.#initialized)throw new Error('rsi_eval_router_ledger_not_initialized');
-    if(!plan||plan.schema!==RSI_EVALUATION_BUDGET_PLAN_SCHEMA)throw new Error('rsi_eval_router_plan_invalid');
-    assertZero(plan,'ledger_plan');
-    const clone=structuredClone(plan);delete clone.plan_digest;if(digest(clone)!==exactDigest(plan.plan_digest,'ledger_plan'))throw new Error('rsi_eval_router_plan_digest_mismatch');
-    if(plan.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
-    const existing=this.#rows.find(r=>r.plan.plan_id===plan.plan_id||r.plan.plan_digest===plan.plan_digest);
+    const checked=verifyStoredBudgetPlan(plan);
+    if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
+    const existing=this.#rows.find(r=>r.plan.plan_id===checked.plan_id||r.plan.plan_digest===checked.plan_digest);
     if(existing){
-      if(existing.plan.plan_digest!==plan.plan_digest)throw new Error('rsi_eval_router_ledger_identity_conflict');
-      return zero({state:'IDEMPOTENT',plan_digest:plan.plan_digest});
+      if(existing.plan.plan_digest!==checked.plan_digest)throw new Error('rsi_eval_router_ledger_identity_conflict');
+      return zero({state:'IDEMPOTENT',plan_digest:checked.plan_digest});
     }
     if(this.#rows.length>=MAX_REQUESTS)throw new Error('rsi_eval_router_ledger_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,plan:structuredClone(plan)}));
-    await this.#persist();
-    return zero({state:'RECORDED',plan_digest:plan.plan_digest});
+    const nextRows=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,plan:structuredClone(checked)})];
+    await this.#persist(nextRows);
+    this.#rows=nextRows;
+    return zero({state:'RECORDED',plan_digest:checked.plan_digest});
   }
   snapshot(){const s=ledgerState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,total_budget_units:s.total_budget_units,total_used_budget_units:s.total_used_budget_units,total_remaining_budget_units:s.total_remaining_budget_units,append_only:true,ledger_can_schedule_evaluation:false,ledger_can_execute_evaluation:false,ledger_can_increase_budget:false,authority_effect:false});}
 }
