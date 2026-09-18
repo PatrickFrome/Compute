@@ -9,10 +9,12 @@ import {
 import {
   createRsiEvaluationBudgetPlan,
   createRsiEvaluationRoutingRequest,
+  verifyRsiArtifactEvaluationRoutingRequest,
 } from '../src/rsi-evaluation-budget-router.mjs';
 import {
   createRsiCandidateExperimentIntent,
   createRsiCandidateExperimentReceipt,
+  verifyRsiCandidateExperimentIntent,
 } from '../src/rsi-candidate-experiment-ledger.mjs';
 import {
   createRsiBoundedRevisionEnvelope,
@@ -23,6 +25,8 @@ import {
   verifyRsiBoundedRevisionDevosBridge,
   createRsiBoundedRevisionArtifactReceipt,
   verifyRsiBoundedRevisionArtifactReceipt,
+  createRsiMaterializedCandidateEvaluationHandoff,
+  verifyRsiMaterializedCandidateEvaluationHandoff,
 } from '../src/rsi-bounded-revision-devos-bridge.mjs';
 import {
   RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA,
@@ -508,6 +512,72 @@ function provenanceMaterialization(build){
   };
 }
 
+
+function phase28ArtifactFixture(label='phase29'){
+  const fx=revisionFixture(label);
+  const bridge=provenanceBridge(fx,label);
+  const build=prepareRsiIsolatedCandidateBuild({
+    experiment_plan:bridge.devos_experiment_plan,
+    source_snapshot:sourceSnapshot(),
+    mutations:bridge.approved_mutations,
+    requested_backend:'FIRECRACKER',
+  });
+  const materialization=provenanceMaterialization(build);
+  const artifactReceipt=createRsiBoundedRevisionArtifactReceipt({
+    receipt_id:`phase28.artifact.receipt.${label}`,
+    bridge,
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    build_plan:build,
+    materialization_receipt:materialization,
+    artifact_digest:labelDigest(`artifact-package-${label}`),
+    provenance_attestation_digest:labelDigest(`provenance-attestation-${label}`),
+    signature_bundle_digest:labelDigest(`signature-bundle-${label}`),
+    transparency_log_entry_digest:labelDigest(`transparency-entry-${label}`),
+    reproducibility_evidence_digest:labelDigest(`reproducibility-${label}`),
+    external_attestor:true,
+    authored_by_candidate:false,
+  });
+  const artifactVerification={
+    bridge,
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    build_plan:build,
+    materialization_receipt:materialization,
+  };
+  return {...fx,bridge,build,materialization,artifactReceipt,artifactVerification};
+}
+
+function phase29Handoff(fx,label='phase29'){
+  return createRsiMaterializedCandidateEvaluationHandoff({
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    evaluator_root_digest:labelDigest(`${label}-evaluator-root`),
+    evaluator_generation_digest:labelDigest(`${label}-evaluator-generation`),
+    evaluation_epoch_digest:labelDigest(`${label}-evaluation-epoch`),
+    sealed_task_set_digest:labelDigest(`${label}-sealed-task-set`),
+    harness_digest:labelDigest(`${label}-harness`),
+    trial_worker_image_digest:labelDigest(`${label}-trial-worker`),
+    resource_budget_digest:labelDigest(`${label}-resource-budget`),
+    task_order_digest:labelDigest(`${label}-task-order`),
+    threshold_policy_digest:labelDigest(`${label}-threshold-policy`),
+    stopping_policy_digest:labelDigest(`${label}-stopping-policy`),
+    external_measurement_digest:labelDigest(`${label}-external-measurement`),
+    proxy_score_digest:labelDigest(`${label}-proxy-score`),
+    uncertainty:0.9,
+    decision_closeness:0.8,
+    proxy_reliability_gap:0.3,
+    evaluator_cost_units:8,
+    expected_information_gain:0.9,
+    external_evaluation_owner:true,
+    authored_by_candidate:false,
+  });
+}
+
 test('provenance-bound artifact receipt yields evaluation eligibility but never activation authority',()=>{
   const fx=revisionFixture('artifact-receipt');
   const bridge=provenanceBridge(fx,'artifact-receipt');
@@ -584,3 +654,139 @@ test('artifact receipt rejects candidate-controlled provenance identity',()=>{
     authored_by_candidate:false,
   }),/provenance_identity_mismatch/);
 });
+
+
+test('Phase29 child re-enters only the existing fresh budget and paired experiment planes with frozen acceptance assets',()=>{
+  const fx=phase28ArtifactFixture('phase29-loop');
+  const handoff=phase29Handoff(fx,'phase29-loop');
+  verifyRsiMaterializedCandidateEvaluationHandoff(handoff,{
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+  });
+  const request=verifyRsiArtifactEvaluationRoutingRequest(handoff.fresh_evaluation_request);
+  assert.equal(request.phase28_artifact_receipt_digest,fx.artifactReceipt.artifact_receipt_digest);
+  assert.equal(request.parent_artifact_digest,fx.envelope.parent_candidate_artifact_digest);
+  assert.equal(request.candidate_artifact_digest,fx.artifactReceipt.artifact_digest);
+  assert.equal(request.acceptance_assets_frozen,true);
+  assert.equal(request.candidate_can_choose_evaluator,false);
+  assert.equal(request.candidate_can_choose_sealed_tasks,false);
+  assert.equal(request.candidate_can_choose_thresholds,false);
+  assert.equal(request.candidate_can_choose_stopping,false);
+  assert.ok(request.scope_tags.includes('SAFETY'));
+  assert.ok(request.scope_tags.includes('SECURITY'));
+  assert.ok(request.scope_tags.includes('HIDDEN_HOLDOUT'));
+
+  const freshPlan=createRsiEvaluationBudgetPlan({
+    plan_id:'phase29.eval.budget.loop',
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(freshPlan.safety_floor_satisfied,true);
+  assert.deepEqual(freshPlan.selected_request_digests,[request.request_digest]);
+
+  const intent=createRsiCandidateExperimentIntent({
+    intent_id:'phase29.paired.intent.loop',
+    request,
+    plan:freshPlan,
+    plan_requests:[request],
+    baseline_artifact_digest:handoff.parent_artifact_digest,
+    candidate_artifact_digest:handoff.candidate_artifact_digest,
+    sealed_task_set_digest:handoff.sealed_task_set_digest,
+    harness_digest:handoff.harness_digest,
+    evaluator_root_digest:handoff.evaluator_root_digest,
+    trial_worker_image_digest:handoff.trial_worker_image_digest,
+    resource_budget_digest:handoff.resource_budget_digest,
+    task_order_digest:handoff.task_order_digest,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  });
+  verifyRsiCandidateExperimentIntent(intent);
+  assert.equal(intent.evaluation_request_kind,'MATERIALIZED_CANDIDATE');
+  assert.equal(intent.phase28_artifact_receipt_digest,fx.artifactReceipt.artifact_receipt_digest);
+  assert.equal(intent.evaluator_generation_digest,handoff.evaluator_generation_digest);
+  assert.equal(intent.evaluation_epoch_digest,handoff.evaluation_epoch_digest);
+  assert.equal(intent.threshold_policy_digest,handoff.threshold_policy_digest);
+  assert.equal(intent.stopping_policy_digest,handoff.stopping_policy_digest);
+  assert.equal(intent.acceptance_assets_frozen,true);
+  assert.equal(intent.fresh_budget_epoch_required,true);
+  assert.equal(intent.max_attempts_per_arm,1);
+  assert.equal(intent.max_retries,0);
+  assert.equal(intent.execution_authority,false);
+  assert.equal(intent.scheduler_authority,false);
+  assert.equal(handoff.state,'READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING');
+  assert.equal(handoff.previous_budget_plan_reuse_allowed,false);
+  assert.equal(handoff.authority_effect,false);
+});
+
+test('Phase29 rejects candidate-owned acceptance, self-rehashed policy weakening, and any paired-asset drift',()=>{
+  const fx=phase28ArtifactFixture('phase29-negative');
+  assert.throws(()=>createRsiMaterializedCandidateEvaluationHandoff({
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    evaluator_root_digest:labelDigest('neg-evaluator'),
+    evaluator_generation_digest:labelDigest('neg-generation'),
+    evaluation_epoch_digest:labelDigest('neg-epoch'),
+    sealed_task_set_digest:labelDigest('neg-tasks'),
+    harness_digest:labelDigest('neg-harness'),
+    trial_worker_image_digest:labelDigest('neg-worker'),
+    resource_budget_digest:labelDigest('neg-budget'),
+    task_order_digest:labelDigest('neg-order'),
+    threshold_policy_digest:labelDigest('neg-threshold'),
+    stopping_policy_digest:labelDigest('neg-stopping'),
+    external_measurement_digest:labelDigest('neg-measurement'),
+    proxy_score_digest:labelDigest('neg-proxy'),
+    uncertainty:0.9,decision_closeness:0.8,proxy_reliability_gap:0.3,
+    evaluator_cost_units:8,expected_information_gain:0.9,
+    external_evaluation_owner:false,
+    authored_by_candidate:true,
+  }),/external_evaluation_owner_required/);
+
+  const handoff=phase29Handoff(fx,'phase29-negative');
+  const tampered=structuredClone(handoff.fresh_evaluation_request);
+  tampered.candidate_can_choose_thresholds=true;
+  const core=structuredClone(tampered);delete core.request_digest;
+  tampered.request_digest=dg(core);
+  assert.throws(()=>verifyRsiArtifactEvaluationRoutingRequest(tampered),/artifact_request_policy_invalid/);
+
+  const request=handoff.fresh_evaluation_request;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:'phase29.eval.budget.negative',
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.throws(()=>createRsiCandidateExperimentIntent({
+    intent_id:'phase29.paired.intent.bad-tasks',
+    request,plan,plan_requests:[request],
+    baseline_artifact_digest:handoff.parent_artifact_digest,
+    candidate_artifact_digest:handoff.candidate_artifact_digest,
+    sealed_task_set_digest:labelDigest('different-sealed-tasks'),
+    harness_digest:handoff.harness_digest,
+    evaluator_root_digest:handoff.evaluator_root_digest,
+    trial_worker_image_digest:handoff.trial_worker_image_digest,
+    resource_budget_digest:handoff.resource_budget_digest,
+    task_order_digest:handoff.task_order_digest,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  }),/sealed_tasks_mismatch/);
+  assert.throws(()=>createRsiCandidateExperimentIntent({
+    intent_id:'phase29.paired.intent.bad-evaluator',
+    request,plan,plan_requests:[request],
+    baseline_artifact_digest:handoff.parent_artifact_digest,
+    candidate_artifact_digest:handoff.candidate_artifact_digest,
+    sealed_task_set_digest:handoff.sealed_task_set_digest,
+    harness_digest:handoff.harness_digest,
+    evaluator_root_digest:labelDigest('different-evaluator'),
+    trial_worker_image_digest:handoff.trial_worker_image_digest,
+    resource_budget_digest:handoff.resource_budget_digest,
+    task_order_digest:handoff.task_order_digest,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  }),/evaluator_mismatch/);
+});
+
