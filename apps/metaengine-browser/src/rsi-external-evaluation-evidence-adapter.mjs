@@ -242,6 +242,19 @@ function tournamentEvidence(identity,candidateHandoff,evaluatorResult,bundle){
   return Object.freeze({plan,result,verdict});
 }
 
+function upstreamBlockedRow(kind,evaluatorResult,reason){
+  const support=zeroAuthority({
+    schema:'metaengine.rsi.upstream-evaluation-block.v1',
+    version:1,
+    evaluator_result_digest:evaluatorResult.result_digest,
+    reason,
+    candidate_can_override:false,
+    direct_promotion_enabled:false,
+  });
+  const supportDigest=digest(support);
+  return evidenceRow(kind,'FAIL',supportDigest,support.schema,supportDigest);
+}
+
 function evidenceRow(kind,result,evidenceDigest,supportSchema,supportDigest){
   const core=zeroAuthority({
     evidence_id:`external:${kind.toLowerCase().replaceAll('_','-')}`,
@@ -269,27 +282,43 @@ export function createRsiExternalEvaluationBundle({
 }={}){
   const identity=verifiedMaterializationIdentity(verified_materialization);
   const evaluator=evaluatorEvidence(identity,candidate_handoff,evaluator_receipts);
-  const holdoutResult=holdoutEvidence(identity,holdout);
-  const regressionResult=regressionEvidence(identity,regression);
-  const integrityResult=integrityEvidence(identity,integrity);
-  const tournamentResult=tournamentEvidence(identity,candidate_handoff,evaluator.result,tournament);
-  const evaluatorRootDigest=rsiEvaluatorRootSnapshot().evaluator_root_digest;
-  if(integrity.policy?.evaluator_root_digest!==evaluatorRootDigest)throw new Error('rsi_external_eval_integrity_evaluator_root_mismatch');
-  for(const receipt of regression.receipts){
-    if(receipt.evaluator_root_digest!==evaluatorRootDigest)throw new Error('rsi_external_eval_regression_evaluator_root_mismatch');
-  }
-  if(holdoutResult.result.holdout_suite_digest!==tournamentResult.plan.workload.holdout_digest)throw new Error('rsi_external_eval_holdout_tournament_binding_mismatch');
-
   const hardDigest=digest({result_digest:evaluator.result.result_digest,hard_invariants:evaluator.result.hard_invariants});
   const objectiveDigest=digest({result_digest:evaluator.result.result_digest,objectives:evaluator.result.objectives,state:evaluator.result.state});
-  const classes=Object.freeze([
-    evidenceRow('HARD_INVARIANTS',evaluator.hard_result,hardDigest,evaluator.result.schema,evaluator.result.result_digest),
-    evidenceRow('OBJECTIVES',evaluator.objective_result,objectiveDigest,evaluator.result.schema,evaluator.result.result_digest),
-    evidenceRow('HOLDOUT',holdoutResult.verdict,holdoutResult.result.holdout_result_digest,holdoutResult.admission.schema,holdoutResult.admission.admission_digest),
-    evidenceRow('REGRESSION_REPLAY',regressionResult.verdict,regressionResult.gate.gate_digest,regressionResult.gate.schema,regressionResult.gate.gate_digest),
-    evidenceRow('EVALUATION_INTEGRITY',integrityResult.verdict,integrityResult.assessment.assessment_digest,integrityResult.assessment.schema,integrityResult.assessment.assessment_digest),
-    evidenceRow('TOURNAMENT',tournamentResult.verdict,tournamentResult.result.result_digest,tournamentResult.result.schema,tournamentResult.result.result_digest),
-  ]);
+  let holdoutResult=null;
+  let regressionResult=null;
+  let integrityResult=null;
+  let tournamentResult=null;
+  let classes;
+  if(evaluator.hard_result!=='PASS'||evaluator.objective_result!=='PASS'){
+    const reason=evaluator.hard_result!=='PASS'?'HARD_INVARIANT_FAILURE':'NO_VERIFIED_OBJECTIVE_ADVANCE';
+    classes=Object.freeze([
+      evidenceRow('HARD_INVARIANTS',evaluator.hard_result,hardDigest,evaluator.result.schema,evaluator.result.result_digest),
+      evidenceRow('OBJECTIVES',evaluator.objective_result,objectiveDigest,evaluator.result.schema,evaluator.result.result_digest),
+      upstreamBlockedRow('HOLDOUT',evaluator.result,reason),
+      upstreamBlockedRow('REGRESSION_REPLAY',evaluator.result,reason),
+      upstreamBlockedRow('EVALUATION_INTEGRITY',evaluator.result,reason),
+      upstreamBlockedRow('TOURNAMENT',evaluator.result,reason),
+    ]);
+  }else{
+    holdoutResult=holdoutEvidence(identity,holdout);
+    regressionResult=regressionEvidence(identity,regression);
+    integrityResult=integrityEvidence(identity,integrity);
+    tournamentResult=tournamentEvidence(identity,candidate_handoff,evaluator.result,tournament);
+    const evaluatorRootDigest=rsiEvaluatorRootSnapshot().evaluator_root_digest;
+    if(integrity.policy?.evaluator_root_digest!==evaluatorRootDigest)throw new Error('rsi_external_eval_integrity_evaluator_root_mismatch');
+    for(const receipt of regression.receipts){
+      if(receipt.evaluator_root_digest!==evaluatorRootDigest)throw new Error('rsi_external_eval_regression_evaluator_root_mismatch');
+    }
+    if(holdoutResult.result.holdout_suite_digest!==tournamentResult.plan.workload.holdout_digest)throw new Error('rsi_external_eval_holdout_tournament_binding_mismatch');
+    classes=Object.freeze([
+      evidenceRow('HARD_INVARIANTS',evaluator.hard_result,hardDigest,evaluator.result.schema,evaluator.result.result_digest),
+      evidenceRow('OBJECTIVES',evaluator.objective_result,objectiveDigest,evaluator.result.schema,evaluator.result.result_digest),
+      evidenceRow('HOLDOUT',holdoutResult.verdict,holdoutResult.result.holdout_result_digest,holdoutResult.admission.schema,holdoutResult.admission.admission_digest),
+      evidenceRow('REGRESSION_REPLAY',regressionResult.verdict,regressionResult.gate.gate_digest,regressionResult.gate.schema,regressionResult.gate.gate_digest),
+      evidenceRow('EVALUATION_INTEGRITY',integrityResult.verdict,integrityResult.assessment.assessment_digest,integrityResult.assessment.schema,integrityResult.assessment.assessment_digest),
+      evidenceRow('TOURNAMENT',tournamentResult.verdict,tournamentResult.result.result_digest,tournamentResult.result.schema,tournamentResult.result.result_digest),
+    ]);
+  }
   if(JSON.stringify(classes.map(row=>row.evidence_kind))!==JSON.stringify(REQUIRED_KINDS))throw new Error('rsi_external_eval_required_class_order_invalid');
 
   const core=zeroAuthority({
@@ -302,12 +331,12 @@ export function createRsiExternalEvaluationBundle({
     isolated_candidate_handoff_digest:identity.isolated_handoff_digest,
     evaluator_plan_digest:evaluator.plan.plan_digest,
     evaluator_result_digest:evaluator.result.result_digest,
-    benchmark_admission_digest:holdoutResult.admission.admission_digest,
-    holdout_result_digest:holdoutResult.result.holdout_result_digest,
-    regression_gate_digest:regressionResult.gate.gate_digest,
-    evaluation_integrity_assessment_digest:integrityResult.assessment.assessment_digest,
-    tournament_plan_digest:tournamentResult.plan.plan_digest,
-    tournament_result_digest:tournamentResult.result.result_digest,
+    benchmark_admission_digest:holdoutResult?.admission?.admission_digest||null,
+    holdout_result_digest:holdoutResult?.result?.holdout_result_digest||null,
+    regression_gate_digest:regressionResult?.gate?.gate_digest||null,
+    evaluation_integrity_assessment_digest:integrityResult?.assessment?.assessment_digest||null,
+    tournament_plan_digest:tournamentResult?.plan?.plan_digest||null,
+    tournament_result_digest:tournamentResult?.result?.result_digest||null,
     evidence_classes:classes,
     required_evidence_kinds:[...REQUIRED_KINDS],
     all_classes_pass:classes.every(row=>row.result==='PASS'),
@@ -340,13 +369,17 @@ export function verifyRsiExternalEvaluationBundle(bundle){
     [bundle.isolated_candidate_handoff_digest,'handoff'],
     [bundle.evaluator_plan_digest,'evaluator_plan'],
     [bundle.evaluator_result_digest,'evaluator_result'],
+  ])exactDigest(value,label);
+  for(const [value,label] of [
     [bundle.benchmark_admission_digest,'benchmark'],
     [bundle.holdout_result_digest,'holdout'],
     [bundle.regression_gate_digest,'regression'],
     [bundle.evaluation_integrity_assessment_digest,'integrity'],
     [bundle.tournament_plan_digest,'tournament_plan'],
     [bundle.tournament_result_digest,'tournament_result'],
-  ])exactDigest(value,label);
+  ]){
+    if(value!=null)exactDigest(value,label);
+  }
   if(!Array.isArray(bundle.evidence_classes)||bundle.evidence_classes.length!==REQUIRED_KINDS.length)throw new Error('rsi_external_eval_bundle_classes_invalid');
   if(JSON.stringify(bundle.evidence_classes.map(row=>row.evidence_kind))!==JSON.stringify(REQUIRED_KINDS))throw new Error('rsi_external_eval_bundle_class_order_invalid');
   for(const row of bundle.evidence_classes){
