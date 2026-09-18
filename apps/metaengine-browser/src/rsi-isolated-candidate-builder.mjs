@@ -50,6 +50,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-experience-graph.mjs',
   'apps/metaengine-browser/src/rsi-benchmark-provenance-guard.mjs',
   'apps/metaengine-browser/src/rsi-frontier-coevolution.mjs',
+  'apps/metaengine-browser/src/rsi-regression-replay.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/trusted-dev-release-resolver.mjs',
   'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
