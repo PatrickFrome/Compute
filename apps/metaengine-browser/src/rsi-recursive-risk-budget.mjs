@@ -4,6 +4,7 @@ export const RSI_RECURSIVE_RISK_BUDGET_SCHEMA = 'metaengine.rsi.recursive-risk-b
 export const RSI_STATISTICAL_CERTIFICATE_SCHEMA = 'metaengine.rsi.statistical-certificate.v1';
 export const RSI_RISK_CONFIRMATION_SCHEMA = 'metaengine.rsi.risk-confirmation.v1';
 export const RSI_RISK_LEDGER_SNAPSHOT_SCHEMA = 'metaengine.rsi.risk-ledger-snapshot.v1';
+export const RSI_RISK_CONTROLLED_PROMOTION_REVIEW_SCHEMA = 'metaengine.rsi.risk-controlled-promotion-review.v1';
 
 export const RSI_RISK_SPENDING_POLICIES = Object.freeze({
   CTHS_FINITE: 'CTHS_FINITE_V1',
@@ -354,6 +355,106 @@ export function verifyRsiExternalStatisticalCertificate(certificate, {
   if (canonical.holdout_digest !== exactDigest(holdout_digest, 'expected_holdout')) throw new Error('rsi_risk_certificate_holdout_mismatch');
   if (canonical.evaluator_root_digest !== exactDigest(evaluator_root_digest, 'expected_evaluator_root')) throw new Error('rsi_risk_certificate_evaluator_root_mismatch');
   return canonical;
+}
+
+export function verifyRsiRiskConfirmation(row) {
+  if (!plainObject(row) || row.schema !== RSI_RISK_CONFIRMATION_SCHEMA || row.version !== 1) throw new Error('rsi_risk_confirmation_invalid');
+  assertZeroAuthority(row, 'confirmation');
+  const state = String(row.state || '');
+  if (!['STATISTICAL_GATE_PASS_FOR_EXTERNAL_REVIEW', 'STATISTICAL_GATE_REJECTED'].includes(state)) {
+    throw new Error('rsi_risk_confirmation_state_invalid');
+  }
+  if (
+    row.direct_promotion_authorized !== false
+    || row.existing_self_update_handoff_authorized !== false
+    || row.statistical_gate_replaces_hard_invariants !== false
+  ) throw new Error('rsi_risk_confirmation_policy_invalid');
+  if (state === 'STATISTICAL_GATE_PASS_FOR_EXTERNAL_REVIEW') {
+    if (row.superiority_certified !== true || row.external_promotion_review_required !== true) throw new Error('rsi_risk_confirmation_pass_invalid');
+  } else if (row.superiority_certified !== false || row.external_promotion_review_required !== false) {
+    throw new Error('rsi_risk_confirmation_reject_invalid');
+  }
+  const cumulative = Number(row.cumulative_alpha_spent);
+  const global = Number(row.global_alpha);
+  const used = Number(row.alpha_used);
+  const allocated = Number(row.allocated_alpha);
+  if (![cumulative, global, used, allocated].every(Number.isFinite) || cumulative < 0 || global <= 0 || used <= 0 || allocated <= 0) {
+    throw new Error('rsi_risk_confirmation_alpha_invalid');
+  }
+  if (used - allocated > EPSILON || cumulative - global > EPSILON) throw new Error('rsi_risk_confirmation_budget_invalid');
+  exactDigest(row.budget_digest, 'confirmation_budget');
+  exactDigest(row.certificate_digest, 'confirmation_certificate');
+  exactDigest(row.tournament_plan_digest, 'confirmation_tournament');
+  exactDigest(row.holdout_digest, 'confirmation_holdout');
+  exactDigest(row.evaluator_root_digest, 'confirmation_evaluator_root');
+  exactSha(row.candidate_sha, 'confirmation_candidate');
+  exactSha(row.parent_sha, 'confirmation_parent');
+  boundedId(row.candidate_id, 'confirmation_candidate_id');
+  const clone = structuredClone(row);
+  delete clone.confirmation_digest;
+  if (exactDigest(row.confirmation_digest, 'confirmation') !== digest(clone)) throw new Error('rsi_risk_confirmation_digest_mismatch');
+  return row;
+}
+
+export function evaluateRsiRiskControlledPromotionReview({ promotion_gate_result, risk_confirmation } = {}) {
+  if (!plainObject(promotion_gate_result) || promotion_gate_result.schema !== 'metaengine.rsi.promotion-admission-gate-result.v1' || promotion_gate_result.version !== 1) {
+    throw new Error('rsi_risk_promotion_gate_invalid');
+  }
+  assertZeroAuthority(promotion_gate_result, 'promotion_gate');
+  const gateClone = structuredClone(promotion_gate_result);
+  delete gateClone.gate_digest;
+  if (exactDigest(promotion_gate_result.gate_digest, 'promotion_gate') !== digest(gateClone)) {
+    throw new Error('rsi_risk_promotion_gate_digest_mismatch');
+  }
+  if (
+    promotion_gate_result.state !== 'READY_FOR_EXTERNAL_PROMOTION_REVIEW'
+    || promotion_gate_result.ready_for_external_promotion_review !== true
+    || promotion_gate_result.existing_self_update_handoff_authorized !== false
+    || promotion_gate_result.direct_install_authorized !== false
+    || promotion_gate_result.promotion_token !== null
+  ) throw new Error('rsi_risk_promotion_gate_not_ready');
+
+  const confirmation = verifyRsiRiskConfirmation(risk_confirmation);
+  if (confirmation.state !== 'STATISTICAL_GATE_PASS_FOR_EXTERNAL_REVIEW') throw new Error('rsi_risk_statistical_gate_not_pass');
+  if (
+    String(promotion_gate_result.candidate_id || '') !== confirmation.candidate_id
+    || exactSha(promotion_gate_result.candidate_sha, 'promotion_candidate') !== confirmation.candidate_sha
+    || exactSha(promotion_gate_result.parent_sha, 'promotion_parent') !== confirmation.parent_sha
+    || exactDigest(promotion_gate_result.tournament_plan_digest, 'promotion_tournament') !== confirmation.tournament_plan_digest
+  ) throw new Error('rsi_risk_promotion_statistical_binding_mismatch');
+
+  const core = {
+    schema: RSI_RISK_CONTROLLED_PROMOTION_REVIEW_SCHEMA,
+    version: 1,
+    state: 'READY_FOR_RISK_CONTROLLED_EXTERNAL_PROMOTION_REVIEW',
+    candidate_id: confirmation.candidate_id,
+    candidate_sha: confirmation.candidate_sha,
+    parent_sha: confirmation.parent_sha,
+    promotion_gate_digest: promotion_gate_result.gate_digest,
+    risk_confirmation_digest: confirmation.confirmation_digest,
+    budget_digest: confirmation.budget_digest,
+    certificate_digest: confirmation.certificate_digest,
+    tournament_plan_digest: confirmation.tournament_plan_digest,
+    holdout_digest: confirmation.holdout_digest,
+    evaluator_root_digest: confirmation.evaluator_root_digest,
+    cumulative_alpha_spent: confirmation.cumulative_alpha_spent,
+    global_alpha: confirmation.global_alpha,
+    hard_invariants_already_required_by_promotion_gate: true,
+    statistical_confirmation_required: true,
+    statistical_gate_is_promotion_authority: false,
+    external_promotion_review_required: true,
+    direct_promotion_authorized: false,
+    direct_install_authorized: false,
+    existing_self_update_handoff_authorized: false,
+    promotion_token: null,
+    execution_authority: false,
+    production_mutation_authority: false,
+    promotion_authority: false,
+    self_update_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+  return Object.freeze({ ...core, review_digest: digest(core) });
 }
 
 export class RsiRecursiveRiskLedger {
