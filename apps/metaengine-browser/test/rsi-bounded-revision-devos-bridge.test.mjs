@@ -54,6 +54,8 @@ import {
   verifyRsiKnowledgeConsolidationProposal,
   createRsiKnowledgeTransferValidation,
   verifyRsiKnowledgeTransferValidation,
+  createRsiKnowledgeConsolidationAdmission,
+  verifyRsiKnowledgeConsolidationAdmission,
   rsiSlowKnowledgeConsolidationTrustRootSnapshot,
 } from '../src/rsi-slow-knowledge-consolidation.mjs';
 
@@ -1410,6 +1412,10 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     proposal,
     heldout_context_digest:labelDigest(`${label}-heldout-context`),
     heldout_task_set_digest:labelDigest(`${label}-heldout-tasks`),
+    task_family_digest:labelDigest(`${label}-task-family`),
+    transfer_harness_digest:labelDigest(`${label}-transfer-harness`),
+    acceptance_policy_digest:labelDigest(`${label}-acceptance-policy`),
+    hidden_holdout_root_digest:labelDigest(`${label}-hidden-holdout-root`),
     external_evaluator_root_digest:labelDigest(`${label}-external-evaluator`),
     control_receipt_digest:labelDigest(`${label}-control`),
     treatment_receipt_digest:labelDigest(`${label}-treatment`),
@@ -1517,13 +1523,62 @@ test('Phase31 negative constraints require held-out predictive confirmation rath
   assert.ok(missing.blockers.includes('KNOWLEDGE_CLASS_TRANSFER_GOAL_NOT_MET'));
 });
 
+test('Phase31 requires at least two distinct passed transfer contexts before library-admission review eligibility',()=>{
+  const rows=phase31SourceRows('quorum');
+  const proposal=phase31Proposal(rows,'quorum');
+  const v1=phase31Validation(proposal,'quorum-a');
+  assert.throws(()=>createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.quorum-one',
+    proposal,
+    validations:[v1],
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  }),/transfer_validation_quorum_invalid/);
+
+  const v2=phase31Validation(proposal,'quorum-b');
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.quorum-two',
+    proposal,
+    validations:[v1,v2],
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(verifyRsiKnowledgeConsolidationAdmission(admission,{proposal,validations:[v1,v2]}).admission_digest,admission.admission_digest);
+  assert.equal(admission.state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
+  assert.equal(admission.passed_transfer_context_count,2);
+  assert.equal(admission.zero_observed_negative_transfer,true);
+  assert.equal(admission.library_admission_token,null);
+  assert.equal(admission.admission_can_write_skill_library,false);
+  assert.equal(admission.admission_can_write_experience_graph,false);
+  assert.equal(admission.admission_can_modify_meta_skill_profile,false);
+  assert.equal(admission.admission_can_activate_knowledge,false);
+
+  const duplicateContext=phase31Validation(proposal,'quorum-c',{
+    heldout_context_digest:v1.heldout_context_digest,
+  });
+  assert.throws(()=>createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.duplicate-context',
+    proposal,
+    validations:[v1,duplicateContext],
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  }),/distinct_target_contexts_required/);
+});
+
 test('Phase31 consolidation archive is durable-before-visible, source-revalidated on restart and cannot activate knowledge',async(t)=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase31-consolidation-'));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const statePath=path.join(dir,'knowledge.json');
   const rows=phase31SourceRows('archive');
   const proposal=phase31Proposal(rows,'archive');
-  const validation=phase31Validation(proposal,'archive');
+  const validations=[phase31Validation(proposal,'archive-a'),phase31Validation(proposal,'archive-b')];
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.archive',
+    proposal,
+    validations,
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  });
   const resolver=async({source_entry_digests})=>{
     const wanted=new Set(source_entry_digests);
     return rows.filter(r=>wanted.has(r.entry.entry_digest));
@@ -1532,11 +1587,11 @@ test('Phase31 consolidation archive is durable-before-visible, source-revalidate
   await archive.init();
 
   await fs.mkdir(statePath);
-  await assert.rejects(()=>archive.add({proposal,validation,source_rows:rows}));
+  await assert.rejects(()=>archive.add({proposal,validations,admission,source_rows:rows}));
   assert.equal(archive.snapshot().row_count,0);
   await fs.rm(statePath,{recursive:true,force:true});
 
-  assert.equal((await archive.add({proposal,validation,source_rows:rows})).state,'TRANSFER_VALIDATED_ADVISORY_KNOWLEDGE');
+  assert.equal((await archive.add({proposal,validations,admission,source_rows:rows})).state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
   const snap=archive.snapshot();
   assert.equal(snap.row_count,1);
   assert.equal(snap.validated_count,1);
@@ -1557,7 +1612,7 @@ test('Phase31 consolidation archive is durable-before-visible, source-revalidate
   const restored=new RsiKnowledgeConsolidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
   await restored.init();
   assert.equal(restored.snapshot().row_count,1);
-  assert.equal((await restored.add({proposal,validation,source_rows:rows})).state,'IDEMPOTENT');
+  assert.equal((await restored.add({proposal,validations,admission,source_rows:rows})).state,'IDEMPOTENT');
 });
 
 test('Phase31 trust root enforces slow external consolidation without authority expansion',()=>{
@@ -1571,6 +1626,10 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.source_evidence_preserved_by_digest,true);
   assert.equal(root.external_consolidator_required,true);
   assert.equal(root.external_transfer_validator_required,true);
+  assert.equal(root.min_distinct_passed_transfer_contexts,2);
+  assert.equal(root.distinct_heldout_task_sets_required,true);
+  assert.equal(root.distinct_task_families_required,true);
+  assert.equal(root.zero_observed_negative_transfer_required,true);
   assert.equal(root.heldout_source_context_exclusion_required,true);
   assert.equal(root.common_non_regression_floor_required,true);
   assert.equal(root.knowledge_class_specific_transfer_goal_required,true);
