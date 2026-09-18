@@ -107,6 +107,8 @@ import {
   verifyRsiStorageOnlyAppendEffectPlan,
   createRsiStorageOnlyAppendEffectReadback,
   verifyRsiStorageOnlyAppendEffectReadback,
+  createRsiStorageOnlyAppendEffectReconciliation,
+  verifyRsiStorageOnlyAppendEffectReconciliation,
   rsiStorageOnlyAppendEffectTrustRootSnapshot,
 } from '../src/rsi-storage-only-append-effect.mjs';
 
@@ -3661,4 +3663,52 @@ test('Phase34 storage-only effect trust root keeps append distinct from governan
   assert.equal(root.future_governance_revalidation_required,true);
   assert.equal(root.authority_effect,false);
   assert.match(root.storage_only_append_effect_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('Phase34 ambiguous append is reconciled by a separate readback-only event without a second effect attempt',()=>{
+  const fx=phase34EffectFixture('reconcile');
+  const ambiguous=createRsiStorageOnlyAppendEffectReadback({
+    receipt_id:'phase34.effect.reconcile.ambiguous',
+    plan:fx.plan,plan_args:fx.planArgs,effect_outcome:'AMBIGUOUS',
+    observed_library:null,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-reconcile-ambiguous-journal'),
+    effect_executor_identity_digest:labelDigest('phase34-reconcile-executor'),
+    readback_owner_identity_digest:labelDigest('phase34-reconcile-initial-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  const reconciled=createRsiStorageOnlyAppendEffectReconciliation({
+    reconciliation_id:'phase34.effect.reconciliation.applied',
+    plan:fx.plan,plan_args:fx.planArgs,
+    ambiguous_receipt:ambiguous,ambiguous_observed_library:null,
+    observed_library:fx.successorLibrary,
+    reconciliation_evidence_digest:labelDigest('phase34-reconcile-evidence'),
+    reconciliation_owner_identity_digest:labelDigest('phase34-reconcile-owner'),
+    external_reconciliation_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(verifyRsiStorageOnlyAppendEffectReconciliation(reconciled,{
+    plan:fx.plan,plan_args:fx.planArgs,ambiguous_receipt:ambiguous,
+    ambiguous_observed_library:null,observed_library:fx.successorLibrary,
+  }).reconciliation_digest,reconciled.reconciliation_digest);
+  assert.equal(reconciled.state,'RECONCILED_APPLIED_STORAGE_ONLY_PENDING_GOVERNANCE');
+  assert.equal(reconciled.append_confirmed,true);
+  assert.equal(reconciled.additional_effect_attempt_performed,false);
+  assert.equal(reconciled.effect_attempt_count,1);
+  assert.equal(reconciled.same_effect_id_retry_allowed,false);
+  assert.equal(reconciled.reconciliation_complete,true);
+  assert.equal(reconciled.retrieval_exposure_changed,false);
+  assert.equal(reconciled.skill_activation_performed,false);
+
+  const notApplied=createRsiStorageOnlyAppendEffectReconciliation({
+    reconciliation_id:'phase34.effect.reconciliation.not-applied',
+    plan:fx.plan,plan_args:fx.planArgs,
+    ambiguous_receipt:ambiguous,ambiguous_observed_library:null,
+    observed_library:fx.currentLibrary,
+    reconciliation_evidence_digest:labelDigest('phase34-reconcile-not-applied-evidence'),
+    reconciliation_owner_identity_digest:labelDigest('phase34-reconcile-not-applied-owner'),
+    external_reconciliation_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(notApplied.state,'RECONCILED_NOT_APPLIED_NEW_PLAN_REQUIRED');
+  assert.equal(notApplied.new_plan_required_for_future_attempt,true);
+  assert.equal(notApplied.additional_effect_attempt_performed,false);
 });
