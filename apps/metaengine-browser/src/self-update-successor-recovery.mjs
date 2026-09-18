@@ -136,6 +136,39 @@ export function recordSelfUpdateRecoveryQualificationResult(result = null) {
   return selfUpdateRecoveryDiagnosticSnapshot();
 }
 
+// D-Q1 repair: record that a QUARANTINED transaction was reopened for
+// re-qualification after its quarantine reason observably healed. The
+// diagnostic returns to TARGET_INSTALLED_PENDING_QUALIFICATION so the normal
+// fail-closed qualification pipeline (heartbeat + re-probe) resumes exactly
+// where it was fenced.
+export function recordSelfUpdateRecoveryQuarantineReopenResult(transaction = null) {
+  const current = latestRecoveryDiagnostic;
+  if (!current || current.state !== 'QUARANTINED') return selfUpdateRecoveryDiagnosticSnapshot();
+  const exactReopen = transaction?.schema === TRANSACTION_SCHEMA
+    && transaction?.state === 'SUCCESSOR_BOOTED'
+    && transaction?.quarantined === false
+    && transaction?.qualified === false
+    && transaction?.automatic_retry_allowed === false
+    && transaction?.authority_effect === false
+    && transaction?.evidence?.quarantine_reopened === true
+    && exactRecoveryTransaction(transaction, current)
+    && String(transaction?.target_version || '') === String(current.target_version || '')
+    && String(current.current_version || '') === String(current.target_version || '');
+  if (!exactReopen) return selfUpdateRecoveryDiagnosticSnapshot();
+
+  latestRecoveryDiagnostic = Object.freeze({
+    ...current,
+    state: 'TARGET_INSTALLED_PENDING_QUALIFICATION',
+    transaction_state: 'SUCCESSOR_BOOTED',
+    reason: clip(transaction?.evidence?.quarantine_reopen_reason || 'quarantine_reason_healed', 240),
+    qualification_resume_allowed: true,
+    recovery_installer_effect_allowed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+  return selfUpdateRecoveryDiagnosticSnapshot();
+}
+
 export function recordSelfUpdateRecoveryQuarantineResult(transaction = null) {
   const current = latestRecoveryDiagnostic;
   if (!current || current.state !== 'TARGET_INSTALLED_PENDING_QUALIFICATION') return selfUpdateRecoveryDiagnosticSnapshot();

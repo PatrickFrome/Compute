@@ -245,6 +245,29 @@ export function classifyNoOpEffectOutcome(actionRaw, result) {
   return null;
 }
 
+// D-Q1 liveness repair: pure projection of a healed auth readback onto the
+// latched continuity status. Exported for contract tests and reuse; returns
+// the prior object unchanged unless the prior classification was AUTH_REQUIRED
+// AND the fresh readback is positively AUTHENTICATED (metadata-only).
+export function applyQuarantineAuthHealToContinuityStatus(prior, refreshedReadback, observedAt = new Date().toISOString()) {
+  if (!prior || typeof prior !== 'object') return prior;
+  const authRequired = prior.state === 'AUTH_REQUIRED' || prior.auth_readback_state === 'AUTH_REQUIRED';
+  if (!authRequired) return prior;
+  if (!refreshedReadback || String(refreshedReadback.auth_state || '').toUpperCase() !== 'AUTHENTICATED') return prior;
+  const priorUserSession = String(prior.user_session_continuity || '').toUpperCase();
+  return {
+    ...prior,
+    state: 'RESTORED',
+    auth_readback_state: 'AUTHENTICATED',
+    auth_redirect_tab_count: Number.isFinite(Number(refreshedReadback.auth_redirect_tab_count)) ? Number(refreshedReadback.auth_redirect_tab_count) : 0,
+    auth_heal_chatgpt_tab_count: Number(refreshedReadback.chatgpt_tab_count || 0) || 0,
+    auth_heal_authenticated_tab_count: Number(refreshedReadback.authenticated_tab_count || 0) || 0,
+    user_session_continuity: priorUserSession === 'LOST' ? 'CONTINUED' : (priorUserSession || 'CONTINUED'),
+    auth_heal_observed_at: observedAt,
+    authority_effect: false,
+  };
+}
+
 export class NativeSupervisorClient {
   #identity;
   #fetch;
@@ -834,6 +857,20 @@ export class NativeSupervisorClient {
       await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
       await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
       await this.#mesh?.dispatchRecoveryIfNeeded().catch((error) => { this.#lastError = `mesh_recovery:${clipError(error)}`; });
+      // D-Q1 liveness repair: the boot-time AUTH_REQUIRED classification is
+      // latched into the continuity projection forever, so a user who logs back
+      // in is never reflected and a quarantined self-update transaction can
+      // never re-qualify. Refresh the classification here (bounded, read-only,
+      // metadata-only) so healed evidence becomes observable to the heartbeat
+      // qualification hook. No tab restore, no navigation, no effect.
+      if (
+        this.#continuityStatus
+        && (this.#continuityStatus.state === 'AUTH_REQUIRED'
+          || this.#continuityStatus.auth_readback_state === 'AUTH_REQUIRED')
+      ) {
+        const refreshed = await this.#capturePreInstallAuthReadback().catch(() => null);
+        this.#continuityStatus = applyQuarantineAuthHealToContinuityStatus(this.#continuityStatus, refreshed);
+      }
       await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
     })().finally(() => { this.#maintenancePromise = null; });
     return this.#maintenancePromise;

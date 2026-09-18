@@ -2,10 +2,15 @@ import { loadSelfUpdateSessionContinuity } from './self-update-session-continuit
 import { qualifyUpdatedSuccessor } from './self-update-handoff.mjs';
 import { compareVersions } from './self-update-handoff.mjs';
 import { reconcileStaleSelfUpdateSessionContinuity } from './self-update-continuity-watchdog.mjs';
-import { quarantineSelfUpdateTransaction, readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
+import {
+  quarantineSelfUpdateTransaction,
+  readSelfUpdateTransaction,
+  reopenQuarantinedSelfUpdateTransactionForRequalification,
+} from './self-update-transaction-journal.mjs';
 import {
   recordSelfUpdateRecoveryQualificationResult,
   recordSelfUpdateRecoveryQuarantineResult,
+  recordSelfUpdateRecoveryQuarantineReopenResult,
   selfUpdateRecoveryDiagnosticSnapshot,
 } from './self-update-successor-recovery.mjs';
 
@@ -58,6 +63,65 @@ export async function recordAcceptedSignedSupervisorHeartbeat({ app, state, acce
     return recoveryBindingDrift(transaction, recovery);
   }
   if (!transaction || transaction.state !== 'SUCCESSOR_BOOTED' || transaction.target_version !== version) {
+    // D-Q1 liveness repair: a QUARANTINED transaction whose ONLY failure was
+    // session-continuity auth loss used to be a permanent dead end — the
+    // quarantine latched forever even after the user logged back in, and the
+    // updater stayed blocked (unresolved_prior:QUARANTINED) until a human ran
+    // an installer by hand. When the CURRENT heartbeat carries positive
+    // metadata-only auth evidence (the supervisor maintenance lane refreshes
+    // the continuity projection once auth is restored), reopen the exact
+    // transaction and resume the normal fail-closed qualification pipeline.
+    // This is NOT a retry of a failed effect: the install physically
+    // succeeded, and a wrong heal simply re-quarantines on the next beat.
+    if (
+      transaction?.state === 'QUARANTINED'
+      && version
+      && transaction.target_version === version
+      && String(transaction.evidence?.quarantine_reason || '') === 'session_continuity_auth_required'
+    ) {
+      const continuity = state?.self_update_session_continuity;
+      const healedAuth = String(continuity?.auth_readback_state || '').toUpperCase() === 'AUTHENTICATED'
+        && String(continuity?.user_session_continuity || '').toUpperCase() !== 'LOST';
+      if (healedAuth) {
+        const reopened = await reopenQuarantinedSelfUpdateTransactionForRequalification(app, {
+          reason: 'session_continuity_auth_required_healed',
+          healedEvidence: {
+            auth_readback_state: 'AUTHENTICATED',
+            user_session_continuity: String(continuity?.user_session_continuity || '').toUpperCase() || null,
+            chatgpt_tab_count: Number(continuity?.auth_heal_chatgpt_tab_count ?? continuity?.tab_count ?? 0) || 0,
+            authenticated_tab_count: Number(continuity?.auth_heal_authenticated_tab_count ?? 0) || 0,
+            metadata_only: true,
+            cookie_values_read: false,
+          },
+          requireTargetVersion: version,
+        }).catch(() => null);
+        if (reopened?.state === 'SUCCESSOR_BOOTED' && reopened?.evidence?.quarantine_reopened === true) {
+          recordSelfUpdateRecoveryQuarantineReopenResult(reopened);
+          if (!globalThis.__METAENGINE_SELF_UPDATE_QUALIFICATION_REPROBE__) {
+            startSuccessorQualificationReprobeLoop({
+              app,
+              onResult: (row) => console.log(JSON.stringify({
+                schema: 'metaengine.browser.self-update-qualification-reprobe.v1',
+                version,
+                origin: 'quarantine_auth_heal',
+                ...row,
+                authority_effect: false,
+              })),
+              onError: (error) => console.error(JSON.stringify({
+                schema: 'metaengine.browser.self-update-qualification-reprobe.v1',
+                version,
+                origin: 'quarantine_auth_heal',
+                state: 'REPROBE_ERROR',
+                error,
+                authority_effect: false,
+              })),
+            });
+          }
+          acceptedHeartbeatHealth = null;
+          return { state: 'QUARANTINE_HEALED_REOPENED', transaction: reopened, authority_effect: false };
+        }
+      }
+    }
     acceptedHeartbeatHealth = null;
     return { state: 'NOT_PENDING', authority_effect: false };
   }

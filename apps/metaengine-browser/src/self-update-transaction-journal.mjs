@@ -29,7 +29,13 @@ const TRANSITIONS = new Map([
   ['SUCCESSOR_BOOTED', new Set(['QUALIFIED','QUARANTINED','AMBIGUOUS_INSTALL','SUPERSEDED'])],
   ['AMBIGUOUS_INSTALL', new Set(['SUCCESSOR_BOOTED','QUARANTINED','SUPERSEDED'])],
   ['QUALIFIED', new Set(['SUPERSEDED'])],
-  ['QUARANTINED', new Set(['SUPERSEDED'])],
+  // D-Q1 repair: QUARANTINED is fail-closed but not necessarily permanent —
+  // when the exact reason that fenced qualification (session-continuity auth
+  // loss) is later observably healed, the transaction may re-enter
+  // SUCCESSOR_BOOTED for re-qualification. Reachable ONLY through
+  // reopenQuarantinedSelfUpdateTransactionForRequalification(), which binds
+  // the reopen to positive metadata-only heal evidence.
+  ['QUARANTINED', new Set(['SUPERSEDED','SUCCESSOR_BOOTED'])],
   ['SUPERSEDED', new Set()],
 ]);
 
@@ -194,5 +200,39 @@ export async function qualifySelfUpdateTransaction(app, evidence = {}) {
 export async function quarantineSelfUpdateTransaction(app, reason = 'qualification_failed') {
   return transitionSelfUpdateTransaction(app, 'QUARANTINED', {
     evidence: { quarantine_reason: String(reason || 'qualification_failed').slice(0, 180) },
+  });
+}
+
+// D-Q1 repair: reopen a QUARANTINED transaction whose quarantine reason has
+// observably healed. NOT a retry of a failed effect — the install physically
+// succeeded; only its qualification was fenced pending user-session evidence
+// that has now arrived. The reopen re-enters the normal fail-closed
+// qualification pipeline; if the evidence was wrong the pipeline re-quarantines
+// on the next heartbeat.
+export async function reopenQuarantinedSelfUpdateTransactionForRequalification(app, {
+  reason = 'quarantine_reason_healed',
+  healedEvidence = {},
+  requireTargetVersion = null,
+  clock = () => Date.now(),
+} = {}) {
+  const current = await readSelfUpdateTransaction(app);
+  if (!current) throw new Error('self_update_transaction_missing');
+  if (current.state !== 'QUARANTINED') {
+    throw new Error(`self_update_transaction_reopen_state_invalid:${current.state}`);
+  }
+  if (requireTargetVersion != null && String(requireTargetVersion) !== current.target_version) {
+    throw new Error('self_update_transaction_target_binding_mismatch');
+  }
+  return transitionSelfUpdateTransaction(app, 'SUCCESSOR_BOOTED', {
+    requireTargetVersion: current.target_version,
+    clock,
+    evidence: {
+      quarantine_reopened: true,
+      quarantine_reopen_reason: String(reason || 'quarantine_reason_healed').slice(0, 180),
+      quarantine_reopened_at: new Date().toISOString(),
+      ...safeEvidence(healedEvidence),
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    },
   });
 }
