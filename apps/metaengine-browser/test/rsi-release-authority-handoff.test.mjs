@@ -70,6 +70,12 @@ import {
   rsiPostDeploymentCorrectionTrustRootSnapshot,
 } from '../src/rsi-post-deployment-correction.mjs';
 import {
+  createRsiCorrectionRetrievalBridge,
+  verifyRsiCorrectionRetrievalBridge,
+  rsiCorrectionRetrievalBridgeTrustRootSnapshot,
+} from '../src/rsi-correction-retrieval-bridge.mjs';
+import { createRsiExperienceContextPlan } from '../src/rsi-experience-context-planner.mjs';
+import {
   createRsiExperienceGraphQuery,
   retrieveRsiExperienceGraph,
 } from '../src/rsi-experience-graph.mjs';
@@ -1386,4 +1392,196 @@ test('post-deployment correction trust root forbids autonomous recovery authorit
   assert.equal(root.autonomous_rollback_allowed,false);
   assert.equal(root.autonomous_self_update_allowed,false);
   assert.equal(root.autonomous_promotion_allowed,false);
+});
+
+
+function correctionGraphFixture(){
+  const temporal=harmfulThenHelpfulFixture();
+  const correction=createRsiPostDeploymentCorrectionAdmission({
+    post_deployment_learning_admission:temporal.learningAdmission,
+    harmful_utility_admission:temporal.harmful,
+    helpful_utility_admission:temporal.helpful,
+  });
+  const graph=applyRsiPostDeploymentCorrectionAdmission({
+    previous_snapshot:temporal.graph,
+    admission:correction,
+  });
+  return {...temporal,correction,graph};
+}
+
+function correctionFrontierEntry(){
+  const opportunityId='opportunity:correction:0123456789abcdef';
+  return {
+    opportunity_id:opportunityId,
+    signal:'POST_DEPLOYMENT_REGRESSION',
+    priority:'HIGH',
+    mutation_surface:'AGENT_ORCHESTRATION',
+    observation_digest:d('b'),
+    hypothesis:{
+      opportunity_id:opportunityId,
+      signal:'POST_DEPLOYMENT_REGRESSION',
+      mutation_surface:'AGENT_ORCHESTRATION',
+      source_sha:CANDIDATE,
+      hypothesis_digest:d('c'),
+      execution_authority:false,
+      browser_authority:false,
+      scheduler_authority:false,
+      task_authority:false,
+      production_mutation_authority:false,
+      promotion_authority:false,
+      self_update_authority:false,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    },
+    plan:{
+      source_sha:CANDIDATE,
+      experiment_id:'rsi_experiment_correction_01234567',
+      target_branch:'work/rsi/correction-bridge-01234567',
+      plan_digest:d('d'),
+      task_spec:{
+        rsi:{
+          opportunity_id:opportunityId,
+          mutation_surface:'AGENT_ORCHESTRATION',
+        },
+      },
+      execution_authority:false,
+      browser_authority:false,
+      scheduler_authority:false,
+      task_authority:false,
+      production_mutation_authority:false,
+      promotion_authority:false,
+      self_update_authority:false,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    },
+    execution_authority:false,
+    browser_authority:false,
+    scheduler_authority:false,
+    task_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  };
+}
+
+function correctionBridgeFixture(){
+  const correctionState=correctionGraphFixture();
+  const frontier=correctionFrontierEntry();
+  const basePlan=createRsiExperienceContextPlan({
+    frontier_entry:frontier,
+    experience_graph_snapshot:correctionState.graph,
+    environment_fingerprint:correctionState.learningAdmission.learning_receipt.environment_fingerprint,
+    model_family:'DEPLOYED_RSI',
+    bridge_case_ids:[],
+  });
+  const bridge=createRsiCorrectionRetrievalBridge({
+    source_sha:CANDIDATE,
+    base_context_plan:basePlan,
+    experience_graph_snapshot:correctionState.graph,
+    selection:{
+      selector_id:'external-correction-selector-v1',
+      selection_id:'correction-selection-0123456789abcdef',
+      bridge_case_ids:[correctionState.correction.failure_case.case_id],
+      evidence_digest:d('e'),
+      evidence_refs:['external:bridge:relevance-proof-1'],
+      external_selector:true,
+      authored_by_candidate:false,
+      candidate_can_select_bridges:false,
+    },
+  });
+  return {...correctionState,frontier,basePlan,bridge};
+}
+
+test('externally selected correction failure bridge is exact-bound to the current plan and graph',()=>{
+  const {graph,correction,basePlan,bridge}=correctionBridgeFixture();
+  verifyRsiCorrectionRetrievalBridge(bridge,basePlan,graph);
+  assert.deepEqual(bridge.bridge_case_ids,[correction.failure_case.case_id]);
+  assert.equal(bridge.selected_cases[0].correction_target_case_id,correction.success_case.case_id);
+  assert.equal(bridge.base_context_plan_digest,basePlan.context_plan_digest);
+  assert.equal(bridge.graph_snapshot_digest,graph.snapshot_digest);
+  assert.equal(bridge.external_selector,true);
+  assert.equal(bridge.candidate_can_select_bridges,false);
+  assert.equal(bridge.bridge_selection_is_retrieval_signal_only,true);
+  assert.equal(bridge.source_context_truth_is_portable,false);
+  assert.equal(bridge.execution_authority,false);
+});
+
+test('verified correction bridge makes the recovery case an explicit retrieval target without authority',()=>{
+  const {graph,correction,frontier,bridge}=correctionBridgeFixture();
+  const finalPlan=createRsiExperienceContextPlan({
+    frontier_entry:frontier,
+    experience_graph_snapshot:graph,
+    environment_fingerprint:correction.failure_case.environment_fingerprint,
+    model_family:'DEPLOYED_RSI',
+    bridge_case_ids:bridge.bridge_case_ids,
+  });
+  const recovery=finalPlan.selected_cases.find(row=>row.case_id===correction.success_case.case_id);
+  assert.ok(recovery);
+  assert.equal(recovery.corrective_trace_target,true);
+  assert.equal(recovery.outcome,'SUCCESS');
+  assert.equal(finalPlan.retrieval_is_advisory_only,true);
+  assert.equal(finalPlan.execution_authority,false);
+  assert.equal(finalPlan.promotion_authority,false);
+});
+
+test('correction bridge rejects success cases, unverified failures and candidate-selected bridges',()=>{
+  const {graph,correction,basePlan}=correctionBridgeFixture();
+  assert.throws(()=>createRsiCorrectionRetrievalBridge({
+    source_sha:CANDIDATE,
+    base_context_plan:basePlan,
+    experience_graph_snapshot:graph,
+    selection:{
+      selector_id:'external-correction-selector-v1',
+      selection_id:'correction-selection-bad-success',
+      bridge_case_ids:[correction.success_case.case_id],
+      evidence_digest:d('f'),
+      evidence_refs:['external:bridge:bad-success'],
+      external_selector:true,
+      authored_by_candidate:false,
+      candidate_can_select_bridges:false,
+    },
+  }),/case_not_verified_failure_trace/);
+
+  assert.throws(()=>createRsiCorrectionRetrievalBridge({
+    source_sha:CANDIDATE,
+    base_context_plan:basePlan,
+    experience_graph_snapshot:graph,
+    selection:{
+      selector_id:'candidate-selector',
+      selection_id:'correction-selection-candidate',
+      bridge_case_ids:[correction.failure_case.case_id],
+      evidence_digest:d('f'),
+      evidence_refs:['external:bridge:candidate'],
+      external_selector:false,
+      authored_by_candidate:true,
+      candidate_can_select_bridges:true,
+    },
+  }),/external_selector_required/);
+});
+
+test('correction bridge is invalidated by graph or base-plan drift',()=>{
+  const {graph,basePlan,bridge}=correctionBridgeFixture();
+  const driftedGraph={...graph,snapshot_digest:d('0')};
+  assert.throws(()=>verifyRsiCorrectionRetrievalBridge(bridge,basePlan,driftedGraph),/snapshot_digest|graph_snapshot|digest/);
+
+  const driftedPlan={...basePlan,context_plan_digest:d('0')};
+  assert.throws(()=>verifyRsiCorrectionRetrievalBridge(bridge,driftedPlan,graph),/context_plan_digest|embedded_plan|digest/);
+});
+
+test('correction retrieval bridge trust root forbids raw candidate-selected bridge injection',()=>{
+  const root=rsiCorrectionRetrievalBridgeTrustRootSnapshot();
+  assert.equal(root.current_base_context_plan_required,true);
+  assert.equal(root.exact_graph_snapshot_required,true);
+  assert.equal(root.correction_failure_cases_only,true);
+  assert.equal(root.verified_success_correction_targets_required,true);
+  assert.equal(root.external_selector_required,true);
+  assert.equal(root.candidate_can_select_bridges,false);
+  assert.equal(root.max_bridge_cases,4);
+  assert.equal(root.bridge_selection_is_retrieval_signal_only,true);
+  assert.equal(root.source_context_truth_is_portable,false);
+  assert.equal(root.cross_context_use_requires_current_plan_binding,true);
+  assert.equal(root.execution_authority,false);
+  assert.equal(root.promotion_authority,false);
 });
