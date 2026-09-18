@@ -17,6 +17,7 @@ import {
 import { nativeSupervisorTransportState } from './native-supervisor-client-base.mjs';
 import { buildSupervisorLifecycleStatusSnapshot } from './supervisor-lifecycle-runtime.mjs';
 import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
+import { buildDevosRuntimeObservability, mergeDevosRuntimeObservability } from './devos-runtime-observability.mjs';
 
 export * from './native-supervisor-client-core.mjs';
 
@@ -463,6 +464,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       const base = super.snapshot();
       const sourceState = nativeSupervisorTransportState(await this.#sourceGetState());
       const supervisorMesh = buildSupervisorMeshWireProjectionV1(base?.supervisor_mesh || null);
+      const devosRuntime = buildDevosRuntimeObservability(base || {});
+      const lifecycleStatus = base?.lifecycle ? buildSupervisorLifecycleStatusSnapshot(base.lifecycle) : null;
+      const supervisorLifecycle = mergeDevosRuntimeObservability(lifecycleStatus, devosRuntime);
       const processPlane = this.#processPlaneRef?.()?.snapshot({ eventLimit: 64 }) || unavailableProcessPlane('PROCESS_PLANE_NOT_READY');
       const payload = {
         state: {
@@ -473,8 +477,11 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           operator_mode: base?.supervisor_mode === 'CONTROL' ? 'CONTROL' : 'OBSERVE',
           started_at: base?.started_at || null,
           last_error: base?.last_error || null,
-          supervisor_lifecycle: base?.lifecycle ? buildSupervisorLifecycleStatusSnapshot(base.lifecycle) : null,
-          ...(supervisorMesh ? { supervisor_mesh: supervisorMesh } : {}),
+          supervisor_lifecycle: supervisorLifecycle,
+          // P1-2 multi-writer repair: always present; explicit null when the
+          // mesh is not running so the per-plane server merge clears it
+          // instead of preserving a stale projection.
+          supervisor_mesh: supervisorMesh,
           self_update: base?.self_update || null,
           realtime_process_plane: processPlane,
           control_latency: this.#controlLatencySnapshot?.() || null,
