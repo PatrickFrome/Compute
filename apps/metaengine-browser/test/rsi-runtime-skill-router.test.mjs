@@ -272,6 +272,21 @@ test('coalition-pollution mask excludes an otherwise active compatible skill wit
   if(plan.selected_count>0)assert.equal(plan.selected[0].skill_digest,explore.capsule.skill_digest);
 });
 
+test('coalition mask is fenced to the exact verified library',()=>{
+  const {library,governance}=fixture();
+  assert.throws(()=>createRsiSkillRoutingPlan({
+    library,
+    governance,
+    context:context(),
+    evidence:[],
+    coalition_masked_skill_digests:[d('f')],
+    max_selected:1,
+    exploration_slots:0,
+    external_planner:true,
+    authored_by_candidate:false,
+  }),/coalition_mask_skill_not_in_library/);
+});
+
 test('skill-router trust root freezes thresholds, negative-transfer veto, and zero authority',()=>{
   const root=rsiRuntimeSkillRouterTrustRootSnapshot();
   assert.equal(root.verified_library_and_governance_required,true);
