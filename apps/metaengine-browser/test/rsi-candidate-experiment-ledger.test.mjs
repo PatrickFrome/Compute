@@ -24,6 +24,14 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stable(value){
+  if(Array.isArray(value))return value.map(stable);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));
+}
+function structuralDigest(value){
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
+}
 
 function routingFixture(label='one'){
   const hypothesis=createRsiSharedExperienceHypothesis({
@@ -331,6 +339,80 @@ test('append-only ledger retains supported rejected and inconclusive experiments
   await restored.init();
   assert.equal(restored.snapshot().row_count,3);
   assert.equal((await restored.add({intent:i1,receipt:r1})).state,'IDEMPOTENT');
+});
+
+
+test('experiment intent is independently replay-verifiable from embedded hardened routing evidence',()=>{
+  const fx=routingFixture('embedded-replay');
+  const row=intent(fx,'embedded-replay');
+  const checked=verifyRsiCandidateExperimentIntent(row);
+  assert.equal(checked.intent_digest,row.intent_digest);
+  assert.equal(checked.request_snapshot.request_digest,fx.request.request_digest);
+  assert.equal(checked.plan_snapshot.plan_digest,fx.plan.plan_digest);
+});
+
+test('ledger rejects self-rehashed intent or receipt policy downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-candidate-experiment-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiCandidateExperimentLedger({statePath:path.join(dir,'ledger.json'),source_sha:SOURCE});
+  await ledger.init();
+  const fx=routingFixture('policy-tamper');
+  const goodIntent=intent(fx,'policy-tamper');
+  const goodReceipt=receipt(goodIntent,'policy-tamper');
+
+  const badIntentCore={...goodIntent,candidate_can_execute_experiment:true};
+  delete badIntentCore.intent_digest;
+  const badIntent={...badIntentCore,intent_digest:structuralDigest(badIntentCore)};
+  await assert.rejects(()=>ledger.add({intent:badIntent,receipt:goodReceipt}),/intent_policy_invalid/);
+
+  const badReceiptCore={...goodReceipt,receipt_can_retry_experiment:true};
+  delete badReceiptCore.receipt_digest;
+  const badReceipt={...badReceiptCore,receipt_digest:structuralDigest(badReceiptCore)};
+  await assert.rejects(()=>ledger.add({intent:goodIntent,receipt:badReceipt}),/receipt_policy_invalid/);
+  assert.equal(ledger.snapshot().row_count,0);
+});
+
+test('failed durable experiment write creates no phantom supported or negative evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-candidate-experiment-persist-fail-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const fx=routingFixture('persist-fail');
+  const rowIntent=intent(fx,'persist-fail');
+  const rowReceipt=receipt(rowIntent,'persist-fail');
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>ledger.add({intent:rowIntent,receipt:rowReceipt}));
+  assert.equal(ledger.snapshot().row_count,0);
+  assert.equal(ledger.snapshot().state_counts.supported,0);
+  assert.deepEqual(ledger.supported(),[]);
+  assert.deepEqual(ledger.rejectedOrInconclusive(),[]);
+});
+
+test('restart rejects self-rehashed experiment outcome reclassification',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-candidate-experiment-restart-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const fx=routingFixture('restart-tamper');
+  const rowIntent=intent(fx,'restart-tamper');
+  const rowReceipt=receipt(rowIntent,'restart-tamper');
+  await ledger.add({intent:rowIntent,receipt:rowReceipt});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const badReceiptCore={...persisted.rows[0].receipt,state:'NO_MATERIAL_IMPROVEMENT',eligible_for_bounded_revision:false,rejected_or_inconclusive:true};
+  delete badReceiptCore.receipt_digest;
+  persisted.rows[0].receipt={...badReceiptCore,receipt_digest:structuralDigest(badReceiptCore)};
+  persisted.state_counts={supported:0,no_material_improvement:1,rejected:0,inconclusive_environment:0,inconclusive_ambiguous:0};
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/receipt_digest_mismatch|receipt_policy_invalid|receipt_intent_mismatch/);
 });
 
 test('candidate experiment trust root keeps paired trials external and zero-authority',()=>{
