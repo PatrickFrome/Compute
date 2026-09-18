@@ -151,6 +151,9 @@ export function createRsiArtifactEvaluationRoutingRequest({
   parent_artifact_digest,
   candidate_artifact_digest,
   provenance_root_digest,
+  build_worker_image_digest,
+  build_harness_manifest_digest,
+  build_capability_manifest_digest,
   evaluator_root_digest,
   evaluator_generation_digest,
   evaluation_epoch_digest,
@@ -173,12 +176,15 @@ export function createRsiArtifactEvaluationRoutingRequest({
   const candidate=exactDigest(candidate_artifact_digest,'candidate_artifact');
   if(parent===candidate)throw new Error('rsi_eval_router_distinct_candidate_required');
   const provenance=exactDigest(provenance_root_digest,'provenance_root');
+  const buildWorker=exactDigest(build_worker_image_digest,'build_worker_image');
+  const buildHarness=exactDigest(build_harness_manifest_digest,'build_harness_manifest');
+  const buildCapabilities=exactDigest(build_capability_manifest_digest,'build_capability_manifest');
   const evaluator=exactDigest(evaluator_root_digest,'evaluator_root');
   const generation=exactDigest(evaluator_generation_digest,'evaluator_generation');
   const epoch=exactDigest(evaluation_epoch_digest,'evaluation_epoch');
   const measurement=exactDigest(external_measurement_digest,'measurement');
   const proxy=exactDigest(proxy_score_digest,'proxy_score');
-  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,epoch,measurement,proxy];
+  const roots=[artifactReceipt,parent,candidate,provenance,buildWorker,buildHarness,buildCapabilities,evaluator,generation,epoch,measurement,proxy];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_eval_router_independent_artifact_roots_required');
   const u=unit(uncertainty,'uncertainty');
   const close=unit(decision_closeness,'decision_closeness',{allowZero:true});
@@ -201,6 +207,9 @@ export function createRsiArtifactEvaluationRoutingRequest({
     origin_candidate_digest:candidate,
     origin_lineage_digest:artifactReceipt,
     provenance_root_digest:provenance,
+    build_worker_image_digest:buildWorker,
+    build_harness_manifest_digest:buildHarness,
+    build_capability_manifest_digest:buildCapabilities,
     evaluator_root_digest:evaluator,
     evaluator_generation_digest:generation,
     evaluation_epoch_digest:epoch,
@@ -218,7 +227,9 @@ export function createRsiArtifactEvaluationRoutingRequest({
     fresh_budget_epoch_required:true,
     prior_budget_reuse_allowed:false,
     evaluator_generation_frozen:true,
+    build_evaluation_environment_separation_required:true,
     candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_build_environment:false,
     external_measurement_owner:true,
     authored_by_candidate:false,
     cheap_proxy_is_final_truth:false,
@@ -240,7 +251,9 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     ||request.fresh_budget_epoch_required!==true
     ||request.prior_budget_reuse_allowed!==false
     ||request.evaluator_generation_frozen!==true
+    ||request.build_evaluation_environment_separation_required!==true
     ||request.candidate_can_choose_evaluator_generation!==false
+    ||request.candidate_can_choose_build_environment!==false
     ||request.external_measurement_owner!==true||request.authored_by_candidate!==false
     ||request.cheap_proxy_is_final_truth!==false||request.independent_audit_required!==true
     ||request.candidate_can_set_priority!==false||request.candidate_can_set_uncertainty!==false
@@ -253,6 +266,9 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     parent_artifact_digest:request.parent_artifact_digest,
     candidate_artifact_digest:request.candidate_artifact_digest,
     provenance_root_digest:request.provenance_root_digest,
+    build_worker_image_digest:request.build_worker_image_digest,
+    build_harness_manifest_digest:request.build_harness_manifest_digest,
+    build_capability_manifest_digest:request.build_capability_manifest_digest,
     evaluator_root_digest:request.evaluator_root_digest,
     evaluator_generation_digest:request.evaluator_generation_digest,
     evaluation_epoch_digest:request.evaluation_epoch_digest,
@@ -489,7 +505,11 @@ export function rsiEvaluationBudgetRouterTrustRootSnapshot(){
     fresh_budget_epoch_required_for_materialized_artifacts:true,
     prior_budget_reuse_forbidden_for_materialized_artifacts:true,
     evaluator_generation_frozen_for_materialized_artifacts:true,
+    build_evaluation_environment_separation_required:true,
+    build_worker_and_trial_worker_must_differ:true,
+    build_harness_and_evaluation_harness_must_differ:true,
     candidate_cannot_choose_evaluator_generation:true,
+    candidate_cannot_choose_build_environment:true,
     recipe_distillation_verified_required:true,
     context_compatible_experience_required:true,
     negative_transfer_clearance_required:true,
