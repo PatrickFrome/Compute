@@ -47,6 +47,7 @@ const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-autonomous-episode-controller.mjs',
   'apps/metaengine-browser/src/rsi-devos-admission-adapter.mjs',
   'apps/metaengine-browser/src/rsi-verified-search-feedback.mjs',
+  'apps/metaengine-browser/src/rsi-episode-promotion-review.mjs',
   'supabase/migrations/20260918171500_rsi_devos_prepared_request_admission_v1.sql',
   'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
