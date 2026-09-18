@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA } from './rsi-meta-profile-shadow-selection.mjs';
+import { RSI_SHADOW_COMPARISON_BINDING_SCHEMA } from './rsi-shadow-comparison-binding.mjs';
 
 export const RSI_META_PROFILE_CANARY_MANIFEST_SCHEMA = 'metaengine.rsi.meta-profile-canary-manifest.v1';
 export const RSI_META_PROFILE_CANARY_OBSERVATION_SCHEMA = 'metaengine.rsi.meta-profile-canary-observation.v1';
@@ -107,10 +108,53 @@ function verifyShadowSelection(selection) {
   return Object.freeze(structuredClone(selection));
 }
 
+function verifyComparisonBinding(binding, selection) {
+  if (!plain(binding) || binding.schema !== RSI_SHADOW_COMPARISON_BINDING_SCHEMA || binding.version !== 1) {
+    throw new Error('rsi_canary_comparison_binding_invalid');
+  }
+  assertZero(binding, 'comparison_binding');
+  if (
+    binding.comparison_mode !== 'READ_ONLY_DUAL_PLAN'
+    || binding.context_source !== 'BASELINE_PLAN'
+    || binding.champion_challenger_roles_fixed !== true
+    || binding.same_verified_context_required !== true
+    || binding.external_comparator_owner !== true
+    || binding.authored_by_candidate !== false
+    || binding.candidate_can_choose_context !== false
+    || binding.candidate_can_choose_comparator !== false
+    || binding.candidate_can_swap_roles !== false
+    || binding.raw_context_exposed_to_candidate !== false
+    || binding.browser_effects_allowed !== false
+    || binding.plan_execution_allowed !== false
+    || binding.baseline_execution_path_unchanged !== true
+    || binding.comparison_can_change_execution !== false
+    || binding.comparison_can_activate_profile !== false
+    || binding.comparison_can_authorize_canary !== false
+    || binding.external_canary_gate_still_required !== true
+  ) throw new Error('rsi_canary_comparison_binding_policy_invalid');
+  const clone = structuredClone(binding);
+  delete clone.binding_digest;
+  if (digest(clone) !== exactDigest(binding.binding_digest, 'comparison_binding')) {
+    throw new Error('rsi_canary_comparison_binding_digest_mismatch');
+  }
+  if (
+    exactSha(binding.source_sha, 'comparison_source') !== selection.source_sha
+    || exactDigest(binding.selection_digest, 'comparison_selection') !== selection.selection_digest
+    || exactDigest(binding.qualification_digest, 'comparison_qualification') !== selection.qualification_digest
+    || exactDigest(binding.champion_profile_digest, 'comparison_champion') !== selection.incumbent_profile_digest
+    || exactDigest(binding.challenger_profile_digest, 'comparison_challenger') !== selection.challenger_profile_digest
+  ) throw new Error('rsi_canary_comparison_binding_selection_mismatch');
+  exactDigest(binding.verified_context_digest, 'comparison_context');
+  exactDigest(binding.baseline_plan_digest, 'comparison_baseline_plan');
+  exactDigest(binding.comparator_root_digest, 'comparison_root');
+  return Object.freeze(structuredClone(binding));
+}
+
 export function createRsiMetaProfileCanaryManifest({
   manifest_id,
   selection,
   cohort_digest,
+  comparator_root_digest,
   decision_budget,
   window_budget,
   external_canary_owner = false,
@@ -124,12 +168,14 @@ export function createRsiMetaProfileCanaryManifest({
   const windows = boundedInt(window_budget, 'window_budget', Math.min(MAX_WINDOWS, decisions));
   if (windows > decisions) throw new Error('rsi_canary_window_budget_exceeds_decisions');
   const cohort = exactDigest(cohort_digest, 'cohort');
+  const comparatorRoot = exactDigest(comparator_root_digest, 'comparator_root');
   const identityCore = {
     source_sha: exactSha(selected.source_sha, 'source'),
     selection_digest: selected.selection_digest,
     incumbent_profile_digest: selected.incumbent_profile_digest,
     challenger_profile_digest: selected.challenger_profile_digest,
     cohort_digest: cohort,
+    comparator_root_digest: comparatorRoot,
   };
   const identityDigest = digest(identityCore);
   const core = {
@@ -142,12 +188,14 @@ export function createRsiMetaProfileCanaryManifest({
     incumbent_profile_digest: selected.incumbent_profile_digest,
     challenger_profile_digest: selected.challenger_profile_digest,
     cohort_digest: cohort,
+    comparator_root_digest: comparatorRoot,
     decision_budget: decisions,
     window_budget: windows,
     canary_identity_digest: identityDigest,
     mode: 'READ_ONLY_DECISION_SUPPORT_CANARY',
     identity_stable: true,
     cohort_fixed: true,
+    external_comparator_root_fixed: true,
     decision_budget_fixed: true,
     window_budget_fixed: true,
     baseline_profile_remains_default: true,
@@ -158,6 +206,7 @@ export function createRsiMetaProfileCanaryManifest({
     mutating_recommendations_allowed: false,
     profile_replacement_allowed: false,
     candidate_can_choose_cohort: false,
+    candidate_can_choose_comparator: false,
     candidate_can_choose_budget: false,
     candidate_can_rewrite_identity: false,
     external_canary_owner: true,
@@ -186,6 +235,7 @@ export function verifyRsiMetaProfileCanaryManifest(manifest, { selection } = {})
     manifest.mode !== 'READ_ONLY_DECISION_SUPPORT_CANARY'
     || manifest.identity_stable !== true
     || manifest.cohort_fixed !== true
+    || manifest.external_comparator_root_fixed !== true
     || manifest.decision_budget_fixed !== true
     || manifest.window_budget_fixed !== true
     || manifest.baseline_profile_remains_default !== true
@@ -196,6 +246,7 @@ export function verifyRsiMetaProfileCanaryManifest(manifest, { selection } = {})
     || manifest.mutating_recommendations_allowed !== false
     || manifest.profile_replacement_allowed !== false
     || manifest.candidate_can_choose_cohort !== false
+    || manifest.candidate_can_choose_comparator !== false
     || manifest.candidate_can_choose_budget !== false
     || manifest.candidate_can_rewrite_identity !== false
     || manifest.external_canary_owner !== true
@@ -207,6 +258,7 @@ export function verifyRsiMetaProfileCanaryManifest(manifest, { selection } = {})
     manifest_id: manifest.manifest_id,
     selection,
     cohort_digest: manifest.cohort_digest,
+    comparator_root_digest: manifest.comparator_root_digest,
     decision_budget: manifest.decision_budget,
     window_budget: manifest.window_budget,
     external_canary_owner: true,
@@ -224,8 +276,7 @@ export function createRsiMetaProfileCanaryObservation({
   selection,
   decision_index,
   window_index,
-  context_digest,
-  baseline_plan_digest,
+  comparison_binding,
   challenger_plan_digest,
   identity_match,
   outcome_safety,
@@ -241,6 +292,10 @@ export function createRsiMetaProfileCanaryObservation({
   state_mutation_attempted = false,
 } = {}) {
   const checked = verifyRsiMetaProfileCanaryManifest(manifest, { selection });
+  const binding = verifyComparisonBinding(comparison_binding, selection);
+  if (binding.comparator_root_digest !== checked.comparator_root_digest) {
+    throw new Error('rsi_canary_comparator_root_drift');
+  }
   if (external_observer !== true || authored_by_candidate !== false) {
     throw new Error('rsi_canary_external_observer_required');
   }
@@ -268,8 +323,10 @@ export function createRsiMetaProfileCanaryObservation({
     canary_identity_digest: checked.canary_identity_digest,
     decision_index: decision,
     window_index: window,
-    context_digest: exactDigest(context_digest, 'context'),
-    baseline_plan_digest: exactDigest(baseline_plan_digest, 'baseline_plan'),
+    comparison_binding: Object.freeze(structuredClone(binding)),
+    comparison_binding_digest: binding.binding_digest,
+    context_digest: binding.verified_context_digest,
+    baseline_plan_digest: binding.baseline_plan_digest,
     challenger_plan_digest: exactDigest(challenger_plan_digest, 'challenger_plan'),
     identity_match: identity_match === true,
     outcome_safety: safety,
@@ -316,8 +373,7 @@ export function verifyRsiMetaProfileCanaryObservation(observation, { manifest, s
     selection,
     decision_index: observation.decision_index,
     window_index: observation.window_index,
-    context_digest: observation.context_digest,
-    baseline_plan_digest: observation.baseline_plan_digest,
+    comparison_binding: observation.comparison_binding,
     challenger_plan_digest: observation.challenger_plan_digest,
     identity_match: observation.identity_match,
     outcome_safety: observation.outcome_safety,
@@ -579,6 +635,8 @@ export function rsiMetaProfileCanaryAdmissionTrustRootSnapshot() {
     phase18_shadow_selection_required: true,
     identity_stable_canary_manifest_required: true,
     fixed_external_cohort_required: true,
+    fixed_external_comparator_root_required: true,
+    exact_context_comparison_binding_required_per_decision: true,
     bounded_decision_budget_required: true,
     baseline_profile_remains_default: true,
     baseline_profile_is_fallback: true,
@@ -593,6 +651,7 @@ export function rsiMetaProfileCanaryAdmissionTrustRootSnapshot() {
     external_observer_required: true,
     external_admission_owner_required: true,
     candidate_can_choose_cohort: false,
+    candidate_can_choose_comparator: false,
     candidate_can_choose_budget: false,
     candidate_can_self_admit: false,
     external_canary_controller_required: true,
