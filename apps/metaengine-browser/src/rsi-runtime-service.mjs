@@ -57,6 +57,7 @@ import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGrap
 import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntimeMetaSkillArchiveTrustRootSnapshot } from './rsi-runtime-meta-skill-archive.mjs';
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowSelectionLedger, createRsiMetaProfileShadowSelection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
+import { RsiMetaProfileShadowComparisonLedger, createRsiMetaProfileShadowComparisonBinding, createRsiMetaProfileDualPlanComparison, rsiMetaProfileShadowComparisonTrustRootSnapshot } from './rsi-meta-profile-shadow-comparison.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -137,6 +138,7 @@ function trustRoots() {
     runtime_meta_skill_archive: rsiRuntimeMetaSkillArchiveTrustRootSnapshot(),
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
+    meta_profile_shadow_comparison: rsiMetaProfileShadowComparisonTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -166,6 +168,7 @@ export class RsiRuntimeService {
   #metaSkillArchive;
   #metaProfileQualification;
   #metaProfileShadowSelection;
+  #metaProfileShadowComparison;
   #archive;
   #observer;
   #verifiedArchive;
@@ -183,7 +186,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowSelectionPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowSelectionPath = null, metaProfileShadowComparisonPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -260,6 +263,11 @@ export class RsiRuntimeService {
       statePath: runtimeMetaProfileShadowSelectionPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeMetaProfileShadowComparisonPath = metaProfileShadowComparisonPath || (ledgerPath ? `${ledgerPath}.meta-profile-shadow-comparison.json` : null);
+    this.#metaProfileShadowComparison = new RsiMetaProfileShadowComparisonLedger({
+      statePath: runtimeMetaProfileShadowComparisonPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -283,6 +291,7 @@ export class RsiRuntimeService {
     await this.#metaSkillArchive.init();
     await this.#metaProfileQualification.init();
     await this.#metaProfileShadowSelection.init();
+    await this.#metaProfileShadowComparison.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -305,6 +314,7 @@ export class RsiRuntimeService {
       runtime_meta_skill_archive_schema: this.#metaSkillArchive.snapshot().schema,
       meta_profile_qualification_schema: this.#metaProfileQualification.snapshot().schema,
       meta_profile_shadow_selection_schema: this.#metaProfileShadowSelection.snapshot().schema,
+      meta_profile_shadow_comparison_schema: this.#metaProfileShadowComparison.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -954,6 +964,108 @@ export class RsiRuntimeService {
     return Object.freeze({ selection, stored });
   }
 
+  async bindSelectedMetaProfileForReadOnlyComparison({
+    binding_id,
+    selection_digest,
+    comparator_root_digest,
+    external_comparator_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const selectionDigest = exactDigest(selection_digest, 'selection_digest');
+    const selection = this.#metaProfileShadowSelection.history()
+      .find((row) => row.selection_digest === selectionDigest);
+    if (!selection) throw new Error('rsi_runtime_meta_profile_shadow_selection_missing');
+    const qualification = this.#metaProfileQualification.qualified()
+      .find((row) => row.qualification_digest === selection.selected.qualification_digest);
+    if (!qualification) throw new Error('rsi_runtime_selected_meta_profile_qualification_missing');
+    const binding = createRsiMetaProfileShadowComparisonBinding({
+      binding_id,
+      selection,
+      selected_qualification: qualification,
+      verified_context_digest: selection.context_digest,
+      comparator_root_digest,
+      external_comparator_owner,
+      authored_by_candidate,
+    });
+    const stored = await this.#metaProfileShadowComparison.addBinding(binding);
+    await this.#ledger.append('META_PROFILE_SHADOW_COMPARISON_BOUND', {
+      binding_id: binding.binding_id,
+      binding_digest: binding.binding_digest,
+      selection_digest: binding.selection_digest,
+      qualification_digest: binding.qualification_digest,
+      verified_context_digest: binding.verified_context_digest,
+      champion_profile_digest: binding.champion_profile_digest,
+      challenger_profile_digest: binding.challenger_profile_digest,
+      comparison_mode: binding.comparison_mode,
+      plan_execution_allowed: false,
+      browser_effects_allowed: false,
+      canary_activation_authorized: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ binding, stored });
+  }
+
+  async recordSelectedMetaProfileDualPlanComparison({
+    binding_digest,
+    comparison_id,
+    champion_plan_digest,
+    challenger_plan_digest,
+    champion_projection_digest,
+    challenger_projection_digest,
+    hard_invariants_pass,
+    incident_observed = false,
+    divergence_kind = 'SEMANTIC_PLAN',
+    evidence_digest,
+    evidence_refs,
+    external_comparator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const binding = this.#metaProfileShadowComparison.bindingByDigest(binding_digest);
+    if (!binding) throw new Error('rsi_runtime_meta_profile_shadow_binding_missing');
+    const selection = this.#metaProfileShadowSelection.history()
+      .find((row) => row.selection_digest === binding.selection_digest);
+    if (!selection) throw new Error('rsi_runtime_meta_profile_shadow_selection_missing');
+    const qualification = this.#metaProfileQualification.qualified()
+      .find((row) => row.qualification_digest === binding.qualification_digest);
+    if (!qualification) throw new Error('rsi_runtime_selected_meta_profile_qualification_missing');
+    const comparison = createRsiMetaProfileDualPlanComparison({
+      comparison_id,
+      binding,
+      selection,
+      selected_qualification: qualification,
+      champion_plan_digest,
+      challenger_plan_digest,
+      champion_projection_digest,
+      challenger_projection_digest,
+      hard_invariants_pass,
+      incident_observed,
+      divergence_kind,
+      evidence_digest,
+      evidence_refs,
+      external_comparator,
+      authored_by_candidate,
+    });
+    const stored = await this.#metaProfileShadowComparison.addComparison(comparison);
+    await this.#ledger.append('META_PROFILE_DUAL_PLAN_COMPARISON_RECORDED', {
+      comparison_id: comparison.comparison_id,
+      comparison_digest: comparison.comparison_digest,
+      binding_digest: comparison.binding_digest,
+      selection_digest: comparison.selection_digest,
+      qualification_digest: comparison.qualification_digest,
+      relation: comparison.relation,
+      divergence_kind: comparison.divergence_kind,
+      hard_invariants_pass: comparison.hard_invariants_pass,
+      incident_observed: comparison.incident_observed,
+      eligible_for_future_canary_review_evidence: comparison.eligible_for_future_canary_review_evidence,
+      canary_activation_authorized: false,
+      live_profile_activation_authorized: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ comparison, stored });
+  }
+
   metaProfileShadowSelectionHistory() {
     this.#assertRunning();
     return this.#metaProfileShadowSelection.history();
@@ -1357,6 +1469,7 @@ export class RsiRuntimeService {
       runtime_meta_skill_archive: this.#metaSkillArchive.snapshot(),
       meta_profile_qualification: this.#metaProfileQualification.snapshot(),
       meta_profile_shadow_selection: this.#metaProfileShadowSelection.snapshot(),
+      meta_profile_shadow_comparison: this.#metaProfileShadowComparison.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
         evaluation_count: this.#skillReliabilityEvaluationCount,
