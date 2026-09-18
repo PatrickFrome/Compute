@@ -59,3 +59,13 @@ test('Browser binds RSI observation to the existing Brain cadence and quit durab
   assert.match(sidecar, /second_scheduler: false/);
   assert.doesNotMatch(sidecar, /setInterval|setTimeout/);
 });
+
+
+test('native supervisor state publishes only the bounded RSI control projection', () => {
+  assert.match(main, /rsi: rsiRuntime\?\.controlPlaneProjection\?\.\(\{ limit: 4 \}\) \|\| null/);
+  assert.match(runtime, /browser_can_enqueue_devos_tasks: false/);
+  assert.match(runtime, /existing_devos_scheduler_required: true/);
+  assert.match(runtime, /direct_execution_enabled: false/);
+  assert.match(runtime, /direct_promotion_enabled: false/);
+  assert.match(runtime, /direct_self_update_enabled: false/);
+});
