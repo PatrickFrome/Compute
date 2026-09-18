@@ -316,7 +316,7 @@ export function verifyRsiBoundedCanaryAdmission(admission,{shadow_selection,shad
     throw new Error('rsi_canary_admission_policy_invalid');
   }
   const canonical=createRsiBoundedCanaryAdmission({
-    admission_id:checkedAdmission.admission_id,
+    admission_id:admission.admission_id,
     shadow_selection,
     shadow_evidence,
     fixed_cohort_digest:admission.fixed_cohort_digest,
@@ -324,7 +324,7 @@ export function verifyRsiBoundedCanaryAdmission(admission,{shadow_selection,shad
     external_admission_owner:true,
     authored_by_candidate:false,
   });
-  if(canonical.admission_digest!==exactDigest(checkedAdmission.admission_digest,'admission')){
+  if(canonical.admission_digest!==exactDigest(admission.admission_digest,'admission')){
     throw new Error('rsi_canary_admission_digest_mismatch');
   }
   return canonical;
@@ -400,7 +400,7 @@ function verifyStoredAdmission(admission){
     throw new Error('rsi_canary_admission_policy_invalid');
   }
   const clone=structuredClone(admission);delete clone.admission_digest;
-  if(digest(clone)!==exactDigest(checkedAdmission.admission_digest,'admission')){
+  if(digest(clone)!==exactDigest(admission.admission_digest,'admission')){
     throw new Error('rsi_canary_admission_digest_mismatch');
   }
   return Object.freeze(structuredClone(admission));
@@ -472,7 +472,7 @@ export class RsiBoundedCanaryAdmissionLedger{
         verifyStoredShadowEvidence(row.shadow_evidence);
         if(row.admission!==null){
           verifyStoredAdmission(row.admission);
-          if(row.checkedAdmission.shadow_evidence_digest!==row.checkedEvidence.evidence_digest){
+          if(row.admission.shadow_evidence_digest!==row.shadow_evidence.evidence_digest){
             throw new Error('rsi_canary_ledger_evidence_binding_mismatch');
           }
         }
@@ -505,9 +505,9 @@ export class RsiBoundedCanaryAdmissionLedger{
     }
     const checkedEvidence=verifyStoredShadowEvidence(shadow_evidence);
     if(checkedEvidence.source_sha!==this.#sourceSha)throw new Error('rsi_canary_ledger_source_mismatch');
-    const existing=this.#rows.find((row)=>row.checkedEvidence.evidence_id===checkedEvidence.evidence_id);
+    const existing=this.#rows.find((row)=>row.shadow_evidence.evidence_id===checkedEvidence.evidence_id);
     if(existing){
-      if(existing.checkedEvidence.evidence_digest!==checkedEvidence.evidence_digest){
+      if(existing.shadow_evidence.evidence_digest!==checkedEvidence.evidence_digest){
         throw new Error('rsi_canary_evidence_identity_conflict');
       }
       return zero({state:'IDEMPOTENT',evidence_digest:checkedEvidence.evidence_digest});
@@ -516,11 +516,11 @@ export class RsiBoundedCanaryAdmissionLedger{
     this.#rows.push(Object.freeze({
       source_sha:this.#sourceSha,
       admission:null,
-      shadow_evidence:structuredClone(shadow_evidence),
+      shadow_evidence:structuredClone(checkedEvidence),
     }));
     await this.#persist();
     return zero({
-      state:shadow_evidence.rollback_required_latched===true?'ROLLBACK_REQUIRED_LATCHED':'SHADOW_EVIDENCE_RECORDED',
+      state:checkedEvidence.rollback_required_latched===true?'ROLLBACK_REQUIRED_LATCHED':'SHADOW_EVIDENCE_RECORDED',
       evidence_digest:checkedEvidence.evidence_digest,
     });
   }
@@ -540,9 +540,9 @@ export class RsiBoundedCanaryAdmissionLedger{
     if(this.#rows.some((row)=>row.shadow_evidence.rollback_required_latched===true)){
       throw new Error('rsi_canary_rollback_latch_active');
     }
-    const existing=this.#rows.find((row)=>row.admission&&(row.checkedAdmission.admission_id===checkedAdmission.admission_id||row.checkedAdmission.admission_digest===checkedAdmission.admission_digest));
+    const existing=this.#rows.find((row)=>row.admission&&(row.admission.admission_id===checkedAdmission.admission_id||row.admission.admission_digest===checkedAdmission.admission_digest));
     if(existing){
-      if(existing.checkedAdmission.admission_digest!==checkedAdmission.admission_digest)throw new Error('rsi_canary_admission_identity_conflict');
+      if(existing.admission.admission_digest!==checkedAdmission.admission_digest)throw new Error('rsi_canary_admission_identity_conflict');
       return zero({state:'IDEMPOTENT',admission_digest:checkedAdmission.admission_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_canary_ledger_capacity_exceeded');
