@@ -210,6 +210,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-context-aware-candidate-synthesis.mjs',
     'apps/metaengine-browser/src/rsi-devos-materialization-handoff.mjs',
     'apps/metaengine-browser/src/rsi-verified-candidate-materialization.mjs',
+    'apps/metaengine-browser/src/rsi-episode-promotion-review.mjs',
     'apps/metaengine-browser/src/rsi-devos-admission-adapter.mjs',
     'supabase/migrations/20260918171500_rsi_devos_prepared_request_admission_v1.sql',
     'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
