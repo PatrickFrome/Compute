@@ -3,7 +3,7 @@ import { minimalWebTreeSitterEdit } from './tree-sitter-edit.mjs';
 
 const REQUEST_SCHEMA = 'metaengine.devos.ide.tree-sitter.request.v1';
 const RESULT_SCHEMA = 'metaengine.devos.ide.tree-sitter.result.v1';
-const RUNTIME_WASM = 'metaengine://shell/ide/tree-sitter.wasm';
+const RUNTIME_WASM = 'metaengine://shell/ide/web-tree-sitter.wasm';
 const JAVASCRIPT_WASM = 'metaengine://shell/ide/tree-sitter-javascript.wasm';
 const MAX_TEXT_BYTES = 192 * 1024;
 const UTF8 = new TextEncoder();
@@ -37,7 +37,7 @@ async function ensureRuntime() {
     runtimePromise = (async () => {
       await Parser.init({
         locateFile(name) {
-          if (name === 'tree-sitter.wasm') return RUNTIME_WASM;
+          if (name === 'web-tree-sitter.wasm') return RUNTIME_WASM;
           throw new Error(`tree_sitter_runtime_asset_unexpected:${clip(name, 80)}`);
         },
       });
