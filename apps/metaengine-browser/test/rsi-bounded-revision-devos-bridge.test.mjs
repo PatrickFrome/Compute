@@ -66,6 +66,19 @@ import {
   verifyRsiConsumerLocalRevalidationReceipt,
   rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot,
 } from '../src/rsi-validated-knowledge-consumer-handoff.mjs';
+import {
+  RsiExistingConsumerOwnerReviewArchive,
+  createRsiExistingConsumerOwnerReviewBundle,
+  verifyRsiExistingConsumerOwnerReviewBundle,
+  createRsiExistingSkillOwnerEvidenceReview,
+  verifyRsiExistingSkillOwnerEvidenceReview,
+  rsiExistingConsumerOwnerReviewTrustRootSnapshot,
+} from '../src/rsi-existing-consumer-owner-review.mjs';
+import {
+  createRsiSkillCapsule,
+  createRsiSkillEvidence,
+  createRsiVerifiedSkillLibrary,
+} from '../src/rsi-verified-skill-library.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
