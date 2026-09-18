@@ -125,6 +125,11 @@ import {
   verifyRsiSelfUpdateRestartGateProbeAdmission,
   rsiSelfUpdateRestartGateProbeTrustRootSnapshot,
 } from './rsi-self-update-restart-gate-probe-admission.mjs';
+import {
+  createRsiSelfUpdateRestartGateProbeOutcome,
+  verifyRsiSelfUpdateRestartGateProbeOutcome,
+  rsiSelfUpdateRestartGateProbeOutcomeTrustRootSnapshot,
+} from './rsi-self-update-restart-gate-probe-outcome.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -144,6 +149,7 @@ const MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS = 128;
 const MAX_SELF_UPDATE_CHECK_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_DOWNLOAD_READINESS = 128;
 const MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS = 128;
+const MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -228,6 +234,7 @@ function trustRoots() {
     self_update_check_admission: rsiSelfUpdateCheckAdmissionTrustRootSnapshot(),
     self_update_download_readiness: rsiSelfUpdateDownloadReadinessTrustRootSnapshot(),
     self_update_restart_gate_probe: rsiSelfUpdateRestartGateProbeTrustRootSnapshot(),
+    self_update_restart_gate_probe_outcome: rsiSelfUpdateRestartGateProbeOutcomeTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -293,6 +300,8 @@ export class RsiRuntimeService {
   #lastSelfUpdateDownloadReadinessDigest = null;
   #selfUpdateRestartGateProbeDigests = new Set();
   #lastSelfUpdateRestartGateProbeDigest = null;
+  #selfUpdateRestartGateProbeOutcomeDigests = new Set();
+  #lastSelfUpdateRestartGateProbeOutcomeDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -445,6 +454,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateRestartGateProbeDigests.add(admission.probe_admission_digest);
           this.#lastSelfUpdateRestartGateProbeDigest = admission.probe_admission_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOME_RECORDED' && row?.payload?.restart_gate_probe_outcome) {
+          const outcome = verifyRsiSelfUpdateRestartGateProbeOutcome(row.payload.restart_gate_probe_outcome);
+          if (this.#selfUpdateRestartGateProbeOutcomeDigests.size >= MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES) {
+            throw new Error('rsi_runtime_restart_gate_probe_outcome_replay_capacity_exhausted');
+          }
+          this.#selfUpdateRestartGateProbeOutcomeDigests.add(outcome.outcome_digest);
+          this.#lastSelfUpdateRestartGateProbeOutcomeDigest = outcome.outcome_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1769,6 +1786,49 @@ export class RsiRuntimeService {
     return Object.freeze({ admission, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateRestartGateProbeOutcome({
+    probe_admission,
+    invocation_receipt,
+    post_probe_runtime_snapshot,
+    prior_transaction = null,
+    observed_at,
+    observer_id,
+  } = {}) {
+    this.#assertRunning();
+    const admission = verifyRsiSelfUpdateRestartGateProbeAdmission(probe_admission);
+    if (!this.#selfUpdateRestartGateProbeDigests.has(admission.probe_admission_digest)) {
+      throw new Error('rsi_runtime_restart_gate_probe_admission_not_persisted');
+    }
+    const outcome = createRsiSelfUpdateRestartGateProbeOutcome({
+      probe_admission: admission,
+      invocation_receipt,
+      post_probe_runtime_snapshot,
+      prior_transaction,
+      observed_at,
+      observer_id,
+    });
+    verifyRsiSelfUpdateRestartGateProbeOutcome(outcome);
+    if (this.#selfUpdateRestartGateProbeOutcomeDigests.has(outcome.outcome_digest)) {
+      return Object.freeze({ outcome, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateRestartGateProbeOutcomeDigests.size >= MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES) {
+      throw new Error('rsi_runtime_restart_gate_probe_outcome_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOME_RECORDED', {
+      restart_gate_probe_outcome: outcome,
+      external_self_update_controller_required: true,
+      ready_for_external_install_cycle_review: outcome.ready_for_external_install_cycle_review,
+      install_cycle_invoked: false,
+      install_cycle_authorized_by_rsi: false,
+      installer_launch_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateRestartGateProbeOutcomeDigests.add(outcome.outcome_digest);
+    this.#lastSelfUpdateRestartGateProbeOutcomeDigest = outcome.outcome_digest;
+    return Object.freeze({ outcome, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2048,6 +2108,22 @@ export class RsiRuntimeService {
         probe_cycle_invoked: false,
         probe_cycle_authorized_by_rsi: false,
         second_cycle_authorized: false,
+        installer_launch_authorized: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_restart_gate_probe_outcome: Object.freeze({
+        count: this.#selfUpdateRestartGateProbeOutcomeDigests.size,
+        capacity: MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES,
+        last_digest: this.#lastSelfUpdateRestartGateProbeOutcomeDigest,
+        external_probe_invocation_receipt_required: true,
+        single_probe_cycle_required: true,
+        no_physical_effect_during_probe_required: true,
+        restart_grace_elapsed_required_before_install_review: true,
+        final_revalidation_required: true,
+        transaction_write_ahead_barrier_required: true,
+        install_cycle_invoked: false,
+        install_cycle_authorized_by_rsi: false,
         installer_launch_authorized: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
