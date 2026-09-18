@@ -357,6 +357,70 @@ export function verifyRsiContextAwareCandidateBuild(envelope,{synthesis_request,
   return envelope;
 }
 
+export function createRsiContextAwareCandidateLedgerPayload({
+  episode_id,
+  synthesis_request,
+  mutation_proposal,
+  context_candidate_build,
+}={}){
+  const request=verifyRsiCandidateSynthesisRequest(synthesis_request);
+  const proposal=verifyRsiCandidateMutationProposal(mutation_proposal,request);
+  const build=verifyRsiContextAwareCandidateBuild(context_candidate_build,{
+    synthesis_request:request,
+    mutation_proposal:proposal,
+  });
+  const core=zeroAuthority({
+    schema:RSI_CONTEXT_AWARE_CANDIDATE_LEDGER_SCHEMA,
+    version:1,
+    episode_id:boundedId(episode_id,'ledger_episode_id'),
+    synthesis_request:request,
+    synthesis_request_digest:request.synthesis_request_digest,
+    mutation_proposal:proposal,
+    mutation_proposal_digest:proposal.mutation_proposal_digest,
+    context_candidate_build:build,
+    context_aware_build_digest:build.context_aware_build_digest,
+    existing_devos_scheduler_required:true,
+    devos_lease_required_before_materialization:true,
+    lease_created:false,
+    workspace_created:false,
+    candidate_materialized:false,
+    raw_source_persisted:false,
+    raw_patch_persisted:false,
+  });
+  assertLedgerSafe(core);
+  const payloadBytes=canonicalBytes(core);
+  if(payloadBytes>MAX_LEDGER_PAYLOAD_BYTES)throw new Error('rsi_synthesis_ledger_payload_budget_exceeded');
+  return Object.freeze({
+    ...core,
+    payload_bytes:payloadBytes,
+    max_payload_bytes:MAX_LEDGER_PAYLOAD_BYTES,
+    ledger_payload_digest:digest(core),
+  });
+}
+
+export function verifyRsiContextAwareCandidateLedgerPayload(payload){
+  if(!payload||typeof payload!=='object'||Array.isArray(payload)||payload.schema!==RSI_CONTEXT_AWARE_CANDIDATE_LEDGER_SCHEMA||payload.version!==1)throw new Error('rsi_synthesis_ledger_payload_invalid');
+  assertZeroAuthority(payload,'ledger_payload');
+  if(
+    payload.existing_devos_scheduler_required!==true
+    || payload.devos_lease_required_before_materialization!==true
+    || payload.lease_created!==false
+    || payload.workspace_created!==false
+    || payload.candidate_materialized!==false
+    || payload.raw_source_persisted!==false
+    || payload.raw_patch_persisted!==false
+  )throw new Error('rsi_synthesis_ledger_payload_policy_invalid');
+  const canonical=createRsiContextAwareCandidateLedgerPayload({
+    episode_id:payload.episode_id,
+    synthesis_request:payload.synthesis_request,
+    mutation_proposal:payload.mutation_proposal,
+    context_candidate_build:payload.context_candidate_build,
+  });
+  if(canonical.ledger_payload_digest!==exactDigest(payload.ledger_payload_digest,'ledger_payload'))throw new Error('rsi_synthesis_ledger_payload_digest_mismatch');
+  if(canonical.payload_bytes!==Number(payload.payload_bytes)||canonical.max_payload_bytes!==Number(payload.max_payload_bytes))throw new Error('rsi_synthesis_ledger_payload_size_mismatch');
+  return canonical;
+}
+
 export function rsiContextAwareCandidateTrustRootSnapshot(){
   const root=zeroAuthority({
     schema:RSI_CONTEXT_AWARE_CANDIDATE_ROOT_SCHEMA,
@@ -376,6 +440,9 @@ export function rsiContextAwareCandidateTrustRootSnapshot(){
     devos_lease_required_before_materialization:true,
     candidate_materialized_by_this_module:false,
     no_second_scheduler:true,
+    ledger_payload_bounded:true,
+    max_ledger_payload_bytes:MAX_LEDGER_PAYLOAD_BYTES,
+    forbidden_sensitive_ledger_fields:[...FORBIDDEN_LEDGER_KEYS].sort(),
   });
   return Object.freeze({...root,context_candidate_root_digest:digest(root)});
 }
