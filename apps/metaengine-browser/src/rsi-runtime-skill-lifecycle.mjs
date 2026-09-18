@@ -139,7 +139,7 @@ export class RsiRuntimeSkillLifecycle{
         harmful_count:sign==='NEGATIVE'?1:0,
         neutral_count:sign==='NEUTRAL'?1:0,
         insufficient_evidence_count:0,
-        router_engagement_count:router_engaged===true?1:1,
+        router_engagement_count:1,
         false_positive_injection_count:false_positive_injection===true?1:0,
         hard_invariant_violation_count:hard_invariant_violation===true?1:0,
         measured_net_delta:credit.credit_score,
@@ -171,9 +171,10 @@ export class RsiRuntimeSkillLifecycle{
     this.#assertInit();
     if(external_evaluator!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_external_evidence_required');
     const e=assertEpisode(episode);const credit=verifyRsiStepCreditReceipt(credit_receipt,e);
+    if(router_engaged!==true)throw new Error('rsi_runtime_skill_router_engagement_required_for_attributed_invocation');
     const item={
       episode:e,credit_receipt:credit,generation:positiveInt(generation,'generation'),
-      router_engaged:router_engaged===true,false_positive_injection:false_positive_injection===true,
+      router_engaged:true,false_positive_injection:false_positive_injection===true,
       hard_invariant_violation:hard_invariant_violation===true,
       authoring_prior:prior(authoring_prior),
       authoring_provenance_digest:exactDigest(authoring_provenance_digest,'authoring_provenance'),
