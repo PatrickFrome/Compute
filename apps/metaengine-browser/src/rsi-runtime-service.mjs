@@ -44,12 +44,15 @@ import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA 
 import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
 import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
 import { RsiBrowserCommandAttributionRegistry, rsiBrowserCommandAttributionTrustRootSnapshot } from './rsi-browser-command-attribution-registry.mjs';
+import { createRsiTrustedCreditReceipt, createRsiExperienceGraphAdmission, applyRsiExperienceGraphAdmission, rsiTrustedCreditTrustRootSnapshot } from './rsi-trusted-credit-assignment.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const DIGEST64 = /^[0-9a-f]{64}$/;
+const SHA256_PREFIXED = /^sha256:[0-9a-f]{64}$/;
+const MAX_PENDING_LEARNING_OUTCOMES = 4096;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -110,6 +113,7 @@ function trustRoots() {
     browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
     episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
     browser_command_attribution: rsiBrowserCommandAttributionTrustRootSnapshot(),
+    trusted_credit: rsiTrustedCreditTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -128,6 +132,9 @@ export class RsiRuntimeService {
   #improvementFrontier;
   #episodes;
   #commandAttributions;
+  #pendingLearningOutcomes = new Map();
+  #creditedOutcomeDigests = new Set();
+  #experienceGraphSnapshot = null;
   #archive;
   #observer;
   #verifiedArchive;
@@ -170,6 +177,15 @@ export class RsiRuntimeService {
       for (const row of page) {
         if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
         if (row?.payload?.command_attribution_event) this.#commandAttributions.apply(row.payload.command_attribution_event);
+        if (row?.payload?.learning_episode) this.#rememberLearningOutcome(row.payload.learning_episode);
+        if (row?.payload?.credit_admission) {
+          this.#experienceGraphSnapshot = applyRsiExperienceGraphAdmission({
+            previous_snapshot: this.#experienceGraphSnapshot,
+            admission: row.payload.credit_admission,
+          });
+          this.#creditedOutcomeDigests.add(row.payload.credit_admission.outcome_episode_digest);
+          this.#pendingLearningOutcomes.delete(row.payload.credit_admission.outcome_episode_digest);
+        }
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -195,6 +211,35 @@ export class RsiRuntimeService {
 
   #assertRunning() {
     if (!this.#running) throw new Error('rsi_runtime_not_started');
+  }
+
+  #rememberLearningOutcome(episode) {
+    if (!episode || episode.eligible_for_experience_graph !== true || typeof episode.episode_digest !== 'string') return;
+    if (this.#creditedOutcomeDigests.has(episode.episode_digest)) return;
+    if (!this.#pendingLearningOutcomes.has(episode.episode_digest) && this.#pendingLearningOutcomes.size >= MAX_PENDING_LEARNING_OUTCOMES) {
+      const oldest = this.#pendingLearningOutcomes.keys().next().value;
+      if (oldest) this.#pendingLearningOutcomes.delete(oldest);
+    }
+    this.#pendingLearningOutcomes.set(episode.episode_digest, Object.freeze(structuredClone(episode)));
+  }
+
+  #findPersistedLearningOutcome(episodeDigest) {
+    const cached = this.#pendingLearningOutcomes.get(episodeDigest);
+    if (cached) return Object.freeze(structuredClone(cached));
+    let cursor = 0;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const candidate = row?.payload?.learning_episode;
+        if (candidate?.episode_digest === episodeDigest && candidate?.eligible_for_experience_graph === true) {
+          return Object.freeze(structuredClone(candidate));
+        }
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return null;
   }
 
   async #persistObservationAdmission(admission) {
@@ -403,6 +448,7 @@ export class RsiRuntimeService {
       trusted_command_attribution_digest: registered?.attribution_digest || null,
       trusted_command_attribution_producer: registered?.producer || null,
       command_attribution_event: consumeEvent,
+      learning_episode: episode.eligible_for_experience_graph ? episode : null,
       eligible_for_experience_graph: episode.eligible_for_experience_graph,
       eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
       quarantined: episode.quarantined,
@@ -412,11 +458,40 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     if (consumeEvent) this.#commandAttributions.apply(consumeEvent);
+    if (episode.eligible_for_experience_graph) this.#rememberLearningOutcome(episode);
     this.#browserOutcomeCount += 1;
     if (episode.eligible_for_experience_graph) this.#browserOutcomeLearningEligibleCount += 1;
     if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
     this.#lastBrowserOutcomeDigest = episode.episode_digest;
     return episode;
+  }
+
+  async recordTrustedCredit({ outcome_episode_digest, assignment } = {}) {
+    this.#assertRunning();
+    const episodeDigest = String(outcome_episode_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(episodeDigest)) throw new Error('rsi_runtime_outcome_episode_digest_invalid');
+    if (this.#creditedOutcomeDigests.has(episodeDigest)) throw new Error('rsi_runtime_outcome_credit_already_recorded');
+    const episode = this.#findPersistedLearningOutcome(episodeDigest);
+    if (!episode) throw new Error('rsi_runtime_persisted_learning_outcome_required');
+    const receipt = createRsiTrustedCreditReceipt({ outcome_episode: episode, assignment });
+    const admission = createRsiExperienceGraphAdmission({ outcome_episode: episode, credit_receipt: receipt });
+    const nextGraph = applyRsiExperienceGraphAdmission({
+      previous_snapshot: this.#experienceGraphSnapshot,
+      admission,
+    });
+    await this.#ledger.append('TRUSTED_CREDIT_ASSIGNED', {
+      outcome_episode_digest: episodeDigest,
+      credit_receipt_digest: receipt.credit_receipt_digest,
+      experience_case_digest: admission.experience_case.case_digest,
+      credit_admission: admission,
+      terminal_task_reward_is_step_credit: false,
+      candidate_can_write_graph: false,
+      authority_effect: false,
+    });
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#creditedOutcomeDigests.add(episodeDigest);
+    this.#pendingLearningOutcomes.delete(episodeDigest);
+    return admission;
   }
 
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
@@ -515,6 +590,18 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      trusted_credit: Object.freeze({
+        pending_learning_outcome_count: this.#pendingLearningOutcomes.size,
+        credited_outcome_count: this.#creditedOutcomeDigests.size,
+        experience_graph_snapshot_digest: this.#experienceGraphSnapshot?.snapshot_digest || null,
+        experience_graph_case_count: this.#experienceGraphSnapshot?.case_count || 0,
+        terminal_task_reward_is_step_credit: false,
+        candidate_can_write_graph: false,
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
         outcome_count: this.#browserOutcomeCount,
