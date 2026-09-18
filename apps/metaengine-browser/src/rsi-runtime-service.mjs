@@ -74,6 +74,14 @@ import {
   applyRsiExperienceGraphAdmission,
   rsiTrustedCreditTrustRootSnapshot,
 } from './rsi-trusted-credit-assignment.mjs';
+import { createRsiExperienceContextPlan, verifyRsiExperienceContextPlan, rsiExperienceContextTrustRootSnapshot } from './rsi-experience-context-planner.mjs';
+import {
+  createRsiCandidateSynthesisRequest,
+  createRsiCandidateMutationProposal,
+  prepareRsiContextAwareCandidateBuild,
+  createRsiContextAwareCandidateLedgerPayload,
+  rsiContextAwareCandidateTrustRootSnapshot,
+} from './rsi-context-aware-candidate-synthesis.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -157,6 +165,8 @@ function trustRoots() {
     browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
     browser_command_attribution: rsiBrowserCommandAttributionTrustRootSnapshot(),
     trusted_credit: rsiTrustedCreditTrustRootSnapshot(),
+    experience_context: rsiExperienceContextTrustRootSnapshot(),
+    context_aware_candidate: rsiContextAwareCandidateTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -195,6 +205,11 @@ export class RsiRuntimeService {
   #browserOutcomeLearningEligibleCount = 0;
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
+  #experienceContextPlans = new Map();
+  #experienceContextPlanCount = 0;
+  #lastExperienceContextPlanDigest = null;
+  #candidateSynthesisPlanCount = 0;
+  #lastContextAwareBuildDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -256,6 +271,21 @@ export class RsiRuntimeService {
           });
           this.#creditedOutcomeDigests.add(row.payload.credit_admission.outcome_episode_digest);
           this.#pendingLearningOutcomes.delete(row.payload.credit_admission.outcome_episode_digest);
+        }
+        if (row?.type === 'BRAIN_OBSERVATION' && row?.payload?.observation?.observation_digest) {
+          const prepared = this.#improvementFrontier.prepare(row.payload.observation);
+          this.#improvementFrontier.commit(prepared);
+        }
+        if (row?.payload?.experience_context_plan) {
+          const plan = verifyRsiExperienceContextPlan(row.payload.experience_context_plan);
+          const episodeId = row?.payload?.episode_event?.episode_id || null;
+          if (episodeId) this.#experienceContextPlans.set(episodeId, Object.freeze(structuredClone(plan)));
+          this.#experienceContextPlanCount += 1;
+          this.#lastExperienceContextPlanDigest = plan.context_plan_digest;
+        }
+        if (row?.payload?.candidate_synthesis?.context_candidate_build) {
+          this.#candidateSynthesisPlanCount += 1;
+          this.#lastContextAwareBuildDigest = row.payload.candidate_synthesis.context_candidate_build.context_aware_build_digest || null;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -468,6 +498,172 @@ export class RsiRuntimeService {
       heldout_generalization_checked: outcome.heldout_generalization_checked === true,
       matched_feedback_budget_baseline_checked: outcome.matched_feedback_budget_baseline_checked === true,
       unacceptable_regression_count: outcome.unacceptable_regression_count,
+    });
+  }
+
+  experienceContextForOpportunity({
+    opportunity_id,
+    bridge_case_ids = [],
+    environment_fingerprint = 'metaengine.browser.runtime',
+    model_family = 'METAENGINE_RSI',
+  } = {}) {
+    this.#assertRunning();
+    const id = String(opportunity_id || '').trim();
+    const frontierEntry = this.#improvementFrontier.entries({ limit: 32 })
+      .find((entry) => entry.opportunity_id === id);
+    if (!frontierEntry) throw new Error('rsi_runtime_frontier_opportunity_not_found');
+    return createRsiExperienceContextPlan({
+      frontier_entry: frontierEntry,
+      experience_graph_snapshot: this.#experienceGraphSnapshot,
+      environment_fingerprint,
+      model_family,
+      bridge_case_ids,
+    });
+  }
+
+  async openLearningEpisodeFromOpportunity({
+    opportunity_id,
+    bridge_case_ids = [],
+    environment_fingerprint = 'metaengine.browser.runtime',
+    model_family = 'METAENGINE_RSI',
+    max_candidates = 4,
+  } = {}) {
+    this.#assertRunning();
+    const contextPlan = this.experienceContextForOpportunity({
+      opportunity_id,
+      bridge_case_ids,
+      environment_fingerprint,
+      model_family,
+    });
+    const episodeId = `episode:rsi:${contextPlan.search_context_digest.slice(0, 24)}`;
+
+    if (this.#episodes.hasEpisode(episodeId)) {
+      const existing = this.#episodes.episode(episodeId);
+      if (
+        existing.source_sha !== contextPlan.source_sha
+        || existing.observation_digest !== contextPlan.observation_digest
+        || existing.opportunity_id !== contextPlan.opportunity_id
+        || existing.hypothesis_digest !== contextPlan.hypothesis_digest
+        || existing.mutation_surface !== contextPlan.mutation_surface
+        || existing.search_context_digest !== contextPlan.search_context_digest
+      ) throw new Error('rsi_runtime_experience_context_episode_identity_conflict');
+      const stored = this.#experienceContextPlans.get(episodeId);
+      if (stored && stored.context_plan_digest !== contextPlan.context_plan_digest) {
+        throw new Error('rsi_runtime_experience_context_plan_conflict');
+      }
+      if (!stored) this.#experienceContextPlans.set(episodeId, Object.freeze(structuredClone(contextPlan)));
+      return Object.freeze({ context_plan: contextPlan, episode: existing, already_open: true });
+    }
+
+    const event = this.#episodes.prepareOpen({
+      episode_id: episodeId,
+      observation_digest: contextPlan.observation_digest,
+      opportunity_id: contextPlan.opportunity_id,
+      hypothesis_digest: contextPlan.hypothesis_digest,
+      mutation_surface: contextPlan.mutation_surface,
+      search_context_digest: contextPlan.search_context_digest,
+      max_candidates,
+    });
+    await this.#ledger.append('RSI_EXPERIENCE_CONTEXT_EPISODE_OPENED', {
+      experience_context_plan: contextPlan,
+      episode_event: event,
+      retrieval_is_advisory_only: true,
+      existing_devos_scheduler_required: true,
+      task_lease_created: false,
+      workspace_created: false,
+      candidate_materialized: false,
+      authority_effect: false,
+    });
+    const episode = this.#episodes.apply(event);
+    this.#experienceContextPlans.set(episodeId, Object.freeze(structuredClone(contextPlan)));
+    this.#experienceContextPlanCount += 1;
+    this.#lastExperienceContextPlanDigest = contextPlan.context_plan_digest;
+    return Object.freeze({ context_plan: contextPlan, episode, already_open: false });
+  }
+
+  episodeExperienceContext(episodeId) {
+    this.#assertRunning();
+    const id = String(episodeId || '').trim();
+    const plan = this.#experienceContextPlans.get(id);
+    return plan ? Object.freeze(structuredClone(plan)) : null;
+  }
+
+  candidateSynthesisRequestForEpisode({
+    episode_id,
+    generation = 1,
+    strategy = 'CONTEXT_GUIDED_DIVERSE_PROPOSAL',
+  } = {}) {
+    this.#assertRunning();
+    const episode = this.#episodes.episode(episode_id);
+    const contextPlan = this.#experienceContextPlans.get(episode.episode_id);
+    if (!contextPlan) throw new Error('rsi_runtime_episode_experience_context_missing');
+    if (episode.search_context_digest !== contextPlan.search_context_digest) {
+      throw new Error('rsi_runtime_episode_context_digest_mismatch');
+    }
+    const frontierEntry = this.#improvementFrontier.entries({ limit: 32 })
+      .find((entry) => entry.opportunity_id === contextPlan.opportunity_id);
+    if (!frontierEntry) throw new Error('rsi_runtime_frontier_opportunity_not_found');
+    return createRsiCandidateSynthesisRequest({
+      context_plan: contextPlan,
+      frontier_entry: frontierEntry,
+      generation,
+      strategy,
+    });
+  }
+
+  async planContextAwareCandidateBuild({
+    episode_id,
+    source_snapshot,
+    proposal,
+    generation = 1,
+    strategy = 'CONTEXT_GUIDED_DIVERSE_PROPOSAL',
+    sequence = 1,
+    previous_candidate_id = null,
+    requested_backend = null,
+  } = {}) {
+    this.#assertRunning();
+    const request = this.candidateSynthesisRequestForEpisode({ episode_id, generation, strategy });
+    const mutationProposal = createRsiCandidateMutationProposal({
+      synthesis_request: request,
+      proposal,
+    });
+    const contextPlan = this.#experienceContextPlans.get(String(episode_id || '').trim());
+    if (!contextPlan) throw new Error('rsi_runtime_episode_experience_context_missing');
+    const frontierEntry = this.#improvementFrontier.entries({ limit: 32 })
+      .find((entry) => entry.opportunity_id === contextPlan.opportunity_id);
+    if (!frontierEntry) throw new Error('rsi_runtime_frontier_opportunity_not_found');
+    const build = prepareRsiContextAwareCandidateBuild({
+      synthesis_request: request,
+      frontier_entry: frontierEntry,
+      source_snapshot,
+      mutation_proposal: mutationProposal,
+      sequence,
+      previous_candidate_id,
+      requested_backend,
+    });
+    const ledgerPayload = createRsiContextAwareCandidateLedgerPayload({
+      episode_id: String(episode_id || '').trim(),
+      synthesis_request: request,
+      mutation_proposal: mutationProposal,
+      context_candidate_build: build,
+    });
+    await this.#ledger.append('RSI_CONTEXT_CANDIDATE_BUILD_PLANNED', {
+      candidate_synthesis: ledgerPayload,
+      existing_devos_scheduler_required: true,
+      lease_created: false,
+      workspace_created: false,
+      candidate_materialized: false,
+      authority_effect: false,
+    });
+    this.#candidateSynthesisPlanCount += 1;
+    this.#lastContextAwareBuildDigest = build.context_aware_build_digest;
+    return Object.freeze({
+      synthesis_request: request,
+      mutation_proposal: mutationProposal,
+      context_candidate_build: build,
+      existing_devos_scheduler_required: true,
+      scheduler_action_authorized: false,
+      authority_effect: false,
     });
   }
 
@@ -1006,6 +1202,27 @@ export class RsiRuntimeService {
         last_episode_digest: this.#lastBrowserOutcomeDigest,
         ambiguous_outcome_learning_allowed: false,
         raw_result_stored: false,
+        authority_effect: false,
+      }),
+      experience_context: Object.freeze({
+        planned_count: this.#experienceContextPlanCount,
+        last_context_plan_digest: this.#lastExperienceContextPlanDigest,
+        verified_graph_available: this.#experienceGraphSnapshot != null,
+        retrieval_is_advisory_only: true,
+        existing_devos_scheduler_required: true,
+        task_lease_created: false,
+        candidate_materialized: false,
+        authority_effect: false,
+      }),
+      candidate_synthesis: Object.freeze({
+        planned_build_count: this.#candidateSynthesisPlanCount,
+        last_context_aware_build_digest: this.#lastContextAwareBuildDigest,
+        devos_lease_required_before_materialization: true,
+        lease_created: false,
+        workspace_created: false,
+        candidate_materialized: false,
+        raw_patch_persisted: false,
+        raw_source_persisted: false,
         authority_effect: false,
       }),
       episodes: this.#episodes.snapshot(),
