@@ -13,6 +13,7 @@ import {
   createRsiSkillLibraryGovernance,
   verifyRsiSkillLibraryGovernance,
   createRsiSkillActivationView,
+  verifyRsiSkillActivationView,
   rsiSkillLibraryGovernanceTrustRootSnapshot,
 } from '../src/rsi-skill-library-governance.mjs';
 
@@ -399,6 +400,7 @@ test('activation view rejects retired, quarantined and cap-dormant skills', () =
   assert.equal(view.only_governance_active_skills, true);
   assert.equal(view.retired_or_quarantined_skill_activation_allowed, false);
   assert.equal(view.activation_view_is_execution_authority, false);
+  verifyRsiSkillActivationView(view, governance, library);
 
   assert.throws(() => createRsiSkillActivationView({
     governance,
