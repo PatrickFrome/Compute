@@ -151,6 +151,33 @@ test('shadow binding ledger is append-only, source-fenced and restart durable wi
   }
 });
 
+
+test('failed durable shadow binding write does not advance in-memory ledger state', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-shadow-profile-binding-fail-'));
+  try {
+    const q = qualification();
+    const binding = createRsiShadowProfileBinding({
+      binding_id: 'shadow.profile.binding.persist.fail',
+      qualification: q,
+      verified_context_digest: d('8'),
+      comparator_root_digest: d('9'),
+      external_shadow_owner: true,
+      authored_by_candidate: false,
+    });
+
+    const statePath = path.join(root, 'shadow-binding.json');
+    const ledger = new RsiShadowProfileBindingLedger({ statePath, source_sha: SOURCE });
+    await ledger.init();
+
+    await fs.mkdir(statePath);
+    await assert.rejects(() => ledger.add(binding, q));
+    assert.equal(ledger.snapshot().row_count, 0);
+    assert.deepEqual(ledger.bindings(), []);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('shadow binding trust root freezes zero-authority champion/challenger semantics', () => {
   const root = rsiShadowProfileBindingTrustRootSnapshot();
   assert.equal(root.qualified_meta_profile_required, true);
