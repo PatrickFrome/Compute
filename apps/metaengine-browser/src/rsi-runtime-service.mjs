@@ -58,6 +58,11 @@ import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntime
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
+import {
+  verifyRsiAnytimeLibraryAdmissionProposal,
+  verifyRsiAnytimeLibraryAdmissionCertificate,
+  rsiAnytimeLibraryAdmissionTrustRootSnapshot,
+} from './rsi-anytime-library-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -139,6 +144,7 @@ function trustRoots() {
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
     shadow_comparison_binding: rsiShadowComparisonBindingTrustRootSnapshot(),
+    anytime_library_admission: rsiAnytimeLibraryAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1017,10 +1023,16 @@ export class RsiRuntimeService {
     return this.#metaProfileShadowRegistry.current();
   }
 
-  async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
+  async adoptVerifiedSkillLibrary({
+    library,
+    admission_exposure_hold_skill_digests = [],
+    external_library_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
     this.#assertRunning();
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
       library,
+      admission_exposure_hold_skill_digests,
       external_library_owner,
       authored_by_candidate,
     });
@@ -1030,6 +1042,8 @@ export class RsiRuntimeService {
       entry_count: result.entry_count,
       reconciled_pending: result.reconciled_pending,
       append_only_library_required: true,
+      admission_exposure_hold_skill_digests: result.admission_exposure_hold_skill_digests || [],
+      retrieval_exposure_changed: false,
       authority_effect: false,
     });
     return result;
@@ -1038,6 +1052,101 @@ export class RsiRuntimeService {
   createSkillActivationView(requested_skill_digests) {
     this.#assertRunning();
     return this.#skillLifecycle.activationView(requested_skill_digests);
+  }
+
+  verifiedSkillStateReadback() {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    return Object.freeze({
+      library,
+      governance,
+      library_digest: library.library_digest,
+      governance_digest: governance.governance_digest,
+      admission_exposure_hold_skill_digests: Object.freeze([
+        ...(this.#skillLifecycle.snapshot().admission_exposure_hold_skill_digests || []),
+      ]),
+      readback_is_execution_authority: false,
+      authority_effect: false,
+    });
+  }
+
+  async applyAnytimeLibraryAdmission({
+    attempt_id,
+    admission_proposal,
+    admission_proposal_args,
+    admission_certificate,
+    admission_certificate_args,
+    external_library_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    if (external_library_owner !== true || authored_by_candidate !== false) {
+      throw new Error('rsi_runtime_anytime_append_external_owner_required');
+    }
+    const proposal = verifyRsiAnytimeLibraryAdmissionProposal(
+      admission_proposal,
+      admission_proposal_args || {},
+    );
+    const certificate = verifyRsiAnytimeLibraryAdmissionCertificate(
+      admission_certificate,
+      admission_certificate_args || {},
+    );
+    if (certificate.state !== 'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF') {
+      throw new Error('rsi_runtime_anytime_append_certificate_not_eligible');
+    }
+    if (certificate.admission_proposal_digest !== proposal.admission_proposal_digest) {
+      throw new Error('rsi_runtime_anytime_append_proposal_certificate_mismatch');
+    }
+    if (proposal.proposed_successor_library?.library_digest !== certificate.proposed_successor_library_digest) {
+      throw new Error('rsi_runtime_anytime_append_successor_digest_mismatch');
+    }
+    const result = await this.#skillLifecycle.adoptVerifiedLibraryOneAttempt({
+      attempt_id,
+      admission_certificate_digest: certificate.admission_certificate_digest,
+      expected_current_library_digest: certificate.current_library_digest,
+      expected_current_governance_digest: certificate.current_governance_digest,
+      proposed_library: proposal.proposed_successor_library,
+      proposed_library_digest: certificate.proposed_successor_library_digest,
+      hold_new_skill_digests: [certificate.proposed_skill_digest],
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('ANYTIME_LIBRARY_APPEND_ATTEMPT_RECORDED', {
+      attempt_id,
+      admission_certificate_digest: certificate.admission_certificate_digest,
+      admission_proposal_digest: proposal.admission_proposal_digest,
+      previous_library_digest: certificate.current_library_digest,
+      proposed_library_digest: certificate.proposed_successor_library_digest,
+      proposed_skill_digest: certificate.proposed_skill_digest,
+      state: result.state,
+      held_skill_digests: result.held_skill_digests || [certificate.proposed_skill_digest],
+      retrieval_exposure_changed: false,
+      skill_activation_authorized: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  async reconcileAnytimeLibraryAdmission({ attempt_id, admission_certificate_digest } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.reconcileVerifiedLibraryAppendAttempt({
+      attempt_id,
+      admission_certificate_digest,
+    });
+    await this.#ledger.append('ANYTIME_LIBRARY_APPEND_RECONCILED', {
+      attempt_id,
+      admission_certificate_digest,
+      state: result.state,
+      observed_library_digest: result.observed_library_digest || null,
+      retry_performed: false,
+      automatic_retry_allowed: false,
+      retrieval_exposure_changed: false,
+      authority_effect: false,
+    });
+    return result;
   }
 
   async recordBrowserStepCredit({
@@ -1331,6 +1440,7 @@ export class RsiRuntimeService {
     });
     const adoption = await this.#skillLifecycle.adoptVerifiedLibrary({
       library: admission.proposed_library,
+      admission_exposure_hold_skill_digests: [admission.successor_skill_digest],
       external_library_owner: true,
       authored_by_candidate: false,
     });
@@ -1345,6 +1455,8 @@ export class RsiRuntimeService {
       adopted_library_digest: admission.proposed_library_digest,
       append_only_library_update: true,
       parent_retained: true,
+      successor_exposure_held: true,
+      retrieval_exposure_changed: false,
       direct_browser_execution_authority: false,
       authority_effect: false,
     });

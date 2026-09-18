@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,8 @@ import {
 
 const SOURCE='a'.repeat(40);
 const d=(char)=>`sha256:${char.repeat(64)}`;
+function stable(value){if(Array.isArray(value))return value.map(stable);if(!value||typeof value!=='object')return value;return Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])]))}
+function stateDigest(value){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`}
 
 function verifiedSkill({id='skill.runtime.credit',source='b',impl='c'}={}){
   const capsule=createRsiSkillCapsule({
@@ -186,18 +189,136 @@ test('verified library updates are append-only and cannot silently remove or rew
       external_library_owner:true,
       authored_by_candidate:false,
     });
+    await assert.rejects(()=>store.adoptVerifiedLibrary({
+      library:library([first,second],'runtime.skill.library.append'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/append_exposure_hold_required/);
     await store.adoptVerifiedLibrary({
       library:library([first,second],'runtime.skill.library.append'),
+      admission_exposure_hold_skill_digests:[second.capsule.skill_digest],
       external_library_owner:true,
       authored_by_candidate:false,
     });
     assert.equal(store.snapshot().library_entry_count,2);
+    assert.equal(store.snapshot().admission_exposure_hold_count,1);
+    const governance=store.governance();
+    const heldRow=governance.entries.find(row=>row.skill_digest===second.capsule.skill_digest);
+    assert.equal(heldRow.state,'DORMANT_CAP');
+    assert.equal(heldRow.active_for_composition,false);
+    assert.equal(heldRow.admission_exposure_held,true);
+    assert.throws(()=>store.activationView([second.capsule.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
     await assert.rejects(()=>store.adoptVerifiedLibrary({
       library:library([second],'runtime.skill.library.append'),
       external_library_owner:true,
       authored_by_candidate:false,
     }),/library_non_append_only_update/);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
+});
+
+test('one-attempt append is journaled before effect, holds new skills dormant and is idempotent after confirmation',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-one-attempt-'));
+  try{
+    const first=verifiedSkill({id:'skill.runtime.one-attempt.first',source:'b',impl:'c'});
+    const second=verifiedSkill({id:'skill.runtime.one-attempt.second',source:'c',impl:'d'});
+    const statePath=path.join(root,'skill-state.json');
+    const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE,clock:()=>1_800_000_000_000});
+    await store.init();
+    const current=library([first],'runtime.skill.library.one-attempt');
+    await store.adoptVerifiedLibrary({library:current,external_library_owner:true,authored_by_candidate:false});
+    const governance=store.governance();
+    const proposed=library([first,second],'runtime.skill.library.one-attempt');
+    const result=await store.adoptVerifiedLibraryOneAttempt({
+      attempt_id:'runtime.skill.append.attempt.1',
+      admission_certificate_digest:d('a'),
+      expected_current_library_digest:current.library_digest,
+      expected_current_governance_digest:governance.governance_digest,
+      proposed_library:proposed,
+      proposed_library_digest:proposed.library_digest,
+      hold_new_skill_digests:[second.capsule.skill_digest],
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(result.state,'CONFIRMED');
+    assert.equal(result.retrieval_exposure_changed,false);
+    assert.equal(store.snapshot().library_entry_count,2);
+    assert.equal(store.snapshot().append_attempt_count,1);
+    assert.equal(store.snapshot().admission_exposure_hold_count,1);
+    assert.throws(()=>store.activationView([second.capsule.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+    const again=await store.adoptVerifiedLibraryOneAttempt({
+      attempt_id:'runtime.skill.append.attempt.1',
+      admission_certificate_digest:d('a'),
+      expected_current_library_digest:current.library_digest,
+      expected_current_governance_digest:governance.governance_digest,
+      proposed_library:proposed,
+      proposed_library_digest:proposed.library_digest,
+      hold_new_skill_digests:[second.capsule.skill_digest],
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(again.state,'ALREADY_RECORDED');
+    assert.equal(again.attempt_state,'CONFIRMED');
+    assert.equal(store.snapshot().library_entry_count,2);
+
+    const restored=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE,clock:()=>1_800_000_000_100});
+    await restored.init();
+    assert.equal(restored.snapshot().admission_exposure_hold_count,1);
+    assert.throws(()=>restored.activationView([second.capsule.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
+});
+
+test('ambiguous append attempt reconciles by library readback and never retries the effect',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-append-reconcile-'));
+  try{
+    const first=verifiedSkill({id:'skill.runtime.reconcile.first',source:'b',impl:'c'});
+    const second=verifiedSkill({id:'skill.runtime.reconcile.second',source:'c',impl:'d'});
+    const statePath=path.join(root,'skill-state.json');
+    const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE,clock:()=>1_800_000_000_000});
+    await store.init();
+    const current=library([first],'runtime.skill.library.reconcile');
+    await store.adoptVerifiedLibrary({library:current,external_library_owner:true,authored_by_candidate:false});
+    const governance=store.governance();
+    const proposed=library([first,second],'runtime.skill.library.reconcile');
+    await store.adoptVerifiedLibraryOneAttempt({
+      attempt_id:'runtime.skill.append.reconcile.1',
+      admission_certificate_digest:d('b'),
+      expected_current_library_digest:current.library_digest,
+      expected_current_governance_digest:governance.governance_digest,
+      proposed_library:proposed,
+      proposed_library_digest:proposed.library_digest,
+      hold_new_skill_digests:[second.capsule.skill_digest],
+      external_library_owner:true,authored_by_candidate:false,
+    });
+
+    const parsed=JSON.parse(await fs.readFile(statePath,'utf8'));
+    parsed.append_attempts[0].state='ATTEMPT_STARTED';
+    parsed.append_attempts[0].confirmed_at=null;
+    delete parsed.state_digest;
+    parsed.state_digest=stateDigest(parsed);
+    await fs.writeFile(statePath,JSON.stringify(parsed),'utf8');
+
+    const restored=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE,clock:()=>1_800_000_000_200});
+    await restored.init();
+    await assert.rejects(()=>restored.adoptVerifiedLibraryOneAttempt({
+      attempt_id:'runtime.skill.append.reconcile.1',
+      admission_certificate_digest:d('b'),
+      expected_current_library_digest:current.library_digest,
+      expected_current_governance_digest:governance.governance_digest,
+      proposed_library:proposed,
+      proposed_library_digest:proposed.library_digest,
+      hold_new_skill_digests:[second.capsule.skill_digest],
+      external_library_owner:true,authored_by_candidate:false,
+    }),/ambiguous_reconcile_required/);
+    const reconciled=await restored.reconcileVerifiedLibraryAppendAttempt({
+      attempt_id:'runtime.skill.append.reconcile.1',
+      admission_certificate_digest:d('b'),
+    });
+    assert.equal(reconciled.state,'CONFIRMED_BY_READBACK');
+    assert.equal(reconciled.automatic_retry_allowed,false);
+    assert.equal(restored.snapshot().library_entry_count,2);
+    assert.equal(restored.snapshot().ambiguous_append_attempt_count,0);
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
@@ -321,6 +442,11 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   const root=rsiRuntimeSkillLifecycleTrustRootSnapshot();
   assert.equal(root.verified_library_required,true);
   assert.equal(root.library_updates_append_only,true);
+  assert.equal(root.append_new_skills_require_exposure_hold,true);
+  assert.equal(root.admission_exposure_holds_force_dormant,true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
+  assert.equal(root.one_attempt_append_journal_durable_before_effect,true);
+  assert.equal(root.ambiguous_append_retry_allowed,false);
   assert.equal(root.independently_credited_outcomes_only,true);
   assert.equal(root.contextual_credit_not_global_truth,true);
   assert.equal(root.candidate_can_write_lifecycle,false);

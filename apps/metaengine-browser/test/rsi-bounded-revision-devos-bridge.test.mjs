@@ -101,6 +101,7 @@ import {
   verifyRsiAnytimeLibraryAdmissionCertificate,
   rsiAnytimeLibraryAdmissionTrustRootSnapshot,
 } from '../src/rsi-anytime-library-admission.mjs';
+import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -3487,12 +3488,12 @@ function phase34SourceQualification(label='phase34-source',{green=true,head=PHAS
   });
 }
 
-function phase34Fixture(label='phase34'){
-  const p33=phase33ExactOwnerFixture(label);
+function phase34Fixture(label='phase34',{p33_override=null,current_governance_override=null}={}){
+  const p33=p33_override||phase33ExactOwnerFixture(label);
   const p33Args=phase33CertificateArgs(p33,label);
   const p33Certificate=createRsiExactSkillPrecommitCertificate(p33Args);
   assert.equal(p33Certificate.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
-  const currentGovernance=createRsiSkillLibraryGovernance({
+  const currentGovernance=current_governance_override||createRsiSkillLibraryGovernance({
     governance_id:'phase34.governance.'+label,
     library:p33.skillFx.currentLibrary,
     lifecycle_evidence:[],
@@ -3786,6 +3787,66 @@ test('Phase34 archive is durable-before-visible and retains rejected or abstaine
   });
   await restored.init();
   assert.equal(restored.snapshot().row_count,1);
+});
+
+test('Phase35 applies an eligible Phase34 append exactly once through the existing runtime lifecycle and keeps the new skill dormant',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase35-runtime-append-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const label='phase35-runtime';
+  const p33=phase33ExactOwnerFixture(label);
+  const runtime=new RsiRuntimeService({
+    source_sha:SOURCE,
+    ledgerPath:path.join(dir,'runtime.jsonl'),
+    clock:()=>1_800_000_000_000,
+  });
+  await runtime.start();
+  await runtime.adoptVerifiedSkillLibrary({
+    library:p33.skillFx.currentLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  const before=runtime.verifiedSkillStateReadback();
+  assert.equal(before.library_digest,p33.skillFx.currentLibrary.library_digest);
+  assert.equal(before.admission_exposure_hold_skill_digests.length,0);
+
+  const fx=phase34Fixture(label,{p33_override:p33,current_governance_override:before.governance});
+  const cert=createRsiAnytimeLibraryAdmissionCertificate(fx.certificateArgs);
+  assert.equal(cert.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF');
+
+  const applied=await runtime.applyAnytimeLibraryAdmission({
+    attempt_id:'phase35.runtime.append.1',
+    admission_proposal:fx.proposal,
+    admission_proposal_args:fx.proposalArgs,
+    admission_certificate:cert,
+    admission_certificate_args:fx.certificateArgs,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(applied.state,'CONFIRMED');
+  assert.equal(applied.retrieval_exposure_changed,false);
+
+  const after=runtime.verifiedSkillStateReadback();
+  assert.equal(after.library_digest,fx.proposal.proposed_successor_library_digest);
+  assert.deepEqual(after.admission_exposure_hold_skill_digests,[cert.proposed_skill_digest]);
+  const held=after.governance.entries.find(row=>row.skill_digest===cert.proposed_skill_digest);
+  assert.equal(held.state,'DORMANT_CAP');
+  assert.equal(held.active_for_composition,false);
+  assert.equal(held.admission_exposure_held,true);
+  assert.throws(()=>runtime.createSkillActivationView([cert.proposed_skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const repeat=await runtime.applyAnytimeLibraryAdmission({
+    attempt_id:'phase35.runtime.append.1',
+    admission_proposal:fx.proposal,
+    admission_proposal_args:fx.proposalArgs,
+    admission_certificate:cert,
+    admission_certificate_args:fx.certificateArgs,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(repeat.state,'ALREADY_RECORDED');
+  assert.equal(runtime.verifiedSkillStateReadback().library.entry_count,after.library.entry_count);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.append_attempt_count,1);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
 });
 
 test('Phase34 trust root preserves external admission without creating activation or lifecycle authority',()=>{
