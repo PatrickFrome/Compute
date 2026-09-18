@@ -55,6 +55,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-self-update-successor-verification.mjs',
   'apps/metaengine-browser/src/rsi-post-adoption-causal-measurement.mjs',
   'apps/metaengine-browser/src/rsi-post-adoption-experience-admission.mjs',
+  'apps/metaengine-browser/src/rsi-experience-context-utility-feedback.mjs',
   'apps/metaengine-browser/src/self-update-handoff.mjs',
   'apps/metaengine-browser/src/self-update-runtime-v8.mjs',
   'apps/metaengine-browser/src/self-update-transaction-journal.mjs',
