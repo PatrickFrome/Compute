@@ -126,6 +126,7 @@ function verifyRelease(release,readiness){
   if(
     release.version!==readiness.target_release_version
     ||release.tag!==readiness.target_release_tag
+    ||String(release.feed_url||'')!==String(readiness.trusted_release?.feed_url||'')
     ||exactSha(release.git_sha,'release_source')!==readiness.candidate_sha
     ||'sha256:'+exactHex(release.installer_sha256,'installer')!==readiness.target_installer_sha256
     ||'sha256:'+exactHex(release.manifest_sha256,'manifest')!==readiness.target_manifest_sha256
@@ -134,7 +135,7 @@ function verifyRelease(release,readiness){
   )throw new Error('rsi_final_install_trusted_release_mismatch');
   return Object.freeze({
     schema:release.schema,version:release.version,tag:release.tag,git_sha:readiness.candidate_sha,
-    installer_name:String(release.installer_name||''),
+    feed_url:String(release.feed_url||''),installer_name:String(release.installer_name||''),
     installer_sha256:readiness.target_installer_sha256,
     manifest_sha256:readiness.target_manifest_sha256,
     installed_executable_sha256:readiness.target_installed_executable_sha256,
@@ -142,7 +143,7 @@ function verifyRelease(release,readiness){
   });
 }
 
-function verifyRuntime(snapshot,readiness,outcome,host,observedAt){
+function verifyRuntime(snapshot,readiness,outcome,host,release,observedAt){
   if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot)||snapshot.schema!=='metaengine.self-update-runtime.v8'){
     throw new Error('rsi_final_install_runtime_schema_invalid');
   }
@@ -154,6 +155,7 @@ function verifyRuntime(snapshot,readiness,outcome,host,observedAt){
     ||snapshot.downloaded_version!==readiness.target_release_version
     ||snapshot.metadata_verified!==true||snapshot.publisher_verified!==true
     ||snapshot.release_resolution!=='VERIFIED'||snapshot.resolved_tag!==readiness.target_release_tag
+    ||snapshot.resolved_feed_url!==release.feed_url
     ||exactSha(snapshot.resolved_git_sha,'resolved_source')!==readiness.candidate_sha
     ||snapshot.candidate_file_count!==1||Number(snapshot.download_percent)!==100
   )throw new Error('rsi_final_install_runtime_binding_invalid');
@@ -216,7 +218,7 @@ export function createRsiSelfUpdateFinalInstallCycleAdmission({
   const host=verifyHost(fresh_runtime_snapshot?.host_resilience);
   const prior=verifyPrior(prior_transaction,outcome);
   const release=verifyRelease(trusted_release,readiness);
-  const runtime=verifyRuntime(fresh_runtime_snapshot,readiness,outcome,host,observedAt);
+  const runtime=verifyRuntime(fresh_runtime_snapshot,readiness,outcome,host,release,observedAt);
 
   const core=zero({
     schema:RSI_SELF_UPDATE_FINAL_INSTALL_CYCLE_ADMISSION_SCHEMA,
