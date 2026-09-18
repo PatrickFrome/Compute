@@ -1907,6 +1907,9 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     acceptance_policy_digest:labelDigest(`${label}-acceptance-policy`),
     hidden_holdout_root_digest:labelDigest(`${label}-hidden-holdout-root`),
     external_evaluator_root_digest:labelDigest(`${label}-external-evaluator`),
+    external_evaluator_generation_digest:labelDigest(`${label}-external-evaluator-generation`),
+    matched_reference_plan_digest:labelDigest(`${label}-matched-reference-plan`),
+    sealed_transfer_acceptance_digest:labelDigest(`${label}-sealed-transfer-acceptance`),
     control_receipt_digest:labelDigest(`${label}-control`),
     treatment_receipt_digest:labelDigest(`${label}-treatment`),
     transfer_evidence_digest:labelDigest(`${label}-transfer-evidence`),
@@ -1915,6 +1918,8 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     evaluator_integrity_pass:true,
     contamination_clear:true,
     from_scratch_replay_pass:true,
+    matched_reference_integrity_pass:true,
+    sealed_transfer_acceptance_pass:true,
     task_non_regression:true,
     safety_non_regression:true,
     security_non_regression:true,
@@ -1926,6 +1931,8 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     diagnostic_discrimination_pass:proposal.knowledge_class==='ENVIRONMENT_DIAGNOSTIC'||proposal.knowledge_class==='AMBIGUITY_DIAGNOSTIC',
     external_transfer_validator:true,
     external_holdout_owner:true,
+    external_reference_owner:true,
+    external_acceptance_owner:true,
     authored_by_candidate:false,
   };
   return createRsiKnowledgeTransferValidation({...base,...overrides});
@@ -1939,11 +1946,16 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
   assert.equal(proposal.knowledge_class,'REUSABLE_RECIPE_CANDIDATE');
   assert.equal(proposal.source_entry_count,2);
   assert.equal(proposal.source_candidate_count,2);
+  assert.equal(proposal.same_evaluator_root_required,true);
   assert.equal(proposal.same_evaluator_generation_required,true);
   assert.equal(proposal.same_evaluator_generation_sequence_required,true);
   assert.equal(proposal.generation_history_anchor_required,true);
   assert.equal(proposal.same_evaluation_epoch_required,true);
   assert.equal(proposal.same_evaluation_epoch_sequence_required,true);
+  assert.equal(proposal.same_evaluation_contract_required,true);
+  assert.equal(proposal.cross_contract_consolidation_allowed,false);
+  assert.equal(proposal.evaluator_root_digest,rows[0].entry.evaluator_root_digest);
+  assert.equal(proposal.evaluation_contract_digest,rows[0].entry.evaluation_contract_digest);
   assert.equal(proposal.evaluator_generation_seq,rows[0].entry.evaluator_generation_seq);
   assert.equal(proposal.evaluator_generation_history_anchor_digest,rows[0].entry.evaluator_generation_history_anchor_digest);
   assert.equal(proposal.evaluation_epoch_seq,rows[0].entry.evaluation_epoch_seq);
@@ -1951,6 +1963,8 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
   assert.equal(proposal.source_sealed_acceptance_digests.length,2);
   assert.equal(proposal.source_differential_reference_digests.length,2);
   assert.equal(proposal.source_counterevidence_digests.length,2);
+  assert.deepEqual(proposal.source_failure_attribution_digests,[]);
+  assert.equal(proposal.source_failure_attribution_preserved,true);
   assert.equal(proposal.cross_generation_consolidation_allowed,false);
   assert.equal(proposal.cross_generation_revalidation_required_before_new_proposal,true);
   assert.equal(proposal.slow_loop_distinct_from_fast_candidate_loop,true);
@@ -2001,7 +2015,20 @@ test('Phase31 reusable recipe requires strict held-out transfer improvement plus
   assert.equal(validation.eligible_for_advisory_knowledge_archive,true);
   assert.equal(validation.strict_transfer_improvement,true);
   assert.equal(validation.candidate_can_choose_holdout,false);
+  assert.equal(validation.candidate_can_view_hidden_holdout,false);
+  assert.equal(validation.candidate_can_choose_task_family,false);
+  assert.equal(validation.candidate_can_choose_transfer_harness,false);
+  assert.equal(validation.candidate_can_choose_acceptance_policy,false);
   assert.equal(validation.candidate_can_choose_evaluator,false);
+  assert.equal(validation.candidate_can_choose_reference,false);
+  assert.equal(validation.candidate_can_view_sealed_transfer_acceptance,false);
+  assert.equal(validation.external_reference_owner,true);
+  assert.equal(validation.external_acceptance_owner,true);
+  assert.equal(validation.matched_reference_integrity_pass,true);
+  assert.equal(validation.sealed_transfer_acceptance_pass,true);
+  assert.match(validation.matched_reference_plan_digest,/^sha256:/);
+  assert.match(validation.sealed_transfer_acceptance_digest,/^sha256:/);
+  assert.equal(validation.source_evaluation_contract_digest,proposal.evaluation_contract_digest);
   assert.equal(validation.validation_can_write_skill_library,false);
   assert.equal(validation.validation_can_activate_knowledge,false);
 
@@ -2049,6 +2076,11 @@ test('Phase31 requires at least two distinct passed transfer contexts before lib
   assert.equal(verifyRsiKnowledgeConsolidationAdmission(admission,{proposal,validations:[v1,v2]}).admission_digest,admission.admission_digest);
   assert.equal(admission.state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
   assert.equal(admission.passed_transfer_context_count,2);
+  assert.equal(admission.matched_reference_quorum_satisfied,true);
+  assert.equal(admission.sealed_transfer_acceptance_quorum_satisfied,true);
+  assert.equal(admission.matched_reference_plan_digests.length,2);
+  assert.equal(admission.sealed_transfer_acceptance_digests.length,2);
+  assert.equal(admission.evaluation_contract_digest,proposal.evaluation_contract_digest);
   assert.equal(admission.zero_observed_negative_transfer,true);
   assert.equal(admission.library_admission_token,null);
   assert.equal(admission.admission_can_write_skill_library,false);
@@ -2123,11 +2155,14 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.phase30_generation_scoped_outcome_evidence_required,true);
   assert.equal(root.min_source_entries,2);
   assert.equal(root.source_candidate_diversity_required,true);
+  assert.equal(root.same_evaluator_root_required,true);
   assert.equal(root.same_evaluator_generation_required,true);
   assert.equal(root.same_evaluator_generation_sequence_required,true);
   assert.equal(root.generation_history_anchor_required,true);
   assert.equal(root.same_evaluation_epoch_required,true);
   assert.equal(root.same_evaluation_epoch_sequence_required,true);
+  assert.equal(root.same_evaluation_contract_required,true);
+  assert.equal(root.cross_contract_consolidation_allowed,false);
   assert.equal(root.cross_generation_consolidation_allowed,false);
   assert.equal(root.cross_generation_revalidation_required_before_new_proposal,true);
   assert.equal(root.mixed_learning_kind_forbidden,true);
@@ -2135,12 +2170,23 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.source_provenance_roots_preserved,true);
   assert.equal(root.source_external_acceptance_evidence_preserved,true);
   assert.equal(root.source_counterevidence_preserved,true);
+  assert.equal(root.source_failure_attribution_preserved,true);
   assert.equal(root.slow_loop_distinct_from_fast_candidate_loop,true);
   assert.equal(root.external_consolidator_required,true);
   assert.equal(root.external_transfer_validator_required,true);
+  assert.equal(root.external_holdout_owner_required,true);
+  assert.equal(root.external_reference_owner_required,true);
+  assert.equal(root.external_acceptance_owner_required,true);
+  assert.equal(root.matched_reference_integrity_required,true);
+  assert.equal(root.sealed_transfer_acceptance_required,true);
+  assert.equal(root.candidate_can_view_hidden_holdout,false);
+  assert.equal(root.candidate_can_choose_reference,false);
+  assert.equal(root.candidate_can_view_sealed_transfer_acceptance,false);
   assert.equal(root.min_distinct_passed_transfer_contexts,2);
   assert.equal(root.distinct_heldout_task_sets_required,true);
   assert.equal(root.distinct_task_families_required,true);
+  assert.equal(root.distinct_matched_reference_plans_required,true);
+  assert.equal(root.distinct_sealed_transfer_acceptance_required,true);
   assert.equal(root.zero_observed_negative_transfer_required,true);
   assert.equal(root.heldout_source_context_exclusion_required,true);
   assert.equal(root.common_non_regression_floor_required,true);
@@ -2203,4 +2249,77 @@ test('Phase31 validation and admission retain exact evaluator sequence lineage w
   assert.equal(admission.scheduler_authority,false);
   assert.equal(admission.promotion_authority,false);
   assert.equal(admission.self_update_authority,false);
+});
+
+
+test('Phase31 refuses consolidation across different exact Phase30 evaluation contracts',()=>{
+  const shared={
+    evaluator_root_digest:labelDigest('phase31-contract-root'),
+    evaluator_generation_digest:labelDigest('phase31-contract-generation'),
+    evaluator_generation_history_anchor_digest:labelDigest('phase31-contract-anchor'),
+    evaluation_epoch_digest:labelDigest('phase31-contract-epoch'),
+    sealed_task_set_digest:labelDigest('phase31-contract-tasks'),
+    evaluation_harness_digest:labelDigest('phase31-contract-harness'),
+    trial_worker_image_digest:labelDigest('phase31-contract-worker'),
+    resource_budget_digest:labelDigest('phase31-contract-budget'),
+    task_order_digest:labelDigest('phase31-contract-order'),
+    acceptance_policy_digest:labelDigest('phase31-contract-acceptance'),
+    stopping_policy_digest:labelDigest('phase31-contract-stopping'),
+    hidden_holdout_root_digest:labelDigest('phase31-contract-holdout'),
+    safety_suite_root_digest:labelDigest('phase31-contract-safety'),
+    security_suite_root_digest:labelDigest('phase31-contract-security'),
+  };
+  const a=phase30OutcomeEvidence('phase31-contract-a',{generationSeq:1,epochSeq:1,generationTag:'phase31-contract',sharedEvaluation:shared});
+  const b=phase30OutcomeEvidence('phase31-contract-b',{
+    generationSeq:1,epochSeq:1,generationTag:'phase31-contract',
+    sharedEvaluation:{...shared,sealed_task_set_digest:labelDigest('phase31-contract-different-tasks')},
+  });
+  const ea=phase30Entry(a,'phase31-contract-a');
+  const eb=phase30Entry(b,'phase31-contract-b');
+  assert.notEqual(ea.evaluation_contract_digest,eb.evaluation_contract_digest);
+  assert.throws(()=>phase31Proposal([
+    {entry:ea,handoff_row:a.handoffRow,experiment_intent:a.intent,experiment_receipt:a.receipt},
+    {entry:eb,handoff_row:b.handoffRow,experiment_intent:b.intent,experiment_receipt:b.receipt},
+  ],'phase31-cross-contract'),/cross_evaluation_contract_forbidden/);
+});
+
+test('Phase31 transfer validation requires external matched reference and sealed acceptance evidence',()=>{
+  const rows=phase31SourceRows('transfer-external-evidence');
+  const proposal=phase31Proposal(rows,'transfer-external-evidence');
+
+  assert.throws(()=>phase31Validation(proposal,'missing-reference-owner',{
+    external_reference_owner:false,
+  }),/external_transfer_validation_required/);
+
+  const badReference=phase31Validation(proposal,'bad-reference',{matched_reference_integrity_pass:false});
+  assert.equal(badReference.state,'KNOWLEDGE_TRANSFER_REJECTED');
+  assert.ok(badReference.blockers.includes('MATCHED_REFERENCE_INTEGRITY_FAILURE'));
+
+  const badAcceptance=phase31Validation(proposal,'bad-sealed-acceptance',{sealed_transfer_acceptance_pass:false});
+  assert.equal(badAcceptance.state,'KNOWLEDGE_TRANSFER_REJECTED');
+  assert.ok(badAcceptance.blockers.includes('SEALED_TRANSFER_ACCEPTANCE_FAILURE'));
+});
+
+test('Phase31 admission refuses reuse of transfer reference or sealed acceptance evidence across contexts',()=>{
+  const rows=phase31SourceRows('evidence-reuse');
+  const proposal=phase31Proposal(rows,'evidence-reuse');
+  const v1=phase31Validation(proposal,'evidence-reuse-a');
+  const v2=phase31Validation(proposal,'evidence-reuse-b',{
+    matched_reference_plan_digest:v1.matched_reference_plan_digest,
+  });
+  assert.throws(()=>createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.reference-reuse',
+    proposal,validations:[v1,v2],
+    external_admission_owner:true,authored_by_candidate:false,
+  }),/transfer_evidence_reuse_forbidden/);
+
+  const v3=phase31Validation(proposal,'evidence-reuse-c');
+  const v4=phase31Validation(proposal,'evidence-reuse-d',{
+    sealed_transfer_acceptance_digest:v3.sealed_transfer_acceptance_digest,
+  });
+  assert.throws(()=>createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.acceptance-reuse',
+    proposal,validations:[v3,v4],
+    external_admission_owner:true,authored_by_candidate:false,
+  }),/transfer_evidence_reuse_forbidden/);
 });
