@@ -167,8 +167,8 @@ export class RsiRuntimeMetaSkillArchive{
   }
   recordByDigest(record_digest){
     if(!this.#initialized)throw new Error('rsi_runtime_meta_archive_not_initialized');
-    const d=digest(String(record_digest||'').toLowerCase());
-    const row=this.#records.find(x=>x.record_digest===String(record_digest||'').toLowerCase());
+    const d=exactDigest(record_digest,'record');
+    const row=this.#records.find(x=>x.record_digest===d);
     return row?Object.freeze(structuredClone(row)):null;
   }
   eligible(){
