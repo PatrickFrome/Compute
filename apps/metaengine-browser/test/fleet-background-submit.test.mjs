@@ -115,6 +115,10 @@ test('submit-after-type fails closed outside exact ChatGPT composer', async () =
   const h = fakeChat();
   const frame = await captureSemanticFrame(h.webContents);
   const composer = frame.semantic_targets.find((row) => row.role === 'textbox');
+  // GLM agent platform (2026-09-19): a GLM_ZAI submit on a non-chat.z.ai host
+  // fails the GLM composer gate (the composer's semantic_ref pins the node,
+  // so a payload-name mismatch cannot reach the gate when a ref is present —
+  // the platform field is the discriminating input).
   await assert.rejects(() => executeSemanticCommand(h.webContents, {
     action: 'SEMANTIC_TYPE',
     platform: 'GLM_ZAI',
@@ -125,7 +129,7 @@ test('submit-after-type fails closed outside exact ChatGPT composer', async () =
       text: 'task',
       submit_after_type: true,
     },
-  }), /native_semantic_submit_requires_exact_chatgpt_composer/);
+  }), /native_semantic_submit_requires_exact_glm_composer/);
 });
 
 test('submit-after-type requires a unique visible semantic Send control before Enter', async () => {
