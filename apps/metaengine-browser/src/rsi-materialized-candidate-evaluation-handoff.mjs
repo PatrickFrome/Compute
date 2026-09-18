@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import {
   RSI_BOUNDED_REVISION_ARTIFACT_RECEIPT_SCHEMA,
@@ -15,12 +17,20 @@ import {
 } from './rsi-candidate-experiment-ledger.mjs';
 
 export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff.v1';
+export const RSI_EVALUATOR_GENERATION_ROTATION_SCHEMA='metaengine.rsi.evaluator-generation-rotation.v1';
+export const RSI_MATERIALIZED_EVALUATION_HANDOFF_LEDGER_SCHEMA='metaengine.rsi.materialized-evaluation-handoff-ledger.v1';
 
+const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
+const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
+const MAX_HANDOFF_ROWS=1024;
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]));}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`;}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_digest_invalid`);return x;}
+function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_sha_invalid`);return x;}
+function safeId(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_invalid`);return x;}
+function positiveInt(v,l,max=Number.MAX_SAFE_INTEGER){const n=Number(v);if(!Number.isSafeInteger(n)||n<1||n>max)throw new Error(`rsi_materialized_eval_${l}_invalid`);return n;}
 function assertZero(v,l){for(const f of ['execution_authority','browser_authority','task_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_materialized_eval_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_materialized_eval_${l}_retry_invalid`);}
 function zero(extra={}){return Object.freeze({...extra,execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false});}
 
@@ -314,6 +324,11 @@ export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
     security_suite_external:true,
     underlying_artifact_request_binds_all_acceptance_assets:true,
     underlying_paired_intent_rechecks_all_acceptance_assets:true,
+    append_only_handoff_history_required:true,
+    durable_before_visible_required:true,
+    evaluator_generation_rotation_requires_external_receipt:true,
+    evaluator_generation_rollback_forbidden:true,
+    same_epoch_generation_drift_forbidden:true,
     existing_evaluation_budget_router_only:true,
     existing_candidate_experiment_ledger_only:true,
     one_attempt_per_arm:true,
@@ -329,4 +344,281 @@ export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
     authority_effect:false,
   };
   return Object.freeze({...root,handoff_root_digest:digest(root)});
+}
+
+
+export function createRsiEvaluatorGenerationRotation({
+  rotation_id,
+  source_sha,
+  previous_evaluator_root_digest,
+  previous_evaluator_generation_digest,
+  next_evaluator_root_digest,
+  next_evaluator_generation_digest,
+  previous_evaluation_epoch_digest,
+  next_evaluation_epoch_digest,
+  anchor_recalibration_digest,
+  external_rotation_receipt_digest,
+  external_generation_owner=false,
+  authored_by_candidate=true,
+}={}){
+  if(external_generation_owner!==true||authored_by_candidate!==false)throw new Error('rsi_materialized_eval_external_generation_owner_required');
+  const previousRoot=exactDigest(previous_evaluator_root_digest,'rotation_previous_root');
+  const previousGeneration=exactDigest(previous_evaluator_generation_digest,'rotation_previous_generation');
+  const nextRoot=exactDigest(next_evaluator_root_digest,'rotation_next_root');
+  const nextGeneration=exactDigest(next_evaluator_generation_digest,'rotation_next_generation');
+  if(previousGeneration===nextGeneration)throw new Error('rsi_materialized_eval_rotation_generation_must_change');
+  if(previousRoot===nextRoot)throw new Error('rsi_materialized_eval_rotation_root_must_change');
+  const roots=[
+    previousRoot,previousGeneration,nextRoot,nextGeneration,
+    exactDigest(previous_evaluation_epoch_digest,'rotation_previous_epoch'),
+    exactDigest(next_evaluation_epoch_digest,'rotation_next_epoch'),
+    exactDigest(anchor_recalibration_digest,'rotation_anchor_recalibration'),
+    exactDigest(external_rotation_receipt_digest,'rotation_external_receipt'),
+  ];
+  if(new Set(roots).size!==roots.length)throw new Error('rsi_materialized_eval_rotation_independent_roots_required');
+  const core=zero({
+    schema:RSI_EVALUATOR_GENERATION_ROTATION_SCHEMA,
+    version:1,
+    rotation_id:safeId(rotation_id,'rotation_id'),
+    source_sha:exactSha(source_sha,'rotation_source'),
+    previous_evaluator_root_digest:roots[0],
+    previous_evaluator_generation_digest:roots[1],
+    next_evaluator_root_digest:roots[2],
+    next_evaluator_generation_digest:roots[3],
+    previous_evaluation_epoch_digest:roots[4],
+    next_evaluation_epoch_digest:roots[5],
+    anchor_recalibration_digest:roots[6],
+    external_rotation_receipt_digest:roots[7],
+    transition_kind:'EXTERNAL_ROTATION',
+    external_generation_owner:true,
+    authored_by_candidate:false,
+    candidate_can_rotate_evaluator:false,
+    candidate_can_choose_anchor:false,
+    rotation_can_execute_evaluation:false,
+    rotation_can_activate_candidate:false,
+  });
+  return Object.freeze({...core,rotation_digest:digest(core)});
+}
+
+export function verifyRsiEvaluatorGenerationRotation(row){
+  if(!row||row.schema!==RSI_EVALUATOR_GENERATION_ROTATION_SCHEMA||row.version!==1)throw new Error('rsi_materialized_eval_rotation_invalid');
+  assertZero(row,'rotation');
+  if(row.transition_kind!=='EXTERNAL_ROTATION'||row.external_generation_owner!==true||row.authored_by_candidate!==false
+    ||row.candidate_can_rotate_evaluator!==false||row.candidate_can_choose_anchor!==false
+    ||row.rotation_can_execute_evaluation!==false||row.rotation_can_activate_candidate!==false){
+    throw new Error('rsi_materialized_eval_rotation_policy_invalid');
+  }
+  const canonical=createRsiEvaluatorGenerationRotation({
+    rotation_id:row.rotation_id,
+    source_sha:row.source_sha,
+    previous_evaluator_root_digest:row.previous_evaluator_root_digest,
+    previous_evaluator_generation_digest:row.previous_evaluator_generation_digest,
+    next_evaluator_root_digest:row.next_evaluator_root_digest,
+    next_evaluator_generation_digest:row.next_evaluator_generation_digest,
+    previous_evaluation_epoch_digest:row.previous_evaluation_epoch_digest,
+    next_evaluation_epoch_digest:row.next_evaluation_epoch_digest,
+    anchor_recalibration_digest:row.anchor_recalibration_digest,
+    external_rotation_receipt_digest:row.external_rotation_receipt_digest,
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.rotation_digest!==exactDigest(row.rotation_digest,'rotation'))throw new Error('rsi_materialized_eval_rotation_digest_mismatch');
+  return canonical;
+}
+
+function verifyPersistedHandoffEvidence({handoff,artifact_receipt,artifact_verification}={}){
+  const checked=verifyRsiMaterializedCandidateEvaluationHandoff(handoff,{artifact_receipt,artifact_verification});
+  if(checked.phase28_artifact_receipt_digest!==artifact_receipt?.artifact_receipt_digest)throw new Error('rsi_materialized_eval_history_artifact_binding_mismatch');
+  if(checked.fresh_evaluation_request?.request_digest!==handoff?.fresh_evaluation_request?.request_digest)throw new Error('rsi_materialized_eval_history_request_binding_mismatch');
+  return Object.freeze({
+    handoff:checked,
+    artifact_receipt:Object.freeze(structuredClone(artifact_receipt)),
+    artifact_verification:Object.freeze(structuredClone(artifact_verification)),
+  });
+}
+
+function handoffHistoryState(sourceSha,rows){
+  const latest=rows.length?rows[rows.length-1]:null;
+  const generations=[...new Set(rows.map(r=>r.handoff.evaluator_generation_digest))];
+  const core=zero({
+    schema:RSI_MATERIALIZED_EVALUATION_HANDOFF_LEDGER_SCHEMA,
+    version:1,
+    source_sha:sourceSha,
+    rows,
+    row_count:rows.length,
+    generation_count:generations.length,
+    latest_handoff_seq:latest?latest.handoff_seq:0,
+    latest_evaluator_generation_digest:latest?latest.handoff.evaluator_generation_digest:null,
+    latest_evaluator_root_digest:latest?latest.handoff.evaluator_root_digest:null,
+    latest_evaluation_epoch_digest:latest?latest.handoff.evaluation_epoch_digest:null,
+    append_only:true,
+    durable_before_visible:true,
+    generation_rollback_forbidden:true,
+    silent_generation_rotation_forbidden:true,
+    same_epoch_generation_drift_forbidden:true,
+    active_candidate_digest:null,
+    ledger_can_execute_evaluation:false,
+    ledger_can_schedule_evaluation:false,
+    ledger_can_promote:false,
+    candidate_can_delete:false,
+    candidate_can_rewrite:false,
+  });
+  return {...core,state_digest:digest(core)};
+}
+
+function validateHistoryRows(sourceSha,rawRows){
+  const checkedRows=[];
+  const handoffDigests=new Set();
+  const requestDigests=new Set();
+  const artifactEpochPairs=new Set();
+  const seenGenerations=new Set();
+  const epochGenerations=new Map();
+  let latestGeneration=null;
+  let latestRoot=null;
+  let latestEpoch=null;
+  for(let index=0;index<rawRows.length;index++){
+    const raw=rawRows[index];
+    if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('rsi_materialized_eval_history_row_invalid');
+    const seq=positiveInt(raw.handoff_seq,'handoff_seq',MAX_HANDOFF_ROWS);
+    if(seq!==index+1)throw new Error('rsi_materialized_eval_history_sequence_gap_or_reorder');
+    const evidence=verifyPersistedHandoffEvidence(raw);
+    const handoff=evidence.handoff;
+    if(handoff.source_sha!==sourceSha)throw new Error('rsi_materialized_eval_history_source_mismatch');
+    const requestDigest=exactDigest(handoff.fresh_evaluation_request?.request_digest,'history_request');
+    const handoffDigest=exactDigest(handoff.evaluation_handoff_digest,'history_handoff');
+    const pair=`${handoff.phase28_artifact_receipt_digest}|${handoff.evaluation_epoch_digest}`;
+    if(handoffDigests.has(handoffDigest))throw new Error('rsi_materialized_eval_history_handoff_duplicate');
+    if(requestDigests.has(requestDigest))throw new Error('rsi_materialized_eval_history_request_duplicate');
+    if(artifactEpochPairs.has(pair))throw new Error('rsi_materialized_eval_history_artifact_epoch_duplicate');
+    const epochGeneration=epochGenerations.get(handoff.evaluation_epoch_digest);
+    if(epochGeneration&&epochGeneration!==handoff.evaluator_generation_digest)throw new Error('rsi_materialized_eval_history_epoch_generation_drift');
+
+    let rotation=null;
+    if(index===0){
+      if(raw.rotation!==null&&raw.rotation!==undefined)throw new Error('rsi_materialized_eval_history_genesis_rotation_forbidden');
+    }else if(handoff.evaluator_generation_digest===latestGeneration){
+      if(raw.rotation!==null&&raw.rotation!==undefined)throw new Error('rsi_materialized_eval_history_same_generation_rotation_forbidden');
+      if(handoff.evaluator_root_digest!==latestRoot)throw new Error('rsi_materialized_eval_history_same_generation_root_drift');
+    }else{
+      if(seenGenerations.has(handoff.evaluator_generation_digest))throw new Error('rsi_materialized_eval_history_generation_rollback');
+      rotation=verifyRsiEvaluatorGenerationRotation(raw.rotation);
+      if(rotation.source_sha!==sourceSha
+        ||rotation.previous_evaluator_generation_digest!==latestGeneration
+        ||rotation.previous_evaluator_root_digest!==latestRoot
+        ||rotation.previous_evaluation_epoch_digest!==latestEpoch
+        ||rotation.next_evaluator_generation_digest!==handoff.evaluator_generation_digest
+        ||rotation.next_evaluator_root_digest!==handoff.evaluator_root_digest
+        ||rotation.next_evaluation_epoch_digest!==handoff.evaluation_epoch_digest){
+        throw new Error('rsi_materialized_eval_history_rotation_binding_mismatch');
+      }
+    }
+    handoffDigests.add(handoffDigest);
+    requestDigests.add(requestDigest);
+    artifactEpochPairs.add(pair);
+    epochGenerations.set(handoff.evaluation_epoch_digest,handoff.evaluator_generation_digest);
+    seenGenerations.add(handoff.evaluator_generation_digest);
+    latestGeneration=handoff.evaluator_generation_digest;
+    latestRoot=handoff.evaluator_root_digest;
+    latestEpoch=handoff.evaluation_epoch_digest;
+    checkedRows.push(Object.freeze({
+      handoff_seq:seq,
+      source_sha:sourceSha,
+      handoff:evidence.handoff,
+      artifact_receipt:evidence.artifact_receipt,
+      artifact_verification:evidence.artifact_verification,
+      rotation:rotation?Object.freeze(structuredClone(rotation)):null,
+    }));
+  }
+  return checkedRows;
+}
+
+export class RsiMaterializedEvaluationHandoffLedger{
+  #path;#sourceSha;#rows=[];#initialized=false;
+  constructor({statePath,source_sha}={}){
+    if(!statePath)throw new Error('rsi_materialized_eval_history_path_required');
+    this.#path=path.resolve(statePath);
+    this.#sourceSha=exactSha(source_sha,'history_source');
+  }
+  async init(){
+    if(this.#initialized)return this.snapshot();
+    await fs.mkdir(path.dirname(this.#path),{recursive:true});
+    try{
+      const parsed=JSON.parse(await fs.readFile(this.#path,'utf8'));
+      assertZero(parsed,'history');
+      if(parsed.schema!==RSI_MATERIALIZED_EVALUATION_HANDOFF_LEDGER_SCHEMA||parsed.version!==1
+        ||parsed.source_sha!==this.#sourceSha||parsed.append_only!==true||parsed.durable_before_visible!==true
+        ||parsed.generation_rollback_forbidden!==true||parsed.silent_generation_rotation_forbidden!==true
+        ||parsed.same_epoch_generation_drift_forbidden!==true||parsed.active_candidate_digest!==null
+        ||parsed.ledger_can_execute_evaluation!==false||parsed.ledger_can_schedule_evaluation!==false
+        ||parsed.ledger_can_promote!==false||parsed.candidate_can_delete!==false||parsed.candidate_can_rewrite!==false){
+        throw new Error('rsi_materialized_eval_history_state_invalid');
+      }
+      const clone=structuredClone(parsed);delete clone.state_digest;
+      if(digest(clone)!==exactDigest(parsed.state_digest,'history_state'))throw new Error('rsi_materialized_eval_history_state_digest_mismatch');
+      if(!Array.isArray(parsed.rows)||parsed.rows.length>MAX_HANDOFF_ROWS)throw new Error('rsi_materialized_eval_history_rows_invalid');
+      const checked=validateHistoryRows(this.#sourceSha,parsed.rows);
+      const canonical=handoffHistoryState(this.#sourceSha,checked);
+      for(const field of ['row_count','generation_count','latest_handoff_seq','latest_evaluator_generation_digest','latest_evaluator_root_digest','latest_evaluation_epoch_digest']){
+        if(parsed[field]!==canonical[field])throw new Error('rsi_materialized_eval_history_summary_mismatch');
+      }
+      this.#rows=checked;
+    }catch(error){
+      if(error?.code!=='ENOENT')throw error;
+    }
+    this.#initialized=true;
+    return this.snapshot();
+  }
+  async #persist(rows){
+    const state=handoffHistoryState(this.#sourceSha,rows);
+    const tmp=`${this.#path}.tmp`;
+    const h=await fs.open(tmp,'w',0o600);
+    try{
+      await h.writeFile(`${JSON.stringify(state)}\n`,'utf8');
+      await h.sync();
+    }finally{
+      await h.close();
+    }
+    await fs.rename(tmp,this.#path);
+  }
+  async add({handoff,artifact_receipt,artifact_verification,rotation=null}={}){
+    if(!this.#initialized)throw new Error('rsi_materialized_eval_history_not_initialized');
+    const evidence=verifyPersistedHandoffEvidence({handoff,artifact_receipt,artifact_verification});
+    if(evidence.handoff.source_sha!==this.#sourceSha)throw new Error('rsi_materialized_eval_history_source_mismatch');
+    const existing=this.#rows.find(r=>r.handoff.evaluation_handoff_digest===evidence.handoff.evaluation_handoff_digest);
+    if(existing){
+      if(existing.handoff.fresh_evaluation_request.request_digest!==evidence.handoff.fresh_evaluation_request.request_digest)throw new Error('rsi_materialized_eval_history_identity_conflict');
+      return zero({state:'IDEMPOTENT',handoff_seq:existing.handoff_seq,evaluation_handoff_digest:evidence.handoff.evaluation_handoff_digest});
+    }
+    if(this.#rows.length>=MAX_HANDOFF_ROWS)throw new Error('rsi_materialized_eval_history_capacity_exceeded');
+    const candidate=Object.freeze({
+      handoff_seq:this.#rows.length+1,
+      source_sha:this.#sourceSha,
+      handoff:evidence.handoff,
+      artifact_receipt:evidence.artifact_receipt,
+      artifact_verification:evidence.artifact_verification,
+      rotation:rotation==null?null:Object.freeze(structuredClone(rotation)),
+    });
+    const nextRows=validateHistoryRows(this.#sourceSha,[...this.#rows,candidate]);
+    await this.#persist(nextRows);
+    this.#rows=nextRows;
+    return zero({state:'RECORDED',handoff_seq:candidate.handoff_seq,evaluation_handoff_digest:evidence.handoff.evaluation_handoff_digest});
+  }
+  rows(){
+    if(!this.#initialized)throw new Error('rsi_materialized_eval_history_not_initialized');
+    return Object.freeze(this.#rows.map(row=>Object.freeze(structuredClone(row))));
+  }
+  snapshot(){
+    const state=handoffHistoryState(this.#sourceSha,this.#rows);
+    return Object.freeze({
+      schema:state.schema,version:state.version,source_sha:state.source_sha,initialized:this.#initialized,
+      row_count:state.row_count,generation_count:state.generation_count,latest_handoff_seq:state.latest_handoff_seq,
+      latest_evaluator_generation_digest:state.latest_evaluator_generation_digest,
+      latest_evaluator_root_digest:state.latest_evaluator_root_digest,
+      latest_evaluation_epoch_digest:state.latest_evaluation_epoch_digest,
+      append_only:true,durable_before_visible:true,generation_rollback_forbidden:true,
+      silent_generation_rotation_forbidden:true,same_epoch_generation_drift_forbidden:true,
+      active_candidate_digest:null,ledger_can_execute_evaluation:false,ledger_can_schedule_evaluation:false,
+      ledger_can_promote:false,authority_effect:false,
+    });
+  }
 }
