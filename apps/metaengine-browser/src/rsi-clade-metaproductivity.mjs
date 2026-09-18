@@ -151,12 +151,13 @@ export function verifyRsiCladeNode(node) {
 
 function validateTree(nodes) {
   const byCandidate = new Map(nodes.map((node) => [node.candidate_id, node]));
-  const roots = nodes.filter((node) => node.parent_candidate_id == null);
-  if (roots.length < 1) throw new Error('rsi_clade_root_missing');
   for (const node of nodes) {
     if (node.parent_candidate_id != null && !byCandidate.has(node.parent_candidate_id)) throw new Error('rsi_clade_parent_missing');
     if (node.parent_candidate_id === node.candidate_id) throw new Error('rsi_clade_self_parent_forbidden');
   }
+  // Detect cycles before asserting the existence of a root. A closed cycle has no
+  // root by construction, but the more specific evidence is the cycle itself.
+  // This also keeps malformed ancestry diagnostics deterministic for callers.
   for (const node of nodes) {
     const seen = new Set([node.candidate_id]);
     let current = node;
@@ -166,6 +167,8 @@ function validateTree(nodes) {
       current = byCandidate.get(current.parent_candidate_id);
     }
   }
+  const roots = nodes.filter((node) => node.parent_candidate_id == null);
+  if (roots.length < 1) throw new Error('rsi_clade_root_missing');
 }
 
 export function createRsiCladeArchive({ archive_id, nodes } = {}) {
