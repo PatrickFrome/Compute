@@ -42,6 +42,7 @@ import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
 import { createRsiRuntimeSkillAdvisory, verifyRsiRuntimeSkillAdvisory } from './rsi-runtime-skill-advisory.mjs';
+import { createRsiRuntimeSkillNeedDecision, createRsiRuntimeSkillFeedback } from './rsi-runtime-skill-need-gate.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -131,6 +132,8 @@ export class RsiRuntimeService {
   #lastObservationAt = null;
   #promotionNominationCount = 0;
   #skillAdvisory = null;
+  #lastSkillDecision = null;
+  #lastSkillFeedback = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -337,7 +340,66 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     this.#skillAdvisory = advisory;
+    this.#lastSkillDecision = null;
+    this.#lastSkillFeedback = null;
     return advisory;
+  }
+
+  async decideSkillAdvisory(context) {
+    this.#assertRunning();
+    if (!this.#skillAdvisory) throw new Error('rsi_runtime_skill_advisory_not_bound');
+    const decision = createRsiRuntimeSkillNeedDecision({
+      advisory: this.#skillAdvisory,
+      context,
+      external_router: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_ADVISORY_DECISION', {
+      advisory_digest: decision.advisory_digest,
+      decision_digest: decision.decision_digest,
+      skill_id: decision.skill_id,
+      skill_digest: decision.skill_digest,
+      context_digest: decision.context_digest,
+      decision: decision.decision,
+      blockers: decision.blockers,
+      injected_metadata_only: decision.decision === 'INJECT_ADVISORY_METADATA',
+      raw_skill_implementation_injected: false,
+      direct_tool_execution_allowed: false,
+      browser_actuation_allowed: false,
+      scheduler_dispatch_allowed: false,
+      authority_effect: false,
+    });
+    this.#lastSkillDecision = decision;
+    return decision;
+  }
+
+  async recordSkillAdvisoryFeedback(input = {}) {
+    this.#assertRunning();
+    if (!this.#skillAdvisory) throw new Error('rsi_runtime_skill_advisory_not_bound');
+    if (!this.#lastSkillDecision) throw new Error('rsi_runtime_skill_decision_missing');
+    if (input?.decision?.decision_digest !== this.#lastSkillDecision.decision_digest) {
+      throw new Error('rsi_runtime_skill_feedback_stale_decision');
+    }
+    const feedback = createRsiRuntimeSkillFeedback({
+      ...input,
+      advisory: this.#skillAdvisory,
+    });
+    await this.#ledger.append('SKILL_ADVISORY_FEEDBACK', {
+      advisory_digest: feedback.advisory_digest,
+      decision_digest: feedback.decision_digest,
+      feedback_digest: feedback.feedback_digest,
+      skill_digest: feedback.skill_digest,
+      usage_receipt_digest: feedback.usage_receipt_digest,
+      outcome: feedback.outcome,
+      measured_delta: feedback.measured_delta,
+      hard_invariants_pass: feedback.hard_invariants_pass,
+      governance_updated_automatically: false,
+      library_updated_automatically: false,
+      external_lifecycle_governance_ingest_required: true,
+      authority_effect: false,
+    });
+    this.#lastSkillFeedback = feedback;
+    return feedback;
   }
 
   async clearSkillAdvisory() {
@@ -351,6 +413,8 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     this.#skillAdvisory = null;
+    this.#lastSkillDecision = null;
+    this.#lastSkillFeedback = null;
     return true;
   }
 
@@ -398,6 +462,7 @@ export class RsiRuntimeService {
         library_digest: this.#skillAdvisory.library_digest,
         governance_digest: this.#skillAdvisory.governance_digest,
         activation_digest: this.#skillAdvisory.activation_digest,
+        composition_plan_digest: this.#skillAdvisory.composition_plan_digest,
         skill_id: this.#skillAdvisory.skill_id,
         skill_version: this.#skillAdvisory.skill_version,
         skill_digest: this.#skillAdvisory.skill_digest,
@@ -408,6 +473,21 @@ export class RsiRuntimeService {
         direct_tool_execution_allowed: false,
         browser_actuation_allowed: false,
         scheduler_dispatch_allowed: false,
+        last_decision: this.#lastSkillDecision ? Object.freeze({
+          decision_digest: this.#lastSkillDecision.decision_digest,
+          context_digest: this.#lastSkillDecision.context_digest,
+          decision: this.#lastSkillDecision.decision,
+          blocker_count: this.#lastSkillDecision.blockers.length,
+          authority_effect: false,
+        }) : null,
+        last_feedback: this.#lastSkillFeedback ? Object.freeze({
+          feedback_digest: this.#lastSkillFeedback.feedback_digest,
+          usage_receipt_digest: this.#lastSkillFeedback.usage_receipt_digest,
+          outcome: this.#lastSkillFeedback.outcome,
+          hard_invariants_pass: this.#lastSkillFeedback.hard_invariants_pass,
+          governance_updated_automatically: false,
+          authority_effect: false,
+        }) : null,
         authority_effect: false,
       }) : null,
       source_binding_exact: true,
@@ -462,6 +542,10 @@ export class RsiRuntimeService {
         direct_tool_execution_allowed: false,
         browser_actuation_allowed: false,
         scheduler_dispatch_allowed: false,
+        last_decision_digest: this.#lastSkillDecision?.decision_digest || null,
+        last_feedback_digest: this.#lastSkillFeedback?.feedback_digest || null,
+        governance_updated_automatically: false,
+        library_updated_automatically: false,
         authority_effect: false,
       }) : null,
       promotion_nomination_count: this.#promotionNominationCount,
