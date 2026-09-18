@@ -29,6 +29,9 @@ const REQUIRED_WORKFLOWS = Object.freeze([
 
 const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-promotion-admission-gate.mjs',
+  'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-service.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
   'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
   'apps/metaengine-browser/src/rsi-evaluator-mesh.mjs',
