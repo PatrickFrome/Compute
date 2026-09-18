@@ -52,6 +52,7 @@ import {
   verifyRsiAutonomousEpisodePlan,
   rsiAutonomousEpisodeControllerTrustRootSnapshot,
 } from './rsi-autonomous-episode-controller.mjs';
+import { createRsiDevosAdmissionEnvelopes, rsiDevosAdmissionAdapterTrustRootSnapshot } from './rsi-devos-admission-adapter.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -120,6 +121,7 @@ function trustRoots() {
     episode_devos_bridge: rsiEpisodeDevosBridgeTrustRootSnapshot(),
     episode_evaluation_ingest: rsiEpisodeEvaluationIngestTrustRootSnapshot(),
     autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
+    devos_admission_adapter: rsiDevosAdmissionAdapterTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -399,6 +401,35 @@ export class RsiRuntimeService {
       task_created: false,
       lease_created: false,
       command_created: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  async prepareAutonomousDevosAdmissions({ workspace_id, priority = 80, ...cycleInput } = {}) {
+    this.#assertRunning();
+    const cycle = await this.prepareAutonomousEpisodeCycle(cycleInput);
+    const envelopes = createRsiDevosAdmissionEnvelopes({
+      runtime_cycle: cycle,
+      workspace_id,
+      priority,
+    });
+    return Object.freeze({
+      schema: 'metaengine.rsi.autonomous-devos-admission-preparation.v1',
+      cycle,
+      envelopes,
+      envelope_count: envelopes.length,
+      rpc_name: 'rsi_devos_admit_prepared_request_v1',
+      rpc_invoked: false,
+      existing_devos_scheduler_required: true,
+      service_role_execution_required: true,
+      scheduler_action_authorized: false,
+      task_created: false,
+      lease_created: false,
       execution_authority: false,
       production_mutation_authority: false,
       promotion_authority: false,
