@@ -7,6 +7,9 @@ import {
   RSI_META_PROFILE_CANARY_MANIFEST_SCHEMA,
   verifyRsiMetaProfileCanaryManifest,
 } from './rsi-meta-profile-canary-admission.mjs';
+import {
+  verifyRsiExternalCanaryStatisticalReview,
+} from './rsi-external-canary-statistical-review.mjs';
 
 export const RSI_EXTERNAL_CANARY_RUN_SCHEMA = 'metaengine.rsi.external-readonly-canary-run.v1';
 export const RSI_EXTERNAL_CANARY_DECISION_SCHEMA = 'metaengine.rsi.external-readonly-canary-decision.v1';
@@ -148,6 +151,7 @@ export function createRsiExternalCanaryRun({
   selection,
   admission,
   ledger_readback,
+  statistical_review,
   external_controller_root_digest,
   reward_hack_challenge_root_digest,
   sealed_evaluator_root_digest,
@@ -163,6 +167,15 @@ export function createRsiExternalCanaryRun({
   const checkedManifest = verifyRsiMetaProfileCanaryManifest(manifest, { selection });
   const checkedAdmission = verifyAdmission(admission, checkedManifest);
   const checkedReadback = verifyLedgerReadback(ledger_readback, checkedAdmission);
+  const checkedReview = verifyRsiExternalCanaryStatisticalReview(statistical_review, {
+    manifest: checkedManifest,
+    selection,
+    admission: checkedAdmission,
+  });
+  if (
+    checkedReview.state !== 'ELIGIBLE_FOR_EXTERNAL_READ_ONLY_CANARY_CONTROLLER'
+    || checkedReview.eligible_for_external_read_only_canary_controller !== true
+  ) throw new Error('rsi_canary_controller_statistical_review_not_eligible');
   const controllerRoot = exactDigest(external_controller_root_digest, 'controller_root');
   const hackRoot = exactDigest(reward_hack_challenge_root_digest, 'reward_hack_root');
   const sealedRoot = exactDigest(sealed_evaluator_root_digest, 'sealed_evaluator_root');
@@ -173,6 +186,10 @@ export function createRsiExternalCanaryRun({
     || controllerRoot === checkedManifest.comparator_root_digest
     || hackRoot === checkedManifest.security_holdout_digest
     || sealedRoot === checkedManifest.monitor_root_digest
+    || controllerRoot === checkedReview.evaluator_root_digest
+    || hackRoot === checkedReview.independent_holdout_digest
+    || sealedRoot === checkedReview.evaluator_root_digest
+    || sealedRoot === checkedReview.independent_holdout_digest
   ) throw new Error('rsi_canary_controller_independent_roots_required');
   const source = exactSha(source_sha, 'source');
   if (source !== checkedManifest.source_sha || source !== checkedAdmission.source_sha) {
@@ -182,6 +199,10 @@ export function createRsiExternalCanaryRun({
     source_sha: source,
     manifest_digest: checkedManifest.manifest_digest,
     admission_digest: checkedAdmission.admission_digest,
+    statistical_review_digest: checkedReview.review_digest,
+    statistical_review_method: checkedReview.method,
+    statistical_review_holdout_digest: checkedReview.independent_holdout_digest,
+    statistical_review_evaluator_root_digest: checkedReview.evaluator_root_digest,
     canary_identity_digest: checkedManifest.canary_identity_digest,
     incumbent_profile_digest: checkedManifest.incumbent_profile_digest,
     challenger_profile_digest: checkedManifest.challenger_profile_digest,
@@ -200,6 +221,10 @@ export function createRsiExternalCanaryRun({
     ...identity,
     canary_run_identity_digest: digest(identity),
     durable_ledger_state_digest: checkedReadback.durable_ledger_state_digest,
+    statistical_review_required: true,
+    statistical_review_eligible: true,
+    familywise_valid_review_required: true,
+    anytime_valid_review_required: true,
     state: 'READY',
     canary_surface: 'READ_ONLY_DECISION_SUPPORT',
     decision_budget: checkedManifest.decision_budget,
@@ -238,6 +263,10 @@ export function verifyRsiExternalCanaryRun(run) {
   assertZero(run, 'run');
   if (
     run.canary_surface !== 'READ_ONLY_DECISION_SUPPORT'
+    || run.statistical_review_required !== true
+    || run.statistical_review_eligible !== true
+    || run.familywise_valid_review_required !== true
+    || run.anytime_valid_review_required !== true
     || run.baseline_profile_remains_default !== true
     || run.baseline_profile_is_mandatory_fallback !== true
     || run.challenger_output_advisory_only !== true
@@ -264,6 +293,9 @@ export function verifyRsiExternalCanaryRun(run) {
   for (const [field, label] of [
     ['manifest_digest', 'verify_manifest'],
     ['admission_digest', 'verify_admission'],
+    ['statistical_review_digest', 'verify_statistical_review'],
+    ['statistical_review_holdout_digest', 'verify_statistical_review_holdout'],
+    ['statistical_review_evaluator_root_digest', 'verify_statistical_review_evaluator'],
     ['canary_identity_digest', 'verify_identity'],
     ['incumbent_profile_digest', 'verify_incumbent'],
     ['challenger_profile_digest', 'verify_challenger'],
@@ -600,6 +632,10 @@ export function rsiExternalReadOnlyCanaryControllerTrustRootSnapshot() {
     schema: 'metaengine.rsi.external-readonly-canary-controller-root.v1',
     version: 1,
     phase19_clean_durable_admission_required: true,
+    external_anytime_valid_statistical_review_required: true,
+    familywise_validity_required: true,
+    independent_statistical_holdout_required: true,
+    material_improvement_required: true,
     external_harness_owns_environment_loop: true,
     canary_surface: 'READ_ONLY_DECISION_SUPPORT',
     one_pending_decision_max: true,
