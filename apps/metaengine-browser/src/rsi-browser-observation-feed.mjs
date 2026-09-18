@@ -25,8 +25,10 @@ export function projectRsiBrainObservation(snapshot = {}) {
   }
   if (
     snapshot?.raw_dom_stored !== false
+    || snapshot?.raw_network_stored !== false
     || snapshot?.page_text_stored !== false
     || snapshot?.input_values_stored !== false
+    || snapshot?.command_payload_stored !== false
   ) {
     throw new Error('rsi_browser_observation_privacy_invalid');
   }
