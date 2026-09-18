@@ -20,6 +20,7 @@ function uuid(v,l){const o=String(v||'').trim().toLowerCase();if(!UUID_RE.test(o
 function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))throw new Error(`rsi_outcome_${l}_invalid`);return o}
 function token(v,l,{nullable=false}={}){if(nullable&&(v==null||v===''))return null;const o=String(v||'').trim().toUpperCase();if(!SAFE_TOKEN_RE.test(o))throw new Error(`rsi_outcome_${l}_invalid`);return o}
 function candidateId(v){const o=String(v||'').trim().toLowerCase();if(!CANDIDATE_ID_RE.test(o))throw new Error('rsi_outcome_candidate_id_invalid');return o}
+function positiveInt(v,l,max=1000000){const o=Number(v);if(!Number.isSafeInteger(o)||o<1||o>max)throw new Error(`rsi_outcome_${l}_invalid`);return o}
 function boundedExecutionMs(v){if(v==null)return null;const o=Number(v);if(!Number.isFinite(o)||o<0||o>86_400_000)throw new Error('rsi_outcome_execution_ms_invalid');return Math.round(o*1000)/1000}
 function assertZeroAuthority(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_outcome_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_outcome_${l}_automatic_retry_invalid`)}
 function normalizeSkillDigests(v){if(v==null)return Object.freeze([]);if(!Array.isArray(v)||v.length>MAX_SKILLS)throw new Error('rsi_outcome_skill_digests_invalid');const seen=new Set();const out=v.map(x=>exactDigest(x,'skill'));for(const d of out){if(seen.has(d))throw new Error('rsi_outcome_skill_digest_duplicate');seen.add(d)}return Object.freeze(out.sort())}
@@ -49,6 +50,16 @@ function normalizeAttribution(attribution){
     candidate_sha=exactSha(attribution.candidate_sha,'candidate');
     proposal_digest=exactDigest(attribution.proposal_digest,'proposal');
   }
+  const trajectoryPresent=attribution.trajectory_id!=null||attribution.step_index!=null||attribution.step_count!=null||attribution.predecessor_episode_digest!=null;
+  let trajectory_id=null,step_index=null,step_count=null,predecessor_episode_digest=null;
+  if(trajectoryPresent){
+    if(attribution.trajectory_id==null||attribution.step_index==null||attribution.step_count==null)throw new Error('rsi_outcome_trajectory_attribution_incomplete');
+    trajectory_id=boundedId(attribution.trajectory_id,'trajectory_id');
+    step_index=positiveInt(attribution.step_index,'step_index',10000);
+    step_count=positiveInt(attribution.step_count,'step_count',10000);
+    if(step_index>step_count)throw new Error('rsi_outcome_step_index_exceeds_count');
+    predecessor_episode_digest=attribution.predecessor_episode_digest==null?null:exactDigest(attribution.predecessor_episode_digest,'predecessor_episode');
+  }
   return Object.freeze({
     task_id:boundedId(attribution.task_id,'task_id'),
     task_signature_digest:exactDigest(attribution.task_signature_digest,'task_signature'),
@@ -56,6 +67,7 @@ function normalizeAttribution(attribution){
     model_family:token(attribution.model_family,'model_family'),
     candidate_id,candidate_sha,proposal_digest,
     skill_digests:normalizeSkillDigests(attribution.skill_digests),
+    trajectory_id,step_index,step_count,predecessor_episode_digest,
     external_attribution:true,
     authored_by_candidate:false,
   });
@@ -113,6 +125,10 @@ export function createRsiBrowserOutcomeEpisode({source_sha,readback,attribution}
     candidate_sha:bound.candidate_sha,
     proposal_digest:bound.proposal_digest,
     skill_digests:bound.skill_digests,
+    trajectory_id:bound.trajectory_id,
+    step_index:bound.step_index,
+    step_count:bound.step_count,
+    predecessor_episode_digest:bound.predecessor_episode_digest,
     context_digest:contextDigest,
     outcome_state:outcomeState,
     quarantined,
@@ -125,6 +141,7 @@ export function createRsiBrowserOutcomeEpisode({source_sha,readback,attribution}
     candidate_attribution_required_for_learning:true,
     eligible_for_experience_graph:!quarantined&&candidateBound,
     eligible_for_skill_evidence:!quarantined&&candidateBound&&bound.skill_digests.length>0,
+    eligible_for_credit_assignment:!quarantined&&candidateBound&&bound.trajectory_id!=null,
     ambiguous_outcome_learning_allowed:false,
     physical_effect_replay_allowed:false,
     candidate_can_edit_episode:false,
@@ -157,6 +174,7 @@ export function rsiBrowserOutcomeIngestTrustRootSnapshot(){
     same_client_readback_required:true,
     external_attribution_required:true,
     candidate_attribution_required_for_learning:true,
+    trajectory_attribution_required_for_step_credit:true,
     ambiguous_outcome_learning_allowed:false,
     unclassified_effect_learning_allowed:false,
     raw_result_stored:false,
