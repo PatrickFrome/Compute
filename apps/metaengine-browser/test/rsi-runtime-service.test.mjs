@@ -147,3 +147,68 @@ test('runtime sidecar coalesces repeated Brain state before fsync while preservi
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('runtime ingests only terminal verified Browser receipts into the durable zero-authority ledger', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-outcome-'));
+  try {
+    const source = 'a'.repeat(40);
+    const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
+    await runtime.start();
+    const commandId = '11111111-1111-4111-8111-111111111111';
+    const d = (char) => `sha256:${char.repeat(64)}`;
+    const episode = await runtime.ingestBrowserOutcome({
+      readback: {
+        schema: 'metaengine.rsi.result-receipt-readback.v1',
+        command_id: commandId,
+        found: true,
+        terminal: true,
+        status: 'COMPLETED',
+        receipt: {
+          schema: 'metaengine.native-supervisor.command-receipt.v2',
+          command_id: commandId,
+          action: 'SCROLL',
+          platform: 'CHATGPT',
+          result: { moved: true, user_value: 'must-not-enter-ledger' },
+          effect_outcome: 'CONFIRMED',
+          lane: 'MUTATION',
+          effect_key: 'effect-runtime-1',
+          execution_ms: 11.2,
+          recorded_at: '2026-09-18T16:40:00.000Z',
+          authority_effect: false,
+        },
+        error: null,
+        execution_authority: false,
+        production_mutation_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+      attribution: {
+        task_id: 'task.runtime.outcome.1',
+        task_signature_digest: d('1'),
+        environment_fingerprint: 'env.browser.chatgpt.v1',
+        model_family: 'GPT_5_6_SOL',
+        candidate_id: `candidate_sha256_${'b'.repeat(64)}`,
+        candidate_sha: 'b'.repeat(40),
+        proposal_digest: d('2'),
+        skill_digests: [d('3')],
+        external_attribution: true,
+        authored_by_candidate: false,
+      },
+    });
+    assert.equal(episode.outcome_state, 'VERIFIED_CONFIRMED_EFFECT');
+    assert.equal(episode.eligible_for_experience_graph, true);
+    const snapshot = runtime.snapshot();
+    assert.equal(snapshot.browser_outcome_ingest.outcome_count, 1);
+    assert.equal(snapshot.browser_outcome_ingest.learning_eligible_count, 1);
+    assert.equal(snapshot.browser_outcome_ingest.quarantined_count, 0);
+    assert.equal(snapshot.ledger.last_event_type, 'BROWSER_OUTCOME_INGESTED');
+    const ledgerText = await fs.readFile(path.join(root, 'rsi.jsonl'), 'utf8');
+    assert.doesNotMatch(ledgerText, /must-not-enter-ledger/);
+    assert.doesNotMatch(ledgerText, /"result":/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
