@@ -211,6 +211,20 @@ export class RsiRuntimeSkillLifecycle{
   #replaceExposureReleaseAttempt(nextRow){
     this.#exposureReleaseAttempts=this.#exposureReleaseAttempts.map(row=>row.attempt_id===nextRow.attempt_id?Object.freeze(nextRow):row);
   }
+  exposureReleaseAttemptReadback({attempt_id,release_certificate_digest}={}){
+    this.#assertInit();
+    const attemptId=boundedId(attempt_id,'exposure_release_attempt_id');
+    const certificateDigest=exactDigest(release_certificate_digest,'exposure_release_certificate');
+    const row=this.#exposureReleaseAttempts.find(x=>x.attempt_id===attemptId&&x.release_certificate_digest===certificateDigest);
+    if(!row)return zero({found:false,attempt_id:attemptId,state:null,retrieval_exposure_changed:false});
+    return zero({
+      found:true,attempt_id:attemptId,state:row.state,skill_digest:row.skill_digest,
+      expected_current_library_digest:row.expected_current_library_digest,
+      expected_current_governance_digest:row.expected_current_governance_digest,
+      expected_next_governance_digest:row.expected_next_governance_digest,
+      retrieval_exposure_changed:row.state==='CONFIRMED'||row.state==='CONFIRMED_BY_READBACK',
+    });
+  }
   async releaseAdmissionExposureHoldOneAttempt({
     attempt_id,release_certificate_digest,skill_digest,expected_current_library_digest,
     expected_current_governance_digest,expected_next_governance_digest,
