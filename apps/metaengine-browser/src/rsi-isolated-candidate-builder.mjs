@@ -48,6 +48,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-recursive-depth-controller.mjs',
   'apps/metaengine-browser/src/rsi-disagreement-acquisition.mjs',
   'apps/metaengine-browser/src/rsi-fixed-skeleton-mutation.mjs',
+  'apps/metaengine-browser/src/rsi-search-mode-router.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/trusted-dev-release-resolver.mjs',
   'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
