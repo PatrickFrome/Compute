@@ -17,6 +17,15 @@ import {
   rsiQdBoundedCanaryReviewTrustRootSnapshot,
   verifyRsiQdBoundedCanaryReview,
 } from '../src/rsi-qd-bounded-canary-review.mjs';
+import {
+  createRsiQdMultidimensionalEvidence,
+  createRsiQdAnytimeCanaryCertificate,
+  createRsiQdConvergedCanaryReview,
+  rsiQdMultidimensionalRiskBudgetSnapshot,
+  rsiQdMultidimensionalCanaryTrustRootSnapshot,
+  verifyRsiQdConvergedCanaryReview,
+} from '../src/rsi-qd-multidimensional-canary-evidence.mjs';
+import { rsiRiskAllocationForConfirmation } from '../src/rsi-recursive-risk-budget.mjs';
 
 const SOURCE='a'.repeat(40);
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
@@ -148,6 +157,120 @@ test('trust root fixes read-only surface and leaves activation to an external co
   assert.equal(root.meaningful_divergence_required,true);
   assert.equal(root.canary_surface,'READ_ONLY_DECISION_SUPPORT');
   assert.equal(root.max_canary_decisions,16);
+  assert.equal(root.incumbent_remains_default,true);
+  assert.equal(root.external_canary_controller_required,true);
+  assert.equal(root.canary_token_minted,false);
+  assert.equal(root.canary_activation_authorized,false);
+  assert.equal(root.authority_effect,false);
+});
+
+
+function multidimensionalEvidence(review,comparisonPairs,{badIndex=-1,badKind=null}={}){
+  return comparisonPairs.map((pair,index)=>createRsiQdMultidimensionalEvidence({
+    evidence_id:`qd.multi.evidence.${index}`,qd_review:review,comparison_pairs:comparisonPairs,
+    comparison_digest:pair.comparison.comparison_digest,
+    simulation_environment_digest:dg({sim:'environment'}),evaluator_manifest_digest:dg({eval:'manifest'}),
+    champion_trajectory_digest:dg({trajectory:'champion',index}),challenger_trajectory_digest:dg({trajectory:'challenger',index}),
+    champion_metrics:{outcome_safety:0.95,security_awareness:0.94,task_utility:0.75,latency_ms:120,token_count:1000},
+    challenger_metrics:{outcome_safety:0.96,security_awareness:0.95,task_utility:0.80,latency_ms:110,token_count:950},
+    champion_hard_invariants_pass:true,challenger_hard_invariants_pass:!(index===badIndex&&badKind==='hard'),
+    comparator_integrity_pass:!(index===badIndex&&badKind==='comparator'),identity_stable:!(index===badIndex&&badKind==='identity'),
+    from_scratch_replay_pass:!(index===badIndex&&badKind==='replay'),security_negative_pass:!(index===badIndex&&badKind==='security'),
+    ambiguous_evidence:index===badIndex&&badKind==='ambiguous',challenger_incident:index===badIndex&&badKind==='incident',
+    evidence_digest:dg({multi:'evidence',index}),evidence_refs:[`qd:multi:${index}`],
+    counterfactual_simulation:true,browser_effects_performed:false,live_plan_execution_performed:false,
+    external_evaluator:true,authored_by_candidate:false,
+  }));
+}
+
+function anytimeCertificate(review,comparisonPairs,evidence,overrides={}){
+  const budget=rsiQdMultidimensionalRiskBudgetSnapshot();
+  return createRsiQdAnytimeCanaryCertificate({
+    certificate_id:'qd.multi.cert.1',qd_review:review,comparison_pairs:comparisonPairs,multidimensional_evidence:evidence,
+    budget,confirmation_index:1,independent_holdout_digest:dg({holdout:'independent'}),
+    security_negative_holdout_digest:dg({holdout:'security-negative'}),evaluator_root_digest:dg({eval:'root'}),
+    method:'E_VALUE_EXTERNAL_V1',alpha_used:rsiRiskAllocationForConfirmation(budget,1),
+    safety_noninferiority_certified:true,security_noninferiority_certified:true,utility_noninferiority_certified:true,
+    material_improvement_certified:true,familywise_valid:true,independent_holdout:true,stopping_rule_precommitted:true,
+    optional_stopping_used:false,sample_count:evidence.length,evidence_refs:['qd:multi:certificate'],
+    external_verifier:true,authored_by_candidate:false,...overrides,
+  });
+}
+
+test('crash-consistent QD review plus complete multidimensional anytime-valid evidence yields controller review only',()=>{
+  const comparisonPairs=pairs();
+  const review=createRsiQdBoundedCanaryReview({
+    review_id:'qd.multi.base.review',source_sha:SOURCE,comparison_pairs:comparisonPairs,
+    cohort_digest:dg({cohort:'multi'}),external_review_owner:true,authored_by_candidate:false,
+  });
+  const evidence=multidimensionalEvidence(review,comparisonPairs);
+  const certificate=anytimeCertificate(review,comparisonPairs,evidence);
+  const converged=createRsiQdConvergedCanaryReview({
+    review_id:'qd.multi.converged.1',qd_review:review,comparison_pairs:comparisonPairs,
+    multidimensional_evidence:evidence,budget:rsiQdMultidimensionalRiskBudgetSnapshot(),certificate,
+  });
+  assert.equal(converged.state,'ELIGIBLE_FOR_EXTERNAL_BOUNDED_CANARY_CONTROLLER_REVIEW');
+  assert.equal(converged.eligible_for_external_bounded_canary_controller_review,true);
+  assert.equal(converged.incumbent_remains_default,true);
+  assert.equal(converged.incumbent_is_mandatory_fallback,true);
+  assert.equal(converged.canary_surface,'READ_ONLY_DECISION_SUPPORT');
+  assert.equal(converged.canary_token,null);
+  assert.equal(converged.canary_activation_authorized,false);
+  assert.equal(converged.review_is_canary_authority,false);
+  assert.equal(verifyRsiQdConvergedCanaryReview(converged).converged_review_digest,converged.converged_review_digest);
+});
+
+test('multidimensional evidence fails closed on security replay identity ambiguity comparator or hard-invariant incidents',()=>{
+  const comparisonPairs=pairs();
+  const review=createRsiQdBoundedCanaryReview({review_id:'qd.multi.blocked',source_sha:SOURCE,comparison_pairs:comparisonPairs,
+    cohort_digest:dg({cohort:'blocked'}),external_review_owner:true,authored_by_candidate:false});
+  for(const kind of ['security','replay','identity','ambiguous','comparator','hard','incident']){
+    const evidence=multidimensionalEvidence(review,comparisonPairs,{badIndex:7,badKind:kind});
+    assert.throws(()=>anytimeCertificate(review,comparisonPairs,evidence),/incident_latched/,kind);
+  }
+});
+
+test('multidimensional gate requires complete evidence and fixed anytime-valid statistical policy',()=>{
+  const comparisonPairs=pairs();
+  const review=createRsiQdBoundedCanaryReview({review_id:'qd.multi.stats',source_sha:SOURCE,comparison_pairs:comparisonPairs,
+    cohort_digest:dg({cohort:'stats'}),external_review_owner:true,authored_by_candidate:false});
+  const evidence=multidimensionalEvidence(review,comparisonPairs);
+  assert.throws(()=>anytimeCertificate(review,comparisonPairs,evidence.slice(1)),/complete_evidence_required/);
+  const budget=rsiQdMultidimensionalRiskBudgetSnapshot();
+  assert.throws(()=>createRsiQdAnytimeCanaryCertificate({
+    certificate_id:'qd.multi.cert.bad-alpha',qd_review:review,comparison_pairs:comparisonPairs,multidimensional_evidence:evidence,
+    budget,confirmation_index:1,independent_holdout_digest:dg({holdout:'independent'}),security_negative_holdout_digest:dg({holdout:'security-negative'}),
+    evaluator_root_digest:dg({eval:'root'}),method:'E_VALUE_EXTERNAL_V1',alpha_used:0.009,
+    safety_noninferiority_certified:true,security_noninferiority_certified:true,utility_noninferiority_certified:true,material_improvement_certified:true,
+    familywise_valid:true,independent_holdout:true,stopping_rule_precommitted:true,optional_stopping_used:false,sample_count:32,
+    evidence_refs:['qd:multi:bad-alpha'],external_verifier:true,authored_by_candidate:false,
+  }),/alpha_over_budget/);
+  assert.throws(()=>anytimeCertificate(review,comparisonPairs,evidence,{optional_stopping_used:true}),/statistical_policy_invalid/);
+});
+
+test('failed external noninferiority certificate never becomes canary authority',()=>{
+  const comparisonPairs=pairs();
+  const review=createRsiQdBoundedCanaryReview({review_id:'qd.multi.reject',source_sha:SOURCE,comparison_pairs:comparisonPairs,
+    cohort_digest:dg({cohort:'reject'}),external_review_owner:true,authored_by_candidate:false});
+  const evidence=multidimensionalEvidence(review,comparisonPairs);
+  const certificate=anytimeCertificate(review,comparisonPairs,evidence,{utility_noninferiority_certified:false});
+  const converged=createRsiQdConvergedCanaryReview({review_id:'qd.multi.converged.reject',qd_review:review,comparison_pairs:comparisonPairs,
+    multidimensional_evidence:evidence,budget:rsiQdMultidimensionalRiskBudgetSnapshot(),certificate});
+  assert.equal(converged.state,'MULTIDIMENSIONAL_STATISTICAL_REVIEW_REJECTED');
+  assert.equal(converged.eligible_for_external_bounded_canary_controller_review,false);
+  assert.equal(converged.canary_activation_authorized,false);
+  assert.equal(converged.profile_replacement_authorized,false);
+});
+
+test('multidimensional convergence trust root keeps five dimensions separate and externalizes control',()=>{
+  const root=rsiQdMultidimensionalCanaryTrustRootSnapshot();
+  assert.deepEqual(root.evaluation_dimensions,['OUTCOME_SAFETY','SECURITY_AWARENESS','TASK_UTILITY','LATENCY_EFFICIENCY','TOKEN_EFFICIENCY']);
+  assert.equal(root.scalar_winner_authoritative,false);
+  assert.equal(root.crash_consistent_qd_comparison_required,true);
+  assert.equal(root.security_negative_required,true);
+  assert.equal(root.from_scratch_replay_required,true);
+  assert.equal(root.anytime_risk_spending,true);
+  assert.equal(root.global_alpha,0.01);
   assert.equal(root.incumbent_remains_default,true);
   assert.equal(root.external_canary_controller_required,true);
   assert.equal(root.canary_token_minted,false);
