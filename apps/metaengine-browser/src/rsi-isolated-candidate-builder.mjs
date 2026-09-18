@@ -37,6 +37,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-trusted-credit-assignment.mjs',
   'apps/metaengine-browser/src/rsi-experience-context-planner.mjs',
   'apps/metaengine-browser/src/rsi-context-aware-candidate-synthesis.mjs',
+  'apps/metaengine-browser/src/rsi-devos-materialization-handoff.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
   'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-open-ended-search-policy.mjs',
