@@ -69,13 +69,58 @@ function verifyOutcomeEvidence({handoff_row,experiment_intent,experiment_receipt
   if(intent.candidate_artifact_digest!==handoff.candidate_artifact_digest||receipt.candidate_artifact_digest!==handoff.candidate_artifact_digest)throw new Error('rsi_outcome_frontier_candidate_artifact_mismatch');
   if(intent.evaluator_root_digest!==handoff.evaluator_root_digest||receipt.evaluator_root_digest!==handoff.evaluator_root_digest)throw new Error('rsi_outcome_frontier_evaluator_root_mismatch');
   if(intent.evaluator_generation_digest!==handoff.evaluator_generation_digest)throw new Error('rsi_outcome_frontier_evaluator_generation_mismatch');
+  if(intent.evaluator_generation_seq!==handoff.evaluator_generation_seq)throw new Error('rsi_outcome_frontier_evaluator_generation_seq_mismatch');
+  if(intent.evaluator_generation_history_anchor_digest!==handoff.evaluator_generation_history_anchor_digest)throw new Error('rsi_outcome_frontier_generation_history_anchor_mismatch');
   if(intent.evaluation_epoch_digest!==handoff.evaluation_epoch_digest)throw new Error('rsi_outcome_frontier_evaluation_epoch_mismatch');
+  if(intent.evaluation_epoch_seq!==handoff.evaluation_epoch_seq)throw new Error('rsi_outcome_frontier_evaluation_epoch_seq_mismatch');
+  if(intent.sealed_task_set_digest!==handoff.sealed_task_set_digest)throw new Error('rsi_outcome_frontier_sealed_tasks_mismatch');
+  if(intent.harness_digest!==handoff.evaluation_harness_digest)throw new Error('rsi_outcome_frontier_harness_mismatch');
+  if(intent.trial_worker_image_digest!==handoff.trial_worker_image_digest)throw new Error('rsi_outcome_frontier_trial_worker_mismatch');
+  if(intent.resource_budget_digest!==handoff.resource_budget_digest)throw new Error('rsi_outcome_frontier_resource_budget_mismatch');
+  if(intent.task_order_digest!==handoff.task_order_digest)throw new Error('rsi_outcome_frontier_task_order_mismatch');
+  if(intent.threshold_policy_digest!==handoff.acceptance_policy_digest)throw new Error('rsi_outcome_frontier_acceptance_policy_mismatch');
+  if(intent.stopping_policy_digest!==handoff.stopping_policy_digest)throw new Error('rsi_outcome_frontier_stopping_policy_mismatch');
+  if(intent.hidden_holdout_root_digest!==handoff.hidden_holdout_root_digest)throw new Error('rsi_outcome_frontier_hidden_holdout_mismatch');
+  if(intent.safety_suite_root_digest!==handoff.safety_suite_root_digest)throw new Error('rsi_outcome_frontier_safety_suite_mismatch');
+  if(intent.security_suite_root_digest!==handoff.security_suite_root_digest)throw new Error('rsi_outcome_frontier_security_suite_mismatch');
   if(!OUTCOME_KIND[receipt.state])throw new Error('rsi_outcome_frontier_outcome_state_invalid');
   return Object.freeze({handoff_seq:hr.handoff_seq,handoff,intent,receipt});
 }
 
 function metricGains(receipt){
   return Object.freeze(Object.fromEntries(METRICS.map(k=>[k,receipt.treatment_metrics[k]-receipt.control_metrics[k]])));
+}
+
+function acceptanceAttribution(evidence){
+  const acceptance=Object.freeze({
+    sealed_task_set_digest:exactDigest(evidence.handoff.sealed_task_set_digest,'sealed_task_set'),
+    evaluation_harness_digest:exactDigest(evidence.handoff.evaluation_harness_digest,'evaluation_harness'),
+    trial_worker_image_digest:exactDigest(evidence.handoff.trial_worker_image_digest,'trial_worker_image'),
+    resource_budget_digest:exactDigest(evidence.handoff.resource_budget_digest,'resource_budget'),
+    task_order_digest:exactDigest(evidence.handoff.task_order_digest,'task_order'),
+    acceptance_policy_digest:exactDigest(evidence.handoff.acceptance_policy_digest,'acceptance_policy'),
+    stopping_policy_digest:exactDigest(evidence.handoff.stopping_policy_digest,'stopping_policy'),
+    hidden_holdout_root_digest:exactDigest(evidence.handoff.hidden_holdout_root_digest,'hidden_holdout'),
+    safety_suite_root_digest:exactDigest(evidence.handoff.safety_suite_root_digest,'safety_suite'),
+    security_suite_root_digest:exactDigest(evidence.handoff.security_suite_root_digest,'security_suite'),
+  });
+  const metric_differential=metricGains(evidence.receipt);
+  const acceptance_bundle_digest=digest(acceptance);
+  const metric_differential_digest=digest(metric_differential);
+  const differential_attribution_digest=digest({
+    parent_artifact_digest:evidence.handoff.parent_artifact_digest,
+    candidate_artifact_digest:evidence.handoff.candidate_artifact_digest,
+    evaluator_root_digest:evidence.handoff.evaluator_root_digest,
+    evaluator_generation_digest:evidence.handoff.evaluator_generation_digest,
+    evaluator_generation_seq:evidence.handoff.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:evidence.handoff.evaluator_generation_history_anchor_digest,
+    evaluation_epoch_digest:evidence.handoff.evaluation_epoch_digest,
+    evaluation_epoch_seq:evidence.handoff.evaluation_epoch_seq,
+    acceptance_bundle_digest,
+    metric_differential_digest,
+    outcome_class:evidence.receipt.state,
+  });
+  return Object.freeze({acceptance,acceptance_bundle_digest,metric_differential,metric_differential_digest,differential_attribution_digest});
 }
 
 function learningFieldsForOutcome(state,input){
@@ -114,6 +159,7 @@ export function createRsiGenerationScopedOutcomeEntry({
     environment_diagnostic_digest,ambiguity_diagnostic_digest,
   });
   const niches=tags(niche_tags,'niche_tags');
+  const attribution=acceptanceAttribution(evidence);
   const core=zero({
     schema:RSI_GENERATION_SCOPED_OUTCOME_ENTRY_SCHEMA,version:1,
     entry_id:id(entry_id,'entry_id'),source_sha:exactSha(evidence.receipt.source_sha,'source'),
@@ -123,9 +169,17 @@ export function createRsiGenerationScopedOutcomeEntry({
     parent_artifact_digest:evidence.handoff.parent_artifact_digest,candidate_artifact_digest:evidence.handoff.candidate_artifact_digest,
     evaluator_root_digest:evidence.handoff.evaluator_root_digest,
     evaluator_generation_digest:evidence.handoff.evaluator_generation_digest,
+    evaluator_generation_seq:evidence.handoff.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:evidence.handoff.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:evidence.handoff.evaluation_epoch_digest,
+    evaluation_epoch_seq:evidence.handoff.evaluation_epoch_seq,
+    provenance_root_digest:evidence.handoff.provenance_root_digest,
     outcome_class:outcome,learning_kind:OUTCOME_KIND[outcome],
-    niche_tags:niches,metric_gains:metricGains(evidence.receipt),
+    niche_tags:niches,metric_gains:attribution.metric_differential,
+    metric_differential_digest:attribution.metric_differential_digest,
+    sealed_acceptance_bundle:attribution.acceptance,
+    sealed_acceptance_bundle_digest:attribution.acceptance_bundle_digest,
+    differential_attribution_digest:attribution.differential_attribution_digest,
     summary_digest:exactDigest(summary_digest,'summary'),
     applicability_digest:exactDigest(applicability_digest,'applicability'),
     counterevidence_digest:exactDigest(counterevidence_digest,'counterevidence'),
@@ -134,7 +188,12 @@ export function createRsiGenerationScopedOutcomeEntry({
     raw_trajectory_stored:false,raw_hidden_holdout_stored:false,raw_evaluator_assets_stored:false,
     raw_prompt_or_secret_stored:false,source_outcome_receipt_stored:false,
     existing_candidate_experiment_ledger_is_source_of_truth:true,
+    exact_external_sequence_binding_required:true,
+    sealed_acceptance_differential_attribution_required:true,
     generation_scoped_comparison_only:true,cross_generation_comparison_requires_external_revalidation:true,
+    fast_learning_timescale:'GENERATION_SCOPED_EVIDENCE',
+    slow_consolidation_requires_external_validation:true,
+    slow_consolidation_authorized:false,
     entry_can_mutate_candidate:false,entry_can_change_budget:false,entry_can_schedule_work:false,
     entry_can_promote:false,entry_can_trigger_rollback:false,
   });
@@ -148,7 +207,10 @@ export function verifyRsiGenerationScopedOutcomeEntry(row,{handoff_row,experimen
     ||row.raw_trajectory_stored!==false||row.raw_hidden_holdout_stored!==false||row.raw_evaluator_assets_stored!==false
     ||row.raw_prompt_or_secret_stored!==false||row.source_outcome_receipt_stored!==false
     ||row.existing_candidate_experiment_ledger_is_source_of_truth!==true
+    ||row.exact_external_sequence_binding_required!==true||row.sealed_acceptance_differential_attribution_required!==true
     ||row.generation_scoped_comparison_only!==true||row.cross_generation_comparison_requires_external_revalidation!==true
+    ||row.fast_learning_timescale!=='GENERATION_SCOPED_EVIDENCE'||row.slow_consolidation_requires_external_validation!==true
+    ||row.slow_consolidation_authorized!==false
     ||row.entry_can_mutate_candidate!==false||row.entry_can_change_budget!==false||row.entry_can_schedule_work!==false
     ||row.entry_can_promote!==false||row.entry_can_trigger_rollback!==false)throw new Error('rsi_outcome_frontier_entry_policy_invalid');
   const canonical=createRsiGenerationScopedOutcomeEntry({
@@ -172,6 +234,9 @@ function archiveState(sourceSha,rows){
     rows,row_count:rows.length,outcome_counts:counts,generation_count:generations.length,niche_count:niches.length,
     append_only:true,durable_before_visible:true,source_outcome_receipts_stored_here:false,
     external_evidence_resolver_required:true,quality_diverse_frontier:true,scalar_global_winner_forbidden:true,
+    exact_external_generation_and_epoch_sequence_required:true,
+    sealed_acceptance_differential_attribution_required:true,
+    two_timescale_learning_separation_required:true,
     cross_generation_dominance_forbidden:true,old_evidence_remains_addressable:true,
     archive_can_mutate_candidate:false,archive_can_change_budget:false,archive_can_schedule_work:false,
     archive_can_promote:false,archive_can_rollback:false,candidate_can_delete:false,candidate_can_rewrite:false,
@@ -193,22 +258,26 @@ function frontierRows(rows){
   const groups=new Map();
   for(const row of supported){
     for(const niche of row.niche_tags){
-      const key=`${row.evaluator_generation_digest}|${row.evaluation_epoch_digest}|${niche}`;
+      const key=`${row.evaluator_generation_seq}|${row.evaluation_epoch_seq}|${row.evaluator_generation_digest}|${row.evaluation_epoch_digest}|${niche}`;
       const list=groups.get(key)||[];list.push(row);groups.set(key,list);
     }
   }
   const out=[];
   for(const [key,list] of groups){
-    const [generation,epoch,niche]=key.split('|');
+    const [generationSeqRaw,epochSeqRaw,generation,epoch,niche]=key.split('|');
+    const generationSeq=Number(generationSeqRaw),epochSeq=Number(epochSeqRaw);
     const nondominated=list.filter(candidate=>!list.some(other=>other.entry_digest!==candidate.entry_digest&&dominates(other,candidate)));
     out.push(Object.freeze({
+      evaluator_generation_seq:generationSeq,evaluation_epoch_seq:epochSeq,
       evaluator_generation_digest:generation,evaluation_epoch_digest:epoch,niche,
       entry_digests:Object.freeze(nondominated.map(r=>r.entry_digest).sort()),
       scalar_winner:null,
     }));
   }
   return Object.freeze(out.sort((a,b)=>
-    a.evaluator_generation_digest.localeCompare(b.evaluator_generation_digest)
+    a.evaluator_generation_seq-b.evaluator_generation_seq
+    ||a.evaluation_epoch_seq-b.evaluation_epoch_seq
+    ||a.evaluator_generation_digest.localeCompare(b.evaluator_generation_digest)
     ||a.evaluation_epoch_digest.localeCompare(b.evaluation_epoch_digest)
     ||a.niche.localeCompare(b.niche)));
 }
@@ -228,6 +297,9 @@ export class RsiGenerationScopedOutcomeArchive{
       if(p.schema!==RSI_GENERATION_SCOPED_OUTCOME_ARCHIVE_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
         ||p.append_only!==true||p.durable_before_visible!==true||p.source_outcome_receipts_stored_here!==false
         ||p.external_evidence_resolver_required!==true||p.quality_diverse_frontier!==true||p.scalar_global_winner_forbidden!==true
+        ||p.exact_external_generation_and_epoch_sequence_required!==true
+        ||p.sealed_acceptance_differential_attribution_required!==true
+        ||p.two_timescale_learning_separation_required!==true
         ||p.cross_generation_dominance_forbidden!==true||p.old_evidence_remains_addressable!==true
         ||p.archive_can_mutate_candidate!==false||p.archive_can_change_budget!==false||p.archive_can_schedule_work!==false
         ||p.archive_can_promote!==false||p.archive_can_rollback!==false||p.candidate_can_delete!==false||p.candidate_can_rewrite!==false){
@@ -294,7 +366,9 @@ export class RsiGenerationScopedOutcomeArchive{
     return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,
       outcome_counts:s.outcome_counts,generation_count:s.generation_count,niche_count:s.niche_count,append_only:true,durable_before_visible:true,
       source_outcome_receipts_stored_here:false,external_evidence_resolver_required:true,quality_diverse_frontier:true,
-      scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,old_evidence_remains_addressable:true,
+      scalar_global_winner_forbidden:true,exact_external_generation_and_epoch_sequence_required:true,
+      sealed_acceptance_differential_attribution_required:true,two_timescale_learning_separation_required:true,
+      cross_generation_dominance_forbidden:true,old_evidence_remains_addressable:true,
       archive_can_mutate_candidate:false,archive_can_change_budget:false,archive_can_schedule_work:false,archive_can_promote:false,
       archive_can_rollback:false,authority_effect:false});
   }
@@ -306,11 +380,16 @@ export function rsiGenerationScopedOutcomeFrontierTrustRootSnapshot(){
     existing_candidate_experiment_ledger_is_only_outcome_truth:true,
     source_outcome_receipts_not_duplicated:true,external_evidence_resolver_required:true,
     phase29_handoff_binding_required:true,evaluator_generation_binding_required:true,evaluation_epoch_binding_required:true,
+    exact_evaluator_generation_sequence_binding_required:true,exact_evaluation_epoch_sequence_binding_required:true,
+    evaluator_generation_history_anchor_binding_required:true,
+    sealed_acceptance_differential_attribution_required:true,
     supported_recipe_candidate_only:true,rejected_negative_constraint_only:true,no_improvement_low_yield_constraint_only:true,
     environment_inconclusive_diagnostic_only:true,ambiguity_diagnostic_only:true,
     raw_trajectory_storage_forbidden:true,hidden_holdout_copy_forbidden:true,evaluator_asset_copy_forbidden:true,
     external_learning_reviewer_required:true,external_niche_owner_required:true,
     quality_diverse_frontier_required:true,scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,
+    fast_generation_evidence_and_slow_consolidation_separation_required:true,
+    slow_consolidation_requires_external_validation:true,
     external_revalidation_required_for_cross_generation_comparison:true,old_evidence_remains_addressable:true,
     maturity_stats_advisory_only:true,automatic_plasticity_change_authorized:false,
     archive_can_mutate_candidate:false,archive_can_change_budget:false,archive_can_schedule_work:false,
