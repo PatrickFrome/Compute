@@ -20,6 +20,7 @@ const MAX_TAGS = 24;
 const MAX_DIGEST_REFS = 32;
 const MAX_EVIDENCE_REFS = 32;
 const MAX_QUERY_BRIDGES = 16;
+const CROSS_CONTEXT_UTILITY_WEIGHT = 0.25;
 const MAX_RETRIEVAL_CASES = 12;
 const MAX_DIFFUSION_HOPS = 2;
 const SIMILARITY_THRESHOLD = 0.70;
@@ -724,20 +725,44 @@ function utilityForCase(snapshot, caseId, targetContextDigest) {
   let helpful = 0;
   let harmful = 0;
   let neutral = 0;
+  let crossContextHelpful = 0;
+  let crossContextHarmful = 0;
+  let crossContextNeutral = 0;
   for (const row of snapshot.utility_receipts) {
-    if (row.case_id !== caseId || row.target_context_digest !== targetContextDigest) continue;
-    if (row.outcome === 'HELPFUL') helpful += 1;
-    else if (row.outcome === 'HARMFUL') harmful += 1;
-    else neutral += 1;
+    if (row.case_id !== caseId) continue;
+    const exactContext = row.target_context_digest === targetContextDigest;
+    if (row.outcome === 'HELPFUL') {
+      if (exactContext) helpful += 1;
+      else crossContextHelpful += 1;
+    } else if (row.outcome === 'HARMFUL') {
+      if (exactContext) harmful += 1;
+      else crossContextHarmful += 1;
+    } else if (exactContext) neutral += 1;
+    else crossContextNeutral += 1;
   }
-  const posteriorAlpha = 1 + helpful;
-  const posteriorBeta = 1 + harmful + 0.25 * neutral;
+  // Exact-context utility remains the dominant signal. Externally verified
+  // evidence from other contexts contributes only a bounded prior so durable
+  // post-deployment feedback is not silently discarded when the next query
+  // context digest changes. This is advisory memory calibration, never global
+  // truth or execution/promotion authority.
+  const weightedHelpful = helpful + CROSS_CONTEXT_UTILITY_WEIGHT * crossContextHelpful;
+  const weightedHarmful = harmful + CROSS_CONTEXT_UTILITY_WEIGHT * crossContextHarmful;
+  const weightedNeutral = neutral + CROSS_CONTEXT_UTILITY_WEIGHT * crossContextNeutral;
+  const posteriorAlpha = 1 + weightedHelpful;
+  const posteriorBeta = 1 + weightedHarmful + 0.25 * weightedNeutral;
   return Object.freeze({
     helpful,
     harmful,
     neutral,
+    cross_context_helpful: crossContextHelpful,
+    cross_context_harmful: crossContextHarmful,
+    cross_context_neutral: crossContextNeutral,
     posterior_mean: posteriorAlpha / (posteriorAlpha + posteriorBeta),
     evidence_count: helpful + harmful + neutral,
+    cross_context_evidence_count: crossContextHelpful + crossContextHarmful + crossContextNeutral,
+    cross_context_discount_weight: CROSS_CONTEXT_UTILITY_WEIGHT,
+    exact_context_utility_dominates: true,
+    cross_context_utility_is_advisory_prior: true,
   });
 }
 
@@ -866,7 +891,7 @@ export function retrieveRsiExperienceGraph({ snapshot, query } = {}) {
     query_digest: checkedQuery.query_digest,
     items,
     item_count: items.length,
-    retrieval_policy: 'TASK_ANCHOR_PLUS_BRIDGE_DIFFUSION_PLUS_CORRECTION_PLUS_CONTEXTUAL_UTILITY_V1',
+    retrieval_policy: 'TASK_ANCHOR_PLUS_BRIDGE_DIFFUSION_PLUS_CORRECTION_PLUS_CONTEXTUAL_UTILITY_V2',
     similarity_threshold: SIMILARITY_THRESHOLD,
     max_diffusion_hops: MAX_DIFFUSION_HOPS,
     max_cases: MAX_RETRIEVAL_CASES,
@@ -940,6 +965,10 @@ export function rsiExperienceGraphTrustRootSnapshot() {
     similarity_edges: true,
     correction_fixed_by_edges: true,
     contextual_utility_receipts: true,
+    cross_context_utility_prior_enabled: true,
+    cross_context_utility_discount_weight: CROSS_CONTEXT_UTILITY_WEIGHT,
+    exact_context_utility_dominates: true,
+    cross_context_utility_is_advisory_prior: true,
     graph_diffusion_max_hops: MAX_DIFFUSION_HOPS,
     similarity_threshold: SIMILARITY_THRESHOLD,
     max_retrieval_cases: MAX_RETRIEVAL_CASES,
