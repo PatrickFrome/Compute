@@ -605,6 +605,42 @@ export function createRsiSkillActivationView({
   return Object.freeze({ ...core, activation_digest: digest(core) });
 }
 
+export function verifyRsiSkillActivationView(view, governance, library) {
+  if (!plainObject(view) || view.schema !== RSI_SKILL_ACTIVATION_VIEW_SCHEMA || view.version !== 1) {
+    throw new Error('rsi_skill_governance_activation_view_invalid');
+  }
+  assertZeroAuthority(view, 'activation_view');
+  if (
+    view.only_governance_active_skills !== true
+    || view.retired_or_quarantined_skill_activation_allowed !== false
+    || view.candidate_can_override_governance_state !== false
+    || view.activation_view_is_execution_authority !== false
+    || view.external_planner !== true
+    || view.authored_by_candidate !== false
+  ) throw new Error('rsi_skill_governance_activation_view_policy_invalid');
+  const checkedGovernance = verifyRsiSkillLibraryGovernance(governance, library);
+  if (
+    view.governance_id !== checkedGovernance.governance_id
+    || view.governance_digest !== checkedGovernance.governance_digest
+    || view.library_id !== checkedGovernance.library_id
+    || view.library_digest !== checkedGovernance.library_digest
+  ) throw new Error('rsi_skill_governance_activation_view_binding_mismatch');
+  if (!Array.isArray(view.selected) || view.selected.length < 1 || view.selected_count !== view.selected.length) {
+    throw new Error('rsi_skill_governance_activation_view_selection_invalid');
+  }
+  const canonical = createRsiSkillActivationView({
+    governance: checkedGovernance,
+    library,
+    requested_skill_digests: view.selected.map((row) => row.skill_digest),
+    external_planner: true,
+    authored_by_candidate: false,
+  });
+  if (canonical.activation_digest !== exactDigest(view.activation_digest, 'activation')) {
+    throw new Error('rsi_skill_governance_activation_view_digest_mismatch');
+  }
+  return canonical;
+}
+
 export function rsiSkillLibraryGovernanceTrustRootSnapshot() {
   const root = {
     schema: 'metaengine.rsi.skill-library-governance-root.v1',
