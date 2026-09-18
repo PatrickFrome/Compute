@@ -44,6 +44,12 @@ import {
   prepareRsiIsolatedCandidateBuild,
   verifyRsiIsolatedCandidateBuildPlan,
 } from '../src/rsi-isolated-candidate-builder.mjs';
+import {
+  RsiGenerationScopedOutcomeArchive,
+  createRsiGenerationScopedOutcomeEntry,
+  verifyRsiGenerationScopedOutcomeEntry,
+  rsiGenerationScopedOutcomeFrontierTrustRootSnapshot,
+} from '../src/rsi-generation-scoped-outcome-frontier.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -1363,4 +1369,217 @@ test('Phase29 artifact request digest commits exact external generation and epoc
 
   const forged={...request,evaluator_generation_seq:8};
   assert.throws(()=>verifyRsiArtifactEvaluationRoutingRequest(forged),/digest_mismatch/);
+});
+
+
+function phase30ExactSequenceEvidence(label='phase30-exact',{
+  state='SUPPORTED_FOR_BOUNDED_REVISION',
+  evaluator_generation_digest=null,
+  evaluator_generation_seq=1,
+  evaluator_generation_history_anchor_digest=null,
+  evaluation_epoch_digest=null,
+  evaluation_epoch_seq=1,
+  treatment_overrides={},
+}={}){
+  const fx=phase28ArtifactFixture(label);
+  const handoff=phase29Handoff(fx,label,{
+    evaluator_generation_digest:evaluator_generation_digest||labelDigest(`${label}-generation`),
+    evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:evaluator_generation_history_anchor_digest||labelDigest(`${label}-generation-anchor`),
+    evaluation_epoch_digest:evaluation_epoch_digest||labelDigest(`${label}-epoch`),
+    evaluation_epoch_seq,
+  });
+  const request=handoff.fresh_evaluation_request;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:`phase30.exact.plan.${label}`,
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  const intent=createRsiMaterializedCandidateExperimentIntent({
+    handoff,
+    handoff_verification:{artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification},
+    fresh_budget_plan:plan,
+    fresh_plan_requests:[request],
+    intent_id:`phase30.exact.intent.${label}`,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  });
+  const control={
+    task_utility:0.70,safety:0.95,security:0.95,
+    process_integrity:0.90,outcome_integrity:0.90,efficiency:0.70,
+  };
+  let treatment={
+    task_utility:0.82,safety:0.95,security:0.96,
+    process_integrity:0.92,outcome_integrity:0.91,efficiency:0.73,
+    ...treatment_overrides,
+  };
+  const flags={environment_blocker_detected:false,controllable_failure_detected:false,ambiguous_effect:false};
+  if(state==='CANDIDATE_EXPERIMENT_REJECTED')treatment={...treatment,safety:0.80};
+  if(state==='NO_MATERIAL_IMPROVEMENT')treatment={...control};
+  if(state==='INCONCLUSIVE_ENVIRONMENT')flags.environment_blocker_detected=true;
+  if(state==='INCONCLUSIVE_AMBIGUOUS')flags.ambiguous_effect=true;
+  const receipt=createRsiCandidateExperimentReceipt({
+    receipt_id:`phase30.exact.receipt.${label}`,
+    intent,
+    control_metrics:control,
+    treatment_metrics:treatment,
+    control_attempts:1,treatment_attempts:1,retry_count:0,
+    same_tasks_pass:true,same_task_order_pass:true,harness_identity_pass:true,
+    resource_budget_identity_pass:true,evaluator_integrity_pass:true,trial_isolation_pass:true,
+    from_scratch_replay_pass:true,contamination_clear:true,reward_hack_detected:false,
+    blind_retry_detected:false,...flags,
+    evidence_digest:labelDigest(`phase30-exact-evidence-${label}`),
+    external_runner:true,external_evaluator:true,authored_by_candidate:false,
+  });
+  assert.equal(receipt.state,state);
+  const handoffRow={
+    handoff_seq:evaluation_epoch_seq,
+    source_sha:SOURCE,
+    handoff,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    rotation:null,
+  };
+  return {fx,handoff,request,plan,intent,receipt,handoffRow};
+}
+
+function phase30ExactSequenceEntry(evidence,label,{niches=['CONTROL_FLOW'],...overrides}={}){
+  const typed={
+    SUPPORTED_FOR_BOUNDED_REVISION:{
+      recipe_digest:labelDigest(`phase30-exact-recipe-${label}`),
+      watch_out_digest:labelDigest(`phase30-exact-watchout-${label}`),
+    },
+    CANDIDATE_EXPERIMENT_REJECTED:{
+      negative_constraint_digest:labelDigest(`phase30-exact-negative-${label}`),
+      watch_out_digest:labelDigest(`phase30-exact-watchout-${label}`),
+    },
+    NO_MATERIAL_IMPROVEMENT:{low_yield_constraint_digest:labelDigest(`phase30-exact-low-yield-${label}`)},
+    INCONCLUSIVE_ENVIRONMENT:{environment_diagnostic_digest:labelDigest(`phase30-exact-env-${label}`)},
+    INCONCLUSIVE_AMBIGUOUS:{ambiguity_diagnostic_digest:labelDigest(`phase30-exact-amb-${label}`)},
+  };
+  return createRsiGenerationScopedOutcomeEntry({
+    entry_id:`phase30.exact.entry.${label}`,
+    handoff_row:evidence.handoffRow,
+    experiment_intent:evidence.intent,
+    experiment_receipt:evidence.receipt,
+    niche_tags:niches,
+    summary_digest:labelDigest(`phase30-exact-summary-${label}`),
+    applicability_digest:labelDigest(`phase30-exact-applicability-${label}`),
+    counterevidence_digest:labelDigest(`phase30-exact-counterevidence-${label}`),
+    ...typed[evidence.receipt.state],
+    external_learning_reviewer:true,
+    external_niche_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+}
+
+test('Phase30 exact-sequence entry binds external generation/epoch identity and sealed acceptance differential',()=>{
+  const evidence=phase30ExactSequenceEvidence('binding',{
+    evaluator_generation_seq:3,
+    evaluation_epoch_seq:7,
+  });
+  const entry=phase30ExactSequenceEntry(evidence,'binding',{niches:['CONTROL_FLOW','VALIDATION']});
+  const checked=verifyRsiGenerationScopedOutcomeEntry(entry,{
+    handoff_row:evidence.handoffRow,
+    experiment_intent:evidence.intent,
+    experiment_receipt:evidence.receipt,
+  });
+  assert.equal(checked.entry_digest,entry.entry_digest);
+  assert.equal(entry.evaluator_generation_seq,3);
+  assert.equal(entry.evaluation_epoch_seq,7);
+  assert.equal(entry.evaluator_generation_history_anchor_digest,evidence.handoff.evaluator_generation_history_anchor_digest);
+  assert.equal(entry.sealed_acceptance_bundle.sealed_task_set_digest,evidence.handoff.sealed_task_set_digest);
+  assert.equal(entry.sealed_acceptance_bundle.hidden_holdout_root_digest,evidence.handoff.hidden_holdout_root_digest);
+  assert.equal(entry.sealed_acceptance_bundle.safety_suite_root_digest,evidence.handoff.safety_suite_root_digest);
+  assert.equal(entry.sealed_acceptance_bundle.security_suite_root_digest,evidence.handoff.security_suite_root_digest);
+  assert.match(entry.sealed_acceptance_bundle_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.match(entry.metric_differential_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.match(entry.differential_attribution_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(entry.fast_learning_timescale,'GENERATION_SCOPED_EVIDENCE');
+  assert.equal(entry.slow_consolidation_requires_external_validation,true);
+  assert.equal(entry.slow_consolidation_authorized,false);
+  assert.equal(entry.authority_effect,false);
+});
+
+test('Phase30 frontier keys supported candidates by exact external generation and epoch sequences',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase30-exact-frontier-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const generation=labelDigest('phase30-shared-generation');
+  const anchor=labelDigest('phase30-shared-anchor');
+  const first=phase30ExactSequenceEvidence('frontier-seq1',{
+    evaluator_generation_digest:generation,evaluator_generation_seq:1,
+    evaluator_generation_history_anchor_digest:anchor,
+    evaluation_epoch_digest:labelDigest('phase30-shared-epoch-1'),evaluation_epoch_seq:1,
+    treatment_overrides:{task_utility:0.86,security:0.96},
+  });
+  const second=phase30ExactSequenceEvidence('frontier-seq2',{
+    evaluator_generation_digest:generation,evaluator_generation_seq:1,
+    evaluator_generation_history_anchor_digest:anchor,
+    evaluation_epoch_digest:labelDigest('phase30-shared-epoch-2'),evaluation_epoch_seq:2,
+    treatment_overrides:{task_utility:0.81,security:1.00},
+  });
+  const e1=phase30ExactSequenceEntry(first,'frontier-seq1');
+  const e2=phase30ExactSequenceEntry(second,'frontier-seq2');
+  const evidence=new Map([
+    [e1.experiment_receipt_digest,{handoff_row:first.handoffRow,experiment_intent:first.intent,experiment_receipt:first.receipt}],
+    [e2.experiment_receipt_digest,{handoff_row:second.handoffRow,experiment_intent:second.intent,experiment_receipt:second.receipt}],
+  ]);
+  const archive=new RsiGenerationScopedOutcomeArchive({
+    statePath:path.join(dir,'frontier.json'),source_sha:SOURCE,
+    evidenceResolver:async({experiment_receipt_digest})=>evidence.get(experiment_receipt_digest),
+  });
+  await archive.init();
+  await archive.add({entry:e1,...evidence.get(e1.experiment_receipt_digest)});
+  await archive.add({entry:e2,...evidence.get(e2.experiment_receipt_digest)});
+  const frontier=archive.frontier();
+  assert.equal(frontier.length,2);
+  assert.deepEqual(frontier.map(x=>x.evaluation_epoch_seq),[1,2]);
+  assert.ok(frontier.every(x=>x.evaluator_generation_seq===1));
+  assert.ok(frontier.every(x=>x.scalar_winner===null));
+  assert.equal(archive.snapshot().exact_external_generation_and_epoch_sequence_required,true);
+  assert.equal(archive.snapshot().sealed_acceptance_differential_attribution_required,true);
+  assert.equal(archive.snapshot().two_timescale_learning_separation_required,true);
+});
+
+test('Phase30 restart rejects self-rehashed sequence or acceptance-attribution forgery',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase30-exact-replay-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'frontier.json');
+  const evidence=phase30ExactSequenceEvidence('replay');
+  const entry=phase30ExactSequenceEntry(evidence,'replay');
+  const resolver=async()=>({handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
+  const archive=new RsiGenerationScopedOutcomeArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await archive.add({entry,handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.rows[0].evaluator_generation_seq=99;
+  raw.rows[0].sealed_acceptance_bundle.hidden_holdout_root_digest=labelDigest('forged-hidden-holdout');
+  const entryCore=structuredClone(raw.rows[0]);delete entryCore.entry_digest;
+  raw.rows[0].entry_digest=dg(entryCore);
+  const stateCore=structuredClone(raw);delete stateCore.state_digest;
+  raw.state_digest=dg(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(raw)}\n`,'utf8');
+  const restored=new RsiGenerationScopedOutcomeArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await assert.rejects(()=>restored.init(),/entry_digest_mismatch|generation_seq|hidden_holdout|acceptance/);
+});
+
+test('Phase30 exact-sequence frontier remains candidate-inaccessible and slow consolidation is external-only',()=>{
+  const evidence=phase30ExactSequenceEvidence('ownership');
+  assert.throws(()=>phase30ExactSequenceEntry(evidence,'ownership',{
+    external_learning_reviewer:false,
+    authored_by_candidate:true,
+  }),/external_learning_ownership_required/);
+  const root=rsiGenerationScopedOutcomeFrontierTrustRootSnapshot();
+  assert.equal(root.exact_evaluator_generation_sequence_binding_required,true);
+  assert.equal(root.exact_evaluation_epoch_sequence_binding_required,true);
+  assert.equal(root.evaluator_generation_history_anchor_binding_required,true);
+  assert.equal(root.sealed_acceptance_differential_attribution_required,true);
+  assert.equal(root.fast_generation_evidence_and_slow_consolidation_separation_required,true);
+  assert.equal(root.slow_consolidation_requires_external_validation,true);
+  assert.equal(root.scalar_global_winner_forbidden,true);
+  assert.equal(root.authority_effect,false);
 });
