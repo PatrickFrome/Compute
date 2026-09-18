@@ -153,7 +153,10 @@ export function createRsiArtifactEvaluationRoutingRequest({
   provenance_root_digest,
   evaluator_root_digest,
   evaluator_generation_digest,
+  evaluator_generation_seq,
+  evaluator_generation_history_anchor_digest,
   evaluation_epoch_digest,
+  evaluation_epoch_seq,
   sealed_task_set_digest,
   harness_digest,
   trial_worker_image_digest,
@@ -185,7 +188,10 @@ export function createRsiArtifactEvaluationRoutingRequest({
   const provenance=exactDigest(provenance_root_digest,'provenance_root');
   const evaluator=exactDigest(evaluator_root_digest,'evaluator_root');
   const generation=exactDigest(evaluator_generation_digest,'evaluator_generation');
+  const generationSeq=boundedInt(evaluator_generation_seq,'evaluator_generation_seq',Number.MAX_SAFE_INTEGER);
+  const generationHistoryAnchor=exactDigest(evaluator_generation_history_anchor_digest,'evaluator_generation_history_anchor');
   const epoch=exactDigest(evaluation_epoch_digest,'evaluation_epoch');
+  const epochSeq=boundedInt(evaluation_epoch_seq,'evaluation_epoch_seq',Number.MAX_SAFE_INTEGER);
   const sealedTasks=exactDigest(sealed_task_set_digest,'sealed_task_set');
   const harness=exactDigest(harness_digest,'harness');
   const worker=exactDigest(trial_worker_image_digest,'trial_worker_image');
@@ -198,7 +204,7 @@ export function createRsiArtifactEvaluationRoutingRequest({
   const securitySuite=exactDigest(security_suite_root_digest,'security_suite');
   const measurement=exactDigest(external_measurement_digest,'measurement');
   const proxy=exactDigest(proxy_score_digest,'proxy_score');
-  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,epoch,sealedTasks,harness,worker,resourceBudget,taskOrder,thresholdPolicy,stoppingPolicy,hiddenHoldout,safetySuite,securitySuite,measurement,proxy];
+  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,generationHistoryAnchor,epoch,sealedTasks,harness,worker,resourceBudget,taskOrder,thresholdPolicy,stoppingPolicy,hiddenHoldout,safetySuite,securitySuite,measurement,proxy];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_eval_router_independent_artifact_roots_required');
   const u=unit(uncertainty,'uncertainty');
   const close=unit(decision_closeness,'decision_closeness',{allowZero:true});
@@ -223,7 +229,10 @@ export function createRsiArtifactEvaluationRoutingRequest({
     provenance_root_digest:provenance,
     evaluator_root_digest:evaluator,
     evaluator_generation_digest:generation,
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:generationHistoryAnchor,
     evaluation_epoch_digest:epoch,
+    evaluation_epoch_seq:epochSeq,
     sealed_task_set_digest:sealedTasks,
     harness_digest:harness,
     trial_worker_image_digest:worker,
@@ -248,9 +257,15 @@ export function createRsiArtifactEvaluationRoutingRequest({
     fresh_budget_epoch_required:true,
     prior_budget_reuse_allowed:false,
     evaluator_generation_frozen:true,
+    evaluator_generation_sequence_external:true,
+    evaluation_epoch_sequence_external:true,
+    evaluator_generation_history_anchor_external:true,
     acceptance_assets_frozen:true,
     candidate_can_choose_evaluator:false,
     candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_evaluator_generation_seq:false,
+    candidate_can_choose_evaluation_epoch_seq:false,
+    candidate_can_choose_generation_history_anchor:false,
     candidate_can_choose_sealed_tasks:false,
     candidate_can_choose_harness:false,
     candidate_can_choose_trial_worker:false,
@@ -282,9 +297,15 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     ||request.fresh_budget_epoch_required!==true
     ||request.prior_budget_reuse_allowed!==false
     ||request.evaluator_generation_frozen!==true
+    ||request.evaluator_generation_sequence_external!==true
+    ||request.evaluation_epoch_sequence_external!==true
+    ||request.evaluator_generation_history_anchor_external!==true
     ||request.acceptance_assets_frozen!==true
     ||request.candidate_can_choose_evaluator!==false
     ||request.candidate_can_choose_evaluator_generation!==false
+    ||request.candidate_can_choose_evaluator_generation_seq!==false
+    ||request.candidate_can_choose_evaluation_epoch_seq!==false
+    ||request.candidate_can_choose_generation_history_anchor!==false
     ||request.candidate_can_choose_sealed_tasks!==false
     ||request.candidate_can_choose_harness!==false
     ||request.candidate_can_choose_trial_worker!==false
@@ -309,7 +330,10 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     provenance_root_digest:request.provenance_root_digest,
     evaluator_root_digest:request.evaluator_root_digest,
     evaluator_generation_digest:request.evaluator_generation_digest,
+    evaluator_generation_seq:request.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:request.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:request.evaluation_epoch_digest,
+    evaluation_epoch_seq:request.evaluation_epoch_seq,
     sealed_task_set_digest:request.sealed_task_set_digest,
     harness_digest:request.harness_digest,
     trial_worker_image_digest:request.trial_worker_image_digest,
@@ -553,7 +577,13 @@ export function rsiEvaluationBudgetRouterTrustRootSnapshot(){
     fresh_budget_epoch_required_for_materialized_artifacts:true,
     prior_budget_reuse_forbidden_for_materialized_artifacts:true,
     evaluator_generation_frozen_for_materialized_artifacts:true,
+    exact_evaluator_generation_sequence_binding_required:true,
+    exact_evaluation_epoch_sequence_binding_required:true,
+    evaluator_generation_history_anchor_binding_required:true,
     candidate_cannot_choose_evaluator_generation:true,
+    candidate_cannot_choose_generation_sequence:true,
+    candidate_cannot_choose_epoch_sequence:true,
+    candidate_cannot_choose_generation_history_anchor:true,
     recipe_distillation_verified_required:true,
     context_compatible_experience_required:true,
     negative_transfer_clearance_required:true,
