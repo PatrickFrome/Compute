@@ -1,4 +1,5 @@
 import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, utilityProcess } from 'electron';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -959,6 +960,31 @@ function attachShellBrainPort() {
   }
 }
 
+function rsiOutcomeAttributionForCommand(command) {
+  const binding = {
+    command_id: String(command?.command_id || '').trim().toLowerCase(),
+    action: String(command?.action || '').trim().toUpperCase(),
+    platform: command?.platform == null ? null : String(command.platform).trim().toUpperCase(),
+    effect_key: command?.effect_key == null ? null : String(command.effect_key).trim(),
+  };
+  if (!/^[0-9a-f-]{36}$/.test(binding.command_id) || !binding.action) {
+    throw new Error('rsi_outcome_command_binding_invalid');
+  }
+  const taskSignature = `sha256:${crypto.createHash('sha256').update(JSON.stringify(binding), 'utf8').digest('hex')}`;
+  return Object.freeze({
+    task_id: `browser.command.${binding.command_id}`,
+    task_signature_digest: taskSignature,
+    environment_fingerprint: `metaengine-browser-${app.getVersion()}`,
+    model_family: 'NATIVE_SUPERVISOR',
+    candidate_id: null,
+    candidate_sha: null,
+    proposal_digest: null,
+    skill_digests: [],
+    external_attribution: true,
+    authored_by_candidate: false,
+  });
+}
+
 async function initNativeSupervisor() {
   if (!nativeSupervisor) {
     const identity = new SupervisorDeviceIdentity({ statePath: supervisorIdentityPath(), secureStorage: safeStorage });
@@ -999,6 +1025,16 @@ async function initNativeSupervisor() {
       flushBrainWorkingMemory: async () => {
         if (!rsiObservationSidecar) return false;
         return rsiObservationSidecar.flush();
+      },
+      rsiResultReceiptReconciliation: true,
+      onRsiOutcomeReadback: async ({ command, readback }) => {
+        await initRsiRuntime();
+        if (!rsiRuntime || rsiRuntime.snapshot()?.state !== 'READY') return false;
+        await rsiRuntime.ingestBrowserOutcome({
+          readback,
+          attribution: rsiOutcomeAttributionForCommand(command),
+        });
+        return true;
       },
       controlStatePath: supervisorControlStatePath(),
     });
