@@ -82,6 +82,7 @@ export function createRsiRevisionScopeAdmission({
     source_sha:sourceSha,
     admission_id:boundedId(admission_id,'admission_id'),
     reliability_binding_digest:binding.binding_digest,
+    reliability_hidden_trial_set_digest:exactDigest(binding.hidden_repeated_trial_set_digest,'reliability_hidden_trial_set'),
     parent_skill_digest:binding.parent_skill_digest,
     successor_skill_digest:binding.successor_skill_digest,
     scope_candidate_digest:candidate.candidate_digest,
