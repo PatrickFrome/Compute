@@ -78,6 +78,27 @@ function verifyOutcomeEvidence({handoff_row,experiment_intent,experiment_receipt
   return Object.freeze({handoff_seq:hr.handoff_seq,handoff,intent,receipt});
 }
 
+function evaluationContractDigest(handoff){
+  return digest({
+    evaluator_root_digest:exactDigest(handoff.evaluator_root_digest,'contract_evaluator_root'),
+    evaluator_generation_digest:exactDigest(handoff.evaluator_generation_digest,'contract_evaluator_generation'),
+    evaluator_generation_seq:positiveInt(handoff.evaluator_generation_seq,'contract_generation_seq'),
+    evaluator_generation_history_anchor_digest:exactDigest(handoff.evaluator_generation_history_anchor_digest,'contract_generation_anchor'),
+    evaluation_epoch_digest:exactDigest(handoff.evaluation_epoch_digest,'contract_evaluation_epoch'),
+    evaluation_epoch_seq:positiveInt(handoff.evaluation_epoch_seq,'contract_epoch_seq'),
+    sealed_task_set_digest:exactDigest(handoff.sealed_task_set_digest,'contract_sealed_tasks'),
+    evaluation_harness_digest:exactDigest(handoff.evaluation_harness_digest,'contract_harness'),
+    trial_worker_image_digest:exactDigest(handoff.trial_worker_image_digest,'contract_trial_worker'),
+    resource_budget_digest:exactDigest(handoff.resource_budget_digest,'contract_resource_budget'),
+    task_order_digest:exactDigest(handoff.task_order_digest,'contract_task_order'),
+    acceptance_policy_digest:exactDigest(handoff.acceptance_policy_digest,'contract_acceptance_policy'),
+    stopping_policy_digest:exactDigest(handoff.stopping_policy_digest,'contract_stopping_policy'),
+    hidden_holdout_root_digest:exactDigest(handoff.hidden_holdout_root_digest,'contract_hidden_holdout'),
+    safety_suite_root_digest:exactDigest(handoff.safety_suite_root_digest,'contract_safety_suite'),
+    security_suite_root_digest:exactDigest(handoff.security_suite_root_digest,'contract_security_suite'),
+  });
+}
+
 function metricGains(receipt){
   return Object.freeze(Object.fromEntries(METRICS.map(k=>[k,receipt.treatment_metrics[k]-receipt.control_metrics[k]])));
 }
@@ -143,6 +164,7 @@ export function createRsiGenerationScopedOutcomeEntry({
     evaluator_generation_history_anchor_digest:exactDigest(evidence.handoff.evaluator_generation_history_anchor_digest,'generation_history_anchor'),
     evaluation_epoch_digest:evidence.handoff.evaluation_epoch_digest,
     evaluation_epoch_seq:positiveInt(evidence.handoff.evaluation_epoch_seq,'epoch_seq'),
+    evaluation_contract_digest:evaluationContractDigest(evidence.handoff),
     outcome_class:outcome,learning_kind:OUTCOME_KIND[outcome],
     niche_tags:niches,metric_gains:metricGains(evidence.receipt),
     summary_digest:exactDigest(summary_digest,'summary'),
@@ -154,7 +176,7 @@ export function createRsiGenerationScopedOutcomeEntry({
     ...learning,
     external_learning_reviewer:true,external_niche_owner:true,external_acceptance_owner:true,authored_by_candidate:false,
     exact_generation_sequence_bound:true,exact_epoch_sequence_bound:true,generation_history_anchor_bound:true,provenance_root_bound:true,
-    sealed_acceptance_lineage_bound:true,sealed_exogenous_acceptance_required_for_positive:true,
+    evaluation_contract_bound:true,sealed_acceptance_lineage_bound:true,sealed_exogenous_acceptance_required_for_positive:true,
     differential_reference_required:true,failure_attribution_required_for_rejected:true,
     candidate_can_view_sealed_acceptance:false,candidate_can_choose_reference:false,candidate_can_choose_niche:false,
     trajectory_summary_is_advisory:true,causal_attribution_is_advisory:true,
@@ -175,7 +197,7 @@ export function verifyRsiGenerationScopedOutcomeEntry(row,{handoff_row,experimen
   if(row.external_learning_reviewer!==true||row.external_niche_owner!==true||row.authored_by_candidate!==false
     ||row.external_acceptance_owner!==true
     ||row.exact_generation_sequence_bound!==true||row.exact_epoch_sequence_bound!==true||row.generation_history_anchor_bound!==true
-    ||row.provenance_root_bound!==true
+    ||row.provenance_root_bound!==true||row.evaluation_contract_bound!==true
     ||row.sealed_acceptance_lineage_bound!==true||row.sealed_exogenous_acceptance_required_for_positive!==true
     ||row.differential_reference_required!==true||row.failure_attribution_required_for_rejected!==true
     ||row.candidate_can_view_sealed_acceptance!==false||row.candidate_can_choose_reference!==false||row.candidate_can_choose_niche!==false
@@ -213,6 +235,7 @@ function archiveState(sourceSha,rows){
     rows,row_count:rows.length,outcome_counts:counts,generation_count:generations.length,epoch_count:epochs.length,niche_count:niches.length,
     append_only:true,durable_before_visible:true,source_outcome_receipts_stored_here:false,
     exact_generation_sequence_required:true,exact_epoch_sequence_required:true,generation_history_anchor_required:true,
+    fixed_evaluation_contract_required_for_dominance:true,cross_contract_dominance_forbidden:true,
     external_evidence_resolver_required:true,quality_diverse_frontier:true,scalar_global_winner_forbidden:true,
     cross_generation_dominance_forbidden:true,cross_epoch_dominance_forbidden:true,old_evidence_remains_addressable:true,
     sealed_acceptance_required_for_positive:true,differential_reference_required_for_conclusive_learning:true,
@@ -237,18 +260,18 @@ function frontierRows(rows){
   const groups=new Map();
   for(const row of supported){
     for(const niche of row.niche_tags){
-      const key=`${row.evaluator_generation_seq}|${row.evaluator_generation_digest}|${row.evaluator_generation_history_anchor_digest}|${row.evaluation_epoch_seq}|${row.evaluation_epoch_digest}|${niche}`;
+      const key=`${row.evaluator_generation_seq}|${row.evaluator_generation_digest}|${row.evaluator_generation_history_anchor_digest}|${row.evaluation_epoch_seq}|${row.evaluation_epoch_digest}|${row.evaluation_contract_digest}|${niche}`;
       const list=groups.get(key)||[];list.push(row);groups.set(key,list);
     }
   }
   const out=[];
   for(const [key,list] of groups){
-    const [generationSeq,generation,generationAnchor,epochSeq,epoch,niche]=key.split('|');
+    const [generationSeq,generation,generationAnchor,epochSeq,epoch,evaluationContract,niche]=key.split('|');
     const nondominated=list.filter(candidate=>!list.some(other=>other.entry_digest!==candidate.entry_digest&&dominates(other,candidate)));
     out.push(Object.freeze({
       evaluator_generation_seq:Number(generationSeq),evaluator_generation_digest:generation,
       evaluator_generation_history_anchor_digest:generationAnchor,
-      evaluation_epoch_seq:Number(epochSeq),evaluation_epoch_digest:epoch,niche,
+      evaluation_epoch_seq:Number(epochSeq),evaluation_epoch_digest:epoch,evaluation_contract_digest:evaluationContract,niche,
       entry_digests:Object.freeze(nondominated.map(r=>r.entry_digest).sort()),
       scalar_winner:null,
     }));
@@ -276,6 +299,7 @@ export class RsiGenerationScopedOutcomeArchive{
       if(p.schema!==RSI_GENERATION_SCOPED_OUTCOME_ARCHIVE_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
         ||p.append_only!==true||p.durable_before_visible!==true||p.source_outcome_receipts_stored_here!==false
         ||p.exact_generation_sequence_required!==true||p.exact_epoch_sequence_required!==true||p.generation_history_anchor_required!==true
+        ||p.fixed_evaluation_contract_required_for_dominance!==true||p.cross_contract_dominance_forbidden!==true
         ||p.external_evidence_resolver_required!==true||p.quality_diverse_frontier!==true||p.scalar_global_winner_forbidden!==true
         ||p.cross_generation_dominance_forbidden!==true||p.cross_epoch_dominance_forbidden!==true||p.old_evidence_remains_addressable!==true
         ||p.sealed_acceptance_required_for_positive!==true||p.differential_reference_required_for_conclusive_learning!==true
@@ -347,6 +371,7 @@ export class RsiGenerationScopedOutcomeArchive{
       outcome_counts:s.outcome_counts,generation_count:s.generation_count,epoch_count:s.epoch_count,niche_count:s.niche_count,
       append_only:true,durable_before_visible:true,source_outcome_receipts_stored_here:false,
       exact_generation_sequence_required:true,exact_epoch_sequence_required:true,generation_history_anchor_required:true,
+      fixed_evaluation_contract_required_for_dominance:true,cross_contract_dominance_forbidden:true,
       external_evidence_resolver_required:true,quality_diverse_frontier:true,
       scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,cross_epoch_dominance_forbidden:true,
       old_evidence_remains_addressable:true,sealed_acceptance_required_for_positive:true,
@@ -365,6 +390,7 @@ export function rsiGenerationScopedOutcomeFrontierTrustRootSnapshot(){
     phase29_handoff_binding_required:true,evaluator_generation_binding_required:true,evaluation_epoch_binding_required:true,
     evaluator_generation_sequence_binding_required:true,evaluation_epoch_sequence_binding_required:true,
     generation_history_anchor_binding_required:true,provenance_root_binding_required:true,
+    evaluation_contract_binding_required:true,fixed_evaluation_contract_required_for_dominance:true,
     supported_recipe_candidate_only:true,rejected_negative_constraint_only:true,no_improvement_low_yield_constraint_only:true,
     environment_inconclusive_diagnostic_only:true,ambiguity_diagnostic_only:true,
     raw_trajectory_storage_forbidden:true,hidden_holdout_copy_forbidden:true,evaluator_asset_copy_forbidden:true,
@@ -373,7 +399,7 @@ export function rsiGenerationScopedOutcomeFrontierTrustRootSnapshot(){
     differential_reference_required:true,candidate_can_choose_reference:false,candidate_can_choose_niche:false,
     failure_attribution_required_for_rejected:true,trajectory_summary_advisory_only:true,causal_attribution_advisory_only:true,
     quality_diverse_frontier_required:true,scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,
-    cross_epoch_dominance_forbidden:true,
+    cross_epoch_dominance_forbidden:true,cross_contract_dominance_forbidden:true,
     external_revalidation_required_for_cross_generation_comparison:true,old_evidence_remains_addressable:true,
     fast_candidate_loop_separate:true,slow_consolidation_loop_advisory_only:true,
     maturity_stats_advisory_only:true,automatic_plasticity_change_authorized:false,
