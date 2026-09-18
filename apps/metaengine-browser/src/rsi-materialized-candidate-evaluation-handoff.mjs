@@ -308,7 +308,10 @@ export function createRsiMaterializedCandidateExperimentIntent({
   });
   const checkedIntent=verifyRsiCandidateExperimentIntent(intent);
   if(checkedIntent.evaluator_generation_digest!==checkedHandoff.evaluator_generation_digest
+    ||checkedIntent.evaluator_generation_seq!==checkedHandoff.evaluator_generation_seq
+    ||checkedIntent.evaluator_generation_history_anchor_digest!==checkedHandoff.evaluator_generation_history_anchor_digest
     ||checkedIntent.evaluation_epoch_digest!==checkedHandoff.evaluation_epoch_digest
+    ||checkedIntent.evaluation_epoch_seq!==checkedHandoff.evaluation_epoch_seq
     ||checkedIntent.phase28_artifact_receipt_digest!==checkedHandoff.phase28_artifact_receipt_digest
     ||checkedIntent.provenance_root_digest!==checkedHandoff.provenance_root_digest
     ||checkedIntent.threshold_policy_digest!==checkedHandoff.acceptance_policy_digest
