@@ -64,6 +64,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-verifier-root-change-review.mjs',
   'apps/metaengine-browser/src/rsi-verifier-root-staging.mjs',
   'apps/metaengine-browser/src/rsi-verifier-root-activation-prepare.mjs',
+  'apps/metaengine-browser/src/rsi-verifier-root-activation-commit-review.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
