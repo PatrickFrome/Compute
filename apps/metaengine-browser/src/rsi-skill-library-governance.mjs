@@ -371,6 +371,7 @@ export function createRsiSkillLibraryGovernance({
   quarantine_false_positive_rate = 0.2,
   retirement_harmful_rate = 0.6,
   retirement_net_delta = 0.05,
+  admission_exposure_hold_skill_digests = [],
   external_library_owner = false,
   authored_by_candidate = true,
 } = {}) {
@@ -384,6 +385,17 @@ export function createRsiSkillLibraryGovernance({
 
   const activeCap = positiveInt(max_active_skills, 'max_active_skills', MAX_ACTIVE_SKILLS);
   const exploration = nonNegativeInt(exploration_slots, 'exploration_slots', activeCap);
+  if (!Array.isArray(admission_exposure_hold_skill_digests)) {
+    throw new Error('rsi_skill_governance_exposure_holds_invalid');
+  }
+  const exposureHolds = Object.freeze([...new Set(admission_exposure_hold_skill_digests.map((raw) =>
+    exactDigest(raw, 'exposure_hold_skill')
+  ))].sort());
+  if (exposureHolds.length !== admission_exposure_hold_skill_digests.length) {
+    throw new Error('rsi_skill_governance_exposure_hold_duplicate');
+  }
+  for (const skillDigest of exposureHolds) findEntry(checkedLibrary, skillDigest);
+  const exposureHoldSet = new Set(exposureHolds);
   const config = Object.freeze({
     max_active_skills: activeCap,
     exploration_slots: exploration,
@@ -420,7 +432,7 @@ export function createRsiSkillLibraryGovernance({
     else if (row.quarantine_required) terminal.set(row.skill_digest, 'QUARANTINED');
   }
 
-  const selectable = summaries.filter((row) => !terminal.has(row.skill_digest));
+  const selectable = summaries.filter((row) => !terminal.has(row.skill_digest) && !exposureHoldSet.has(row.skill_digest));
   const proven = selectable.filter((row) => row.proven_positive)
     .sort((a, b) => b.governance_score - a.governance_score || deterministicTie(a.skill_digest, governance_id).localeCompare(deterministicTie(b.skill_digest, governance_id)));
   const exploratory = selectable.filter((row) => !row.proven_positive)
@@ -443,12 +455,15 @@ export function createRsiSkillLibraryGovernance({
   }
 
   const entries = summaries.map((row) => {
-    const state = terminal.get(row.skill_digest) || chosen.get(row.skill_digest) || 'DORMANT_CAP';
+    const exposureHeld = exposureHoldSet.has(row.skill_digest);
+    const state = exposureHeld ? 'DORMANT_CAP' : (terminal.get(row.skill_digest) || chosen.get(row.skill_digest) || 'DORMANT_CAP');
     if (!STATES.has(state)) throw new Error('rsi_skill_governance_state_invalid');
     return Object.freeze({
       ...row,
       state,
       active_for_composition: state === 'ACTIVE' || state === 'EXPLORATION_ACTIVE',
+      admission_exposure_held: exposureHeld,
+      admission_exposure_hold_external_release_required: exposureHeld,
       retained_in_evidence_archive: true,
       hard_deleted: false,
       candidate_can_reactivate: false,
@@ -472,8 +487,14 @@ export function createRsiSkillLibraryGovernance({
     quarantined_count: entries.filter((row) => row.state === 'QUARANTINED').length,
     dormant_count: entries.filter((row) => row.state === 'DORMANT_CAP').length,
     lifecycle_evidence_count: lifecycle_evidence.length,
+    admission_exposure_hold_skill_digests: exposureHolds,
+    admission_exposure_hold_count: exposureHolds.length,
+    admission_exposure_holds_force_dormant: true,
+    admission_exposure_hold_release_is_external_governance_action: true,
     library_evidence_remains_append_only: true,
     active_view_is_bounded: true,
+    admission_exposure_holds_force_dormant: true,
+    admission_exposure_hold_release_is_external_governance_action: true,
     outcome_driven_retirement: true,
     premature_retirement_protected_by_minimum_evidence: true,
     meta_skill_authoring_prior_is_tiebreak_only: true,
@@ -504,6 +525,8 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
   if (
     governance.library_evidence_remains_append_only !== true
     || governance.active_view_is_bounded !== true
+    || governance.admission_exposure_holds_force_dormant !== true
+    || governance.admission_exposure_hold_release_is_external_governance_action !== true
     || governance.outcome_driven_retirement !== true
     || governance.premature_retirement_protected_by_minimum_evidence !== true
     || governance.meta_skill_authoring_prior_is_tiebreak_only !== true
@@ -522,6 +545,17 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
   if (!Array.isArray(governance.entries) || governance.entries.length !== checkedLibrary.entries.length) {
     throw new Error('rsi_skill_governance_entries_invalid');
   }
+  if (!Array.isArray(governance.admission_exposure_hold_skill_digests)
+    || governance.admission_exposure_hold_count !== governance.admission_exposure_hold_skill_digests.length) {
+    throw new Error('rsi_skill_governance_exposure_holds_invalid');
+  }
+  const exposureHoldSet = new Set(governance.admission_exposure_hold_skill_digests.map((raw) =>
+    exactDigest(raw, 'exposure_hold_skill')
+  ));
+  if (exposureHoldSet.size !== governance.admission_exposure_hold_skill_digests.length) {
+    throw new Error('rsi_skill_governance_exposure_hold_duplicate');
+  }
+  for (const skillDigest of exposureHoldSet) findEntry(checkedLibrary, skillDigest);
   if (governance.active_count > governance.config.max_active_skills) throw new Error('rsi_skill_governance_active_cap_exceeded');
 
   for (const row of governance.entries) {
@@ -529,6 +563,9 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     findEntry(checkedLibrary, row.skill_digest);
     const shouldActive = row.state === 'ACTIVE' || row.state === 'EXPLORATION_ACTIVE';
     if (row.active_for_composition !== shouldActive
+      || row.admission_exposure_held !== exposureHoldSet.has(row.skill_digest)
+      || row.admission_exposure_hold_external_release_required !== exposureHoldSet.has(row.skill_digest)
+      || (exposureHoldSet.has(row.skill_digest) && (row.state !== 'DORMANT_CAP' || row.active_for_composition !== false))
       || row.retained_in_evidence_archive !== true
       || row.hard_deleted !== false
       || row.candidate_can_reactivate !== false
