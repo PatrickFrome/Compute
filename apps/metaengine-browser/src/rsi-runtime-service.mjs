@@ -41,12 +41,26 @@ import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integr
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
+import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
+import { createRsiEpisodeDevosCandidateRequest, rsiEpisodeDevosBridgeTrustRootSnapshot } from './rsi-episode-devos-bridge.mjs';
+import {
+  createRsiEpisodeEvaluationEvidenceBundle,
+  verifyRsiEpisodeEvaluationEvidenceBundle,
+  rsiEpisodeEvaluationIngestTrustRootSnapshot,
+} from './rsi-episode-evaluation-ingest.mjs';
+import {
+  createRsiAutonomousEpisodePlan,
+  verifyRsiAutonomousEpisodePlan,
+  rsiAutonomousEpisodeControllerTrustRootSnapshot,
+} from './rsi-autonomous-episode-controller.mjs';
+import { createRsiDevosAdmissionEnvelopes, rsiDevosAdmissionAdapterTrustRootSnapshot } from './rsi-devos-admission-adapter.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const DIGEST64 = /^[0-9a-f]{64}$/;
+const MAX_AUTONOMOUS_PREPARED_REQUESTS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -104,6 +118,11 @@ function trustRoots() {
     fixed_skeleton_mutation: rsiFixedSkeletonTrustRootSnapshot(),
     search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
+    episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
+    episode_devos_bridge: rsiEpisodeDevosBridgeTrustRootSnapshot(),
+    episode_evaluation_ingest: rsiEpisodeEvaluationIngestTrustRootSnapshot(),
+    autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
+    devos_admission_adapter: rsiDevosAdmissionAdapterTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -120,6 +139,7 @@ export class RsiRuntimeService {
   #ledger;
   #experienceGate;
   #improvementFrontier;
+  #episodes;
   #archive;
   #observer;
   #verifiedArchive;
@@ -129,6 +149,7 @@ export class RsiRuntimeService {
   #lastObservationDigest = null;
   #lastObservationAt = null;
   #promotionNominationCount = 0;
+  #preparedRequestDigests = new Set();
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -141,11 +162,31 @@ export class RsiRuntimeService {
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
     this.#verifiedArchive = new RsiVerifiedEvolutionArchive({ clock });
     this.#roots = trustRoots();
+    this.#episodes = new RsiEpisodeOrchestrator({
+      source_sha: this.#sourceSha,
+      trust_root_set_digest: digest(this.#roots),
+    });
   }
 
   async start() {
     if (this.#running) return this.snapshot();
     await this.#ledger.init();
+    let replayCursor = 0;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: replayCursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
+        if (row?.type === 'RSI_AUTONOMOUS_EPISODE_REQUEST_PREPARED' && row?.payload?.request_digest) {
+          if (this.#preparedRequestDigests.size >= MAX_AUTONOMOUS_PREPARED_REQUESTS) {
+            throw new Error('rsi_runtime_autonomous_request_replay_capacity_exhausted');
+          }
+          this.#preparedRequestDigests.add(exactDigest(row.payload.request_digest, 'autonomous_request_digest'));
+        }
+      }
+      replayCursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
       runtime_schema: RSI_RUNTIME_SERVICE_SCHEMA,
@@ -155,6 +196,7 @@ export class RsiRuntimeService {
       experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
       improvement_frontier_schema: RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
+      episode_orchestration_mode: 'DURABLE_EVENT_SOURCED_ZERO_AUTHORITY',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
       self_update_authority: false,
@@ -217,6 +259,203 @@ export class RsiRuntimeService {
     if (!admission) return false;
     await this.#persistObservationAdmission(admission);
     return true;
+  }
+
+  async openEpisode(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareOpen(input);
+    await this.#ledger.append('RSI_EPISODE_OPENED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  async registerEpisodeCandidate(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareCandidate(input);
+    await this.#ledger.append('RSI_EPISODE_CANDIDATE_REGISTERED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  async recordEpisodeEvidence(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareEvidence(input);
+    await this.#ledger.append('RSI_EPISODE_EVIDENCE_RECORDED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  episodeNominationReadiness(input = {}) {
+    this.#assertRunning();
+    return this.#episodes.nominationReadiness(input);
+  }
+
+  async ingestEpisodeEvaluationBundle(input = {}) {
+    this.#assertRunning();
+    const episodeId = String(input.episode_id || '').trim();
+    const candidateId = String(input.candidate_id || '').trim().toLowerCase();
+    const episode = this.#episodes.episode(episodeId);
+    const bundle = createRsiEpisodeEvaluationEvidenceBundle({
+      ...input,
+      episode,
+      candidate_id: candidateId,
+    });
+    verifyRsiEpisodeEvaluationEvidenceBundle(bundle);
+
+    for (const evidence of bundle.evidence) {
+      const current = this.#episodes.episode(episodeId).candidates?.[candidateId]?.evidence?.[evidence.evidence_kind] || null;
+      if (current) {
+        if (current.evidence_digest !== evidence.evidence_digest || current.result !== evidence.result) {
+          throw new Error(`rsi_runtime_episode_evaluation_conflict:${evidence.evidence_kind}`);
+        }
+        continue;
+      }
+      await this.recordEpisodeEvidence({
+        episode_id: episodeId,
+        candidate_id: candidateId,
+        evidence_id: evidence.evidence_id,
+        evidence_kind: evidence.evidence_kind,
+        evidence_digest: evidence.evidence_digest,
+        result: evidence.result,
+        source_sha: bundle.source_sha,
+        trust_root_set_digest: bundle.trust_root_set_digest,
+        ambiguous_effect: evidence.ambiguous_effect,
+      });
+    }
+
+    await this.#ledger.append('RSI_EPISODE_EVALUATION_BUNDLE_ACCEPTED', {
+      episode_id: bundle.episode_id,
+      candidate_id: bundle.candidate_id,
+      candidate_sha: bundle.candidate_sha,
+      bundle_digest: bundle.bundle_digest,
+      evidence: bundle.evidence.map((row) => ({
+        evidence_kind: row.evidence_kind,
+        evidence_digest: row.evidence_digest,
+        source_artifact_digest: row.source_artifact_digest,
+        result: row.result,
+      })),
+      external_promotion_gate_still_required: true,
+      authority_effect: false,
+    });
+
+    return Object.freeze({
+      bundle,
+      readiness: this.#episodes.nominationReadiness({ episode_id: episodeId, candidate_id: candidateId }),
+      authority_effect: false,
+      automatic_retry_allowed: false,
+    });
+  }
+
+  async prepareAutonomousEpisodeCycle(input = {}) {
+    this.#assertRunning();
+    const plan = createRsiAutonomousEpisodePlan(input);
+    verifyRsiAutonomousEpisodePlan(plan);
+
+    let episode;
+    if (!this.#episodes.hasEpisode(plan.episode_id)) {
+      episode = await this.openEpisode(plan.episode_open_spec);
+    } else {
+      episode = this.#episodes.episode(plan.episode_id);
+      if (
+        episode.source_sha !== plan.source_sha
+        || episode.observation_digest !== plan.observation_digest
+        || episode.opportunity_id !== plan.opportunity_id
+        || episode.hypothesis_digest !== plan.hypothesis_digest
+        || episode.mutation_surface !== plan.mutation_surface
+        || episode.search_context_digest !== plan.search_context_digest
+        || episode.max_candidates !== plan.max_candidates
+      ) {
+        throw new Error('rsi_runtime_autonomous_episode_identity_conflict');
+      }
+    }
+
+    const requests = [];
+    let newlyPersisted = 0;
+    for (const variantPlan of plan.variant_plans) {
+      const request = createRsiEpisodeDevosCandidateRequest({
+        episode,
+        experiment_plan: variantPlan,
+        request_generation: 1,
+      });
+      const requestDigest = exactDigest(request.request_digest, 'autonomous_request_digest');
+      const alreadyPrepared = this.#preparedRequestDigests.has(requestDigest);
+      if (!alreadyPrepared) {
+        if (this.#preparedRequestDigests.size >= MAX_AUTONOMOUS_PREPARED_REQUESTS) {
+          throw new Error('rsi_runtime_autonomous_request_capacity_exhausted');
+        }
+        await this.#ledger.append('RSI_AUTONOMOUS_EPISODE_REQUEST_PREPARED', {
+          episode_id: plan.episode_id,
+          controller_plan_digest: plan.controller_plan_digest,
+          routing_digest: plan.routing_digest,
+          request_id: request.request_id,
+          request_digest: request.request_digest,
+          experiment_id: request.experiment_id,
+          target_branch: request.target_branch,
+          variant_id: variantPlan.search_variant.variant_id,
+          variant_digest: variantPlan.search_variant.variant_digest,
+          search_mode: variantPlan.search_variant.search_mode,
+          allocation_role: variantPlan.search_variant.allocation_role,
+          proposal_budget_units: variantPlan.search_variant.proposal_budget_units,
+          dispatch_authorized: false,
+          authority_effect: false,
+        });
+        this.#preparedRequestDigests.add(requestDigest);
+        newlyPersisted += 1;
+      }
+      requests.push(Object.freeze({
+        request,
+        search_variant: variantPlan.search_variant,
+        already_prepared: alreadyPrepared,
+        scheduler_action_authorized: false,
+        authority_effect: false,
+      }));
+    }
+
+    return Object.freeze({
+      schema: 'metaengine.rsi.autonomous-episode-runtime-cycle.v1',
+      controller_plan: plan,
+      episode: this.#episodes.episode(plan.episode_id),
+      requests: Object.freeze(requests),
+      request_count: requests.length,
+      newly_persisted_request_count: newlyPersisted,
+      existing_devos_scheduler_required: true,
+      scheduler_action_authorized: false,
+      task_created: false,
+      lease_created: false,
+      command_created: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+  }
+
+  async prepareAutonomousDevosAdmissions({ workspace_id, priority = 80, ...cycleInput } = {}) {
+    this.#assertRunning();
+    const cycle = await this.prepareAutonomousEpisodeCycle(cycleInput);
+    const envelopes = createRsiDevosAdmissionEnvelopes({
+      runtime_cycle: cycle,
+      workspace_id,
+      priority,
+    });
+    return Object.freeze({
+      schema: 'metaengine.rsi.autonomous-devos-admission-preparation.v1',
+      cycle,
+      envelopes,
+      envelope_count: envelopes.length,
+      rpc_name: 'rsi_devos_admit_prepared_request_v1',
+      rpc_invoked: false,
+      existing_devos_scheduler_required: true,
+      service_role_execution_required: true,
+      scheduler_action_authorized: false,
+      task_created: false,
+      lease_created: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
   }
 
   async proposeCandidate(input = {}) {
@@ -323,7 +562,7 @@ export class RsiRuntimeService {
     const entries = this.#improvementFrontier.entries({ limit: bounded });
     return Object.freeze({
       schema: 'metaengine.rsi.runtime-control-projection.v1',
-      state: this.#state,
+      state: this.#running ? 'READY' : 'CREATED',
       source_sha: this.#sourceSha,
       last_observation_digest: this.#lastObservationDigest,
       last_observation_at: this.#lastObservationAt,
@@ -381,6 +620,9 @@ export class RsiRuntimeService {
       experience_gate: this.#experienceGate.snapshot(),
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
+      autonomous_prepared_request_count: this.#preparedRequestDigests.size,
+      autonomous_prepared_request_capacity: MAX_AUTONOMOUS_PREPARED_REQUESTS,
+      episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
       candidate_effect_executor_exposed: false,
