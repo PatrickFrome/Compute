@@ -35,9 +35,13 @@ export function createRsiSharedExperienceHypothesis({
   origin_candidate_digest,
   origin_lineage_digest,
   sanitized_summary_digest,
+  distilled_recipe_digest,
   supporting_evidence_digest,
   counterevidence_digest,
   falsification_test_digest,
+  source_context_digest,
+  local_revalidation_protocol_digest,
+  negative_transfer_probe_digest,
   scope_tags,
   recipient_group_tags,
   evaluator_cost_units,
@@ -54,9 +58,13 @@ export function createRsiSharedExperienceHypothesis({
     exactDigest(origin_candidate_digest,'origin_candidate'),
     exactDigest(origin_lineage_digest,'origin_lineage'),
     exactDigest(sanitized_summary_digest,'sanitized_summary'),
+    exactDigest(distilled_recipe_digest,'distilled_recipe'),
     exactDigest(supporting_evidence_digest,'supporting_evidence'),
     exactDigest(counterevidence_digest,'counterevidence'),
     exactDigest(falsification_test_digest,'falsification_test'),
+    exactDigest(source_context_digest,'source_context'),
+    exactDigest(local_revalidation_protocol_digest,'local_revalidation_protocol'),
+    exactDigest(negative_transfer_probe_digest,'negative_transfer_probe'),
   ];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_experience_independent_evidence_roots_required');
   const cost=boundedPositiveInt(evaluator_cost_units,'evaluator_cost_units',MAX_EVALUATOR_COST_UNITS);
@@ -69,9 +77,13 @@ export function createRsiSharedExperienceHypothesis({
     origin_candidate_digest:roots[0],
     origin_lineage_digest:roots[1],
     sanitized_summary_digest:roots[2],
-    supporting_evidence_digest:roots[3],
-    counterevidence_digest:roots[4],
-    falsification_test_digest:roots[5],
+    distilled_recipe_digest:roots[3],
+    supporting_evidence_digest:roots[4],
+    counterevidence_digest:roots[5],
+    falsification_test_digest:roots[6],
+    source_context_digest:roots[7],
+    local_revalidation_protocol_digest:roots[8],
+    negative_transfer_probe_digest:roots[9],
     scope_tags:tags(scope_tags,'scope_tags'),
     recipient_group_tags:tags(recipient_group_tags,'recipient_group_tags'),
     evaluator_cost_units:cost,
@@ -85,6 +97,9 @@ export function createRsiSharedExperienceHypothesis({
     candidate_can_mark_hypothesis_verified:false,
     candidate_can_expand_scope:false,
     candidate_can_choose_recipients:false,
+    candidate_can_choose_revalidation_protocol:false,
+    candidate_can_suppress_counterevidence:false,
+    distilled_recipe_is_advisory_only:true,
     hypothesis_is_mutation_authority:false,
     hypothesis_is_evaluation_authority:false,
   });
@@ -98,6 +113,8 @@ export function verifyRsiSharedExperienceHypothesis(hypothesis){
     ||hypothesis.hidden_data_disclosed!==false||hypothesis.raw_benchmark_content_included!==false
     ||hypothesis.raw_verifier_assets_included!==false||hypothesis.candidate_can_mark_hypothesis_verified!==false
     ||hypothesis.candidate_can_expand_scope!==false||hypothesis.candidate_can_choose_recipients!==false
+    ||hypothesis.candidate_can_choose_revalidation_protocol!==false||hypothesis.candidate_can_suppress_counterevidence!==false
+    ||hypothesis.distilled_recipe_is_advisory_only!==true
     ||hypothesis.hypothesis_is_mutation_authority!==false||hypothesis.hypothesis_is_evaluation_authority!==false)throw new Error('rsi_experience_hypothesis_policy_invalid');
   const canonical=createRsiSharedExperienceHypothesis({
     hypothesis_id:hypothesis.hypothesis_id,
@@ -105,9 +122,13 @@ export function verifyRsiSharedExperienceHypothesis(hypothesis){
     origin_candidate_digest:hypothesis.origin_candidate_digest,
     origin_lineage_digest:hypothesis.origin_lineage_digest,
     sanitized_summary_digest:hypothesis.sanitized_summary_digest,
+    distilled_recipe_digest:hypothesis.distilled_recipe_digest,
     supporting_evidence_digest:hypothesis.supporting_evidence_digest,
     counterevidence_digest:hypothesis.counterevidence_digest,
     falsification_test_digest:hypothesis.falsification_test_digest,
+    source_context_digest:hypothesis.source_context_digest,
+    local_revalidation_protocol_digest:hypothesis.local_revalidation_protocol_digest,
+    negative_transfer_probe_digest:hypothesis.negative_transfer_probe_digest,
     scope_tags:hypothesis.scope_tags,
     recipient_group_tags:hypothesis.recipient_group_tags,
     evaluator_cost_units:hypothesis.evaluator_cost_units,
@@ -129,6 +150,9 @@ export function createRsiSharedExperienceAdmission({
   counterevidence_reviewed,
   falsification_test_precommitted,
   hidden_data_non_disclosure_pass,
+  recipe_distillation_verified,
+  context_compatibility_pass,
+  negative_transfer_probe_pass,
   scope_precision_pass,
   evaluator_budget_available,
   marginal_information_gain_certified,
@@ -142,6 +166,9 @@ export function createRsiSharedExperienceAdmission({
   if(counterevidence_reviewed!==true)blockers.push('COUNTEREVIDENCE_NOT_REVIEWED');
   if(falsification_test_precommitted!==true)blockers.push('FALSIFICATION_TEST_NOT_PRECOMMITTED');
   if(hidden_data_non_disclosure_pass!==true)blockers.push('HIDDEN_DATA_BOUNDARY_FAILURE');
+  if(recipe_distillation_verified!==true)blockers.push('RECIPE_DISTILLATION_UNVERIFIED');
+  if(context_compatibility_pass!==true)blockers.push('CONTEXT_COMPATIBILITY_FAILURE');
+  if(negative_transfer_probe_pass!==true)blockers.push('NEGATIVE_TRANSFER_DETECTED');
   if(scope_precision_pass!==true)blockers.push('SCOPE_PRECISION_FAILURE');
   if(evaluator_budget_available!==true)blockers.push('EVALUATOR_BUDGET_UNAVAILABLE');
   if(marginal_information_gain_certified!==true)blockers.push('LOW_INFORMATION_GAIN');
@@ -155,9 +182,23 @@ export function createRsiSharedExperienceAdmission({
     origin_candidate_digest:checked.origin_candidate_digest,
     origin_lineage_digest:checked.origin_lineage_digest,
     sanitized_summary_digest:checked.sanitized_summary_digest,
+    distilled_recipe_digest:checked.distilled_recipe_digest,
     supporting_evidence_digest:checked.supporting_evidence_digest,
     counterevidence_digest:checked.counterevidence_digest,
     falsification_test_digest:checked.falsification_test_digest,
+    source_context_digest:checked.source_context_digest,
+    local_revalidation_protocol_digest:checked.local_revalidation_protocol_digest,
+    negative_transfer_probe_digest:checked.negative_transfer_probe_digest,
+    supporting_evidence_verified:supporting_evidence_verified===true,
+    counterevidence_reviewed:counterevidence_reviewed===true,
+    falsification_test_precommitted:falsification_test_precommitted===true,
+    hidden_data_non_disclosure_pass:hidden_data_non_disclosure_pass===true,
+    recipe_distillation_verified:recipe_distillation_verified===true,
+    context_compatibility_pass:context_compatibility_pass===true,
+    negative_transfer_probe_pass:negative_transfer_probe_pass===true,
+    scope_precision_pass:scope_precision_pass===true,
+    evaluator_budget_available:evaluator_budget_available===true,
+    marginal_information_gain_certified:marginal_information_gain_certified===true,
     scope_tags:checked.scope_tags,
     recipient_group_tags:checked.recipient_group_tags,
     evaluator_cost_units:checked.evaluator_cost_units,
@@ -190,9 +231,34 @@ export function verifyRsiSharedExperienceAdmission(admission,{hypothesis}={}){
     ||admission.consumer_must_revalidate_locally!==true||admission.consumer_must_preserve_source_provenance!==true)throw new Error('rsi_experience_admission_policy_invalid');
   const checked=verifyRsiSharedExperienceHypothesis(hypothesis);
   if(admission.hypothesis_digest!==checked.hypothesis_digest)throw new Error('rsi_experience_admission_binding_mismatch');
-  const clone=structuredClone(admission);delete clone.admission_digest;
-  if(digest(clone)!==exactDigest(admission.admission_digest,'admission'))throw new Error('rsi_experience_admission_digest_mismatch');
-  return Object.freeze(structuredClone(admission));
+  const canonical=createRsiSharedExperienceAdmission({
+    admission_id:admission.admission_id,
+    hypothesis:checked,
+    supporting_evidence_verified:admission.supporting_evidence_verified,
+    counterevidence_reviewed:admission.counterevidence_reviewed,
+    falsification_test_precommitted:admission.falsification_test_precommitted,
+    hidden_data_non_disclosure_pass:admission.hidden_data_non_disclosure_pass,
+    recipe_distillation_verified:admission.recipe_distillation_verified,
+    context_compatibility_pass:admission.context_compatibility_pass,
+    negative_transfer_probe_pass:admission.negative_transfer_probe_pass,
+    scope_precision_pass:admission.scope_precision_pass,
+    evaluator_budget_available:admission.evaluator_budget_available,
+    marginal_information_gain_certified:admission.marginal_information_gain_certified,
+    external_reviewer:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.admission_digest!==exactDigest(admission.admission_digest,'admission'))throw new Error('rsi_experience_admission_digest_mismatch');
+  return canonical;
+}
+
+function verifyStoredBusRow(row,sourceSha){
+  if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('rsi_experience_bus_row_invalid');
+  const h=verifyRsiSharedExperienceHypothesis(row.hypothesis);
+  const a=verifyRsiSharedExperienceAdmission(row.admission,{hypothesis:h});
+  const expected=exactSha(sourceSha,'bus_source');
+  if(row.source_sha!==expected||h.source_sha!==expected||a.source_sha!==expected)throw new Error('rsi_experience_bus_source_mismatch');
+  if(a.hypothesis_digest!==h.hypothesis_digest)throw new Error('rsi_experience_bus_binding_mismatch');
+  return Object.freeze({source_sha:expected,hypothesis:structuredClone(h),admission:structuredClone(a)});
 }
 
 function busState(sourceSha,rows){
@@ -238,19 +304,22 @@ export class RsiSharedExperienceBus{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'bus'))throw new Error('rsi_experience_bus_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_experience_bus_rows_invalid');
       const ids=new Set();
-      for(const row of p.rows){
-        if(row.source_sha!==this.#sourceSha)throw new Error('rsi_experience_bus_source_mismatch');
-        const hc=structuredClone(row.hypothesis);delete hc.hypothesis_digest;if(digest(hc)!==exactDigest(row.hypothesis.hypothesis_digest,'bus_hypothesis'))throw new Error('rsi_experience_bus_hypothesis_digest_mismatch');
-        const ac=structuredClone(row.admission);delete ac.admission_digest;if(digest(ac)!==exactDigest(row.admission.admission_digest,'bus_admission'))throw new Error('rsi_experience_bus_admission_digest_mismatch');
-        if(row.admission.hypothesis_digest!==row.hypothesis.hypothesis_digest)throw new Error('rsi_experience_bus_binding_mismatch');
-        if(ids.has(row.hypothesis.hypothesis_digest))throw new Error('rsi_experience_bus_hypothesis_duplicate');
-        ids.add(row.hypothesis.hypothesis_digest);
-      }
-      this.#rows=p.rows;
+      const checkedRows=p.rows.map((row)=>{
+        const checked=verifyStoredBusRow(row,this.#sourceSha);
+        if(ids.has(checked.hypothesis.hypothesis_digest))throw new Error('rsi_experience_bus_hypothesis_duplicate');
+        ids.add(checked.hypothesis.hypothesis_digest);
+        return checked;
+      });
+      const canonical=busState(this.#sourceSha,checkedRows);
+      if(p.row_count!==canonical.row_count||p.eligible_count!==canonical.eligible_count
+        ||JSON.stringify(p.represented_recipient_groups)!==JSON.stringify(canonical.represented_recipient_groups)
+        ||JSON.stringify(p.represented_scopes)!==JSON.stringify(canonical.represented_scopes)
+        ||p.total_admitted_evaluator_cost_units!==canonical.total_admitted_evaluator_cost_units)throw new Error('rsi_experience_bus_summary_mismatch');
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){const s=busState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
+  async #persist(rows=this.#rows){const s=busState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
   async add({hypothesis,admission}={}){
     if(!this.#initialized)throw new Error('rsi_experience_bus_not_initialized');
     const h=verifyRsiSharedExperienceHypothesis(hypothesis);
@@ -262,8 +331,10 @@ export class RsiSharedExperienceBus{
       return zero({state:'IDEMPOTENT',admission_digest:a.admission_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_experience_bus_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,hypothesis:structuredClone(h),admission:structuredClone(a)}));
-    await this.#persist();
+    const nextRow=verifyStoredBusRow({source_sha:this.#sourceSha,hypothesis:structuredClone(h),admission:structuredClone(a)},this.#sourceSha);
+    const preview=Object.freeze([...this.#rows,nextRow]);
+    await this.#persist(preview);
+    this.#rows=preview;
     return zero({state:a.state,admission_digest:a.admission_digest});
   }
   eligibleForRecipient(recipientTag){
@@ -282,6 +353,10 @@ export function rsiSharedExperienceBusTrustRootSnapshot(){
     evidence_backed_hypothesis_required:true,
     counterevidence_required:true,
     precommitted_falsification_test_required:true,
+    verified_recipe_distillation_required:true,
+    context_compatibility_gate_required:true,
+    negative_transfer_probe_required:true,
+    local_revalidation_protocol_digest_required:true,
     hidden_data_non_disclosure_required:true,
     raw_benchmark_content_sharing_forbidden:true,
     raw_verifier_asset_sharing_forbidden:true,
