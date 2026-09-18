@@ -439,6 +439,7 @@ export class RsiRuntimeService {
     });
     await this.#ledger.append('RSI_CONTEXT_CANDIDATE_BUILD_PLANNED', {
       episode_id: String(episode_id || '').trim(),
+      synthesis_request: request,
       synthesis_request_digest: request.synthesis_request_digest,
       mutation_proposal: mutationProposal,
       context_candidate_build: build,
