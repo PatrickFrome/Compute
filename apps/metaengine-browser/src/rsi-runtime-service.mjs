@@ -1334,6 +1334,72 @@ export class RsiRuntimeService {
     return convergence;
   }
 
+  async recordPostDeploymentLearning({
+    release_authority_convergence_digest,
+    assessment,
+  } = {}) {
+    this.#assertRunning();
+    const convergenceDigest = String(release_authority_convergence_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(convergenceDigest)) throw new Error('rsi_runtime_release_authority_convergence_digest_invalid');
+    if (this.#postDeploymentLearningConvergenceDigests.has(convergenceDigest)) {
+      throw new Error('rsi_runtime_post_deployment_learning_already_recorded');
+    }
+    const convergence = this.#findReleaseAuthorityConvergenceByDigest(convergenceDigest);
+    if (!convergence) throw new Error('rsi_runtime_release_authority_convergence_not_persisted');
+    verifyRsiReleaseAuthorityConvergence(convergence);
+    if (convergence.candidate_sha !== this.#sourceSha) {
+      throw new Error('rsi_runtime_post_deployment_source_not_converged_candidate');
+    }
+    const reconciliation = this.#findReleaseEffectReconciliationByDigest(convergence.release_effect_reconciliation_digest);
+    if (!reconciliation) throw new Error('rsi_runtime_release_effect_reconciliation_not_persisted');
+    verifyRsiReleaseEffectReconciliation(reconciliation);
+    const releaseHandoff = this.#findReleaseAuthorityHandoffByDigest(convergence.release_handoff_digest);
+    if (!releaseHandoff) throw new Error('rsi_runtime_release_authority_handoff_not_persisted');
+    const review = this.#findExternalPromotionReviewByResultDigest(convergence.promotion_review_result_digest);
+    if (!review) throw new Error('rsi_runtime_external_promotion_review_result_not_persisted');
+    verifyRsiExternalPromotionReviewResult(review.result, review.request);
+    verifyRsiReleaseAuthorityHandoff(releaseHandoff, review.result, review.request);
+
+    const receipt = createRsiPostDeploymentLearningReceipt({
+      source_sha: this.#sourceSha,
+      release_authority_convergence: convergence,
+      release_effect_reconciliation: reconciliation,
+      release_handoff: releaseHandoff,
+      promotion_review_result: review.result,
+      promotion_review_request: review.request,
+      assessment,
+    });
+    const admission = createRsiPostDeploymentExperienceAdmission({
+      learning_receipt: receipt,
+      release_handoff: releaseHandoff,
+    });
+    verifyRsiPostDeploymentExperienceAdmission(admission);
+    const nextGraph = applyRsiPostDeploymentExperienceAdmission({
+      previous_snapshot: this.#experienceGraphSnapshot,
+      admission,
+    });
+
+    await this.#ledger.append('RSI_POST_DEPLOYMENT_LEARNING_RECORDED', {
+      post_deployment_learning_admission: admission,
+      release_authority_convergence_digest: convergenceDigest,
+      candidate_can_self_reward: false,
+      candidate_global_score_delta: null,
+      reward_scalar: null,
+      deployment_success_is_contextual_not_global_truth: true,
+      graph_applied_after_durable_append: true,
+      release_authority_advanced_by_learning: false,
+      self_update_invoked_by_learning: false,
+      authority_effect: false,
+    });
+
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#postDeploymentLearningConvergenceDigests.add(convergenceDigest);
+    this.#postDeploymentLearningCount += 1;
+    this.#lastPostDeploymentLearningAdmissionDigest = admission.admission_digest;
+    this.#lastPostDeploymentLearningCaseDigest = admission.experience_case.case_digest;
+    return admission;
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1631,6 +1697,25 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      post_deployment_learning: Object.freeze({
+        count: this.#postDeploymentLearningCount,
+        last_admission_digest: this.#lastPostDeploymentLearningAdmissionDigest,
+        last_case_digest: this.#lastPostDeploymentLearningCaseDigest,
+        external_release_authority_convergence_required: true,
+        running_source_must_equal_converged_candidate: true,
+        deployment_success_is_contextual_not_global_truth: true,
+        candidate_can_self_reward: false,
+        candidate_global_score_delta: null,
+        reward_scalar: null,
+        existing_experience_graph_only: true,
+        release_authority_advanced_by_learning: false,
+        self_update_invoked_by_learning: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       release_authority_convergence: Object.freeze({
         count: this.#releaseAuthorityConvergenceCount,
         last_digest: this.#lastReleaseAuthorityConvergenceDigest,
