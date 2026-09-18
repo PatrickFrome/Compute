@@ -7,6 +7,11 @@ import test from 'node:test';
 import { BROWSER_BRAIN_WORKING_MEMORY_SCHEMA } from '../src/browser-brain-working-memory.mjs';
 import { RSI_HARD_INVARIANTS } from '../src/rsi-shadow-core.mjs';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
+import {
+  createRsiSkillCapsule,
+  createRsiSkillEvidence,
+  createRsiVerifiedSkillLibrary,
+} from '../src/rsi-verified-skill-library.mjs';
 
 test('unified RSI runtime binds the full converged trust-root set with zero authority', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-'));
@@ -387,6 +392,156 @@ test('runtime closes verified Browser outcome -> external step credit -> durable
     assert.equal(snapshot.command_attribution.consumed_count, 1);
     assert.equal(snapshot.execution_authority, false);
     assert.equal(snapshot.authority_effect, false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test('runtime adopts verified skills, reconciles credited pending evidence, and exposes only governed activation', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-skill-loop-'));
+  try {
+    const source = 'a'.repeat(40);
+    const d = (char) => `sha256:${char.repeat(64)}`;
+    const skill = createRsiSkillCapsule({
+      skill_id: 'skill.runtime.integrated',
+      version: 1,
+      parent_skill_digest: null,
+      source_candidate_sha: 'b'.repeat(40),
+      role: 'ANALYZER',
+      input_schema_digest: d('1'),
+      output_schema_digest: d('2'),
+      implementation_digest: d('3'),
+      components: [{ component_id: 'skill.runtime.integrated.component', artifact_digest: d('4'), kind: 'TYPED_TRANSFORM' }],
+      capabilities: ['READ_VERIFIED_CONTEXT','ANALYZE_FAILURE_CODES'],
+      max_context_tokens: 2048,
+      max_output_tokens: 512,
+      max_invocations: 2,
+      external_builder: true,
+      authored_by_candidate: false,
+    });
+    const skillEvidence = createRsiSkillEvidence({
+      capsule: skill,
+      hidden_holdout_digest: d('5'),
+      evaluator_root_digest: d('6'),
+      unit_test_digest: d('7'),
+      runtime_feedback_digest: d('8'),
+      attempt_count: 12,
+      success_count: 10,
+      hard_invariants_pass: true,
+      verified_for_library: true,
+      evidence_refs: ['VERIFY_skill.runtime.integrated'],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    const verifiedLibrary = createRsiVerifiedSkillLibrary({
+      library_id: 'runtime.skill.library.integrated',
+      entries: [{ capsule: skill, evidence: skillEvidence }],
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+
+    const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
+    await runtime.start();
+    const candidate = await runtime.proposeCandidate({
+      candidate_id: 'candidate.runtime.skill.1',
+      parent_sha: source,
+      candidate_sha: 'c'.repeat(40),
+      mutation_surface: 'BROWSER_RUNTIME',
+      hypothesis: 'verified skill should earn contextual lifecycle evidence only after receipt-bound credit',
+    });
+    await runtime.beginEvaluation(candidate.candidate_id);
+
+    const commandId = '66666666-6666-4666-8666-666666666666';
+    await runtime.bindBrowserCommandAttribution({
+      command_id: commandId,
+      action: 'SCROLL',
+      platform: 'CHATGPT',
+      effect_key: 'effect-runtime-skill-1',
+      task_id: 'task.runtime.skill.1',
+      task_signature_digest: d('9'),
+      environment_fingerprint: 'env.browser.chatgpt.v1',
+      model_family: 'GPT_5_6_SOL',
+      candidate_id: candidate.candidate_id,
+      proposal_digest: d('a'),
+      skill_digests: [skill.skill_digest],
+      trajectory_id: 'trajectory.runtime.skill.1',
+      step_index: 1,
+      step_count: 1,
+      external_planner: true,
+      authored_by_candidate: false,
+    });
+    const episode = await runtime.ingestBrowserOutcome({
+      readback: {
+        schema: 'metaengine.rsi.result-receipt-readback.v1',
+        command_id: commandId,
+        found: true,
+        terminal: true,
+        status: 'COMPLETED',
+        receipt: {
+          schema: 'metaengine.native-supervisor.command-receipt.v2',
+          command_id: commandId,
+          action: 'SCROLL',
+          platform: 'CHATGPT',
+          result: { moved: true },
+          effect_outcome: 'CONFIRMED',
+          lane: 'MUTATION',
+          effect_key: 'effect-runtime-skill-1',
+          execution_ms: 7.2,
+          recorded_at: '2026-09-18T18:10:00.000Z',
+          authority_effect: false,
+        },
+        error: null,
+        execution_authority: false,
+        production_mutation_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    });
+    const credited = await runtime.recordBrowserStepCredit({
+      episode,
+      task_anchor: {
+        task_id: 'task.runtime.skill.1',
+        task_signature_digest: d('9'),
+        challenge_family: 'BROWSER_INTERACTION',
+        hidden_manifest_digest: d('b'),
+        external_writer: true,
+        authored_by_candidate: false,
+      },
+      credit_id: 'credit.runtime.skill.1',
+      credit_sign: 'POSITIVE',
+      credit_score: 0.7,
+      method: 'EXTERNAL_STEP_EVALUATOR',
+      evaluator_digest: d('c'),
+      evaluation_digest: d('d'),
+      lesson_digests: [d('e')],
+      evidence_refs: ['evidence:runtime:skill:1'],
+      skill_generation: 1,
+      skill_authoring_prior: 'VERIFIED_DIRECT_SKILL',
+      skill_authoring_provenance_digest: d('f'),
+      external_credit_assigner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(credited.skill_lifecycle.state, 'HELD_NO_LIBRARY');
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.pending_count, 1);
+
+    const adopted = await runtime.adoptVerifiedSkillLibrary({
+      library: verifiedLibrary,
+      external_library_owner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(adopted.reconciled_pending, 1);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.pending_count, 0);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count, 1);
+
+    const activation = runtime.createSkillActivationView([skill.skill_digest]);
+    assert.equal(activation.selected_count, 1);
+    assert.equal(activation.selected[0].skill_digest, skill.skill_digest);
+    assert.equal(activation.activation_view_is_execution_authority, false);
+    assert.equal(runtime.snapshot().execution_authority, false);
+    assert.equal(runtime.snapshot().authority_effect, false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
