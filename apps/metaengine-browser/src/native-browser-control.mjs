@@ -3,6 +3,7 @@ import { chatGptControlMatches } from './chatgpt-ui-controls.mjs';
 import { openCdpOutcomeLatch } from './browser-cdp-outcome-latch.mjs';
 import {
   nativeBrowserCdpPool,
+  recoverNativeExecutionContextBinding,
   releasePersistentBrowserDebugger,
   withPersistentBrowserDebugger,
 } from './browser-persistent-cdp-session.mjs';
@@ -225,8 +226,12 @@ export async function captureSemanticFrame(webContents) {
     const capturedAt = new Date().toISOString();
     const url = clip(webContents.getURL?.() || '', 1200);
     let runtime = dbg.bindingIdentity?.() || null;
-    if (runtime && (!runtime.main_frame_id || !runtime.main_execution_context_unique_id)) {
-      await new Promise((resolve) => setImmediate(resolve));
+    if (runtime && runtime.main_frame_id && !runtime.main_execution_context_unique_id) {
+      // D-L4 v2: a document replacement after attach clears the execution-
+      // context binding, and idempotent Runtime.enable never re-delivers it.
+      // Attempt a bounded disable -> enable toggle recovery so semantic refs
+      // can be issued for THIS document instead of staying dead forever.
+      await recoverNativeExecutionContextBinding(webContents);
       runtime = dbg.bindingIdentity?.() || runtime;
     }
     let runtimeObservation = null;

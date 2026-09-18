@@ -5,6 +5,8 @@ const MAX_SUBTARGETS = 256;
 // D-L4 repair: per-command JS-side deadline for the bounded Runtime re-seed so
 // a wedged debugger transport can never hang the recovery path.
 const RUNTIME_RESEED_TIMEOUT_MS = 5000;
+const RUNTIME_CONTEXT_RECOVERY_MIN_INTERVAL_MS = 2000;
+const RUNTIME_CONTEXT_RECOVERY_SETTLE_MS = 25;
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
 
 function liveWebContents(webContents) {
@@ -104,6 +106,11 @@ function rowProjection(row) {
     runtime_reseed_count: row.runtimeReseedCount,
     last_runtime_reseed_at: row.lastRuntimeReseedAt,
     last_runtime_reseed_error: row.lastRuntimeReseedError,
+    runtime_context_recovery_count: row.runtimeContextRecoveryCount,
+    last_runtime_context_recovery_at: row.lastRuntimeContextRecoveryAtMs > 0
+      ? new Date(row.lastRuntimeContextRecoveryAtMs).toISOString()
+      : null,
+    last_runtime_context_recovery_error: row.lastRuntimeContextRecoveryError,
     subtargets,
     root_document_generation_ignores_subtarget_sessions: true,
     same_document_revision_requires_main_frame_match: true,
@@ -272,6 +279,16 @@ export class PersistentBrowserCdpSessionPool {
       runtimeReseedInFlight: false,
       lastRuntimeReseedAt: null,
       lastRuntimeReseedError: null,
+      // D-L4 v2: toggle-based execution-context recovery bookkeeping.
+      // Chromium's Runtime.enable is idempotent — re-invoking it on an
+      // already-enabled domain does NOT re-deliver executionContextCreated,
+      // so a context wiped by a document replacement never comes back via a
+      // plain re-enable. Only a bounded Runtime.disable -> Runtime.enable
+      // toggle forces V8 to report every live context again.
+      runtimeContextRecoveryCount: 0,
+      runtimeContextRecoveryInFlight: false,
+      lastRuntimeContextRecoveryAtMs: 0,
+      lastRuntimeContextRecoveryError: null,
       subtargets: new Map(),
       subtargetBySession: new Map(),
       executionContexts: new Map(),
@@ -475,6 +492,7 @@ export class PersistentBrowserCdpSessionPool {
         new Promise((resolve) => { const timer = setTimeout(() => resolve(null), RUNTIME_RESEED_TIMEOUT_MS); timer.unref?.(); }),
       ]);
       void Promise.resolve()
+        .then(() => bounded(Promise.resolve(row.dbg.sendCommand('Runtime.disable')).catch(() => null)))
         .then(() => bounded(row.dbg.sendCommand('Runtime.enable')))
         .then(() => bounded(row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true })))
         .then(() => {
@@ -486,6 +504,53 @@ export class PersistentBrowserCdpSessionPool {
           row.lastRuntimeReseedError = clip(error?.message || error, 300);
         });
     });
+  }
+
+  // D-L4 v2: bounded, single-flight, rate-limited recovery of the main
+  // execution-context binding. Invoked by the perception path when the
+  // runtime identity is otherwise complete but the context unique id is
+  // missing (the signature of a post-attach document replacement). Uses the
+  // disable -> enable toggle — the ONLY reliable way to force V8 to report
+  // pre-existing contexts — and never touches navigation or page state.
+  async recoverExecutionContextBinding(webContents) {
+    if (!liveWebContents(webContents)) return null;
+    let row = null;
+    try {
+      row = this.#rows.get(exactId(webContents));
+    } catch {
+      return null;
+    }
+    if (!row || row.webContents !== webContents) return null;
+    if (row.ready !== true || row.dbg.isAttached?.() !== true || !row.eventCapable) return null;
+    const current = rowProjection(row);
+    if (current.main_execution_context_unique_id) return current;
+    if (row.runtimeContextRecoveryInFlight) return null;
+    const now = Date.now();
+    if (now - row.lastRuntimeContextRecoveryAtMs < RUNTIME_CONTEXT_RECOVERY_MIN_INTERVAL_MS) return null;
+    row.runtimeContextRecoveryInFlight = true;
+    row.lastRuntimeContextRecoveryAtMs = now;
+    try {
+      const bounded = (promise) => Promise.race([
+        Promise.resolve(promise),
+        new Promise((resolve) => { const timer = setTimeout(() => resolve(null), RUNTIME_RESEED_TIMEOUT_MS); timer.unref?.(); }),
+      ]);
+      await bounded(Promise.resolve(row.dbg.sendCommand('Runtime.disable')).catch(() => null));
+      await bounded(row.dbg.sendCommand('Runtime.enable'));
+      // Give protocol events a settle tick so executionContextCreated lands
+      // before the caller re-reads the binding identity.
+      await new Promise((resolve) => { const timer = setTimeout(resolve, RUNTIME_CONTEXT_RECOVERY_SETTLE_MS); timer.unref?.(); });
+      row.runtimeContextRecoveryCount += 1;
+      row.lastRuntimeContextRecoveryError = null;
+      const after = rowProjection(row);
+      // Report success only when the binding actually healed; otherwise the
+      // caller treats this attempt as exhausted (rate limit applies).
+      return after.main_execution_context_unique_id ? after : null;
+    } catch (error) {
+      row.lastRuntimeContextRecoveryError = clip(error?.message || error, 300);
+      return null;
+    } finally {
+      row.runtimeContextRecoveryInFlight = false;
+    }
   }
 
   #seedMainFrameIdentity(row) {
@@ -657,6 +722,17 @@ export async function withPersistentBrowserDebugger(webContents, fn) {
     bindingIdentity: () => nativeBrowserCdpPool.identity(webContents, { require_ready: true, require_event_stream: true }),
   });
   return fn(adapter);
+}
+
+// D-L4 v2: best-effort, bounded execution-context binding recovery for the
+// perception path. Never throws — a failed recovery simply leaves semantic
+// refs unissued (fail-closed) instead of failing the whole capture.
+export async function recoverNativeExecutionContextBinding(webContents) {
+  try {
+    return await nativeBrowserCdpPool.recoverExecutionContextBinding(webContents);
+  } catch {
+    return null;
+  }
 }
 
 export async function persistentBrowserDebuggerBinding(webContents) {
