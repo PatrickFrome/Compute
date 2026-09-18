@@ -88,6 +88,14 @@ import {
   verifyRsiExactSkillPrecommitCertificate,
   rsiExactExistingConsumerOwnerReviewTrustRootSnapshot,
 } from '../src/rsi-exact-existing-consumer-owner-review.mjs';
+import {
+  RsiStorageOnlyLibraryAppendArchive,
+  createRsiStorageOnlyLibraryAppendPlan,
+  verifyRsiStorageOnlyLibraryAppendPlan,
+  createRsiStorageOnlyLibraryAppendReadback,
+  verifyRsiStorageOnlyLibraryAppendReadback,
+  rsiStorageOnlyLibraryAdmissionTrustRootSnapshot,
+} from '../src/rsi-storage-only-library-admission.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -3096,4 +3104,287 @@ test('Phase33 reviewer separation of duties rejects owner, critic and attestor i
 
   const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
   assert.equal(root.reviewer_separation_of_duties_required,true);
+});
+
+
+function phase34Fixture(label='phase34'){
+  const ownerFx=phase33ExactOwnerFixture(label);
+  const certificateArgs=phase33CertificateArgs(ownerFx,label);
+  const certificate=createRsiExactSkillPrecommitCertificate(certificateArgs);
+  assert.equal(certificate.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
+  const currentLibrary=ownerFx.skillFx.currentLibrary;
+  const skill=ownerFx.skillFx.skill;
+  const skillEvidence=ownerFx.skillEvidenceReview.standard_skill_evidence;
+  const planEvidence={
+    phase33_certificate:certificate,
+    phase33_certificate_args:certificateArgs,
+    current_library:currentLibrary,
+    skill_capsule:skill,
+    skill_evidence:skillEvidence,
+  };
+  const plan=createRsiStorageOnlyLibraryAppendPlan({
+    plan_id:'phase34.library.append.plan.'+label,
+    ...planEvidence,
+    phase33_policy_head_sha:'f'.repeat(40),
+    phase33_terminal_ci_evidence_digest:labelDigest(label+'-terminal-ci'),
+    predecessor_ci_terminal_green:true,
+    append_effect_id_digest:labelDigest(label+'-append-effect-id'),
+    idempotency_key_digest:labelDigest(label+'-append-idempotency'),
+    effect_journal_policy_digest:labelDigest(label+'-effect-journal-policy'),
+    external_library_owner_identity_digest:labelDigest(label+'-library-owner-id'),
+    external_ci_attestor_identity_digest:labelDigest(label+'-ci-attestor-id'),
+    external_library_owner:true,
+    external_ci_attestor:true,
+    authored_by_candidate:false,
+  });
+  const successorLibrary=createRsiVerifiedSkillLibrary({
+    library_id:currentLibrary.library_id,
+    entries:[
+      ...currentLibrary.entries.map(row=>({capsule:row.capsule,evidence:row.evidence})),
+      {capsule:skill,evidence:skillEvidence},
+    ],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  return {ownerFx,certificateArgs,certificate,currentLibrary,skill,skillEvidence,planEvidence,plan,successorLibrary};
+}
+
+function phase34Readback(fx,label='phase34-readback',overrides={}){
+  return createRsiStorageOnlyLibraryAppendReadback({
+    receipt_id:'phase34.library.append.readback.'+label,
+    plan:fx.plan,
+    plan_evidence:fx.planEvidence,
+    effect_outcome:'CONFIRMED_APPLIED',
+    observed_library:fx.successorLibrary,
+    effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest(label+'-effect-journal-entry'),
+    external_effect_executor_identity_digest:labelDigest(label+'-effect-executor-id'),
+    external_readback_identity_digest:labelDigest(label+'-readback-owner-id'),
+    external_effect_executor:true,
+    external_readback_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+}
+
+test('Phase34 plan reuses the existing verified library and precommits one exact storage-only append',()=>{
+  const fx=phase34Fixture('plan');
+  const checked=verifyRsiStorageOnlyLibraryAppendPlan(fx.plan,fx.planEvidence);
+  assert.equal(checked.plan_digest,fx.plan.plan_digest);
+  assert.equal(fx.plan.current_library_digest,fx.currentLibrary.library_digest);
+  assert.equal(fx.plan.proposed_skill_digest,fx.skill.skill_digest);
+  assert.equal(fx.plan.proposed_skill_evidence_digest,fx.skillEvidence.evidence_digest);
+  assert.equal(fx.plan.expected_successor_library_digest,fx.successorLibrary.library_digest);
+  assert.equal(fx.plan.expected_successor_entry_count,fx.currentLibrary.entry_count+1);
+  assert.equal(fx.plan.existing_verified_skill_library_schema_reused,true);
+  assert.equal(fx.plan.second_skill_library_created,false);
+  assert.equal(fx.plan.append_is_storage_only,true);
+  assert.equal(fx.plan.effect_attempt_limit,1);
+  assert.equal(fx.plan.blind_retry_forbidden,true);
+  assert.equal(fx.plan.governance_recompute_performed,false);
+  assert.equal(fx.plan.activation_view_rebuilt,false);
+  assert.equal(fx.plan.retrieval_exposure_changed,false);
+  assert.equal(fx.plan.skill_activation_performed,false);
+  assert.equal(fx.plan.library_append_performed,false);
+  assert.equal(fx.plan.authority_effect,false);
+});
+
+test('Phase34 refuses stale library, non-green predecessor CI and non-eligible Phase33 certificates',()=>{
+  const fx=phase34Fixture('gates');
+  assert.throws(()=>createRsiStorageOnlyLibraryAppendPlan({
+    plan_id:'phase34.gate.not-green',
+    ...fx.planEvidence,
+    phase33_policy_head_sha:'f'.repeat(40),
+    phase33_terminal_ci_evidence_digest:labelDigest('phase34-gate-not-green-ci'),
+    predecessor_ci_terminal_green:false,
+    append_effect_id_digest:labelDigest('phase34-gate-not-green-effect'),
+    idempotency_key_digest:labelDigest('phase34-gate-not-green-idempotency'),
+    effect_journal_policy_digest:labelDigest('phase34-gate-not-green-journal'),
+    external_library_owner_identity_digest:labelDigest('phase34-gate-not-green-owner'),
+    external_ci_attestor_identity_digest:labelDigest('phase34-gate-not-green-ci-owner'),
+    external_library_owner:true,external_ci_attestor:true,authored_by_candidate:false,
+  }),/predecessor_ci_not_terminal_green/);
+
+  const stale=phase34Fixture('stale-library');
+  assert.throws(()=>createRsiStorageOnlyLibraryAppendPlan({
+    plan_id:'phase34.gate.stale-library',
+    ...fx.planEvidence,
+    current_library:stale.successorLibrary,
+    phase33_policy_head_sha:'f'.repeat(40),
+    phase33_terminal_ci_evidence_digest:labelDigest('phase34-gate-stale-ci'),
+    predecessor_ci_terminal_green:true,
+    append_effect_id_digest:labelDigest('phase34-gate-stale-effect'),
+    idempotency_key_digest:labelDigest('phase34-gate-stale-idempotency'),
+    effect_journal_policy_digest:labelDigest('phase34-gate-stale-journal'),
+    external_library_owner_identity_digest:labelDigest('phase34-gate-stale-owner'),
+    external_ci_attestor_identity_digest:labelDigest('phase34-gate-stale-ci-owner'),
+    external_library_owner:true,external_ci_attestor:true,authored_by_candidate:false,
+  }),/current_library_drift|skill_digest_already_present/);
+
+  const insufficientArgs=phase33CertificateArgs(fx.ownerFx,'phase34-insufficient',{anytime_valid_e_value_microunits:1});
+  const insufficientCert=createRsiExactSkillPrecommitCertificate(insufficientArgs);
+  assert.equal(insufficientCert.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+  assert.throws(()=>createRsiStorageOnlyLibraryAppendPlan({
+    plan_id:'phase34.gate.insufficient',
+    phase33_certificate:insufficientCert,
+    phase33_certificate_args:insufficientArgs,
+    current_library:fx.currentLibrary,
+    skill_capsule:fx.skill,
+    skill_evidence:fx.skillEvidence,
+    phase33_policy_head_sha:'f'.repeat(40),
+    phase33_terminal_ci_evidence_digest:labelDigest('phase34-gate-insufficient-ci'),
+    predecessor_ci_terminal_green:true,
+    append_effect_id_digest:labelDigest('phase34-gate-insufficient-effect'),
+    idempotency_key_digest:labelDigest('phase34-gate-insufficient-idempotency'),
+    effect_journal_policy_digest:labelDigest('phase34-gate-insufficient-journal'),
+    external_library_owner_identity_digest:labelDigest('phase34-gate-insufficient-owner'),
+    external_ci_attestor_identity_digest:labelDigest('phase34-gate-insufficient-ci-owner'),
+    external_library_owner:true,external_ci_attestor:true,authored_by_candidate:false,
+  }),/certificate_not_eligible/);
+});
+
+test('Phase34 confirmed append readback requires the exact successor and leaves it storage-only pending governance',()=>{
+  const fx=phase34Fixture('applied');
+  const receipt=phase34Readback(fx,'applied');
+  const checked=verifyRsiStorageOnlyLibraryAppendReadback(receipt,{
+    plan:fx.plan,plan_evidence:fx.planEvidence,observed_library:fx.successorLibrary,
+  });
+  assert.equal(checked.receipt_digest,receipt.receipt_digest);
+  assert.equal(receipt.state,'APPEND_CONFIRMED_STORAGE_ONLY_PENDING_GOVERNANCE');
+  assert.equal(receipt.append_confirmed,true);
+  assert.equal(receipt.observed_library_digest,fx.successorLibrary.library_digest);
+  assert.equal(receipt.predecessor_entries_preserved,true);
+  assert.equal(receipt.storage_only_pending_governance,true);
+  assert.equal(receipt.governance_recompute_performed,false);
+  assert.equal(receipt.activation_view_rebuilt,false);
+  assert.equal(receipt.retrieval_exposure_changed,false);
+  assert.equal(receipt.skill_activation_performed,false);
+  assert.equal(receipt.same_effect_id_retry_allowed,false);
+  assert.equal(receipt.authority_effect,false);
+
+  const wrongLibrary=fx.currentLibrary;
+  assert.throws(()=>createRsiStorageOnlyLibraryAppendReadback({
+    receipt_id:'phase34.library.append.readback.wrong',
+    plan:fx.plan,plan_evidence:fx.planEvidence,effect_outcome:'CONFIRMED_APPLIED',
+    observed_library:wrongLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-wrong-journal'),
+    external_effect_executor_identity_digest:labelDigest('phase34-wrong-executor'),
+    external_readback_identity_digest:labelDigest('phase34-wrong-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  }),/successor_readback_mismatch|exact_single_append_not_observed/);
+});
+
+test('Phase34 confirmed-not-applied and ambiguous outcomes never blind-retry the same effect identity',()=>{
+  const fx=phase34Fixture('effects');
+  const notApplied=createRsiStorageOnlyLibraryAppendReadback({
+    receipt_id:'phase34.readback.not-applied',
+    plan:fx.plan,plan_evidence:fx.planEvidence,effect_outcome:'CONFIRMED_NOT_APPLIED',
+    observed_library:fx.currentLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-not-applied-journal'),
+    external_effect_executor_identity_digest:labelDigest('phase34-not-applied-executor'),
+    external_readback_identity_digest:labelDigest('phase34-not-applied-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(notApplied.state,'APPEND_CONFIRMED_NOT_APPLIED_NEW_PLAN_REQUIRED_FOR_FUTURE_ATTEMPT');
+  assert.equal(notApplied.append_confirmed,false);
+  assert.equal(notApplied.same_effect_id_retry_allowed,false);
+  assert.equal(notApplied.new_effect_requires_new_plan,true);
+  assert.equal(notApplied.reconciliation_required,false);
+
+  const ambiguous=createRsiStorageOnlyLibraryAppendReadback({
+    receipt_id:'phase34.readback.ambiguous',
+    plan:fx.plan,plan_evidence:fx.planEvidence,effect_outcome:'AMBIGUOUS',
+    observed_library:null,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-ambiguous-journal'),
+    external_effect_executor_identity_digest:labelDigest('phase34-ambiguous-executor'),
+    external_readback_identity_digest:labelDigest('phase34-ambiguous-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(ambiguous.state,'APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED');
+  assert.equal(ambiguous.reconciliation_required,true);
+  assert.equal(ambiguous.same_effect_id_retry_allowed,false);
+  assert.equal(ambiguous.new_effect_requires_new_plan,false);
+  assert.equal(ambiguous.retrieval_exposure_changed,false);
+});
+
+test('Phase34 requires library-owner, CI-attestor, effect-executor and readback identities to be distinct',()=>{
+  const fx=phase34Fixture('separation');
+  assert.throws(()=>createRsiStorageOnlyLibraryAppendReadback({
+    receipt_id:'phase34.readback.separation',
+    plan:fx.plan,plan_evidence:fx.planEvidence,effect_outcome:'CONFIRMED_APPLIED',
+    observed_library:fx.successorLibrary,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-separation-journal'),
+    external_effect_executor_identity_digest:fx.plan.external_library_owner_identity_digest,
+    external_readback_identity_digest:labelDigest('phase34-separation-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  }),/effect_readback_separation_of_duties_required/);
+});
+
+test('Phase34 archive is durable-before-visible, append-only and preserves ambiguous-effect evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34-library-admission-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'admission.json');
+  const fx=phase34Fixture('archive');
+  const ambiguous=createRsiStorageOnlyLibraryAppendReadback({
+    receipt_id:'phase34.archive.ambiguous',
+    plan:fx.plan,plan_evidence:fx.planEvidence,effect_outcome:'AMBIGUOUS',
+    observed_library:null,effect_attempt_count:1,
+    effect_journal_entry_digest:labelDigest('phase34-archive-journal'),
+    external_effect_executor_identity_digest:labelDigest('phase34-archive-executor'),
+    external_readback_identity_digest:labelDigest('phase34-archive-readback'),
+    external_effect_executor:true,external_readback_owner:true,authored_by_candidate:false,
+  });
+  const resolver=async({event_type})=>event_type==='PLAN'
+    ?{plan_evidence:fx.planEvidence}
+    :{plan_evidence:fx.planEvidence,observed_library:null};
+  const archive=new RsiStorageOnlyLibraryAppendArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.recordPlan({plan:fx.plan,plan_evidence:fx.planEvidence}));
+  assert.equal(archive.snapshot().event_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.recordPlan({plan:fx.plan,plan_evidence:fx.planEvidence})).state,'PLAN_RECORDED_EFFECT_NOT_ATTEMPTED');
+  assert.equal((await archive.recordReadback({
+    plan:fx.plan,receipt:ambiguous,plan_evidence:fx.planEvidence,observed_library:null,
+  })).state,'APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED');
+  const snap=archive.snapshot();
+  assert.equal(snap.event_count,2);
+  assert.equal(snap.plan_count,1);
+  assert.equal(snap.readback_count,1);
+  assert.equal(snap.ambiguous_effects_retained,true);
+  assert.equal(snap.archive_can_write_skill_library,false);
+  assert.equal(snap.archive_can_recompute_governance,false);
+  assert.equal(snap.archive_can_change_retrieval_exposure,false);
+  assert.equal(snap.archive_can_activate_skill,false);
+
+  const restored=new RsiStorageOnlyLibraryAppendArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().event_count,2);
+  assert.equal((await restored.recordPlan({plan:fx.plan,plan_evidence:fx.planEvidence})).state,'IDEMPOTENT');
+  assert.equal((await restored.recordReadback({
+    plan:fx.plan,receipt:ambiguous,plan_evidence:fx.planEvidence,observed_library:null,
+  })).state,'IDEMPOTENT');
+});
+
+test('Phase34 trust root separates storage admission from governance, retrieval exposure and activation',()=>{
+  const root=rsiStorageOnlyLibraryAdmissionTrustRootSnapshot();
+  assert.equal(root.exact_phase33_precommit_certificate_required,true);
+  assert.equal(root.predecessor_exact_head_terminal_ci_required,true);
+  assert.equal(root.existing_verified_skill_library_schema_reused,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.exact_current_library_binding_required,true);
+  assert.equal(root.exact_single_skill_append_required,true);
+  assert.equal(root.effect_plan_must_be_durable_before_attempt,true);
+  assert.equal(root.effect_attempt_limit,1);
+  assert.equal(root.blind_retry_forbidden,true);
+  assert.equal(root.ambiguous_effect_requires_reconciliation,true);
+  assert.equal(root.append_is_storage_only,true);
+  assert.equal(root.governance_recompute_forbidden_in_phase34,true);
+  assert.equal(root.retrieval_exposure_change_forbidden_in_phase34,true);
+  assert.equal(root.skill_activation_forbidden_in_phase34,true);
+  assert.equal(root.future_governance_revalidation_required,true);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.storage_only_library_admission_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
