@@ -10,6 +10,7 @@ export const RSI_CANDIDATE_SYNTHESIS_REQUEST_SCHEMA = 'metaengine.rsi.candidate-
 export const RSI_CANDIDATE_MUTATION_PROPOSAL_SCHEMA = 'metaengine.rsi.candidate-mutation-proposal.v1';
 export const RSI_CONTEXT_AWARE_CANDIDATE_BUILD_SCHEMA = 'metaengine.rsi.context-aware-candidate-build.v1';
 export const RSI_CONTEXT_AWARE_CANDIDATE_ROOT_SCHEMA = 'metaengine.rsi.context-aware-candidate-root.v1';
+export const RSI_CONTEXT_AWARE_CANDIDATE_LEDGER_SCHEMA = 'metaengine.rsi.context-aware-candidate-ledger-payload.v1';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
@@ -17,6 +18,8 @@ const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const SAFE_TOKEN_RE=/^[A-Z0-9][A-Z0-9_.:-]{0,95}$/;
 const MAX_MUTATIONS=16;
 const MAX_SELECTED_EXPERIENCE=12;
+const MAX_LEDGER_PAYLOAD_BYTES=48*1024;
+const FORBIDDEN_LEDGER_KEYS=new Set(['page_text','raw_dom','raw_html','prompt','prompt_plaintext','input_value','input_values','cookie','cookies','authorization','access_token','refresh_token','secret','password']);
 const GENERIC_CHANGE_TYPES=new Set(['MODIFY','DELETE']);
 const STRATEGIES=new Set([
   'CONTEXT_GUIDED_DIVERSE_PROPOSAL',
@@ -35,6 +38,17 @@ function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))thro
 function token(v,l){const o=String(v||'').trim().toUpperCase();if(!SAFE_TOKEN_RE.test(o))throw new Error(`rsi_synthesis_${l}_invalid`);return o}
 function positiveInt(v,l,max=1_000_000){const o=Number(v);if(!Number.isSafeInteger(o)||o<1||o>max)throw new Error(`rsi_synthesis_${l}_invalid`);return o}
 function normalizePath(v){const p=String(v||'').trim();if(!p||p.length>240||p.startsWith('/')||p.includes('\\')||p.includes('\0')||p.split('/').some(x=>!x||x==='.'||x==='..'||x==='.git'))throw new Error('rsi_synthesis_mutation_path_invalid');return p}
+
+function assertLedgerSafe(value,path=[]){
+  if(Array.isArray(value)){for(let i=0;i<value.length;i+=1)assertLedgerSafe(value[i],[...path,String(i)]);return}
+  if(!value||typeof value!=='object')return;
+  for(const [key,child] of Object.entries(value)){
+    const normalized=String(key).toLowerCase();
+    if(FORBIDDEN_LEDGER_KEYS.has(normalized))throw new Error(`rsi_synthesis_ledger_sensitive_field_forbidden:${[...path,key].join('.')}`);
+    assertLedgerSafe(child,[...path,key]);
+  }
+}
+function canonicalBytes(value){return Buffer.byteLength(JSON.stringify(stable(value)),'utf8')}
 
 function verifyFrontierBinding(entry, contextPlan){
   if(!entry||typeof entry!=='object'||Array.isArray(entry))throw new Error('rsi_synthesis_frontier_entry_invalid');
