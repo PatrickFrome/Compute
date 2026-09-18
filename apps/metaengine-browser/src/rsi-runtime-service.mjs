@@ -42,6 +42,8 @@ import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
 import { RsiCommandAttributionRegistry, RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA, rsiCommandAttributionTrustRootSnapshot } from './rsi-command-attribution-registry.mjs';
+import { createRsiStepCreditReceipt, rsiStepCreditTrustRootSnapshot } from './rsi-runtime-credit-assignment.mjs';
+import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiRuntimeExperienceStoreTrustRootSnapshot } from './rsi-runtime-experience-store.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -107,6 +109,8 @@ function trustRoots() {
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
     browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
     command_attribution: rsiCommandAttributionTrustRootSnapshot(),
+    step_credit: rsiStepCreditTrustRootSnapshot(),
+    runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -123,6 +127,7 @@ export class RsiRuntimeService {
   #ledger;
   #experienceGate;
   #commandAttribution;
+  #experienceStore;
   #archive;
   #observer;
   #verifiedArchive;
@@ -137,7 +142,7 @@ export class RsiRuntimeService {
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -147,6 +152,11 @@ export class RsiRuntimeService {
       statePath: commandAttributionPath,
       source_sha: this.#sourceSha,
       clock,
+    });
+    const runtimeExperiencePath = experiencePath || (ledgerPath ? `${ledgerPath}.experience.json` : null);
+    this.#experienceStore = new RsiRuntimeExperienceStore({
+      statePath: runtimeExperiencePath,
+      source_sha: this.#sourceSha,
     });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
@@ -158,6 +168,7 @@ export class RsiRuntimeService {
   async start() {
     if (this.#running) return this.snapshot();
     await this.#commandAttribution.init();
+    await this.#experienceStore.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -167,6 +178,7 @@ export class RsiRuntimeService {
       trust_root_set_digest: digest(this.#roots),
       experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
       command_attribution_registry: RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA,
+      runtime_experience_store_schema: this.#experienceStore.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -288,6 +300,7 @@ export class RsiRuntimeService {
     command_id, action, platform = null, effect_key = null,
     task_id, task_signature_digest, environment_fingerprint, model_family,
     candidate_id, proposal_digest, skill_digests = [],
+    trajectory_id = null, step_index = null, step_count = null, predecessor_episode_digest = null,
     external_planner = false, authored_by_candidate = true,
   } = {}) {
     this.#assertRunning();
@@ -303,6 +316,7 @@ export class RsiRuntimeService {
       candidate_sha: candidate.candidate_sha,
       proposal_digest,
       skill_digests,
+      trajectory_id, step_index, step_count, predecessor_episode_digest,
       external_planner,
       authored_by_candidate,
     });
@@ -315,6 +329,10 @@ export class RsiRuntimeService {
       proposal_digest: binding.proposal_digest,
       skill_digests: binding.skill_digests,
       task_signature_digest: binding.task_signature_digest,
+      trajectory_id: binding.trajectory_id,
+      step_index: binding.step_index,
+      step_count: binding.step_count,
+      predecessor_episode_digest: binding.predecessor_episode_digest,
       binding_is_effect_authority: false,
       authority_effect: false,
     });
@@ -343,6 +361,10 @@ export class RsiRuntimeService {
           candidate_sha: commandBinding.candidate_sha,
           proposal_digest: commandBinding.proposal_digest,
           skill_digests: commandBinding.skill_digests,
+          trajectory_id: commandBinding.trajectory_id,
+          step_index: commandBinding.step_index,
+          step_count: commandBinding.step_count,
+          predecessor_episode_digest: commandBinding.predecessor_episode_digest,
           external_attribution: true,
           authored_by_candidate: false,
         };
@@ -366,6 +388,10 @@ export class RsiRuntimeService {
       candidate_sha: episode.candidate_sha,
       proposal_digest: episode.proposal_digest,
       skill_digests: episode.skill_digests,
+      trajectory_id: episode.trajectory_id,
+      step_index: episode.step_index,
+      step_count: episode.step_count,
+      predecessor_episode_digest: episode.predecessor_episode_digest,
       command_attribution_binding_digest: commandBinding?.binding_digest || null,
       eligible_for_experience_graph: episode.eligible_for_experience_graph,
       eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
@@ -392,6 +418,59 @@ export class RsiRuntimeService {
     if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
     this.#lastBrowserOutcomeDigest = episode.episode_digest;
     return episode;
+  }
+
+  async recordBrowserStepCredit({
+    episode,
+    task_anchor,
+    credit_id,
+    credit_sign,
+    credit_score,
+    method,
+    evaluator_digest,
+    evaluation_digest,
+    failure_codes = [],
+    lesson_digests = [],
+    evidence_refs,
+    external_credit_assigner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const creditReceipt = createRsiStepCreditReceipt({
+      credit_id,
+      episode,
+      credit_sign,
+      credit_score,
+      method,
+      evaluator_digest,
+      evaluation_digest,
+      failure_codes,
+      lesson_digests,
+      evidence_refs,
+      external_credit_assigner,
+      authored_by_candidate,
+    });
+    const materialization = materializeRsiExperienceCaseFromCredit({
+      episode,
+      credit_receipt: creditReceipt,
+      task_anchor,
+    });
+    const stored = await this.#experienceStore.appendMaterialization(materialization);
+    await this.#ledger.append('STEP_CREDIT_RECORDED', {
+      episode_digest: episode.episode_digest,
+      credit_receipt_digest: creditReceipt.receipt_digest,
+      credit_sign: creditReceipt.credit_sign,
+      credit_score: creditReceipt.credit_score,
+      credit_method: creditReceipt.method,
+      trajectory_id: creditReceipt.trajectory_id,
+      step_index: creditReceipt.step_index,
+      case_digest: materialization.case_row?.case_digest || null,
+      experience_snapshot_digest: stored.snapshot_digest,
+      materialization_state: materialization.state,
+      final_task_reward_broadcast_to_all_steps: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ credit_receipt: creditReceipt, materialization, stored });
   }
 
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
@@ -445,6 +524,7 @@ export class RsiRuntimeService {
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       experience_gate: this.#experienceGate.snapshot(),
       command_attribution: this.#commandAttribution.snapshot(),
+      runtime_experience_store: this.#experienceStore.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
