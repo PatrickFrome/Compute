@@ -194,7 +194,14 @@ export function createRsiChallengeSourceEvidence({
 }
 
 export function verifyRsiChallengeSourceEvidence(source) {
-  if (!plainObject(source) || source.schema !== RSI_CHALLENGE_SOURCE_EVIDENCE_SCHEMA || source.version !== 1) throw new Error('rsi_challenge_source_invalid');
+  exactKeys(source, [
+    'schema','version','source_id','source_kind','source_class','source_candidate_sha','baseline_sha','family',
+    'mechanism_tags','failure_codes','predecessor_history','predecessor_history_digest','evidence_digest','evidence_refs',
+    'external_verifier','authored_by_candidate','raw_page_text_present','raw_user_input_present','secret_material_present',
+    'model_text_is_authority','execution_authority','production_mutation_authority','promotion_authority',
+    'self_update_authority','automatic_retry_allowed','authority_effect','source_digest',
+  ], [], 'source');
+  if (source.schema !== RSI_CHALLENGE_SOURCE_EVIDENCE_SCHEMA || source.version !== 1) throw new Error('rsi_challenge_source_invalid');
   assertZeroAuthority(source, 'source');
   if (
     source.external_verifier !== true
@@ -276,7 +283,17 @@ export function buildRsiAdversarialChallengeProposal({
 }
 
 export function verifyRsiAdversarialChallengeProposal(proposal) {
-  if (!plainObject(proposal) || proposal.schema !== RSI_ADVERSARIAL_CHALLENGE_PROPOSAL_SCHEMA || proposal.version !== 1) {
+  exactKeys(proposal, [
+    'schema','version','generation','source_id','source_digest','source_kind','source_class','baseline_sha',
+    'source_candidate_sha','family','mechanism_tags','failure_codes','requested_difficulty','predecessor_history_digest',
+    'predecessor_history_count','challenge_dynamics','static_benchmark_only','candidate_can_select_opponents',
+    'candidate_can_select_expected_solution','hidden_manifest_required','external_materialization_required',
+    'trusted_evaluator_required','minimal_criterion_targeted','solution_exposed_to_candidate',
+    'task_manifest_exposed_to_candidate','no_live_production_adversary','execution_authority',
+    'production_mutation_authority','promotion_authority','self_update_authority','automatic_retry_allowed',
+    'authority_effect','proposal_id','proposal_digest',
+  ], [], 'proposal');
+  if (proposal.schema !== RSI_ADVERSARIAL_CHALLENGE_PROPOSAL_SCHEMA || proposal.version !== 1) {
     throw new Error('rsi_challenge_proposal_invalid');
   }
   assertZeroAuthority(proposal, 'proposal');
@@ -363,7 +380,15 @@ export function finalizeRsiAdversarialChallenge({ source_evidence, proposal, mat
   const checkedProposal = verifyRsiAdversarialChallengeProposal(proposal);
   if (checkedProposal.source_digest !== source.source_digest) throw new Error('rsi_challenge_finalize_source_mismatch');
   const receipt = materialization_receipt;
-  if (!plainObject(receipt) || receipt.schema !== RSI_CHALLENGE_MATERIALIZATION_RECEIPT_SCHEMA || receipt.version !== 1) {
+  exactKeys(receipt, [
+    'schema','version','proposal_id','proposal_digest','suite_digest','hidden_manifest_digest',
+    'environment_fingerprint','attempted_count','solved_count','exact_predecessor_history_digest','sandbox_backend',
+    'external_materializer','authored_by_candidate','hidden_manifest_verified','candidate_visible_manifest',
+    'expected_solution_exposed','live_production_target','network_default_deny','host_repository_mounted',
+    'execution_authority','production_mutation_authority','promotion_authority','self_update_authority',
+    'automatic_retry_allowed','authority_effect','receipt_digest',
+  ], [], 'materialization');
+  if (receipt.schema !== RSI_CHALLENGE_MATERIALIZATION_RECEIPT_SCHEMA || receipt.version !== 1) {
     throw new Error('rsi_challenge_materialization_invalid');
   }
   assertZeroAuthority(receipt, 'materialization');
