@@ -40,7 +40,7 @@ test('Tree-sitter dependencies and worker authority contract are exact and local
   assert.equal(pkg.dependencies?.['tree-sitter-javascript'], undefined);
 
   const worker = await source('src/ide/tree-sitter-worker.mjs');
-  assert.match(worker, /metaengine:\/\/shell\/ide\/tree-sitter\.wasm/);
+  assert.match(worker, /metaengine:\/\/shell\/ide\/web-tree-sitter\.wasm/);
   assert.match(worker, /metaengine:\/\/shell\/ide\/tree-sitter-javascript\.wasm/);
   assert.match(worker, /tree\.edit\(edit\)/);
   assert.match(worker, /parser\.parse\(nextText, previous\)/);
@@ -59,7 +59,7 @@ test('IDE build copies parser runtime and JavaScript grammar into the existing l
   assert.match(builder, /packageRoot\('web-tree-sitter'\)/);
   assert.match(builder, /packageRoot\('tree-sitter-javascript'\)/);
   assert.match(builder, /tree-sitter\.worker\.js/);
-  assert.match(builder, /tree-sitter\.wasm/);
+  assert.match(builder, /web-tree-sitter\.wasm/);
   assert.match(builder, /tree-sitter-javascript\.wasm/);
   assert.match(builder, /web_tree_sitter_version: '0\.27\.0'/);
   assert.match(builder, /javascript_grammar_version: '0\.25\.0'/);
@@ -99,7 +99,7 @@ test('incremental edit mapping is bounded, UTF-16 aligned and surrogate-safe', (
 test('web-tree-sitter 0.27 incremental JavaScript parse matches clean parse after Unicode and newline edit', async () => {
   const runtimeRoot = await packageRoot('web-tree-sitter');
   const grammarRoot = await packageRoot('tree-sitter-javascript');
-  const runtimeWasm = path.join(runtimeRoot, 'tree-sitter.wasm');
+  const runtimeWasm = path.join(runtimeRoot, 'web-tree-sitter.wasm');
   const grammarWasm = path.join(grammarRoot, 'tree-sitter-javascript.wasm');
 
   await fs.access(runtimeWasm);
@@ -107,7 +107,7 @@ test('web-tree-sitter 0.27 incremental JavaScript parse matches clean parse afte
 
   await Parser.init({
     locateFile(name) {
-      assert.equal(name, 'tree-sitter.wasm');
+      assert.equal(name, 'web-tree-sitter.wasm');
       return runtimeWasm;
     },
   });
