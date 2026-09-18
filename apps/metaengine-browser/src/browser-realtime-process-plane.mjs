@@ -114,6 +114,7 @@ export class BrowserRealtimeProcessPlane {
   #sampleMs;
   #eventLimit;
   #onChange;
+  #onBrainSnapshot;
   #timer = null;
   #started = false;
   #stopPromise = null;
@@ -146,6 +147,7 @@ export class BrowserRealtimeProcessPlane {
     eventLimit = DEFAULT_EVENT_LIMIT,
     cognitiveEventLimit = DEFAULT_COGNITIVE_EVENT_LIMIT,
     onChange = null,
+    onBrainSnapshot = null,
   } = {}) {
     if (!app || typeof app.getAppMetrics !== 'function' || typeof app.on !== 'function') {
       throw new Error('browser_realtime_process_plane_app_required');
@@ -153,6 +155,7 @@ export class BrowserRealtimeProcessPlane {
     if (typeof getWebContents !== 'function') throw new Error('browser_realtime_process_plane_webcontents_required');
     if (resolveTabId != null && typeof resolveTabId !== 'function') throw new Error('browser_realtime_process_plane_tab_resolver_invalid');
     if (onChange != null && typeof onChange !== 'function') throw new Error('browser_realtime_process_plane_onchange_invalid');
+    if (onBrainSnapshot != null && typeof onBrainSnapshot !== 'function') throw new Error('browser_realtime_process_plane_brain_snapshot_callback_invalid');
     this.#app = app;
     this.#getWebContents = getWebContents;
     this.#resolveTabId = resolveTabId;
@@ -160,6 +163,7 @@ export class BrowserRealtimeProcessPlane {
     this.#sampleMs = boundedInt(sampleMs, DEFAULT_SAMPLE_MS, 50, 5000);
     this.#eventLimit = boundedInt(eventLimit, DEFAULT_EVENT_LIMIT, 32, 4096);
     this.#onChange = onChange;
+    this.#onBrainSnapshot = onBrainSnapshot;
     this.#cognitiveBus = new BrowserCognitiveDeltaBus({
       clock,
       maxEvents: boundedInt(cognitiveEventLimit, DEFAULT_COGNITIVE_EVENT_LIMIT, 64, 16384),
@@ -229,6 +233,28 @@ export class BrowserRealtimeProcessPlane {
     } catch (error) {
       this.#brainLastError = text(error?.message || error, 300);
       return null;
+    }
+  }
+
+  #publishBrainWorkingMemory(reason) {
+    if (!this.#onBrainSnapshot) return false;
+    try {
+      const snapshot = typeof this.#brain.workingMemorySnapshot === 'function'
+        ? this.#brain.workingMemorySnapshot()
+        : this.#brain.snapshot()?.observation?.working_memory || null;
+      if (!snapshot) return false;
+      this.#onBrainSnapshot(snapshot, Object.freeze({
+        reason: text(reason, 96) || 'UNKNOWN',
+        process_sequence: this.#sequence,
+        observed_at: this.#observedAt,
+        cadence: reason === 'METRICS_SAMPLE' ? 'EXISTING_PROCESS_SAMPLE' : 'TOPOLOGY_REFRESH',
+        second_scheduler: false,
+        authority_effect: false,
+      }));
+      return true;
+    } catch (error) {
+      this.#brainLastError = `RSI_OBSERVATION_SIDECAR:${text(error?.message || error, 240)}`;
+      return false;
     }
   }
 
@@ -374,6 +400,7 @@ export class BrowserRealtimeProcessPlane {
       this.#dispatchBrainEdge(sample);
       try { this.#onChange?.(sample); } catch {}
     }
+    this.#publishBrainWorkingMemory(reason);
     return this.snapshot();
   }
 
@@ -586,6 +613,8 @@ export class BrowserRealtimeProcessPlane {
       browser_brain_source: 'SAME_PROCESS_AND_SEMANTIC_EVENT_STREAM',
       browser_brain_second_process_observer: false,
       browser_brain_durable_persistence: this.#brainPersistence != null,
+      rsi_brain_observation_sidecar: this.#onBrainSnapshot != null,
+      rsi_brain_observation_cadence: 'EXISTING_PROCESS_SAMPLE_PLUS_TOPOLOGY_REFRESH',
       event_loop_pressure_source: 'NODE_ELU_PLUS_EXISTING_PROCESS_SAMPLER_DRIFT',
       event_loop_pressure_dedicated_timer: false,
       cognitive_delta_second_scheduler: false,
