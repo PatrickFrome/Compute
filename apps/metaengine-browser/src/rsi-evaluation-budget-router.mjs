@@ -154,6 +154,16 @@ export function createRsiArtifactEvaluationRoutingRequest({
   evaluator_root_digest,
   evaluator_generation_digest,
   evaluation_epoch_digest,
+  sealed_task_set_digest,
+  harness_digest,
+  trial_worker_image_digest,
+  resource_budget_digest,
+  task_order_digest,
+  threshold_policy_digest,
+  stopping_policy_digest,
+  hidden_holdout_root_digest,
+  safety_suite_root_digest,
+  security_suite_root_digest,
   external_measurement_digest,
   proxy_score_digest,
   uncertainty,
@@ -176,9 +186,19 @@ export function createRsiArtifactEvaluationRoutingRequest({
   const evaluator=exactDigest(evaluator_root_digest,'evaluator_root');
   const generation=exactDigest(evaluator_generation_digest,'evaluator_generation');
   const epoch=exactDigest(evaluation_epoch_digest,'evaluation_epoch');
+  const sealedTasks=exactDigest(sealed_task_set_digest,'sealed_task_set');
+  const harness=exactDigest(harness_digest,'harness');
+  const worker=exactDigest(trial_worker_image_digest,'trial_worker_image');
+  const resourceBudget=exactDigest(resource_budget_digest,'resource_budget');
+  const taskOrder=exactDigest(task_order_digest,'task_order');
+  const thresholdPolicy=exactDigest(threshold_policy_digest,'threshold_policy');
+  const stoppingPolicy=exactDigest(stopping_policy_digest,'stopping_policy');
+  const hiddenHoldout=exactDigest(hidden_holdout_root_digest,'hidden_holdout');
+  const safetySuite=exactDigest(safety_suite_root_digest,'safety_suite');
+  const securitySuite=exactDigest(security_suite_root_digest,'security_suite');
   const measurement=exactDigest(external_measurement_digest,'measurement');
   const proxy=exactDigest(proxy_score_digest,'proxy_score');
-  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,epoch,measurement,proxy];
+  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,epoch,sealedTasks,harness,worker,resourceBudget,taskOrder,thresholdPolicy,stoppingPolicy,hiddenHoldout,safetySuite,securitySuite,measurement,proxy];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_eval_router_independent_artifact_roots_required');
   const u=unit(uncertainty,'uncertainty');
   const close=unit(decision_closeness,'decision_closeness',{allowZero:true});
@@ -204,6 +224,16 @@ export function createRsiArtifactEvaluationRoutingRequest({
     evaluator_root_digest:evaluator,
     evaluator_generation_digest:generation,
     evaluation_epoch_digest:epoch,
+    sealed_task_set_digest:sealedTasks,
+    harness_digest:harness,
+    trial_worker_image_digest:worker,
+    resource_budget_digest:resourceBudget,
+    task_order_digest:taskOrder,
+    threshold_policy_digest:thresholdPolicy,
+    stopping_policy_digest:stoppingPolicy,
+    hidden_holdout_root_digest:hiddenHoldout,
+    safety_suite_root_digest:safetySuite,
+    security_suite_root_digest:securitySuite,
     scope_tags:scopes,
     recipient_group_tags:recipients,
     evaluator_cost_units:cost,
@@ -218,7 +248,19 @@ export function createRsiArtifactEvaluationRoutingRequest({
     fresh_budget_epoch_required:true,
     prior_budget_reuse_allowed:false,
     evaluator_generation_frozen:true,
+    acceptance_assets_frozen:true,
+    candidate_can_choose_evaluator:false,
     candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_sealed_tasks:false,
+    candidate_can_choose_harness:false,
+    candidate_can_choose_trial_worker:false,
+    candidate_can_choose_resource_budget:false,
+    candidate_can_choose_task_order:false,
+    candidate_can_choose_thresholds:false,
+    candidate_can_choose_stopping:false,
+    candidate_can_choose_hidden_holdout:false,
+    candidate_can_choose_safety_suite:false,
+    candidate_can_choose_security_suite:false,
     external_measurement_owner:true,
     authored_by_candidate:false,
     cheap_proxy_is_final_truth:false,
@@ -240,7 +282,19 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     ||request.fresh_budget_epoch_required!==true
     ||request.prior_budget_reuse_allowed!==false
     ||request.evaluator_generation_frozen!==true
+    ||request.acceptance_assets_frozen!==true
+    ||request.candidate_can_choose_evaluator!==false
     ||request.candidate_can_choose_evaluator_generation!==false
+    ||request.candidate_can_choose_sealed_tasks!==false
+    ||request.candidate_can_choose_harness!==false
+    ||request.candidate_can_choose_trial_worker!==false
+    ||request.candidate_can_choose_resource_budget!==false
+    ||request.candidate_can_choose_task_order!==false
+    ||request.candidate_can_choose_thresholds!==false
+    ||request.candidate_can_choose_stopping!==false
+    ||request.candidate_can_choose_hidden_holdout!==false
+    ||request.candidate_can_choose_safety_suite!==false
+    ||request.candidate_can_choose_security_suite!==false
     ||request.external_measurement_owner!==true||request.authored_by_candidate!==false
     ||request.cheap_proxy_is_final_truth!==false||request.independent_audit_required!==true
     ||request.candidate_can_set_priority!==false||request.candidate_can_set_uncertainty!==false
@@ -256,6 +310,16 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     evaluator_root_digest:request.evaluator_root_digest,
     evaluator_generation_digest:request.evaluator_generation_digest,
     evaluation_epoch_digest:request.evaluation_epoch_digest,
+    sealed_task_set_digest:request.sealed_task_set_digest,
+    harness_digest:request.harness_digest,
+    trial_worker_image_digest:request.trial_worker_image_digest,
+    resource_budget_digest:request.resource_budget_digest,
+    task_order_digest:request.task_order_digest,
+    threshold_policy_digest:request.threshold_policy_digest,
+    stopping_policy_digest:request.stopping_policy_digest,
+    hidden_holdout_root_digest:request.hidden_holdout_root_digest,
+    safety_suite_root_digest:request.safety_suite_root_digest,
+    security_suite_root_digest:request.security_suite_root_digest,
     external_measurement_digest:request.external_measurement_digest,
     proxy_score_digest:request.proxy_score_digest,
     uncertainty:request.uncertainty,

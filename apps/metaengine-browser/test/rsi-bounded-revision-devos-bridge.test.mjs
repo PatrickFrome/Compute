@@ -675,6 +675,21 @@ test('Phase29 provenance-bound child re-enters only the existing fresh budget an
   assert.equal(request.candidate_artifact_digest,fx.artifactReceipt.artifact_digest);
   assert.equal(request.fresh_budget_epoch_required,true);
   assert.equal(request.prior_budget_reuse_allowed,false);
+  assert.equal(request.acceptance_assets_frozen,true);
+  assert.equal(request.sealed_task_set_digest,handoff.sealed_task_set_digest);
+  assert.equal(request.harness_digest,handoff.evaluation_harness_digest);
+  assert.equal(request.trial_worker_image_digest,handoff.trial_worker_image_digest);
+  assert.equal(request.resource_budget_digest,handoff.resource_budget_digest);
+  assert.equal(request.task_order_digest,handoff.task_order_digest);
+  assert.equal(request.threshold_policy_digest,handoff.acceptance_policy_digest);
+  assert.equal(request.stopping_policy_digest,handoff.stopping_policy_digest);
+  assert.equal(request.hidden_holdout_root_digest,handoff.hidden_holdout_root_digest);
+  assert.equal(request.safety_suite_root_digest,handoff.safety_suite_root_digest);
+  assert.equal(request.security_suite_root_digest,handoff.security_suite_root_digest);
+  assert.equal(request.candidate_can_choose_evaluator,false);
+  assert.equal(request.candidate_can_choose_hidden_holdout,false);
+  assert.equal(request.candidate_can_choose_safety_suite,false);
+  assert.equal(request.candidate_can_choose_security_suite,false);
   assert.ok(request.scope_tags.includes('SAFETY'));
   assert.ok(request.scope_tags.includes('SECURITY'));
   assert.ok(request.scope_tags.includes('HIDDEN_HOLDOUT'));
@@ -712,6 +727,12 @@ test('Phase29 provenance-bound child re-enters only the existing fresh budget an
   assert.equal(intent.trial_worker_image_digest,handoff.trial_worker_image_digest);
   assert.equal(intent.resource_budget_digest,handoff.resource_budget_digest);
   assert.equal(intent.task_order_digest,handoff.task_order_digest);
+  assert.equal(intent.threshold_policy_digest,handoff.acceptance_policy_digest);
+  assert.equal(intent.stopping_policy_digest,handoff.stopping_policy_digest);
+  assert.equal(intent.hidden_holdout_root_digest,handoff.hidden_holdout_root_digest);
+  assert.equal(intent.safety_suite_root_digest,handoff.safety_suite_root_digest);
+  assert.equal(intent.security_suite_root_digest,handoff.security_suite_root_digest);
+  assert.equal(intent.acceptance_assets_frozen,true);
   assert.equal(intent.max_attempts_per_arm,1);
   assert.equal(intent.max_retries,0);
   assert.equal(intent.execution_authority,false);
@@ -750,6 +771,45 @@ test('Phase29 rejects candidate-owned evaluation and build-worker reuse',()=>{
   assert.throws(()=>phase29Handoff(fx,'worker-reuse',{
     trial_worker_image_digest:fx.artifactReceipt.worker_image_digest,
   }),/build_and_evaluation_worker_must_differ/);
+});
+
+
+test('Phase29 underlying router and paired ledger reject policy rehash and direct acceptance-asset drift',()=>{
+  const fx=phase28ArtifactFixture('phase29-bypass');
+  const handoff=phase29Handoff(fx,'phase29-bypass');
+  const request=handoff.fresh_evaluation_request;
+
+  const tampered=structuredClone(request);
+  tampered.candidate_can_choose_hidden_holdout=true;
+  const requestCore=structuredClone(tampered);
+  delete requestCore.request_digest;
+  tampered.request_digest=dg(requestCore);
+  assert.throws(()=>verifyRsiArtifactEvaluationRoutingRequest(tampered),/artifact_request_policy_invalid/);
+
+  const freshPlan=createRsiEvaluationBudgetPlan({
+    plan_id:'phase29.eval.budget.bypass',
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.throws(()=>createRsiCandidateExperimentIntent({
+    intent_id:'phase29.paired.intent.direct-drift',
+    request,
+    plan:freshPlan,
+    plan_requests:[request],
+    baseline_artifact_digest:handoff.parent_artifact_digest,
+    candidate_artifact_digest:handoff.candidate_artifact_digest,
+    sealed_task_set_digest:labelDigest('phase29-bypass-different-tasks'),
+    harness_digest:handoff.evaluation_harness_digest,
+    evaluator_root_digest:handoff.evaluator_root_digest,
+    trial_worker_image_digest:handoff.trial_worker_image_digest,
+    resource_budget_digest:handoff.resource_budget_digest,
+    task_order_digest:handoff.task_order_digest,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  }),/sealed_tasks_mismatch/);
 });
 
 test('Phase29 rejects stale budget reuse and evaluator root aliasing',()=>{
