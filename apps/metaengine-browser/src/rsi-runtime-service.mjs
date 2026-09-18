@@ -59,6 +59,11 @@ import {
   verifyRsiVerifiedSearchFeedback,
   rsiVerifiedSearchFeedbackTrustRootSnapshot,
 } from './rsi-verified-search-feedback.mjs';
+import {
+  createRsiEpisodePromotionReview,
+  verifyRsiEpisodePromotionReview,
+  rsiEpisodePromotionReviewTrustRootSnapshot,
+} from './rsi-episode-promotion-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -130,6 +135,7 @@ function trustRoots() {
     autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
     devos_admission_adapter: rsiDevosAdmissionAdapterTrustRootSnapshot(),
     verified_search_feedback: rsiVerifiedSearchFeedbackTrustRootSnapshot(),
+    episode_promotion_review: rsiEpisodePromotionReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -486,6 +492,54 @@ export class RsiRuntimeService {
       this.#verifiedSearchFeedbackDigests.delete(retired.feedback_digest);
     }
     return Object.freeze({ feedback, already_recorded: false, authority_effect: false });
+  }
+
+  async prepareEpisodePromotionReview({
+    episode_id,
+    candidate_id,
+    evaluation_bundle,
+    candidate_handoff,
+    tournament_plan,
+    tournament_result,
+    archive_admission,
+    qualification,
+    risk_confirmation,
+  } = {}) {
+    this.#assertRunning();
+    const readiness = this.#episodes.nominationReadiness({ episode_id, candidate_id });
+    const review = createRsiEpisodePromotionReview({
+      episode_readiness: readiness,
+      evaluation_bundle,
+      candidate_handoff,
+      tournament_plan,
+      tournament_result,
+      archive_admission,
+      qualification,
+      risk_confirmation,
+    });
+    verifyRsiEpisodePromotionReview(review);
+    await this.#ledger.append('RSI_EPISODE_PROMOTION_REVIEW_READY', {
+      episode_id: review.episode_id,
+      candidate_id: review.candidate_id,
+      candidate_sha: review.candidate_sha,
+      parent_sha: review.parent_sha,
+      review_digest: review.review_digest,
+      evaluation_bundle_digest: review.evaluation_bundle_digest,
+      promotion_gate_digest: review.promotion_gate_digest,
+      risk_review_digest: review.risk_review_digest,
+      risk_confirmation_digest: review.risk_confirmation_digest,
+      artifact_digest: review.artifact_digest,
+      provenance_digest: review.provenance_digest,
+      rollback: review.rollback,
+      external_release_handoff_review_required: true,
+      release_handoff_authorized: false,
+      direct_install_authorized: false,
+      direct_promotion_authorized: false,
+      existing_self_update_handoff_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    return review;
   }
 
   async proposeCandidate(input = {}) {
