@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { BROWSER_BRAIN_WORKING_MEMORY_SCHEMA } from '../src/browser-brain-working-memory.mjs';
 import { RsiShadowObserver } from '../src/rsi-shadow-observer.mjs';
 import { RsiRuntimeImprovementFrontier } from '../src/rsi-runtime-improvement-frontier.mjs';
 import { createRsiExperienceContextPlan } from '../src/rsi-experience-context-planner.mjs';
+import { RsiRuntimeLedger } from '../src/rsi-runtime-ledger.mjs';
 import {
   createRsiCandidateSynthesisRequest,
   verifyRsiCandidateSynthesisRequest,
@@ -12,6 +16,8 @@ import {
   verifyRsiCandidateMutationProposal,
   prepareRsiContextAwareCandidateBuild,
   verifyRsiContextAwareCandidateBuild,
+  createRsiContextAwareCandidateLedgerPayload,
+  verifyRsiContextAwareCandidateLedgerPayload,
   rsiContextAwareCandidateTrustRootSnapshot,
 } from '../src/rsi-context-aware-candidate-synthesis.mjs';
 
@@ -192,4 +198,71 @@ test('candidate synthesis trust root is only a planning boundary',()=>{
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);
   assert.equal(root.self_update_authority,false);
+});
+
+
+test('bounded synthesis ledger envelope fits runtime ledger budget and replays without sensitive state',async()=>{
+  const {entry,request,proposal,sourceSnapshot}=fixture();
+  const build=prepareRsiContextAwareCandidateBuild({
+    synthesis_request:request,
+    frontier_entry:entry,
+    source_snapshot:sourceSnapshot,
+    mutation_proposal:proposal,
+    sequence:1,
+  });
+  const payload=createRsiContextAwareCandidateLedgerPayload({
+    episode_id:'episode:rsi:111111111111111111111111',
+    synthesis_request:request,
+    mutation_proposal:proposal,
+    context_candidate_build:build,
+  });
+  const checked=verifyRsiContextAwareCandidateLedgerPayload(payload);
+  assert.equal(checked.payload_bytes,payload.payload_bytes);
+  assert.ok(payload.payload_bytes < payload.max_payload_bytes);
+  assert.ok(payload.max_payload_bytes <= 48*1024);
+  assert.equal(payload.raw_source_persisted,false);
+  assert.equal(payload.raw_patch_persisted,false);
+  assert.equal(payload.candidate_materialized,false);
+
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-synth-ledger-'));
+  try{
+    const ledgerPath=path.join(dir,'rsi.jsonl');
+    const ledger=new RsiRuntimeLedger({ledgerPath,source_sha:SOURCE});
+    await ledger.init();
+    const row=await ledger.append('RSI_CONTEXT_CANDIDATE_BUILD_PLANNED',{
+      candidate_synthesis:payload,
+      authority_effect:false,
+    });
+    assert.equal(row.type,'RSI_CONTEXT_CANDIDATE_BUILD_PLANNED');
+    assert.equal(ledger.snapshot().event_count,1);
+
+    const replay=new RsiRuntimeLedger({ledgerPath,source_sha:SOURCE});
+    await replay.init();
+    const [persisted]=replay.events({limit:1});
+    assert.equal(
+      persisted.payload.candidate_synthesis.ledger_payload_digest,
+      payload.ledger_payload_digest,
+    );
+    const serialized=JSON.stringify(persisted);
+    assert.doesNotMatch(serialized,/"page_text"|"raw_dom"|"prompt_plaintext"|"input_value"|"cookies"|"access_token"|"secret"|"password"/);
+  }finally{
+    await fs.rm(dir,{recursive:true,force:true});
+  }
+});
+
+test('synthesis ledger envelope fails closed when a verified object is tampered with sensitive payload',()=>{
+  const {entry,request,proposal,sourceSnapshot}=fixture();
+  const build=prepareRsiContextAwareCandidateBuild({
+    synthesis_request:request,
+    frontier_entry:entry,
+    source_snapshot:sourceSnapshot,
+    mutation_proposal:proposal,
+  });
+  const forgedRequest={...request,prompt_plaintext:'steal me'};
+  assert.throws(()=>createRsiContextAwareCandidateLedgerPayload({
+    episode_id:'episode:rsi:222222222222222222222222',
+    synthesis_request:forgedRequest,
+    mutation_proposal:proposal,
+    context_candidate_build:build,
+  }),/digest_mismatch|sensitive_field_forbidden/);
 });
