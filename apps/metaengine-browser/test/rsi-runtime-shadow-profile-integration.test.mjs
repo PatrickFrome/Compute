@@ -166,14 +166,44 @@ test('runtime carries a qualified meta profile into shadow-only dual-plan compar
     assert.equal(compared.baseline_plan.routing_is_execution_authority,false);
     assert.equal(runtime.snapshot().meta_profile_shadow_registry.selection_count,1);
 
+    const shadowEvidence=await runtime.recordBoundedCanaryShadowEvidence({
+      evidence_id:'runtime.shadow.canary.evidence.1',
+      context_cohort_digest:d('e'),
+      shadow_observation_count:32,
+      matched_count:24,
+      divergence_count:8,
+      ambiguity_count:0,
+      incident_count:0,
+      hard_invariant_violation_count:0,
+      identity_drift_count:0,
+      outcome_evidence_digest:d('1'),
+      safety_evidence_digest:d('2'),
+      security_evidence_digest:d('3'),
+      awareness_evidence_digest:d('4'),
+      utility_evidence_digest:d('5'),
+      evidence_refs:['runtime:shadow:canary:evidence:1'],
+      external_observer:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(shadowEvidence.evidence.eligible_for_bounded_canary_admission,true);
+    const boundedHandoff=await runtime.qualifyBoundedCanaryHandoff({
+      admission_id:'runtime.shadow.canary.handoff.1',
+      shadow_evidence_digest:shadowEvidence.evidence.evidence_digest,
+      fixed_cohort_digest:d('e'),
+      external_admission_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(boundedHandoff.admission.eligible_for_external_bounded_canary_handoff,true);
+
     const canary=await runtime.admitBoundedCanaryMetaProfile({
       canary_id:'runtime.shadow.canary.1',
+      bounded_admission_digest:boundedHandoff.admission.admission_digest,
       cohort_digest:d('e'),
       external_canary_owner:true,
       authored_by_candidate:false,
     });
     assert.equal(canary.admission.action_surface,'READ_ONLY_DECISION_SUPPORT');
-    assert.equal(canary.admission.max_decisions,32);
+    assert.equal(canary.admission.max_decisions,16);
     assert.equal(canary.admission.canary_can_execute_browser_effect,false);
 
     const canaryDecision=await runtime.issueBoundedCanaryDecision({
@@ -215,6 +245,7 @@ test('runtime carries a qualified meta profile into shadow-only dual-plan compar
     assert.equal(canaryOutcome.stored.rollback_required,false);
     assert.equal(runtime.snapshot().meta_profile_canary_ledger.total_decision_count,1);
     assert.equal(runtime.snapshot().meta_profile_canary_ledger.total_outcome_count,1);
+    assert.ok(runtime.snapshot().bounded_canary_admission_ledger.row_count>=1);
     assert.equal(runtime.snapshot().execution_authority,false);
     assert.equal(runtime.snapshot().authority_effect,false);
   }finally{
