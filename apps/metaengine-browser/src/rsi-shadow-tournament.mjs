@@ -61,6 +61,7 @@ const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-disagreement-acquisition.mjs',
   'apps/metaengine-browser/src/rsi-experience-graph.mjs',
   'apps/metaengine-browser/src/rsi-benchmark-provenance-guard.mjs',
+  'apps/metaengine-browser/src/rsi-frontier-coevolution.mjs',
   'apps/metaengine-browser/src/candidate-capsule.cjs',
   'apps/metaengine-browser/src/verification-sandbox-plan.cjs',
   'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
