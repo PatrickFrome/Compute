@@ -372,3 +372,46 @@ export function verifyRsiBoundedRevisionArtifactReceipt(row,args={}){
   if(canonical.artifact_receipt_digest!==receipt.artifact_receipt_digest)throw new Error('rsi_revision_bridge_artifact_receipt_mismatch');
   return canonical;
 }
+
+
+export function rsiBoundedRevisionDevosBridgeTrustRootSnapshot(){
+  const root={
+    schema:'metaengine.rsi.bounded-revision-devos-bridge-root.v1',
+    version:1,
+    existing_devos_scheduler_only:true,
+    existing_isolated_candidate_builder_only:true,
+    second_scheduler_allowed:false,
+    second_builder_allowed:false,
+    exact_phase27_envelope_required:true,
+    exact_phase27_proposal_required:true,
+    approved_mutation_manifest_required:true,
+    bounded_files_operations_bytes_required:true,
+    protected_policy_roots_immutable:true,
+    private_writable_layer_required:true,
+    host_repository_mount_allowed:false,
+    network_deny_by_default_required:true,
+    provenance_predicate_type:SLSA_PREDICATE,
+    external_provenance_attestation_required:true,
+    external_signature_bundle_required:true,
+    transparency_log_inclusion_required:true,
+    candidate_self_attestation_allowed:false,
+    builder_identity_binding_required:true,
+    worker_image_binding_required:true,
+    toolchain_binding_required:true,
+    dependency_materials_binding_required:true,
+    build_definition_binding_required:true,
+    workspace_generation_binding_required:true,
+    lease_generation_binding_required:true,
+    fresh_paired_evaluation_required:true,
+    direct_active_replacement_allowed:false,
+    direct_promotion_allowed:false,
+    execution_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    scheduler_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  };
+  return Object.freeze({...root,bridge_root_digest:digest(root)});
+}
