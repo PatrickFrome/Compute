@@ -13,7 +13,7 @@ test('new DevOS runtime requires batch leasing and disables the legacy single-co
   assert.match(main, /commandBatchSize:\s*64/);
   assert.match(main, /commandReadConcurrency:\s*32/);
   assert.match(main, /commandMutationConcurrency:\s*16/);
-  assert.match(main, /commandBatchWaitMs:\s*15000/);
+  assert.match(main, /commandBatchWaitMs:\s*4000/);
   assert.match(main, /legacySingleLeaseFallback:\s*false/);
   assert.match(main, /commandFastlane:\s*false/);
 });
