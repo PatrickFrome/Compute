@@ -42,6 +42,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-clade-metaproductivity.mjs',
   'apps/metaengine-browser/src/rsi-comparative-lineage-operators.mjs',
   'apps/metaengine-browser/src/rsi-trace-guided-harness-repair.mjs',
+  'apps/metaengine-browser/src/rsi-hierarchical-evaluation-economy.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/trusted-dev-release-resolver.mjs',
   'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
