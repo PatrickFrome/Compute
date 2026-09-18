@@ -155,6 +155,8 @@ export function createRsiMetaProfileCanaryManifest({
   selection,
   cohort_digest,
   comparator_root_digest,
+  security_holdout_digest,
+  monitor_root_digest,
   decision_budget,
   window_budget,
   external_canary_owner = false,
@@ -169,6 +171,11 @@ export function createRsiMetaProfileCanaryManifest({
   if (windows > decisions) throw new Error('rsi_canary_window_budget_exceeds_decisions');
   const cohort = exactDigest(cohort_digest, 'cohort');
   const comparatorRoot = exactDigest(comparator_root_digest, 'comparator_root');
+  const securityHoldout = exactDigest(security_holdout_digest, 'security_holdout');
+  const monitorRoot = exactDigest(monitor_root_digest, 'monitor_root');
+  if (securityHoldout === cohort || securityHoldout === comparatorRoot || monitorRoot === cohort || monitorRoot === comparatorRoot || monitorRoot === securityHoldout) {
+    throw new Error('rsi_canary_independent_monitor_evidence_required');
+  }
   const identityCore = {
     source_sha: exactSha(selected.source_sha, 'source'),
     selection_digest: selected.selection_digest,
@@ -176,6 +183,8 @@ export function createRsiMetaProfileCanaryManifest({
     challenger_profile_digest: selected.challenger_profile_digest,
     cohort_digest: cohort,
     comparator_root_digest: comparatorRoot,
+    security_holdout_digest: securityHoldout,
+    monitor_root_digest: monitorRoot,
   };
   const identityDigest = digest(identityCore);
   const core = {
@@ -189,6 +198,8 @@ export function createRsiMetaProfileCanaryManifest({
     challenger_profile_digest: selected.challenger_profile_digest,
     cohort_digest: cohort,
     comparator_root_digest: comparatorRoot,
+    security_holdout_digest: securityHoldout,
+    monitor_root_digest: monitorRoot,
     decision_budget: decisions,
     window_budget: windows,
     canary_identity_digest: identityDigest,
@@ -196,6 +207,9 @@ export function createRsiMetaProfileCanaryManifest({
     identity_stable: true,
     cohort_fixed: true,
     external_comparator_root_fixed: true,
+    independent_security_holdout_fixed: true,
+    independent_monitor_root_fixed: true,
+    security_holdout_hidden_from_candidate: true,
     decision_budget_fixed: true,
     window_budget_fixed: true,
     baseline_profile_remains_default: true,
@@ -207,6 +221,8 @@ export function createRsiMetaProfileCanaryManifest({
     profile_replacement_allowed: false,
     candidate_can_choose_cohort: false,
     candidate_can_choose_comparator: false,
+    candidate_can_choose_security_holdout: false,
+    candidate_can_choose_monitor: false,
     candidate_can_choose_budget: false,
     candidate_can_rewrite_identity: false,
     external_canary_owner: true,
@@ -236,6 +252,9 @@ export function verifyRsiMetaProfileCanaryManifest(manifest, { selection } = {})
     || manifest.identity_stable !== true
     || manifest.cohort_fixed !== true
     || manifest.external_comparator_root_fixed !== true
+    || manifest.independent_security_holdout_fixed !== true
+    || manifest.independent_monitor_root_fixed !== true
+    || manifest.security_holdout_hidden_from_candidate !== true
     || manifest.decision_budget_fixed !== true
     || manifest.window_budget_fixed !== true
     || manifest.baseline_profile_remains_default !== true
@@ -247,6 +266,8 @@ export function verifyRsiMetaProfileCanaryManifest(manifest, { selection } = {})
     || manifest.profile_replacement_allowed !== false
     || manifest.candidate_can_choose_cohort !== false
     || manifest.candidate_can_choose_comparator !== false
+    || manifest.candidate_can_choose_security_holdout !== false
+    || manifest.candidate_can_choose_monitor !== false
     || manifest.candidate_can_choose_budget !== false
     || manifest.candidate_can_rewrite_identity !== false
     || manifest.external_canary_owner !== true
@@ -259,6 +280,8 @@ export function verifyRsiMetaProfileCanaryManifest(manifest, { selection } = {})
     selection,
     cohort_digest: manifest.cohort_digest,
     comparator_root_digest: manifest.comparator_root_digest,
+    security_holdout_digest: manifest.security_holdout_digest,
+    monitor_root_digest: manifest.monitor_root_digest,
     decision_budget: manifest.decision_budget,
     window_budget: manifest.window_budget,
     external_canary_owner: true,
@@ -335,6 +358,8 @@ export function createRsiMetaProfileCanaryObservation({
     divergence_class: divergence,
     incident_codes: Object.freeze(incidents),
     evidence_digest: exactDigest(evidence_digest, 'evidence'),
+    security_holdout_digest: checked.security_holdout_digest,
+    monitor_root_digest: checked.monitor_root_digest,
     external_observer: true,
     authored_by_candidate: false,
     execution_attempted: false,
@@ -482,6 +507,12 @@ export function assessRsiMetaProfileCanary({
 }
 
 function ledgerState(sourceSha, manifestDigest, observations) {
+  const blockerRows = observations.map((row) => Object.freeze({
+    decision_index: row.decision_index,
+    blockers: Object.freeze(blockersFor(row)),
+  })).filter((row) => row.blockers.length > 0);
+  const blockerSet = new Set(blockerRows.flatMap((row) => row.blockers));
+  const incidentLatched = blockerRows.length > 0;
   const core = {
     schema: RSI_META_PROFILE_CANARY_LEDGER_SCHEMA,
     version: 1,
@@ -489,6 +520,10 @@ function ledgerState(sourceSha, manifestDigest, observations) {
     manifest_digest: manifestDigest,
     observations,
     observation_count: observations.length,
+    incident_latched: incidentLatched,
+    incident_can_be_cleared: false,
+    first_blocking_decision_index: blockerRows[0]?.decision_index ?? null,
+    latched_blockers: Object.freeze([...blockerSet].sort()),
     append_only: true,
     baseline_profile_remains_default: true,
     ledger_can_activate_profile: false,
@@ -539,6 +574,7 @@ export class RsiMetaProfileCanaryEvidenceLedger {
         || parsed.ledger_can_execute_browser_effects !== false
         || parsed.candidate_can_delete_observations !== false
         || parsed.candidate_can_rewrite_observations !== false
+        || parsed.incident_can_be_cleared !== false
       ) throw new Error('rsi_canary_ledger_state_invalid');
       const clone = structuredClone(parsed);
       delete clone.state_digest;
@@ -610,6 +646,30 @@ export class RsiMetaProfileCanaryEvidenceLedger {
     return Object.freeze(this.#rows.map((row) => Object.freeze(structuredClone(row))));
   }
 
+  assess({ admission_id, manifest, selection, external_admission_owner = false, authored_by_candidate = true } = {}) {
+    if (!this.#initialized) throw new Error('rsi_canary_ledger_not_initialized');
+    const checkedManifest = verifyRsiMetaProfileCanaryManifest(manifest, { selection });
+    if (checkedManifest.manifest_digest !== this.#manifestDigest) throw new Error('rsi_canary_ledger_manifest_mismatch');
+    const result = assessRsiMetaProfileCanary({
+      admission_id,
+      manifest: checkedManifest,
+      selection,
+      observations: this.#rows,
+      external_admission_owner,
+      authored_by_candidate,
+    });
+    const state = ledgerState(this.#sourceSha, this.#manifestDigest, this.#rows);
+    if (state.incident_latched && result.state !== 'BLOCKED_BASELINE_ONLY') {
+      throw new Error('rsi_canary_incident_latch_invariant_violation');
+    }
+    return Object.freeze({
+      ...result,
+      durable_ledger_readback_required: true,
+      durable_ledger_incident_latched: state.incident_latched,
+      durable_ledger_state_digest: state.state_digest,
+    });
+  }
+
   snapshot() {
     const state = ledgerState(this.#sourceSha, this.#manifestDigest, this.#rows);
     return Object.freeze({
@@ -619,6 +679,10 @@ export class RsiMetaProfileCanaryEvidenceLedger {
       manifest_digest: state.manifest_digest,
       initialized: this.#initialized,
       observation_count: state.observation_count,
+      incident_latched: state.incident_latched,
+      incident_can_be_cleared: false,
+      first_blocking_decision_index: state.first_blocking_decision_index,
+      latched_blockers: state.latched_blockers,
       append_only: true,
       baseline_profile_remains_default: true,
       ledger_can_activate_profile: false,
@@ -636,6 +700,9 @@ export function rsiMetaProfileCanaryAdmissionTrustRootSnapshot() {
     identity_stable_canary_manifest_required: true,
     fixed_external_cohort_required: true,
     fixed_external_comparator_root_required: true,
+    independent_security_holdout_required: true,
+    independent_monitor_root_required: true,
+    security_holdout_hidden_from_candidate: true,
     exact_context_comparison_binding_required_per_decision: true,
     bounded_decision_budget_required: true,
     baseline_profile_remains_default: true,
@@ -647,11 +714,15 @@ export function rsiMetaProfileCanaryAdmissionTrustRootSnapshot() {
     identity_drift_blocks_canary: true,
     ambiguous_evidence_blocks_canary: true,
     hard_incident_blocks_canary: true,
+    incident_latch_fail_closed: true,
+    incident_can_be_cleared: false,
     utility_regression_blocks_canary: true,
     external_observer_required: true,
     external_admission_owner_required: true,
     candidate_can_choose_cohort: false,
     candidate_can_choose_comparator: false,
+    candidate_can_choose_security_holdout: false,
+    candidate_can_choose_monitor: false,
     candidate_can_choose_budget: false,
     candidate_can_self_admit: false,
     external_canary_controller_required: true,
