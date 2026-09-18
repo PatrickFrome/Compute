@@ -110,3 +110,47 @@ test('Brain failure is fail-soft and does not suppress process-plane delivery', 
   assert.match(snapshot.browser_brain.process_plane_last_error, /brain_fixture_failure/);
   assert.equal(snapshot.control_authority, false);
 });
+
+
+test('existing process cadence emits bounded Brain working memory to the RSI sidecar without a second observer', () => {
+  const observed = [];
+  const workingMemory = Object.freeze({
+    schema: 'metaengine.browser.brain-working-memory.v1',
+    global: Object.freeze({ process_revision: 1, cognitive_sequence: 2, dropped_events: 0 }),
+    cell_count: 0,
+    cells: Object.freeze([]),
+    raw_dom_stored: false,
+    raw_network_stored: false,
+    page_text_stored: false,
+    input_values_stored: false,
+    command_payload_stored: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+  const brain = {
+    observeEdge: () => Object.freeze({ authority_effect: false }),
+    pressureBudget: () => null,
+    workingMemorySnapshot: () => workingMemory,
+    snapshot: () => Object.freeze({
+      schema: 'metaengine.browser-brain.continuous-coordinator.v1',
+      observation: { working_memory: workingMemory },
+      authority_effect: false,
+    }),
+  };
+  const plane = new BrowserRealtimeProcessPlane({
+    app: new FakeApp(),
+    getWebContents: () => [fakeWebContents()],
+    resolveTabId: () => TAB_ID,
+    brainCoordinator: brain,
+    onBrainSnapshot: (snapshot, metadata) => observed.push({ snapshot, metadata }),
+  });
+
+  const snapshot = plane.refresh('METRICS_SAMPLE');
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].snapshot.schema, 'metaengine.browser.brain-working-memory.v1');
+  assert.equal(observed[0].metadata.cadence, 'EXISTING_PROCESS_SAMPLE');
+  assert.equal(observed[0].metadata.second_scheduler, false);
+  assert.equal(snapshot.rsi_brain_observation_sidecar, true);
+  assert.equal(snapshot.rsi_brain_observation_cadence, 'EXISTING_PROCESS_SAMPLE_PLUS_TOPOLOGY_REFRESH');
+  assert.equal(snapshot.browser_brain_second_process_observer, false);
+});
