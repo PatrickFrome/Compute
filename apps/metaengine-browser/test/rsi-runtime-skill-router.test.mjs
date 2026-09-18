@@ -13,6 +13,10 @@ import {
 } from '../src/rsi-verified-skill-library.mjs';
 import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
 import {
+  createRsiSkillRelationEdge,
+  createRsiSkillRelationGraph,
+} from '../src/rsi-skill-relation-graph.mjs';
+import {
   RsiRuntimeSkillRouter,
   createRsiSkillContextEvidence,
   verifyRsiSkillContextEvidence,
@@ -287,6 +291,65 @@ test('coalition mask is fenced to the exact verified library',()=>{
   }),/coalition_mask_skill_not_in_library/);
 });
 
+test('typed prerequisite relation can suppress a dependent skill but never auto-add its prerequisite',()=>{
+  const {good,bad,library,governance}=fixture();
+  const b=episode({command:'99999999-9999-4999-8999-999999999999',skillDigest:bad.capsule.skill_digest,sign:'POSITIVE'});
+  const evidence=[createRsiSkillContextEvidence({
+    source_sha:SOURCE,episode:b.ep,credit_receipt:b.credit,skill_digest:bad.capsule.skill_digest,
+    external_evaluator:true,authored_by_candidate:false,
+  })];
+  const edge=createRsiSkillRelationEdge({
+    relation_id:'relation.router.good-prerequisite-bad',library,
+    from_skill_digest:good.capsule.skill_digest,to_skill_digest:bad.capsule.skill_digest,
+    relation_type:'PREREQUISITE',scope:'GLOBAL_VERIFIED',
+    evidence_digest:d('e'),evidence_refs:['relation:router:prerequisite'],
+    external_evaluator:true,authored_by_candidate:false,
+  });
+  const graph=createRsiSkillRelationGraph({
+    graph_id:'graph.router.prerequisite',library,edges:[edge],
+    external_graph_owner:true,authored_by_candidate:false,
+  });
+  const plan=createRsiSkillRoutingPlan({
+    library,governance,context:context(),evidence,relation_graph:graph,
+    max_selected:1,exploration_slots:0,external_planner:true,authored_by_candidate:false,
+  });
+  assert.equal(plan.selected_count,0);
+  assert.equal(plan.relation_suppressed_count,1);
+  assert.equal(plan.relation_suppressed[0].skill_digest,bad.capsule.skill_digest);
+  assert.equal(plan.relation_suppressed[0].reason,'MISSING_PREREQUISITE');
+  assert.ok(!plan.selected.some(row=>row.skill_digest===good.capsule.skill_digest));
+  assert.equal(plan.relation_graph_cannot_grant_skill_activity,true);
+});
+
+test('typed antagonism relation retains the higher-ranked selected skill and suppresses the conflicting lower-ranked peer',()=>{
+  const {good,bad,library,governance}=fixture();
+  const g=episode({command:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',skillDigest:good.capsule.skill_digest,sign:'POSITIVE',step:1});
+  const b=episode({command:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',skillDigest:bad.capsule.skill_digest,sign:'POSITIVE',step:2});
+  const evidence=[
+    createRsiSkillContextEvidence({source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,external_evaluator:true,authored_by_candidate:false}),
+    createRsiSkillContextEvidence({source_sha:SOURCE,episode:b.ep,credit_receipt:b.credit,skill_digest:bad.capsule.skill_digest,external_evaluator:true,authored_by_candidate:false}),
+  ];
+  const edge=createRsiSkillRelationEdge({
+    relation_id:'relation.router.good-antagonistic-bad',library,
+    from_skill_digest:good.capsule.skill_digest,to_skill_digest:bad.capsule.skill_digest,
+    relation_type:'ANTAGONISTIC',scope:'GLOBAL_VERIFIED',
+    evidence_digest:d('e'),evidence_refs:['relation:router:antagonistic'],
+    external_evaluator:true,authored_by_candidate:false,
+  });
+  const graph=createRsiSkillRelationGraph({
+    graph_id:'graph.router.antagonism',library,edges:[edge],
+    external_graph_owner:true,authored_by_candidate:false,
+  });
+  const plan=createRsiSkillRoutingPlan({
+    library,governance,context:context(),evidence,relation_graph:graph,
+    max_selected:2,exploration_slots:0,external_planner:true,authored_by_candidate:false,
+  });
+  assert.equal(plan.selected_count,1);
+  assert.equal(plan.relation_suppressed_count,1);
+  assert.equal(plan.relation_suppressed[0].reason,'ANTAGONISTIC_WITH_HIGHER_RANKED_SKILL');
+  assert.equal(plan.relation_graph_cannot_grant_skill_activity,true);
+});
+
 test('skill-router trust root freezes thresholds, negative-transfer veto, and zero authority',()=>{
   const root=rsiRuntimeSkillRouterTrustRootSnapshot();
   assert.equal(root.verified_library_and_governance_required,true);
@@ -296,6 +359,9 @@ test('skill-router trust root freezes thresholds, negative-transfer veto, and ze
   assert.equal(root.exact_context_negative_transfer_veto,true);
   assert.equal(root.coalition_pollution_mask_supported,true);
   assert.equal(root.coalition_mask_cannot_grant_activity,true);
+  assert.equal(root.typed_skill_relation_graph_supported,true);
+  assert.equal(root.relation_graph_can_only_constrain_or_order_selection,true);
+  assert.equal(root.relation_graph_cannot_grant_skill_activity,true);
   assert.equal(root.bounded_exploration_slots,true);
   assert.equal(root.candidate_can_write_evidence,false);
   assert.equal(root.candidate_can_select_skills,false);
