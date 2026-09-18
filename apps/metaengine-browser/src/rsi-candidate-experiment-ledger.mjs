@@ -99,6 +99,8 @@ export function createRsiCandidateExperimentIntent({
     if(roots[0]!==routed.request.parent_artifact_digest)throw new Error('rsi_experiment_artifact_baseline_mismatch');
     if(roots[1]!==routed.request.candidate_artifact_digest)throw new Error('rsi_experiment_artifact_candidate_mismatch');
     if(roots[4]!==routed.request.evaluator_root_digest)throw new Error('rsi_experiment_artifact_evaluator_mismatch');
+    if(roots[5]===routed.request.build_worker_image_digest)throw new Error('rsi_experiment_build_and_trial_worker_must_differ');
+    if(roots[3]===routed.request.build_harness_manifest_digest)throw new Error('rsi_experiment_build_and_evaluation_harness_must_differ');
   }
   const identity={
     source_sha:routed.request.source_sha,
@@ -117,6 +119,9 @@ export function createRsiCandidateExperimentIntent({
       evaluation_request_kind:'MATERIALIZED_CANDIDATE',
       phase28_artifact_receipt_digest:routed.request.phase28_artifact_receipt_digest,
       provenance_root_digest:routed.request.provenance_root_digest,
+      build_worker_image_digest:routed.request.build_worker_image_digest,
+      build_harness_manifest_digest:routed.request.build_harness_manifest_digest,
+      build_capability_manifest_digest:routed.request.build_capability_manifest_digest,
       evaluator_generation_digest:routed.request.evaluator_generation_digest,
       evaluation_epoch_digest:routed.request.evaluation_epoch_digest,
       fresh_budget_epoch_required:true,
@@ -149,6 +154,11 @@ export function createRsiCandidateExperimentIntent({
     candidate_can_choose_evaluator:false,
     candidate_can_choose_task_set:false,
     candidate_can_choose_baseline:false,
+    candidate_can_choose_harness:false,
+    candidate_can_choose_trial_worker:false,
+    candidate_can_choose_resource_budget:false,
+    candidate_can_choose_task_order:false,
+    build_evaluation_environment_separation_required:artifactRequest,
     candidate_can_retry_ambiguous_effect:false,
     intent_is_execution_authority:false,
     intent_is_scheduler_authority:false,
@@ -166,6 +176,9 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
     ||intent.experiment_execution_external!==true||intent.authored_by_candidate!==false||intent.external_experiment_owner!==true
     ||intent.candidate_can_execute_experiment!==false||intent.candidate_can_choose_evaluator!==false
     ||intent.candidate_can_choose_task_set!==false||intent.candidate_can_choose_baseline!==false
+    ||intent.candidate_can_choose_harness!==false||intent.candidate_can_choose_trial_worker!==false
+    ||intent.candidate_can_choose_resource_budget!==false||intent.candidate_can_choose_task_order!==false
+    ||intent.build_evaluation_environment_separation_required!==(intent.evaluation_request_kind==='MATERIALIZED_CANDIDATE')
     ||intent.candidate_can_retry_ambiguous_effect!==false||intent.intent_is_execution_authority!==false
     ||intent.intent_is_scheduler_authority!==false)throw new Error('rsi_experiment_intent_policy_invalid');
   const embeddedRequest=request??intent.request_snapshot;
@@ -179,6 +192,9 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
     if(intent.evaluation_request_kind!=='MATERIALIZED_CANDIDATE'
       ||intent.phase28_artifact_receipt_digest!==embeddedRequest.phase28_artifact_receipt_digest
       ||intent.provenance_root_digest!==embeddedRequest.provenance_root_digest
+      ||intent.build_worker_image_digest!==embeddedRequest.build_worker_image_digest
+      ||intent.build_harness_manifest_digest!==embeddedRequest.build_harness_manifest_digest
+      ||intent.build_capability_manifest_digest!==embeddedRequest.build_capability_manifest_digest
       ||intent.evaluator_generation_digest!==embeddedRequest.evaluator_generation_digest
       ||intent.evaluation_epoch_digest!==embeddedRequest.evaluation_epoch_digest
       ||intent.fresh_budget_epoch_required!==true)throw new Error('rsi_experiment_artifact_request_binding_invalid');
@@ -426,6 +442,13 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     fresh_budget_epoch_required_for_materialized_candidate:true,
     evaluator_generation_binding_required:true,
     evaluator_root_binding_required:true,
+    build_evaluation_environment_separation_required:true,
+    build_worker_and_trial_worker_must_differ:true,
+    build_harness_and_evaluation_harness_must_differ:true,
+    candidate_cannot_choose_harness:true,
+    candidate_cannot_choose_trial_worker:true,
+    candidate_cannot_choose_resource_budget:true,
+    candidate_cannot_choose_task_order:true,
     paired_control_treatment_required:true,
     unchanged_baseline_artifact_required:true,
     same_sealed_tasks_required:true,
