@@ -24,19 +24,19 @@ function digest(value) {
 
 function exactSha(value, label) {
   const out = String(value || '').trim().toLowerCase();
-  if (!SHA40_RE.test(out)) throw new Error(\`rsi_episode_devos_\${label}_sha_invalid\`);
+  if (!SHA40_RE.test(out)) throw new Error(`rsi_episode_devos_${label}_sha_invalid`);
   return out;
 }
 
 function exactDigest(value, label) {
   const out = String(value || '').trim().toLowerCase();
-  if (!DIGEST_RE.test(out)) throw new Error(\`rsi_episode_devos_\${label}_digest_invalid\`);
+  if (!DIGEST_RE.test(out)) throw new Error(`rsi_episode_devos_${label}_digest_invalid`);
   return out.startsWith('sha256:') ? out.slice(7) : out;
 }
 
 function safeId(value, label) {
   const out = String(value || '').trim();
-  if (!SAFE_ID_RE.test(out)) throw new Error(\`rsi_episode_devos_\${label}_invalid\`);
+  if (!SAFE_ID_RE.test(out)) throw new Error(`rsi_episode_devos_${label}_invalid`);
   return out;
 }
 
@@ -52,11 +52,11 @@ function assertZeroAuthority(value, label) {
     'authority_effect',
   ]) {
     if (Object.hasOwn(value || {}, field) && value[field] !== false) {
-      throw new Error(\`rsi_episode_devos_\${label}_\${field}_invalid\`);
+      throw new Error(`rsi_episode_devos_${label}_${field}_invalid`);
     }
   }
   if (Object.hasOwn(value || {}, 'automatic_retry_allowed') && value.automatic_retry_allowed !== false) {
-    throw new Error(\`rsi_episode_devos_\${label}_automatic_retry_invalid\`);
+    throw new Error(`rsi_episode_devos_${label}_automatic_retry_invalid`);
   }
 }
 
@@ -157,7 +157,7 @@ export function createRsiEpisodeDevosCandidateRequest({
   return zeroAuthority({
     schema: RSI_EPISODE_DEVOS_REQUEST_SCHEMA,
     version: 1,
-    request_id: \`rsi_episode_devos_req_\${requestDigest.slice(0, 24)}\`,
+    request_id: `rsi_episode_devos_req_${requestDigest.slice(0, 24)}`,
     request_digest: requestDigest,
     ...requestMaterial,
     task_spec: structuredClone(plan.task_spec),
@@ -203,7 +203,7 @@ function verifyRequest(request) {
   };
   if (!Number.isSafeInteger(core.request_generation) || core.request_generation < 1) throw new Error('rsi_episode_devos_request_generation_invalid');
   const expectedDigest = digest(core);
-  if (request.request_digest !== expectedDigest || request.request_id !== \`rsi_episode_devos_req_\${expectedDigest.slice(0, 24)}\`) {
+  if (request.request_digest !== expectedDigest || request.request_id !== `rsi_episode_devos_req_${expectedDigest.slice(0, 24)}`) {
     throw new Error('rsi_episode_devos_request_digest_mismatch');
   }
   if (digest(request.task_spec) !== core.task_spec_digest) throw new Error('rsi_episode_devos_request_task_spec_tampered');
