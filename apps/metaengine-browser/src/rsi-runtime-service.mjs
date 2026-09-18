@@ -53,6 +53,7 @@ import { createRsiExternalEvaluationBundle, verifyRsiExternalEvaluationBundle, r
 import { createRsiExternalPromotionReviewRequest, finalizeRsiExternalPromotionReview, verifyRsiExternalPromotionReviewRequest, verifyRsiExternalPromotionReviewResult, rsiExternalPromotionReviewTrustRootSnapshot } from './rsi-external-promotion-review.mjs';
 import { createRsiReleaseAuthorityHandoff, verifyRsiReleaseAuthorityHandoff, rsiReleaseAuthorityHandoffTrustRootSnapshot } from './rsi-release-authority-handoff.mjs';
 import { createRsiReleaseExecutorAdmission, verifyRsiReleaseExecutorAdmission, rsiReleaseExecutorAdmissionTrustRootSnapshot } from './rsi-release-executor-admission.mjs';
+import { createRsiReleaseEffectReconciliation, verifyRsiReleaseEffectReconciliation, rsiReleaseEffectReconciliationTrustRootSnapshot } from './rsi-release-effect-reconciliation.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -130,6 +131,7 @@ function trustRoots() {
     external_promotion_review: rsiExternalPromotionReviewTrustRootSnapshot(),
     release_authority_handoff: rsiReleaseAuthorityHandoffTrustRootSnapshot(),
     release_executor_admission: rsiReleaseExecutorAdmissionTrustRootSnapshot(),
+    release_effect_reconciliation: rsiReleaseEffectReconciliationTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -187,6 +189,9 @@ export class RsiRuntimeService {
   #releaseExecutorAdmissionCount = 0;
   #lastReleaseExecutorAdmissionDigest = null;
   #lastReleaseExecutorCommandId = null;
+  #releaseEffectReconciliationCount = 0;
+  #lastReleaseEffectReconciliationDigest = null;
+  #lastReleaseEffectOutcome = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -517,6 +522,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const admission = row?.payload?.release_executor_admission;
         if (admission?.release_handoff_digest === wanted) found = Object.freeze(structuredClone(admission));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseExecutorAdmissionByDigest(admissionDigest) {
+    const wanted = String(admissionDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const admission = row?.payload?.release_executor_admission;
+        if (admission?.admission_digest === wanted) found = Object.freeze(structuredClone(admission));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseEffectReconciliationByAdmission(admissionDigest) {
+    const wanted = String(admissionDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const reconciliation = row?.payload?.release_effect_reconciliation;
+        if (reconciliation?.executor_admission_digest === wanted) found = Object.freeze(structuredClone(reconciliation));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -1099,6 +1138,55 @@ export class RsiRuntimeService {
     return admission;
   }
 
+  async reconcileReleaseEffect({
+    executor_admission_digest,
+    command_readback,
+    transaction_readback,
+    successor_runtime_readback = null,
+    reconciled_at,
+  } = {}) {
+    this.#assertRunning();
+    const admissionDigest = String(executor_admission_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(admissionDigest)) throw new Error('rsi_runtime_release_executor_admission_digest_invalid');
+    if (this.#findReleaseEffectReconciliationByAdmission(admissionDigest)) {
+      throw new Error('rsi_runtime_release_effect_already_reconciled');
+    }
+    const admission = this.#findReleaseExecutorAdmissionByDigest(admissionDigest);
+    if (!admission) throw new Error('rsi_runtime_release_executor_admission_not_persisted');
+    verifyRsiReleaseExecutorAdmission(admission);
+    const releaseHandoff = this.#findReleaseAuthorityHandoffByDigest(admission.release_handoff_digest);
+    if (!releaseHandoff) throw new Error('rsi_runtime_release_authority_handoff_not_persisted');
+    const review = this.#findExternalPromotionReviewByResultDigest(releaseHandoff.promotion_review_result_digest);
+    if (!review) throw new Error('rsi_runtime_external_promotion_review_result_not_persisted');
+    verifyRsiExternalPromotionReviewResult(review.result, review.request);
+    verifyRsiReleaseAuthorityHandoff(releaseHandoff, review.result, review.request);
+    const reconciliation = createRsiReleaseEffectReconciliation({
+      executor_admission: admission,
+      release_handoff: releaseHandoff,
+      promotion_review_result: review.result,
+      promotion_review_request: review.request,
+      command_readback,
+      transaction_readback,
+      successor_runtime_readback,
+      reconciled_at,
+    });
+    verifyRsiReleaseEffectReconciliation(reconciliation);
+    await this.#ledger.append('RSI_RELEASE_EFFECT_RECONCILED', {
+      release_effect_reconciliation: reconciliation,
+      same_command_receipt_required: true,
+      effect_reexecution_authorized: false,
+      retry_authorized: false,
+      ambiguous_effect_replay_allowed: false,
+      release_authority_advanced_by_rsi: false,
+      self_update_invoked_by_rsi: false,
+      authority_effect: false,
+    });
+    this.#releaseEffectReconciliationCount += 1;
+    this.#lastReleaseEffectReconciliationDigest = reconciliation.reconciliation_digest;
+    this.#lastReleaseEffectOutcome = reconciliation.result;
+    return reconciliation;
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1396,6 +1484,24 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      release_effect_reconciliation: Object.freeze({
+        count: this.#releaseEffectReconciliationCount,
+        last_digest: this.#lastReleaseEffectReconciliationDigest,
+        last_outcome: this.#lastReleaseEffectOutcome,
+        same_command_receipt_required: true,
+        db_command_completion_is_not_physical_success_proof: true,
+        exact_qualified_successor_required_for_confirmed_success: true,
+        effect_reexecution_authorized: false,
+        retry_authorized: false,
+        ambiguous_effect_replay_allowed: false,
+        release_authority_advanced_by_rsi: false,
+        self_update_invoked_by_rsi: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       release_executor_admission: Object.freeze({
         count: this.#releaseExecutorAdmissionCount,
         last_digest: this.#lastReleaseExecutorAdmissionDigest,
