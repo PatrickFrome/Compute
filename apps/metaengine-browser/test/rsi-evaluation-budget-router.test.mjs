@@ -20,8 +20,10 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stable(value){if(Array.isArray(value))return value.map(stable);if(!value||typeof value!=='object')return value;return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));}
+function structuralDigest(value){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;}
 
-function experience(label,{cost=8,info=0.8}={}){
+function experience(label,{cost=8,info=0.8,scopeTags=['VERIFIER']}={}){
   const hypothesis=createRsiSharedExperienceHypothesis({
     hypothesis_id:`experience.hypothesis.${label}`,
     source_sha:SOURCE,
@@ -31,7 +33,7 @@ function experience(label,{cost=8,info=0.8}={}){
     supporting_evidence_digest:dg(`support-${label}`),
     counterevidence_digest:dg(`counter-${label}`),
     falsification_test_digest:dg(`falsify-${label}`),
-    scope_tags:['VERIFIER'],
+    scope_tags:scopeTags,
     recipient_group_tags:['CODING'],
     evaluator_cost_units:cost,
     expected_information_gain:info,
@@ -57,7 +59,7 @@ function experience(label,{cost=8,info=0.8}={}){
   return {hypothesis,admission};
 }
 function request(label,opts={}){
-  const exp=experience(label,{cost:opts.cost??8,info:opts.info??0.8});
+  const exp=experience(label,{cost:opts.cost??8,info:opts.info??0.8,scopeTags:opts.scopeTags??['VERIFIER']});
   const row=createRsiEvaluationRoutingRequest({
     request_id:`eval.request.${label}`,
     hypothesis:exp.hypothesis,
@@ -225,4 +227,100 @@ test('evaluation budget router trust root keeps routing advisory and bounded',()
   assert.equal(root.selected_request_is_execution_authority,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.evaluation_budget_router_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('plan rejects a self-rehashed routing-priority manipulation',()=>{
+  const fx=request('priority-tamper',{cost:8,info:0.8,uncertainty:0.8,closeness:0.8,gap:0.2});
+  const badCore={...fx.row,routing_priority_score:999};
+  delete badCore.request_digest;
+  const bad={...badCore,request_digest:structuralDigest(badCore)};
+  assert.throws(()=>createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.priority-tamper',
+    source_sha:SOURCE,
+    requests:[bad],
+    epoch_budget_units:16,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  }),/request_digest_mismatch/);
+});
+
+test('protected safety and security scopes receive a fail-closed evaluation floor',()=>{
+  const regular=request('floor-regular',{cost:4,info:1,uncertainty:1,closeness:1,gap:1}).row;
+  const safety=request('floor-safety',{cost:8,info:0.2,uncertainty:0.2,closeness:0,gap:0,scopeTags:['SAFETY']}).row;
+
+  const insufficient=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.floor-insufficient',
+    source_sha:SOURCE,
+    requests:[regular,safety],
+    epoch_budget_units:4,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(insufficient.safety_floor_satisfied,false);
+  assert.equal(insufficient.state,'EVALUATION_BUDGET_FLOOR_UNSATISFIED');
+  assert.deepEqual(insufficient.selected_request_digests,[]);
+
+  const enough=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.floor-enough',
+    source_sha:SOURCE,
+    requests:[regular,safety],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(enough.safety_floor_satisfied,true);
+  assert.ok(enough.selected_request_digests.includes(safety.request_digest));
+  assert.ok(enough.protected_scopes_covered.includes('SAFETY'));
+});
+
+test('failed durable budget-ledger write creates no phantom spend',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-eval-router-persist-fail-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const row=request('persist-fail',{cost:8}).row;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.persist-fail',
+    source_sha:SOURCE,
+    requests:[row],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>ledger.add(plan));
+  assert.equal(ledger.snapshot().row_count,0);
+  assert.equal(ledger.snapshot().total_used_budget_units,0);
+});
+
+test('restart rejects self-rehashed plan policy or accounting downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-eval-router-restart-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const row=request('restart-policy',{cost:8}).row;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.restart-policy',
+    source_sha:SOURCE,
+    requests:[row],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  await ledger.add(plan);
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const badPlanCore={...persisted.rows[0].plan,candidate_can_override_budget:true};
+  delete badPlanCore.plan_digest;
+  persisted.rows[0].plan={...badPlanCore,plan_digest:structuralDigest(badPlanCore)};
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/plan_policy_invalid/);
 });
