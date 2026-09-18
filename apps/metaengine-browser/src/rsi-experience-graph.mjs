@@ -361,8 +361,12 @@ export function verifyRsiExperienceUtilityReceipt(row) {
 function normalizeSimilarityEdge(row, caseById) {
   exactKeys(row, [
     'left_case_id','right_case_id','similarity_score','embedding_model_digest','external_indexer','authored_by_candidate',
-  ], [], 'similarity_edge');
-  if (row.external_indexer !== true || row.authored_by_candidate !== false) throw new Error('rsi_exg_similarity_external_origin_required');
+  ], ['similarity_is_retrieval_signal_only'], 'similarity_edge');
+  if (
+    row.external_indexer !== true
+    || row.authored_by_candidate !== false
+    || (Object.prototype.hasOwnProperty.call(row, 'similarity_is_retrieval_signal_only') && row.similarity_is_retrieval_signal_only !== true)
+  ) throw new Error('rsi_exg_similarity_external_origin_required');
   let left = boundedId(row.left_case_id, 'similarity_left');
   let right = boundedId(row.right_case_id, 'similarity_right');
   if (left === right || !caseById.has(left) || !caseById.has(right)) throw new Error('rsi_exg_similarity_binding_invalid');
@@ -382,8 +386,12 @@ function normalizeSimilarityEdge(row, caseById) {
 function normalizeCorrectionEdge(row, caseById) {
   exactKeys(row, [
     'from_case_id','to_case_id','evidence_digest','external_verifier','authored_by_candidate',
-  ], [], 'correction_edge');
-  if (row.external_verifier !== true || row.authored_by_candidate !== false) throw new Error('rsi_exg_correction_external_origin_required');
+  ], ['fixed_by_relation_is_authority'], 'correction_edge');
+  if (
+    row.external_verifier !== true
+    || row.authored_by_candidate !== false
+    || (Object.prototype.hasOwnProperty.call(row, 'fixed_by_relation_is_authority') && row.fixed_by_relation_is_authority !== false)
+  ) throw new Error('rsi_exg_correction_external_origin_required');
   const fromId = boundedId(row.from_case_id, 'correction_from');
   const toId = boundedId(row.to_case_id, 'correction_to');
   const from = caseById.get(fromId);
