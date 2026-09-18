@@ -5,6 +5,7 @@ import test from 'node:test';
 const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const runtime = await fs.readFile(new URL('../src/rsi-runtime-service.mjs', import.meta.url), 'utf8');
 const ledger = await fs.readFile(new URL('../src/rsi-runtime-ledger.mjs', import.meta.url), 'utf8');
+const feed = await fs.readFile(new URL('../src/rsi-browser-observation-feed.mjs', import.meta.url), 'utf8');
 
 test('Browser lifecycle starts RSI only after exact Development Plane source binding', () => {
   assert.match(main, /import \{ RsiRuntimeService \} from '\.\/rsi-runtime-service\.mjs'/);
@@ -15,12 +16,23 @@ test('Browser lifecycle starts RSI only after exact Development Plane source bin
 });
 
 test('Browser shell snapshot exposes bounded RSI observability without actuation authority', () => {
-  assert.match(main, /rsi: rsiRuntime\?\.snapshot\(\)/);
+  assert.match(main, /observation_feed: rsiObservationFeed\?\.snapshot\(\) \|\| null/);
   assert.match(main, /candidate_effect_executor_exposed: false/);
   assert.match(main, /physical_effect_replay_allowed: false/);
   assert.match(main, /direct_promotion_enabled: false/);
   assert.match(main, /direct_self_update_enabled: false/);
   assert.match(main, /authority_effect: false/);
+});
+
+test('Browser Brain observations enter RSI through a bounded zero-authority sidecar', () => {
+  assert.match(main, /import \{ RsiBrowserObservationFeed \} from '\.\/rsi-browser-observation-feed\.mjs'/);
+  assert.match(main, /observe: \(brainSnapshot\) => rsiRuntime\.observeBrainSnapshot\(brainSnapshot\)/);
+  assert.match(main, /onBrainObservation: \(brainSnapshot\) => rsiObservationFeed\?\.offer\(brainSnapshot\) \|\| null/);
+  assert.match(feed, /max_pending_observations: 1/);
+  assert.match(feed, /producer: 'EXISTING_BROWSER_BRAIN_EVENT_STREAM'/);
+  assert.match(feed, /second_scheduler: false/);
+  assert.match(feed, /execution_authority: false/);
+  assert.doesNotMatch(feed, /setInterval\(|setTimeout\(/);
 });
 
 test('RSI runtime does not contain a Browser effect executor or direct promotion/install path', () => {
