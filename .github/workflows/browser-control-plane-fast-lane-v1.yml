@@ -124,8 +124,8 @@ jobs:
           grep -Fq "wake_reason:'SUBSCRIBED_RECHECK'" "$edge"
           grep -Fq 'const wake=await subscription.wake' "$edge"
           grep -Fq 'transport_delivery_is_authority:false' "$edge"
-          grep -Fq 'realtime_process_plane:boundedObject' "$edge"
-          grep -Fq 'control_latency:boundedObject' "$edge"
+          grep -Fq 'row.realtime_process_plane=boundedObject' "$edge"
+          grep -Fq 'row.control_latency=boundedObject' "$edge"
           ! grep -Eq "finish\(['\"]SUBSCRIBED_RECHECK['\"]\)" "$edge"
           ! grep -Eq 'eval[[:space:]]*\(|new[[:space:]]+Function[[:space:]]*\(' "$edge"
 
