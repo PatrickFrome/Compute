@@ -115,7 +115,9 @@ test('DevOS runtime observability keeps bounded task-cycle and last-failure evid
   assert.doesNotMatch(wire, /"positive_effect_proof"\s*:/);
   assert.equal(runtime.task_cycle.raw_effect_proof_exposed, false);
   assert.equal(runtime.last_failure.task_cycle.raw_effect_proof_exposed, false);
-  assert.doesNotMatch(wire, /task_spec/);
+  assert.doesNotMatch(wire, /"task_spec"\s*:/);
+  assert.equal(runtime.task_cycle.task_spec_exposed, false);
+  assert.equal(runtime.last_failure.task_cycle.task_spec_exposed, false);
 });
 
 test('DevOS runtime projection bounds role counts and failure text', () => {
