@@ -147,6 +147,11 @@ import {
   verifyRsiSelfUpdateSuccessorVerification,
   rsiSelfUpdateSuccessorVerificationTrustRootSnapshot,
 } from './rsi-self-update-successor-verification.mjs';
+import {
+  createRsiPostAdoptionCausalMeasurement,
+  verifyRsiPostAdoptionCausalMeasurement,
+  rsiPostAdoptionCausalMeasurementTrustRootSnapshot,
+} from './rsi-post-adoption-causal-measurement.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -171,6 +176,7 @@ const MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS = 128;
 const MAX_SELF_UPDATE_POST_EFFECT_READBACKS = 256;
 const MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS = 256;
+const MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -259,6 +265,7 @@ function trustRoots() {
     self_update_final_install_cycle: rsiSelfUpdateFinalInstallCycleTrustRootSnapshot(),
     self_update_final_apply_readback: rsiSelfUpdateFinalApplyReadbackTrustRootSnapshot(),
     self_update_successor_verification: rsiSelfUpdateSuccessorVerificationTrustRootSnapshot(),
+    post_adoption_causal_measurement: rsiPostAdoptionCausalMeasurementTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -334,6 +341,8 @@ export class RsiRuntimeService {
   #lastSelfUpdatePostEffectReadbackDigest = null;
   #selfUpdateSuccessorVerificationDigests = new Set();
   #lastSelfUpdateSuccessorVerificationDigest = null;
+  #postAdoptionCausalMeasurementDigests = new Set();
+  #lastPostAdoptionCausalMeasurementDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -526,6 +535,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateSuccessorVerificationDigests.add(verification.successor_verification_digest);
           this.#lastSelfUpdateSuccessorVerificationDigest = verification.successor_verification_digest;
+        }
+        if (row?.type === 'RSI_POST_ADOPTION_CAUSAL_MEASUREMENT_RECORDED' && row?.payload?.post_adoption_measurement) {
+          const measurement = verifyRsiPostAdoptionCausalMeasurement(row.payload.post_adoption_measurement);
+          if (this.#postAdoptionCausalMeasurementDigests.size >= MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS) {
+            throw new Error('rsi_runtime_post_adoption_measurement_replay_capacity_exhausted');
+          }
+          this.#postAdoptionCausalMeasurementDigests.add(measurement.measurement_digest);
+          this.#lastPostAdoptionCausalMeasurementDigest = measurement.measurement_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -2094,6 +2111,56 @@ export class RsiRuntimeService {
     return Object.freeze({ verification, already_recorded: false, authority_effect: false });
   }
 
+  async recordPostAdoptionCausalMeasurement({
+    successor_verification,
+    policy,
+    control_receipt,
+    candidate_receipt,
+    measurement_id,
+    evaluated_at,
+    external_synthesizer = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const successor = verifyRsiSelfUpdateSuccessorVerification(successor_verification);
+    if (!this.#selfUpdateSuccessorVerificationDigests.has(successor.successor_verification_digest)) {
+      throw new Error('rsi_runtime_successor_verification_not_persisted');
+    }
+    const measurement = createRsiPostAdoptionCausalMeasurement({
+      successor_verification: successor,
+      policy,
+      control_receipt,
+      candidate_receipt,
+      measurement_id,
+      evaluated_at,
+      external_synthesizer,
+      authored_by_candidate,
+    });
+    verifyRsiPostAdoptionCausalMeasurement(measurement);
+    if (this.#postAdoptionCausalMeasurementDigests.has(measurement.measurement_digest)) {
+      return Object.freeze({ measurement, already_recorded: true, authority_effect: false });
+    }
+    if (this.#postAdoptionCausalMeasurementDigests.size >= MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS) {
+      throw new Error('rsi_runtime_post_adoption_measurement_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_POST_ADOPTION_CAUSAL_MEASUREMENT_RECORDED', {
+      post_adoption_measurement: measurement,
+      qualified_successor_required: true,
+      contextual_pareto_evidence_only: true,
+      scalar_reward_authoritative: false,
+      experience_graph_write_performed: false,
+      skill_library_write_performed: false,
+      next_episode_created: false,
+      execution_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      authority_effect: false,
+    });
+    this.#postAdoptionCausalMeasurementDigests.add(measurement.measurement_digest);
+    this.#lastPostAdoptionCausalMeasurementDigest = measurement.measurement_digest;
+    return Object.freeze({ measurement, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2447,6 +2514,25 @@ export class RsiRuntimeService {
         same_invocation_retry_allowed: false,
         fresh_physical_effect_retry_allowed: false,
         physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      post_adoption_causal_measurement: Object.freeze({
+        count: this.#postAdoptionCausalMeasurementDigests.size,
+        capacity: MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS,
+        last_digest: this.#lastPostAdoptionCausalMeasurementDigest,
+        qualified_successor_required: true,
+        precommitted_metric_set_required: true,
+        exact_predecessor_vs_candidate_pair_required: true,
+        matched_workload_environment_execution_signature_required: true,
+        external_arm_evaluator_required: true,
+        external_synthesizer_required: true,
+        scalar_reward_authoritative: false,
+        hard_invariant_regression_veto: true,
+        pareto_improvement_required_for_skill_evolution: true,
+        verified_regressions_are_learning_evidence: true,
+        experience_graph_write_performed_here: false,
+        skill_library_write_performed_here: false,
+        next_episode_created_here: false,
         authority_effect: false,
       }),
       devos_materialization: Object.freeze({
