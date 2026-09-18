@@ -63,8 +63,10 @@ function verifyBridgeSnapshot(bridge,{revision_envelope,revision_proposal}={}){
     experiment_intent:revision_envelope?.experiment_intent_snapshot,
     experiment_receipt:revision_envelope?.experiment_receipt_snapshot,
   });
-  assertZero(checked,'bridge');
-  if(checked.external_implementation_reviewer!==true||checked.uses_existing_devos_scheduler!==true
+  if(checked.execution_authority!==false||checked.production_mutation_authority!==false
+    ||checked.promotion_authority!==false||checked.self_update_authority!==false
+    ||checked.automatic_retry_allowed!==false||checked.authority_effect!==false
+    ||checked.external_implementation_reviewer!==true||checked.uses_existing_devos_scheduler!==true
     ||checked.uses_existing_isolated_candidate_builder!==true||checked.bridge_can_create_workspace!==false
     ||checked.bridge_can_materialize_candidate!==false||checked.bridge_can_execute_commands!==false
     ||checked.bridge_can_promote!==false)throw new Error('rsi_impl_eval_bridge_policy_invalid');
