@@ -82,14 +82,23 @@ function verifyTransaction(txn, admission, expectedState){
     ||exactSha(txn.resolved_git_sha,'transaction_source')!==admission.candidate_sha
     ||String(txn.state||'').toUpperCase()!==expectedState
   )throw new Error('rsi_successor_transaction_binding_mismatch');
+  const attemptCount=Number(txn.attempt_count);
+  if(!Number.isSafeInteger(attemptCount)||attemptCount<1){
+    throw new Error('rsi_successor_transaction_attempt_count_invalid');
+  }
+  const createdAt=exactUtc(txn.created_at,'transaction_created_at');
+  const updatedAt=exactUtc(txn.updated_at,'transaction_updated_at');
+  if(Date.parse(updatedAt)<Date.parse(createdAt)){
+    throw new Error('rsi_successor_transaction_time_order_invalid');
+  }
   return Object.freeze({
     schema:txn.schema,
     transaction_id:safeId(txn.transaction_id,'transaction_id'),
     source_version:txn.source_version,target_version:txn.target_version,resolved_git_sha:admission.candidate_sha,
     state:expectedState,qualified:txn.qualified===true,quarantined:txn.quarantined===true,
-    attempt_count:Number(txn.attempt_count||0),
-    created_at:exactUtc(txn.created_at,'transaction_created_at'),
-    updated_at:exactUtc(txn.updated_at,'transaction_updated_at'),
+    attempt_count:attemptCount,
+    created_at:createdAt,
+    updated_at:updatedAt,
     transaction_digest:digest(txn),authority_effect:false,
   });
 }
@@ -159,9 +168,11 @@ function verifySuccessorReceipt(receipt, admission, transaction){
   if(!Number.isSafeInteger(pid)||pid<1)throw new Error('rsi_successor_receipt_pid_invalid');
   const pre=String(receipt.pre_install_receipt_sha256||'').trim().toLowerCase();
   if(!HEX64.test(pre))throw new Error('rsi_successor_receipt_preinstall_digest_invalid');
+  const preRecorded=exactUtc(receipt.pre_install_recorded_at,'pre_install_recorded_at');
   const recorded=exactUtc(receipt.recorded_at,'successor_receipt_recorded_at');
-  if(Date.parse(recorded)<Date.parse(transaction.created_at||recorded)){
-    throw new Error('rsi_successor_receipt_predates_transaction');
+  if(Date.parse(recorded)<Date.parse(transaction.created_at)
+    ||Date.parse(recorded)<Date.parse(preRecorded)){
+    throw new Error('rsi_successor_receipt_time_order_invalid');
   }
   return Object.freeze({
     schema:receipt.schema,version:receipt.version,pid,primary_instance:true,
@@ -169,7 +180,7 @@ function verifySuccessorReceipt(receipt, admission, transaction){
     successor_startup:String(receipt.successor_startup||''),
     qualification_state:'BOOT_VERIFIED',
     pre_install_receipt_sha256:pre,
-    pre_install_recorded_at:String(receipt.pre_install_recorded_at||''),
+    pre_install_recorded_at:preRecorded,
     recorded_at:recorded,successor_receipt_digest:digest(receipt),authority_effect:false,
   });
 }
@@ -195,7 +206,7 @@ export function createRsiInstalledExecutableReadback({
   return Object.freeze({...core,readback_digest:digest(core)});
 }
 
-function verifyExecutable(row,admission){
+function verifyExecutable(row,admission,observedAt){
   if(!row||row.schema!==RSI_INSTALLED_EXECUTABLE_READBACK_SCHEMA||row.version!==1){
     throw new Error('rsi_successor_executable_readback_schema_invalid');
   }
@@ -209,6 +220,9 @@ function verifyExecutable(row,admission){
     ||String(row.installed_version||'')!==admission.target_release_version
     ||exactDigest(row.installed_executable_sha256,'installed_executable')!==admission.target_installed_executable_sha256
   )throw new Error('rsi_successor_executable_readback_binding_mismatch');
+  if(Date.parse(exactUtc(row.observed_at,'executable_observed_at'))>Date.parse(observedAt)){
+    throw new Error('rsi_successor_executable_readback_after_verification');
+  }
   const clone=structuredClone(row);
   const claimed=exactDigest(clone.readback_digest,'executable_readback');
   delete clone.readback_digest;
@@ -253,7 +267,7 @@ export function createRsiSelfUpdateSuccessorVerification({
       expectedTxn==='QUALIFIED'?'QUALIFIED':'TARGET_INSTALLED_PENDING_QUALIFICATION',
     );
     receipt=verifySuccessorReceipt(successor_receipt,admission,transaction);
-    executable=verifyExecutable(installed_executable_readback,admission);
+    executable=verifyExecutable(installed_executable_readback,admission,observedAt);
 
     if(expectedTxn==='QUALIFIED'){
       if(transaction.qualified!==true||transaction.quarantined===true
@@ -291,6 +305,7 @@ export function createRsiSelfUpdateSuccessorVerification({
     schema:RSI_SELF_UPDATE_SUCCESSOR_VERIFICATION_SCHEMA,version:1,state,reason,
     final_install_admission_digest:admission.final_install_admission_digest,
     post_effect_readback_digest:post.post_effect_readback_digest,
+    post_effect_state:post.state,
     candidate_sha:admission.candidate_sha,previous_authority_sha:admission.previous_authority_sha,
     target_release_version:admission.target_release_version,
     observed_at:observedAt,observer_id:observer,
@@ -304,7 +319,7 @@ export function createRsiSelfUpdateSuccessorVerification({
     eligible_for_skill_evolution:eligible,
     qualification_resume_allowed:qualificationResume,
     existing_successor_qualification_pipeline_required:qualificationResume,
-    existing_ambiguous_recovery_pipeline_required:state==='RECONCILIATION_ONLY',
+    existing_ambiguous_recovery_pipeline_required:post.state==='AMBIGUOUS_INSTALL_RECONCILIATION_ONLY',
     new_installer_effect_allowed:false,same_invocation_retry_allowed:false,
     fresh_physical_effect_retry_allowed:false,physical_effect_replay_allowed:false,
   });
@@ -335,6 +350,18 @@ export function verifyRsiSelfUpdateSuccessorVerification(row){
   )throw new Error('rsi_successor_verification_eligibility_invalid');
   exactDigest(row.final_install_admission_digest,'final_install_admission');
   exactDigest(row.post_effect_readback_digest,'post_effect_readback');
+  if(typeof row.post_effect_state!=='string'||row.post_effect_state.length<3){
+    throw new Error('rsi_successor_post_effect_state_invalid');
+  }
+  if(row.existing_ambiguous_recovery_pipeline_required
+    !==(row.post_effect_state==='AMBIGUOUS_INSTALL_RECONCILIATION_ONLY')){
+    throw new Error('rsi_successor_ambiguous_pipeline_flag_invalid');
+  }
+  const pending=row.state==='SUCCESSOR_VERIFIED_PENDING_QUALIFICATION'||row.state==='QUARANTINED_SUCCESSOR_HOLD';
+  if(row.qualification_resume_allowed!==pending
+    ||row.existing_successor_qualification_pipeline_required!==pending){
+    throw new Error('rsi_successor_qualification_pipeline_flag_invalid');
+  }
   exactSha(row.candidate_sha,'candidate');
   exactSha(row.previous_authority_sha,'previous_authority');
   exactUtc(row.observed_at,'observed_at');
