@@ -8,6 +8,7 @@ import {
 } from '../src/rsi-proxy-reliability-calibration.mjs';
 import {
   createRsiDisagreementCommitteeMember,
+  verifyRsiDisagreementCommitteeMember,
   createRsiDisagreementCommittee,
   verifyRsiDisagreementCommittee,
   createRsiAcquisitionCandidate,
@@ -62,47 +63,57 @@ function pair(policy, index, proxy, holdout, evaluatorChar = '9') {
   });
 }
 
-function calibratedSnapshot(policy) {
-  const rows = [
+function calibratedPairs(policy) {
+  return [
     pair(policy, 1, 0.1, 0.1),
     pair(policy, 2, 0.3, 0.3),
     pair(policy, 3, 0.7, 0.7),
     pair(policy, 4, 0.9, 0.9),
   ];
-  return createRsiProxyReliabilitySnapshot({ policy, pairs: rows });
 }
 
-function unreliableSnapshot(policy) {
-  const rows = [
+function unreliablePairs(policy) {
+  return [
     pair(policy, 1, 0.9, 0.1),
     pair(policy, 2, 0.7, 0.3),
     pair(policy, 3, 0.3, 0.7),
     pair(policy, 4, 0.1, 0.9),
   ];
-  return createRsiProxyReliabilitySnapshot({ policy, pairs: rows });
 }
 
-function member(id, family, proxyChar, snapshotMode = 'calibrated') {
+function memberBinding(id, family, proxyChar, snapshotMode = 'calibrated') {
   const policy = proxyPolicy(id, proxyChar);
-  const snapshot = snapshotMode === 'unreliable' ? unreliableSnapshot(policy) : calibratedSnapshot(policy);
-  return createRsiDisagreementCommitteeMember({
+  const pairs = snapshotMode === 'unreliable' ? unreliablePairs(policy) : calibratedPairs(policy);
+  const snapshot = createRsiProxyReliabilitySnapshot({ policy, pairs });
+  const member = createRsiDisagreementCommitteeMember({
     member_id: `committee.member.${id}`,
     predictor_family: family,
     predictor_identity_digest: d(proxyChar),
     proxy_policy: policy,
     proxy_snapshot: snapshot,
+    proxy_pairs: pairs,
     external_member_owner: true,
     authored_by_candidate: false,
   });
+  return Object.freeze({
+    member,
+    proxy_policy: policy,
+    proxy_snapshot: snapshot,
+    proxy_pairs: pairs,
+  });
 }
 
-function committee(members = [
-  member('a', 'GPT_5_6_SOL_JUDGE', 'a'),
-  member('b', 'GLM_5_JUDGE', 'b'),
+function member(...args) {
+  return memberBinding(...args).member;
+}
+
+function committee(memberBindings = [
+  memberBinding('a', 'GPT_5_6_SOL_JUDGE', 'a'),
+  memberBinding('b', 'GLM_5_JUDGE', 'b'),
 ]) {
   return createRsiDisagreementCommittee({
     committee_id: 'committee.rsi.active-eval.1',
-    members,
+    member_bindings: memberBindings,
     full_holdout_digest: d('f'),
     evaluator_root_digest: d('9'),
     external_committee_owner: true,
@@ -156,9 +167,14 @@ function matrix(comm, candidates, probabilitiesByCandidate) {
 }
 
 test('committee weights are derived from V1.22 calibration instead of candidate claims', () => {
-  const calibrated = member('a', 'GPT_5_6_SOL_JUDGE', 'a');
-  const unreliable = member('b', 'GLM_5_JUDGE', 'b', 'unreliable');
+  const calibratedBinding = memberBinding('a', 'GPT_5_6_SOL_JUDGE', 'a');
+  const unreliableBinding = memberBinding('b', 'GLM_5_JUDGE', 'b', 'unreliable');
+  const calibrated = calibratedBinding.member;
+  const unreliable = unreliableBinding.member;
 
+  verifyRsiDisagreementCommitteeMember(calibrated, calibratedBinding);
+  verifyRsiDisagreementCommitteeMember(unreliable, unreliableBinding);
+  assert.equal(calibrated.calibration_recomputed_from_external_pairs, true);
   assert.equal(calibrated.reliability_state, 'CALIBRATED');
   assert.equal(calibrated.reliability_weight, 1);
   assert.equal(calibrated.candidate_can_edit_member_weight, false);
@@ -180,10 +196,10 @@ test('committee requires distinct predictor identities and exposes disagreement 
   assert.equal(comm.candidate_can_choose_member_weights, false);
   assert.equal(comm.authority_effect, false);
 
-  const duplicateIdentity = member('c', 'OTHER_JUDGE', 'a');
+  const duplicateIdentity = memberBinding('c', 'OTHER_JUDGE', 'a');
   assert.throws(() => createRsiDisagreementCommittee({
     committee_id: 'committee.duplicate',
-    members: [member('a', 'GPT_5_6_SOL_JUDGE', 'a'), duplicateIdentity],
+    member_bindings: [memberBinding('a', 'GPT_5_6_SOL_JUDGE', 'a'), duplicateIdentity],
     full_holdout_digest: d('f'),
     evaluator_root_digest: d('9'),
     external_committee_owner: true,
@@ -262,8 +278,8 @@ test('diversity lane preserves an unconventional mutation surface even when its 
 
 test('unreliable or collapsed committee disables disagreement and falls back instead of pretending uncertainty is calibrated', () => {
   const comm = committee([
-    member('a', 'GPT_5_6_SOL_JUDGE', 'a'),
-    member('b', 'GLM_5_JUDGE', 'b', 'unreliable'),
+    memberBinding('a', 'GPT_5_6_SOL_JUDGE', 'a'),
+    memberBinding('b', 'GLM_5_JUDGE', 'b', 'unreliable'),
   ]);
   assert.equal(comm.active_member_count, 1);
   assert.equal(comm.diversity_sufficient_for_disagreement, false);
