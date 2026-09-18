@@ -36,7 +36,9 @@ function verifyReliabilityBinding(binding){
   }
   assertZero(binding,'reliability');
   exactSha(binding.source_sha,'source');
-  exactDigest(binding.binding_digest,'reliability_binding');
+  const bindingDigest=exactDigest(binding.binding_digest,'reliability_binding');
+  const bindingClone=structuredClone(binding);delete bindingClone.binding_digest;
+  if(digest(bindingClone)!==bindingDigest)throw new Error('rsi_revision_scope_reliability_binding_digest_mismatch');
   exactDigest(binding.parent_skill_digest,'parent_skill');
   exactDigest(binding.successor_skill_digest,'successor_skill');
   if(binding.state!=='ELIGIBLE_FOR_EXISTING_SCOPE_PRESERVATION_GATE'
@@ -166,6 +168,9 @@ export class RsiRevisionScopeLedger{
       for(const row of parsed.rows){
         if(row.schema!==RSI_REVISION_SCOPE_ADMISSION_SCHEMA||row.source_sha!==this.#sourceSha)throw new Error('rsi_revision_scope_row_invalid');
         assertZero(row,'row');
+        const rowDigest=exactDigest(row.admission_digest,'admission');
+        const rowClone=structuredClone(row);delete rowClone.admission_digest;
+        if(digest(rowClone)!==rowDigest)throw new Error('rsi_revision_scope_row_digest_mismatch');
         if(ids.has(row.admission_id)||bindings.has(row.reliability_binding_digest))throw new Error('rsi_revision_scope_row_duplicate');
         ids.add(row.admission_id);bindings.add(row.reliability_binding_digest);
       }
