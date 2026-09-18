@@ -352,6 +352,8 @@ export function createRsiFrontierLearnabilityReceipt({
     version: 1,
     proposal_id: checkedProposal.proposal_id,
     proposal_digest: checkedProposal.proposal_digest,
+    mode: checkedProposal.mode,
+    family: checkedProposal.family,
     materialization_digest: checkedMaterialization.materialization_digest,
     executor_snapshot_digest: exactDigest(executor_snapshot_digest, 'executor_snapshot'),
     panel_model_families: normalizeTokens(panel_model_families, 'panel_model_family'),
@@ -431,6 +433,8 @@ export function finalizeRsiFrontierTask({
       state: 'HELD_NOT_FRONTIER',
       proposal_id: checkedProposal.proposal_id,
       proposal_digest: checkedProposal.proposal_digest,
+      mode: checkedProposal.mode,
+      family: checkedProposal.family,
       materialization_digest: checkedMaterialization.materialization_digest,
       learnability_digest: checkedLearnability.learnability_digest,
       challenge: null,
@@ -523,12 +527,7 @@ export function createRsiFrontierTaskBufferSnapshot({ generation, handoffs } = {
     ids.add(row.challenge.challenge_id);
     suiteDigests.add(row.challenge.suite_digest);
     manifestDigests.add(row.challenge.hidden_manifest_digest);
-    const proposalMode = (() => {
-      const parts = String(row.proposal_id || '').split('.');
-      const hinted = parts.find((part) => MODES.includes(String(part).toUpperCase()));
-      return hinted ? String(hinted).toUpperCase() : null;
-    })();
-    const mode = proposalMode || 'DEDUCTION';
+    const mode = normalizeMode(row.mode);
     modeCounts[mode] += 1;
     familyCounts[row.challenge.family] = (familyCounts[row.challenge.family] || 0) + 1;
     return Object.freeze({
