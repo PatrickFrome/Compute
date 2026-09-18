@@ -13,6 +13,9 @@ import {
   createRsiSkillLibraryGovernance,
   verifyRsiSkillLibraryGovernance,
 } from './rsi-skill-library-governance.mjs';
+import {
+  verifyRsiSkillRevisionAdmission,
+} from './rsi-skill-revision-admission.mjs';
 
 export const RSI_LINEAGE_SKILL_ADMISSION_SCHEMA='metaengine.rsi.lineage-skill-admission.v1';
 
@@ -36,6 +39,8 @@ export function admitRsiLineageSkill({
   skill,
   skill_evidence,
   portability_receipts,
+  skill_revision_admission=null,
+  skill_revision_admission_inputs=null,
   library_id,
   existing_entries=[],
   lifecycle_evidence=[],
@@ -64,6 +69,26 @@ export function admitRsiLineageSkill({
      ||checkedEvidence.verified_for_library!==true
      ||checkedEvidence.hard_invariants_pass!==true){
     throw new Error('rsi_lineage_skill_evidence_not_verified');
+  }
+
+  let checkedRevision=null;
+  if(checkedSkill.skill_version===1){
+    if(skill_revision_admission!=null||skill_revision_admission_inputs!=null)throw new Error('rsi_lineage_skill_initial_revision_gate_forbidden');
+  }else{
+    if(!skill_revision_admission||!skill_revision_admission_inputs)throw new Error('rsi_lineage_skill_revision_gate_required');
+    checkedRevision=verifyRsiSkillRevisionAdmission(skill_revision_admission,skill_revision_admission_inputs);
+    if(
+      checkedRevision.successor_skill_digest!==checkedSkill.skill_digest
+      ||checkedRevision.successor_skill_version!==checkedSkill.skill_version
+      ||checkedRevision.successor_candidate_sha!==lineage.candidate_sha
+      ||checkedRevision.parent_skill_digest!==checkedSkill.parent_skill_digest
+      ||checkedRevision.parent_skill_version!==checkedSkill.skill_version-1
+    )throw new Error('rsi_lineage_skill_revision_gate_binding_invalid');
+    const parentEntry=existing_entries.find((row)=>
+      row?.capsule?.skill_digest===checkedSkill.parent_skill_digest
+      &&row?.capsule?.skill_id===checkedSkill.skill_id
+      &&row?.capsule?.skill_version===checkedSkill.skill_version-1);
+    if(!parentEntry)throw new Error('rsi_lineage_skill_parent_version_missing');
   }
 
   if(!Array.isArray(portability_receipts)||portability_receipts.length<2||portability_receipts.length>32){
@@ -128,6 +153,9 @@ export function admitRsiLineageSkill({
     skill_version:checkedSkill.skill_version,
     skill_digest:checkedSkill.skill_digest,
     skill_evidence_digest:checkedEvidence.evidence_digest,
+    skill_revision_admission_digest:checkedRevision?.admission_digest||null,
+    revision_gate_required:checkedSkill.skill_version>1,
+    revision_gate_verified:checkedSkill.skill_version===1?null:true,
     portability_receipt_digests:[...receiptDigests].sort(),
     verified_transfer_context_count:contexts.size,
     verified_transfer_holdout_count:holdouts.size,
