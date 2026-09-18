@@ -372,10 +372,11 @@ function archiveState(sourceSha,rows){
 }
 
 export class RsiKnowledgeConsolidationArchive{
-  #path;#sourceSha;#rows=[];#initialized=false;
-  constructor({statePath,source_sha}={}){
+  #path;#sourceSha;#resolver;#rows=[];#initialized=false;
+  constructor({statePath,source_sha,evidenceResolver}={}){
     if(!statePath)throw new Error('rsi_consolidation_archive_path_required');
-    this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'archive_source');
+    if(typeof evidenceResolver!=='function')throw new Error('rsi_consolidation_source_evidence_resolver_required');
+    this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'archive_source');this.#resolver=evidenceResolver;
   }
   async init(){
     if(this.#initialized)return this.snapshot();
@@ -394,17 +395,21 @@ export class RsiKnowledgeConsolidationArchive{
       if(digest(clone)!==exactDigest(p.state_digest,'archive'))throw new Error('rsi_consolidation_archive_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ARCHIVE_ROWS)throw new Error('rsi_consolidation_archive_rows_invalid');
       const ids=new Set();
+      const checkedRows=[];
       for(const row of p.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_consolidation_archive_source_mismatch');
-        const pc=structuredClone(row.proposal);delete pc.proposal_digest;
-        const vc=structuredClone(row.validation);delete vc.validation_digest;
-        if(digest(pc)!==exactDigest(row.proposal.proposal_digest,'archive_proposal'))throw new Error('rsi_consolidation_archive_proposal_digest_mismatch');
-        if(digest(vc)!==exactDigest(row.validation.validation_digest,'archive_validation'))throw new Error('rsi_consolidation_archive_validation_digest_mismatch');
-        if(row.validation.proposal_digest!==row.proposal.proposal_digest)throw new Error('rsi_consolidation_archive_binding_mismatch');
-        if(ids.has(row.proposal.proposal_digest))throw new Error('rsi_consolidation_archive_duplicate');
-        ids.add(row.proposal.proposal_digest);
+        const sourceRows=await this.#resolver({
+          proposal_digest:row.proposal.proposal_digest,
+          source_entry_digests:row.proposal.source_entry_digests,
+        });
+        const proposal=verifyRsiKnowledgeConsolidationProposal(row.proposal,{source_rows:sourceRows});
+        const validation=verifyRsiKnowledgeTransferValidation(row.validation,{proposal});
+        if(validation.proposal_digest!==proposal.proposal_digest)throw new Error('rsi_consolidation_archive_binding_mismatch');
+        if(ids.has(proposal.proposal_digest))throw new Error('rsi_consolidation_archive_duplicate');
+        ids.add(proposal.proposal_digest);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,proposal,validation}));
       }
-      this.#rows=p.rows;
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
@@ -413,18 +418,14 @@ export class RsiKnowledgeConsolidationArchive{
     try{await h.writeFile(`${JSON.stringify(state)}\n`,'utf8');await h.sync();}finally{await h.close();}
     await fs.rename(tmp,this.#path);
   }
-  async add({proposal,validation}={}){
+  async add({proposal,validation,source_rows}={}){
     if(!this.#initialized)throw new Error('rsi_consolidation_archive_not_initialized');
-    if(!proposal||proposal.schema!==RSI_KNOWLEDGE_CONSOLIDATION_PROPOSAL_SCHEMA)throw new Error('rsi_consolidation_proposal_invalid');
-    if(!validation||validation.schema!==RSI_KNOWLEDGE_TRANSFER_VALIDATION_SCHEMA)throw new Error('rsi_consolidation_validation_invalid');
-    assertZero(proposal,'archive_proposal');assertZero(validation,'archive_validation');
-    const pc=structuredClone(proposal);delete pc.proposal_digest;
-    const vc=structuredClone(validation);delete vc.validation_digest;
-    if(digest(pc)!==exactDigest(proposal.proposal_digest,'archive_proposal'))throw new Error('rsi_consolidation_proposal_digest_mismatch');
-    if(digest(vc)!==exactDigest(validation.validation_digest,'archive_validation'))throw new Error('rsi_consolidation_validation_digest_mismatch');
-    if(proposal.source_sha!==this.#sourceSha||validation.source_sha!==this.#sourceSha||validation.proposal_digest!==proposal.proposal_digest){
+    const checkedProposal=verifyRsiKnowledgeConsolidationProposal(proposal,{source_rows});
+    const checkedValidation=verifyRsiKnowledgeTransferValidation(validation,{proposal:checkedProposal});
+    if(checkedProposal.source_sha!==this.#sourceSha||checkedValidation.source_sha!==this.#sourceSha||checkedValidation.proposal_digest!==checkedProposal.proposal_digest){
       throw new Error('rsi_consolidation_archive_binding_mismatch');
     }
+    proposal=checkedProposal;validation=checkedValidation;
     const existing=this.#rows.find(r=>r.proposal.proposal_digest===proposal.proposal_digest);
     if(existing){
       if(existing.validation.validation_digest!==validation.validation_digest)throw new Error('rsi_consolidation_archive_identity_conflict');
