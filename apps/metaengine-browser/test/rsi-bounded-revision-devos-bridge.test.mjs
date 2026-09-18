@@ -3728,3 +3728,236 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.authority_effect,false);
   assert.match(root.phase34_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
+
+
+function phase34bLifecycleFixture(label='phase34b-lifecycle'){
+  const fx=phase34Fixture(label);
+  const certificate=createRsiAnytimeLibraryAdmissionCertificate(fx.certificateArgs);
+  assert.equal(certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF');
+  return {fx,certificate};
+}
+
+async function phase34bStore(root,label){
+  const x=phase34bLifecycleFixture(label);
+  const statePath=path.join(root,'runtime-skill-lifecycle.json');
+  const store=new RsiRuntimeSkillLifecycle({
+    statePath,
+    source_sha:SOURCE,
+    clock:()=>1_800_000_100_000,
+  });
+  await store.init();
+  await store.adoptVerifiedLibrary({
+    library:x.fx.p33.skillFx.currentLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  return {...x,statePath,store};
+}
+
+async function preparePhase34bPlan(x,label){
+  return x.store.prepareStorageOnlyAppendAdmission({
+    admission_id:'phase34b.append.admission.'+label,
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    proposed_successor_library:x.fx.proposal.proposed_successor_library,
+    append_effect_id_digest:labelDigest(label+'-effect-id'),
+    idempotency_key_digest:labelDigest(label+'-idempotency-key'),
+    external_effect_planner_identity_digest:labelDigest(label+'-planner-identity'),
+    external_library_owner:true,
+    external_effect_planner:true,
+    authored_by_candidate:false,
+  });
+}
+
+test('Phase34B runtime lifecycle persists CAS plan before effect and adopts applied readback as dormant storage only',async(t)=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-applied-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const x=await phase34bStore(root,'applied');
+  const planned=await preparePhase34bPlan(x,'applied');
+  assert.equal(planned.state,'PLANNED_NOT_ATTEMPTED');
+  assert.equal(x.store.snapshot().append_admission_count,1);
+  assert.equal(x.store.snapshot().append_attempted_count,0);
+  assert.equal(x.store.snapshot().library_digest,x.fx.p33.skillFx.currentLibrary.library_digest);
+
+  const attempt=await x.store.prepareStorageOnlyAppendEffectAttempt({
+    admission_id:'phase34b.append.admission.applied',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_executor_identity_digest:labelDigest('phase34b-applied-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(attempt.state,'ATTEMPT_PREPARED_AWAITING_EXTERNAL_EFFECT_READBACK');
+  assert.equal(attempt.effect_execution_authority,false);
+  assert.equal(x.store.snapshot().append_attempted_count,1);
+
+  const readback=await x.store.recordStorageOnlyAppendReadback({
+    admission_id:'phase34b.append.admission.applied',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_observation:'APPLIED',
+    observed_library:x.fx.proposal.proposed_successor_library,
+    external_effect_receipt_digest:labelDigest('phase34b-applied-effect-receipt'),
+    readback_verifier_identity_digest:labelDigest('phase34b-applied-readback-verifier'),
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(readback.state,'APPLIED_STORAGE_ONLY_DORMANT');
+  assert.equal(readback.retrieval_exposure_changed,false);
+  assert.equal(readback.skill_activation_performed,false);
+  assert.equal(x.store.snapshot().library_digest,x.fx.proposal.proposed_successor_library.library_digest);
+  assert.equal(x.store.snapshot().active_count,0);
+
+  const governance=x.store.governance();
+  const appended=governance.entries.find(row=>row.skill_digest===x.certificate.proposed_skill_digest);
+  assert.equal(appended.evidence_window_count,0);
+  assert.equal(appended.state,'DORMANT_CAP');
+  assert.equal(appended.active_for_composition,false);
+  assert.throws(()=>x.store.activationView([x.certificate.proposed_skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const restored=new RsiRuntimeSkillLifecycle({statePath:x.statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().library_digest,x.fx.proposal.proposed_successor_library.library_digest);
+  assert.equal(restored.snapshot().append_admission_count,1);
+  assert.equal(restored.storageAppendAdmissions()[0].state,'APPLIED_STORAGE_ONLY_DORMANT');
+  assert.equal(restored.snapshot().active_count,0);
+});
+
+test('Phase34B ambiguous effect consumes the single attempt and reconciliation is readback only',async(t)=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-ambiguous-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const x=await phase34bStore(root,'ambiguous');
+  await preparePhase34bPlan(x,'ambiguous');
+  await x.store.prepareStorageOnlyAppendEffectAttempt({
+    admission_id:'phase34b.append.admission.ambiguous',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_executor_identity_digest:labelDigest('phase34b-ambiguous-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  const ambiguous=await x.store.recordStorageOnlyAppendReadback({
+    admission_id:'phase34b.append.admission.ambiguous',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_observation:'AMBIGUOUS',
+    observed_library:null,
+    external_effect_receipt_digest:labelDigest('phase34b-ambiguous-effect-receipt'),
+    readback_verifier_identity_digest:labelDigest('phase34b-ambiguous-readback-verifier'),
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(ambiguous.state,'AMBIGUOUS_RECONCILIATION_REQUIRED');
+  assert.equal(ambiguous.blind_retry_authorized,false);
+  assert.equal(x.store.snapshot().ambiguous_append_count,1);
+  await assert.rejects(()=>x.store.prepareStorageOnlyAppendEffectAttempt({
+    admission_id:'phase34b.append.admission.ambiguous',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_executor_identity_digest:labelDigest('phase34b-ambiguous-second-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/effect_attempt_already_consumed/);
+
+  const reconciled=await x.store.reconcileStorageOnlyAppend({
+    admission_id:'phase34b.append.admission.ambiguous',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    observed_library:x.fx.proposal.proposed_successor_library,
+    reconciliation_owner_identity_digest:labelDigest('phase34b-ambiguous-reconciliation-owner'),
+    external_reconciliation_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(reconciled.state,'RECONCILED_APPLIED_STORAGE_ONLY_DORMANT');
+  assert.equal(reconciled.second_effect_attempt_performed,false);
+  assert.equal(reconciled.blind_retry_authorized,false);
+  assert.equal(x.store.snapshot().library_digest,x.fx.proposal.proposed_successor_library.library_digest);
+  assert.equal(x.store.snapshot().active_count,0);
+});
+
+test('Phase34B CAS rejects stale predecessor and exact NOT_APPLIED readback requires a fresh plan',async(t)=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-not-applied-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const x=await phase34bStore(root,'not-applied');
+  await preparePhase34bPlan(x,'not-applied');
+  await x.store.prepareStorageOnlyAppendEffectAttempt({
+    admission_id:'phase34b.append.admission.not-applied',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_executor_identity_digest:labelDigest('phase34b-not-applied-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  const result=await x.store.recordStorageOnlyAppendReadback({
+    admission_id:'phase34b.append.admission.not-applied',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_observation:'NOT_APPLIED',
+    observed_library:x.fx.p33.skillFx.currentLibrary,
+    external_effect_receipt_digest:labelDigest('phase34b-not-applied-effect-receipt'),
+    readback_verifier_identity_digest:labelDigest('phase34b-not-applied-readback-verifier'),
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(result.state,'NOT_APPLIED_REPLAN_REQUIRED');
+  assert.equal(x.store.snapshot().library_digest,x.fx.p33.skillFx.currentLibrary.library_digest);
+  await assert.rejects(()=>x.store.prepareStorageOnlyAppendEffectAttempt({
+    admission_id:'phase34b.append.admission.not-applied',
+    admission_certificate:x.certificate,
+    admission_certificate_args:x.fx.certificateArgs,
+    effect_executor_identity_digest:labelDigest('phase34b-not-applied-second-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/effect_attempt_already_consumed/);
+
+  const staleRoot=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-stale-'));
+  t.after(()=>fs.rm(staleRoot,{recursive:true,force:true}));
+  const stale=phase34bLifecycleFixture('stale');
+  const staleStore=new RsiRuntimeSkillLifecycle({statePath:path.join(staleRoot,'state.json'),source_sha:SOURCE});
+  await staleStore.init();
+  await staleStore.adoptVerifiedLibrary({
+    library:stale.fx.proposal.proposed_successor_library,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  await assert.rejects(()=>staleStore.prepareStorageOnlyAppendAdmission({
+    admission_id:'phase34b.append.admission.stale',
+    admission_certificate:stale.certificate,
+    admission_certificate_args:stale.fx.certificateArgs,
+    proposed_successor_library:stale.fx.proposal.proposed_successor_library,
+    append_effect_id_digest:labelDigest('phase34b-stale-effect'),
+    idempotency_key_digest:labelDigest('phase34b-stale-idempotency'),
+    external_effect_planner_identity_digest:labelDigest('phase34b-stale-planner'),
+    external_library_owner:true,
+    external_effect_planner:true,
+    authored_by_candidate:false,
+  }),/cas_predecessor_mismatch/);
+});
+
+test('Phase34B failed durable plan persist leaves zero phantom admission state',async(t)=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-persist-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const x=await phase34bStore(root,'persist-failure');
+  await fs.mkdir(x.statePath,{recursive:false});
+  await assert.rejects(()=>preparePhase34bPlan(x,'persist-failure'));
+  assert.equal(x.store.snapshot().append_admission_count,0);
+  assert.equal(x.store.snapshot().append_attempted_count,0);
+  assert.equal(x.store.snapshot().library_digest,x.fx.p33.skillFx.currentLibrary.library_digest);
+});
+
+test('Phase34B runtime lifecycle trust root freezes one-attempt CAS without activation authority',()=>{
+  const root=rsiRuntimeSkillLifecycleTrustRootSnapshot();
+  assert.equal(root.exact_library_compare_and_swap_required,true);
+  assert.equal(root.durable_append_plan_before_external_effect,true);
+  assert.equal(root.one_external_append_attempt_per_plan,true);
+  assert.equal(root.ambiguous_append_requires_readback_only_reconciliation,true);
+  assert.equal(root.blind_append_retry_forbidden,true);
+  assert.equal(root.append_does_not_imply_retrieval_exposure,true);
+  assert.equal(root.append_does_not_imply_activation,true);
+  assert.equal(root.zero_evidence_skill_remains_dormant,true);
+  assert.equal(root.existing_governance_is_only_activation_lifecycle_authority,true);
+  assert.equal(root.execution_authority,false);
+  assert.equal(root.promotion_authority,false);
+  assert.equal(root.self_update_authority,false);
+  assert.equal(root.authority_effect,false);
+});
