@@ -334,6 +334,12 @@ export class BrowserBrainContinuousCoordinator {
     return this.#observation.checkpoint();
   }
 
+  workingMemorySnapshot() {
+    return typeof this.#observation.workingMemorySnapshot === 'function'
+      ? this.#observation.workingMemorySnapshot()
+      : this.#observation.snapshot()?.working_memory || null;
+  }
+
   rememberAdvisoryPlan(plan) {
     return this.#cognition.rememberPlan(plan);
   }
