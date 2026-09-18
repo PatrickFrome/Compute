@@ -261,6 +261,7 @@ export function createRsiBoundedRevisionDevosBridge({
     negative_evidence_root_digest:checkedEnvelope.negative_evidence_root_digest,
     regression_budget_digest:checkedEnvelope.regression_budget_digest,
     validation_plan_digest:checkedEnvelope.validation_plan_digest,
+    parent_candidate_artifact_digest:checkedEnvelope.parent_candidate_artifact_digest,
     implementation_manifest_digest:manifest.manifest_digest,
     harness_manifest_digest:manifest.harness_manifest_digest,
     harness_signature_bundle_digest:manifest.harness_signature_bundle_digest,
