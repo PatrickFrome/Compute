@@ -69,7 +69,10 @@ function verifyOutcomeEvidence({handoff_row,experiment_intent,experiment_receipt
   if(intent.candidate_artifact_digest!==handoff.candidate_artifact_digest||receipt.candidate_artifact_digest!==handoff.candidate_artifact_digest)throw new Error('rsi_outcome_frontier_candidate_artifact_mismatch');
   if(intent.evaluator_root_digest!==handoff.evaluator_root_digest||receipt.evaluator_root_digest!==handoff.evaluator_root_digest)throw new Error('rsi_outcome_frontier_evaluator_root_mismatch');
   if(intent.evaluator_generation_digest!==handoff.evaluator_generation_digest)throw new Error('rsi_outcome_frontier_evaluator_generation_mismatch');
+  if(intent.evaluator_generation_seq!==handoff.evaluator_generation_seq)throw new Error('rsi_outcome_frontier_evaluator_generation_seq_mismatch');
+  if(intent.evaluator_generation_history_anchor_digest!==handoff.evaluator_generation_history_anchor_digest)throw new Error('rsi_outcome_frontier_generation_history_anchor_mismatch');
   if(intent.evaluation_epoch_digest!==handoff.evaluation_epoch_digest)throw new Error('rsi_outcome_frontier_evaluation_epoch_mismatch');
+  if(intent.evaluation_epoch_seq!==handoff.evaluation_epoch_seq)throw new Error('rsi_outcome_frontier_evaluation_epoch_seq_mismatch');
   if(!OUTCOME_KIND[receipt.state])throw new Error('rsi_outcome_frontier_outcome_state_invalid');
   return Object.freeze({handoff_seq:hr.handoff_seq,handoff,intent,receipt});
 }
@@ -102,6 +105,7 @@ function learningFieldsForOutcome(state,input){
 export function createRsiGenerationScopedOutcomeEntry({
   entry_id,handoff_row,experiment_intent,experiment_receipt,niche_tags,
   summary_digest,applicability_digest,counterevidence_digest,
+  trajectory_summary_digest,reference_evidence_digest,causal_attribution_digest,
   recipe_digest=null,watch_out_digest=null,negative_constraint_digest=null,
   low_yield_constraint_digest=null,environment_diagnostic_digest=null,ambiguity_diagnostic_digest=null,
   external_learning_reviewer=false,external_niche_owner=false,authored_by_candidate=true,
@@ -123,14 +127,24 @@ export function createRsiGenerationScopedOutcomeEntry({
     parent_artifact_digest:evidence.handoff.parent_artifact_digest,candidate_artifact_digest:evidence.handoff.candidate_artifact_digest,
     evaluator_root_digest:evidence.handoff.evaluator_root_digest,
     evaluator_generation_digest:evidence.handoff.evaluator_generation_digest,
+    evaluator_generation_seq:positiveInt(evidence.handoff.evaluator_generation_seq,'generation_seq'),
+    evaluator_generation_history_anchor_digest:exactDigest(evidence.handoff.evaluator_generation_history_anchor_digest,'generation_history_anchor'),
     evaluation_epoch_digest:evidence.handoff.evaluation_epoch_digest,
+    evaluation_epoch_seq:positiveInt(evidence.handoff.evaluation_epoch_seq,'epoch_seq'),
     outcome_class:outcome,learning_kind:OUTCOME_KIND[outcome],
     niche_tags:niches,metric_gains:metricGains(evidence.receipt),
     summary_digest:exactDigest(summary_digest,'summary'),
     applicability_digest:exactDigest(applicability_digest,'applicability'),
     counterevidence_digest:exactDigest(counterevidence_digest,'counterevidence'),
+    trajectory_summary_digest:exactDigest(trajectory_summary_digest,'trajectory_summary'),
+    reference_evidence_digest:exactDigest(reference_evidence_digest,'reference_evidence'),
+    causal_attribution_digest:exactDigest(causal_attribution_digest,'causal_attribution'),
     ...learning,
     external_learning_reviewer:true,external_niche_owner:true,authored_by_candidate:false,
+    exact_generation_sequence_bound:true,exact_epoch_sequence_bound:true,generation_history_anchor_bound:true,
+    sealed_acceptance_lineage_bound:true,differential_reference_required:true,
+    trajectory_summary_is_advisory:true,causal_attribution_is_advisory:true,
+    candidate_can_author_learning:false,
     raw_trajectory_stored:false,raw_hidden_holdout_stored:false,raw_evaluator_assets_stored:false,
     raw_prompt_or_secret_stored:false,source_outcome_receipt_stored:false,
     existing_candidate_experiment_ledger_is_source_of_truth:true,
@@ -145,6 +159,10 @@ export function verifyRsiGenerationScopedOutcomeEntry(row,{handoff_row,experimen
   if(!row||row.schema!==RSI_GENERATION_SCOPED_OUTCOME_ENTRY_SCHEMA||row.version!==1)throw new Error('rsi_outcome_frontier_entry_invalid');
   assertZero(row,'entry');
   if(row.external_learning_reviewer!==true||row.external_niche_owner!==true||row.authored_by_candidate!==false
+    ||row.exact_generation_sequence_bound!==true||row.exact_epoch_sequence_bound!==true||row.generation_history_anchor_bound!==true
+    ||row.sealed_acceptance_lineage_bound!==true||row.differential_reference_required!==true
+    ||row.trajectory_summary_is_advisory!==true||row.causal_attribution_is_advisory!==true
+    ||row.candidate_can_author_learning!==false
     ||row.raw_trajectory_stored!==false||row.raw_hidden_holdout_stored!==false||row.raw_evaluator_assets_stored!==false
     ||row.raw_prompt_or_secret_stored!==false||row.source_outcome_receipt_stored!==false
     ||row.existing_candidate_experiment_ledger_is_source_of_truth!==true
@@ -154,6 +172,8 @@ export function verifyRsiGenerationScopedOutcomeEntry(row,{handoff_row,experimen
   const canonical=createRsiGenerationScopedOutcomeEntry({
     entry_id:row.entry_id,handoff_row,experiment_intent,experiment_receipt,niche_tags:row.niche_tags,
     summary_digest:row.summary_digest,applicability_digest:row.applicability_digest,counterevidence_digest:row.counterevidence_digest,
+    trajectory_summary_digest:row.trajectory_summary_digest,reference_evidence_digest:row.reference_evidence_digest,
+    causal_attribution_digest:row.causal_attribution_digest,
     recipe_digest:row.recipe_digest,watch_out_digest:row.watch_out_digest,negative_constraint_digest:row.negative_constraint_digest,
     low_yield_constraint_digest:row.low_yield_constraint_digest,environment_diagnostic_digest:row.environment_diagnostic_digest,
     ambiguity_diagnostic_digest:row.ambiguity_diagnostic_digest,
@@ -165,14 +185,16 @@ export function verifyRsiGenerationScopedOutcomeEntry(row,{handoff_row,experimen
 
 function archiveState(sourceSha,rows){
   const counts=Object.freeze(Object.fromEntries(Object.keys(OUTCOME_KIND).map(k=>[k,rows.filter(r=>r.outcome_class===k).length])));
-  const generations=[...new Set(rows.map(r=>r.evaluator_generation_digest))].sort();
+  const generations=[...new Set(rows.map(r=>r.evaluator_generation_seq))].sort((a,b)=>a-b);
+  const epochs=[...new Set(rows.map(r=>`${r.evaluator_generation_seq}:${r.evaluation_epoch_seq}`))].sort();
   const niches=[...new Set(rows.flatMap(r=>r.niche_tags))].sort();
   const core=zero({
     schema:RSI_GENERATION_SCOPED_OUTCOME_ARCHIVE_SCHEMA,version:1,source_sha:sourceSha,
-    rows,row_count:rows.length,outcome_counts:counts,generation_count:generations.length,niche_count:niches.length,
+    rows,row_count:rows.length,outcome_counts:counts,generation_count:generations.length,epoch_count:epochs.length,niche_count:niches.length,
     append_only:true,durable_before_visible:true,source_outcome_receipts_stored_here:false,
+    exact_generation_sequence_required:true,exact_epoch_sequence_required:true,generation_history_anchor_required:true,
     external_evidence_resolver_required:true,quality_diverse_frontier:true,scalar_global_winner_forbidden:true,
-    cross_generation_dominance_forbidden:true,old_evidence_remains_addressable:true,
+    cross_generation_dominance_forbidden:true,cross_epoch_dominance_forbidden:true,old_evidence_remains_addressable:true,
     archive_can_mutate_candidate:false,archive_can_change_budget:false,archive_can_schedule_work:false,
     archive_can_promote:false,archive_can_rollback:false,candidate_can_delete:false,candidate_can_rewrite:false,
   });
@@ -193,22 +215,26 @@ function frontierRows(rows){
   const groups=new Map();
   for(const row of supported){
     for(const niche of row.niche_tags){
-      const key=`${row.evaluator_generation_digest}|${row.evaluation_epoch_digest}|${niche}`;
+      const key=`${row.evaluator_generation_seq}|${row.evaluator_generation_digest}|${row.evaluator_generation_history_anchor_digest}|${row.evaluation_epoch_seq}|${row.evaluation_epoch_digest}|${niche}`;
       const list=groups.get(key)||[];list.push(row);groups.set(key,list);
     }
   }
   const out=[];
   for(const [key,list] of groups){
-    const [generation,epoch,niche]=key.split('|');
+    const [generationSeq,generation,generationAnchor,epochSeq,epoch,niche]=key.split('|');
     const nondominated=list.filter(candidate=>!list.some(other=>other.entry_digest!==candidate.entry_digest&&dominates(other,candidate)));
     out.push(Object.freeze({
-      evaluator_generation_digest:generation,evaluation_epoch_digest:epoch,niche,
+      evaluator_generation_seq:Number(generationSeq),evaluator_generation_digest:generation,
+      evaluator_generation_history_anchor_digest:generationAnchor,
+      evaluation_epoch_seq:Number(epochSeq),evaluation_epoch_digest:epoch,niche,
       entry_digests:Object.freeze(nondominated.map(r=>r.entry_digest).sort()),
       scalar_winner:null,
     }));
   }
   return Object.freeze(out.sort((a,b)=>
-    a.evaluator_generation_digest.localeCompare(b.evaluator_generation_digest)
+    a.evaluator_generation_seq-b.evaluator_generation_seq
+    ||a.evaluation_epoch_seq-b.evaluation_epoch_seq
+    ||a.evaluator_generation_digest.localeCompare(b.evaluator_generation_digest)
     ||a.evaluation_epoch_digest.localeCompare(b.evaluation_epoch_digest)
     ||a.niche.localeCompare(b.niche)));
 }
@@ -227,8 +253,9 @@ export class RsiGenerationScopedOutcomeArchive{
       const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'archive');
       if(p.schema!==RSI_GENERATION_SCOPED_OUTCOME_ARCHIVE_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
         ||p.append_only!==true||p.durable_before_visible!==true||p.source_outcome_receipts_stored_here!==false
+        ||p.exact_generation_sequence_required!==true||p.exact_epoch_sequence_required!==true||p.generation_history_anchor_required!==true
         ||p.external_evidence_resolver_required!==true||p.quality_diverse_frontier!==true||p.scalar_global_winner_forbidden!==true
-        ||p.cross_generation_dominance_forbidden!==true||p.old_evidence_remains_addressable!==true
+        ||p.cross_generation_dominance_forbidden!==true||p.cross_epoch_dominance_forbidden!==true||p.old_evidence_remains_addressable!==true
         ||p.archive_can_mutate_candidate!==false||p.archive_can_change_budget!==false||p.archive_can_schedule_work!==false
         ||p.archive_can_promote!==false||p.archive_can_rollback!==false||p.candidate_can_delete!==false||p.candidate_can_rewrite!==false){
         throw new Error('rsi_outcome_frontier_archive_policy_invalid');
@@ -249,7 +276,8 @@ export class RsiGenerationScopedOutcomeArchive{
       }
       const canonical=archiveState(this.#sourceSha,checked);
       if(canonical.row_count!==p.row_count||JSON.stringify(canonical.outcome_counts)!==JSON.stringify(p.outcome_counts)
-        ||canonical.generation_count!==p.generation_count||canonical.niche_count!==p.niche_count)throw new Error('rsi_outcome_frontier_archive_summary_mismatch');
+        ||canonical.generation_count!==p.generation_count||canonical.epoch_count!==p.epoch_count
+        ||canonical.niche_count!==p.niche_count)throw new Error('rsi_outcome_frontier_archive_summary_mismatch');
       this.#rows=checked;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
@@ -292,9 +320,12 @@ export class RsiGenerationScopedOutcomeArchive{
   snapshot(){
     const s=archiveState(this.#sourceSha,this.#rows);
     return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,
-      outcome_counts:s.outcome_counts,generation_count:s.generation_count,niche_count:s.niche_count,append_only:true,durable_before_visible:true,
-      source_outcome_receipts_stored_here:false,external_evidence_resolver_required:true,quality_diverse_frontier:true,
-      scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,old_evidence_remains_addressable:true,
+      outcome_counts:s.outcome_counts,generation_count:s.generation_count,epoch_count:s.epoch_count,niche_count:s.niche_count,
+      append_only:true,durable_before_visible:true,source_outcome_receipts_stored_here:false,
+      exact_generation_sequence_required:true,exact_epoch_sequence_required:true,generation_history_anchor_required:true,
+      external_evidence_resolver_required:true,quality_diverse_frontier:true,
+      scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,cross_epoch_dominance_forbidden:true,
+      old_evidence_remains_addressable:true,
       archive_can_mutate_candidate:false,archive_can_change_budget:false,archive_can_schedule_work:false,archive_can_promote:false,
       archive_can_rollback:false,authority_effect:false});
   }
@@ -306,11 +337,15 @@ export function rsiGenerationScopedOutcomeFrontierTrustRootSnapshot(){
     existing_candidate_experiment_ledger_is_only_outcome_truth:true,
     source_outcome_receipts_not_duplicated:true,external_evidence_resolver_required:true,
     phase29_handoff_binding_required:true,evaluator_generation_binding_required:true,evaluation_epoch_binding_required:true,
+    evaluator_generation_sequence_binding_required:true,evaluation_epoch_sequence_binding_required:true,
+    generation_history_anchor_binding_required:true,
     supported_recipe_candidate_only:true,rejected_negative_constraint_only:true,no_improvement_low_yield_constraint_only:true,
     environment_inconclusive_diagnostic_only:true,ambiguity_diagnostic_only:true,
     raw_trajectory_storage_forbidden:true,hidden_holdout_copy_forbidden:true,evaluator_asset_copy_forbidden:true,
     external_learning_reviewer_required:true,external_niche_owner_required:true,
+    differential_reference_required:true,trajectory_summary_advisory_only:true,causal_attribution_advisory_only:true,
     quality_diverse_frontier_required:true,scalar_global_winner_forbidden:true,cross_generation_dominance_forbidden:true,
+    cross_epoch_dominance_forbidden:true,
     external_revalidation_required_for_cross_generation_comparison:true,old_evidence_remains_addressable:true,
     maturity_stats_advisory_only:true,automatic_plasticity_change_authorized:false,
     archive_can_mutate_candidate:false,archive_can_change_budget:false,archive_can_schedule_work:false,
