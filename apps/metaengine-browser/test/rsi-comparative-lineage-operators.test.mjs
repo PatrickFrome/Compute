@@ -147,7 +147,7 @@ test('comparative portfolio prefers reaction-norm and cross-lineage operators wh
   });
   const profile=createRsiReactionNormProfile({trajectories:[
     target,
-    trajectory({id:'t2',candidate:'1',lineage:'lineage.a',task:'task.two',failures:['BAD_TOOL_ROUTING'],evaluator:'a'}),
+    trajectory({id:'t.2',candidate:'1',lineage:'lineage.a',task:'task.two',failures:['BAD_TOOL_ROUTING'],evaluator:'a'}),
   ]});
   const contrast=createRsiCrossLineageContrast({
     target_trajectory:target,
