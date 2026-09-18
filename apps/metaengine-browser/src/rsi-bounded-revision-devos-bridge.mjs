@@ -12,9 +12,14 @@ import {
   verifyRsiIsolatedCandidateBuildPlan,
   finalizeRsiIsolatedCandidateBuild,
 } from './rsi-isolated-candidate-builder.mjs';
+import {
+  createRsiArtifactEvaluationRoutingRequest,
+  verifyRsiArtifactEvaluationRoutingRequest,
+} from './rsi-evaluation-budget-router.mjs';
 
 export const RSI_BOUNDED_REVISION_DEVOS_BRIDGE_SCHEMA='metaengine.rsi.bounded-revision-devos-bridge.v1';
 export const RSI_BOUNDED_REVISION_ARTIFACT_RECEIPT_SCHEMA='metaengine.rsi.bounded-revision-artifact-receipt.v1';
+export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff.v1';
 
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SLSA_PREDICATE='https://slsa.dev/provenance/v1';
@@ -470,3 +475,273 @@ export function verifyRsiBoundedRevisionArtifactReceipt(row,args={}){
   if(canonical.artifact_receipt_digest!==receipt.artifact_receipt_digest)throw new Error('rsi_revision_bridge_artifact_receipt_mismatch');
   return canonical;
 }
+
+export function createRsiMaterializedCandidateEvaluationHandoff({
+  artifact_receipt,
+  artifact_verification,
+  evaluator_root_digest,
+  evaluator_generation_digest,
+  evaluation_epoch_digest,
+  external_measurement_digest,
+  proxy_score_digest,
+  uncertainty,
+  decision_closeness,
+  proxy_reliability_gap,
+  evaluator_cost_units,
+  expected_information_gain,
+  external_evaluation_owner=false,
+  authored_by_candidate=true,
+}={}){
+  if(external_evaluation_owner!==true||authored_by_candidate!==false)throw new Error('rsi_revision_bridge_external_evaluation_owner_required');
+  const verification=artifact_verification||{};
+  const receipt=verifyRsiBoundedRevisionArtifactReceipt(artifact_receipt,verification);
+  const envelope=verification.envelope;
+  if(!envelope||envelope.envelope_digest!==receipt.envelope_digest)throw new Error('rsi_revision_bridge_phase29_envelope_binding_required');
+  if(receipt.eligible_for_fresh_paired_evaluation!==true||receipt.eligible_for_promotion!==false
+    ||receipt.candidate_artifact_is_active!==false||receipt.candidate_artifact_replaces_parent!==false){
+    throw new Error('rsi_revision_bridge_phase29_artifact_not_evaluation_eligible');
+  }
+  const evalRoots=[
+    exactDigest(evaluator_root_digest,'phase29_evaluator_root'),
+    exactDigest(evaluator_generation_digest,'phase29_evaluator_generation'),
+    exactDigest(evaluation_epoch_digest,'phase29_evaluation_epoch'),
+    exactDigest(external_measurement_digest,'phase29_external_measurement'),
+    exactDigest(proxy_score_digest,'phase29_proxy_score'),
+  ];
+  const buildRoots=new Set([
+    receipt.artifact_digest,
+    receipt.builder_identity_digest,
+    receipt.worker_image_digest,
+    receipt.toolchain_image_digest,
+    receipt.dependency_material_manifest_digest,
+    receipt.harness_manifest_digest,
+    receipt.capability_manifest_digest,
+    receipt.build_provenance_policy_digest,
+    receipt.artifact_signature_policy_digest,
+    receipt.transparency_log_policy_digest,
+  ]);
+  if(evalRoots.some(root=>buildRoots.has(root)))throw new Error('rsi_revision_bridge_phase29_build_evaluation_root_reuse_forbidden');
+
+  const provenanceRoot=digest({
+    artifact_receipt_digest:receipt.artifact_receipt_digest,
+    provenance_attestation_digest:receipt.provenance_attestation_digest,
+    signature_bundle_digest:receipt.signature_bundle_digest,
+    transparency_log_entry_digest:receipt.transparency_log_entry_digest,
+    reproducibility_evidence_digest:receipt.reproducibility_evidence_digest,
+    build_provenance_digest:receipt.build_provenance_digest,
+    artifact_signature_digest:receipt.artifact_signature_digest,
+    transparency_log_inclusion_digest:receipt.transparency_log_inclusion_digest,
+    artifact_reconstruction_digest:receipt.artifact_reconstruction_digest,
+    protected_root_diff_audit_digest:receipt.protected_root_diff_audit_digest,
+    preserved_behavior_review_digest:receipt.preserved_behavior_review_digest,
+    builder_identity_digest:receipt.builder_identity_digest,
+    worker_image_digest:receipt.worker_image_digest,
+    toolchain_image_digest:receipt.toolchain_image_digest,
+    dependency_material_manifest_digest:receipt.dependency_material_manifest_digest,
+    harness_manifest_digest:receipt.harness_manifest_digest,
+    capability_manifest_digest:receipt.capability_manifest_digest,
+    workspace_id:receipt.workspace_id,
+    workspace_generation:receipt.workspace_generation,
+    lease_generation:receipt.lease_generation,
+  });
+  const seed={
+    artifact_receipt_digest:receipt.artifact_receipt_digest,
+    evaluator_root_digest:evalRoots[0],
+    evaluator_generation_digest:evalRoots[1],
+    evaluation_epoch_digest:evalRoots[2],
+    provenance_root_digest:provenanceRoot,
+  };
+  const requestId=`phase29.eval.${hash(seed).slice(0,24)}`;
+  const request=createRsiArtifactEvaluationRoutingRequest({
+    request_id:requestId,
+    source_sha:receipt.source_sha,
+    phase28_artifact_receipt_digest:receipt.artifact_receipt_digest,
+    parent_artifact_digest:envelope.parent_candidate_artifact_digest,
+    candidate_artifact_digest:receipt.artifact_digest,
+    provenance_root_digest:provenanceRoot,
+    build_worker_image_digest:receipt.worker_image_digest,
+    build_harness_manifest_digest:receipt.harness_manifest_digest,
+    build_capability_manifest_digest:receipt.capability_manifest_digest,
+    evaluator_root_digest:seed.evaluator_root_digest,
+    evaluator_generation_digest:seed.evaluator_generation_digest,
+    evaluation_epoch_digest:seed.evaluation_epoch_digest,
+    external_measurement_digest:evalRoots[3],
+    proxy_score_digest:evalRoots[4],
+    uncertainty,
+    decision_closeness,
+    proxy_reliability_gap,
+    evaluator_cost_units,
+    expected_information_gain,
+    scope_tags:['HIDDEN_HOLDOUT','MATERIALIZED_CANDIDATE','SAFETY','SECURITY'],
+    recipient_group_tags:['RSI_CANDIDATE_VALIDATION'],
+    external_measurement_owner:true,
+    authored_by_candidate:false,
+  });
+  verifyRsiArtifactEvaluationRoutingRequest(request);
+  const core={
+    schema:RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA,
+    version:1,
+    source_sha:receipt.source_sha,
+    phase28_artifact_receipt_digest:receipt.artifact_receipt_digest,
+    phase27_envelope_digest:receipt.envelope_digest,
+    phase27_proposal_digest:receipt.proposal_digest,
+    parent_artifact_digest:envelope.parent_candidate_artifact_digest,
+    candidate_artifact_digest:receipt.artifact_digest,
+    provenance_root_digest:provenanceRoot,
+    build_worker_image_digest:receipt.worker_image_digest,
+    build_harness_manifest_digest:receipt.harness_manifest_digest,
+    build_capability_manifest_digest:receipt.capability_manifest_digest,
+    evaluator_root_digest:request.evaluator_root_digest,
+    evaluator_generation_digest:request.evaluator_generation_digest,
+    evaluation_epoch_digest:request.evaluation_epoch_digest,
+    fresh_evaluation_request:request,
+    state:'READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING',
+    fresh_budget_epoch_required:true,
+    previous_budget_plan_reuse_allowed:false,
+    sealed_exogenous_acceptance_required:true,
+    evaluator_generation_frozen:true,
+    build_evaluation_environment_separation_required:true,
+    anchor_provenance_survives_evaluator_rotation:true,
+    evaluator_dependent_verdict_reuse_allowed:false,
+    existing_evaluation_budget_router_only:true,
+    existing_candidate_experiment_ledger_only:true,
+    candidate_can_choose_evaluator:false,
+    candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_budget:false,
+    candidate_can_choose_harness:false,
+    candidate_can_choose_trial_worker:false,
+    candidate_can_choose_resource_budget:false,
+    candidate_can_choose_task_order:false,
+    candidate_can_choose_thresholds:false,
+    candidate_can_choose_stopping_rule:false,
+    handoff_can_schedule_evaluation:false,
+    handoff_can_execute_evaluation:false,
+    handoff_can_promote:false,
+    active_artifact_replaced:false,
+    deployment_evidence_still_required_for_trusted_learning:true,
+    external_evaluation_owner:true,
+    authored_by_candidate:false,
+    second_evaluation_router_created:false,
+    second_experiment_ledger_created:false,
+    execution_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    scheduler_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  };
+  return Object.freeze({...core,evaluation_handoff_digest:digest(core)});
+}
+
+export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
+  const handoff=verifyDigestObject(
+    row,
+    RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA,
+    'evaluation_handoff_digest',
+    'phase29_evaluation_handoff',
+  );
+  if(handoff.state!=='READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING'
+    ||handoff.fresh_budget_epoch_required!==true
+    ||handoff.previous_budget_plan_reuse_allowed!==false
+    ||handoff.sealed_exogenous_acceptance_required!==true
+    ||handoff.evaluator_generation_frozen!==true
+    ||handoff.build_evaluation_environment_separation_required!==true
+    ||handoff.anchor_provenance_survives_evaluator_rotation!==true
+    ||handoff.evaluator_dependent_verdict_reuse_allowed!==false
+    ||handoff.existing_evaluation_budget_router_only!==true
+    ||handoff.existing_candidate_experiment_ledger_only!==true
+    ||handoff.candidate_can_choose_evaluator!==false
+    ||handoff.candidate_can_choose_evaluator_generation!==false
+    ||handoff.candidate_can_choose_budget!==false
+    ||handoff.candidate_can_choose_harness!==false
+    ||handoff.candidate_can_choose_trial_worker!==false
+    ||handoff.candidate_can_choose_resource_budget!==false
+    ||handoff.candidate_can_choose_task_order!==false
+    ||handoff.candidate_can_choose_thresholds!==false
+    ||handoff.candidate_can_choose_stopping_rule!==false
+    ||handoff.handoff_can_schedule_evaluation!==false
+    ||handoff.handoff_can_execute_evaluation!==false
+    ||handoff.handoff_can_promote!==false
+    ||handoff.active_artifact_replaced!==false
+    ||handoff.deployment_evidence_still_required_for_trusted_learning!==true
+    ||handoff.external_evaluation_owner!==true
+    ||handoff.authored_by_candidate!==false
+    ||handoff.second_evaluation_router_created!==false
+    ||handoff.second_experiment_ledger_created!==false)throw new Error('rsi_revision_bridge_phase29_handoff_policy_invalid');
+  const canonical=createRsiMaterializedCandidateEvaluationHandoff({
+    ...args,
+    evaluator_root_digest:handoff.evaluator_root_digest,
+    evaluator_generation_digest:handoff.evaluator_generation_digest,
+    evaluation_epoch_digest:handoff.evaluation_epoch_digest,
+    external_measurement_digest:handoff.fresh_evaluation_request.external_measurement_digest,
+    proxy_score_digest:handoff.fresh_evaluation_request.proxy_score_digest,
+    uncertainty:handoff.fresh_evaluation_request.uncertainty,
+    decision_closeness:handoff.fresh_evaluation_request.decision_closeness,
+    proxy_reliability_gap:handoff.fresh_evaluation_request.proxy_reliability_gap,
+    evaluator_cost_units:handoff.fresh_evaluation_request.evaluator_cost_units,
+    expected_information_gain:handoff.fresh_evaluation_request.expected_information_gain,
+    external_evaluation_owner:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.evaluation_handoff_digest!==handoff.evaluation_handoff_digest)throw new Error('rsi_revision_bridge_phase29_handoff_mismatch');
+  return canonical;
+}
+
+export function rsiBoundedRevisionDevosBridgeTrustRootSnapshot(){
+  const root={
+    schema:'metaengine.rsi.bounded-revision-devos-bridge-root.v1',
+    version:1,
+    existing_devos_scheduler_only:true,
+    existing_isolated_candidate_builder_only:true,
+    second_scheduler_allowed:false,
+    second_builder_allowed:false,
+    exact_phase27_envelope_required:true,
+    exact_phase27_proposal_required:true,
+    approved_mutation_manifest_required:true,
+    bounded_files_operations_bytes_required:true,
+    protected_policy_roots_immutable:true,
+    private_writable_layer_required:true,
+    host_repository_mount_allowed:false,
+    network_deny_by_default_required:true,
+    provenance_predicate_type:SLSA_PREDICATE,
+    independent_provenance_roots_required:true,
+    external_provenance_attestation_required:true,
+    external_signature_bundle_required:true,
+    transparency_log_inclusion_required:true,
+    artifact_reconstruction_required:true,
+    protected_root_diff_audit_required:true,
+    preserved_behavior_review_required:true,
+    candidate_self_attestation_allowed:false,
+    builder_identity_binding_required:true,
+    worker_image_binding_required:true,
+    toolchain_binding_required:true,
+    dependency_materials_binding_required:true,
+    harness_manifest_binding_required:true,
+    capability_manifest_binding_required:true,
+    workspace_generation_binding_required:true,
+    lease_generation_binding_required:true,
+    fresh_paired_evaluation_required:true,
+    fresh_evaluation_budget_epoch_required:true,
+    previous_evaluation_budget_reuse_allowed:false,
+    sealed_exogenous_acceptance_required:true,
+    evaluator_generation_frozen_per_epoch:true,
+    build_evaluation_environment_separation_required:true,
+    evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+    anchor_provenance_survives_evaluator_rotation:true,
+    existing_evaluation_budget_router_only:true,
+    existing_candidate_experiment_ledger_only:true,
+    direct_active_replacement_allowed:false,
+    direct_promotion_allowed:false,
+    deployment_evidence_required_for_trusted_learning:true,
+    execution_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    scheduler_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  };
+  return Object.freeze({...root,bridge_root_digest:digest(root)});
+}
+
