@@ -1940,7 +1940,20 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
   assert.equal(proposal.source_entry_count,2);
   assert.equal(proposal.source_candidate_count,2);
   assert.equal(proposal.same_evaluator_generation_required,true);
+  assert.equal(proposal.same_evaluator_generation_sequence_required,true);
+  assert.equal(proposal.generation_history_anchor_required,true);
   assert.equal(proposal.same_evaluation_epoch_required,true);
+  assert.equal(proposal.same_evaluation_epoch_sequence_required,true);
+  assert.equal(proposal.evaluator_generation_seq,rows[0].entry.evaluator_generation_seq);
+  assert.equal(proposal.evaluator_generation_history_anchor_digest,rows[0].entry.evaluator_generation_history_anchor_digest);
+  assert.equal(proposal.evaluation_epoch_seq,rows[0].entry.evaluation_epoch_seq);
+  assert.deepEqual(proposal.source_provenance_root_digests,[...new Set(rows.map(r=>r.entry.provenance_root_digest))].sort());
+  assert.equal(proposal.source_sealed_acceptance_digests.length,2);
+  assert.equal(proposal.source_differential_reference_digests.length,2);
+  assert.equal(proposal.source_counterevidence_digests.length,2);
+  assert.equal(proposal.cross_generation_consolidation_allowed,false);
+  assert.equal(proposal.cross_generation_revalidation_required_before_new_proposal,true);
+  assert.equal(proposal.slow_loop_distinct_from_fast_candidate_loop,true);
   assert.equal(proposal.source_evidence_preserved_by_digest,true);
   assert.equal(proposal.raw_source_trajectory_copied,false);
   assert.equal(proposal.raw_hidden_holdout_copied,false);
@@ -2111,9 +2124,18 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.min_source_entries,2);
   assert.equal(root.source_candidate_diversity_required,true);
   assert.equal(root.same_evaluator_generation_required,true);
+  assert.equal(root.same_evaluator_generation_sequence_required,true);
+  assert.equal(root.generation_history_anchor_required,true);
   assert.equal(root.same_evaluation_epoch_required,true);
+  assert.equal(root.same_evaluation_epoch_sequence_required,true);
+  assert.equal(root.cross_generation_consolidation_allowed,false);
+  assert.equal(root.cross_generation_revalidation_required_before_new_proposal,true);
   assert.equal(root.mixed_learning_kind_forbidden,true);
   assert.equal(root.source_evidence_preserved_by_digest,true);
+  assert.equal(root.source_provenance_roots_preserved,true);
+  assert.equal(root.source_external_acceptance_evidence_preserved,true);
+  assert.equal(root.source_counterevidence_preserved,true);
+  assert.equal(root.slow_loop_distinct_from_fast_candidate_loop,true);
   assert.equal(root.external_consolidator_required,true);
   assert.equal(root.external_transfer_validator_required,true);
   assert.equal(root.min_distinct_passed_transfer_contexts,2);
@@ -2130,4 +2152,55 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.archive_can_schedule_work,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.slow_knowledge_consolidation_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('Phase31 rejects self-rehashed sequence and history-anchor forgery before slow consolidation',()=>{
+  const rows=phase31SourceRows('exact-sequence-forgery');
+  const forgedSeq=structuredClone(rows[1]);
+  forgedSeq.entry.evaluator_generation_seq+=1;
+  const seqCore=structuredClone(forgedSeq.entry);delete seqCore.entry_digest;
+  forgedSeq.entry.entry_digest=dg(seqCore);
+  assert.throws(
+    ()=>phase31Proposal([rows[0],forgedSeq],'forged-sequence'),
+    /entry_digest_mismatch|generation_seq|cross_generation/,
+  );
+
+  const forgedAnchor=structuredClone(rows[1]);
+  forgedAnchor.entry.evaluator_generation_history_anchor_digest=labelDigest('forged-phase31-history-anchor');
+  const anchorCore=structuredClone(forgedAnchor.entry);delete anchorCore.entry_digest;
+  forgedAnchor.entry.entry_digest=dg(anchorCore);
+  assert.throws(
+    ()=>phase31Proposal([rows[0],forgedAnchor],'forged-anchor'),
+    /entry_digest_mismatch|history_anchor|generation_history_anchor/,
+  );
+});
+
+test('Phase31 validation and admission retain exact evaluator sequence lineage without gaining authority',()=>{
+  const rows=phase31SourceRows('validation-lineage');
+  const proposal=phase31Proposal(rows,'validation-lineage');
+  const v1=phase31Validation(proposal,'validation-lineage-a');
+  const v2=phase31Validation(proposal,'validation-lineage-b');
+  for(const validation of [v1,v2]){
+    assert.equal(validation.evaluator_generation_seq,proposal.evaluator_generation_seq);
+    assert.equal(validation.evaluator_generation_history_anchor_digest,proposal.evaluator_generation_history_anchor_digest);
+    assert.equal(validation.source_evaluation_epoch_seq,proposal.evaluation_epoch_seq);
+    assert.equal(validation.execution_authority,false);
+    assert.equal(validation.scheduler_authority,false);
+  }
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase31.admission.validation-lineage',
+    proposal,validations:[v1,v2],
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(admission.evaluator_generation_seq,proposal.evaluator_generation_seq);
+  assert.equal(admission.evaluator_generation_history_anchor_digest,proposal.evaluator_generation_history_anchor_digest);
+  assert.equal(admission.evaluation_epoch_seq,proposal.evaluation_epoch_seq);
+  assert.equal(admission.state,'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW');
+  assert.equal(admission.library_admission_token,null);
+  assert.equal(admission.execution_authority,false);
+  assert.equal(admission.scheduler_authority,false);
+  assert.equal(admission.promotion_authority,false);
+  assert.equal(admission.self_update_authority,false);
 });
