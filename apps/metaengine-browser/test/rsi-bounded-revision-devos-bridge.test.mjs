@@ -433,6 +433,9 @@ test('artifact receipt binds exact candidate subject to complete hermetic proven
   const checked=verifyRsiBoundedRevisionArtifactReceipt(receipt,{bridge,candidate_handoff:handoff});
   assert.equal(checked.receipt_digest,receipt.receipt_digest);
   assert.equal(receipt.candidate_sha,handoff.candidate_sha);
+  assert.equal(receipt.candidate_handoff_digest,handoff.handoff_digest);
+  assert.match(receipt.candidate_capsule_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.match(receipt.sandbox_plan_digest,/^sha256:[0-9a-f]{64}$/);
   assert.equal(receipt.toolchain_digest,bridge.implementation_manifest.toolchain_digest);
   assert.equal(receipt.dependency_closure_digest,bridge.implementation_manifest.dependency_closure_digest);
   assert.equal(receipt.materials_complete,true);
