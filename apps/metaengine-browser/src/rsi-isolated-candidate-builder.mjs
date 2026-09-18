@@ -65,6 +65,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-benchmark-coevolution-admission.mjs',
   'apps/metaengine-browser/src/rsi-shared-experience-bus.mjs',
   'apps/metaengine-browser/src/rsi-evaluation-budget-router.mjs',
+  'apps/metaengine-browser/src/rsi-candidate-experiment-ledger.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
