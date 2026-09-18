@@ -8,6 +8,7 @@ const migration = fs.readFileSync(
 );
 const edge = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url), 'utf8');
 const wake = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs', import.meta.url), 'utf8');
+const postgresWake = fs.readFileSync(new URL('../supabase/a2-browser-native-supervisor-v1/postgres-command-wake.mjs', import.meta.url), 'utf8');
 
 function returnedTemplate(source, functionName) {
   const escapedName = functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -67,6 +68,6 @@ test('modern non-JWT service keys use the existing Postgres NOTIFY channel inste
 
   assert.match(wake, /row\.table \?\? row\.tbl/);
   assert.match(wake, /row\.target_client_id !== undefined \? row\.target_client_id : row\.client/);
-  assert.match(wake, /POSTGRES_RELISTEN/);
-  assert.match(wake, /does not require a production DDL rewrite/);
+  assert.match(postgresWake, /POSTGRES_RELISTEN/);
+  assert.match(postgresWake, /does not require a production DDL rewrite/);
 });
