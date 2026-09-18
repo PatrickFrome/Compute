@@ -59,6 +59,7 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { RsiBoundedCanaryAdmissionLedger, createRsiBoundedCanaryShadowEvidence, createRsiBoundedCanaryAdmission, rsiBoundedCanaryAdmissionTrustRootSnapshot } from './rsi-bounded-canary-admission.mjs';
 import { RsiMetaProfileCanaryLedger, createRsiMetaProfileCanaryAdmission, createRsiMetaProfileCanaryOutcome, rsiMetaProfileCanaryTrustRootSnapshot } from './rsi-meta-profile-canary-admission.mjs';
+import { createRsiCanaryExternalVerifierReview, rsiCanaryExternalVerifierTrustRootSnapshot } from './rsi-canary-external-verifier.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -141,6 +142,7 @@ function trustRoots() {
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
     bounded_canary_admission: rsiBoundedCanaryAdmissionTrustRootSnapshot(),
     meta_profile_canary: rsiMetaProfileCanaryTrustRootSnapshot(),
+    canary_external_verifier: rsiCanaryExternalVerifierTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1205,6 +1207,63 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return Object.freeze({ outcome, stored });
+  }
+
+  async reviewCompletedCanaryWithExternalVerifier({
+    canary_id,
+    review_id,
+    verifier_root_digest,
+    hidden_acceptance_manifest_digest,
+    reward_hacking_trap_digest,
+    transfer_holdout_digest,
+    trajectory_integrity_digest,
+    candidate_test_digest,
+    hidden_acceptance_pass = false,
+    reward_hacking_trap_pass = false,
+    transfer_holdout_pass = false,
+    trajectory_integrity_pass = false,
+    external_verifier = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const evidence = this.#metaProfileCanaryLedger.completionEvidence(canary_id);
+    if (!evidence) throw new Error('rsi_runtime_canary_missing');
+    if (evidence.rollback_required === true || evidence.fixed_budget_complete !== true) {
+      throw new Error('rsi_runtime_canary_external_verifier_not_ready');
+    }
+    const review = createRsiCanaryExternalVerifierReview({
+      review_id,
+      admission: evidence.admission,
+      decisions: evidence.decisions,
+      outcomes: evidence.outcomes,
+      verifier_root_digest,
+      hidden_acceptance_manifest_digest,
+      reward_hacking_trap_digest,
+      transfer_holdout_digest,
+      trajectory_integrity_digest,
+      candidate_test_digest,
+      hidden_acceptance_pass,
+      reward_hacking_trap_pass,
+      transfer_holdout_pass,
+      trajectory_integrity_pass,
+      external_verifier,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('META_PROFILE_CANARY_EXTERNAL_VERIFIER_REVIEWED', {
+      canary_id,
+      canary_admission_digest: evidence.admission.admission_digest,
+      review_digest: review.review_digest,
+      verifier_root_digest: review.verifier_root_digest,
+      state: review.state,
+      all_external_dimensions_pass: review.all_external_dimensions_pass,
+      candidate_tests_advisory_only: true,
+      incumbent_remains_default: true,
+      deployment_acceptance_authorized: false,
+      profile_activation_authorized: false,
+      verifier_evolution_requires_separate_sealed_admission: true,
+      authority_effect: false,
+    });
+    return review;
   }
 
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
