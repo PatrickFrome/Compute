@@ -10,6 +10,7 @@ import {
 export const RSI_EXPERIENCE_CONTEXT_PLAN_SCHEMA = 'metaengine.rsi.experience-context-plan.v1';
 export const RSI_EXPERIENCE_CONTEXT_ROOT_SCHEMA = 'metaengine.rsi.experience-context-root.v1';
 
+const SHA40_RE = /^[0-9a-f]{40}$/;
 const SHA256_PREFIXED_RE = /^sha256:[0-9a-f]{64}$/;
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 const SAFE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
@@ -66,6 +67,12 @@ function assertZeroAuthority(value, label) {
   }
 }
 
+function exactSha(value, label) {
+  const out = String(value || '').trim().toLowerCase();
+  if (!SHA40_RE.test(out)) throw new Error(`rsi_context_${label}_sha_invalid`);
+  return out;
+}
+
 function boundedId(value, label) {
   const out = String(value || '').trim();
   if (!SAFE_ID_RE.test(out)) throw new Error(`rsi_context_${label}_invalid`);
@@ -119,9 +126,12 @@ function verifyFrontierEntry(entry) {
   if (String(hypothesis.mutation_surface || '').toUpperCase() !== mutationSurface) throw new Error('rsi_context_hypothesis_surface_mismatch');
   if (String(plan?.task_spec?.rsi?.opportunity_id || '') !== opportunityId) throw new Error('rsi_context_experiment_opportunity_mismatch');
   if (String(plan?.task_spec?.rsi?.mutation_surface || '').toUpperCase() !== mutationSurface) throw new Error('rsi_context_experiment_surface_mismatch');
+  const sourceSha = exactSha(hypothesis.source_sha, 'hypothesis_source');
+  if (exactSha(plan.source_sha, 'experiment_source') !== sourceSha) throw new Error('rsi_context_source_mismatch');
   const hypothesisDigest = prefixedDigest(hypothesis.hypothesis_digest, 'hypothesis');
   const planDigest = prefixedDigest(plan.plan_digest, 'experiment_plan');
   return Object.freeze({
+    source_sha: sourceSha,
     opportunity_id: opportunityId,
     signal,
     priority,
@@ -169,6 +179,7 @@ export function createRsiExperienceContextPlan({
   const environmentFingerprint = boundedId(environment_fingerprint, 'environment_fingerprint');
   const modelFamily = token(model_family, 'model_family');
   const targetContextDigest = digest({
+    source_sha: frontier.source_sha,
     observation_digest: frontier.observation_digest,
     opportunity_id: frontier.opportunity_id,
     signal: frontier.signal,
@@ -214,6 +225,7 @@ export function createRsiExperienceContextPlan({
     schema: RSI_EXPERIENCE_CONTEXT_PLAN_SCHEMA,
     version: 1,
     mode,
+    source_sha: frontier.source_sha,
     opportunity_id: frontier.opportunity_id,
     signal: frontier.signal,
     priority: frontier.priority,
