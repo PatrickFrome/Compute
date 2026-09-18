@@ -221,6 +221,8 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-self-update-restart-gate-probe-outcome.mjs',
     'apps/metaengine-browser/src/rsi-self-update-final-install-cycle-admission.mjs',
     'apps/metaengine-browser/src/rsi-self-update-final-apply-readback.mjs',
+    'apps/metaengine-browser/src/rsi-self-update-successor-verification.mjs',
+    'apps/metaengine-browser/src/self-update-handoff.mjs',
     'apps/metaengine-browser/src/self-update-runtime-v8.mjs',
     'apps/metaengine-browser/src/self-update-transaction-journal.mjs',
     'apps/metaengine-browser/src/self-update-ambiguous-successor-recovery.mjs',
