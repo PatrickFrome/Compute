@@ -260,11 +260,15 @@ function localEvidenceArgs(fixture, overrides = {}) {
     matched_reference_control_receipt_digest: d('phase32-matched-control'),
     treatment_receipt_digest: d('phase32-treatment'),
     local_evidence_digest: d('phase32-local-evidence'),
+    behavioral_abstraction_digest: d('phase32-behavioral-abstraction'),
+    behavioral_invariant_set_digest: d('phase32-behavioral-invariants'),
+    failure_attribution_digest: d('phase32-failure-attribution'),
     attempt_count: 12,
     success_count: 11,
     local_acceptance_pass: true,
     matched_reference_pass: true,
     skill_specific_value_demonstrated: true,
+    failure_attribution_clear: true,
     hard_invariants_pass: true,
     contamination_clear: true,
     from_scratch_replay_pass: true,
@@ -305,6 +309,10 @@ test('Phase32 converts only reusable Phase31 knowledge into a fresh local skill 
   assert.equal(result.blockers.length, 0);
   assert.equal(result.standard_skill_evidence_verified_for_library, true);
   assert.equal(result.standard_skill_evidence.skill_digest, fx.skill.skill_digest);
+  assert.equal(result.structured_behavioral_abstraction_required, true);
+  assert.equal(result.behavioral_invariant_set_required, true);
+  assert.equal(result.independent_failure_attribution_required, true);
+  assert.equal(result.raw_trajectory_stored, false);
   assert.equal(result.library_append_performed, false);
   assert.equal(result.library_admission_token, null);
   assert.equal(result.review_can_append_library, false);
@@ -358,6 +366,7 @@ test('Phase32 differential and non-regression failures stay rejected evidence an
   const harmful = createRsiConsolidatedKnowledgeSkillEvidenceReview(localEvidenceArgs(fx, {
     matched_reference_pass: false,
     skill_specific_value_demonstrated: false,
+    failure_attribution_clear: false,
     efficiency_non_regression: false,
     negative_transfer_detected: true,
   }));
@@ -365,6 +374,7 @@ test('Phase32 differential and non-regression failures stay rejected evidence an
   assert.equal(harmful.standard_skill_evidence_verified_for_library, false);
   assert.ok(harmful.blockers.includes('MATCHED_REFERENCE_FAILED'));
   assert.ok(harmful.blockers.includes('SKILL_SPECIFIC_VALUE_NOT_DEMONSTRATED'));
+  assert.ok(harmful.blockers.includes('FAILURE_ATTRIBUTION_AMBIGUOUS'));
   assert.ok(harmful.blockers.includes('EFFICIENCY_REGRESSION'));
   assert.ok(harmful.blockers.includes('NEGATIVE_TRANSFER_DETECTED'));
   assert.equal(harmful.library_append_performed, false);
@@ -446,6 +456,10 @@ test('Phase32 trust root freezes local revalidation and keeps all activation aut
   assert.equal(root.local_holdout_independent_from_phase31_required, true);
   assert.equal(root.matched_reference_required, true);
   assert.equal(root.skill_specific_value_required, true);
+  assert.equal(root.structured_behavioral_abstraction_required, true);
+  assert.equal(root.behavioral_invariant_set_required, true);
+  assert.equal(root.independent_failure_attribution_required, true);
+  assert.equal(root.raw_trajectory_stored, false);
   assert.equal(root.zero_negative_transfer_required, true);
   assert.equal(root.skill_library_write_performed_here, false);
   assert.equal(root.skill_activation_performed_here, false);
