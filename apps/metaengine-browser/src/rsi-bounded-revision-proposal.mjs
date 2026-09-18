@@ -285,19 +285,24 @@ export class RsiBoundedRevisionProposalArchive{
       const ids=new Set();
       const proposalIds=new Set();
       const childIds=new Set();
+      const envelopeIds=new Set();
       const checkedRows=[];
       for(const row of p.rows){
         if(!row||typeof row!=='object'||row.source_sha!==this.#sourceSha)throw new Error('rsi_revision_archive_source_mismatch');
+        const expectedSeq=checkedRows.length+1;
+        if(row.archive_seq!==expectedSeq)throw new Error('rsi_revision_archive_sequence_invalid');
         const envelope=verifyRsiBoundedRevisionEnvelope(row.envelope);
         const proposal=verifyRsiBoundedRevisionProposal(row.proposal,{envelope});
         if(envelope.source_sha!==this.#sourceSha||proposal.source_sha!==this.#sourceSha)throw new Error('rsi_revision_archive_source_mismatch');
         if(ids.has(proposal.proposal_digest))throw new Error('rsi_revision_archive_proposal_duplicate');
         if(proposalIds.has(proposal.proposal_id))throw new Error('rsi_revision_archive_proposal_id_duplicate');
         if(childIds.has(proposal.proposed_child_artifact_identity_digest))throw new Error('rsi_revision_archive_child_identity_duplicate');
+        if(envelopeIds.has(envelope.envelope_id))throw new Error('rsi_revision_archive_envelope_id_duplicate');
         ids.add(proposal.proposal_digest);
         proposalIds.add(proposal.proposal_id);
         childIds.add(proposal.proposed_child_artifact_identity_digest);
-        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,envelope,proposal}));
+        envelopeIds.add(envelope.envelope_id);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,archive_seq:expectedSeq,envelope,proposal}));
       }
       const recomputed=archiveState(this.#sourceSha,checkedRows);
       if(recomputed.state_digest!==exactDigest(p.state_digest,'archive')){
@@ -318,6 +323,7 @@ export class RsiBoundedRevisionProposalArchive{
       r.proposal.proposal_digest===checkedProposal.proposal_digest
       ||r.proposal.proposal_id===checkedProposal.proposal_id
       ||r.proposal.proposed_child_artifact_identity_digest===checkedProposal.proposed_child_artifact_identity_digest
+      ||r.envelope.envelope_id===checkedEnvelope.envelope_id
     );
     if(existing){
       if(existing.proposal.proposal_digest!==checkedProposal.proposal_digest)throw new Error('rsi_revision_archive_identity_conflict');
@@ -326,6 +332,7 @@ export class RsiBoundedRevisionProposalArchive{
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_revision_archive_capacity_exceeded');
     const nextRows=[...this.#rows,Object.freeze({
       source_sha:this.#sourceSha,
+      archive_seq:this.#rows.length+1,
       envelope:structuredClone(checkedEnvelope),
       proposal:structuredClone(checkedProposal),
     })];
@@ -333,7 +340,7 @@ export class RsiBoundedRevisionProposalArchive{
     this.#rows=nextRows;
     return zero({state:'ARCHIVED_FOR_EXTERNAL_IMPLEMENTATION_REVIEW',proposal_digest:checkedProposal.proposal_digest});
   }
-  snapshot(){const s=archiveState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,represented_mutation_categories:s.represented_mutation_categories,append_only:true,preserves_multiple_proposals:true,scalar_winner_forbidden:true,active_artifact_digest:null,archive_can_apply_revision:false,archive_can_write_repository:false,archive_can_schedule_implementation:false,authority_effect:false});}
+  snapshot(){const s=archiveState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,last_archive_seq:s.rows.length,monotonic_archive_sequence:true,unique_envelope_identity:true,represented_mutation_categories:s.represented_mutation_categories,append_only:true,preserves_multiple_proposals:true,scalar_winner_forbidden:true,active_artifact_digest:null,archive_can_apply_revision:false,archive_can_write_repository:false,archive_can_schedule_implementation:false,authority_effect:false});}
 }
 
 export function rsiBoundedRevisionProposalTrustRootSnapshot(){
@@ -346,6 +353,8 @@ export function rsiBoundedRevisionProposalTrustRootSnapshot(){
     canonical_phase26_replay_required:true,
     durable_before_visible_required:true,
     restart_revalidation_required:true,
+    monotonic_archive_sequence_required:true,
+    unique_envelope_identity_required:true,
     max_mutated_files:MAX_MUTATED_FILES,
     max_edit_operations:MAX_EDIT_OPERATIONS,
     max_changed_bytes:MAX_CHANGED_BYTES,
