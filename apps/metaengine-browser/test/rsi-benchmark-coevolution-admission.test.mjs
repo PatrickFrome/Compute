@@ -18,6 +18,8 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]));}
+function objDigest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`;}
 
 function proposal(overrides={}){
   return createRsiBenchmarkGenerationProposal({
@@ -170,6 +172,51 @@ test('append-only ledger preserves benchmark generation history and never activa
   await restored.init();
   assert.equal(restored.snapshot().row_count,2);
   assert.equal((await restored.add({proposal:p1,receipt:r1,admission:a1})).state,'IDEMPOTENT');
+});
+
+test('failed benchmark persistence never becomes visible in memory',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-benchmark-crash-consistency-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiBenchmarkCoevolutionLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const p=proposal();
+  const r=receipt(p);
+  const a=admission(p,r);
+
+  await fs.mkdir(`${statePath}.tmp`);
+  await assert.rejects(()=>ledger.add({proposal:p,receipt:r,admission:a}));
+  assert.equal(ledger.snapshot().row_count,0);
+  assert.equal(ledger.snapshot().qualified_count,0);
+
+  await fs.rm(`${statePath}.tmp`,{recursive:true,force:true});
+  const restored=new RsiBenchmarkCoevolutionLedger({statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,0);
+});
+
+test('restart rejects a self-rehashed benchmark policy downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-benchmark-replay-hardening-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiBenchmarkCoevolutionLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const p=proposal();
+  const r=receipt(p);
+  const a=admission(p,r);
+  await ledger.add({proposal:p,receipt:r,admission:a});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const weakened={...persisted.rows[0].admission,active_benchmark_unchanged:false};
+  delete weakened.admission_digest;
+  persisted.rows[0].admission={...weakened,admission_digest:objDigest(weakened)};
+  const stateCore=structuredClone(persisted);
+  delete stateCore.state_digest;
+  persisted.state_digest=objDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiBenchmarkCoevolutionLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/admission_policy_invalid/);
 });
 
 test('candidate cannot self-validate or activate benchmark generation',()=>{
