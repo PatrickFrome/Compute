@@ -220,6 +220,9 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #processPushLastError = null;
   #cognitiveTransport = null;
   #cognitivePortHub = null;
+  #brainObservationSink = null;
+  #brainObservationSinkCalls = 0;
+  #brainObservationSinkErrors = 0;
   #version = '0.0.0';
   #controlLatencySnapshot = null;
   #quitBarrierApp = null;
@@ -330,6 +333,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     this.#processPlaneSet = (value) => { realtimeProcessPlane = value; };
     this.#selfUpdateDurabilityReadyRef = () => selfUpdateDurabilityReady;
     this.#version = String(options.version || '0.0.0');
+    this.#brainObservationSink = options.onBrainObservation ?? null;
+    if (this.#brainObservationSink != null && typeof this.#brainObservationSink !== 'function') {
+      throw new Error('native_supervisor_brain_observation_sink_invalid');
+    }
     this.#cognitiveTransport = createNativeSupervisorCognitiveTransport({
       identity: this.#workspaceIdentity,
       fetchImpl: this.#workspaceFetch,
@@ -445,6 +452,24 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     });
   }
 
+  #publishBrainObservation(plane) {
+    if (!this.#brainObservationSink) return null;
+    let snapshot = null;
+    try {
+      snapshot = plane?.brainSnapshot?.()?.observation?.working_memory || null;
+      if (!snapshot) return null;
+      const result = this.#brainObservationSink(snapshot);
+      this.#brainObservationSinkCalls += 1;
+      if (result && typeof result.then === 'function') {
+        void Promise.resolve(result).catch(() => { this.#brainObservationSinkErrors += 1; });
+      }
+      return result;
+    } catch {
+      this.#brainObservationSinkErrors += 1;
+      return null;
+    }
+  }
+
   #dispatchRealtimeObservationEdge() {
     return dispatchRealtimeObservationEdge({
       cognitiveTransport: this.#cognitiveTransport,
@@ -539,10 +564,12 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
           // falls back to the existing durable /v1/state path.
           this.#dispatchRealtimeObservationEdge();
           this.#cognitivePortHub?.notify();
+          this.#publishBrainObservation(plane);
         },
       });
       this.#processPlaneSet?.(plane);
       const snapshot = plane.start();
+      this.#publishBrainObservation(plane);
       this.#processPlaneError = null;
       this.#scheduleRealtimeStatePush();
       return snapshot;
@@ -636,6 +663,16 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       cognitive_delta_full_state_fallback: true,
       cognitive_delta_second_polling_loop: false,
       cognitive_delta_command_authority: false,
+      brain_observation_sink: Object.freeze({
+        bound: this.#brainObservationSink != null,
+        callback_count: this.#brainObservationSinkCalls,
+        error_count: this.#brainObservationSinkErrors,
+        source: 'EXISTING_BROWSER_BRAIN_WORKING_MEMORY',
+        dedicated_timer: false,
+        second_scheduler: false,
+        execution_authority: false,
+        authority_effect: false,
+      }),
       shutdown_durability: {
         barrier_installed: this.#quitBarrierHandler != null,
         flush_in_flight: this.#quitDurabilityPromise != null && this.#quitDurabilityApproved !== true,
