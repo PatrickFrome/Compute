@@ -231,6 +231,53 @@ export function verifyRsiMetaProfileShadowComparisonBinding(binding, {
   return canonical;
 }
 
+function verifyStoredBinding(binding) {
+  if (!plainObject(binding) || binding.schema !== RSI_META_PROFILE_SHADOW_BINDING_SCHEMA || binding.version !== 1) {
+    throw new Error('rsi_meta_comparison_binding_invalid');
+  }
+  assertZeroAuthority(binding, 'binding');
+  if (
+    binding.selection_policy !== 'QUALIFIED_PARETO_DIVERSITY_ROUND_ROBIN_V1'
+    || binding.comparison_mode !== 'READ_ONLY_DUAL_PLAN'
+    || binding.qd_selection_required !== true
+    || binding.same_verified_context_required !== true
+    || binding.champion_challenger_roles_fixed !== true
+    || binding.raw_context_exposed_to_candidate !== false
+    || binding.candidate_can_choose_profile !== false
+    || binding.candidate_can_choose_context !== false
+    || binding.candidate_can_choose_comparator !== false
+    || binding.candidate_can_swap_roles !== false
+    || binding.plan_execution_allowed !== false
+    || binding.browser_effects_allowed !== false
+    || binding.active_profile_replacement_authorized !== false
+    || binding.shadow_profile_activation_authorized !== false
+    || binding.canary_activation_authorized !== false
+    || binding.future_canary_gate_still_required !== true
+    || binding.external_comparator_owner !== true
+    || binding.authored_by_candidate !== false
+  ) {
+    throw new Error('rsi_meta_comparison_binding_policy_invalid');
+  }
+  exactSha(binding.source_sha, 'binding_source');
+  boundedId(binding.binding_id, 'binding_id');
+  boundedId(binding.selection_id, 'selection_id');
+  boundedId(binding.qualification_id, 'qualification_id');
+  for (const [value, label] of [
+    [binding.selection_digest, 'selection'],
+    [binding.qualification_digest, 'qualification'],
+    [binding.verified_context_digest, 'verified_context'],
+    [binding.comparator_root_digest, 'comparator_root'],
+    [binding.champion_profile_digest, 'champion_profile'],
+    [binding.challenger_profile_digest, 'challenger_profile'],
+  ]) exactDigest(value, label);
+  const clone = structuredClone(binding);
+  delete clone.binding_digest;
+  if (digest(clone) !== exactDigest(binding.binding_digest, 'binding')) {
+    throw new Error('rsi_meta_comparison_binding_digest_mismatch');
+  }
+  return Object.freeze(structuredClone(binding));
+}
+
 export function createRsiMetaProfileDualPlanComparison({
   comparison_id,
   binding,
@@ -359,6 +406,66 @@ export function verifyRsiMetaProfileDualPlanComparison(row, args = {}) {
   return canonical;
 }
 
+function verifyStoredComparison(row) {
+  if (!plainObject(row) || row.schema !== RSI_META_PROFILE_DUAL_PLAN_COMPARISON_SCHEMA || row.version !== 1) {
+    throw new Error('rsi_meta_comparison_receipt_invalid');
+  }
+  assertZeroAuthority(row, 'comparison');
+  if (
+    row.shadow_only !== true
+    || row.plan_execution_observed !== false
+    || row.plan_execution_authorized !== false
+    || row.raw_context_stored !== false
+    || row.candidate_can_author_comparison !== false
+    || row.candidate_can_choose_comparator !== false
+    || row.canary_activation_authorized !== false
+    || row.live_profile_activation_authorized !== false
+    || row.profile_replacement_authorized !== false
+    || row.external_comparator !== true
+    || row.authored_by_candidate !== false
+  ) {
+    throw new Error('rsi_meta_comparison_receipt_policy_invalid');
+  }
+  exactSha(row.source_sha, 'comparison_source');
+  boundedId(row.comparison_id, 'comparison_id');
+  for (const [value, label] of [
+    [row.binding_digest, 'binding'],
+    [row.selection_digest, 'selection'],
+    [row.qualification_digest, 'qualification'],
+    [row.verified_context_digest, 'verified_context'],
+    [row.comparator_root_digest, 'comparator_root'],
+    [row.champion_profile_digest, 'champion_profile'],
+    [row.challenger_profile_digest, 'challenger_profile'],
+    [row.champion_plan_digest, 'champion_plan'],
+    [row.challenger_plan_digest, 'challenger_plan'],
+    [row.champion_projection_digest, 'champion_projection'],
+    [row.challenger_projection_digest, 'challenger_projection'],
+    [row.evidence_digest, 'evidence'],
+  ]) exactDigest(value, label);
+  evidenceRefs(row.evidence_refs);
+  const diverged = row.champion_projection_digest !== row.challenger_projection_digest;
+  const expectedRelation = row.hard_invariants_pass !== true
+    ? 'HARD_INVARIANT_FAILURE'
+    : row.incident_observed === true
+      ? 'INCIDENT'
+      : diverged
+        ? 'SHADOW_DIVERGENCE'
+        : 'MATCHES_CHAMPION';
+  if (row.relation !== expectedRelation) throw new Error('rsi_meta_comparison_receipt_relation_invalid');
+  if ((diverged ? row.divergence_kind === 'NONE' : row.divergence_kind !== 'NONE')) {
+    throw new Error('rsi_meta_comparison_receipt_divergence_kind_invalid');
+  }
+  if (row.eligible_for_future_canary_review_evidence !== (row.hard_invariants_pass === true && row.incident_observed !== true)) {
+    throw new Error('rsi_meta_comparison_receipt_eligibility_invalid');
+  }
+  const clone = structuredClone(row);
+  delete clone.comparison_digest;
+  if (digest(clone) !== exactDigest(row.comparison_digest, 'comparison')) {
+    throw new Error('rsi_meta_comparison_receipt_digest_mismatch');
+  }
+  return Object.freeze(structuredClone(row));
+}
+
 function ledgerState(sourceSha, bindings, comparisons) {
   const core = {
     schema: RSI_META_PROFILE_SHADOW_COMPARISON_LEDGER_SCHEMA,
@@ -422,33 +529,25 @@ export class RsiMetaProfileShadowComparisonLedger {
       }
       const bindingIds = new Set();
       const comparisonIds = new Set();
-      for (const binding of parsed.bindings) {
-        assertZeroAuthority(binding, 'persisted_binding');
-        if (binding.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_ledger_binding_source_mismatch');
-        if (bindingIds.has(binding.binding_id)) throw new Error('rsi_meta_comparison_ledger_binding_duplicate');
-        bindingIds.add(binding.binding_id);
-        const row = structuredClone(binding);
-        delete row.binding_digest;
-        if (digest(row) !== exactDigest(binding.binding_digest, 'binding')) {
-          throw new Error('rsi_meta_comparison_ledger_binding_digest_mismatch');
-        }
-      }
-      for (const comparison of parsed.comparisons) {
-        assertZeroAuthority(comparison, 'persisted_comparison');
-        if (comparison.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_ledger_comparison_source_mismatch');
-        if (comparisonIds.has(comparison.comparison_id)) throw new Error('rsi_meta_comparison_ledger_comparison_duplicate');
-        if (!parsed.bindings.some((binding) => binding.binding_digest === comparison.binding_digest)) {
+      const checkedBindings = parsed.bindings.map((binding) => {
+        const checked = verifyStoredBinding(binding);
+        if (checked.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_ledger_binding_source_mismatch');
+        if (bindingIds.has(checked.binding_id)) throw new Error('rsi_meta_comparison_ledger_binding_duplicate');
+        bindingIds.add(checked.binding_id);
+        return checked;
+      });
+      const checkedComparisons = parsed.comparisons.map((comparison) => {
+        const checked = verifyStoredComparison(comparison);
+        if (checked.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_ledger_comparison_source_mismatch');
+        if (comparisonIds.has(checked.comparison_id)) throw new Error('rsi_meta_comparison_ledger_comparison_duplicate');
+        if (!checkedBindings.some((binding) => binding.binding_digest === checked.binding_digest)) {
           throw new Error('rsi_meta_comparison_ledger_orphan_comparison');
         }
-        comparisonIds.add(comparison.comparison_id);
-        const row = structuredClone(comparison);
-        delete row.comparison_digest;
-        if (digest(row) !== exactDigest(comparison.comparison_digest, 'comparison')) {
-          throw new Error('rsi_meta_comparison_ledger_comparison_digest_mismatch');
-        }
-      }
-      this.#bindings = parsed.bindings;
-      this.#comparisons = parsed.comparisons;
+        comparisonIds.add(checked.comparison_id);
+        return checked;
+      });
+      this.#bindings = checkedBindings;
+      this.#comparisons = checkedComparisons;
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
     }
@@ -471,51 +570,35 @@ export class RsiMetaProfileShadowComparisonLedger {
 
   async addBinding(binding) {
     if (!this.#initialized) throw new Error('rsi_meta_comparison_ledger_not_initialized');
-    if (!plainObject(binding) || binding.schema !== RSI_META_PROFILE_SHADOW_BINDING_SCHEMA) {
-      throw new Error('rsi_meta_comparison_binding_invalid');
-    }
-    assertZeroAuthority(binding, 'binding');
-    if (binding.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_binding_source_mismatch');
-    const row = structuredClone(binding);
-    delete row.binding_digest;
-    if (digest(row) !== exactDigest(binding.binding_digest, 'binding')) {
-      throw new Error('rsi_meta_comparison_binding_digest_mismatch');
-    }
-    const existing = this.#bindings.find((entry) => entry.binding_id === binding.binding_id);
+    const checked = verifyStoredBinding(binding);
+    if (checked.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_binding_source_mismatch');
+    const existing = this.#bindings.find((entry) => entry.binding_id === checked.binding_id);
     if (existing) {
-      if (existing.binding_digest !== binding.binding_digest) throw new Error('rsi_meta_comparison_binding_identity_conflict');
-      return zeroAuthority({ state: 'IDEMPOTENT', binding_digest: binding.binding_digest });
+      if (existing.binding_digest !== checked.binding_digest) throw new Error('rsi_meta_comparison_binding_identity_conflict');
+      return zeroAuthority({ state: 'IDEMPOTENT', binding_digest: checked.binding_digest });
     }
     if (this.#bindings.length >= MAX_ROWS) throw new Error('rsi_meta_comparison_ledger_capacity_exceeded');
-    this.#bindings.push(structuredClone(binding));
+    this.#bindings.push(structuredClone(checked));
     await this.#persist();
-    return zeroAuthority({ state: 'SHADOW_BOUND', binding_digest: binding.binding_digest });
+    return zeroAuthority({ state: 'SHADOW_BOUND', binding_digest: checked.binding_digest });
   }
 
   async addComparison(comparison) {
     if (!this.#initialized) throw new Error('rsi_meta_comparison_ledger_not_initialized');
-    if (!plainObject(comparison) || comparison.schema !== RSI_META_PROFILE_DUAL_PLAN_COMPARISON_SCHEMA) {
-      throw new Error('rsi_meta_comparison_receipt_invalid');
-    }
-    assertZeroAuthority(comparison, 'comparison');
-    if (comparison.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_receipt_source_mismatch');
-    if (!this.#bindings.some((binding) => binding.binding_digest === comparison.binding_digest)) {
+    const checked = verifyStoredComparison(comparison);
+    if (checked.source_sha !== this.#sourceSha) throw new Error('rsi_meta_comparison_receipt_source_mismatch');
+    if (!this.#bindings.some((binding) => binding.binding_digest === checked.binding_digest)) {
       throw new Error('rsi_meta_comparison_binding_not_persisted');
     }
-    const row = structuredClone(comparison);
-    delete row.comparison_digest;
-    if (digest(row) !== exactDigest(comparison.comparison_digest, 'comparison')) {
-      throw new Error('rsi_meta_comparison_receipt_digest_mismatch');
-    }
-    const existing = this.#comparisons.find((entry) => entry.comparison_id === comparison.comparison_id);
+    const existing = this.#comparisons.find((entry) => entry.comparison_id === checked.comparison_id);
     if (existing) {
-      if (existing.comparison_digest !== comparison.comparison_digest) throw new Error('rsi_meta_comparison_receipt_identity_conflict');
-      return zeroAuthority({ state: 'IDEMPOTENT', comparison_digest: comparison.comparison_digest });
+      if (existing.comparison_digest !== checked.comparison_digest) throw new Error('rsi_meta_comparison_receipt_identity_conflict');
+      return zeroAuthority({ state: 'IDEMPOTENT', comparison_digest: checked.comparison_digest });
     }
     if (this.#comparisons.length >= MAX_ROWS) throw new Error('rsi_meta_comparison_ledger_capacity_exceeded');
-    this.#comparisons.push(structuredClone(comparison));
+    this.#comparisons.push(structuredClone(checked));
     await this.#persist();
-    return zeroAuthority({ state: 'COMPARISON_RECORDED', comparison_digest: comparison.comparison_digest });
+    return zeroAuthority({ state: 'COMPARISON_RECORDED', comparison_digest: checked.comparison_digest });
   }
 
   bindingByDigest(bindingDigest) {
