@@ -115,6 +115,11 @@ import {
   verifyRsiSelfUpdateCheckAdmission,
   rsiSelfUpdateCheckAdmissionTrustRootSnapshot,
 } from './rsi-self-update-controller-admission.mjs';
+import {
+  createRsiSelfUpdateDownloadReadiness,
+  verifyRsiSelfUpdateDownloadReadiness,
+  rsiSelfUpdateDownloadReadinessTrustRootSnapshot,
+} from './rsi-self-update-download-readiness.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -132,6 +137,7 @@ const MAX_PUBLISHED_RELEASE_RECONCILIATIONS = 128;
 const MAX_RELEASE_PROMOTION_JOURNAL_INTENTS = 128;
 const MAX_SELF_UPDATE_ELIGIBILITY_REVIEWS = 128;
 const MAX_SELF_UPDATE_CHECK_ADMISSIONS = 128;
+const MAX_SELF_UPDATE_DOWNLOAD_READINESS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -214,6 +220,7 @@ function trustRoots() {
     release_promotion_journal: rsiReleasePromotionJournalTrustRootSnapshot(),
     self_update_eligibility_review: rsiSelfUpdateEligibilityReviewTrustRootSnapshot(),
     self_update_check_admission: rsiSelfUpdateCheckAdmissionTrustRootSnapshot(),
+    self_update_download_readiness: rsiSelfUpdateDownloadReadinessTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -275,6 +282,8 @@ export class RsiRuntimeService {
   #lastSelfUpdateEligibilityReviewDigest = null;
   #selfUpdateCheckAdmissionDigests = new Set();
   #lastSelfUpdateCheckAdmissionDigest = null;
+  #selfUpdateDownloadReadinessDigests = new Set();
+  #lastSelfUpdateDownloadReadinessDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -411,6 +420,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateCheckAdmissionDigests.add(admission.admission_digest);
           this.#lastSelfUpdateCheckAdmissionDigest = admission.admission_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_DOWNLOAD_READINESS_READY' && row?.payload?.self_update_download_readiness) {
+          const readiness = verifyRsiSelfUpdateDownloadReadiness(row.payload.self_update_download_readiness);
+          if (this.#selfUpdateDownloadReadinessDigests.size >= MAX_SELF_UPDATE_DOWNLOAD_READINESS) {
+            throw new Error('rsi_runtime_self_update_download_readiness_replay_capacity_exhausted');
+          }
+          this.#selfUpdateDownloadReadinessDigests.add(readiness.readiness_digest);
+          this.#lastSelfUpdateDownloadReadinessDigest = readiness.readiness_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1649,6 +1666,51 @@ export class RsiRuntimeService {
     return Object.freeze({ admission, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateDownloadReadiness({
+    check_admission,
+    post_check_runtime_snapshot,
+    prior_transaction = null,
+    trusted_release,
+    observed_at,
+    observer_id,
+  } = {}) {
+    this.#assertRunning();
+    const admission = verifyRsiSelfUpdateCheckAdmission(check_admission);
+    if (!this.#selfUpdateCheckAdmissionDigests.has(admission.admission_digest)) {
+      throw new Error('rsi_runtime_self_update_check_admission_not_persisted');
+    }
+    const readiness = createRsiSelfUpdateDownloadReadiness({
+      check_admission: admission,
+      post_check_runtime_snapshot,
+      prior_transaction,
+      trusted_release,
+      observed_at,
+      observer_id,
+    });
+    verifyRsiSelfUpdateDownloadReadiness(readiness);
+    if (this.#selfUpdateDownloadReadinessDigests.has(readiness.readiness_digest)) {
+      return Object.freeze({ readiness, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateDownloadReadinessDigests.size >= MAX_SELF_UPDATE_DOWNLOAD_READINESS) {
+      throw new Error('rsi_runtime_self_update_download_readiness_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_DOWNLOAD_READINESS_READY', {
+      self_update_download_readiness: readiness,
+      external_apply_controller_required: true,
+      apply_cycle_invoked: false,
+      apply_cycle_authorized_by_rsi: false,
+      restart_authorized: false,
+      pre_install_receipt_authorized: false,
+      installer_handoff_authorized: false,
+      installer_launch_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateDownloadReadinessDigests.add(readiness.readiness_digest);
+    this.#lastSelfUpdateDownloadReadinessDigest = readiness.readiness_digest;
+    return Object.freeze({ readiness, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1892,6 +1954,25 @@ export class RsiRuntimeService {
         self_update_check_invoked: false,
         self_update_check_authorized_by_rsi: false,
         self_update_apply_authorized: false,
+        installer_launch_authorized: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_download_readiness: Object.freeze({
+        count: this.#selfUpdateDownloadReadinessDigests.size,
+        capacity: MAX_SELF_UPDATE_DOWNLOAD_READINESS,
+        last_digest: this.#lastSelfUpdateDownloadReadinessDigest,
+        exact_downloaded_candidate_required: true,
+        publisher_and_metadata_verification_required: true,
+        no_install_effect_before_readiness: true,
+        external_apply_controller_required: true,
+        existing_self_update_runtime_method: 'applyWhenSafe',
+        restart_gate_owned_by_existing_runtime: true,
+        restart_grace_required: true,
+        prior_transaction_recheck_required: true,
+        host_resilience_recheck_required: true,
+        apply_cycle_invoked: false,
+        apply_cycle_authorized_by_rsi: false,
         installer_launch_authorized: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
