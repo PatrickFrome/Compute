@@ -33,9 +33,9 @@ import { RSI_ISOLATED_CANDIDATE_HANDOFF_SCHEMA } from '../src/rsi-isolated-candi
 
 const PARENT = 'a'.repeat(40);
 const CANDIDATE = 'b'.repeat(40);
-const CID = \`candidate_sha256_\${'d'.repeat(64)}\`;
-const HANDOFF_DIGEST = \`sha256:\${'c'.repeat(64)}\`;
-const d = (c) => \`sha256:\${c.repeat(64)}\`;
+const CID = `candidate_sha256_${'d'.repeat(64)}`;
+const HANDOFF_DIGEST = `sha256:${'c'.repeat(64)}`;
+const d = (c) => `sha256:${c.repeat(64)}`;
 
 function handoff() {
   return {
@@ -86,7 +86,7 @@ function evaluator() {
       plan,
       evaluator_id: entry.evaluator_id,
       result: 'PASS',
-      evidence_refs: [\`github:run:hard:\${index}\`],
+      evidence_refs: [`github:run:hard:${index}`],
     })),
     createRsiEvaluatorReceipt({
       plan,
@@ -134,7 +134,7 @@ function tournament(h, evaluatorResult) {
     incumbent_metrics: baseMetrics,
     candidate_metrics: candidateMetrics,
     hard_invariants: hard,
-    evidence_refs: [\`artifact:tournament:\${index + 1}\`],
+    evidence_refs: [`artifact:tournament:${index + 1}`],
   }));
   const result = evaluateRsiShadowTournament({ plan, receipts });
   return { plan, receipts, result };
@@ -146,7 +146,7 @@ function retention() {
     capability_family: 'BROWSER_RSI',
     challenge_digest: d('4'),
     benchmark_admission_digest: d('5'),
-    baseline_candidate_id: \`candidate_sha256_\${'9'.repeat(64)}\`,
+    baseline_candidate_id: `candidate_sha256_${'9'.repeat(64)}`,
     baseline_candidate_sha: '9'.repeat(40),
     mastered_generation: 1,
     mastered_at: '2026-09-18T00:00:00Z',
