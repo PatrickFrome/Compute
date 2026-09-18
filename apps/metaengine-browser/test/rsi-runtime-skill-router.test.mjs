@@ -250,6 +250,43 @@ test('routing is limited to governance-active skills and cannot reactivate quara
   assert.equal(plan.selected_count, activeDigests.length > 0 ? 1 : 0);
 });
 
+test('coalition-pollution mask excludes an otherwise active compatible skill without granting any new activity',()=>{
+  const {good,explore,library,governance}=fixture();
+  const g=episode({command:'88888888-8888-4888-8888-888888888888',skillDigest:good.capsule.skill_digest,sign:'POSITIVE'});
+  const evidence=[createRsiSkillContextEvidence({
+    source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,
+    external_evaluator:true,authored_by_candidate:false,
+  })];
+  const plan=createRsiSkillRoutingPlan({
+    library,governance,context:context(),evidence,
+    coalition_masked_skill_digests:[good.capsule.skill_digest],
+    max_selected:2,exploration_slots:1,external_planner:true,authored_by_candidate:false,
+  });
+  assert.ok(!plan.selected.some(row=>row.skill_digest===good.capsule.skill_digest));
+  assert.equal(plan.coalition_masked_count,1);
+  assert.equal(plan.masked_coalition_pollution[0].skill_digest,good.capsule.skill_digest);
+  assert.equal(plan.masked_coalition_pollution[0].reason,'NEGATIVE_COALITION_MARGINAL');
+  assert.equal(plan.coalition_mask_cannot_grant_activity,true);
+  assert.ok(plan.selected.every(row=>row.skill_digest!==good.capsule.skill_digest));
+  assert.ok(plan.selected_count<=2);
+  if(plan.selected_count>0)assert.equal(plan.selected[0].skill_digest,explore.capsule.skill_digest);
+});
+
+test('coalition mask is fenced to the exact verified library',()=>{
+  const {library,governance}=fixture();
+  assert.throws(()=>createRsiSkillRoutingPlan({
+    library,
+    governance,
+    context:context(),
+    evidence:[],
+    coalition_masked_skill_digests:[d('f')],
+    max_selected:1,
+    exploration_slots:0,
+    external_planner:true,
+    authored_by_candidate:false,
+  }),/coalition_mask_skill_not_in_library/);
+});
+
 test('skill-router trust root freezes thresholds, negative-transfer veto, and zero authority',()=>{
   const root=rsiRuntimeSkillRouterTrustRootSnapshot();
   assert.equal(root.verified_library_and_governance_required,true);
@@ -257,6 +294,8 @@ test('skill-router trust root freezes thresholds, negative-transfer veto, and ze
   assert.equal(root.exact_interface_compatibility_required,true);
   assert.equal(root.contextual_utility_not_global_truth,true);
   assert.equal(root.exact_context_negative_transfer_veto,true);
+  assert.equal(root.coalition_pollution_mask_supported,true);
+  assert.equal(root.coalition_mask_cannot_grant_activity,true);
   assert.equal(root.bounded_exploration_slots,true);
   assert.equal(root.candidate_can_write_evidence,false);
   assert.equal(root.candidate_can_select_skills,false);
