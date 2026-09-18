@@ -58,6 +58,7 @@ import { createRsiReleaseAuthorityConvergence, verifyRsiReleaseAuthorityConverge
 import { createRsiPostDeploymentLearningReceipt, createRsiPostDeploymentExperienceAdmission, verifyRsiPostDeploymentExperienceAdmission, applyRsiPostDeploymentExperienceAdmission, rsiPostDeploymentLearningTrustRootSnapshot } from './rsi-post-deployment-learning.mjs';
 import { createRsiPostDeploymentUtilityAdmission, verifyRsiPostDeploymentUtilityAdmission, applyRsiPostDeploymentUtilityAdmission, rsiPostDeploymentUtilityTrustRootSnapshot } from './rsi-post-deployment-utility.mjs';
 import { createRsiPostDeploymentCorrectionAdmission, verifyRsiPostDeploymentCorrectionAdmission, applyRsiPostDeploymentCorrectionAdmission, rsiPostDeploymentCorrectionTrustRootSnapshot } from './rsi-post-deployment-correction.mjs';
+import { createRsiCorrectionRetrievalBridge, verifyRsiCorrectionRetrievalBridge, rsiCorrectionRetrievalBridgeTrustRootSnapshot } from './rsi-correction-retrieval-bridge.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -140,6 +141,7 @@ function trustRoots() {
     post_deployment_learning: rsiPostDeploymentLearningTrustRootSnapshot(),
     post_deployment_utility: rsiPostDeploymentUtilityTrustRootSnapshot(),
     post_deployment_correction: rsiPostDeploymentCorrectionTrustRootSnapshot(),
+    correction_retrieval_bridge: rsiCorrectionRetrievalBridgeTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -214,6 +216,9 @@ export class RsiRuntimeService {
   #postDeploymentCorrectionCount = 0;
   #lastPostDeploymentCorrectionAdmissionDigest = null;
   #lastPostDeploymentCorrectionEdgeDigest = null;
+  #correctionRetrievalBridgeCount = 0;
+  #lastCorrectionRetrievalBridgeDigest = null;
+  #lastCorrectionRetrievalSelectionId = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -743,6 +748,40 @@ export class RsiRuntimeService {
     return found;
   }
 
+  #findCorrectionRetrievalBridgeByDigest(bridgeDigest) {
+    const wanted = String(bridgeDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const bridge = row?.payload?.correction_retrieval_bridge;
+        if (bridge?.bridge_digest === wanted) found = Object.freeze(structuredClone(bridge));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findCorrectionRetrievalBridgeBySelectionId(selectionId) {
+    const wanted = String(selectionId || '').trim();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const bridge = row?.payload?.correction_retrieval_bridge;
+        if (bridge?.selection_id === wanted) found = Object.freeze(structuredClone(bridge));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
   #findPersistedLearningOutcome(episodeDigest) {
     const cached = this.#pendingLearningOutcomes.get(episodeDigest);
     if (cached) return Object.freeze(structuredClone(cached));
@@ -816,6 +855,43 @@ export class RsiRuntimeService {
   experienceContextForOpportunity({
     opportunity_id,
     bridge_case_ids = [],
+    bridge_selection_digest = null,
+    environment_fingerprint = 'metaengine.browser.runtime',
+    model_family = 'METAENGINE_RSI',
+  } = {}) {
+    this.#assertRunning();
+    if (Array.isArray(bridge_case_ids) && bridge_case_ids.length > 0) {
+      throw new Error('rsi_runtime_external_bridge_selection_required');
+    }
+    const id = String(opportunity_id || '').trim();
+    const frontierEntry = this.#improvementFrontier.entries({ limit: 32 })
+      .find((entry) => entry.opportunity_id === id);
+    if (!frontierEntry) throw new Error('rsi_runtime_frontier_opportunity_not_found');
+    const basePlan = createRsiExperienceContextPlan({
+      frontier_entry: frontierEntry,
+      experience_graph_snapshot: this.#experienceGraphSnapshot,
+      environment_fingerprint,
+      model_family,
+      bridge_case_ids: [],
+    });
+    if (bridge_selection_digest == null) return basePlan;
+    const bridgeDigest = String(bridge_selection_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(bridgeDigest)) throw new Error('rsi_runtime_correction_bridge_digest_invalid');
+    const bridge = this.#findCorrectionRetrievalBridgeByDigest(bridgeDigest);
+    if (!bridge) throw new Error('rsi_runtime_correction_bridge_not_persisted');
+    verifyRsiCorrectionRetrievalBridge(bridge, basePlan, this.#experienceGraphSnapshot);
+    return createRsiExperienceContextPlan({
+      frontier_entry: frontierEntry,
+      experience_graph_snapshot: this.#experienceGraphSnapshot,
+      environment_fingerprint,
+      model_family,
+      bridge_case_ids: bridge.bridge_case_ids,
+    });
+  }
+
+  async recordCorrectionRetrievalBridgeSelection({
+    opportunity_id,
+    selection,
     environment_fingerprint = 'metaengine.browser.runtime',
     model_family = 'METAENGINE_RSI',
   } = {}) {
@@ -824,18 +900,43 @@ export class RsiRuntimeService {
     const frontierEntry = this.#improvementFrontier.entries({ limit: 32 })
       .find((entry) => entry.opportunity_id === id);
     if (!frontierEntry) throw new Error('rsi_runtime_frontier_opportunity_not_found');
-    return createRsiExperienceContextPlan({
+    const basePlan = createRsiExperienceContextPlan({
       frontier_entry: frontierEntry,
       experience_graph_snapshot: this.#experienceGraphSnapshot,
       environment_fingerprint,
       model_family,
-      bridge_case_ids,
+      bridge_case_ids: [],
     });
+    const bridge = createRsiCorrectionRetrievalBridge({
+      source_sha: this.#sourceSha,
+      base_context_plan: basePlan,
+      experience_graph_snapshot: this.#experienceGraphSnapshot,
+      selection,
+    });
+    verifyRsiCorrectionRetrievalBridge(bridge, basePlan, this.#experienceGraphSnapshot);
+    if (this.#findCorrectionRetrievalBridgeBySelectionId(bridge.selection_id)) {
+      throw new Error('rsi_runtime_correction_bridge_selection_duplicate');
+    }
+    await this.#ledger.append('RSI_CORRECTION_RETRIEVAL_BRIDGE_RECORDED', {
+      correction_retrieval_bridge: bridge,
+      base_context_plan: basePlan,
+      candidate_can_select_bridges: false,
+      bridge_selection_is_retrieval_signal_only: true,
+      source_context_truth_is_portable: false,
+      execution_authority: false,
+      promotion_authority: false,
+      authority_effect: false,
+    });
+    this.#correctionRetrievalBridgeCount += 1;
+    this.#lastCorrectionRetrievalBridgeDigest = bridge.bridge_digest;
+    this.#lastCorrectionRetrievalSelectionId = bridge.selection_id;
+    return bridge;
   }
 
   async openLearningEpisodeFromOpportunity({
     opportunity_id,
     bridge_case_ids = [],
+    bridge_selection_digest = null,
     environment_fingerprint = 'metaengine.browser.runtime',
     model_family = 'METAENGINE_RSI',
     max_candidates = 4,
@@ -844,6 +945,7 @@ export class RsiRuntimeService {
     const contextPlan = this.experienceContextForOpportunity({
       opportunity_id,
       bridge_case_ids,
+      bridge_selection_digest,
       environment_fingerprint,
       model_family,
     });
@@ -1878,6 +1980,23 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      correction_retrieval_bridge: Object.freeze({
+        count: this.#correctionRetrievalBridgeCount,
+        last_bridge_digest: this.#lastCorrectionRetrievalBridgeDigest,
+        last_selection_id: this.#lastCorrectionRetrievalSelectionId,
+        raw_bridge_case_ids_accepted: false,
+        persisted_external_selection_required: true,
+        correction_failure_cases_only: true,
+        verified_success_correction_targets_required: true,
+        candidate_can_select_bridges: false,
+        bridge_selection_is_retrieval_signal_only: true,
+        source_context_truth_is_portable: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       post_deployment_correction: Object.freeze({
         count: this.#postDeploymentCorrectionCount,
         last_admission_digest: this.#lastPostDeploymentCorrectionAdmissionDigest,
