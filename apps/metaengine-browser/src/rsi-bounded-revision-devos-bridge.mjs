@@ -490,6 +490,9 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
   task_order_digest,
   threshold_policy_digest,
   stopping_policy_digest,
+  hidden_holdout_root_digest,
+  safety_suite_root_digest,
+  security_suite_root_digest,
   external_measurement_digest,
   proxy_score_digest,
   uncertainty,
@@ -504,7 +507,9 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
   const verification=artifact_verification||{};
   const receipt=verifyRsiBoundedRevisionArtifactReceipt(artifact_receipt,verification);
   const envelope=verification.envelope;
+  const priorExperimentIntent=verification.experiment_intent;
   if(!envelope||envelope.envelope_digest!==receipt.envelope_digest)throw new Error('rsi_revision_bridge_phase29_envelope_binding_required');
+  if(!priorExperimentIntent?.plan_digest)throw new Error('rsi_revision_bridge_phase29_prior_budget_binding_required');
   if(receipt.eligible_for_fresh_paired_evaluation!==true||receipt.eligible_for_promotion!==false
     ||receipt.candidate_artifact_is_active!==false||receipt.candidate_artifact_replaces_parent!==false){
     throw new Error('rsi_revision_bridge_phase29_artifact_not_evaluation_eligible');
@@ -543,10 +548,15 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     task_order_digest:exactDigest(task_order_digest,'phase29_task_order'),
     threshold_policy_digest:exactDigest(threshold_policy_digest,'phase29_threshold_policy'),
     stopping_policy_digest:exactDigest(stopping_policy_digest,'phase29_stopping_policy'),
+    prior_budget_plan_digest:exactDigest(priorExperimentIntent.plan_digest,'phase29_prior_budget_plan'),
+    hidden_holdout_root_digest:exactDigest(hidden_holdout_root_digest,'phase29_hidden_holdout'),
+    safety_suite_root_digest:exactDigest(safety_suite_root_digest,'phase29_safety_suite'),
+    security_suite_root_digest:exactDigest(security_suite_root_digest,'phase29_security_suite'),
     provenance_root_digest:provenanceRoot,
   };
   const seedRoots=Object.values(seed);
   if(new Set(seedRoots).size!==seedRoots.length)throw new Error('rsi_revision_bridge_phase29_independent_acceptance_roots_required');
+  if(seed.trial_worker_image_digest===receipt.worker_image_digest)throw new Error('rsi_revision_bridge_phase29_build_and_evaluation_worker_must_differ');
   const requestId=`phase29.eval.${hash(seed).slice(0,24)}`;
   const request=createRsiArtifactEvaluationRoutingRequest({
     request_id:requestId,
@@ -565,6 +575,10 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     task_order_digest:seed.task_order_digest,
     threshold_policy_digest:seed.threshold_policy_digest,
     stopping_policy_digest:seed.stopping_policy_digest,
+    prior_budget_plan_digest:seed.prior_budget_plan_digest,
+    hidden_holdout_root_digest:seed.hidden_holdout_root_digest,
+    safety_suite_root_digest:seed.safety_suite_root_digest,
+    security_suite_root_digest:seed.security_suite_root_digest,
     external_measurement_digest,
     proxy_score_digest,
     uncertainty,
@@ -598,12 +612,17 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     task_order_digest:request.task_order_digest,
     threshold_policy_digest:request.threshold_policy_digest,
     stopping_policy_digest:request.stopping_policy_digest,
+    prior_budget_plan_digest:request.prior_budget_plan_digest,
+    hidden_holdout_root_digest:request.hidden_holdout_root_digest,
+    safety_suite_root_digest:request.safety_suite_root_digest,
+    security_suite_root_digest:request.security_suite_root_digest,
     fresh_evaluation_request:request,
     state:'READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING',
     fresh_budget_epoch_required:true,
     previous_budget_plan_reuse_allowed:false,
     evaluator_generation_frozen:true,
     acceptance_assets_frozen:true,
+    build_and_evaluation_workers_distinct:true,
     anchor_provenance_survives_evaluator_rotation:true,
     evaluator_dependent_verdict_reuse_allowed:false,
     existing_evaluation_budget_router_only:true,
@@ -617,6 +636,9 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     candidate_can_choose_task_order:false,
     candidate_can_choose_thresholds:false,
     candidate_can_choose_stopping:false,
+    candidate_can_choose_hidden_holdout:false,
+    candidate_can_choose_safety_suite:false,
+    candidate_can_choose_security_suite:false,
     candidate_can_choose_budget:false,
     handoff_can_schedule_evaluation:false,
     handoff_can_execute_evaluation:false,
@@ -648,6 +670,7 @@ export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
     ||handoff.previous_budget_plan_reuse_allowed!==false
     ||handoff.evaluator_generation_frozen!==true
     ||handoff.acceptance_assets_frozen!==true
+    ||handoff.build_and_evaluation_workers_distinct!==true
     ||handoff.anchor_provenance_survives_evaluator_rotation!==true
     ||handoff.evaluator_dependent_verdict_reuse_allowed!==false
     ||handoff.existing_evaluation_budget_router_only!==true
@@ -661,6 +684,9 @@ export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
     ||handoff.candidate_can_choose_task_order!==false
     ||handoff.candidate_can_choose_thresholds!==false
     ||handoff.candidate_can_choose_stopping!==false
+    ||handoff.candidate_can_choose_hidden_holdout!==false
+    ||handoff.candidate_can_choose_safety_suite!==false
+    ||handoff.candidate_can_choose_security_suite!==false
     ||handoff.candidate_can_choose_budget!==false
     ||handoff.handoff_can_schedule_evaluation!==false
     ||handoff.handoff_can_execute_evaluation!==false
@@ -681,6 +707,9 @@ export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
     task_order_digest:handoff.task_order_digest,
     threshold_policy_digest:handoff.threshold_policy_digest,
     stopping_policy_digest:handoff.stopping_policy_digest,
+    hidden_holdout_root_digest:handoff.hidden_holdout_root_digest,
+    safety_suite_root_digest:handoff.safety_suite_root_digest,
+    security_suite_root_digest:handoff.security_suite_root_digest,
     external_measurement_digest:handoff.fresh_evaluation_request.external_measurement_digest,
     proxy_score_digest:handoff.fresh_evaluation_request.proxy_score_digest,
     uncertainty:handoff.fresh_evaluation_request.uncertainty,
