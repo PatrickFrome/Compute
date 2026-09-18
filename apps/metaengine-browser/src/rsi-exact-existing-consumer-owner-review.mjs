@@ -53,7 +53,9 @@ export function createRsiExactConsumerOwnerReviewBundle({
 }={}){
   if(external_consumer_owner!==true||authored_by_candidate!==false)throw new Error('rsi_phase33_external_consumer_owner_required');
   const p32=verifyPhase32({handoff,receipt,proposal,validations,admission,source_rows});
-  const roots=[exactDigest(current_consumer_snapshot_digest,'consumer_snapshot'),exactDigest(consumer_owner_policy_digest,'owner_policy'),exactDigest(consumer_owner_identity_digest,'owner_identity'),p32.handoff.handoff_digest,p32.receipt.receipt_digest,p32.handoff.consumer_evaluation_contract_digest];
+  const currentSnapshot=exactDigest(current_consumer_snapshot_digest,'consumer_snapshot');
+  if(currentSnapshot!==p32.handoff.current_consumer_plane_digest)throw new Error('rsi_phase33_current_consumer_snapshot_drift');
+  const roots=[currentSnapshot,exactDigest(consumer_owner_policy_digest,'owner_policy'),exactDigest(consumer_owner_identity_digest,'owner_identity'),p32.handoff.handoff_digest,p32.receipt.receipt_digest,p32.handoff.consumer_evaluation_contract_digest];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_phase33_bundle_independent_roots_required');
   const route=routeFor(p32.receipt);
   const eligible=!route.endsWith('EVIDENCE_ONLY');
@@ -63,7 +65,9 @@ export function createRsiExactConsumerOwnerReviewBundle({
     phase32_handoff_digest:p32.handoff.handoff_digest,phase32_receipt_digest:p32.receipt.receipt_digest,
     knowledge_class:p32.handoff.knowledge_class,consumer_route:p32.handoff.consumer_route,review_route:route,
     consumer_model_family:p32.handoff.consumer_model_family,consumer_environment_family:p32.handoff.consumer_environment_family,
-    consumer_context_digest:p32.handoff.consumer_context_digest,consumer_harness_digest:p32.handoff.consumer_harness_digest,
+    source_evaluation_contract_digest:p32.handoff.source_evaluation_contract_digest,
+    consumer_context_digest:p32.handoff.consumer_context_digest,consumer_task_set_digest:p32.handoff.consumer_task_set_digest,
+    consumer_harness_digest:p32.handoff.consumer_harness_digest,consumer_retrieval_profile_digest:p32.handoff.consumer_retrieval_profile_digest,
     consumer_evaluator_root_digest:p32.handoff.consumer_evaluator_root_digest,
     consumer_evaluator_generation_digest:p32.handoff.consumer_evaluator_generation_digest,
     consumer_evaluator_generation_seq:p32.handoff.consumer_evaluator_generation_seq,
@@ -71,12 +75,21 @@ export function createRsiExactConsumerOwnerReviewBundle({
     consumer_evaluation_epoch_seq:p32.handoff.consumer_evaluation_epoch_seq,consumer_evaluation_epoch_digest:p32.handoff.consumer_evaluation_epoch_digest,
     consumer_evaluation_contract_digest:p32.handoff.consumer_evaluation_contract_digest,
     consumer_holdout_digest:p32.handoff.consumer_holdout_digest,matched_reference_plan_digest:p32.handoff.matched_reference_plan_digest,
-    local_revalidation_protocol_digest:p32.handoff.local_revalidation_protocol_digest,current_consumer_snapshot_digest:roots[0],
+    local_revalidation_protocol_digest:p32.handoff.local_revalidation_protocol_digest,
+    current_consumer_plane_digest:p32.handoff.current_consumer_plane_digest,
+    current_verified_library_digest:p32.handoff.current_verified_library_digest,
+    current_consumer_snapshot_digest:roots[0],
     consumer_owner_policy_digest:roots[1],consumer_owner_identity_digest:roots[2],
     state:eligible?'ELIGIBLE_FOR_EXISTING_CONSUMER_OWNER_PRECOMMIT_REVIEW':'PRESERVED_NON_ADMISSIBLE_EVIDENCE',
     eligible_for_existing_consumer_owner_review:eligible,negative_transfer_veto:p32.receipt.state==='CONSUMER_NEGATIVE_TRANSFER',
     suppress_repeat_same_consumer_context:p32.receipt.suppress_repeat_same_consumer_context===true,
+    consumer_state_integrity_pass:p32.receipt.consumer_state_integrity_pass===true,
+    retrieval_profile_integrity_pass:p32.receipt.retrieval_profile_integrity_pass===true,
+    process_non_regression:p32.receipt.process_non_regression===true,
+    outcome_non_regression:p32.receipt.outcome_non_regression===true,
     exact_phase32_consumer_identity_required:true,current_consumer_snapshot_exact_binding_required:true,
+    current_consumer_plane_exact_binding_required:true,consumer_retrieval_profile_exact_binding_required:true,
+    consumer_task_set_exact_binding_required:true,current_verified_library_exact_binding_required_for_recipe:route==='EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT',
     source_generation_verdict_inherited:false,library_append_performed:false,retrieval_exposure_changed:false,
     skill_activation_performed:false,experience_graph_write_performed:false,meta_skill_profile_mutated:false,
     owner_review_token:null,bundle_can_schedule_work:false,direct_activation_allowed:false,
@@ -87,7 +100,11 @@ export function createRsiExactConsumerOwnerReviewBundle({
 export function verifyRsiExactConsumerOwnerReviewBundle(bundle,evidence={}){
   if(!bundle||bundle.schema!==RSI_EXACT_CONSUMER_OWNER_REVIEW_BUNDLE_SCHEMA||bundle.version!==1)throw new Error('rsi_phase33_bundle_invalid');
   assertZero(bundle,'bundle');
-  if(bundle.exact_phase32_consumer_identity_required!==true||bundle.current_consumer_snapshot_exact_binding_required!==true||bundle.source_generation_verdict_inherited!==false||bundle.library_append_performed!==false||bundle.retrieval_exposure_changed!==false||bundle.skill_activation_performed!==false||bundle.experience_graph_write_performed!==false||bundle.meta_skill_profile_mutated!==false||bundle.owner_review_token!==null||bundle.bundle_can_schedule_work!==false||bundle.direct_activation_allowed!==false)throw new Error('rsi_phase33_bundle_policy_invalid');
+  if(bundle.exact_phase32_consumer_identity_required!==true||bundle.current_consumer_snapshot_exact_binding_required!==true
+    ||bundle.current_consumer_plane_exact_binding_required!==true||bundle.consumer_retrieval_profile_exact_binding_required!==true
+    ||bundle.consumer_task_set_exact_binding_required!==true
+    ||bundle.current_verified_library_exact_binding_required_for_recipe!==(bundle.review_route==='EXISTING_VERIFIED_SKILL_OWNER_PRECOMMIT')
+    ||bundle.source_generation_verdict_inherited!==false||bundle.library_append_performed!==false||bundle.retrieval_exposure_changed!==false||bundle.skill_activation_performed!==false||bundle.experience_graph_write_performed!==false||bundle.meta_skill_profile_mutated!==false||bundle.owner_review_token!==null||bundle.bundle_can_schedule_work!==false||bundle.direct_activation_allowed!==false)throw new Error('rsi_phase33_bundle_policy_invalid');
   const canonical=createRsiExactConsumerOwnerReviewBundle({bundle_id:bundle.bundle_id,...evidence,current_consumer_snapshot_digest:bundle.current_consumer_snapshot_digest,consumer_owner_policy_digest:bundle.consumer_owner_policy_digest,consumer_owner_identity_digest:bundle.consumer_owner_identity_digest,external_consumer_owner:true,authored_by_candidate:false});
   if(canonical.bundle_digest!==exactDigest(bundle.bundle_digest,'bundle'))throw new Error('rsi_phase33_bundle_digest_mismatch');
   return canonical;
@@ -116,9 +133,14 @@ export function createRsiExactSkillPrecommitCertificate({
   const skillReview=verifyRsiConsolidatedKnowledgeSkillEvidenceReview(skill_evidence_review,skill_evidence_review_args||{});
   if(skillReview.state!=='READY_FOR_EXTERNAL_EXISTING_LIBRARY_APPEND_REVIEW'||skillReview.standard_skill_evidence_verified_for_library!==true)throw new Error('rsi_phase33_phase32_skill_review_not_ready');
   const libraryDigest=exactDigest(current_library_snapshot_digest,'library_snapshot');
-  if(skillReview.current_library_digest!==libraryDigest||b.current_consumer_snapshot_digest!==libraryDigest)throw new Error('rsi_phase33_library_snapshot_drift');
+  if(skillReview.current_library_digest!==libraryDigest
+    ||b.current_verified_library_digest!==libraryDigest)throw new Error('rsi_phase33_library_snapshot_drift');
+  if(b.current_consumer_snapshot_digest!==b.current_consumer_plane_digest)throw new Error('rsi_phase33_consumer_snapshot_drift');
   if(skillReview.source_sha!==b.source_sha)throw new Error('rsi_phase33_skill_source_mismatch');
   if(skillReview.local_hidden_holdout_digest!==b.consumer_holdout_digest||skillReview.local_evaluator_root_digest!==b.consumer_evaluator_root_digest)throw new Error('rsi_phase33_consumer_skill_evidence_binding_mismatch');
+  if(b.consumer_state_integrity_pass!==true||b.retrieval_profile_integrity_pass!==true||b.process_non_regression!==true||b.outcome_non_regression!==true){
+    throw new Error('rsi_phase33_phase32_consumer_state_not_clean');
+  }
 
   const criticIds=[exactDigest(structural_critic_identity_digest,'structural_critic_identity'),exactDigest(behavioral_critic_identity_digest,'behavioral_critic_identity'),exactDigest(semantic_critic_identity_digest,'semantic_critic_identity')];
   if(new Set(criticIds).size!==3)throw new Error('rsi_phase33_three_independent_critics_required');
@@ -135,7 +157,12 @@ export function createRsiExactSkillPrecommitCertificate({
   ];
   if(new Set(reviewPrincipalIds).size!==reviewPrincipalIds.length)throw new Error('rsi_phase33_reviewer_separation_of_duties_required');
   const evidenceRoots=[...reviewPrincipalIds,...criticReceipts,exactDigest(coalition_ablation_receipt_digest,'coalition_ablation'),exactDigest(no_skill_ablation_receipt_digest,'no_skill_ablation'),exactDigest(mechanical_artifact_audit_digest,'mechanical_artifact_audit'),exactDigest(artifact_noop_ablation_receipt_digest,'artifact_noop_ablation'),exactDigest(benchmark_provenance_attestation_digest,'benchmark_provenance'),exactDigest(evaluator_provenance_attestation_digest,'evaluator_provenance'),exactDigest(contamination_attestation_digest,'contamination_attestation'),exactDigest(active_cap_policy_digest,'active_cap_policy'),exactDigest(marginal_subset_selection_policy_digest,'marginal_subset_selection'),exactDigest(anytime_valid_certificate_digest,'anytime_valid_certificate'),exactDigest(false_admission_error_budget_policy_digest,'false_admission_error_budget'),exactDigest(paired_instance_manifest_digest,'paired_instance_manifest'),exactDigest(stopping_policy_digest,'stopping_policy')];
-  const forbidden=new Set([b.phase32_handoff_digest,b.phase32_receipt_digest,b.consumer_holdout_digest,b.consumer_evaluator_root_digest,b.consumer_evaluation_contract_digest,skillReview.evidence_review_digest,skillReview.standard_skill_evidence_digest,libraryDigest]);
+  const forbidden=new Set([
+    b.phase32_handoff_digest,b.phase32_receipt_digest,b.consumer_holdout_digest,b.consumer_evaluator_root_digest,
+    b.consumer_evaluation_contract_digest,b.source_evaluation_contract_digest,b.consumer_task_set_digest,
+    b.consumer_retrieval_profile_digest,b.current_consumer_plane_digest,b.current_verified_library_digest,
+    skillReview.evidence_review_digest,skillReview.standard_skill_evidence_digest,libraryDigest,
+  ]);
   if(new Set(evidenceRoots).size!==evidenceRoots.length||evidenceRoots.some(x=>forbidden.has(x)))throw new Error('rsi_phase33_independent_precommit_evidence_required');
   const [ownerPrincipal,structuralPrincipal,behavioralPrincipal,semanticPrincipal,artifactAuditorPrincipal,benchmarkAttestorPrincipal,evaluatorAttestorPrincipal,contaminationAttestorPrincipal,statisticalAcceptorPrincipal]=reviewPrincipalIds;
   const rootOffset=reviewPrincipalIds.length+criticReceipts.length;
@@ -166,6 +193,9 @@ export function createRsiExactSkillPrecommitCertificate({
   const core=zero({
     schema:RSI_EXACT_SKILL_PRECOMMIT_CERTIFICATE_SCHEMA,version:1,certificate_id:id(certificate_id,'certificate_id'),source_sha:b.source_sha,
     bundle_digest:b.bundle_digest,phase32_handoff_digest:b.phase32_handoff_digest,phase32_receipt_digest:b.phase32_receipt_digest,
+    source_evaluation_contract_digest:b.source_evaluation_contract_digest,
+    consumer_task_set_digest:b.consumer_task_set_digest,consumer_retrieval_profile_digest:b.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest:b.current_consumer_plane_digest,current_verified_library_digest:b.current_verified_library_digest,
     consumer_evaluation_contract_digest:b.consumer_evaluation_contract_digest,consumer_evaluator_generation_digest:b.consumer_evaluator_generation_digest,
     consumer_evaluator_generation_seq:b.consumer_evaluator_generation_seq,consumer_evaluator_generation_history_anchor_digest:b.consumer_evaluator_generation_history_anchor_digest,
     consumer_evaluation_epoch_seq:b.consumer_evaluation_epoch_seq,consumer_evaluation_epoch_digest:b.consumer_evaluation_epoch_digest,
@@ -190,6 +220,8 @@ export function createRsiExactSkillPrecommitCertificate({
     contamination_clear:contamination_clear===true,marginal_gain_subset_pass:marginal_gain_subset_pass===true,active_cap_pass:active_cap_pass===true,
     blockers:Object.freeze(blockers.sort()),state,
     three_independent_critics_required:true,reviewer_separation_of_duties_required:true,coalition_aware_ablation_required:true,mechanical_artifact_audit_required:true,artifact_noop_ablation_required:true,
+    exact_consumer_state_binding_required:true,exact_retrieval_profile_binding_required:true,exact_current_library_binding_required:true,
+    local_process_outcome_non_regression_required:true,consumer_state_integrity_required:true,retrieval_profile_integrity_required:true,
     contamination_resistant_provenance_required:true,paired_anytime_valid_acceptance_required:true,numeric_anytime_valid_threshold_required:true,insufficient_evidence_abstain_required:true,active_cap_and_marginal_subset_policy_required:true,
     append_does_not_imply_retrieval_exposure:true,library_append_performed:false,retrieval_exposure_changed:false,skill_activation_performed:false,
     skill_lifecycle_mutated:false,meta_skill_profile_mutated:false,certificate_can_schedule_work:false,library_admission_token:null,
@@ -200,7 +232,10 @@ export function createRsiExactSkillPrecommitCertificate({
 export function verifyRsiExactSkillPrecommitCertificate(row,args={}){
   if(!row||row.schema!==RSI_EXACT_SKILL_PRECOMMIT_CERTIFICATE_SCHEMA||row.version!==1)throw new Error('rsi_phase33_certificate_invalid');
   assertZero(row,'certificate');
-  if(row.three_independent_critics_required!==true||row.reviewer_separation_of_duties_required!==true||row.coalition_aware_ablation_required!==true||row.mechanical_artifact_audit_required!==true||row.artifact_noop_ablation_required!==true||row.contamination_resistant_provenance_required!==true||row.paired_anytime_valid_acceptance_required!==true||row.numeric_anytime_valid_threshold_required!==true||row.insufficient_evidence_abstain_required!==true||row.active_cap_and_marginal_subset_policy_required!==true||row.append_does_not_imply_retrieval_exposure!==true||row.library_append_performed!==false||row.retrieval_exposure_changed!==false||row.skill_activation_performed!==false||row.skill_lifecycle_mutated!==false||row.meta_skill_profile_mutated!==false||row.certificate_can_schedule_work!==false||row.library_admission_token!==null)throw new Error('rsi_phase33_certificate_policy_invalid');
+  if(row.three_independent_critics_required!==true||row.reviewer_separation_of_duties_required!==true||row.coalition_aware_ablation_required!==true||row.mechanical_artifact_audit_required!==true||row.artifact_noop_ablation_required!==true
+    ||row.exact_consumer_state_binding_required!==true||row.exact_retrieval_profile_binding_required!==true||row.exact_current_library_binding_required!==true
+    ||row.local_process_outcome_non_regression_required!==true||row.consumer_state_integrity_required!==true||row.retrieval_profile_integrity_required!==true
+    ||row.contamination_resistant_provenance_required!==true||row.paired_anytime_valid_acceptance_required!==true||row.numeric_anytime_valid_threshold_required!==true||row.insufficient_evidence_abstain_required!==true||row.active_cap_and_marginal_subset_policy_required!==true||row.append_does_not_imply_retrieval_exposure!==true||row.library_append_performed!==false||row.retrieval_exposure_changed!==false||row.skill_activation_performed!==false||row.skill_lifecycle_mutated!==false||row.meta_skill_profile_mutated!==false||row.certificate_can_schedule_work!==false||row.library_admission_token!==null)throw new Error('rsi_phase33_certificate_policy_invalid');
   const canonical=createRsiExactSkillPrecommitCertificate({...args,certificate_id:row.certificate_id,current_library_snapshot_digest:row.current_library_digest,structural_critic_identity_digest:row.structural_critic_identity_digest,structural_critic_receipt_digest:row.structural_critic_receipt_digest,behavioral_critic_identity_digest:row.behavioral_critic_identity_digest,behavioral_critic_receipt_digest:row.behavioral_critic_receipt_digest,semantic_critic_identity_digest:row.semantic_critic_identity_digest,semantic_critic_receipt_digest:row.semantic_critic_receipt_digest,artifact_auditor_identity_digest:row.artifact_auditor_identity_digest,benchmark_provenance_attestor_identity_digest:row.benchmark_provenance_attestor_identity_digest,evaluator_provenance_attestor_identity_digest:row.evaluator_provenance_attestor_identity_digest,contamination_attestor_identity_digest:row.contamination_attestor_identity_digest,statistical_acceptor_identity_digest:row.statistical_acceptor_identity_digest,coalition_ablation_receipt_digest:row.coalition_ablation_receipt_digest,no_skill_ablation_receipt_digest:row.no_skill_ablation_receipt_digest,mechanical_artifact_audit_digest:row.mechanical_artifact_audit_digest,artifact_noop_ablation_receipt_digest:row.artifact_noop_ablation_receipt_digest,benchmark_provenance_attestation_digest:row.benchmark_provenance_attestation_digest,evaluator_provenance_attestation_digest:row.evaluator_provenance_attestation_digest,contamination_attestation_digest:row.contamination_attestation_digest,active_cap_policy_digest:row.active_cap_policy_digest,marginal_subset_selection_policy_digest:row.marginal_subset_selection_policy_digest,anytime_valid_certificate_digest:row.anytime_valid_certificate_digest,false_admission_error_budget_policy_digest:row.false_admission_error_budget_policy_digest,paired_instance_manifest_digest:row.paired_instance_manifest_digest,stopping_policy_digest:row.stopping_policy_digest,active_retrieval_cap:row.active_retrieval_cap,current_active_retrieval_count:row.current_active_retrieval_count,projected_active_retrieval_count:row.projected_active_retrieval_count,structural_validity_pass:row.structural_validity_pass,behavioral_harmlessness_pass:row.behavioral_harmlessness_pass,semantic_consistency_pass:row.semantic_consistency_pass,coalition_ablation_pass:row.coalition_ablation_pass,no_skill_ablation_pass:row.no_skill_ablation_pass,mechanical_artifact_audit_pass:row.mechanical_artifact_audit_pass,artifact_noop_ablation_pass:row.artifact_noop_ablation_pass,benchmark_provenance_pass:row.benchmark_provenance_pass,evaluator_provenance_pass:row.evaluator_provenance_pass,contamination_clear:row.contamination_clear,marginal_gain_subset_pass:row.marginal_gain_subset_pass,false_admission_alpha_ppm:row.false_admission_alpha_ppm,anytime_valid_e_value_microunits:row.anytime_valid_e_value_microunits,paired_sample_count:row.paired_sample_count,minimum_paired_sample_count:row.minimum_paired_sample_count,active_cap_pass:row.active_cap_pass,external_owner_reviewer:true,external_critics:true,external_artifact_auditor:true,external_provenance_attestor:true,external_statistical_acceptor:true,authored_by_candidate:false});
   if(canonical.certificate_digest!==exactDigest(row.certificate_digest,'certificate'))throw new Error('rsi_phase33_certificate_digest_mismatch');
   return canonical;
@@ -222,6 +257,10 @@ export class RsiExactOwnerReviewArchive{
 }
 
 export function rsiExactExistingConsumerOwnerReviewTrustRootSnapshot(){
-  const root={schema:'metaengine.rsi.exact-existing-consumer-owner-review-root.v1',version:1,exact_phase32_consumer_identity_required:true,existing_verified_skill_library_reused:true,second_skill_library_allowed:false,three_independent_critics_required:true,reviewer_separation_of_duties_required:true,coalition_aware_ablation_required:true,no_skill_paired_intervention_required:true,mechanical_artifact_audit_required:true,artifact_noop_ablation_required:true,benchmark_and_evaluator_provenance_required:true,contamination_clear_required:true,anytime_valid_acceptance_required:true,numeric_anytime_valid_threshold_required:true,insufficient_evidence_abstain_required:true,fixed_false_admission_error_budget_required:true,active_retrieval_cap_required:true,marginal_subset_selection_policy_required:true,append_does_not_imply_active_retrieval:true,negative_transfer_veto_retained:true,rejected_evidence_append_only:true,direct_library_append:false,direct_retrieval_exposure_change:false,direct_skill_activation:false,direct_experience_graph_write:false,direct_meta_skill_profile_mutation:false,direct_scheduler_action:false,execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
+  const root={schema:'metaengine.rsi.exact-existing-consumer-owner-review-root.v1',version:1,exact_phase32_consumer_identity_required:true,exact_consumer_task_set_required:true,exact_consumer_retrieval_profile_required:true,
+current_consumer_plane_exact_binding_required:true,current_verified_library_exact_binding_required:true,
+existing_verified_skill_library_reused:true,second_skill_library_allowed:false,three_independent_critics_required:true,reviewer_separation_of_duties_required:true,coalition_aware_ablation_required:true,no_skill_paired_intervention_required:true,
+local_process_outcome_non_regression_required:true,consumer_state_integrity_required:true,retrieval_profile_integrity_required:true,
+mechanical_artifact_audit_required:true,artifact_noop_ablation_required:true,benchmark_and_evaluator_provenance_required:true,contamination_clear_required:true,anytime_valid_acceptance_required:true,numeric_anytime_valid_threshold_required:true,insufficient_evidence_abstain_required:true,fixed_false_admission_error_budget_required:true,active_retrieval_cap_required:true,marginal_subset_selection_policy_required:true,append_does_not_imply_active_retrieval:true,negative_transfer_veto_retained:true,rejected_evidence_append_only:true,direct_library_append:false,direct_retrieval_exposure_change:false,direct_skill_activation:false,direct_experience_graph_write:false,direct_meta_skill_profile_mutation:false,direct_scheduler_action:false,execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
   return Object.freeze({...root,exact_owner_review_root_digest:digest(root)});
 }
