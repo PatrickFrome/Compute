@@ -176,6 +176,9 @@ export function verifyRsiExternalHoldoutResult(row,identity,benchmarkAdmission){
 
 function evaluatorEvidence(identity,candidateHandoff,receipts){
   if(!candidateHandoff||candidateHandoff.handoff_digest!==identity.isolated_handoff_digest)throw new Error('rsi_external_eval_candidate_handoff_digest_mismatch');
+  const handoffCore=structuredClone(candidateHandoff);
+  delete handoffCore.handoff_digest;
+  if(digest(handoffCore)!==identity.isolated_handoff_digest)throw new Error('rsi_external_eval_candidate_handoff_digest_invalid');
   if(candidateHandoff.parent_sha!==identity.parent_sha||candidateHandoff.candidate_sha!==identity.candidate_sha||candidateHandoff.candidate_capsule?.candidate_id!==identity.candidate_id)throw new Error('rsi_external_eval_candidate_handoff_identity_mismatch');
   const plan=createRsiEvaluatorMeshPlan({candidate_handoff:candidateHandoff});
   if(!Array.isArray(receipts))throw new Error('rsi_external_eval_evaluator_receipts_invalid');
