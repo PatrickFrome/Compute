@@ -3938,6 +3938,7 @@ test('Phase34B failed durable plan persist leaves zero phantom admission state',
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-persist-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const x=await phase34bStore(root,'persist-failure');
+  await fs.rm(x.statePath,{force:true});
   await fs.mkdir(x.statePath,{recursive:false});
   await assert.rejects(()=>preparePhase34bPlan(x,'persist-failure'));
   assert.equal(x.store.snapshot().append_admission_count,0);
