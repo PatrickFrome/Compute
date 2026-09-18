@@ -240,6 +240,7 @@ test('promotion gate independently rejects candidate mutation of promotion and s
     'apps/metaengine-browser/src/rsi-validated-knowledge-consumer-handoff.mjs',
     'apps/metaengine-browser/src/rsi-exact-existing-consumer-owner-review.mjs',
     'apps/metaengine-browser/src/rsi-anytime-library-admission.mjs',
+    'apps/metaengine-browser/src/rsi-skill-exposure-release.mjs',
     'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
     'apps/metaengine-browser/src/rsi-runtime-service.mjs',
     'apps/metaengine-browser/src/self-update-runtime.mjs',
