@@ -2121,3 +2121,250 @@ test('Phase33 trust root reuses existing consumers and keeps owner effects exter
   assert.equal(root.authority_effect,false);
   assert.match(root.existing_consumer_owner_review_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
+
+
+function phase34Fixture(label='phase34'){
+  const library=phase33CurrentLibrary(label);
+  const p32=phase33Bundle(label,{consumerSnapshotDigest:library.library_digest});
+  const skill=createRsiSkillCapsule({
+    skill_id:'phase34.proposed.'+label,
+    version:1,
+    source_candidate_sha:SOURCE,
+    role:'PROPOSER',
+    input_schema_digest:labelDigest(label+'-phase34-input'),
+    output_schema_digest:labelDigest(label+'-phase34-output'),
+    implementation_digest:labelDigest(label+'-phase34-impl'),
+    components:[{component_id:'core',artifact_digest:labelDigest(label+'-phase34-component'),kind:'MODULE'}],
+    capabilities:['PROPOSE_TYPED_TRANSFORM'],
+    max_context_tokens:4096,
+    max_output_tokens:1024,
+    max_invocations:4,
+    external_builder:true,
+    authored_by_candidate:false,
+  });
+  const review=createRsiExistingSkillOwnerEvidenceReview({
+    review_id:'phase34.phase33.review.'+label,
+    ...p32,
+    current_library:library,
+    skill_capsule:skill,
+    knowledge_to_skill_binding_digest:labelDigest(label+'-phase34-binding'),
+    external_materialization_receipt_digest:labelDigest(label+'-phase34-materialization'),
+    interface_review_digest:labelDigest(label+'-phase34-interface'),
+    capability_review_digest:labelDigest(label+'-phase34-capability-review'),
+    unit_test_digest:labelDigest(label+'-phase34-unit'),
+    runtime_feedback_digest:labelDigest(label+'-phase34-runtime'),
+    attempt_count:6,
+    success_count:6,
+    hard_invariants_pass:true,
+    matched_reference_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    negative_transfer_clear:true,
+    external_skill_builder:true,
+    external_library_evaluator:true,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  const governance=createRsiSkillLibraryGovernance({
+    governance_id:'phase34.governance.'+label,
+    library,
+    lifecycle_evidence:[],
+    max_active_skills:8,
+    exploration_slots:2,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  const phase33_args={...p32,current_library:library,skill_capsule:skill};
+  const plan=createRsiAnytimeValidLibraryAdmissionPlan({
+    plan_id:'phase34.plan.'+label,
+    phase33_review:review,
+    phase33_args,
+    current_governance:governance,
+    statistical_owner_root_digest:labelDigest(label+'-phase34-stat-owner'),
+    false_admission_alpha:0.05,
+    error_budget_digest:labelDigest(label+'-phase34-error-budget'),
+    paired_instance_set_digest:labelDigest(label+'-phase34-paired-instances'),
+    pairing_protocol_digest:labelDigest(label+'-phase34-pairing-protocol'),
+    eprocess_protocol_digest:labelDigest(label+'-phase34-eprocess-protocol'),
+    error_spending_policy_digest:labelDigest(label+'-phase34-error-spending'),
+    stopping_policy_digest:labelDigest(label+'-phase34-stopping-policy'),
+    change_envelope_digest:labelDigest(label+'-phase34-change-envelope'),
+    maturity_policy_digest:labelDigest(label+'-phase34-maturity-policy'),
+    least_privilege_policy_digest:labelDigest(label+'-phase34-least-privilege-policy'),
+    planned_min_pairs:4,
+    planned_max_pairs:16,
+    external_library_owner:true,
+    external_statistical_owner:true,
+    external_scope_owner:true,
+    authored_by_candidate:false,
+  });
+  const scope=createRsiLeastPrivilegeSkillScopeReceipt({
+    scope_receipt_id:'phase34.scope.'+label,
+    plan,
+    plan_args:{},
+    phase33_review:review,
+    phase33_args,
+    current_governance:governance,
+    observed_required_capabilities:skill.capabilities,
+    replay_task_family_digests:[labelDigest(label+'-phase34-task-family-a'),labelDigest(label+'-phase34-task-family-b')],
+    scope_validation_evidence_digest:labelDigest(label+'-phase34-scope-evidence'),
+    replay_all_pass:true,
+    no_overprivileged_actions:true,
+    no_hidden_capability_escalation:true,
+    external_scope_owner:true,
+    external_replay_evaluator:true,
+    authored_by_candidate:false,
+  });
+  return {library,p32,skill,review,governance,phase33_args,plan,scope};
+}
+
+function phase34Certificate(fx,label='phase34',overrides={}){
+  return createRsiAnytimeValidLibraryAdmissionCertificate({
+    certificate_id:'phase34.certificate.'+label,
+    plan:fx.plan,
+    plan_args:{},
+    phase33_review:fx.review,
+    phase33_args:fx.phase33_args,
+    current_governance:fx.governance,
+    scope_receipt:fx.scope,
+    paired_sequence_digest:labelDigest(label+'-phase34-paired-sequence'),
+    reference_receipt_digest:labelDigest(label+'-phase34-reference-receipt'),
+    candidate_receipt_digest:labelDigest(label+'-phase34-candidate-receipt'),
+    statistical_owner_attestation_digest:labelDigest(label+'-phase34-stat-attestation'),
+    observed_pair_count:8,
+    stopping_index:8,
+    final_e_value:25,
+    same_instances_pass:true,
+    matched_reference_pass:true,
+    evaluator_integrity_pass:true,
+    contamination_clear:true,
+    hard_invariants_pass:true,
+    negative_transfer_detected:false,
+    optional_stopping_protocol_pass:true,
+    external_statistical_owner:true,
+    external_library_owner:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+}
+
+test('Phase34 requires an anytime-valid certificate before existing-library owner append review',()=>{
+  const fx=phase34Fixture('eligible');
+  assert.equal(fx.plan.false_admission_alpha,0.05);
+  assert.equal(fx.plan.anytime_valid_evalue_threshold,20);
+  assert.equal(fx.plan.paired_identical_instances_required,true);
+  assert.equal(fx.plan.matched_no_skill_or_incumbent_reference_required,true);
+  assert.equal(fx.plan.optional_stopping_only_via_anytime_valid_protocol,true);
+  assert.equal(fx.plan.candidate_can_choose_alpha,false);
+  assert.equal(fx.plan.library_append_performed,false);
+  assert.equal(fx.scope.least_privilege_pass,true);
+  assert.deepEqual(fx.scope.declared_capabilities,fx.scope.observed_required_capabilities);
+  const cert=phase34Certificate(fx,'eligible');
+  assert.equal(cert.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_APPEND_REVIEW');
+  assert.equal(cert.threshold_pass,true);
+  assert.equal(cert.eligible_for_existing_library_owner_append_review,true);
+  assert.equal(cert.library_append_performed,false);
+  assert.equal(cert.skill_activation_performed,false);
+  assert.equal(cert.governance_mutation_performed,false);
+  assert.equal(cert.library_admission_token,null);
+  assert.equal(verifyRsiAnytimeValidLibraryAdmissionPlan(fx.plan,{
+    phase33_review:fx.review,phase33_args:fx.phase33_args,current_governance:fx.governance,
+  }).plan_digest,fx.plan.plan_digest);
+  assert.equal(verifyRsiLeastPrivilegeSkillScopeReceipt(fx.scope,{
+    plan:fx.plan,plan_args:{},phase33_review:fx.review,phase33_args:fx.phase33_args,current_governance:fx.governance,
+  }).scope_receipt_digest,fx.scope.scope_receipt_digest);
+  assert.equal(verifyRsiAnytimeValidLibraryAdmissionCertificate(cert,{
+    plan:fx.plan,plan_args:{},phase33_review:fx.review,phase33_args:fx.phase33_args,
+    current_governance:fx.governance,scope_receipt:fx.scope,
+  }).certificate_digest,cert.certificate_digest);
+});
+
+test('Phase34 preserves insufficient evidence and negative transfer instead of greedy admission',()=>{
+  const insufficientFx=phase34Fixture('insufficient');
+  const insufficient=phase34Certificate(insufficientFx,'insufficient',{final_e_value:10});
+  assert.equal(insufficient.state,'INSUFFICIENT_EVIDENCE');
+  assert.equal(insufficient.insufficient_evidence,true);
+  assert.equal(insufficient.eligible_for_existing_library_owner_append_review,false);
+
+  const negativeFx=phase34Fixture('negative');
+  const negative=phase34Certificate(negativeFx,'negative',{negative_transfer_detected:true,final_e_value:100});
+  assert.equal(negative.state,'NEGATIVE_TRANSFER_VETO');
+  assert.equal(negative.negative_transfer_veto,true);
+  assert.equal(negative.eligible_for_existing_library_owner_append_review,false);
+});
+
+test('Phase34 least-privilege replay blocks capability mismatch even with strong statistical evidence',()=>{
+  const fx=phase34Fixture('scope-block');
+  const badScope=createRsiLeastPrivilegeSkillScopeReceipt({
+    scope_receipt_id:'phase34.scope.scope-block.mismatch',
+    plan:fx.plan,plan_args:{},phase33_review:fx.review,phase33_args:fx.phase33_args,current_governance:fx.governance,
+    observed_required_capabilities:['READ_VERIFIED_CONTEXT'],
+    replay_task_family_digests:[labelDigest('phase34-scope-block-family-a'),labelDigest('phase34-scope-block-family-b')],
+    scope_validation_evidence_digest:labelDigest('phase34-scope-block-evidence'),
+    replay_all_pass:true,no_overprivileged_actions:true,no_hidden_capability_escalation:true,
+    external_scope_owner:true,external_replay_evaluator:true,authored_by_candidate:false,
+  });
+  assert.equal(badScope.least_privilege_pass,false);
+  const cert=createRsiAnytimeValidLibraryAdmissionCertificate({
+    certificate_id:'phase34.certificate.scope-block',
+    plan:fx.plan,plan_args:{},phase33_review:fx.review,phase33_args:fx.phase33_args,current_governance:fx.governance,
+    scope_receipt:badScope,
+    paired_sequence_digest:labelDigest('phase34-scope-block-sequence'),
+    reference_receipt_digest:labelDigest('phase34-scope-block-reference'),
+    candidate_receipt_digest:labelDigest('phase34-scope-block-candidate'),
+    statistical_owner_attestation_digest:labelDigest('phase34-scope-block-attestation'),
+    observed_pair_count:8,stopping_index:8,final_e_value:100,
+    same_instances_pass:true,matched_reference_pass:true,evaluator_integrity_pass:true,contamination_clear:true,
+    hard_invariants_pass:true,negative_transfer_detected:false,optional_stopping_protocol_pass:true,
+    external_statistical_owner:true,external_library_owner:true,authored_by_candidate:false,
+  });
+  assert.equal(cert.state,'ADMISSION_REJECTED');
+  assert.equal(cert.least_privilege_pass,false);
+  assert.equal(cert.threshold_pass,true);
+});
+
+test('Phase34 archive is durable-before-visible and restart-revalidates Phase33 evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34-admission-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'admission.json');
+  const fx=phase34Fixture('archive');
+  const cert=phase34Certificate(fx,'archive');
+  const external={phase33_review:fx.review,phase33_args:fx.phase33_args,current_governance:fx.governance};
+  const resolver=async()=>external;
+  const archive=new RsiAnytimeValidLibraryAdmissionArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({plan:fx.plan,scope_receipt:fx.scope,certificate:cert,evidence:external}));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+  const added=await archive.add({plan:fx.plan,scope_receipt:fx.scope,certificate:cert,evidence:external});
+  assert.equal(added.state,'ADMISSION_EVIDENCE_ARCHIVED');
+  assert.equal(added.certificate_state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_APPEND_REVIEW');
+  assert.equal(archive.snapshot().archive_can_write_library,false);
+  assert.equal(archive.snapshot().archive_can_mutate_governance,false);
+  const restored=new RsiAnytimeValidLibraryAdmissionArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+});
+
+test('Phase34 trust root reuses existing governance and keeps lifecycle effects external',()=>{
+  const root=rsiAnytimeValidLibraryAdmissionTrustRootSnapshot();
+  assert.equal(root.existing_verified_skill_library_reused,true);
+  assert.equal(root.existing_skill_library_governance_reused,true);
+  assert.equal(root.paired_identical_instance_validation_required,true);
+  assert.equal(root.anytime_valid_certificate_required,true);
+  assert.equal(root.externally_owned_false_admission_error_budget_required,true);
+  assert.equal(root.insufficient_evidence_is_first_class,true);
+  assert.equal(root.negative_transfer_is_hard_veto,true);
+  assert.equal(root.task_conditioned_least_privilege_replay_required,true);
+  assert.equal(root.maturity_aware_change_envelope_required,true);
+  assert.equal(root.no_second_library,true);
+  assert.equal(root.no_second_governance_plane,true);
+  assert.equal(root.library_append_performed_here,false);
+  assert.equal(root.skill_activation_performed_here,false);
+  assert.equal(root.governance_mutation_performed_here,false);
+  assert.equal(root.skill_quarantine_performed_here,false);
+  assert.equal(root.skill_retirement_performed_here,false);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.anytime_valid_library_admission_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
