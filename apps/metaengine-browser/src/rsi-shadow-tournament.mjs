@@ -85,6 +85,7 @@ const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-slow-knowledge-consolidation.mjs',
   'apps/metaengine-browser/src/rsi-consolidated-knowledge-skill-review.mjs',
   'apps/metaengine-browser/src/rsi-validated-knowledge-consumer-handoff.mjs',
+  'apps/metaengine-browser/src/rsi-exact-existing-consumer-owner-review.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
