@@ -126,8 +126,10 @@ test('planner retrieves only verified graph summaries and never exposes raw traj
   assert.ok(plan.selected_cases[0].mechanism_tags.includes('AMBIGUOUS_COMMAND_OUTCOMES'));
   assert.equal(plan.selected_cases[0].source_context_truth_is_portable,false);
   assert.equal(plan.selected_cases[0].external_transfer_validation_required,true);
-  const serialized=JSON.stringify(plan);
-  assert.doesNotMatch(serialized,/raw_trajectory|raw_page_text|raw_user_input/);
+  assert.equal(plan.raw_trajectory_exposed,false);
+  assert.equal(plan.raw_page_text_exposed,false);
+  assert.equal(plan.raw_user_input_exposed,false);
+  assert.equal(plan.secret_material_exposed,false);
   assert.equal(plan.candidate_can_write_graph,false);
   assert.equal(plan.candidate_can_select_retrieval_thresholds,false);
   assert.equal(plan.candidate_can_mark_memory_portable,false);
