@@ -7,7 +7,7 @@ import test from 'node:test';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 
 const sourceSha = 'a'.repeat(40);
-const candidateId = \`candidate_sha256_\${'c'.repeat(64)}\`;
+const candidateId = `candidate_sha256_${'c'.repeat(64)}`;
 
 test('runtime persists episode transitions before applying them and replays them after restart', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-episode-runtime-'));
