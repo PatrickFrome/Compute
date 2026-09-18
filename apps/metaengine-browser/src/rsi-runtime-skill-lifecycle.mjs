@@ -97,6 +97,7 @@ export class RsiRuntimeSkillLifecycle{
   #libraryContainsAll(skillDigests){return !!this.#library&&skillDigests.every(d=>this.#library.entries.some(e=>e.skill_digest===d))}
   #assertAppendOnlyLibrary(next){
     if(!this.#library)return;
+    if(next.library_id!==this.#library.library_id)throw new Error('rsi_runtime_skill_library_identity_drift');
     const current=new Map(this.#library.entries.map(e=>[e.skill_digest,e]));
     const incoming=new Map(next.entries.map(e=>[e.skill_digest,e]));
     for(const [skillDigest,row] of current){
@@ -193,6 +194,10 @@ export class RsiRuntimeSkillLifecycle{
     }
     const rows=this.#materializeOne(item);await this.#persist();
     return zero({state:'APPLIED',applied:true,credit_receipt_digest:credit.receipt_digest,evidence_digests:rows.map(r=>r.evidence_digest)});
+  }
+  verifiedLibrarySnapshot(){
+    this.#assertInit();
+    return this.#library ? structuredClone(this.#library) : null;
   }
   governance(){
     this.#assertInit();if(!this.#library)return null;

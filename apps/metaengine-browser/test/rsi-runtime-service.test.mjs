@@ -535,6 +535,28 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(adopted.reconciled_pending, 1);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.pending_count, 0);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count, 1);
+    assert.equal(runtime.snapshot().runtime_skill_router.evidence_count, 1);
+
+    const route = await runtime.routeVerifiedSkills({
+      context_id: 'context.runtime.skill.1',
+      task_signature_digest: d('9'),
+      environment_fingerprint: 'env.browser.chatgpt.v1',
+      model_family: 'GPT_5_6_SOL',
+      challenge_family: 'BROWSER_INTERACTION',
+      required_role: 'ANALYZER',
+      required_capabilities: ['ANALYZE_FAILURE_CODES'],
+      input_schema_digest: d('1'),
+      output_schema_digest: d('2'),
+      max_selected: 1,
+      exploration_slots: 0,
+      external_planner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(route.selected_count, 1);
+    assert.equal(route.selected[0].skill_digest, skill.skill_digest);
+    assert.equal(route.selected[0].reason, 'CONTEXT_EVIDENCE');
+    assert.equal(route.routing_is_execution_authority, false);
+    assert.equal(runtime.snapshot().runtime_skill_router.route_count, 1);
 
     const activation = runtime.createSkillActivationView([skill.skill_digest]);
     assert.equal(activation.selected_count, 1);
