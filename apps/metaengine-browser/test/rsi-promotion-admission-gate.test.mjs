@@ -239,6 +239,7 @@ test('promotion gate independently rejects candidate mutation of promotion and s
     'apps/metaengine-browser/src/rsi-release-authority-convergence.mjs',
     'apps/metaengine-browser/src/rsi-post-deployment-learning.mjs',
     'apps/metaengine-browser/src/rsi-post-deployment-utility.mjs',
+    'apps/metaengine-browser/src/rsi-post-deployment-correction.mjs',
     'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
     'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
     'apps/metaengine-browser/src/self-update-runtime.mjs',
