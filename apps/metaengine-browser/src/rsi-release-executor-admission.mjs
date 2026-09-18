@@ -198,6 +198,9 @@ export function createRsiReleaseExecutorAdmission({
     leased_at:lease.leased_at,
     expires_at:lease.expires_at,
     idempotency_key:lease.idempotency_key,
+    external_release_authority_id:lease.issued_by,
+    executor_readback:lease,
+    pre_effect_authority_readback:authorityReadback,
     executor_readback_digest:lease.readback_digest,
     pre_effect_authority_readback_digest:authorityReadback.readback_digest,
     browser_generation:lease.browser_generation,
@@ -245,7 +248,23 @@ export function verifyRsiReleaseExecutorAdmission(row){
     || row.ambiguous_effect_replay_allowed!==false
   )throw new Error('rsi_release_executor_admission_policy_invalid');
   uuid(row.command_id,'command_id');uuid(row.workspace_id,'workspace_id');safeId(row.leased_by,'leased_by');idempotency(row.idempotency_key);
+  safeId(row.external_release_authority_id,'external_release_authority_id');
   sha(row.candidate_sha,'candidate');sha(row.parent_sha,'parent');sha(row.current_authority_sha,'current_authority');
+  const lease=verifyRsiReleaseExecutorReadback(row.executor_readback);
+  const authorityReadback=verifyRsiReleaseAuthorityReadback(row.pre_effect_authority_readback);
+  if(
+    lease.readback_digest!==row.executor_readback_digest
+    || authorityReadback.readback_digest!==row.pre_effect_authority_readback_digest
+    || lease.command_id!==row.command_id
+    || lease.workspace_id!==row.workspace_id
+    || lease.leased_by!==row.leased_by
+    || lease.idempotency_key!==row.idempotency_key
+    || lease.issued_by!==row.external_release_authority_id
+    || lease.browser_generation!==row.browser_generation
+    || authorityReadback.browser_generation!==row.browser_generation
+    || lease.current_authority_sha!==row.current_authority_sha
+    || authorityReadback.current_authority_sha!==row.current_authority_sha
+  )throw new Error('rsi_release_executor_admission_readback_binding_mismatch');
   for(const [value,label] of [
     [row.release_handoff_digest,'release_handoff'],[row.promotion_review_result_digest,'promotion_review'],
     [row.executor_readback_digest,'executor_readback'],[row.pre_effect_authority_readback_digest,'authority_readback'],
