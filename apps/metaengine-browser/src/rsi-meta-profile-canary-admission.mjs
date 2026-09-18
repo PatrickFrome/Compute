@@ -1,3 +1,4 @@
+import { verifyRsiBoundedCanaryAdmission } from './rsi-bounded-canary-admission.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,7 +11,7 @@ export const RSI_META_PROFILE_CANARY_LEDGER_SCHEMA='metaengine.rsi.meta-profile-
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
-const MAX_CANARY_DECISIONS=32;
+const MAX_CANARY_DECISIONS=16;
 const ALLOWED_SURFACE='READ_ONLY_DECISION_SUPPORT';
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
@@ -37,6 +38,7 @@ function verifyEnvelope(row,schema,digestField,label){
 
 export function createRsiMetaProfileCanaryAdmission({
   source_sha,canary_id,selection,qualification,meta_record,current_library,current_governance,
+  bounded_canary_admission,bounded_shadow_evidence,
   cohort_digest,max_decisions=MAX_CANARY_DECISIONS,action_surface=ALLOWED_SURFACE,
   external_canary_owner=false,authored_by_candidate=true,
 }={}){
@@ -44,18 +46,30 @@ export function createRsiMetaProfileCanaryAdmission({
   if(!selection||selection.schema!=='metaengine.rsi.meta-profile-shadow-selection.v1'||selection.mode!=='SHADOW_ONLY')throw new Error('rsi_canary_shadow_selection_required');
   if(!qualification||qualification.schema!=='metaengine.rsi.meta-profile-qualification.v1'||qualification.qualified_for_shadow_profile_selection!==true)throw new Error('rsi_canary_qualification_required');
   if(!meta_record||meta_record.schema!=='metaengine.rsi.runtime-meta-skill-record.v1'||meta_record.eligible_for_meta_archive!==true)throw new Error('rsi_canary_meta_record_required');
+  const bounded=verifyRsiBoundedCanaryAdmission(bounded_canary_admission,{
+    shadow_selection:selection,
+    shadow_evidence:bounded_shadow_evidence,
+  });
+  if(bounded.eligible_for_external_bounded_canary_handoff!==true||bounded.canary_activation_authorized!==false){
+    throw new Error('rsi_canary_bounded_handoff_required');
+  }
   const source=exactSha(source_sha,'source');
   if(selection.source_sha!==source||qualification.source_sha!==source||meta_record.source_sha!==source)throw new Error('rsi_canary_source_binding_mismatch');
   if(selection.qualification_digest!==qualification.qualification_digest||selection.meta_record_digest!==meta_record.record_digest||qualification.meta_record_digest!==meta_record.record_digest)throw new Error('rsi_canary_lineage_binding_mismatch');
+  if(bounded.shadow_selection_digest!==selection.selection_digest)throw new Error('rsi_canary_bounded_selection_mismatch');
   if(!current_library||typeof current_library!=='object'||current_library.library_digest!==selection.library_digest||current_library.library_digest!==meta_record.library_digest)throw new Error('rsi_canary_library_identity_drift');
   if(!current_governance||typeof current_governance!=='object'||current_governance.library_digest!==current_library.library_digest)throw new Error('rsi_canary_governance_identity_invalid');
   const decisions=Number(max_decisions);
   if(decisions!==MAX_CANARY_DECISIONS)throw new Error('rsi_canary_fixed_decision_budget_required');
   if(String(action_surface||'').toUpperCase()!==ALLOWED_SURFACE)throw new Error('rsi_canary_surface_not_allowed');
+  if(bounded.fixed_cohort_digest!==exactDigest(cohort_digest,'cohort'))throw new Error('rsi_canary_bounded_cohort_mismatch');
+  if(bounded.decision_budget!==decisions)throw new Error('rsi_canary_bounded_budget_mismatch');
   const core={
     schema:RSI_META_PROFILE_CANARY_ADMISSION_SCHEMA,version:1,
     source_sha:source,canary_id:id(canary_id,'canary_id'),
     selection_digest:exactDigest(selection.selection_digest,'selection'),
+    bounded_canary_admission_digest:exactDigest(bounded.admission_digest,'bounded_admission'),
+    bounded_shadow_evidence_digest:exactDigest(bounded.shadow_evidence_digest,'bounded_shadow_evidence'),
     qualification_digest:exactDigest(qualification.qualification_digest,'qualification'),
     meta_record_digest:exactDigest(meta_record.record_digest,'meta_record'),
     incumbent_profile_digest:exactDigest(selection.incumbent_profile_digest,'incumbent_profile'),
@@ -64,7 +78,8 @@ export function createRsiMetaProfileCanaryAdmission({
     governance_digest:exactDigest(current_governance.governance_digest,'governance'),
     cohort_digest:exactDigest(cohort_digest,'cohort'),
     action_surface:ALLOWED_SURFACE,max_decisions:MAX_CANARY_DECISIONS,
-    baseline_is_default:true,baseline_fallback_required:true,
+    clean_shadow_evidence_required:true,minimum_shadow_observations_required:32,
+    bounded_handoff_required:true,baseline_is_default:true,baseline_fallback_required:true,
     exact_identity_required:true,library_and_governance_drift_fail_closed:true,
     candidate_can_choose_cohort:false,candidate_can_choose_exposure:false,
     canary_can_execute_browser_effect:false,canary_decision_is_advisory_only:true,
@@ -77,7 +92,9 @@ export function createRsiMetaProfileCanaryAdmission({
 }
 export function verifyRsiMetaProfileCanaryAdmission(row){
   const checked=verifyEnvelope(row,RSI_META_PROFILE_CANARY_ADMISSION_SCHEMA,'admission_digest','admission');
-  if(checked.action_surface!==ALLOWED_SURFACE||checked.max_decisions!==MAX_CANARY_DECISIONS||checked.baseline_is_default!==true
+  if(checked.action_surface!==ALLOWED_SURFACE||checked.max_decisions!==MAX_CANARY_DECISIONS
+    ||checked.clean_shadow_evidence_required!==true||checked.minimum_shadow_observations_required!==32
+    ||checked.bounded_handoff_required!==true||checked.baseline_is_default!==true
     ||checked.baseline_fallback_required!==true||checked.exact_identity_required!==true
     ||checked.library_and_governance_drift_fail_closed!==true||checked.candidate_can_choose_cohort!==false
     ||checked.candidate_can_choose_exposure!==false||checked.canary_can_execute_browser_effect!==false
@@ -270,7 +287,8 @@ export function rsiMetaProfileCanaryTrustRootSnapshot(){
   const root={
     schema:'metaengine.rsi.meta-profile-canary-root.v1',version:1,
     allowed_surface:ALLOWED_SURFACE,max_canary_decisions:MAX_CANARY_DECISIONS,
-    exact_shadow_selection_required:true,exact_qualification_required:true,exact_meta_record_required:true,
+    exact_shadow_selection_required:true,clean_shadow_evidence_required:true,minimum_shadow_observations_required:32,
+    bounded_handoff_required:true,exact_qualification_required:true,exact_meta_record_required:true,
     exact_library_and_governance_identity_required:true,external_cohort_required:true,external_canary_owner_required:true,
     baseline_is_default:true,baseline_fallback_required:true,
     outcome_safety_required:true,security_awareness_required:true,task_utility_required:true,
