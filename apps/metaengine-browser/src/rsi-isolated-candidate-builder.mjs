@@ -61,6 +61,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-sealed-canary-review.mjs',
   'apps/metaengine-browser/src/rsi-verifier-evolution-admission.mjs',
   'apps/metaengine-browser/src/rsi-verifier-shadow-qualification.mjs',
+  'apps/metaengine-browser/src/rsi-verifier-root-change-review.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
