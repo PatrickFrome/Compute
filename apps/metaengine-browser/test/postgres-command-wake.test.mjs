@@ -6,13 +6,16 @@ import {
   POSTGRES_COMMAND_WAKE_SCHEMA,
 } from '../supabase/a2-browser-native-supervisor-v1/postgres-command-wake.mjs';
 
-const commandPayload = (client = 'browser-a', extra = {}) => JSON.stringify({
-  tbl: 'compute_fabric_a2_browser_supervisor_command_h205f22',
+const commandPayload = (targetClientId = 'browser-a', extra = {}) => JSON.stringify({
+  table: 'compute_fabric_a2_browser_supervisor_command_h205f22',
   op: 'INSERT',
-  client,
-  cmd: '11111111-1111-4111-8111-111111111111',
+  client_id: 'issuer-client',
+  target_client_id: targetClientId,
+  supervisor_client_id: null,
+  command_id: '11111111-1111-4111-8111-111111111111',
   action: 'CAPTURE',
   status: 'PENDING',
+  last_seen: null,
   ...extra,
 });
 
@@ -20,13 +23,16 @@ function harness({ failListen = false, maxWaiters = 128 } = {}) {
   let callback = null;
   let listenCount = 0;
   let unlistenCount = 0;
+  let readyCallback = null;
   const hub = createPostgresCommandWakeHub({
     maxWaiters,
-    listen: async (channel, onNotify) => {
+    listen: async (channel, onNotify, onListen) => {
       listenCount += 1;
       assert.equal(channel, 'glm_browser_pulse');
       if (failListen) throw new Error('listen_failed');
       callback = onNotify;
+      readyCallback = onListen;
+      onListen?.();
       return {
         unlisten: async () => { unlistenCount += 1; },
       };
@@ -35,6 +41,7 @@ function harness({ failListen = false, maxWaiters = 128 } = {}) {
   return {
     hub,
     notify(payload) { callback?.(payload); },
+    relisten() { readyCallback?.(); },
     listenCount: () => listenCount,
     unlistenCount: () => unlistenCount,
   };
@@ -75,7 +82,7 @@ test('untargeted command notification wakes all waiters but malformed/non-pendin
   await Promise.all([a.subscribed, b.subscribed]);
 
   h.notify('not-json');
-  h.notify(JSON.stringify({ tbl: 'other_table', status: 'PENDING', client: null }));
+  h.notify(JSON.stringify({ table: 'other_table', status: 'PENDING', target_client_id: null }));
   h.notify(commandPayload(null, { status: 'COMPLETED' }));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(h.hub.snapshot().waiter_count, 2);
@@ -84,6 +91,20 @@ test('untargeted command notification wakes all waiters but malformed/non-pendin
   assert.equal((await a.wake).reason, 'POSTGRES_NOTIFY');
   assert.equal((await b.wake).reason, 'POSTGRES_NOTIFY');
   assert.equal(h.hub.snapshot().waiter_count, 0);
+  await h.hub.close();
+});
+
+test('listener reconnect wakes bounded waiters for durable queue recheck because NOTIFY has no history', async () => {
+  const h = harness();
+  const a = h.hub.open({ clientId: 'browser-a', timeoutMs: 5000 });
+  const b = h.hub.open({ clientId: 'browser-b', timeoutMs: 5000 });
+  await Promise.all([a.subscribed, b.subscribed]);
+  assert.equal(h.hub.snapshot().listen_generation, 1);
+
+  h.relisten();
+  assert.equal((await a.wake).reason, 'POSTGRES_RELISTEN');
+  assert.equal((await b.wake).reason, 'POSTGRES_RELISTEN');
+  assert.equal(h.hub.snapshot().listen_generation, 2);
   await h.hub.close();
 });
 
