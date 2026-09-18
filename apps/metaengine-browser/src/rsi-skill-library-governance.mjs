@@ -423,7 +423,7 @@ export function createRsiSkillLibraryGovernance({
   const selectable = summaries.filter((row) => !terminal.has(row.skill_digest));
   const proven = selectable.filter((row) => row.proven_positive)
     .sort((a, b) => b.governance_score - a.governance_score || deterministicTie(a.skill_digest, governance_id).localeCompare(deterministicTie(b.skill_digest, governance_id)));
-  const exploratory = selectable.filter((row) => !row.proven_positive)
+  const exploratory = selectable.filter((row) => !row.proven_positive && row.evidence_window_count > 0)
     .sort((a, b) =>
       priorBonus(b.authoring_prior) - priorBonus(a.authoring_prior)
       || a.total_invocations - b.total_invocations
@@ -652,6 +652,7 @@ export function rsiSkillLibraryGovernanceTrustRootSnapshot() {
     exploration_slots_required: true,
     premature_retirement_protected_by_minimum_evidence: true,
     router_false_positive_diagnostics_required: true,
+    zero_evidence_skill_activation_forbidden: true,
     meta_skill_authoring_prior_is_tiebreak_only: true,
     candidate_can_change_governance: false,
     candidate_can_reactivate_skill: false,

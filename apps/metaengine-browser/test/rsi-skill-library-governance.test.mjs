@@ -251,6 +251,31 @@ test('active cap preserves one bounded exploration slot and ranks proven positiv
   assert.equal(governance.candidate_can_bypass_active_cap, false);
 });
 
+
+test('newly appended verified skill with zero lifecycle windows stays dormant until shadow evidence exists', () => {
+  const { library, explore } = fixture();
+  const governance = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.zero-evidence.dormant',
+    library,
+    lifecycle_evidence: [],
+    max_active_skills: 4,
+    exploration_slots: 4,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  const row = governance.entries.find((entry) => entry.skill_digest === explore.skill_digest);
+  assert.equal(row.evidence_window_count, 0);
+  assert.equal(row.state, 'DORMANT_CAP');
+  assert.equal(row.active_for_composition, false);
+  assert.throws(() => createRsiSkillActivationView({
+    governance,
+    library,
+    requested_skill_digests: [explore.skill_digest],
+    external_planner: true,
+    authored_by_candidate: false,
+  }), /requested_skill_not_active:DORMANT_CAP/);
+});
+
 test('retirement requires repeated negative evidence and never hard-deletes the skill', () => {
   const { library, harmful } = fixture();
   const oneWindow = lifecycle(library, harmful, {
@@ -427,6 +452,7 @@ test('skill governance trust root encodes library-drift defenses without widenin
   assert.equal(root.exploration_slots_required, true);
   assert.equal(root.premature_retirement_protected_by_minimum_evidence, true);
   assert.equal(root.router_false_positive_diagnostics_required, true);
+  assert.equal(root.zero_evidence_skill_activation_forbidden, true);
   assert.equal(root.meta_skill_authoring_prior_is_tiebreak_only, true);
   assert.equal(root.candidate_can_change_governance, false);
   assert.equal(root.candidate_can_reactivate_skill, false);
