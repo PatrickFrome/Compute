@@ -280,20 +280,30 @@ export function createRsiSkillRoutingPlan({
     const graph=verifyRsiSkillRelationGraph(relation_graph,checkedLibrary);
     relationGraphDigest=graph.graph_digest;
     const applicable=graph.edges.filter(edge=>edge.scope==='GLOBAL_VERIFIED'||edge.context_digest===checkedContext.context_digest);
-    const selectedDigests=new Set(routedSelected.map(row=>row.entry.skill_digest));
-
-    const missingPrerequisites=new Set();
-    for(const edge of applicable.filter(edge=>edge.relation_type==='PREREQUISITE')){
-      if(selectedDigests.has(edge.to_skill_digest)&&!selectedDigests.has(edge.from_skill_digest)){
-        missingPrerequisites.add(edge.to_skill_digest);
-        relationSuppressed.push(Object.freeze({
-          skill_digest:edge.to_skill_digest,
-          relation_digest:edge.relation_digest,
-          reason:'MISSING_PREREQUISITE',
-        }));
+    const prerequisiteEdges=applicable.filter(edge=>edge.relation_type==='PREREQUISITE');
+    let prerequisiteClosureChanged=true;
+    while(prerequisiteClosureChanged){
+      prerequisiteClosureChanged=false;
+      const selectedDigests=new Set(routedSelected.map(row=>row.entry.skill_digest));
+      const missingPrerequisites=new Set();
+      for(const edge of prerequisiteEdges){
+        if(selectedDigests.has(edge.to_skill_digest)&&!selectedDigests.has(edge.from_skill_digest)){
+          missingPrerequisites.add(edge.to_skill_digest);
+          if(!relationSuppressed.some(item=>item.skill_digest===edge.to_skill_digest&&item.relation_digest===edge.relation_digest)){
+            relationSuppressed.push(Object.freeze({
+              skill_digest:edge.to_skill_digest,
+              relation_digest:edge.relation_digest,
+              reason:'MISSING_PREREQUISITE',
+            }));
+          }
+        }
+      }
+      if(missingPrerequisites.size>0){
+        const before=routedSelected.length;
+        routedSelected=routedSelected.filter(row=>!missingPrerequisites.has(row.entry.skill_digest));
+        prerequisiteClosureChanged=routedSelected.length!==before;
       }
     }
-    routedSelected=routedSelected.filter(row=>!missingPrerequisites.has(row.entry.skill_digest));
 
     const remaining=new Map(routedSelected.map((row,index)=>[row.entry.skill_digest,{row,index}]));
     const prereqEdges=applicable.filter(edge=>edge.relation_type==='PREREQUISITE'
