@@ -23,7 +23,7 @@ export const DEVOS_TREE_SITTER_RUNTIME_CONTRACT = Object.freeze({
   arbitrary_eval_allowed: false,
   old_tree_edit_before_incremental_reparse_required: true,
   source_digest_readback_required: true,
-  monaco_coordinates_require_worker_byte_mapping: true,
+  monaco_coordinates_require_worker_code_unit_mapping: true,
   parser_output_authority: false,
   repository_mutation_authority: false,
   browser_actuation_authority: false,
@@ -180,7 +180,8 @@ export function validateDevOSTreeSitterMonacoEdit(value) {
   return zeroAuthority({
     start, end, replacement_text: replacement,
     replacement_utf8_bytes: ENCODER.encode(replacement).byteLength,
-    renderer_byte_offsets_trusted: false,
+    replacement_utf16_code_units: replacement.length,
+    renderer_edit_indices_trusted: false,
     renderer_tree_points_trusted: false,
   });
 }
@@ -218,7 +219,7 @@ export function validateDevOSTreeSitterEditRequest(value) {
     parser: validateDevOSTreeSitterParserRef(row.parser),
     edit: validateDevOSTreeSitterMonacoEdit(row.edit),
     edit_count: 1,
-    worker_byte_mapping_required: true,
+    worker_code_unit_mapping_required: true,
     old_tree_edit_before_parse_required: true,
     full_reparse_on_mapping_ambiguity: true,
   });
@@ -230,7 +231,7 @@ export function validateDevOSTreeSitterDerivedEditReceipt(value) {
     'schema', 'protocol_version', 'previous_document', 'next_document',
     'start_index', 'old_end_index', 'new_end_index',
     'start_position', 'old_end_position', 'new_end_position',
-    'replacement_utf8_bytes', 'worker_source_sha256_verified',
+    'replacement_utf8_bytes', 'replacement_utf16_code_units', 'worker_source_sha256_verified',
   ], [], 'devos_tree_sitter_derived_edit_fields_invalid');
   if (row.schema !== 'metaengine.devos.tree-sitter.derived-edit.v1' || Number(row.protocol_version) !== 1) throw new Error('devos_tree_sitter_derived_edit_contract_invalid');
   const previous = validateDevOSTreeSitterDocumentRef(row.previous_document);
@@ -240,7 +241,8 @@ export function validateDevOSTreeSitterDerivedEditReceipt(value) {
   const oldEnd = nat(row.old_end_index, 'devos_tree_sitter_old_end_index_invalid');
   const newEnd = nat(row.new_end_index, 'devos_tree_sitter_new_end_index_invalid');
   const replacementBytes = nat(row.replacement_utf8_bytes, 'devos_tree_sitter_replacement_bytes_invalid');
-  if (oldEnd < start || newEnd < start || newEnd - start !== replacementBytes) throw new Error('devos_tree_sitter_byte_edit_invalid');
+  const replacementCodeUnits = nat(row.replacement_utf16_code_units, 'devos_tree_sitter_replacement_code_units_invalid');
+  if (oldEnd < start || newEnd < start || newEnd - start !== replacementCodeUnits) throw new Error('devos_tree_sitter_code_unit_edit_invalid');
   const startPoint = treePoint(row.start_position, 'devos_tree_sitter_start_position_invalid');
   const oldEndPoint = treePoint(row.old_end_position, 'devos_tree_sitter_old_end_position_invalid');
   const newEndPoint = treePoint(row.new_end_position, 'devos_tree_sitter_new_end_position_invalid');
@@ -252,15 +254,17 @@ export function validateDevOSTreeSitterDerivedEditReceipt(value) {
     start_index: start, old_end_index: oldEnd, new_end_index: newEnd,
     start_position: startPoint, old_end_position: oldEndPoint, new_end_position: newEndPoint,
     replacement_utf8_bytes: replacementBytes,
-    byte_offsets_are_utf8: true,
-    tree_point_columns_are_bytes: true,
+    replacement_utf16_code_units: replacementCodeUnits,
+    edit_indices_are_utf16_code_units: true,
+    tree_point_columns_are_utf16_code_units: true,
+    wasm_shim_converts_code_units_to_core_bytes: true,
     worker_source_sha256_verified: true,
   });
 }
 
 export function classifyDevOSTreeSitterIncrementalEligibility({
   previous_document, next_document, previous_parser, next_parser,
-  edit_count, old_tree_available, byte_mapping_verified,
+  edit_count, old_tree_available, code_unit_mapping_verified,
 } = {}) {
   const previous = validateDevOSTreeSitterDocumentRef(previous_document);
   const next = validateDevOSTreeSitterDocumentRef(next_document);
@@ -269,7 +273,7 @@ export function classifyDevOSTreeSitterIncrementalEligibility({
   if (!sameParser(previous_parser, next_parser)) return zeroAuthority({ state: 'FULL_REPARSE_REQUIRED', reason: 'PARSER_DRIFT', incremental: false });
   if (nat(edit_count, 'devos_tree_sitter_edit_count_invalid') !== 1) return zeroAuthority({ state: 'FULL_REPARSE_REQUIRED', reason: 'EDIT_BATCH_NOT_SINGLE', incremental: false });
   if (old_tree_available !== true) return zeroAuthority({ state: 'FULL_REPARSE_REQUIRED', reason: 'OLD_TREE_MISSING', incremental: false });
-  if (byte_mapping_verified !== true) return zeroAuthority({ state: 'FULL_REPARSE_REQUIRED', reason: 'BYTE_MAPPING_UNVERIFIED', incremental: false });
+  if (code_unit_mapping_verified !== true) return zeroAuthority({ state: 'FULL_REPARSE_REQUIRED', reason: 'CODE_UNIT_MAPPING_UNVERIFIED', incremental: false });
   return zeroAuthority({ state: 'INCREMENTAL_ALLOWED', reason: null, incremental: true, old_tree_edit_before_parse_required: true });
 }
 
@@ -288,8 +292,9 @@ export const DEVOS_TREE_SITTER_PROTOCOL_CONTRACT = Object.freeze({
   revision_rule: 'NEXT_EQUALS_PREVIOUS_PLUS_ONE',
   source_identity: 'SHA256_READBACK_REQUIRED',
   monaco_input_coordinates: 'ONE_BASED_UTF16_LINE_COLUMN_CLAIM',
-  tree_sitter_edit_indices: 'WORKER_DERIVED_UTF8_BYTE_OFFSETS',
-  tree_sitter_point_columns: 'WORKER_DERIVED_BYTES',
+  tree_sitter_edit_indices: 'WEB_BINDING_UTF16_CODE_UNITS',
+  tree_sitter_point_columns: 'WEB_BINDING_UTF16_CODE_UNITS',
+  wasm_core_bridge: 'CODE_UNIT_TO_BYTE_IN_BINDING_WEB_SHIM',
   incremental_edit_count: 1,
   multiple_edits_require_full_reparse: true,
   parser_drift_requires_full_reparse: true,
