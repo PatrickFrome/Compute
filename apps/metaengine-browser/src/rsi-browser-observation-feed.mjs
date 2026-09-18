@@ -97,23 +97,27 @@ export class RsiBrowserObservationFeed {
       return Object.freeze({ accepted: false, reason: this.#lastError, authority_effect: false });
     }
 
-    if (this.#pending != null) this.#coalesced += 1;
+    const replacedPending = this.#pending != null;
+    if (replacedPending) this.#coalesced += 1;
     this.#pending = projected;
-    if (!this.#drainPromise) {
-      const pending = this.#drain();
-      this.#drainPromise = pending;
-      void pending.finally(() => {
-        if (this.#drainPromise === pending) this.#drainPromise = null;
-        if (this.#accepting && this.#pending != null && !this.#drainPromise) this.offer(this.#pending);
-      }).catch(() => {});
-    }
+    this.#ensureDrain();
 
     return Object.freeze({
       accepted: true,
-      coalesced: this.#pending !== projected,
+      coalesced: replacedPending,
       in_flight: this.#drainPromise != null,
       authority_effect: false,
     });
+  }
+
+  #ensureDrain() {
+    if (!this.#accepting || this.#drainPromise || this.#pending == null) return;
+    const active = this.#drain();
+    this.#drainPromise = active;
+    void active.finally(() => {
+      if (this.#drainPromise === active) this.#drainPromise = null;
+      this.#ensureDrain();
+    }).catch(() => {});
   }
 
   async #drain() {
@@ -133,13 +137,7 @@ export class RsiBrowserObservationFeed {
 
   async flush() {
     while (this.#drainPromise || this.#pending != null) {
-      if (!this.#drainPromise && this.#pending != null) {
-        const pending = this.#drain();
-        this.#drainPromise = pending;
-        void pending.finally(() => {
-          if (this.#drainPromise === pending) this.#drainPromise = null;
-        }).catch(() => {});
-      }
+      this.#ensureDrain();
       if (this.#drainPromise) await this.#drainPromise;
     }
     return this.snapshot();
