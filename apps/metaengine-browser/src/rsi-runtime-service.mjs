@@ -62,6 +62,7 @@ import { RsiMetaProfileCanaryLedger, createRsiMetaProfileCanaryAdmission, create
 import { RsiSealedCanaryReviewLedger, createRsiSealedCanaryReviewReceipt, createRsiSealedCanaryReview, rsiSealedCanaryReviewTrustRootSnapshot } from './rsi-sealed-canary-review.mjs';
 import { createRsiVerifierEvolutionAdmission, rsiVerifierEvolutionAdmissionTrustRootSnapshot } from './rsi-verifier-evolution-admission.mjs';
 import { createRsiVerifierShadowQualification, rsiVerifierShadowQualificationTrustRootSnapshot } from './rsi-verifier-shadow-qualification.mjs';
+import { createRsiVerifierRootChangeReview, rsiVerifierRootChangeReviewTrustRootSnapshot } from './rsi-verifier-root-change-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -147,6 +148,7 @@ function trustRoots() {
     sealed_canary_review: rsiSealedCanaryReviewTrustRootSnapshot(),
     verifier_evolution_admission: rsiVerifierEvolutionAdmissionTrustRootSnapshot(),
     verifier_shadow_qualification: rsiVerifierShadowQualificationTrustRootSnapshot(),
+    verifier_root_change_review: rsiVerifierRootChangeReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1384,6 +1386,51 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return qualification;
+  }
+
+  async recordVerifierRootChangeReview({
+    review_id,
+    proposal,
+    predecessor_approval,
+    secondary_approval,
+    external_review_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const review = createRsiVerifierRootChangeReview({
+      review_id,
+      proposal,
+      predecessor_approval,
+      secondary_approval,
+      external_review_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('VERIFIER_ROOT_CHANGE_REVIEW_RECORDED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      proposal_digest: review.proposal_digest,
+      qualification_digest: review.qualification_digest,
+      constitution_digest: review.constitution_digest,
+      predecessor_approval_digest: review.predecessor_approval_digest,
+      secondary_approval_digest: review.secondary_approval_digest,
+      current_root_generation: review.current_root_generation,
+      next_root_generation: review.next_root_generation,
+      predecessor_verifier_root_digest: review.predecessor_verifier_root_digest,
+      candidate_verifier_root_digest: review.candidate_verifier_root_digest,
+      secondary_verifier_root_digest: review.secondary_verifier_root_digest,
+      prior_root_history_digest: review.prior_root_history_digest,
+      next_root_history_digest: review.next_root_history_digest,
+      state: review.state,
+      ready_for_external_trust_root_controller_review: review.ready_for_external_trust_root_controller_review,
+      active_verifier_remains_predecessor: true,
+      rollback_to_prior_generation_allowed: false,
+      root_change_authorized: false,
+      verifier_activation_authorized: false,
+      trust_root_update_token: null,
+      second_scheduler_created: false,
+      authority_effect: false,
+    });
+    return review;
   }
 
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
