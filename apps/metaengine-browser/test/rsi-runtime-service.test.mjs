@@ -17,6 +17,10 @@ import {
   createRsiEvaluationIntegrityReceipt,
   assessRsiEvaluationIntegrity,
 } from '../src/rsi-evaluation-integrity-guard.mjs';
+import {
+  createRsiSkillTrajectoryReceipt,
+  createRsiSkillReliabilityDataset,
+} from '../src/rsi-contrastive-skill-reliability.mjs';
 
 test('unified RSI runtime binds the full converged trust-root set with zero authority', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-'));
@@ -672,6 +676,87 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(integrity.admission.eligible_for_existing_reliability_gate, true);
     assert.equal(runtime.snapshot().skill_revision_integrity.admitted_count, 1);
     assert.equal(runtime.integrityAdmittedSkillRevisions({ parent_skill_digest: skill.skill_digest }).length, 1);
+
+    const successorEvidence = createRsiSkillEvidence({
+      capsule: successorSkill,
+      hidden_holdout_digest: d('5'),
+      evaluator_root_digest: d('6'),
+      unit_test_digest: d('7'),
+      runtime_feedback_digest: d('8'),
+      attempt_count: 12,
+      success_count: 11,
+      hard_invariants_pass: true,
+      verified_for_library: true,
+      evidence_refs: ['VERIFY_skill.runtime.integrated.v2'],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    const makeTrajectory = ({ id, skillRow, evidenceRow, repeat, outcome, evidenceDigest }) => createRsiSkillTrajectoryReceipt({
+      receipt_id: id,
+      skill: skillRow,
+      skill_evidence: evidenceRow,
+      cohort_id: 'cohort.runtime.skill.hidden.1',
+      repeat_index: repeat,
+      state_signature_digest: d('c'),
+      deployment_view_digest: d('d'),
+      outcome,
+      invoked_skill: true,
+      capability_sufficient: true,
+      clarification_required: false,
+      unsupported_success_claim: false,
+      evidence_digest: evidenceDigest,
+      evidence_refs: [`trajectory:${id}`],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    const baselineReceipts = [
+      makeTrajectory({ id: 'runtime.baseline.repeat.1', skillRow: skill, evidenceRow: skillEvidence, repeat: 1, outcome: 'SUCCESS', evidenceDigest: d('e') }),
+      makeTrajectory({ id: 'runtime.baseline.repeat.2', skillRow: skill, evidenceRow: skillEvidence, repeat: 2, outcome: 'FAILURE', evidenceDigest: d('f') }),
+    ];
+    const baselineDataset = createRsiSkillReliabilityDataset({
+      dataset_id: 'runtime.skill.reliability.baseline',
+      skill,
+      skill_evidence: skillEvidence,
+      trajectory_receipts: baselineReceipts,
+      hidden_repeated_trial_set_digest: d('0'),
+      external_dataset_owner: true,
+      authored_by_candidate: false,
+    });
+    const successorReceipts = [
+      makeTrajectory({ id: 'runtime.successor.repeat.1', skillRow: successorSkill, evidenceRow: successorEvidence, repeat: 1, outcome: 'SUCCESS', evidenceDigest: d('e') }),
+      makeTrajectory({ id: 'runtime.successor.repeat.2', skillRow: successorSkill, evidenceRow: successorEvidence, repeat: 2, outcome: 'SUCCESS', evidenceDigest: d('f') }),
+    ];
+    const successorDataset = createRsiSkillReliabilityDataset({
+      dataset_id: 'runtime.skill.reliability.successor',
+      skill: successorSkill,
+      skill_evidence: successorEvidence,
+      trajectory_receipts: successorReceipts,
+      hidden_repeated_trial_set_digest: d('0'),
+      external_dataset_owner: true,
+      authored_by_candidate: false,
+    });
+    const reliability = await runtime.recordSkillRevisionReliability({
+      request_id: curation.request.request_id,
+      binding_id: 'binding.runtime.skill.reliability.1',
+      baseline_dataset: baselineDataset,
+      baseline_trajectory_receipts: baselineReceipts,
+      successor_skill_evidence: successorEvidence,
+      successor_dataset: successorDataset,
+      successor_trajectory_receipts: successorReceipts,
+      contrast_codes: ['SUCCESS_PATTERN_MISSING_FROM_FAILURE'],
+      contrast_evidence_digest: d('a'),
+      revision_evidence_refs: ['contrast:runtime:skill:1'],
+      reliability_evidence_refs: ['reliability:runtime:skill:1'],
+      hard_invariants_pass: true,
+      max_potential_regression: 0,
+      external_curator: true,
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(reliability.state, 'ELIGIBLE_FOR_EXISTING_SCOPE_PRESERVATION_GATE');
+    assert.equal(reliability.eligible_for_existing_scope_preservation_gate, true);
+    assert.equal(runtime.snapshot().skill_revision_reliability.evaluation_count, 1);
+    assert.equal(runtime.snapshot().skill_revision_reliability.pass_count, 1);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 1);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
