@@ -1591,6 +1591,16 @@ test('Phase30 Pareto frontier is exact generation plus epoch plus niche scoped a
     evaluator_generation_digest:labelDigest('phase30-g1-generation'),
     evaluator_generation_history_anchor_digest:labelDigest('phase30-g1-anchor'),
     evaluation_epoch_digest:labelDigest('phase30-g1-epoch1'),
+    sealed_task_set_digest:labelDigest('phase30-g1-e1-tasks'),
+    evaluation_harness_digest:labelDigest('phase30-g1-e1-harness'),
+    trial_worker_image_digest:labelDigest('phase30-g1-e1-worker'),
+    resource_budget_digest:labelDigest('phase30-g1-e1-budget'),
+    task_order_digest:labelDigest('phase30-g1-e1-order'),
+    acceptance_policy_digest:labelDigest('phase30-g1-e1-acceptance'),
+    stopping_policy_digest:labelDigest('phase30-g1-e1-stopping'),
+    hidden_holdout_root_digest:labelDigest('phase30-g1-e1-holdout'),
+    safety_suite_root_digest:labelDigest('phase30-g1-e1-safety'),
+    security_suite_root_digest:labelDigest('phase30-g1-e1-security'),
   };
   const a=phase30OutcomeEvidence('pareto-a',{generationSeq:1,epochSeq:1,generationTag:'phase30-g1',sharedEvaluation:sharedG1E1});
   const b=phase30OutcomeEvidence('pareto-b',{
@@ -1606,13 +1616,32 @@ test('Phase30 Pareto frontier is exact generation plus epoch plus niche scoped a
     );
     await archive.add({entry,handoff_row:evidence.handoffRow,experiment_intent:evidence.intent,experiment_receipt:evidence.receipt});
   }
+  assert.equal(e1.evaluation_contract_digest,e2.evaluation_contract_digest);
+
+  const differentContract=phase30OutcomeEvidence('pareto-different-contract',{
+    generationSeq:1,epochSeq:1,generationTag:'phase30-g1',
+    sharedEvaluation:{
+      ...sharedG1E1,
+      sealed_task_set_digest:labelDigest('phase30-g1-e1-different-tasks'),
+    },
+  });
+  const eContract=phase30Entry(differentContract,'pareto-different-contract',{niches:['CONTROL_FLOW']});
+  evidenceByKey.set(
+    `${eContract.handoff_digest}|${eContract.experiment_intent_digest}|${eContract.experiment_receipt_digest}`,
+    {handoff_row:differentContract.handoffRow,experiment_intent:differentContract.intent,experiment_receipt:differentContract.receipt},
+  );
+  await archive.add({
+    entry:eContract,
+    handoff_row:differentContract.handoffRow,
+    experiment_intent:differentContract.intent,
+    experiment_receipt:differentContract.receipt,
+  });
+  assert.notEqual(eContract.evaluation_contract_digest,e1.evaluation_contract_digest);
 
   const g1e2=phase30OutcomeEvidence('pareto-epoch2',{
     generationSeq:1,epochSeq:2,generationTag:'phase30-g1',
     sharedEvaluation:{
-      evaluator_root_digest:sharedG1E1.evaluator_root_digest,
-      evaluator_generation_digest:sharedG1E1.evaluator_generation_digest,
-      evaluator_generation_history_anchor_digest:sharedG1E1.evaluator_generation_history_anchor_digest,
+      ...sharedG1E1,
       evaluation_epoch_digest:labelDigest('phase30-g1-epoch2'),
     },
   });
@@ -1630,9 +1659,13 @@ test('Phase30 Pareto frontier is exact generation plus epoch plus niche scoped a
   await archive.add({entry:e4,handoff_row:g2e1.handoffRow,experiment_intent:g2e1.intent,experiment_receipt:g2e1.receipt});
 
   const frontier=archive.frontier();
-  assert.equal(frontier.length,3);
-  const first=frontier.find(x=>x.evaluator_generation_seq===1&&x.evaluation_epoch_seq===1&&x.niche==='CONTROL_FLOW');
+  assert.equal(frontier.length,4);
+  const first=frontier.find(x=>x.evaluator_generation_seq===1&&x.evaluation_epoch_seq===1
+    &&x.evaluation_contract_digest===e1.evaluation_contract_digest&&x.niche==='CONTROL_FLOW');
   assert.deepEqual(first.entry_digests,[e1.entry_digest]);
+  assert.ok(frontier.some(x=>x.evaluator_generation_seq===1&&x.evaluation_epoch_seq===1
+    &&x.evaluation_contract_digest===eContract.evaluation_contract_digest
+    &&x.entry_digests.includes(eContract.entry_digest)));
   assert.equal(first.scalar_winner,null);
   assert.ok(frontier.some(x=>x.evaluator_generation_seq===1&&x.evaluation_epoch_seq===2));
   assert.ok(frontier.some(x=>x.evaluator_generation_seq===2&&x.evaluation_epoch_seq===1));
@@ -1643,6 +1676,8 @@ test('Phase30 Pareto frontier is exact generation plus epoch plus niche scoped a
   assert.equal(snap.exact_generation_sequence_required,true);
   assert.equal(snap.exact_epoch_sequence_required,true);
   assert.equal(snap.generation_history_anchor_required,true);
+  assert.equal(snap.fixed_evaluation_contract_required_for_dominance,true);
+  assert.equal(snap.cross_contract_dominance_forbidden,true);
   assert.equal(snap.cross_generation_dominance_forbidden,true);
   assert.equal(snap.cross_epoch_dominance_forbidden,true);
 });
@@ -1727,6 +1762,9 @@ test('Phase30 trust root freezes exact-sequence quality-diverse learning with ze
   assert.equal(root.evaluation_epoch_sequence_binding_required,true);
   assert.equal(root.generation_history_anchor_binding_required,true);
   assert.equal(root.provenance_root_binding_required,true);
+  assert.equal(root.evaluation_contract_binding_required,true);
+  assert.equal(root.fixed_evaluation_contract_required_for_dominance,true);
+  assert.equal(root.cross_contract_dominance_forbidden,true);
   assert.equal(root.external_acceptance_owner_required,true);
   assert.equal(root.sealed_exogenous_acceptance_required_for_positive,true);
   assert.equal(root.candidate_can_view_sealed_acceptance,false);
