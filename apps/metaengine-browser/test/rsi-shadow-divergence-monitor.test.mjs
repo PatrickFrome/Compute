@@ -36,6 +36,7 @@ import {
   createRsiShadowDivergenceObservation,
   rsiShadowDivergenceMonitorTrustRootSnapshot,
 } from '../src/rsi-shadow-divergence-monitor.mjs';
+import { createRsiBoundedCanaryReview } from '../src/rsi-bounded-canary-review.mjs';
 
 const SOURCE = 'a'.repeat(40);
 const d = (char) => `sha256:${char.repeat(64)}`;
@@ -343,6 +344,21 @@ test('clean externally monitored evidence reaches review only, never canary auth
     assert.equal(snapshot.ledger_can_activate_canary, false);
     assert.equal(snapshot.canary_activation_authorized, false);
     assert.equal(snapshot.active_profile_digest, fx.shadowBinding.champion_profile_digest);
+    const reviewEvidence = ledger.reviewEvidence();
+    assert.equal(reviewEvidence.ready_for_external_bounded_canary_review, true);
+    assert.equal(reviewEvidence.incident_latched, false);
+    assert.equal(reviewEvidence.champion_remains_default, true);
+    assert.equal(reviewEvidence.canary_activation_authorized, false);
+    assert.match(reviewEvidence.review_evidence_digest, /^sha256:[0-9a-f]{64}$/);
+    const review = createRsiBoundedCanaryReview({
+      review_id: 'shadow.monitor.external.review.1',
+      shadow_review_evidence: reviewEvidence,
+      external_cohort_digest: d('1'),
+      external_reviewer: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(review.state, 'READY_FOR_EXTERNAL_CANARY_CONTROLLER_REVIEW');
+    assert.equal(review.review_can_activate_canary, false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -385,6 +401,15 @@ test('security or replay failure latches an incident permanently across restart'
     assert.equal(restored.snapshot().incident_latched, true);
     assert.equal(restored.snapshot().ready_for_external_bounded_canary_review, false);
     assert.equal(restored.snapshot().incident_can_be_cleared, false);
+    const incidentEvidence = restored.reviewEvidence();
+    assert.equal(incidentEvidence.incident_latched, true);
+    assert.throws(() => createRsiBoundedCanaryReview({
+      review_id: 'shadow.monitor.external.review.incident',
+      shadow_review_evidence: incidentEvidence,
+      external_cohort_digest: d('1'),
+      external_reviewer: true,
+      authored_by_candidate: false,
+    }), /shadow_evidence_not_ready/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
