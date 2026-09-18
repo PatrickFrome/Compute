@@ -50,6 +50,13 @@ export function createRsiBoundedRevisionDevosBridge({
   approved_mutations,
   approved_mutation_manifest_digest,
   implementation_reviewer_root_digest,
+  builder_identity_digest,
+  toolchain_image_digest,
+  dependency_material_manifest_digest,
+  harness_manifest_digest,
+  capability_manifest_digest,
+  build_provenance_policy_digest,
+  artifact_signature_policy_digest,
   external_implementation_reviewer=false,
 }={}){
   if(external_implementation_reviewer!==true)throw new Error('rsi_revision_bridge_external_reviewer_required');
@@ -63,6 +70,42 @@ export function createRsiBoundedRevisionDevosBridge({
   const manifestDigest=digest(approved);
   if(manifestDigest!==exactDigest(approved_mutation_manifest_digest,'approved_mutation_manifest'))throw new Error('rsi_revision_bridge_mutation_manifest_digest_mismatch');
   const reviewerRoot=exactDigest(implementation_reviewer_root_digest,'reviewer_root');
+  const provenanceValues=[
+    exactDigest(builder_identity_digest,'builder_identity'),
+    exactDigest(toolchain_image_digest,'toolchain_image'),
+    exactDigest(dependency_material_manifest_digest,'dependency_material_manifest'),
+    exactDigest(harness_manifest_digest,'harness_manifest'),
+    exactDigest(capability_manifest_digest,'capability_manifest'),
+    exactDigest(build_provenance_policy_digest,'build_provenance_policy'),
+    exactDigest(artifact_signature_policy_digest,'artifact_signature_policy'),
+  ];
+  if(new Set(provenanceValues).size!==provenanceValues.length)throw new Error('rsi_revision_bridge_independent_provenance_roots_required');
+  const provenanceContract=Object.freeze({
+    builder_identity_digest:provenanceValues[0],
+    toolchain_image_digest:provenanceValues[1],
+    dependency_material_manifest_digest:provenanceValues[2],
+    harness_manifest_digest:provenanceValues[3],
+    capability_manifest_digest:provenanceValues[4],
+    build_provenance_policy_digest:provenanceValues[5],
+    artifact_signature_policy_digest:provenanceValues[6],
+    immutable_materials_required:true,
+    network_deny_required:true,
+    private_writable_layer_required:true,
+    materials_complete_required:true,
+    artifact_reconstruction_required:true,
+    protected_root_diff_audit_required:true,
+    preserved_behavior_review_required:true,
+    external_build_attestation_required:true,
+    artifact_signature_required:true,
+    transparency_log_inclusion_required:true,
+    candidate_can_choose_builder:false,
+    candidate_can_choose_toolchain:false,
+    candidate_can_choose_dependencies:false,
+    candidate_can_choose_harness:false,
+    candidate_can_choose_capabilities:false,
+    candidate_can_sign_artifact:false,
+    provenance_is_activation_authority:false,
+  });
   const seed={
     source_sha:checkedEnvelope.source_sha,
     envelope_digest:checkedEnvelope.envelope_digest,
@@ -70,6 +113,7 @@ export function createRsiBoundedRevisionDevosBridge({
     mutation_surface:surface,
     approved_mutation_manifest_digest:manifestDigest,
     implementation_reviewer_root_digest:reviewerRoot,
+    implementation_provenance_contract_digest:digest(provenanceContract),
   };
   const seedHash=hash(seed);
   const experimentId=`rsi_exp_${seedHash.slice(0,24)}`;
@@ -88,6 +132,7 @@ export function createRsiBoundedRevisionDevosBridge({
     negative_evidence_root_digest:checkedEnvelope.negative_evidence_root_digest,
     regression_budget_digest:checkedEnvelope.regression_budget_digest,
     validation_plan_digest:checkedEnvelope.validation_plan_digest,
+    implementation_provenance_contract_digest:digest(provenanceContract),
   });
   const constraints=Object.freeze([
     `exact_base_sha=${checkedEnvelope.source_sha}`,
@@ -103,6 +148,13 @@ export function createRsiBoundedRevisionDevosBridge({
     'private_writable_layer_required',
     'no_host_repository_mount',
     'network_deny_by_default',
+    'locked_dependency_materials_required',
+    'external_build_attestation_required',
+    'artifact_signature_required',
+    'transparency_log_inclusion_required',
+    'artifact_reconstruction_required',
+    'protected_root_diff_audit_required',
+    'preserved_behavior_review_required',
     'protected_policy_roots_immutable',
     'no_main_or_production_promotion',
     'no_direct_self_update',
@@ -128,6 +180,7 @@ export function createRsiBoundedRevisionDevosBridge({
       revision_envelope_digest:checkedEnvelope.envelope_digest,
       revision_proposal_digest:checkedProposal.proposal_digest,
       revision_limits:limits,
+      implementation_provenance_contract:provenanceContract,
     }),
   });
   const plan={
@@ -160,6 +213,7 @@ export function createRsiBoundedRevisionDevosBridge({
     approved_mutations:approved,
     approved_mutation_manifest_digest:manifestDigest,
     implementation_reviewer_root_digest:reviewerRoot,
+    implementation_provenance_contract:provenanceContract,
     mutation_surface:surface,
     revision_limits:limits,
     devos_experiment_plan:Object.freeze(plan),
@@ -194,6 +248,13 @@ export function verifyRsiBoundedRevisionDevosBridge(bridge,{envelope,proposal,ex
     approved_mutations:bridge.approved_mutations,
     approved_mutation_manifest_digest:bridge.approved_mutation_manifest_digest,
     implementation_reviewer_root_digest:bridge.implementation_reviewer_root_digest,
+    builder_identity_digest:bridge.implementation_provenance_contract?.builder_identity_digest,
+    toolchain_image_digest:bridge.implementation_provenance_contract?.toolchain_image_digest,
+    dependency_material_manifest_digest:bridge.implementation_provenance_contract?.dependency_material_manifest_digest,
+    harness_manifest_digest:bridge.implementation_provenance_contract?.harness_manifest_digest,
+    capability_manifest_digest:bridge.implementation_provenance_contract?.capability_manifest_digest,
+    build_provenance_policy_digest:bridge.implementation_provenance_contract?.build_provenance_policy_digest,
+    artifact_signature_policy_digest:bridge.implementation_provenance_contract?.artifact_signature_policy_digest,
     external_implementation_reviewer:true,
   });
   if(canonical.bridge_digest!==exactDigest(bridge.bridge_digest,'bridge'))throw new Error('rsi_revision_bridge_digest_mismatch');
