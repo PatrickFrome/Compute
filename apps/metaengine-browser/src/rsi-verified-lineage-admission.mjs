@@ -67,6 +67,49 @@ function verifyVerifiedEvaluatorResult(row,candidate){
   return row;
 }
 
+export function verifyRsiVerifiedLineageAdmission(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row) || row.schema !== RSI_VERIFIED_LINEAGE_ADMISSION_SCHEMA || row.version !== 1) {
+    throw new Error('rsi_lineage_admission_invalid');
+  }
+  zeroAuthority(row,'admission');
+  if (!CANDIDATE_ID_RE.test(String(row.candidate_id || '').toLowerCase())
+      || !SHA40_RE.test(String(row.candidate_sha || '').toLowerCase())
+      || !SHA40_RE.test(String(row.parent_sha || '').toLowerCase())
+      || !SHA256_RE.test(String(row.verified_evaluator_result_digest || '').toLowerCase())
+      || !SHA256_RE.test(String(row.tournament_plan_digest || '').toLowerCase())
+      || !SHA256_RE.test(String(row.tournament_result_digest || '').toLowerCase())
+      || !SHA256_RE.test(String(row.archive_admission_digest || '').toLowerCase())
+      || !SHA256_RE.test(String(row.archive_snapshot_digest || '').toLowerCase())
+      || !SHA256_RE.test(String(row.clade_node_digest || '').toLowerCase())) {
+    throw new Error('rsi_lineage_admission_identity_invalid');
+  }
+  if (
+    row.diverse_lineage_retention_required !== true
+    || row.scalar_rank_authoritative !== false
+    || row.non_elite_stepping_stones_may_remain_active !== true
+    || row.direct_skill_library_admission_allowed !== false
+    || row.transfer_evidence_required_before_skill_library !== true
+    || row.lifecycle_governance_required_before_skill_activation !== true
+    || row.candidate_can_edit_archive !== false
+    || row.candidate_can_edit_clade_statistics !== false
+    || row.eligible_for_promotion !== false
+    || row.direct_promotion_enabled !== false
+    || row.direct_self_update_enabled !== false
+  ) throw new Error('rsi_lineage_admission_policy_invalid');
+  const clade = verifyRsiCladeNode(row.clade_node);
+  if (clade.node_digest !== row.clade_node_digest
+      || clade.candidate_id !== row.candidate_id
+      || clade.candidate_sha !== row.candidate_sha
+      || clade.parent_candidate_id !== row.parent_candidate_id) {
+    throw new Error('rsi_lineage_admission_clade_binding_invalid');
+  }
+  const clone=structuredClone(row);
+  delete clone.lineage_admission_digest;
+  const expected=digest(clone);
+  if (row.lineage_admission_digest !== expected) throw new Error('rsi_lineage_admission_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
 export function admitRsiVerifiedLineage({
   archive,
   candidate_handoff,
