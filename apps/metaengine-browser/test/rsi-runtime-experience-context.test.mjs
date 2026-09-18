@@ -83,7 +83,7 @@ test('runtime opens a durable zero-authority learning episode from frontier with
   }
 });
 
-test('opening the same experience context twice is fenced by deterministic episode identity',async()=>{
+test('opening the same experience context twice is durable-idempotent under deterministic episode identity',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-context-duplicate-'));
   const ledgerPath=path.join(root,'rsi.jsonl');
   try {
@@ -91,11 +91,12 @@ test('opening the same experience context twice is fenced by deterministic episo
     await runtime.start();
     await runtime.observeBrainSnapshot(ambiguousBrain());
     const [entry]=runtime.improvementFrontier({limit:32});
-    await runtime.openLearningEpisodeFromOpportunity({opportunity_id:entry.opportunity_id});
-    await assert.rejects(
-      runtime.openLearningEpisodeFromOpportunity({opportunity_id:entry.opportunity_id}),
-      /rsi_episode_duplicate/,
-    );
+    const first=await runtime.openLearningEpisodeFromOpportunity({opportunity_id:entry.opportunity_id});
+    const second=await runtime.openLearningEpisodeFromOpportunity({opportunity_id:entry.opportunity_id});
+    assert.equal(first.already_open,false);
+    assert.equal(second.already_open,true);
+    assert.equal(second.episode.episode_id,first.episode.episode_id);
+    assert.equal(second.context_plan.context_plan_digest,first.context_plan.context_plan_digest);
     assert.equal(runtime.snapshot().episodes.episode_count,1);
     assert.equal(runtime.snapshot().experience_context.planned_count,1);
   } finally {
