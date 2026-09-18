@@ -132,6 +132,8 @@ test('canary outcome evaluates outcome safety security awareness and task utilit
   verifyRsiMetaProfileCanaryOutcome(outcome,{admission:fx.admission,decision});
   assert.equal(outcome.rollback_required,false);
   assert.equal(outcome.learning_success_eligible,true);
+  assert.equal(outcome.ambiguous_is_not_success,true);
+  assert.equal(outcome.ambiguous_retry_allowed,false);
 });
 
 test('ambiguity or security failure latches rollback and prevents further canary decisions',async()=>{
