@@ -101,7 +101,7 @@ test('raising the floor invalidates an ACTIVE transport proof and requires fresh
     tab_id: agent.tab_id,
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
-    conversation_url: 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc',
+    conversation_url: 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc',
   });
   agent = h.provisioner.snapshot().agents[0];
   assert.equal(agent.lifecycle_state, 'ACTIVE');
@@ -124,7 +124,7 @@ test('preconversation overlay proof is also invalidated when the canonical gener
     tab_id: agent.tab_id,
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
-    transport_url: 'https://chatgpt.com/',
+    transport_url: 'https://chat.z.ai/',
   });
   agent = h.provisioner.snapshot().agents[0];
   assert.equal(agent.lifecycle_state, 'ACTIVE');

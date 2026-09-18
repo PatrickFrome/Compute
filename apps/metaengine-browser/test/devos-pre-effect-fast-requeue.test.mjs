@@ -48,7 +48,7 @@ const fleet = {
   }],
 };
 
-const composer = { role: 'textbox', name: 'Message ChatGPT' };
+const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const supervisorTab = 'tab_supervisor';
 

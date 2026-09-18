@@ -7,7 +7,7 @@ const AGENT_ID = 'agent_12345678-abcd';
 const TAB_ID = 'tab_12345678-1234-4123-8123-123456789abc';
 const TARGET_ID = 'webcontents:41';
 const LEASE_ID = '12345678-1234-4123-8123-123456789abc';
-const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
 function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => structuredClone(body) };
@@ -61,7 +61,7 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
       assert.equal(tab_id, TAB_ID);
       assert.equal(target_id, TARGET_ID);
       assert.equal(generation_epoch, 7);
-      assert.equal(transport_url, 'https://chatgpt.com/');
+      assert.equal(transport_url, 'https://chat.z.ai/');
       return activate({ stage: 'PRECONVERSATION_ROOT', hash: '2'.repeat(64) });
     },
     markTransportProven: async ({ agent_id, tab_id, target_id, generation_epoch, conversation_url }) => {
@@ -162,7 +162,7 @@ test('one restored conversation is promoted locally before the normal scheduler 
 });
 
 test('root ChatGPT tabs gain preconversation transport proof without TYPE or CLICK', async () => {
-  const h = harness({ tabUrl: 'https://chatgpt.com/' });
+  const h = harness({ tabUrl: 'https://chat.z.ai/' });
   try {
     const snapshot = await h.cycle.cycle();
     assert.equal(h.state.fleet.agents[0].lifecycle_state, 'ACTIVE');

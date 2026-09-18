@@ -46,7 +46,7 @@ test('elastic restart requires fresh local revalidation and exact fresh transpor
     tab_id: agent.tab_id,
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
-    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   });
   const priorActive = first.snapshot().agents[0];
   assert.equal(priorActive.lifecycle_state, 'ACTIVE');
@@ -68,7 +68,7 @@ test('elastic restart requires fresh local revalidation and exact fresh transpor
       tab_id: afterRestart.tab_id,
       target_id: priorActive.target_id,
       generation_epoch: priorActive.generation_epoch,
-      conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     }),
     /fleet_transport_target_binding_mismatch|fleet_transport_generation_binding_mismatch/,
   );
@@ -88,7 +88,7 @@ test('elastic restart requires fresh local revalidation and exact fresh transpor
       tab_id: afterRestart.tab_id,
       target_id: afterRestart.target_id,
       generation_epoch: afterRestart.generation_epoch - 1,
-      conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     }),
     /fleet_transport_generation_binding_mismatch/,
   );
@@ -98,7 +98,7 @@ test('elastic restart requires fresh local revalidation and exact fresh transpor
     tab_id: afterRestart.tab_id,
     target_id: afterRestart.target_id,
     generation_epoch: afterRestart.generation_epoch,
-    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   });
   const freshActive = activated.agents[0];
   assert.equal(freshActive.lifecycle_state, 'ACTIVE');

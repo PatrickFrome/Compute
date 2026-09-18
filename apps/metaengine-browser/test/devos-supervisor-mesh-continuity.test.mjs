@@ -6,9 +6,9 @@ import test from 'node:test';
 import { SupervisorMesh, supervisorInstanceIdForUrl } from '../src/supervisor-mesh.mjs';
 import { SupervisorMeshRuntime } from '../src/supervisor-mesh-runtime.mjs';
 
-const A = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const B = 'https://chatgpt.com/c/bbbbbbbb-1111-2222-3333-444444444444';
-const F = 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444';
+const A = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const B = 'https://chat.z.ai/c/bbbbbbbb-1111-2222-3333-444444444444';
+const F = 'https://chat.z.ai/c/ffffffff-1111-2222-3333-444444444444';
 
 function meshHarness() {
   let stored = null;

@@ -1,7 +1,9 @@
 export const TAB_NETWORK_ACTIVITY_VERSION = '1.0.0';
 
 const TRACKED_TYPES = new Set(['xhr','other']);
-const ALLOWED_HOST_SUFFIXES = ['chatgpt.com','openai.com'];
+// GLM agent platform (2026-09-19): the fleet's inference traffic now flows to
+// chat.z.ai; the ChatGPT suffixes stay tracked for the legacy operator lane.
+const ALLOWED_HOST_SUFFIXES = ['chat.z.ai','z.ai','chatgpt.com','openai.com'];
 
 function nowIso(clock) { return new Date(clock()).toISOString(); }
 function hostAllowed(url) {

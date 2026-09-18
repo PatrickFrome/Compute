@@ -36,7 +36,7 @@ test('root transport proof is an in-process admission overlay until a canonical 
       tab_id: bound.tab_id,
       target_id: bound.target_id,
       generation_epoch: bound.generation_epoch,
-      transport_url: 'https://chatgpt.com/',
+      transport_url: 'https://chat.z.ai/',
     });
     const overlay = promoted.agents[0];
     assert.equal(overlay.lifecycle_state, 'ACTIVE');
@@ -55,7 +55,7 @@ test('root transport proof is an in-process admission overlay until a canonical 
         tab_id: bound.tab_id,
         target_id: 'webcontents:999',
         generation_epoch: bound.generation_epoch,
-        transport_url: 'https://chatgpt.com/',
+        transport_url: 'https://chat.z.ai/',
       }),
       /fleet_transport_preconversation_target_binding_mismatch/,
     );
@@ -65,7 +65,7 @@ test('root transport proof is an in-process admission overlay until a canonical 
       tab_id: bound.tab_id,
       target_id: bound.target_id,
       generation_epoch: bound.generation_epoch,
-      conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
     });
     assert.equal(canonical.agents[0].lifecycle_state, 'ACTIVE');
     assert.equal(canonical.agents[0].transport_proof.transport_stage, undefined);

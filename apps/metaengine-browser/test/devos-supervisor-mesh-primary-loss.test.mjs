@@ -5,8 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { SupervisorMeshRuntime } from '../src/supervisor-mesh-runtime.mjs';
 
-const A = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const B = 'https://chatgpt.com/c/bbbbbbbb-1111-2222-3333-444444444444';
+const A = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const B = 'https://chat.z.ai/c/bbbbbbbb-1111-2222-3333-444444444444';
 
 test('lost primary permits standby recovery event without replaying a prior delivery', async () => {
   const commands = [];

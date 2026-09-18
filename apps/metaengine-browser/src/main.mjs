@@ -1,4 +1,5 @@
 import { app, BaseWindow, MessageChannelMain, WebContentsView, ipcMain, nativeTheme, protocol, safeStorage, session, utilityProcess } from 'electron';
+import { AGENT_PLATFORM_HOME_URL, isAgentPlatformHost } from './browser-agent-platform.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -109,13 +110,13 @@ function configureUserSession() {
   userSession = session.fromPartition(SECURITY_POLICY.user_space_partition, { cache: true });
   let chatgptPreconnectArmed = false;
   try {
-    userSession.preconnect({ url: 'https://chatgpt.com/', numSockets: 2 });
+    userSession.preconnect({ url: AGENT_PLATFORM_HOME_URL, numSockets: 2 });
     chatgptPreconnectArmed = true;
   } catch {}
   console.log(JSON.stringify({
     schema: 'metaengine.browser.chat-preconnect.v1',
     state: chatgptPreconnectArmed ? 'ARMED' : 'UNAVAILABLE',
-    origin: 'https://chatgpt.com/',
+    origin: AGENT_PLATFORM_HOME_URL,
     sockets: 2,
     persistent_partition: SECURITY_POLICY.user_space_partition,
     authority_effect: false,
@@ -491,11 +492,11 @@ function wireRemoteView(tab, view) {
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
 }
 
-async function createTab(input = 'https://chatgpt.com/', { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
+async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
   if (!userSession) configureUserSession();
   const d = navigationDecision(input);
   if (!d.allow) throw new Error(`navigation_blocked:${d.reason}`);
-  const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'CHATGPT' ? 'ChatGPT' : '', created_by_continuity_id });
+  const tab = registry.create({ url: d.normalized_url, kind: d.kind, role, title: d.kind === 'GLM_CHAT' ? 'Z.ai' : (d.kind === 'CHATGPT' ? 'ChatGPT' : ''), created_by_continuity_id });
   const view = new WebContentsView({ webPreferences: { ...REMOTE_WEB_PREFERENCES, session: userSession } });
   views.set(tab.tab_id, view);
   wireRemoteView(tab, view);
@@ -698,7 +699,7 @@ async function handleCommand(command, payload = {}) {
   if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
   if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true, awaitLoad: false });
-  if (command === 'NEW_TAB') return createTab(payload?.url || 'https://chatgpt.com/', { select: payload?.select !== false, load: true, created_by_continuity_id: payload?.created_by_continuity_id || null });
+  if (command === 'NEW_TAB') return createTab(payload?.url || AGENT_PLATFORM_HOME_URL, { select: payload?.select !== false, load: true, created_by_continuity_id: payload?.created_by_continuity_id || null });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
   if (command === 'CLOSE_TAB') { await closeTab(payload?.tab_id); return { ok: true }; }
   if (command === 'NAVIGATE') {
@@ -779,6 +780,7 @@ function tabForPlatform(platform) {
   const match = (tab) => {
     try {
       const host = new URL(tab.url).hostname.toLowerCase();
+      if (p === 'GLM_ZAI') return isAgentPlatformHost(host);
       if (p === 'CHATGPT') return host === 'chatgpt.com' || host === 'www.chatgpt.com' || host === 'chat.openai.com';
     } catch {}
     return false;
@@ -1113,10 +1115,10 @@ async function bootstrapDegradableSubsystems() {
 
   let initialTab = null;
   if (sessionReady && shouldCreateInitialRemoteTab) {
-    initialTab = await runDegradableStartupStep('INITIAL_TAB_CREATE', () => createTab('https://chatgpt.com/', { select: true, load: false }));
+    initialTab = await runDegradableStartupStep('INITIAL_TAB_CREATE', () => createTab(AGENT_PLATFORM_HOME_URL, { select: true, load: false }));
     if (initialTab?.tab_id) {
       setImmediate(() => {
-        void loadTab(initialTab.tab_id, 'https://chatgpt.com/')
+        void loadTab(initialTab.tab_id, AGENT_PLATFORM_HOME_URL)
           .then(() => recordStartupSubsystemReady('INITIAL_REMOTE_LOAD'))
           .catch((error) => recordStartupSubsystemDegraded('INITIAL_REMOTE_LOAD', error));
       });

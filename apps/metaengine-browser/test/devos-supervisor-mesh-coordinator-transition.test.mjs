@@ -14,8 +14,8 @@ function makeMesh() {
   });
 }
 
-const primary = { tab_id: 'tab_primary', url: 'https://chatgpt.com/c/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', selected: true };
-const standby = { tab_id: 'tab_standby', url: 'https://chatgpt.com/c/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', selected: false };
+const primary = { tab_id: 'tab_primary', url: 'https://chat.z.ai/c/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', selected: true };
+const standby = { tab_id: 'tab_standby', url: 'https://chat.z.ai/c/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', selected: false };
 
 test('stable coordinator does not consume a new fencing generation', async () => {
   const mesh = makeMesh();

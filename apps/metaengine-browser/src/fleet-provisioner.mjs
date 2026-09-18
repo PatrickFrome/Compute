@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { AGENT_PLATFORM_HOME_URL, isAgentPlatformUrl } from './browser-agent-platform.mjs';
 import {
   FleetProvisioner as CoreFleetProvisioner,
   FLEET_PROFILES,
@@ -175,14 +176,14 @@ export function compactZeroTargetRestartBindings(input, { policy = null, tabExis
   };
 }
 
-function normalizeRootChatGptUrl(value) {
+function normalizeRootAgentPlatformUrl(value) {
   const url = new URL(String(value || '').trim());
-  if (url.protocol !== 'https:' || !['chatgpt.com', 'www.chatgpt.com'].includes(url.hostname.toLowerCase())) {
+  if (url.protocol !== 'https:' || !isAgentPlatformUrl(url.href)) {
     throw new Error('fleet_transport_preconversation_origin_invalid');
   }
   const path = url.pathname.replace(/\/+$/, '');
   if (path !== '') throw new Error('fleet_transport_preconversation_path_invalid');
-  return 'https://chatgpt.com/';
+  return AGENT_PLATFORM_HOME_URL;
 }
 
 function exactOverlayProof(agent, proof) {
@@ -263,7 +264,7 @@ export class FleetProvisioner extends CoreFleetProvisioner {
     if (!tabId || String(agent.tab_id || '') !== tabId) throw new Error('fleet_transport_preconversation_tab_binding_mismatch');
     if (!targetId || String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_transport_preconversation_target_binding_mismatch');
     if (!Number.isSafeInteger(generationEpoch) || Number(agent.generation_epoch) !== generationEpoch) throw new Error('fleet_transport_preconversation_generation_binding_mismatch');
-    const normalizedUrl = normalizeRootChatGptUrl(transport_url);
+    const normalizedUrl = normalizeRootAgentPlatformUrl(transport_url);
     const proof = Object.freeze({
       schema: 'metaengine.browser.fleet-transport-proof.v1',
       transport_stage: 'PRECONVERSATION_ROOT',

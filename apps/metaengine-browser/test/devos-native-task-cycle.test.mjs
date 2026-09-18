@@ -40,14 +40,14 @@ const fleet = {
     authority_effect: false,
   }],
 };
-const composer = { role: 'textbox', name: 'Message ChatGPT' };
+const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
-const conversationUrl = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversationUrl = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 
 function response(status, body) { return { status, ok: status >= 200 && status < 300, async json(){ return structuredClone(body); } }; }
-function frame({ url = 'https://chatgpt.com/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
+function frame({ url = 'https://chat.z.ai/', stopActive = false, sendVisible = true, viewport = { width: 1200, height: 640 } } = {}) {
   return {
     tab_id: lease.tab_id,
     target_id: lease.target_id,
@@ -136,12 +136,12 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true, tab_id: selected }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount < 3) return frame();
+      if (captureCount < 2) return frame();
       return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.payload.submit_after_type, false);
-      return { authority_effect: true };
+      assert.equal(command.payload.submit_after_type, true);
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
@@ -149,16 +149,16 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
   const cycle = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
   const first = await cycle.cycle();
   assert.equal(first.dispatch.state, 'RUNNING');
-  assert.equal(first.dispatch.proof.effect_state, 'PROVEN_GENERATING');
+  assert.equal(first.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
   assert.equal(first.dispatch.selected_tab_mutation, true);
   assert.equal(first.dispatch.viewport_geometry_required, true);
   assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
   assert.equal(first.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(selected, supervisorTab);
   assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 1);
+  assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 0);
   const type = calls.find((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE');
-  assert.equal(type[2].submit_after_type, false);
+  assert.equal(type[2].submit_after_type, true);
   const second = await cycle.cycle();
   assert.equal(second.dispatch.state, 'NO_REDISPATCH');
   assert.equal(first.second_scheduler_loop, false);
@@ -185,9 +185,9 @@ test('zero viewport is rejected before type or Send click', async () => {
   assert.equal(selected, supervisorTab);
 });
 
-test('existing conversation URL alone never proves no-op Send click and click is not repeated', async () => {
+test('existing conversation URL alone never proves no-op submit and the submit is not repeated', async () => {
   let selected = supervisorTab;
-  let clicks = 0;
+  let submits = 0;
   let completionPosts = 0;
   const signedRequest = async (path) => {
     if (path === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] });
@@ -198,8 +198,8 @@ test('existing conversation URL alone never proves no-op Send click and click is
     if (command.action === 'FLEET_RECONCILE') return fleet;
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') return frame({ url: conversationUrl, stopActive: false, sendVisible: true });
-    if (command.action === 'SEMANTIC_TYPE') return { authority_effect: true };
-    if (command.action === 'TYPED_CLICK') { clicks += 1; return { authority_effect: true }; }
+    if (command.action === 'SEMANTIC_TYPE') { submits += 1; return { authority_effect: true }; }
+    if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
@@ -211,7 +211,7 @@ test('existing conversation URL alone never proves no-op Send click and click is
       return true;
     },
   );
-  assert.equal(clicks, 1);
+  assert.equal(submits, 1);
   assert.equal(completionPosts, 1);
   assert.equal(selected, supervisorTab);
 });
@@ -229,7 +229,7 @@ test('user-selected tab after Send is not overwritten by restoration', async () 
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount < 3) return frame();
+      if (captureCount < 2) return frame();
       selected = 'tab_user_override';
       return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
     }

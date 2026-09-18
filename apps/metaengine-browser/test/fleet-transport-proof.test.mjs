@@ -36,7 +36,7 @@ test('BOUND_UNVERIFIED promotes to ACTIVE only with exact physical transport pro
     tab_id: before.tab_id,
     target_id: before.target_id,
     generation_epoch: before.generation_epoch,
-    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   });
   const after = snap.agents[0];
   assert.equal(after.lifecycle_state, 'ACTIVE');
@@ -59,7 +59,7 @@ test('stale tab, target or generation cannot promote fleet agent', async () => {
     tab_id: agent.tab_id,
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
-    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   };
   await assert.rejects(() => h.provisioner.markTransportProven({ ...common, tab_id: 'tab_deadbeef-dead-beef-dead-beefdeadbeef' }), /fleet_transport_tab_binding_mismatch/);
   await assert.rejects(() => h.provisioner.markTransportProven({ ...common, target_id: 'webcontents:999' }), /fleet_transport_target_binding_mismatch/);
@@ -77,7 +77,7 @@ test('tab loss clears ACTIVE transport proof and increments incarnation', async 
     tab_id: before.tab_id,
     target_id: before.target_id,
     generation_epoch: before.generation_epoch,
-    conversation_url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   });
   await h.provisioner.onTabClosed(before.tab_id, 'TEST_LOSS');
   const after = h.provisioner.snapshot().agents[0];

@@ -16,10 +16,10 @@ const lease = {
   automatic_retry_allowed: false,
   task_spec: { objective: 'Use an already transport-proven Browser incarnation.' },
 };
-const composer = { role: 'textbox', name: 'Message ChatGPT' };
+const composer = { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) }, backend_node_id: 3 };
 const send = { role: 'button', name: 'Send prompt' };
 const stop = { role: 'button', name: 'Stop generating' };
-const conversation = 'https://chatgpt.com/c/12345678-abcd-4abc-8abc-123456789abc';
+const conversation = 'https://chat.z.ai/c/12345678-abcd-4abc-8abc-123456789abc';
 const supervisorTab = 'tab_supervisor';
 const fleetProof = {
   schema: 'metaengine.browser.fleet-transport-proof.v1',
@@ -81,19 +81,19 @@ function harness({ lifecycle = 'ACTIVE', proof = fleetProof, postTarget = lease.
       return { ok: true, tab_id: selectedTab };
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.payload.submit_after_type, false);
-      return { authority_effect: true };
+      assert.equal(command.payload.submit_after_type, true);
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') return { authority_effect: true };
     if (command.action === 'CAPTURE') {
       captures += 1;
-      const post = captures >= 3;
+      const post = captures >= 2;
       return {
         schema: 'metaengine.native-browser.perception.v1',
         tab_id: lease.tab_id,
         target_id: post ? postTarget : lease.target_id,
         process_incarnation_id: 'browser-process-incarnation-001',
-        url: post ? conversation : 'https://chatgpt.com/',
+        url: post ? conversation : 'https://chat.z.ai/',
         viewport: { width: 1200, height: 640 },
         semantic_targets: post ? [composer, stop] : [composer, send],
         authority_effect: false,

@@ -9,8 +9,8 @@ const TAB_ID = 'tab_87654321-1234-4123-8123-123456789abc';
 const TARGET_ID = 'webcontents:51';
 const TASK_ID = '12345678-1111-4111-8111-123456789abc';
 const PROMOTION_LEASE_ID = '12345678-2222-4222-8222-123456789abc';
-const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-ffffffffffff';
-const ROOT = 'https://chatgpt.com/';
+const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-ffffffffffff';
+const ROOT = 'https://chat.z.ai/';
 const sha256 = (value) => crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 
 function response(status, body) {
@@ -38,7 +38,7 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
   let clickCount = 0;
   const state = {
     tabs: [
-      { tab_id: 'tab_supervisor', url: 'https://chatgpt.com/c/supervisor-1234', selected: true },
+      { tab_id: 'tab_supervisor', url: 'https://chat.z.ai/c/supervisor-1234', selected: true },
       { tab_id: TAB_ID, url: ROOT, selected: false },
     ],
     active_tab: { tab_id: 'tab_supervisor' },
@@ -107,7 +107,7 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
     url,
     viewport: { width: 1200, height: 800 },
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'd'.repeat(64) }, backend_node_id: 3 },
       ...(generating ? [{ role: 'button', name: 'Stop generating' }] : [{ role: 'button', name: 'Send prompt' }]),
     ],
     authority_effect: false,
@@ -123,16 +123,15 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
     if (command.action === 'CAPTURE') {
       captureCount += 1;
       if (captureCount === 1) return frame({ url: ROOT }); // promotion CAPTURE
-      if (captureCount === 2) return frame({ url: ROOT }); // pre-type
-      if (captureCount === 3) return frame({ url: ROOT }); // pre-click after type
-      return frame({ url: CONVERSATION, generating: true }); // post-send and any revalidation
+      if (captureCount === 2) return frame({ url: ROOT }); // pre-type readiness
+      return frame({ url: CONVERSATION, generating: true }); // post-submit and any revalidation
     }
     if (command.action === 'SEMANTIC_TYPE') {
-      assert.equal(command.payload.submit_after_type, false);
-      return { authority_effect: true };
+      assert.equal(command.payload.submit_after_type, true);
+      clickCount += 1;
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
     }
     if (command.action === 'TYPED_CLICK') {
-      clickCount += 1;
       return { authority_effect: true };
     }
     throw new Error(`unexpected_command:${command.action}`);
@@ -221,11 +220,11 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
     assert.equal(markRunningObservedCanonicalProof, true, 'canonical proof must exist before DB RUNNING receipt');
     assert.equal(state.fleet.agents[0].transport_proof.transport_stage, undefined);
     assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
-    assert.equal(clickCount, 1, 'only one Send effect is allowed');
+    assert.equal(clickCount, 1, 'only one Enter-submit effect is allowed');
     assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
-    assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 1);
+    assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 0);
     assert.ok(calls.findIndex((row) => row[1] === '/v1/devos/promotion-release') < calls.findIndex((row) => row[1] === '/v1/devos/cycle'));
-    assert.ok(calls.findIndex((row) => row[1] === 'TYPED_CLICK') < calls.findIndex((row) => row[1] === '/v1/devos/mark-running'));
+    assert.ok(calls.findIndex((row) => row[1] === 'SEMANTIC_TYPE') < calls.findIndex((row) => row[1] === '/v1/devos/mark-running'));
   } finally {
     clearFleetRuntime(fleetRuntime);
   }

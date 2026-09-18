@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { evaluateFleetSubmitReadiness } from './fleet-submit-readiness.mjs';
+import { AGENT_PLATFORM_ID, isAgentPlatformConversationUrl } from './browser-agent-platform.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
 import { FLEET_TAB_CEILING } from './tab-registry.mjs';
 import { devosRuntimeControlAllowsContinuousService, normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
@@ -32,14 +32,19 @@ function positiveInt(value, name) {
   if (!Number.isSafeInteger(out) || out < 1) throw new Error(`devos_${name}_invalid`);
   return out;
 }
+function stopControlName(name) {
+  const value = String(name || '').trim().toLowerCase();
+  if (!value) return false;
+  return /^(stop( generation| generating| response)?|останов(ить)?( ответ| генерацию)?)$/.test(value)
+    || value.includes('stop generating')
+    || value.includes('остановить ответ');
+}
+
 function conversationUrl(value) {
-  try {
-    const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' || !['chatgpt.com','www.chatgpt.com'].includes(url.hostname.toLowerCase())) return null;
-    const path = url.pathname.replace(/\/+$/, '');
-    if (!/^\/c\/[a-z0-9-]+$/i.test(path)) return null;
-    return `https://chatgpt.com${path.toLowerCase()}`;
-  } catch { return null; }
+  if (!isAgentPlatformConversationUrl(value)) return null;
+  const url = new URL(String(value || ''));
+  const path = url.pathname.replace(/\/+$/, '');
+  return `https://chat.z.ai${path.toLowerCase()}`;
 }
 function selectedTabId(state = {}) {
   const active = String(state?.active_tab?.tab_id || '');
@@ -71,6 +76,7 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
     observed_target_id: lease.target_id,
     selected_tab_id,
     phase,
+    platform: AGENT_PLATFORM_ID,
   });
   if (!readiness.ready) {
     const error = new Error(`devos_submit_not_ready:${phase}:${readiness.reason}`);
@@ -519,7 +525,7 @@ export class DevOsNativeTaskCycle {
       if (selected !== lease.tab_id) throw new Error('devos_foreground_selection_unproven');
       assertLiveLeaseBinding(lease, foregroundState?.fleet);
 
-      const pre = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
+      const pre = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
       const preReady = readinessOrThrow({ frame: pre, lease, selected_tab_id: selected, phase: 'PRE_TYPE' });
       const preConversation = conversationUrl(pre?.url);
 
@@ -531,49 +537,12 @@ export class DevOsNativeTaskCycle {
         pre_conversation_url_sha256: preConversation ? sha256(preConversation) : null,
       });
 
-      try {
-        await this.#executeCommand({
-          action: 'SEMANTIC_TYPE', platform: 'CHATGPT',
-          payload: {
-            tab_id: lease.tab_id,
-            role: preReady.composer.role,
-            accessible_name: preReady.composer.name,
-            semantic_ref: preReady.composer.semantic_ref,
-            text: prompt,
-            replace_existing: true,
-            submit_after_type: false,
-          },
-        });
-      } catch (error) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS', physical_effect_attempted: false, effect_barrier_crossed: false }).catch(() => {});
-        await this.#reportAmbiguous(lease, 'SEMANTIC_TYPE_EFFECT_AMBIGUOUS').catch(() => {});
-        throw error;
-      }
-
-      const beforeClickState = await this.#getState();
-      const selectedBeforeClick = selectedTabId(beforeClickState);
-      if (selectedBeforeClick !== lease.tab_id) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'FOREGROUND_LOST_AFTER_TYPE', physical_effect_attempted: false, effect_barrier_crossed: false }).catch(() => {});
-        await this.#reportAmbiguous(lease, 'FOREGROUND_LOST_AFTER_TYPE').catch(() => {});
-        throw new Error('devos_foreground_lost_after_type');
-      }
-      assertLiveLeaseBinding(lease, beforeClickState?.fleet);
-
-      const typedFrame = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
-      let typedReady;
-      try {
-        typedReady = readinessOrThrow({ frame: typedFrame, lease, selected_tab_id: selectedBeforeClick, phase: 'PRE_CLICK' });
-      } catch (error) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'READINESS_LOST_AFTER_TYPE', physical_effect_attempted: false, effect_barrier_crossed: false }).catch(() => {});
-        await this.#reportAmbiguous(lease, 'READINESS_LOST_AFTER_TYPE').catch(() => {});
-        throw error;
-      }
-
-      // Durable write-ahead barrier: once this fsync succeeds, any crash is conservatively
-      // treated as a possibly executed external effect. The Browser click happens only after it.
+      // Durable write-ahead barrier: once this fsync succeeds, any crash is
+      // conservatively treated as a possibly executed external effect. The GLM
+      // Enter submit (the only physical effect) happens only after it.
       try {
         await journal?.markEffectAttempted(effectBinding, {
-          phase: 'BEFORE_TYPED_CLICK',
+          phase: 'BEFORE_ENTER_SUBMIT',
           effect_barrier_contract: WRITE_AHEAD_EFFECT_BARRIER,
           send_click_returned: false,
         });
@@ -582,36 +551,41 @@ export class DevOsNativeTaskCycle {
         throw error;
       }
 
+      let submitted = null;
       try {
         clickIssued = true;
-        await this.#executeCommand({
-          action: 'TYPED_CLICK', platform: 'CHATGPT',
+        submitted = await this.#executeCommand({
+          action: 'SEMANTIC_TYPE', platform: AGENT_PLATFORM_ID,
           payload: {
             tab_id: lease.tab_id,
-            role: typedReady.send_control.role,
-            accessible_name: typedReady.send_control.name,
-            semantic_ref: typedReady.send_control.semantic_ref,
+            role: preReady.composer.role,
+            accessible_name: preReady.composer.accessible_name,
+            semantic_ref: preReady.composer.semantic_ref,
+            text: prompt,
+            replace_existing: true,
+            submit_after_type: true,
           },
         });
         await journal?.markDeliveryPending(effectBinding, {
-          send_click_attempted: true,
-          send_click_returned: true,
+          enter_submit_attempted: true,
           physical_effect_attempted: true,
           effect_barrier_crossed: true,
         });
       } catch (error) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_CLICK_EFFECT_AMBIGUOUS', send_click_attempted: clickIssued, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
-        await this.#reportAmbiguous(lease, 'SEND_CLICK_EFFECT_AMBIGUOUS').catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'ENTER_SUBMIT_EFFECT_AMBIGUOUS', enter_submit_attempted: clickIssued, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
+        await this.#reportAmbiguous(lease, 'ENTER_SUBMIT_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
       }
 
-      const post = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
+      const post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
       const normalizedUrl = conversationUrl(post?.url);
-      const stopObserved = chatGptControlCount(post, 'STOP') === 1;
-      const newConversationObserved = !preConversation && Boolean(normalizedUrl);
-      const effectState = stopObserved ? 'PROVEN_GENERATING' : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
+      const submitState = String(submitted?.effect_state || '').toUpperCase();
+      const newConversationObserved = (!preConversation && Boolean(normalizedUrl)) || submitted?.new_conversation_observed === true;
+      const effectState = ['PROVEN_COMPOSER_CLEARED','PROVEN_NEW_CONVERSATION','PROVEN_GENERATING'].includes(submitState)
+        ? (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : submitState)
+        : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
       if (!effectState || !normalizedUrl) {
-        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_EFFECT_NOT_PROVEN', send_click_attempted: true, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
+        await journal?.markAmbiguous(effectBinding, { reason: 'SEND_EFFECT_NOT_PROVEN', enter_submit_attempted: true, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEND_EFFECT_NOT_PROVEN').catch(() => {});
         const error = new Error('devos_send_effect_ambiguous');
         error.automatic_retry_allowed = false;
@@ -639,8 +613,8 @@ export class DevOsNativeTaskCycle {
           state: 'RUNNING', task_id: lease.task_id, lease_generation: lease.lease_generation,
           tab_id: lease.tab_id, target_id: lease.target_id, agent_generation_epoch: lease.agent_generation_epoch,
           proof, server: body, prompt_included: false, page_data_authority: false,
-          selected_tab_mutation: true, viewport_geometry_required: true, mouse_geometry_required: true,
-          click_issued: clickIssued, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
+          selected_tab_mutation: true, viewport_geometry_required: true,
+          click_issued: clickIssued, submit_path: 'ENTER_KEY_EVENT_DRIVEN_READBACK', mouse_geometry_required: false, delivery_journal_state: 'CONFIRMED', automatic_retry_allowed: false, authority_effect: true,
         };
       } catch (writeError) {
         const status = await this.#readTaskStatus(lease);
@@ -680,8 +654,13 @@ export class DevOsNativeTaskCycle {
     const lease = assertLiveLeaseBinding({ ...raw, automatic_retry_allowed: false }, fleetSnapshot);
     const expectedUrlHash = String(raw.conversation_url_sha256 || '').toLowerCase();
     if (!HASH_RE.test(expectedUrlHash)) return { state: 'WAITING_FOR_TRANSPORT_PROOF', authority_effect: false };
-    const frame = await this.#executeCommand({ action: 'CAPTURE', platform: 'CHATGPT', payload: { tab_id: lease.tab_id } });
-    if (chatGptControlCount(frame, 'STOP') > 0) return { state: 'GENERATING', task_id: lease.task_id, authority_effect: false };
+    const frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
+    // Cross-platform generation hint: a uniquely named stop control proves an
+    // in-flight generation regardless of platform (chat.z.ai usually exposes no
+    // named stop control; the proven-conversation path then decides completion).
+    if ((frame?.semantic_targets || []).some((row) => String(row?.role || '').toLowerCase() === 'button' && stopControlName(row?.name))) {
+      return { state: 'GENERATING', task_id: lease.task_id, authority_effect: false };
+    }
     const url = conversationUrl(frame?.url);
     if (!url || sha256(url) !== expectedUrlHash) {
       await this.#reportAmbiguous(lease, 'COMPLETION_CONVERSATION_BINDING_MISMATCH').catch(() => {});

@@ -1,13 +1,44 @@
 import crypto from 'node:crypto';
-import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
+import {
+  AGENT_PLATFORM_ID,
+  isAgentPlatformConversationUrl,
+  resolveAgentPlatformComposer,
+} from './browser-agent-platform.mjs';
 
 const TASK_ID_RE = /^[A-Za-z0-9._:-]{8,160}$/;
 const AGENT_ID_RE = /^agent_[a-z0-9-]{8,64}$/;
 const POINT_ID_RE = /^[a-z0-9][a-z0-9._:-]{2,127}$/;
 const SHA_RE = /^[a-f0-9]{40}$/;
-const COMPOSER_NAMES = Object.freeze(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
+const GLM_BUSY_SAMPLE_INTERVAL_MS = 250;
 
 function sha256(value) { return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex'); }
+
+function frameDigest(frame) {
+  const targetShape = (frame?.semantic_targets || []).slice(0, 160)
+    .map((row) => `${String(row?.role || '').slice(0, 32)}:${String(row?.name || '').slice(0, 180)}:${Number(row?.backend_node_id || 0)}`)
+    .sort();
+  return sha256(JSON.stringify({
+    url: String(frame?.url || '').slice(0, 1200),
+    text: String(frame?.text_excerpt || '').slice(0, 12000),
+    targets: targetShape,
+  }));
+}
+
+// GLM agent platform busy probe: chat.z.ai exposes no named STOP control, so
+// an in-flight generation is detected as semantic-frame digest churn between
+// two bounded captures. A quiet surface is proven not-generating; churn fails
+// the dispatch with the same busy error id the ChatGPT lane used.
+async function agentBusyGenerating({ capture, samples = 2, intervalMs = GLM_BUSY_SAMPLE_INTERVAL_MS, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) {
+  let previous = null;
+  for (let index = 0; index < Math.max(2, Number(samples) || 2); index += 1) {
+    if (index > 0) await sleep(intervalMs);
+    const frame = await capture();
+    const digest = frameDigest(frame);
+    if (previous != null && digest !== previous) return true;
+    previous = digest;
+  }
+  return false;
+}
 function normalizePayload(payload = {}) {
   const taskId = String(payload.task_id || '').trim();
   const agentId = String(payload.agent_id || '').trim().toLowerCase();
@@ -24,16 +55,7 @@ function normalizePayload(payload = {}) {
   return { task_id: taskId, agent_id: agentId, point_id: pointId, base_sha: baseSha, generation_epoch: generationEpoch, prompt };
 }
 function isConversationUrl(value) {
-  try {
-    const url = new URL(String(value || ''));
-    return url.protocol === 'https:'
-      && ['chatgpt.com','www.chatgpt.com'].includes(url.hostname.toLowerCase())
-      && /^\/c\/[a-z0-9-]+\/?$/i.test(url.pathname);
-  } catch { return false; }
-}
-function exactComposer(frame) {
-  const rows = (frame?.semantic_targets || []).filter((row) => String(row?.role || '').toLowerCase() === 'textbox' && COMPOSER_NAMES.includes(String(row?.name || '')));
-  return rows.length === 1 ? structuredClone(rows[0]) : null;
+  return isAgentPlatformConversationUrl(value);
 }
 
 async function requireLiveBoundView({ fleet, getView, tabId, targetId, unavailableReason, mismatchReason }) {
@@ -79,9 +101,11 @@ export async function dispatchFleetTask({
     mismatchReason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_CAPTURE',
   });
 
+  if (await agentBusyGenerating({ capture: () => captureSemanticFrame(view.webContents) })) {
+    throw new Error('fleet_task_agent_busy_generating');
+  }
   const pre = await captureSemanticFrame(view.webContents);
-  if (chatGptControlCount(pre, 'STOP') > 0) throw new Error('fleet_task_agent_busy_generating');
-  const composer = exactComposer(pre);
+  const composer = resolveAgentPlatformComposer(pre);
   if (!composer) throw new Error('fleet_task_composer_not_unique');
 
   // Re-read the physical tab immediately before the only effect. Capture/model/page data
@@ -101,10 +125,10 @@ export async function dispatchFleetTask({
   try {
     submit = await executeSemanticCommand(view.webContents, {
       action: 'SEMANTIC_TYPE',
-      platform: 'CHATGPT',
+      platform: AGENT_PLATFORM_ID,
       payload: {
         role: composer.role,
-        accessible_name: composer.name,
+        accessible_name: composer.accessible_name,
         semantic_ref: composer.semantic_ref,
         text: task.prompt,
         replace_existing: true,
@@ -116,7 +140,7 @@ export async function dispatchFleetTask({
     await publishSnapshot().catch(() => {});
   }
 
-  const stopObserved = chatGptControlCount(post, 'STOP') === 1 || submit?.stop_observed === true;
+  const stopObserved = submit?.stop_observed === true;
   const preConversation = isConversationUrl(pre?.url);
   const postConversation = isConversationUrl(post?.url);
   const newConversationObserved = (!preConversation && postConversation) || submit?.new_conversation_observed === true;
