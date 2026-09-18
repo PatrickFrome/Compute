@@ -114,6 +114,8 @@ export function createRsiCandidateExperimentIntent({
     ...identity,
     experiment_identity_digest:digest(identity),
     evaluator_cost_units:routed.request.evaluator_cost_units,
+    request_snapshot:routed.request,
+    plan_snapshot:routed.plan,
     max_attempts_per_arm:1,
     max_retries:0,
     paired_control_treatment:true,
@@ -151,8 +153,15 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
     ||intent.candidate_can_choose_task_set!==false||intent.candidate_can_choose_baseline!==false
     ||intent.candidate_can_retry_ambiguous_effect!==false||intent.intent_is_execution_authority!==false
     ||intent.intent_is_scheduler_authority!==false)throw new Error('rsi_experiment_intent_policy_invalid');
+  const embeddedRequest=request??intent.request_snapshot;
+  const embeddedPlan=plan??intent.plan_snapshot;
+  const embeddedPlanRequests=plan_requests??embeddedPlan?.request_snapshots;
+  const embeddedHypothesis=hypothesis??embeddedRequest?.hypothesis_snapshot;
+  const embeddedAdmission=admission??embeddedRequest?.admission_snapshot;
+  if(!embeddedRequest||!embeddedPlan||!embeddedPlanRequests||!embeddedHypothesis||!embeddedAdmission)throw new Error('rsi_experiment_embedded_routing_evidence_required');
   const canonical=createRsiCandidateExperimentIntent({
-    intent_id:intent.intent_id,request,plan,plan_requests,hypothesis,admission,
+    intent_id:intent.intent_id,request:embeddedRequest,plan:embeddedPlan,plan_requests:embeddedPlanRequests,
+    hypothesis:embeddedHypothesis,admission:embeddedAdmission,
     baseline_artifact_digest:intent.baseline_artifact_digest,candidate_artifact_digest:intent.candidate_artifact_digest,
     sealed_task_set_digest:intent.sealed_task_set_digest,harness_digest:intent.harness_digest,
     evaluator_root_digest:intent.evaluator_root_digest,trial_worker_image_digest:intent.trial_worker_image_digest,
@@ -343,36 +352,40 @@ export class RsiCandidateExperimentLedger{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_experiment_ledger_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_experiment_ledger_rows_invalid');
       const ids=new Set();
-      for(const row of p.rows){
-        if(row.source_sha!==this.#sourceSha)throw new Error('rsi_experiment_ledger_source_mismatch');
-        const ic=structuredClone(row.intent);delete ic.intent_digest;if(digest(ic)!==exactDigest(row.intent.intent_digest,'ledger_intent'))throw new Error('rsi_experiment_ledger_intent_digest_mismatch');
-        const rc=structuredClone(row.receipt);delete rc.receipt_digest;if(digest(rc)!==exactDigest(row.receipt.receipt_digest,'ledger_receipt'))throw new Error('rsi_experiment_ledger_receipt_digest_mismatch');
-        if(row.receipt.intent_digest!==row.intent.intent_digest)throw new Error('rsi_experiment_ledger_binding_mismatch');
-        if(ids.has(row.intent.intent_digest))throw new Error('rsi_experiment_ledger_intent_duplicate');
-        ids.add(row.intent.intent_digest);
+      const receiptIds=new Set();
+      const checkedRows=[];
+      for(const raw of p.rows){
+        if(raw.source_sha!==this.#sourceSha)throw new Error('rsi_experiment_ledger_source_mismatch');
+        const intent=verifyRsiCandidateExperimentIntent(raw.intent);
+        const receipt=verifyRsiCandidateExperimentReceipt(raw.receipt,{intent});
+        if(intent.source_sha!==this.#sourceSha||receipt.source_sha!==this.#sourceSha)throw new Error('rsi_experiment_ledger_source_mismatch');
+        if(ids.has(intent.intent_digest))throw new Error('rsi_experiment_ledger_intent_duplicate');
+        if(receiptIds.has(receipt.receipt_id))throw new Error('rsi_experiment_ledger_receipt_duplicate');
+        ids.add(intent.intent_digest);receiptIds.add(receipt.receipt_id);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,intent,receipt}));
       }
-      this.#rows=p.rows;
+      const canonical=ledgerState(this.#sourceSha,checkedRows);
+      if(p.row_count!==canonical.row_count||JSON.stringify(p.state_counts)!==JSON.stringify(canonical.state_counts))throw new Error('rsi_experiment_ledger_summary_mismatch');
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){const s=ledgerState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
+  async #persist(rows=this.#rows){const s=ledgerState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
   async add({intent,receipt}={}){
     if(!this.#initialized)throw new Error('rsi_experiment_ledger_not_initialized');
-    if(!intent||intent.schema!==RSI_CANDIDATE_EXPERIMENT_INTENT_SCHEMA)throw new Error('rsi_experiment_intent_invalid');
-    if(!receipt||receipt.schema!==RSI_CANDIDATE_EXPERIMENT_RECEIPT_SCHEMA)throw new Error('rsi_experiment_receipt_invalid');
-    assertZero(intent,'ledger_intent');assertZero(receipt,'ledger_receipt');
-    const ic=structuredClone(intent);delete ic.intent_digest;if(digest(ic)!==exactDigest(intent.intent_digest,'ledger_intent'))throw new Error('rsi_experiment_intent_digest_mismatch');
-    const rc=structuredClone(receipt);delete rc.receipt_digest;if(digest(rc)!==exactDigest(receipt.receipt_digest,'ledger_receipt'))throw new Error('rsi_experiment_receipt_digest_mismatch');
-    if(intent.source_sha!==this.#sourceSha||receipt.source_sha!==this.#sourceSha||receipt.intent_digest!==intent.intent_digest)throw new Error('rsi_experiment_ledger_binding_mismatch');
-    const existing=this.#rows.find(r=>r.intent.intent_digest===intent.intent_digest);
+    const checkedIntent=verifyRsiCandidateExperimentIntent(intent);
+    const checkedReceipt=verifyRsiCandidateExperimentReceipt(receipt,{intent:checkedIntent});
+    if(checkedIntent.source_sha!==this.#sourceSha||checkedReceipt.source_sha!==this.#sourceSha)throw new Error('rsi_experiment_ledger_binding_mismatch');
+    const existing=this.#rows.find(r=>r.intent.intent_digest===checkedIntent.intent_digest||r.receipt.receipt_id===checkedReceipt.receipt_id);
     if(existing){
-      if(existing.receipt.receipt_digest!==receipt.receipt_digest)throw new Error('rsi_experiment_ledger_identity_conflict');
-      return zero({state:'IDEMPOTENT',receipt_digest:receipt.receipt_digest});
+      if(existing.intent.intent_digest!==checkedIntent.intent_digest||existing.receipt.receipt_digest!==checkedReceipt.receipt_digest)throw new Error('rsi_experiment_ledger_identity_conflict');
+      return zero({state:'IDEMPOTENT',receipt_digest:checkedReceipt.receipt_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_experiment_ledger_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,intent:structuredClone(intent),receipt:structuredClone(receipt)}));
-    await this.#persist();
-    return zero({state:receipt.state,receipt_digest:receipt.receipt_digest});
+    const nextRows=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,intent:structuredClone(checkedIntent),receipt:structuredClone(checkedReceipt)})];
+    await this.#persist(nextRows);
+    this.#rows=nextRows;
+    return zero({state:checkedReceipt.state,receipt_digest:checkedReceipt.receipt_digest});
   }
   supported(){if(!this.#initialized)throw new Error('rsi_experiment_ledger_not_initialized');return Object.freeze(this.#rows.filter(r=>r.receipt.eligible_for_bounded_revision===true).map(r=>Object.freeze(structuredClone(r.receipt))));}
   rejectedOrInconclusive(){if(!this.#initialized)throw new Error('rsi_experiment_ledger_not_initialized');return Object.freeze(this.#rows.filter(r=>r.receipt.rejected_or_inconclusive===true).map(r=>Object.freeze(structuredClone(r.receipt))));}
