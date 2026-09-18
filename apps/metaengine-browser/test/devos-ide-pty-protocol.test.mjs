@@ -7,6 +7,9 @@ import {
   assertCurrentDevOSPtySessionRef,
   classifyDevOSPtyInputSequence,
   classifyDevOSPtyResizeSequence,
+  classifyDevOSPtyTransportFence,
+  classifyDevOSPtyTreeCleanup,
+  projectDevOSPtyOutputPressure,
   sameDevOSPtySessionRef,
   validateDevOSPtyCreateRequest,
   validateDevOSPtyExitReceipt,
@@ -272,7 +275,89 @@ test('all protocol limits are centralized and contract forbids second scheduler 
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.arbitrary_signal_allowed, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.renderer_node_authority, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.second_scheduler_allowed, false);
+  assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.output_backpressure_protocol_required, true);
+  assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.output_ring_hard_bound_required, true);
+  assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.process_tree_cleanup_evidence_required, true);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.production_promotion_authority, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.automatic_retry_allowed, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.authority_effect, false);
+});
+
+
+test('transport epoch is a separate stale fence and never mutates process identity', () => {
+  const current = classifyDevOSPtyTransportFence({
+    expected_ref: ref(),
+    actual_ref: ref(),
+    current_transport_epoch: 5,
+    transport_epoch: 5,
+  });
+  assert.equal(current.state, 'CURRENT');
+  assert.equal(current.accepted, true);
+
+  const staleTransport = classifyDevOSPtyTransportFence({
+    expected_ref: ref(),
+    actual_ref: ref(),
+    current_transport_epoch: 5,
+    transport_epoch: 4,
+  });
+  assert.equal(staleTransport.state, 'STALE_TRANSPORT_NO_EFFECT');
+  assert.equal(staleTransport.accepted, false);
+
+  const staleSession = classifyDevOSPtyTransportFence({
+    expected_ref: ref(),
+    actual_ref: ref({ process_incarnation_id: 'process_66666666-6666-4666-8666-666666666666' }),
+    current_transport_epoch: 5,
+    transport_epoch: 5,
+  });
+  assert.equal(staleSession.state, 'STALE_SESSION_NO_EFFECT');
+  assert.equal(staleSession.accepted, false);
+});
+
+test('output pressure model pauses once above high-water, resumes at low-water and hard-bounds ring memory', () => {
+  let state = { unacked_bytes: 0, ring_bytes: 0, backpressured: false };
+  let pauseCount = 0;
+  for (let i = 0; i < 256; i += 1) {
+    const next = projectDevOSPtyOutputPressure({ ...state, incoming_bytes: 32 * 1024 });
+    if (next.pause_required) pauseCount += 1;
+    state = next;
+  }
+  assert.equal(pauseCount, 1);
+  assert.equal(state.backpressured, true);
+  assert.ok(state.unacked_bytes > DEVOS_PTY_BOUNDS.output_high_water_bytes);
+  assert.equal(state.ring_bytes, DEVOS_PTY_BOUNDS.output_ring_bytes);
+  assert.equal(state.ring_truncated, true);
+
+  const impossible = projectDevOSPtyOutputPressure({ ...state, ack_bytes: state.unacked_bytes + 1 });
+  assert.equal(impossible.state, 'INVALID_ACK_NO_EFFECT');
+  assert.equal(impossible.accepted, false);
+  assert.equal(impossible.resume_required, false);
+
+  const toLowWater = state.unacked_bytes - DEVOS_PTY_BOUNDS.output_low_water_bytes;
+  const resumed = projectDevOSPtyOutputPressure({ ...state, ack_bytes: toLowWater });
+  assert.equal(resumed.state, 'FLOWING');
+  assert.equal(resumed.resume_required, true);
+  assert.equal(resumed.unacked_bytes, DEVOS_PTY_BOUNDS.output_low_water_bytes);
+});
+
+test('bounded PTY claim requires descendant cleanup evidence, never root-exit assumption', () => {
+  assert.equal(classifyDevOSPtyTreeCleanup({
+    containment_bound: true,
+    root_exited: true,
+    descendants_alive: 2,
+  }).state, 'FAILED_LEAK');
+
+  assert.equal(classifyDevOSPtyTreeCleanup({
+    containment_bound: false,
+    root_exited: true,
+    descendants_alive: 0,
+  }).state, 'PARTIAL_UNVERIFIED');
+
+  const verified = classifyDevOSPtyTreeCleanup({
+    containment_bound: true,
+    root_exited: true,
+    descendants_alive: 0,
+  });
+  assert.equal(verified.state, 'VERIFIED');
+  assert.equal(verified.accepted, true);
+  assert.equal(verified.authority_effect, false);
 });
