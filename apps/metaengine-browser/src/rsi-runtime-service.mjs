@@ -54,6 +54,7 @@ import { RsiRevisionScopeLedger, createRsiRevisionScopeAdmission, rsiRevisionSco
 import { createRsiRevisionLibraryAdmission, rsiRevisionLibraryAdmissionTrustRootSnapshot } from './rsi-revision-library-admission.mjs';
 import { RsiSkillCoalitionAuditStore, createRsiSkillCoalitionObservation, rsiSkillCoalitionAuditTrustRootSnapshot } from './rsi-skill-coalition-audit.mjs';
 import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGraphTrustRootSnapshot } from './rsi-skill-relation-graph.mjs';
+import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntimeMetaSkillArchiveTrustRootSnapshot } from './rsi-runtime-meta-skill-archive.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -131,6 +132,7 @@ function trustRoots() {
     revision_library_admission: rsiRevisionLibraryAdmissionTrustRootSnapshot(),
     skill_coalition_audit: rsiSkillCoalitionAuditTrustRootSnapshot(),
     skill_relation_graph: rsiSkillRelationGraphTrustRootSnapshot(),
+    runtime_meta_skill_archive: rsiRuntimeMetaSkillArchiveTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -157,6 +159,7 @@ export class RsiRuntimeService {
   #revisionScopeLedger;
   #skillCoalitionAudit;
   #skillRelationStore;
+  #metaSkillArchive;
   #archive;
   #observer;
   #verifiedArchive;
@@ -174,7 +177,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -236,6 +239,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillRelationPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeMetaSkillArchivePath = metaSkillArchivePath || (ledgerPath ? `${ledgerPath}.meta-skill-archive.json` : null);
+    this.#metaSkillArchive = new RsiRuntimeMetaSkillArchive({
+      statePath: runtimeMetaSkillArchivePath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -256,6 +264,7 @@ export class RsiRuntimeService {
     await this.#revisionScopeLedger.init();
     await this.#skillCoalitionAudit.init();
     await this.#skillRelationStore.init();
+    await this.#metaSkillArchive.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -275,6 +284,7 @@ export class RsiRuntimeService {
       revision_scope_admission_schema: this.#revisionScopeLedger.snapshot().schema,
       skill_coalition_audit_schema: this.#skillCoalitionAudit.snapshot().schema,
       skill_relation_store_schema: this.#skillRelationStore.snapshot().schema,
+      runtime_meta_skill_archive_schema: this.#metaSkillArchive.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -776,6 +786,54 @@ export class RsiRuntimeService {
     return Object.freeze({ edge, stored });
   }
 
+  async recordMetaSkillEvolution({
+    record_id,
+    parent_profile,
+    successor_profile,
+    fast_loop_summary,
+    plan,
+    evaluation,
+    result,
+    external_archive_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    if (!library) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const record = createRsiRuntimeMetaSkillRecord({
+      source_sha: this.#sourceSha,
+      record_id,
+      library,
+      parent_profile,
+      successor_profile,
+      fast_loop_summary,
+      plan,
+      evaluation,
+      result,
+      external_archive_owner,
+      authored_by_candidate,
+    });
+    const stored = await this.#metaSkillArchive.add(record);
+    await this.#ledger.append('META_SKILL_EVOLUTION_ARCHIVED', {
+      record_id: record.record_id,
+      record_digest: record.record_digest,
+      parent_profile_digest: record.parent_profile_digest,
+      successor_profile_digest: record.successor_profile_digest,
+      relation: record.relation,
+      state: record.state,
+      eligible_for_meta_archive: record.eligible_for_meta_archive,
+      fixed_meta_operation_digest: record.fixed_meta_operation_digest,
+      successor_profile_activation_authorized: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ record, stored });
+  }
+
+  metaSkillEvolutionArchive() {
+    this.#assertRunning();
+    return this.#metaSkillArchive.eligible();
+  }
+
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
     this.#assertRunning();
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
@@ -1171,6 +1229,7 @@ export class RsiRuntimeService {
       revision_scope_admission: this.#revisionScopeLedger.snapshot(),
       skill_coalition_audit: this.#skillCoalitionAudit.snapshot(),
       skill_relation_store: this.#skillRelationStore.snapshot(),
+      runtime_meta_skill_archive: this.#metaSkillArchive.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
         evaluation_count: this.#skillReliabilityEvaluationCount,
