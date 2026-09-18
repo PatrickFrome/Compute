@@ -165,6 +165,56 @@ test('runtime carries a qualified meta profile into shadow-only dual-plan compar
     assert.equal(compared.shadow_projection.projection_can_override_governance,false);
     assert.equal(compared.baseline_plan.routing_is_execution_authority,false);
     assert.equal(runtime.snapshot().meta_profile_shadow_registry.selection_count,1);
+
+    const canary=await runtime.admitBoundedCanaryMetaProfile({
+      canary_id:'runtime.shadow.canary.1',
+      cohort_digest:d('e'),
+      external_canary_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(canary.admission.action_surface,'READ_ONLY_DECISION_SUPPORT');
+    assert.equal(canary.admission.max_decisions,32);
+    assert.equal(canary.admission.canary_can_execute_browser_effect,false);
+
+    const canaryDecision=await runtime.issueBoundedCanaryDecision({
+      canary_id:'runtime.shadow.canary.1',
+      cohort_digest:d('e'),
+      route_args:{
+        context_id:'runtime.shadow.canary.context.1',
+        task_signature_digest:d('f'),
+        environment_fingerprint:'env.browser.chatgpt.v1',
+        model_family:'GPT_5_6_SOL',
+        challenge_family:'BROWSER_INTERACTION',
+        required_role:'ANALYZER',
+        required_capabilities:['READ_VERIFIED_CONTEXT'],
+        input_schema_digest:d('1'),
+        output_schema_digest:d('2'),
+        max_selected:2,
+        exploration_slots:1,
+        external_planner:true,
+        authored_by_candidate:false,
+      },
+    });
+    assert.equal(canaryDecision.decision.decision_can_execute_browser_effect,false);
+    assert.equal(canaryDecision.decision.baseline_execution_unchanged,true);
+
+    const canaryOutcome=await runtime.recordBoundedCanaryOutcome({
+      canary_id:'runtime.shadow.canary.1',
+      decision:canaryDecision.decision,
+      outcome_id:'runtime.shadow.canary.outcome.1',
+      outcome_safety:'PASS',
+      security_awareness:'PASS',
+      task_utility:0.5,
+      ambiguous:false,
+      hard_invariant_pass:true,
+      evidence_digest:d('1'),
+      evidence_refs:['runtime:shadow:canary:outcome:1'],
+      external_evaluator:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(canaryOutcome.stored.rollback_required,false);
+    assert.equal(runtime.snapshot().meta_profile_canary_ledger.total_decision_count,1);
+    assert.equal(runtime.snapshot().meta_profile_canary_ledger.total_outcome_count,1);
     assert.equal(runtime.snapshot().execution_authority,false);
     assert.equal(runtime.snapshot().authority_effect,false);
   }finally{
