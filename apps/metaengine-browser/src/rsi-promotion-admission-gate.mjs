@@ -49,6 +49,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-recursive-depth-controller.mjs',
   'apps/metaengine-browser/src/rsi-disagreement-acquisition.mjs',
   'apps/metaengine-browser/src/rsi-experience-graph.mjs',
+  'apps/metaengine-browser/src/rsi-memory-governance.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/candidate-capsule.cjs',
   'apps/metaengine-browser/src/verification-sandbox-plan.cjs',
