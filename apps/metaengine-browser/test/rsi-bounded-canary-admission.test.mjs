@@ -6,6 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA } from '../src/rsi-meta-profile-shadow-selection.mjs';
+import { rsiPromotionGateTrustRootSnapshot } from '../src/rsi-promotion-admission-gate.mjs';
+import { rsiTournamentTrustRootSnapshot } from '../src/rsi-shadow-tournament.mjs';
 import {
   RsiBoundedCanaryAdmissionLedger,
   createRsiBoundedCanaryAdmission,
@@ -293,4 +295,17 @@ test('bounded canary trust root freezes identity, cohort, budget and zero author
   assert.equal(root.live_profile_activation_authorized,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.canary_admission_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('bounded canary root is immutable to candidates and downstream promotion/tournament gates',()=>{
+  const required=[
+    'apps/metaengine-browser/src/rsi-runtime-meta-skill-archive.mjs',
+    'apps/metaengine-browser/src/rsi-meta-profile-qualification.mjs',
+    'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
+    'apps/metaengine-browser/src/rsi-bounded-canary-admission.mjs',
+  ];
+  for(const root of [rsiPromotionGateTrustRootSnapshot(),rsiTournamentTrustRootSnapshot()]){
+    for(const p of required)assert.equal(root.immutable_component_paths.includes(p),true,p);
+  }
 });
