@@ -3,8 +3,6 @@ import crypto from 'node:crypto';
 import {
   createFabricLedgerEvent,
   reduceFabricEffectLedger,
-  fabricSha256,
-  canonicalFabricJson,
 } from './browser-fabric-effect-ledger.mjs';
 import {
   evaluateBrowserFabricEffectDomain,
