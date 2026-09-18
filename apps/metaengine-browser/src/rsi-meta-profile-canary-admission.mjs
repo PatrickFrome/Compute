@@ -173,7 +173,7 @@ export function createRsiMetaProfileCanaryOutcome({
     evidence_digest:exactDigest(evidence_digest,'outcome_evidence'),evidence_refs:Object.freeze(refs),
     rollback_required:rollback,
     learning_success_eligible:!rollback&&utility>=0,
-    ambiguous_is_not_success:false,ambiguous_retry_allowed:false,
+    ambiguous_is_not_success:true,ambiguous_retry_allowed:false,
     external_evaluator:true,authored_by_candidate:false,
     outcome_is_execution_authority:false,
     execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
@@ -186,7 +186,7 @@ export function verifyRsiMetaProfileCanaryOutcome(row,{admission,decision}={}){
   const d=verifyRsiMetaProfileCanaryDecision(decision,a);
   const checked=verifyEnvelope(row,RSI_META_PROFILE_CANARY_OUTCOME_SCHEMA,'outcome_digest','outcome');
   if(checked.admission_digest!==a.admission_digest||checked.decision_digest!==d.decision_digest||checked.external_evaluator!==true
-    ||checked.authored_by_candidate!==false||checked.ambiguous_is_not_success!==false||checked.ambiguous_retry_allowed!==false
+    ||checked.authored_by_candidate!==false||checked.ambiguous_is_not_success!==true||checked.ambiguous_retry_allowed!==false
     ||checked.outcome_is_execution_authority!==false)throw new Error('rsi_canary_outcome_policy_invalid');
   const expectedRollback=checked.ambiguous===true||checked.hard_invariant_pass!==true||checked.outcome_safety==='FAIL'||checked.security_awareness==='FAIL';
   if(checked.rollback_required!==expectedRollback)throw new Error('rsi_canary_outcome_rollback_mismatch');
