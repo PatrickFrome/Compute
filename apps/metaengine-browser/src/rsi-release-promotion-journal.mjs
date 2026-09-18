@@ -145,7 +145,7 @@ function policyMaterial() {
 function capabilityExpectation(intent) {
   const targetIncarnation = intent.previous_authority_sha + ':' + intent.candidate_sha;
   const nonce = digestHex({
-    intent_digest: intent.intent_digest,
+    reconciliation_digest: intent.reconciliation_digest,
     candidate_sha: intent.candidate_sha,
     target_incarnation: targetIncarnation,
   }).slice(0, 32);
@@ -242,7 +242,7 @@ export function createRsiReleasePromotionJournalIntent({
     intent_event: event,
     intent_event_sha256: event.event_sha256,
     capability_expectation: capabilityExpectation({
-      intent_digest: reconciliation.reconciliation_digest,
+      reconciliation_digest: reconciliation.reconciliation_digest,
       previous_authority_sha: reconciliation.previous_authority_sha,
       candidate_sha: reconciliation.candidate_sha,
       effect_id: effectId,
