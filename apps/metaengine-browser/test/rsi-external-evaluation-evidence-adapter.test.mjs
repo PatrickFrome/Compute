@@ -40,7 +40,6 @@ import {
 const PARENT='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
 const CANDIDATE_ID=`candidate_sha256_${'c'.repeat(64)}`;
-const HANDOFF_DIGEST=`sha256:${'d'.repeat(64)}`;
 const SUITE=`sha256:${'e'.repeat(64)}`;
 const HOLDOUT=`sha256:${'f'.repeat(64)}`;
 const d=(c)=>`sha256:${c.repeat(64)}`;
@@ -54,7 +53,7 @@ function digest(value){return `sha256:${crypto.createHash('sha256').update(JSON.
 function bytes(value){return Buffer.byteLength(JSON.stringify(stable(value)),'utf8')}
 
 function handoff(){
-  return {
+  const core={
     schema:RSI_ISOLATED_CANDIDATE_HANDOFF_SCHEMA,
     version:1,
     experiment_id:'rsi_exp_0123456789abcdef01234567',
@@ -88,6 +87,7 @@ function handoff(){
     automatic_retry_allowed:false,
     authority_effect:false,
   };
+  return {...core,handoff_digest:digest(core)};
 }
 
 function verifiedMaterialization(){
@@ -103,7 +103,7 @@ function verifiedMaterialization(){
     context_aware_build_digest:d('3'),
     generic_build_plan_digest:d('4'),
     source_snapshot_digest:d('5'),
-    isolated_candidate_handoff_digest:HANDOFF_DIGEST,
+    isolated_candidate_handoff_digest:handoff().handoff_digest,
     workspace_id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     task_id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     lease_generation:3,
