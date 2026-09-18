@@ -161,6 +161,10 @@ export function createRsiArtifactEvaluationRoutingRequest({
   task_order_digest,
   threshold_policy_digest,
   stopping_policy_digest,
+  prior_budget_plan_digest,
+  hidden_holdout_root_digest,
+  safety_suite_root_digest,
+  security_suite_root_digest,
   external_measurement_digest,
   proxy_score_digest,
   uncertainty,
@@ -190,9 +194,13 @@ export function createRsiArtifactEvaluationRoutingRequest({
   const taskOrder=exactDigest(task_order_digest,'task_order');
   const thresholdPolicy=exactDigest(threshold_policy_digest,'threshold_policy');
   const stoppingPolicy=exactDigest(stopping_policy_digest,'stopping_policy');
+  const priorBudgetPlan=exactDigest(prior_budget_plan_digest,'prior_budget_plan');
+  const hiddenHoldout=exactDigest(hidden_holdout_root_digest,'hidden_holdout_root');
+  const safetySuite=exactDigest(safety_suite_root_digest,'safety_suite_root');
+  const securitySuite=exactDigest(security_suite_root_digest,'security_suite_root');
   const measurement=exactDigest(external_measurement_digest,'measurement');
   const proxy=exactDigest(proxy_score_digest,'proxy_score');
-  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,epoch,sealedTasks,harness,worker,resourceBudget,taskOrder,thresholdPolicy,stoppingPolicy,measurement,proxy];
+  const roots=[artifactReceipt,parent,candidate,provenance,evaluator,generation,epoch,sealedTasks,harness,worker,resourceBudget,taskOrder,thresholdPolicy,stoppingPolicy,priorBudgetPlan,hiddenHoldout,safetySuite,securitySuite,measurement,proxy];
   if(new Set(roots).size!==roots.length)throw new Error('rsi_eval_router_independent_artifact_roots_required');
   const u=unit(uncertainty,'uncertainty');
   const close=unit(decision_closeness,'decision_closeness',{allowZero:true});
@@ -225,6 +233,10 @@ export function createRsiArtifactEvaluationRoutingRequest({
     task_order_digest:taskOrder,
     threshold_policy_digest:thresholdPolicy,
     stopping_policy_digest:stoppingPolicy,
+    prior_budget_plan_digest:priorBudgetPlan,
+    hidden_holdout_root_digest:hiddenHoldout,
+    safety_suite_root_digest:safetySuite,
+    security_suite_root_digest:securitySuite,
     scope_tags:scopes,
     recipient_group_tags:recipients,
     evaluator_cost_units:cost,
@@ -249,6 +261,7 @@ export function createRsiArtifactEvaluationRoutingRequest({
     candidate_can_choose_task_order:false,
     candidate_can_choose_thresholds:false,
     candidate_can_choose_stopping:false,
+    candidate_can_choose_protected_suites:false,
     external_measurement_owner:true,
     authored_by_candidate:false,
     cheap_proxy_is_final_truth:false,
@@ -280,6 +293,7 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     ||request.candidate_can_choose_task_order!==false
     ||request.candidate_can_choose_thresholds!==false
     ||request.candidate_can_choose_stopping!==false
+    ||request.candidate_can_choose_protected_suites!==false
     ||request.external_measurement_owner!==true||request.authored_by_candidate!==false
     ||request.cheap_proxy_is_final_truth!==false||request.independent_audit_required!==true
     ||request.candidate_can_set_priority!==false||request.candidate_can_set_uncertainty!==false
@@ -302,6 +316,10 @@ export function verifyRsiArtifactEvaluationRoutingRequest(request){
     task_order_digest:request.task_order_digest,
     threshold_policy_digest:request.threshold_policy_digest,
     stopping_policy_digest:request.stopping_policy_digest,
+    prior_budget_plan_digest:request.prior_budget_plan_digest,
+    hidden_holdout_root_digest:request.hidden_holdout_root_digest,
+    safety_suite_root_digest:request.safety_suite_root_digest,
+    security_suite_root_digest:request.security_suite_root_digest,
     external_measurement_digest:request.external_measurement_digest,
     proxy_score_digest:request.proxy_score_digest,
     uncertainty:request.uncertainty,
@@ -535,6 +553,8 @@ export function rsiEvaluationBudgetRouterTrustRootSnapshot(){
     fresh_budget_epoch_required_for_materialized_artifacts:true,
     prior_budget_reuse_forbidden_for_materialized_artifacts:true,
     evaluator_generation_frozen_for_materialized_artifacts:true,
+    prior_budget_plan_identity_binding_required:true,
+    protected_suite_root_binding_required:true,
     candidate_cannot_choose_evaluator_generation:true,
     recipe_distillation_verified_required:true,
     context_compatible_experience_required:true,
