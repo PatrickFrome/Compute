@@ -397,11 +397,14 @@ function evaluationArgs(bundle,label='phase29',overrides={}){
     uncertainty:0.9,
     decision_closeness:0.8,
     proxy_reliability_gap:0.4,
+    evaluator_cost_units:8,
+    expected_information_gain:0.9,
     epoch_budget_units:8,
-    baseline_artifact_digest:labelDigest(`${label}.baseline.artifact`),
     sealed_task_set_digest:labelDigest(`${label}.sealed.tasks`),
     harness_digest:labelDigest(`${label}.evaluation.harness`),
     evaluator_root_digest:labelDigest(`${label}.external.evaluator`),
+    evaluator_generation_digest:labelDigest(`${label}.evaluator.generation.1`),
+    evaluation_epoch_digest:labelDigest(`${label}.evaluation.epoch.1`),
     trial_worker_image_digest:labelDigest(`${label}.evaluation.worker`),
     resource_budget_digest:labelDigest(`${label}.resource.budget`),
     task_order_digest:labelDigest(`${label}.task.order`),
@@ -424,14 +427,34 @@ test('Phase29 closes provenance artifact into existing fresh paired evaluation o
   assert.equal(handoff.candidate_sha,CANDIDATE);
   assert.equal(handoff.candidate_artifact_digest,bundle.artifactReceipt.artifact_digest);
   assert.equal(handoff.routing_request.source_sha,SOURCE);
+  assert.equal(handoff.routing_request.request_kind,'MATERIALIZED_CANDIDATE');
+  assert.equal(handoff.routing_request.phase28_artifact_receipt_digest,bundle.artifactReceipt.artifact_receipt_digest);
+  assert.equal(handoff.routing_request.parent_artifact_digest,bundle.fx.envelope.parent_candidate_artifact_digest);
+  assert.equal(handoff.routing_request.candidate_artifact_digest,bundle.artifactReceipt.artifact_digest);
+  assert.equal(handoff.routing_request.evaluator_generation_digest,args.evaluator_generation_digest);
+  assert.equal(handoff.routing_request.evaluation_epoch_digest,args.evaluation_epoch_digest);
+  assert.equal(handoff.routing_request.fresh_budget_epoch_required,true);
+  assert.equal(handoff.routing_request.prior_budget_reuse_allowed,false);
+  assert.ok(handoff.routing_request.scope_tags.includes('SAFETY'));
+  assert.ok(handoff.routing_request.scope_tags.includes('SECURITY'));
+  assert.ok(handoff.routing_request.scope_tags.includes('HIDDEN_HOLDOUT'));
   assert.equal(handoff.budget_plan.state,'EVALUATION_BUDGET_ROUTED');
   assert.ok(handoff.budget_plan.selected_request_digests.includes(handoff.routing_request_digest));
+  assert.equal(handoff.paired_experiment_intent.baseline_artifact_digest,bundle.fx.envelope.parent_candidate_artifact_digest);
   assert.equal(handoff.paired_experiment_intent.candidate_artifact_digest,bundle.artifactReceipt.artifact_digest);
+  assert.equal(handoff.paired_experiment_intent.evaluation_request_kind,'MATERIALIZED_CANDIDATE');
+  assert.equal(handoff.paired_experiment_intent.phase28_artifact_receipt_digest,bundle.artifactReceipt.artifact_receipt_digest);
+  assert.equal(handoff.paired_experiment_intent.evaluator_generation_digest,args.evaluator_generation_digest);
+  assert.equal(handoff.paired_experiment_intent.evaluation_epoch_digest,args.evaluation_epoch_digest);
   assert.equal(handoff.paired_experiment_intent.max_attempts_per_arm,1);
   assert.equal(handoff.paired_experiment_intent.max_retries,0);
   assert.equal(handoff.paired_experiment_intent.external_evaluator_required,true);
   assert.equal(handoff.fresh_evaluation_budget_required,true);
+  assert.equal(handoff.previous_evaluation_budget_reuse_allowed,false);
   assert.equal(handoff.fresh_external_measurement_required,true);
+  assert.equal(handoff.evaluator_generation_frozen,true);
+  assert.equal(handoff.evaluator_dependent_verdict_reuse_across_generation_allowed,false);
+  assert.equal(handoff.anchor_provenance_survives_evaluator_rotation,true);
   assert.equal(handoff.sealed_exogenous_acceptance_required,true);
   assert.equal(handoff.build_and_evaluation_roots_independent,true);
   assert.equal(handoff.active_artifact_replaced,false);
@@ -454,7 +477,7 @@ test('Phase29 rejects candidate-owned evaluation control and build/evaluation id
   assert.throws(()=>createRsiProvenanceEvaluationHandoff({
     ...common,
     trial_worker_image_digest:bundle.artifactReceipt.worker_image_digest,
-  }),/build_and_evaluation_roots_must_be_independent/);
+  }),/build_and_evaluation_workers_must_be_distinct|build_and_evaluation_roots_must_be_independent/);
   assert.throws(()=>createRsiProvenanceEvaluationHandoff({
     ...common,
     harness_digest:bundle.artifactReceipt.harness_manifest_digest,
@@ -468,11 +491,17 @@ test('Phase29 requires a fresh budget selection instead of silently reusing spen
   ),/fresh_request_not_selected/);
 });
 
-test('Phase29 rejects baseline equal to materialized candidate artifact',()=>{
-  const bundle=phase28Artifact('phase29-baseline');
-  assert.throws(()=>createRsiProvenanceEvaluationHandoff(
-    evaluationArgs(bundle,'phase29-baseline',{baseline_artifact_digest:bundle.artifactReceipt.artifact_digest})
-  ),/distinct_candidate_required/);
+test('Phase29 freezes evaluator generation and evaluation epoch as independent external roots',()=>{
+  const bundle=phase28Artifact('phase29-generation');
+  const common=evaluationArgs(bundle,'phase29-generation');
+  assert.throws(()=>createRsiProvenanceEvaluationHandoff({
+    ...common,
+    evaluator_generation_digest:common.evaluator_root_digest,
+  }),/evaluation_roots_must_be_distinct/);
+  assert.throws(()=>createRsiProvenanceEvaluationHandoff({
+    ...common,
+    evaluation_epoch_digest:common.evaluator_generation_digest,
+  }),/evaluation_roots_must_be_distinct/);
 });
 
 test('Phase29 self-rehashed policy downgrade is rejected',()=>{
@@ -492,10 +521,20 @@ test('Phase29 trust root reuses existing evaluation planes and freezes candidate
   assert.equal(root.existing_paired_candidate_experiment_ledger_only,true);
   assert.equal(root.fresh_external_measurement_required,true);
   assert.equal(root.fresh_evaluation_budget_required,true);
+  assert.equal(root.previous_evaluation_budget_reuse_allowed,false);
+  assert.equal(root.evaluator_generation_binding_required,true);
+  assert.equal(root.evaluation_epoch_binding_required,true);
+  assert.equal(root.evaluator_generation_frozen_per_epoch,true);
+  assert.equal(root.evaluator_dependent_verdict_reuse_across_generation_allowed,false);
+  assert.equal(root.anchor_provenance_survives_evaluator_rotation,true);
+  assert.equal(root.materialized_artifact_request_required,true);
+  assert.equal(root.protected_scope_floor_required,true);
   assert.equal(root.sealed_exogenous_acceptance_required,true);
   assert.equal(root.full_phase27_phase28_lineage_binding_required,true);
   assert.equal(root.build_and_evaluation_roots_independent,true);
   assert.equal(root.candidate_can_choose_evaluator,false);
+  assert.equal(root.candidate_can_choose_evaluator_generation,false);
+  assert.equal(root.candidate_can_choose_evaluation_epoch,false);
   assert.equal(root.candidate_can_choose_task_set,false);
   assert.equal(root.candidate_can_choose_harness,false);
   assert.equal(root.candidate_can_choose_trial_worker,false);
