@@ -6,6 +6,7 @@ import {
   applyRsiEvaluatorMesh,
   createRsiEvaluatorMeshPlan,
   verifyRsiEvaluatorReceipt,
+  rsiEvaluatorRootSnapshot,
 } from './rsi-evaluator-mesh.mjs';
 import { RsiShadowArchive, RSI_HARD_INVARIANTS, RSI_SHADOW_STATES } from './rsi-shadow-core.mjs';
 import {
@@ -269,6 +270,12 @@ export function createRsiExternalEvaluationBundle({
   const regressionResult=regressionEvidence(identity,regression);
   const integrityResult=integrityEvidence(identity,integrity);
   const tournamentResult=tournamentEvidence(identity,candidate_handoff,evaluator.result,tournament);
+  const evaluatorRootDigest=rsiEvaluatorRootSnapshot().evaluator_root_digest;
+  if(integrity.policy?.evaluator_root_digest!==evaluatorRootDigest)throw new Error('rsi_external_eval_integrity_evaluator_root_mismatch');
+  for(const receipt of regression.receipts){
+    if(receipt.evaluator_root_digest!==evaluatorRootDigest)throw new Error('rsi_external_eval_regression_evaluator_root_mismatch');
+  }
+  if(holdoutResult.result.holdout_suite_digest!==tournamentResult.plan.workload.holdout_digest)throw new Error('rsi_external_eval_holdout_tournament_binding_mismatch');
 
   const hardDigest=digest({result_digest:evaluator.result.result_digest,hard_invariants:evaluator.result.hard_invariants});
   const objectiveDigest=digest({result_digest:evaluator.result.result_digest,objectives:evaluator.result.objectives,state:evaluator.result.state});
