@@ -291,3 +291,103 @@ test('trusted command attribution converts an evaluated runtime candidate into r
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('runtime closes verified Browser outcome -> external step credit -> durable experience graph loop', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-learning-loop-'));
+  try {
+    const source = 'a'.repeat(40);
+    const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
+    await runtime.start();
+    const candidate = await runtime.proposeCandidate({
+      candidate_id: 'candidate.runtime.learning.1',
+      parent_sha: source,
+      candidate_sha: 'd'.repeat(40),
+      mutation_surface: 'BROWSER_RUNTIME',
+      hypothesis: 'receipt-bound action improves task progression',
+    });
+    await runtime.beginEvaluation(candidate.candidate_id);
+    const commandId = '55555555-5555-4555-8555-555555555555';
+    const d = (char) => `sha256:${char.repeat(64)}`;
+    await runtime.bindBrowserCommandAttribution({
+      command_id: commandId,
+      action: 'SCROLL',
+      platform: 'CHATGPT',
+      effect_key: 'effect-learning-1',
+      task_id: 'task.runtime.learning.1',
+      task_signature_digest: d('1'),
+      environment_fingerprint: 'env.browser.chatgpt.v1',
+      model_family: 'GPT_5_6_SOL',
+      candidate_id: candidate.candidate_id,
+      proposal_digest: d('2'),
+      skill_digests: [d('3')],
+      trajectory_id: 'trajectory.runtime.learning.1',
+      step_index: 1,
+      step_count: 1,
+      predecessor_episode_digest: null,
+      external_planner: true,
+      authored_by_candidate: false,
+    });
+    const episode = await runtime.ingestBrowserOutcome({
+      readback: {
+        schema: 'metaengine.rsi.result-receipt-readback.v1',
+        command_id: commandId,
+        found: true,
+        terminal: true,
+        status: 'COMPLETED',
+        receipt: {
+          schema: 'metaengine.native-supervisor.command-receipt.v2',
+          command_id: commandId,
+          action: 'SCROLL',
+          platform: 'CHATGPT',
+          result: { moved: true },
+          effect_outcome: 'CONFIRMED',
+          lane: 'MUTATION',
+          effect_key: 'effect-learning-1',
+          execution_ms: 8.5,
+          recorded_at: '2026-09-18T17:40:00.000Z',
+          authority_effect: false,
+        },
+        error: null,
+        execution_authority: false,
+        production_mutation_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    });
+    assert.equal(episode.eligible_for_credit_assignment, true);
+    const credited = await runtime.recordBrowserStepCredit({
+      episode,
+      task_anchor: {
+        task_id: 'task.runtime.learning.1',
+        task_signature_digest: d('1'),
+        challenge_family: 'BROWSER_INTERACTION',
+        hidden_manifest_digest: d('4'),
+        external_writer: true,
+        authored_by_candidate: false,
+      },
+      credit_id: 'credit.runtime.learning.1',
+      credit_sign: 'POSITIVE',
+      credit_score: 0.8,
+      method: 'EXTERNAL_STEP_EVALUATOR',
+      evaluator_digest: d('5'),
+      evaluation_digest: d('6'),
+      lesson_digests: [d('7')],
+      evidence_refs: ['evidence:runtime:learning:1'],
+      external_credit_assigner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(credited.materialization.case_row.outcome, 'SUCCESS');
+    assert.equal(credited.stored.state, 'APPENDED');
+    const snapshot = runtime.snapshot();
+    assert.equal(snapshot.runtime_experience_store.case_count, 1);
+    assert.equal(snapshot.runtime_experience_store.graph_epoch, 1);
+    assert.equal(snapshot.command_attribution.consumed_count, 1);
+    assert.equal(snapshot.execution_authority, false);
+    assert.equal(snapshot.authority_effect, false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
