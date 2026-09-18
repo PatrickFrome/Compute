@@ -1927,6 +1927,9 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     acceptance_policy_digest:labelDigest(`${label}-acceptance-policy`),
     hidden_holdout_root_digest:labelDigest(`${label}-hidden-holdout-root`),
     external_evaluator_root_digest:labelDigest(`${label}-external-evaluator`),
+    external_evaluator_generation_digest:labelDigest(`${label}-external-evaluator-generation`),
+    matched_reference_plan_digest:labelDigest(`${label}-matched-reference-plan`),
+    sealed_transfer_acceptance_digest:labelDigest(`${label}-sealed-transfer-acceptance`),
     control_receipt_digest:labelDigest(`${label}-control`),
     treatment_receipt_digest:labelDigest(`${label}-treatment`),
     transfer_evidence_digest:labelDigest(`${label}-transfer-evidence`),
@@ -1935,6 +1938,8 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     evaluator_integrity_pass:true,
     contamination_clear:true,
     from_scratch_replay_pass:true,
+    matched_reference_integrity_pass:true,
+    sealed_transfer_acceptance_pass:true,
     task_non_regression:true,
     safety_non_regression:true,
     security_non_regression:true,
@@ -1946,6 +1951,8 @@ function phase31Validation(proposal,label='phase31',overrides={}){
     diagnostic_discrimination_pass:proposal.knowledge_class==='ENVIRONMENT_DIAGNOSTIC'||proposal.knowledge_class==='AMBIGUITY_DIAGNOSTIC',
     external_transfer_validator:true,
     external_holdout_owner:true,
+    external_reference_owner:true,
+    external_acceptance_owner:true,
     authored_by_candidate:false,
   };
   return createRsiKnowledgeTransferValidation({...base,...overrides});
