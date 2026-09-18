@@ -23,6 +23,14 @@ const SOURCE='a'.repeat(40);
 function dg(label){
   return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;
 }
+function stable(value){
+  if(Array.isArray(value))return value.map(stable);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));
+}
+function structuralDigest(value){
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
+}
 function phase21Metrics(){
   return {
     false_positive_rate:0.02,
@@ -235,6 +243,69 @@ test('archive rejects a conflicting rewrite of the same candidate identity',asyn
   });
   const review2=review(fx,eval2,'candidate-conflict-2');
   await assert.rejects(()=>archive.add({evaluation:eval2,review:review2}),/identity_conflict/);
+});
+
+
+test('archive rejects self-rehashed evaluation or review rows that weaken shadow policy',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-verifier-shadow-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const archive=new RsiVerifierShadowArchive({statePath:path.join(dir,'archive.json'),source_sha:SOURCE});
+  await archive.init();
+  const fx=phase21('candidate-policy');
+  const eval1=evaluation(fx,'candidate-policy');
+  const review1=review(fx,eval1,'candidate-policy');
+
+  const badEvalCore={...eval1,candidate_can_read_heldout_anchor:true};
+  delete badEvalCore.evaluation_digest;
+  const badEval={...badEvalCore,evaluation_digest:structuralDigest(badEvalCore)};
+  await assert.rejects(()=>archive.add({evaluation:badEval,review:review1}),/evaluation_policy_invalid/);
+
+  const badReviewCore={...review1,candidate_can_become_active_verifier:true};
+  delete badReviewCore.review_digest;
+  const badReview={...badReviewCore,review_digest:structuralDigest(badReviewCore)};
+  await assert.rejects(()=>archive.add({evaluation:eval1,review:badReview}),/review_policy_invalid/);
+  assert.equal(archive.snapshot().row_count,0);
+});
+
+test('failed durable verifier-shadow archive write does not create phantom in-memory evidence',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-verifier-shadow-persist-fail-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiVerifierShadowArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+  const fx=phase21('candidate-persist-fail');
+  const eval1=evaluation(fx,'candidate-persist-fail');
+  const review1=review(fx,eval1,'candidate-persist-fail');
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({evaluation:eval1,review:review1}));
+  assert.equal(archive.snapshot().row_count,0);
+  assert.equal(archive.snapshot().eligible_count,0);
+  assert.deepEqual(archive.eligible(),[]);
+});
+
+test('restart rejects a self-rehashed persisted review that changes archive eligibility policy',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-verifier-shadow-restart-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'archive.json');
+  const archive=new RsiVerifierShadowArchive({statePath,source_sha:SOURCE});
+  await archive.init();
+  const fx=phase21('candidate-restart-policy');
+  const eval1=evaluation(fx,'candidate-restart-policy');
+  const review1=review(fx,eval1,'candidate-restart-policy');
+  await archive.add({evaluation:eval1,review:review1});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const badReviewCore={...persisted.rows[0].review,greedy_replacement_forbidden:false};
+  delete badReviewCore.review_digest;
+  persisted.rows[0].review={...badReviewCore,review_digest:structuralDigest(badReviewCore)};
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiVerifierShadowArchive({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/review_policy_invalid/);
 });
 
 test('verifier shadow lifecycle trust root keeps evaluation hidden and zero-authority',()=>{
