@@ -277,14 +277,23 @@ export function createRsiSearchModeRoutingPlan({
     const invalidRate=s.attempts?s.invalid/s.attempts:0;
     const explorationBonus=Math.sqrt(Math.log(totalAttempts+2)/(s.attempts+1));
     const normalizedCost=s.avgCost==null?0:Math.min(1,s.avgCost/Math.max(1,totalBudget));
-    const score=posteriorMean + 0.05*explorationBonus + 0.15*checked.novelty_pressure/(s.attempts+1) - 0.35*invalidRate - 0.10*normalizedCost;
-    return Object.freeze({search_mode:m,...s,posterior_mean:posteriorMean,exploration_bonus:explorationBonus,selection_score:score});
+    // Keep exploitation and exploration as separate budget decisions. Folding the
+    // UCB/novelty bonus into the exploit score double-counts exploration because
+    // this router already reserves an explicit exploration fraction below.
+    const exploitationScore=posteriorMean - 0.35*invalidRate - 0.10*normalizedCost;
+    const explorationScore=explorationBonus + 0.15*checked.novelty_pressure/(s.attempts+1);
+    return Object.freeze({
+      search_mode:m,...s,posterior_mean:posteriorMean,
+      exploration_bonus:explorationBonus,
+      exploration_score:explorationScore,
+      selection_score:exploitationScore,
+    });
   });
 
   const seed=digest({context:checked.context_digest,outcomes:verified.map((x)=>x.outcome_digest).sort(),routing_id});
   const sorted=rows.slice().sort((a,b)=>b.selection_score-a.selection_score||detTie(seed,a.search_mode).localeCompare(detTie(seed,b.search_mode)));
   const exploit=sorted[0];
-  const explorationCandidates=rows.filter((row)=>row.search_mode!==exploit.search_mode).sort((a,b)=>a.attempts-b.attempts||b.exploration_bonus-a.exploration_bonus||detTie(seed,a.search_mode).localeCompare(detTie(seed,b.search_mode)));
+  const explorationCandidates=rows.filter((row)=>row.search_mode!==exploit.search_mode).sort((a,b)=>b.exploration_score-a.exploration_score||a.attempts-b.attempts||detTie(seed,a.search_mode).localeCompare(detTie(seed,b.search_mode)));
   const exploreMode=explorationCandidates[0]||null;
 
   let allocations;
