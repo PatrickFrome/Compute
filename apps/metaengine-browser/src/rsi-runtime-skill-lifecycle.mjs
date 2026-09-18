@@ -147,6 +147,234 @@ export class RsiRuntimeSkillLifecycle{
     await this.#persist();
     return zero({state:changed?'ADOPTED':'UNCHANGED',library_digest:checked.library_digest,entry_count:checked.entry_count,reconciled_pending:reconciled});
   }
+
+  #appendAdmission(admissionId){
+    const idValue=boundedId(admissionId,'append_admission_id');
+    const row=this.#appendAdmissions.find(item=>item.admission_id===idValue);
+    if(!row)throw new Error('rsi_runtime_skill_append_admission_not_found');
+    return row;
+  }
+  #verifyAppendCertificate(row,certificate,certificateArgs){
+    const checked=verifyRsiAnytimeLibraryAdmissionCertificate(certificate,certificateArgs||{});
+    if(checked.admission_certificate_digest!==row.admission_certificate_digest)throw new Error('rsi_runtime_skill_append_certificate_mismatch');
+    if(checked.state!=='ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF'
+      ||checked.append_handoff_one_attempt_only!==true||checked.ambiguous_append_retry_allowed!==false
+      ||checked.append_effect_performed!==false||checked.library_append_token!==null
+      ||checked.retrieval_exposure_change_authorized!==false||checked.skill_activation_authorized!==false
+      ||checked.lifecycle_mutation_authorized!==false){
+      throw new Error('rsi_runtime_skill_append_certificate_not_eligible');
+    }
+    return checked;
+  }
+  #certificatePrincipals(certificate){
+    return new Set([
+      certificate.library_owner_identity_digest,
+      certificate.statistical_acceptor_identity_digest,
+      certificate.source_qualification_owner_identity_digest,
+      certificate.least_privilege_reviewer_identity_digest,
+      certificate.governance_reviewer_identity_digest,
+      certificate.benchmark_security_attestor_identity_digest,
+    ].filter(Boolean).map((value)=>exactDigest(value,'append_certificate_principal')));
+  }
+  async prepareStorageOnlyAppendAdmission({
+    admission_id,admission_certificate,admission_certificate_args,proposed_successor_library,
+    append_effect_id_digest,idempotency_key_digest,external_effect_planner_identity_digest,
+    external_library_owner=false,external_effect_planner=false,authored_by_candidate=true,
+  }={}){
+    this.#assertInit();
+    if(external_library_owner!==true||external_effect_planner!==true||authored_by_candidate!==false){
+      throw new Error('rsi_runtime_skill_append_external_planner_required');
+    }
+    if(!this.#library)throw new Error('rsi_runtime_skill_library_unavailable');
+    const certificate=verifyRsiAnytimeLibraryAdmissionCertificate(admission_certificate,admission_certificate_args||{});
+    if(certificate.state!=='ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF'
+      ||certificate.append_handoff_one_attempt_only!==true||certificate.ambiguous_append_retry_allowed!==false
+      ||certificate.append_effect_performed!==false||certificate.library_append_token!==null){
+      throw new Error('rsi_runtime_skill_append_certificate_not_eligible');
+    }
+    if(certificate.current_library_digest!==this.#library.library_digest)throw new Error('rsi_runtime_skill_append_cas_predecessor_mismatch');
+    const successor=verifyRsiVerifiedSkillLibrary(proposed_successor_library);
+    if(successor.library_id!==this.#library.library_id)throw new Error('rsi_runtime_skill_append_library_identity_drift');
+    if(successor.library_digest!==certificate.proposed_successor_library_digest)throw new Error('rsi_runtime_skill_append_successor_digest_mismatch');
+    this.#assertAppendOnlyLibrary(successor);
+    if(successor.entries.length!==this.#library.entries.length+1)throw new Error('rsi_runtime_skill_append_exactly_one_skill_required');
+    const predecessorDigests=new Set(this.#library.entries.map(row=>row.skill_digest));
+    const added=successor.entries.filter(row=>!predecessorDigests.has(row.skill_digest));
+    if(added.length!==1||added[0].skill_digest!==certificate.proposed_skill_digest
+      ||added[0].evidence_digest!==certificate.proposed_skill_evidence_digest){
+      throw new Error('rsi_runtime_skill_append_candidate_identity_mismatch');
+    }
+    const admissionId=boundedId(admission_id,'append_admission_id');
+    const effectId=exactDigest(append_effect_id_digest,'append_effect_id');
+    const idempotency=exactDigest(idempotency_key_digest,'append_idempotency_key');
+    const planner=exactDigest(external_effect_planner_identity_digest,'append_planner_identity');
+    if(this.#certificatePrincipals(certificate).has(planner))throw new Error('rsi_runtime_skill_append_planner_separation_required');
+    const existing=this.#appendAdmissions.find(row=>row.admission_id===admissionId||row.append_effect_id_digest===effectId||row.idempotency_key_digest===idempotency);
+    const immutable={
+      admission_id:admissionId,
+      admission_certificate_digest:certificate.admission_certificate_digest,
+      admission_proposal_digest:certificate.admission_proposal_digest,
+      predecessor_source_qualification_digest:certificate.predecessor_source_qualification_digest,
+      source_evaluation_contract_digest:certificate.source_evaluation_contract_digest,
+      consumer_task_set_digest:certificate.consumer_task_set_digest,
+      consumer_retrieval_profile_digest:certificate.consumer_retrieval_profile_digest,
+      current_consumer_plane_digest:certificate.current_consumer_plane_digest,
+      current_verified_library_digest:certificate.current_verified_library_digest,
+      consumer_evaluation_contract_digest:certificate.consumer_evaluation_contract_digest,
+      expected_predecessor_library_digest:this.#library.library_digest,
+      expected_successor_library_digest:successor.library_digest,
+      expected_successor_entry_count:successor.entry_count,
+      proposed_skill_digest:certificate.proposed_skill_digest,
+      proposed_skill_evidence_digest:certificate.proposed_skill_evidence_digest,
+      append_effect_id_digest:effectId,
+      idempotency_key_digest:idempotency,
+      external_effect_planner_identity_digest:planner,
+    };
+    const appendPlanDigest=digest(immutable);
+    if(existing){
+      if(existing.append_plan_digest!==appendPlanDigest)throw new Error('rsi_runtime_skill_append_identity_conflict');
+      return zero({state:'IDEMPOTENT_PLAN',admission_id:admissionId,append_plan_digest:appendPlanDigest});
+    }
+    if(this.#appendAdmissions.length>=MAX_APPEND_ADMISSIONS)throw new Error('rsi_runtime_skill_append_admission_capacity_exceeded');
+    const row={
+      ...immutable,append_plan_digest:appendPlanDigest,
+      effect_attempt_count:0,effect_executor_identity_digest:null,effect_receipt_digest:null,
+      readback_verifier_identity_digest:null,reconciliation_owner_identity_digest:null,
+      observed_library_digest:null,
+      prepared_at:this.#now(),attempt_prepared_at:null,readback_at:null,reconciled_at:null,
+      state:'PLANNED_NOT_ATTEMPTED',
+      durable_plan_before_effect:true,one_effect_attempt_only:true,blind_retry_authorized:false,
+      reconciliation_readback_only:true,retrieval_exposure_changed:false,skill_activation_performed:false,
+      lifecycle_mutation_performed:false,governance_recompute_performed:false,library_append_performed_by_lifecycle:false,
+    };
+    this.#appendAdmissions.push(Object.freeze(row));
+    await this.#persist();
+    return zero({state:row.state,admission_id:admissionId,append_plan_digest:appendPlanDigest,
+      expected_predecessor_library_digest:row.expected_predecessor_library_digest,
+      expected_successor_library_digest:row.expected_successor_library_digest});
+  }
+  async prepareStorageOnlyAppendEffectAttempt({
+    admission_id,admission_certificate,admission_certificate_args,effect_executor_identity_digest,
+    external_effect_executor=false,authored_by_candidate=true,
+  }={}){
+    this.#assertInit();
+    if(external_effect_executor!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_append_external_executor_required');
+    const row=this.#appendAdmission(admission_id);
+    const certificate=this.#verifyAppendCertificate(row,admission_certificate,admission_certificate_args);
+    if(row.state!=='PLANNED_NOT_ATTEMPTED'||row.effect_attempt_count!==0)throw new Error('rsi_runtime_skill_append_effect_attempt_already_consumed');
+    if(!this.#library||this.#library.library_digest!==row.expected_predecessor_library_digest)throw new Error('rsi_runtime_skill_append_cas_predecessor_mismatch');
+    const executor=exactDigest(effect_executor_identity_digest,'append_executor_identity');
+    const principals=this.#certificatePrincipals(certificate);
+    if(principals.has(executor)||executor===row.external_effect_planner_identity_digest)throw new Error('rsi_runtime_skill_append_executor_separation_required');
+    const index=this.#appendAdmissions.indexOf(row);
+    const next=Object.freeze({...row,effect_attempt_count:1,effect_executor_identity_digest:executor,
+      attempt_prepared_at:this.#now(),state:'ATTEMPT_PREPARED_AWAITING_EXTERNAL_EFFECT_READBACK'});
+    this.#appendAdmissions[index]=next;
+    await this.#persist();
+    return zero({state:next.state,admission_id:next.admission_id,append_effect_id_digest:next.append_effect_id_digest,
+      idempotency_key_digest:next.idempotency_key_digest,effect_execution_authority:false});
+  }
+  async recordStorageOnlyAppendReadback({
+    admission_id,admission_certificate,admission_certificate_args,effect_observation,observed_library=null,
+    external_effect_receipt_digest,readback_verifier_identity_digest,
+    external_readback_verifier=false,authored_by_candidate=true,
+  }={}){
+    this.#assertInit();
+    if(external_readback_verifier!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_append_external_readback_required');
+    const row=this.#appendAdmission(admission_id);
+    const certificate=this.#verifyAppendCertificate(row,admission_certificate,admission_certificate_args);
+    if(row.state!=='ATTEMPT_PREPARED_AWAITING_EXTERNAL_EFFECT_READBACK'||row.effect_attempt_count!==1)throw new Error('rsi_runtime_skill_append_readback_state_invalid');
+    const verifier=exactDigest(readback_verifier_identity_digest,'append_readback_identity');
+    const principals=this.#certificatePrincipals(certificate);
+    if(principals.has(verifier)||verifier===row.external_effect_planner_identity_digest||verifier===row.effect_executor_identity_digest){
+      throw new Error('rsi_runtime_skill_append_readback_separation_required');
+    }
+    const receiptDigest=exactDigest(external_effect_receipt_digest,'append_effect_receipt');
+    const observation=String(effect_observation||'').trim().toUpperCase();
+    if(!['APPLIED','NOT_APPLIED','AMBIGUOUS'].includes(observation))throw new Error('rsi_runtime_skill_append_effect_observation_invalid');
+    let state,observedDigest=null,nextLibrary=this.#library;
+    if(observation==='APPLIED'){
+      if(!observed_library)throw new Error('rsi_runtime_skill_append_observed_library_required');
+      const observed=verifyRsiVerifiedSkillLibrary(observed_library);
+      if(observed.library_digest!==row.expected_successor_library_digest||observed.entry_count!==row.expected_successor_entry_count){
+        throw new Error('rsi_runtime_skill_append_successor_readback_mismatch');
+      }
+      if(!this.#library||this.#library.library_digest!==row.expected_predecessor_library_digest)throw new Error('rsi_runtime_skill_append_local_predecessor_drift');
+      this.#assertAppendOnlyLibrary(observed);
+      const newEntries=observed.entries.filter(item=>!this.#library.entries.some(old=>old.skill_digest===item.skill_digest));
+      if(newEntries.length!==1||newEntries[0].skill_digest!==row.proposed_skill_digest||newEntries[0].evidence_digest!==row.proposed_skill_evidence_digest){
+        throw new Error('rsi_runtime_skill_append_readback_candidate_mismatch');
+      }
+      nextLibrary=observed;observedDigest=observed.library_digest;state='APPLIED_STORAGE_ONLY_DORMANT';
+    }else if(observation==='NOT_APPLIED'){
+      if(!observed_library)throw new Error('rsi_runtime_skill_append_observed_library_required');
+      const observed=verifyRsiVerifiedSkillLibrary(observed_library);
+      if(observed.library_digest!==row.expected_predecessor_library_digest)throw new Error('rsi_runtime_skill_append_not_applied_readback_mismatch');
+      observedDigest=observed.library_digest;state='NOT_APPLIED_REPLAN_REQUIRED';
+    }else{
+      if(observed_library){
+        const observed=verifyRsiVerifiedSkillLibrary(observed_library);
+        if(observed.library_digest===row.expected_successor_library_digest||observed.library_digest===row.expected_predecessor_library_digest){
+          throw new Error('rsi_runtime_skill_append_resolved_state_cannot_be_ambiguous');
+        }
+        observedDigest=observed.library_digest;
+      }
+      state='AMBIGUOUS_RECONCILIATION_REQUIRED';
+    }
+    const index=this.#appendAdmissions.indexOf(row);
+    const next=Object.freeze({...row,effect_receipt_digest:receiptDigest,readback_verifier_identity_digest:verifier,
+      observed_library_digest:observedDigest,readback_at:this.#now(),state,
+      blind_retry_authorized:false,retrieval_exposure_changed:false,skill_activation_performed:false,
+      lifecycle_mutation_performed:false,governance_recompute_performed:false,library_append_performed_by_lifecycle:false});
+    this.#appendAdmissions[index]=next;
+    if(state==='APPLIED_STORAGE_ONLY_DORMANT')this.#library=nextLibrary;
+    await this.#persist();
+    return zero({state,admission_id:next.admission_id,observed_library_digest:observedDigest,
+      blind_retry_authorized:false,retrieval_exposure_changed:false,skill_activation_performed:false});
+  }
+  async reconcileStorageOnlyAppend({
+    admission_id,admission_certificate,admission_certificate_args,observed_library,
+    reconciliation_owner_identity_digest,external_reconciliation_owner=false,authored_by_candidate=true,
+  }={}){
+    this.#assertInit();
+    if(external_reconciliation_owner!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_append_external_reconciliation_owner_required');
+    const row=this.#appendAdmission(admission_id);
+    const certificate=this.#verifyAppendCertificate(row,admission_certificate,admission_certificate_args);
+    if(row.state!=='AMBIGUOUS_RECONCILIATION_REQUIRED'||row.effect_attempt_count!==1)throw new Error('rsi_runtime_skill_append_reconciliation_state_invalid');
+    const owner=exactDigest(reconciliation_owner_identity_digest,'append_reconciliation_owner');
+    const principals=this.#certificatePrincipals(certificate);
+    if(principals.has(owner)||[row.external_effect_planner_identity_digest,row.effect_executor_identity_digest,row.readback_verifier_identity_digest].includes(owner)){
+      throw new Error('rsi_runtime_skill_append_reconciliation_separation_required');
+    }
+    const observed=verifyRsiVerifiedSkillLibrary(observed_library);
+    let state;
+    if(observed.library_digest===row.expected_successor_library_digest){
+      if(!this.#library||this.#library.library_digest!==row.expected_predecessor_library_digest)throw new Error('rsi_runtime_skill_append_local_predecessor_drift');
+      this.#assertAppendOnlyLibrary(observed);
+      const added=observed.entries.filter(item=>!this.#library.entries.some(old=>old.skill_digest===item.skill_digest));
+      if(added.length!==1||added[0].skill_digest!==row.proposed_skill_digest||added[0].evidence_digest!==row.proposed_skill_evidence_digest){
+        throw new Error('rsi_runtime_skill_append_reconciliation_candidate_mismatch');
+      }
+      this.#library=observed;state='RECONCILED_APPLIED_STORAGE_ONLY_DORMANT';
+    }else if(observed.library_digest===row.expected_predecessor_library_digest){
+      state='RECONCILED_NOT_APPLIED_REPLAN_REQUIRED';
+    }else{
+      throw new Error('rsi_runtime_skill_append_reconciliation_unresolved');
+    }
+    const index=this.#appendAdmissions.indexOf(row);
+    const next=Object.freeze({...row,reconciliation_owner_identity_digest:owner,observed_library_digest:observed.library_digest,
+      reconciled_at:this.#now(),state,blind_retry_authorized:false,retrieval_exposure_changed:false,
+      skill_activation_performed:false,lifecycle_mutation_performed:false,governance_recompute_performed:false,
+      library_append_performed_by_lifecycle:false});
+    this.#appendAdmissions[index]=next;
+    await this.#persist();
+    return zero({state,admission_id:next.admission_id,observed_library_digest:observed.library_digest,
+      second_effect_attempt_performed:false,blind_retry_authorized:false});
+  }
+  storageAppendAdmissions(){
+    this.#assertInit();
+    return Object.freeze(this.#appendAdmissions.map(row=>Object.freeze(structuredClone(row))));
+  }
   #nextSeq(skillDigest){const next=(this.#seq.get(skillDigest)||0)+1;this.#seq.set(skillDigest,next);return next}
   #materializeOne({episode,credit_receipt,generation,router_engaged,false_positive_injection,hard_invariant_violation,authoring_prior,authoring_provenance_digest}){
     const e=assertEpisode(episode);
