@@ -47,10 +47,9 @@ export function createRsiSkillCoalitionAudit({context_digest,observations,min_ne
     marginals.get(skill).push(withRow.utility-withoutRow.utility);
   }
   const summaries=[...marginals.entries()].map(([skill,vals])=>{
-    const unique=[];for(const v of vals)if(!unique.includes(v))unique.push(v);
-    const mean=unique.reduce((a,b)=>a+b,0)/unique.length;
-    const neg=unique.filter(v=>v<0).length,pos=unique.filter(v=>v>0).length;
-    return Object.freeze({skill_digest:skill,pair_count:unique.length,mean_marginal:Math.round(mean*1e9)/1e9,negative_pair_count:neg,positive_pair_count:pos,mask:neg>=min_negative_pairs&&pos===0&&mean<0});
+    const mean=vals.reduce((a,b)=>a+b,0)/vals.length;
+    const neg=vals.filter(v=>v<0).length,pos=vals.filter(v=>v>0).length;
+    return Object.freeze({skill_digest:skill,pair_count:vals.length,mean_marginal:Math.round(mean*1e9)/1e9,negative_pair_count:neg,positive_pair_count:pos,mask:neg>=min_negative_pairs&&pos===0&&mean<0});
   }).sort((a,b)=>a.skill_digest.localeCompare(b.skill_digest));
   const masked=summaries.filter(x=>x.mask).map(x=>x.skill_digest);
   const core={schema:RSI_SKILL_COALITION_AUDIT_SCHEMA,version:1,context_digest:ctx,observation_digests:rows.map(x=>x.observation_digest).sort(),summaries,masked_skill_digests:Object.freeze(masked),min_negative_pairs,candidate_can_choose_threshold:false,coalition_pollution_checked:true,cross_skill_interaction_evidence_required:true,mask_is_execution_authority:false,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
