@@ -274,8 +274,8 @@ export class RsiShadowProfileBindingLedger {
     return this.snapshot();
   }
 
-  async #persist() {
-    const state = ledgerState(this.#sourceSha, this.#rows);
+  async #persist(rows = this.#rows) {
+    const state = ledgerState(this.#sourceSha, rows);
     const tempPath = `${this.#path}.tmp`;
     const handle = await fs.open(tempPath, 'w', 0o600);
     try {
@@ -305,8 +305,9 @@ export class RsiShadowProfileBindingLedger {
     if (this.#rows.length >= MAX_ROWS) {
       throw new Error('rsi_shadow_profile_ledger_capacity_exceeded');
     }
-    this.#rows.push(structuredClone(checked));
-    await this.#persist();
+    const nextRows = [...this.#rows, structuredClone(checked)];
+    await this.#persist(nextRows);
+    this.#rows = nextRows;
     return zeroAuthority({ state: 'SHADOW_BOUND', binding_digest: checked.binding_digest });
   }
 
