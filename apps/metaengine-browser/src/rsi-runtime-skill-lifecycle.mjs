@@ -354,7 +354,7 @@ export class RsiRuntimeSkillLifecycle{
       if(added.length!==1||added[0].skill_digest!==row.proposed_skill_digest||added[0].evidence_digest!==row.proposed_skill_evidence_digest){
         throw new Error('rsi_runtime_skill_append_reconciliation_candidate_mismatch');
       }
-      this.#library=observed;state='RECONCILED_APPLIED_STORAGE_ONLY_DORMANT';
+      state='RECONCILED_APPLIED_STORAGE_ONLY_DORMANT';
     }else if(observed.library_digest===row.expected_predecessor_library_digest){
       state='RECONCILED_NOT_APPLIED_REPLAN_REQUIRED';
     }else{
@@ -369,7 +369,7 @@ export class RsiRuntimeSkillLifecycle{
     const persistedLibrary=state==='RECONCILED_APPLIED_STORAGE_ONLY_DORMANT'?observed:this.#library;
     await this.#persistSnapshot({library:persistedLibrary,appendAdmissions:nextAdmissions});
     this.#appendAdmissions=nextAdmissions;
-    await Promise.resolve();
+    if(state==='RECONCILED_APPLIED_STORAGE_ONLY_DORMANT')this.#library=observed;
     return zero({state,admission_id:next.admission_id,observed_library_digest:observed.library_digest,
       second_effect_attempt_performed:false,blind_retry_authorized:false});
   }
