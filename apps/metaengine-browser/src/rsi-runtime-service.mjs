@@ -316,6 +316,7 @@ export class RsiRuntimeService {
     this.#assertRunning();
     const advisory = createRsiRuntimeSkillAdvisory(input);
     verifyRsiRuntimeSkillAdvisory(advisory, input);
+    if (advisory.source_parent_sha !== this.#sourceSha) throw new Error('rsi_runtime_skill_source_parent_mismatch');
     await this.#ledger.append('SKILL_ADVISORY_BOUND', {
       advisory_schema: advisory.schema,
       advisory_digest: advisory.advisory_digest,
@@ -339,8 +340,16 @@ export class RsiRuntimeService {
     return advisory;
   }
 
-  clearSkillAdvisory() {
+  async clearSkillAdvisory() {
     this.#assertRunning();
+    if (!this.#skillAdvisory) return false;
+    await this.#ledger.append('SKILL_ADVISORY_CLEARED', {
+      advisory_digest: this.#skillAdvisory.advisory_digest,
+      skill_id: this.#skillAdvisory.skill_id,
+      skill_digest: this.#skillAdvisory.skill_digest,
+      source_parent_sha: this.#skillAdvisory.source_parent_sha,
+      authority_effect: false,
+    });
     this.#skillAdvisory = null;
     return true;
   }
@@ -384,6 +393,8 @@ export class RsiRuntimeService {
       skill_advisory: this.#skillAdvisory ? Object.freeze({
         schema: this.#skillAdvisory.schema,
         advisory_digest: this.#skillAdvisory.advisory_digest,
+        source_parent_sha: this.#skillAdvisory.source_parent_sha,
+        source_candidate_sha: this.#skillAdvisory.source_candidate_sha,
         library_digest: this.#skillAdvisory.library_digest,
         governance_digest: this.#skillAdvisory.governance_digest,
         activation_digest: this.#skillAdvisory.activation_digest,
@@ -440,6 +451,8 @@ export class RsiRuntimeService {
       skill_advisory_bound: this.#skillAdvisory != null,
       skill_advisory: this.#skillAdvisory ? Object.freeze({
         advisory_digest: this.#skillAdvisory.advisory_digest,
+        source_parent_sha: this.#skillAdvisory.source_parent_sha,
+        source_candidate_sha: this.#skillAdvisory.source_candidate_sha,
         skill_id: this.#skillAdvisory.skill_id,
         skill_version: this.#skillAdvisory.skill_version,
         skill_digest: this.#skillAdvisory.skill_digest,
