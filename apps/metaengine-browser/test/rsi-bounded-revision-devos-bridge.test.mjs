@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   createRsiSharedExperienceAdmission,
@@ -29,6 +32,9 @@ import {
   createRsiMaterializedCandidateEvaluationHandoff,
   verifyRsiMaterializedCandidateEvaluationHandoff,
   createRsiMaterializedCandidateExperimentIntent,
+  createRsiEvaluatorGenerationRotation,
+  verifyRsiEvaluatorGenerationRotation,
+  RsiMaterializedEvaluationHandoffLedger,
   rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot,
 } from '../src/rsi-materialized-candidate-evaluation-handoff.mjs';
 import {
@@ -847,4 +853,208 @@ test('Phase29 trust root freezes external evaluation assets and zero authority',
   assert.equal(root.promotion_authority,false);
   assert.equal(root.self_update_authority,false);
   assert.equal(root.authority_effect,false);
+});
+
+
+test('Phase29 durable handoff history supports same-generation epochs and externally witnessed generation rotation',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-history-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiMaterializedEvaluationHandoffLedger({statePath:path.join(dir,'history.json'),source_sha:SOURCE});
+  await ledger.init();
+
+  const fx=phase28ArtifactFixture('history');
+  const first=phase29Handoff(fx,'history-gen1');
+  const firstAdd=await ledger.add({
+    handoff:first,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+  });
+  assert.equal(firstAdd.state,'RECORDED');
+  assert.equal(firstAdd.handoff_seq,1);
+
+  const second=phase29Handoff(fx,'history-gen1-epoch2',{
+    evaluator_root_digest:first.evaluator_root_digest,
+    evaluator_generation_digest:first.evaluator_generation_digest,
+  });
+  const secondAdd=await ledger.add({
+    handoff:second,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+  });
+  assert.equal(secondAdd.handoff_seq,2);
+
+  const third=phase29Handoff(fx,'history-gen2');
+  const rotation=createRsiEvaluatorGenerationRotation({
+    rotation_id:'phase29.rotation.history.gen2',
+    source_sha:SOURCE,
+    previous_evaluator_root_digest:second.evaluator_root_digest,
+    previous_evaluator_generation_digest:second.evaluator_generation_digest,
+    next_evaluator_root_digest:third.evaluator_root_digest,
+    next_evaluator_generation_digest:third.evaluator_generation_digest,
+    previous_evaluation_epoch_digest:second.evaluation_epoch_digest,
+    next_evaluation_epoch_digest:third.evaluation_epoch_digest,
+    anchor_recalibration_digest:labelDigest('history-gen2-anchor-recalibration'),
+    external_rotation_receipt_digest:labelDigest('history-gen2-external-rotation'),
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  verifyRsiEvaluatorGenerationRotation(rotation);
+  const thirdAdd=await ledger.add({
+    handoff:third,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    rotation,
+  });
+  assert.equal(thirdAdd.handoff_seq,3);
+
+  const snap=ledger.snapshot();
+  assert.equal(snap.row_count,3);
+  assert.equal(snap.generation_count,2);
+  assert.equal(snap.latest_handoff_seq,3);
+  assert.equal(snap.latest_evaluator_generation_digest,third.evaluator_generation_digest);
+  assert.equal(snap.active_candidate_digest,null);
+  assert.equal(snap.ledger_can_execute_evaluation,false);
+  assert.equal(snap.ledger_can_promote,false);
+
+  const restored=new RsiMaterializedEvaluationHandoffLedger({statePath:path.join(dir,'history.json'),source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,3);
+  assert.equal((await restored.add({
+    handoff:third,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+    rotation,
+  })).state,'IDEMPOTENT');
+});
+
+test('Phase29 durable handoff history rejects silent generation change, rollback, and same-epoch generation drift',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-history-rotation-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiMaterializedEvaluationHandoffLedger({statePath:path.join(dir,'history.json'),source_sha:SOURCE});
+  await ledger.init();
+
+  const fx=phase28ArtifactFixture('rotation-base');
+  const first=phase29Handoff(fx,'rotation-gen1');
+  await ledger.add({handoff:first,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification});
+
+  const second=phase29Handoff(fx,'rotation-gen2');
+  await assert.rejects(
+    ()=>ledger.add({handoff:second,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification}),
+    /rotation_invalid|rotation_binding_mismatch/,
+  );
+
+  const rotation=createRsiEvaluatorGenerationRotation({
+    rotation_id:'phase29.rotation.base.gen2',
+    source_sha:SOURCE,
+    previous_evaluator_root_digest:first.evaluator_root_digest,
+    previous_evaluator_generation_digest:first.evaluator_generation_digest,
+    next_evaluator_root_digest:second.evaluator_root_digest,
+    next_evaluator_generation_digest:second.evaluator_generation_digest,
+    previous_evaluation_epoch_digest:first.evaluation_epoch_digest,
+    next_evaluation_epoch_digest:second.evaluation_epoch_digest,
+    anchor_recalibration_digest:labelDigest('rotation-base-anchor'),
+    external_rotation_receipt_digest:labelDigest('rotation-base-receipt'),
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  await ledger.add({handoff:second,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification,rotation});
+
+  const rollback=phase29Handoff(fx,'rotation-rollback',{
+    evaluator_root_digest:first.evaluator_root_digest,
+    evaluator_generation_digest:first.evaluator_generation_digest,
+  });
+  const rollbackRotation=createRsiEvaluatorGenerationRotation({
+    rotation_id:'phase29.rotation.rollback',
+    source_sha:SOURCE,
+    previous_evaluator_root_digest:second.evaluator_root_digest,
+    previous_evaluator_generation_digest:second.evaluator_generation_digest,
+    next_evaluator_root_digest:rollback.evaluator_root_digest,
+    next_evaluator_generation_digest:rollback.evaluator_generation_digest,
+    previous_evaluation_epoch_digest:second.evaluation_epoch_digest,
+    next_evaluation_epoch_digest:rollback.evaluation_epoch_digest,
+    anchor_recalibration_digest:labelDigest('rotation-rollback-anchor'),
+    external_rotation_receipt_digest:labelDigest('rotation-rollback-receipt'),
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  await assert.rejects(
+    ()=>ledger.add({handoff:rollback,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification,rotation:rollbackRotation}),
+    /generation_rollback/,
+  );
+
+  const fx2=phase28ArtifactFixture('rotation-other-artifact');
+  const epochDrift=phase29Handoff(fx2,'rotation-epoch-drift',{
+    evaluation_epoch_digest:first.evaluation_epoch_digest,
+  });
+  await assert.rejects(
+    ()=>ledger.add({handoff:epochDrift,artifact_receipt:fx2.artifactReceipt,artifact_verification:fx2.artifactVerification}),
+    /epoch_generation_drift/,
+  );
+});
+
+test('Phase29 handoff ledger is durable-before-visible and restart rejects sequence tamper',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-history-persist-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'history.json');
+  const fx=phase28ArtifactFixture('persist');
+  const handoff=phase29Handoff(fx,'persist');
+
+  const failed=new RsiMaterializedEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await failed.init();
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>failed.add({
+    handoff,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+  }));
+  assert.equal(failed.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  const ledger=new RsiMaterializedEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  await ledger.add({handoff,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification});
+  const second=phase29Handoff(fx,'persist-second',{
+    evaluator_root_digest:handoff.evaluator_root_digest,
+    evaluator_generation_digest:handoff.evaluator_generation_digest,
+  });
+  await ledger.add({handoff:second,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  persisted.rows[1].handoff_seq=3;
+  const stateCore=structuredClone(persisted);
+  delete stateCore.state_digest;
+  persisted.state_digest=dg(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiMaterializedEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/sequence_gap_or_reorder/);
+});
+
+test('Phase29 handoff history rejects self-rehashed candidate authority and request identity conflicts',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-history-policy-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiMaterializedEvaluationHandoffLedger({statePath:path.join(dir,'history.json'),source_sha:SOURCE});
+  await ledger.init();
+  const fx=phase28ArtifactFixture('policy-history');
+  const handoff=phase29Handoff(fx,'policy-history');
+
+  const bad=structuredClone(handoff);
+  bad.candidate_can_choose_evaluator=true;
+  const core=structuredClone(bad);
+  delete core.evaluation_handoff_digest;
+  bad.evaluation_handoff_digest=dg(core);
+  await assert.rejects(
+    ()=>ledger.add({handoff:bad,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification}),
+    /handoff_policy_invalid/,
+  );
+  assert.equal(ledger.snapshot().row_count,0);
+
+  await ledger.add({handoff,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification});
+  const conflicting=structuredClone(handoff);
+  conflicting.evaluation_handoff_digest=labelDigest('different-handoff-digest');
+  await assert.rejects(
+    ()=>ledger.add({handoff:conflicting,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification}),
+    /handoff_digest_mismatch/,
+  );
+  assert.equal(ledger.snapshot().row_count,1);
 });
