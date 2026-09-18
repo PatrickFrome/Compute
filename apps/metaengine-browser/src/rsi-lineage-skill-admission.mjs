@@ -122,6 +122,7 @@ export function admitRsiLineageSkill({
     lineage_admission_digest:lineage.lineage_admission_digest,
     candidate_id:lineage.candidate_id,
     candidate_sha:lineage.candidate_sha,
+    source_parent_sha:lineage.parent_sha,
     archive_state:lineage.archive_state,
     skill_id:checkedSkill.skill_id,
     skill_version:checkedSkill.skill_version,
