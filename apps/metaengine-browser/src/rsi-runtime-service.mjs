@@ -39,6 +39,7 @@ import { rsiFixedSkeletonTrustRootSnapshot } from './rsi-fixed-skeleton-mutation
 import { rsiSearchModeRouterTrustRootSnapshot } from './rsi-search-mode-router.mjs';
 import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integrity-guard.mjs';
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
+import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -116,6 +117,7 @@ export class RsiRuntimeService {
   #sourceSha;
   #clock;
   #ledger;
+  #experienceGate;
   #archive;
   #observer;
   #verifiedArchive;
@@ -131,6 +133,7 @@ export class RsiRuntimeService {
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
     this.#ledger = new RsiRuntimeLedger({ ledgerPath, source_sha: this.#sourceSha, clock });
+    this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
     this.#verifiedArchive = new RsiVerifiedEvolutionArchive({ clock });
@@ -146,6 +149,8 @@ export class RsiRuntimeService {
       runtime_mode: RSI_RUNTIME_MODE,
       source_sha: this.#sourceSha,
       trust_root_set_digest: digest(this.#roots),
+      experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
+      observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
       self_update_authority: false,
@@ -159,18 +164,40 @@ export class RsiRuntimeService {
     if (!this.#running) throw new Error('rsi_runtime_not_started');
   }
 
+  async #persistObservationAdmission(admission) {
+    if (admission?.action !== 'PERSIST' || !admission?.observation) {
+      throw new Error('rsi_runtime_observation_admission_invalid');
+    }
+    const observation = admission.observation;
+    await this.#ledger.append('BRAIN_OBSERVATION', {
+      observation_schema: observation?.schema || null,
+      observation_digest: observation.observation_digest,
+      experience_signature_digest: admission.signature_digest,
+      admission_reason: admission.reason,
+      critical: admission.critical === true,
+      opportunity_count: Array.isArray(observation?.opportunities) ? observation.opportunities.length : 0,
+      authority_effect: false,
+    });
+    this.#experienceGate.commitPersist(admission);
+    return observation;
+  }
+
   async observeBrainSnapshot(snapshot) {
     this.#assertRunning();
     const observation = this.#observer.observeBrainSnapshot(snapshot);
     this.#lastObservationDigest = digest(observation);
     this.#lastObservationAt = new Date(this.#clock()).toISOString();
-    await this.#ledger.append('BRAIN_OBSERVATION', {
-      observation_schema: observation?.schema || null,
-      observation_digest: this.#lastObservationDigest,
-      opportunity_count: Array.isArray(observation?.opportunities) ? observation.opportunities.length : 0,
-      authority_effect: false,
-    });
+    const admission = this.#experienceGate.offer(observation);
+    if (admission.action === 'PERSIST') await this.#persistObservationAdmission(admission);
     return observation;
+  }
+
+  async flushObservations() {
+    this.#assertRunning();
+    const admission = this.#experienceGate.flush();
+    if (!admission) return false;
+    await this.#persistObservationAdmission(admission);
+    return true;
   }
 
   async proposeCandidate(input = {}) {
@@ -288,6 +315,8 @@ export class RsiRuntimeService {
       }, {}),
       last_observation_digest: this.#lastObservationDigest,
       last_observation_at: this.#lastObservationAt,
+      observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
+      experience_gate: this.#experienceGate.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
