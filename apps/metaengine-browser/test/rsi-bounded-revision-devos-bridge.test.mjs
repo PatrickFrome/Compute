@@ -2771,22 +2771,25 @@ test('Phase32 rejects partial evaluator or epoch identity drift and exact archiv
   await archive.init();
   const receipt=phase32Receipt(base,'identity-base');
   await archive.add({...base,receipt});
-  const changed=phase32Fixture('identity-drift-changed',{
-    consumerGeneration:labelDigest('new-consumer-generation'),
-    consumerGenerationSeq:base.proposal.evaluator_generation_seq+1,
-    consumerGenerationAnchor:labelDigest('new-consumer-generation-anchor'),
-    consumerEpochSeq:base.proposal.evaluation_epoch_seq+1,
-    consumerEpochDigest:labelDigest('new-consumer-epoch'),
+  const changedHandoff=createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:'phase32.consumer.identity-drift.next-epoch',
+    proposal:base.proposal,validations:base.validations,admission:base.admission,source_rows:base.rows,
+    consumer_model_family:base.handoff.consumer_model_family,
+    consumer_environment_family:base.handoff.consumer_environment_family,
+    consumer_context_digest:base.handoff.consumer_context_digest,
+    consumer_harness_digest:base.handoff.consumer_harness_digest,
+    consumer_evaluator_root_digest:base.handoff.consumer_evaluator_root_digest,
+    consumer_evaluator_generation_digest:base.handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:base.handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:base.handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:base.handoff.consumer_evaluation_epoch_seq+1,
+    consumer_evaluation_epoch_digest:labelDigest('identity-drift-next-consumer-epoch'),
+    consumer_holdout_digest:labelDigest('identity-drift-next-holdout'),
+    matched_reference_plan_digest:labelDigest('identity-drift-next-reference'),
+    local_revalidation_protocol_digest:labelDigest('identity-drift-next-protocol'),
+    external_consumer_router:true,authored_by_candidate:false,
   });
-  // Different evaluator incarnation receives a different exact consumer identity
-  // and therefore cannot collide with the prior archive row.
-  const changedResolver=async({phase31_admission_digest})=>{
-    if(phase31_admission_digest!==changed.admission.admission_digest)return resolver({phase31_admission_digest});
-    return {proposal:changed.proposal,validations:changed.validations,admission:changed.admission,source_rows:changed.rows};
-  };
-  const secondPath=path.join(dir,'consumer-second.json');
-  const second=new RsiConsumerRevalidationArchive({statePath:secondPath,source_sha:SOURCE,evidenceResolver:changedResolver});
-  await second.init();
-  await second.add({...changed,receipt:phase32Receipt(changed,'identity-changed')});
-  assert.equal(second.snapshot().row_count,1);
+  const changedFx={...base,handoff:changedHandoff};
+  await archive.add({...changedFx,receipt:phase32Receipt(changedFx,'identity-next-epoch')});
+  assert.equal(archive.snapshot().row_count,2);
 });
