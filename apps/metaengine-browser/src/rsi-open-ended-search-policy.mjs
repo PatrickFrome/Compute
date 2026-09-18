@@ -652,7 +652,10 @@ export function assessRsiProposalNovelty({ proposal, prior_proposals = [] } = {}
     const combined = (pathSimilarity + mechanismSimilarity) / 2;
     if (!nearest || combined > nearest.combined) nearest = { prior, pathSimilarity, mechanismSimilarity, combined };
   }
-  const nearDuplicate = nearest && nearest.pathSimilarity >= 0.8 && nearest.mechanismSimilarity >= 0.8;
+  const nearDuplicate = nearest
+    && nearest.combined >= 0.8
+    && nearest.pathSimilarity >= 0.6
+    && nearest.mechanismSimilarity >= 0.6;
   return zeroAuthority({
     schema: RSI_PROPOSAL_NOVELTY_SCHEMA,
     version: 1,
