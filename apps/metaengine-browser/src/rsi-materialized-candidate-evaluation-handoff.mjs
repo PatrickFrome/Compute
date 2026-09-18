@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
 import {
   RSI_BOUNDED_REVISION_ARTIFACT_RECEIPT_SCHEMA,
@@ -15,12 +17,17 @@ import {
 } from './rsi-candidate-experiment-ledger.mjs';
 
 export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff.v1';
+export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_LEDGER_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff-ledger.v1';
 
+const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
+const MAX_HANDOFF_ROWS=2048;
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]));}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`;}
+function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_sha_invalid`);return x;}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_materialized_eval_${l}_digest_invalid`);return x;}
+function positiveInt(v,l){const n=Number(v);if(!Number.isSafeInteger(n)||n<1)throw new Error(`rsi_materialized_eval_${l}_invalid`);return n;}
 function assertZero(v,l){for(const f of ['execution_authority','browser_authority','task_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_materialized_eval_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_materialized_eval_${l}_retry_invalid`);}
 function zero(extra={}){return Object.freeze({...extra,execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false});}
 
@@ -42,7 +49,10 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
   artifact_verification,
   evaluator_root_digest,
   evaluator_generation_digest,
+  evaluator_generation_seq,
+  evaluator_generation_history_anchor_digest,
   evaluation_epoch_digest,
+  evaluation_epoch_seq,
   sealed_task_set_digest,
   evaluation_harness_digest,
   trial_worker_image_digest,
@@ -67,7 +77,10 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
   const {receipt,envelope,experimentIntent}=verifyArtifact(artifact_receipt,artifact_verification);
   const evaluator=exactDigest(evaluator_root_digest,'evaluator_root');
   const generation=exactDigest(evaluator_generation_digest,'evaluator_generation');
+  const generationSeq=positiveInt(evaluator_generation_seq,'evaluator_generation_seq');
+  const generationHistoryAnchor=exactDigest(evaluator_generation_history_anchor_digest,'evaluator_generation_history_anchor');
   const epoch=exactDigest(evaluation_epoch_digest,'evaluation_epoch');
+  const epochSeq=positiveInt(evaluation_epoch_seq,'evaluation_epoch_seq');
   const taskSet=exactDigest(sealed_task_set_digest,'sealed_task_set');
   const harness=exactDigest(evaluation_harness_digest,'evaluation_harness');
   const trialWorker=exactDigest(trial_worker_image_digest,'trial_worker');
@@ -83,7 +96,7 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
 
   if(trialWorker===receipt.worker_image_digest)throw new Error('rsi_materialized_eval_build_and_evaluation_worker_must_differ');
   const evaluationRoots=[
-    evaluator,generation,epoch,taskSet,harness,trialWorker,resourceBudget,taskOrder,acceptance,stopping,
+    evaluator,generation,generationHistoryAnchor,epoch,taskSet,harness,trialWorker,resourceBudget,taskOrder,acceptance,stopping,
     hiddenHoldout,safetySuite,securitySuite,externalMeasurement,proxyScore,
   ];
   if(new Set(evaluationRoots).size!==evaluationRoots.length)throw new Error('rsi_materialized_eval_independent_evaluation_roots_required');
@@ -122,7 +135,10 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     provenance_root_digest:provenanceRoot,
     evaluator_root_digest:evaluator,
     evaluator_generation_digest:generation,
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:generationHistoryAnchor,
     evaluation_epoch_digest:epoch,
+    evaluation_epoch_seq:epochSeq,
     sealed_task_set_digest:taskSet,
     harness_digest:harness,
     trial_worker_image_digest:trialWorker,
@@ -172,6 +188,10 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     previous_budget_plan_reuse_allowed:false,
     evaluator_generation_frozen:true,
     evaluator_dependent_verdict_reuse_allowed:false,
+    evaluator_generation_history_append_only:true,
+    evaluator_generation_seq_external:true,
+    evaluation_epoch_seq_external:true,
+    generation_history_anchor_external:true,
     build_and_evaluation_workers_distinct:true,
     existing_evaluation_budget_router_only:true,
     existing_candidate_experiment_ledger_only:true,
@@ -205,6 +225,8 @@ export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
   if(row.state!=='READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING'
     ||row.fresh_budget_epoch_required!==true||row.previous_budget_plan_reuse_allowed!==false
     ||row.evaluator_generation_frozen!==true||row.evaluator_dependent_verdict_reuse_allowed!==false
+    ||row.evaluator_generation_history_append_only!==true||row.evaluator_generation_seq_external!==true
+    ||row.evaluation_epoch_seq_external!==true||row.generation_history_anchor_external!==true
     ||row.build_and_evaluation_workers_distinct!==true
     ||row.existing_evaluation_budget_router_only!==true||row.existing_candidate_experiment_ledger_only!==true
     ||row.candidate_can_choose_evaluator!==false||row.candidate_can_choose_evaluator_generation!==false
@@ -221,7 +243,10 @@ export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
     ...args,
     evaluator_root_digest:row.evaluator_root_digest,
     evaluator_generation_digest:row.evaluator_generation_digest,
+    evaluator_generation_seq:row.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:row.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:row.evaluation_epoch_digest,
+    evaluation_epoch_seq:row.evaluation_epoch_seq,
     sealed_task_set_digest:row.sealed_task_set_digest,
     evaluation_harness_digest:row.evaluation_harness_digest,
     trial_worker_image_digest:row.trial_worker_image_digest,
@@ -292,6 +317,214 @@ export function createRsiMaterializedCandidateExperimentIntent({
   return checkedIntent;
 }
 
+
+function verifyStoredMaterializedCandidateEvaluationHandoff(row){
+  if(!row||row.schema!==RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA||row.version!==1)throw new Error('rsi_materialized_eval_handoff_invalid');
+  assertZero(row,'stored_handoff');
+  if(row.state!=='READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING'
+    ||row.fresh_budget_epoch_required!==true||row.previous_budget_plan_reuse_allowed!==false
+    ||row.evaluator_generation_frozen!==true||row.evaluator_dependent_verdict_reuse_allowed!==false
+    ||row.evaluator_generation_history_append_only!==true||row.evaluator_generation_seq_external!==true
+    ||row.evaluation_epoch_seq_external!==true||row.generation_history_anchor_external!==true
+    ||row.build_and_evaluation_workers_distinct!==true
+    ||row.existing_evaluation_budget_router_only!==true||row.existing_candidate_experiment_ledger_only!==true
+    ||row.candidate_can_choose_evaluator!==false||row.candidate_can_choose_evaluator_generation!==false
+    ||row.candidate_can_choose_task_set!==false||row.candidate_can_choose_harness!==false
+    ||row.candidate_can_choose_trial_worker!==false||row.candidate_can_choose_resource_budget!==false
+    ||row.candidate_can_choose_task_order!==false||row.candidate_can_choose_acceptance_policy!==false
+    ||row.candidate_can_choose_stopping_policy!==false||row.candidate_can_choose_hidden_holdout!==false
+    ||row.candidate_can_choose_safety_suite!==false||row.candidate_can_choose_security_suite!==false
+    ||row.candidate_can_choose_budget!==false||row.handoff_can_schedule_evaluation!==false
+    ||row.handoff_can_execute_evaluation!==false||row.handoff_can_promote!==false
+    ||row.external_evaluation_owner!==true||row.authored_by_candidate!==false
+    ||row.second_evaluation_router_created!==false||row.second_experiment_ledger_created!==false)throw new Error('rsi_materialized_eval_handoff_policy_invalid');
+  exactSha(row.source_sha,'stored_handoff_source');
+  positiveInt(row.evaluator_generation_seq,'stored_generation_seq');
+  positiveInt(row.evaluation_epoch_seq,'stored_epoch_seq');
+  exactDigest(row.evaluator_generation_history_anchor_digest,'stored_generation_history_anchor');
+  const request=verifyRsiArtifactEvaluationRoutingRequest(row.fresh_evaluation_request);
+  const bindings=[
+    ['source_sha',row.source_sha],
+    ['phase28_artifact_receipt_digest',row.phase28_artifact_receipt_digest],
+    ['parent_artifact_digest',row.parent_artifact_digest],
+    ['candidate_artifact_digest',row.candidate_artifact_digest],
+    ['provenance_root_digest',row.provenance_root_digest],
+    ['evaluator_root_digest',row.evaluator_root_digest],
+    ['evaluator_generation_digest',row.evaluator_generation_digest],
+    ['evaluation_epoch_digest',row.evaluation_epoch_digest],
+    ['sealed_task_set_digest',row.sealed_task_set_digest],
+    ['harness_digest',row.evaluation_harness_digest],
+    ['trial_worker_image_digest',row.trial_worker_image_digest],
+    ['resource_budget_digest',row.resource_budget_digest],
+    ['task_order_digest',row.task_order_digest],
+    ['threshold_policy_digest',row.acceptance_policy_digest],
+    ['stopping_policy_digest',row.stopping_policy_digest],
+    ['hidden_holdout_root_digest',row.hidden_holdout_root_digest],
+    ['safety_suite_root_digest',row.safety_suite_root_digest],
+    ['security_suite_root_digest',row.security_suite_root_digest],
+  ];
+  for(const [field,value] of bindings){
+    if(request[field]!==value)throw new Error(`rsi_materialized_eval_stored_request_${field}_mismatch`);
+  }
+  const clone=structuredClone(row);delete clone.evaluation_handoff_digest;
+  if(digest(clone)!==exactDigest(row.evaluation_handoff_digest,'stored_handoff'))throw new Error('rsi_materialized_eval_handoff_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
+export function rsiMaterializedEvaluatorGenerationPredecessorAnchor(previousHandoff){
+  const previous=verifyStoredMaterializedCandidateEvaluationHandoff(previousHandoff);
+  return digest({
+    previous_evaluator_generation_seq:previous.evaluator_generation_seq,
+    previous_evaluator_root_digest:previous.evaluator_root_digest,
+    previous_evaluator_generation_digest:previous.evaluator_generation_digest,
+    previous_evaluation_epoch_seq:previous.evaluation_epoch_seq,
+    previous_evaluation_epoch_digest:previous.evaluation_epoch_digest,
+    previous_handoff_digest:previous.evaluation_handoff_digest,
+    previous_history_anchor_digest:previous.evaluator_generation_history_anchor_digest,
+  });
+}
+
+function assertGenerationTransition(previous,current){
+  if(!previous)return;
+  if(current.evaluator_generation_seq===previous.evaluator_generation_seq){
+    if(current.evaluator_root_digest!==previous.evaluator_root_digest
+      ||current.evaluator_generation_digest!==previous.evaluator_generation_digest
+      ||current.evaluator_generation_history_anchor_digest!==previous.evaluator_generation_history_anchor_digest){
+      throw new Error('rsi_materialized_eval_generation_identity_drift');
+    }
+    if(current.evaluation_epoch_seq===previous.evaluation_epoch_seq){
+      if(current.evaluation_epoch_digest!==previous.evaluation_epoch_digest)throw new Error('rsi_materialized_eval_epoch_identity_drift');
+    }else if(current.evaluation_epoch_seq===previous.evaluation_epoch_seq+1){
+      if(current.evaluation_epoch_digest===previous.evaluation_epoch_digest)throw new Error('rsi_materialized_eval_new_epoch_digest_required');
+    }else{
+      throw new Error('rsi_materialized_eval_epoch_sequence_gap');
+    }
+    return;
+  }
+  if(current.evaluator_generation_seq!==previous.evaluator_generation_seq+1)throw new Error('rsi_materialized_eval_generation_sequence_gap');
+  if(current.evaluation_epoch_seq!==1)throw new Error('rsi_materialized_eval_new_generation_epoch_must_start_at_one');
+  if(current.evaluator_generation_digest===previous.evaluator_generation_digest)throw new Error('rsi_materialized_eval_new_generation_digest_required');
+  const expected=rsiMaterializedEvaluatorGenerationPredecessorAnchor(previous);
+  if(current.evaluator_generation_history_anchor_digest!==expected)throw new Error('rsi_materialized_eval_generation_history_anchor_mismatch');
+}
+
+function handoffLedgerState(sourceSha,rows){
+  const handoffs=rows.map(row=>row.handoff);
+  const generations=[...new Set(handoffs.map(row=>row.evaluator_generation_seq))];
+  const latest=handoffs.at(-1)||null;
+  const core=zero({
+    schema:RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_LEDGER_SCHEMA,
+    version:1,
+    source_sha:sourceSha,
+    rows,
+    row_count:rows.length,
+    generation_count:generations.length,
+    latest_generation_seq:latest?.evaluator_generation_seq??null,
+    latest_epoch_seq:latest?.evaluation_epoch_seq??null,
+    append_only:true,
+    durable_before_visible:true,
+    generation_history_monotonic:true,
+    generation_transition_contiguous:true,
+    epoch_transition_contiguous:true,
+    experiment_results_stored_here:false,
+    existing_candidate_experiment_ledger_owns_outcomes:true,
+    candidate_can_delete:false,
+    candidate_can_rewrite:false,
+    ledger_can_schedule_evaluation:false,
+    ledger_can_execute_evaluation:false,
+    ledger_can_promote:false,
+  });
+  return {...core,state_digest:digest(core)};
+}
+
+export class RsiMaterializedCandidateEvaluationHandoffLedger{
+  #path;#sourceSha;#rows=[];#initialized=false;
+  constructor({statePath,source_sha}={}){
+    if(!statePath)throw new Error('rsi_materialized_eval_handoff_ledger_path_required');
+    this.#path=path.resolve(statePath);
+    this.#sourceSha=exactSha(source_sha,'handoff_ledger_source');
+  }
+  async init(){
+    if(this.#initialized)return this.snapshot();
+    await fs.mkdir(path.dirname(this.#path),{recursive:true});
+    try{
+      const persisted=JSON.parse(await fs.readFile(this.#path,'utf8'));
+      assertZero(persisted,'handoff_ledger');
+      if(persisted.schema!==RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_LEDGER_SCHEMA||persisted.version!==1
+        ||persisted.source_sha!==this.#sourceSha||persisted.append_only!==true||persisted.durable_before_visible!==true
+        ||persisted.generation_history_monotonic!==true||persisted.generation_transition_contiguous!==true
+        ||persisted.epoch_transition_contiguous!==true||persisted.experiment_results_stored_here!==false
+        ||persisted.existing_candidate_experiment_ledger_owns_outcomes!==true||persisted.candidate_can_delete!==false
+        ||persisted.candidate_can_rewrite!==false||persisted.ledger_can_schedule_evaluation!==false
+        ||persisted.ledger_can_execute_evaluation!==false||persisted.ledger_can_promote!==false)throw new Error('rsi_materialized_eval_handoff_ledger_state_invalid');
+      const clone=structuredClone(persisted);delete clone.state_digest;
+      if(digest(clone)!==exactDigest(persisted.state_digest,'handoff_ledger'))throw new Error('rsi_materialized_eval_handoff_ledger_digest_mismatch');
+      if(!Array.isArray(persisted.rows)||persisted.rows.length>MAX_HANDOFF_ROWS)throw new Error('rsi_materialized_eval_handoff_ledger_rows_invalid');
+      const checked=[];
+      const digests=new Set();
+      const identities=new Set();
+      let previous=null;
+      for(let i=0;i<persisted.rows.length;i+=1){
+        const raw=persisted.rows[i];
+        if(!raw||raw.handoff_seq!==i+1)throw new Error('rsi_materialized_eval_handoff_sequence_gap');
+        const handoff=verifyStoredMaterializedCandidateEvaluationHandoff(raw.handoff);
+        if(handoff.source_sha!==this.#sourceSha)throw new Error('rsi_materialized_eval_handoff_ledger_source_mismatch');
+        if(digests.has(handoff.evaluation_handoff_digest))throw new Error('rsi_materialized_eval_handoff_duplicate');
+        const identity=`${handoff.phase28_artifact_receipt_digest}:${handoff.evaluator_generation_seq}:${handoff.evaluation_epoch_seq}`;
+        if(identities.has(identity))throw new Error('rsi_materialized_eval_handoff_identity_duplicate');
+        assertGenerationTransition(previous,handoff);
+        digests.add(handoff.evaluation_handoff_digest);
+        identities.add(identity);
+        checked.push(Object.freeze({handoff_seq:i+1,handoff}));
+        previous=handoff;
+      }
+      const canonical=handoffLedgerState(this.#sourceSha,checked);
+      if(canonical.row_count!==persisted.row_count||canonical.generation_count!==persisted.generation_count
+        ||canonical.latest_generation_seq!==persisted.latest_generation_seq||canonical.latest_epoch_seq!==persisted.latest_epoch_seq){
+        throw new Error('rsi_materialized_eval_handoff_ledger_derived_state_mismatch');
+      }
+      this.#rows=checked;
+    }catch(error){if(error?.code!=='ENOENT')throw error;}
+    this.#initialized=true;
+    return this.snapshot();
+  }
+  async #persist(rows){
+    const state=handoffLedgerState(this.#sourceSha,rows);
+    const tmp=`${this.#path}.tmp`;
+    const handle=await fs.open(tmp,'w',0o600);
+    try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync();}finally{await handle.close();}
+    await fs.rename(tmp,this.#path);
+  }
+  async add(handoff){
+    if(!this.#initialized)throw new Error('rsi_materialized_eval_handoff_ledger_not_initialized');
+    const checked=verifyStoredMaterializedCandidateEvaluationHandoff(handoff);
+    if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_materialized_eval_handoff_ledger_source_mismatch');
+    const existing=this.#rows.find(row=>row.handoff.evaluation_handoff_digest===checked.evaluation_handoff_digest);
+    if(existing)return zero({state:'IDEMPOTENT',handoff_seq:existing.handoff_seq,evaluation_handoff_digest:checked.evaluation_handoff_digest});
+    const identity=`${checked.phase28_artifact_receipt_digest}:${checked.evaluator_generation_seq}:${checked.evaluation_epoch_seq}`;
+    if(this.#rows.some(row=>`${row.handoff.phase28_artifact_receipt_digest}:${row.handoff.evaluator_generation_seq}:${row.handoff.evaluation_epoch_seq}`===identity)){
+      throw new Error('rsi_materialized_eval_handoff_identity_conflict');
+    }
+    if(this.#rows.length>=MAX_HANDOFF_ROWS)throw new Error('rsi_materialized_eval_handoff_ledger_capacity_exceeded');
+    assertGenerationTransition(this.#rows.at(-1)?.handoff??null,checked);
+    const next=[...this.#rows,Object.freeze({handoff_seq:this.#rows.length+1,handoff:structuredClone(checked)})];
+    await this.#persist(next);
+    this.#rows=next;
+    return zero({state:'HANDOFF_RECORDED_EXTERNAL_EVALUATION_REQUIRED',handoff_seq:next.length,evaluation_handoff_digest:checked.evaluation_handoff_digest});
+  }
+  snapshot(){
+    const state=handoffLedgerState(this.#sourceSha,this.#rows);
+    return Object.freeze({
+      schema:state.schema,version:state.version,source_sha:state.source_sha,initialized:this.#initialized,
+      row_count:state.row_count,generation_count:state.generation_count,latest_generation_seq:state.latest_generation_seq,
+      latest_epoch_seq:state.latest_epoch_seq,append_only:true,durable_before_visible:true,generation_history_monotonic:true,
+      generation_transition_contiguous:true,epoch_transition_contiguous:true,experiment_results_stored_here:false,
+      existing_candidate_experiment_ledger_owns_outcomes:true,ledger_can_schedule_evaluation:false,
+      ledger_can_execute_evaluation:false,ledger_can_promote:false,authority_effect:false,
+    });
+  }
+}
+
 export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
   const root={
     schema:'metaengine.rsi.materialized-candidate-evaluation-handoff-root.v1',
@@ -302,6 +535,12 @@ export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
     protected_scope_floor_required:true,
     evaluator_generation_frozen_per_epoch:true,
     evaluator_dependent_verdict_reuse_allowed:false,
+    evaluator_generation_history_append_only:true,
+    evaluator_generation_sequence_external:true,
+    evaluation_epoch_sequence_external:true,
+    generation_transition_must_be_contiguous:true,
+    evaluation_epoch_transition_must_be_contiguous:true,
+    generation_history_anchor_external:true,
     build_and_evaluation_workers_must_differ:true,
     sealed_task_set_external:true,
     evaluation_harness_external:true,
