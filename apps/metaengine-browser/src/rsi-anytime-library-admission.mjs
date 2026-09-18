@@ -369,6 +369,22 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     throw new Error('rsi_phase34_skill_already_present');
   }
 
+  const phase33ReviewerIdentityDigests = Object.freeze([
+    p33.certificate.owner_reviewer_identity_digest,
+    p33.certificate.structural_critic_identity_digest,
+    p33.certificate.behavioral_critic_identity_digest,
+    p33.certificate.semantic_critic_identity_digest,
+    p33.certificate.artifact_auditor_identity_digest,
+    p33.certificate.benchmark_provenance_attestor_identity_digest,
+    p33.certificate.evaluator_provenance_attestor_identity_digest,
+    p33.certificate.contamination_attestor_identity_digest,
+    p33.certificate.statistical_acceptor_identity_digest,
+  ].map((value) => exactDigest(value, 'phase33_reviewer_identity')).sort());
+  if (new Set(phase33ReviewerIdentityDigests).size !== phase33ReviewerIdentityDigests.length) {
+    throw new Error('rsi_phase34_phase33_reviewer_identity_set_invalid');
+  }
+  const phase33ReviewerIdentitySetDigest = digest(phase33ReviewerIdentityDigests);
+
   const parent = parentContext(library, governance, skill);
   const normalizedEnvelope = String(change_envelope_class || '').trim().toUpperCase();
   if (normalizedEnvelope !== parent.required_change_envelope_class) {
@@ -389,6 +405,7 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     governance.governance_digest,
     skill.skill_digest,
     evidence.evidence_digest,
+    phase33ReviewerIdentitySetDigest,
     digest({phase33_policy_source_sha:policySourceSha,phase33_certificate_digest:p33.certificate.certificate_digest}),
   ];
   if (new Set(roots).size !== roots.length) {
@@ -413,6 +430,14 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     phase33_certificate_digest: p33.certificate.certificate_digest,
     phase32_handoff_digest: p33.certificate.phase32_handoff_digest,
     phase32_receipt_digest: p33.certificate.phase32_receipt_digest,
+    consumer_model_family: p33.bundle.consumer_model_family,
+    consumer_environment_family: p33.bundle.consumer_environment_family,
+    consumer_context_digest: p33.bundle.consumer_context_digest,
+    consumer_task_set_digest: p33.bundle.consumer_task_set_digest,
+    consumer_harness_digest: p33.bundle.consumer_harness_digest,
+    consumer_retrieval_profile_digest: p33.bundle.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest: p33.bundle.current_consumer_plane_digest,
+    current_verified_library_digest: p33.bundle.current_verified_library_digest,
     consumer_evaluation_contract_digest: p33.certificate.consumer_evaluation_contract_digest,
     current_library_id: library.library_id,
     current_library_digest: library.library_digest,
@@ -424,6 +449,8 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     proposed_skill_evidence_digest: evidence.evidence_digest,
     proposed_successor_library_digest: successor.library_digest,
     proposed_successor_library_entry_count: successor.entry_count,
+    phase33_reviewer_identity_digests: phase33ReviewerIdentityDigests,
+    phase33_reviewer_identity_set_digest: phase33ReviewerIdentitySetDigest,
     parent_skill_digest: parent.parent_skill_digest,
     parent_skill_version: parent.parent_skill_version,
     parent_governance_state: parent.parent_governance_state,
@@ -458,6 +485,10 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     scope_replay_required: true,
     maturity_sensitive_change_envelope_required: true,
     phase33_anytime_valid_certificate_reused: true,
+    phase33_reviewer_lineage_bound: true,
+    exact_consumer_state_lineage_preserved: true,
+    exact_retrieval_profile_lineage_preserved: true,
+    exact_current_library_lineage_preserved: true,
     proposed_successor_is_append_only: true,
     proposed_successor_preserves_current_entries: true,
     proposed_successor_is_not_active_runtime_state: true,
@@ -496,6 +527,10 @@ export function verifyRsiAnytimeLibraryAdmissionProposal(row, args = {}) {
     || row.scope_replay_required !== true
     || row.maturity_sensitive_change_envelope_required !== true
     || row.phase33_anytime_valid_certificate_reused !== true
+    || row.phase33_reviewer_lineage_bound !== true
+    || row.exact_consumer_state_lineage_preserved !== true
+    || row.exact_retrieval_profile_lineage_preserved !== true
+    || row.exact_current_library_lineage_preserved !== true
     || row.proposed_successor_is_append_only !== true
     || row.proposed_successor_preserves_current_entries !== true
     || row.proposed_successor_is_not_active_runtime_state !== true
@@ -530,9 +565,10 @@ export function verifyRsiAnytimeLibraryAdmissionProposal(row, args = {}) {
   if (canonical.admission_proposal_digest !== exactDigest(row.admission_proposal_digest, 'admission_proposal')) {
     throw new Error('rsi_phase34_admission_proposal_digest_mismatch');
   }
+  const rowSuccessor = verifyRsiVerifiedSkillLibrary(row.proposed_successor_library);
   if (
-    canonical.proposed_successor_library.library_digest
-    !== row.proposed_successor_library?.library_digest
+    canonical.proposed_successor_library.library_digest !== rowSuccessor.library_digest
+    || canonical.proposed_successor_library.entry_count !== rowSuccessor.entry_count
   ) {
     throw new Error('rsi_phase34_successor_library_digest_mismatch');
   }
@@ -550,6 +586,11 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
   source_qualification_owner_identity_digest,
   least_privilege_reviewer_identity_digest,
   governance_reviewer_identity_digest,
+  benchmark_security_attestor_identity_digest,
+  harness_security_attestor_identity_digest,
+  benchmark_ancestry_attestation_digest,
+  clean_room_requalification_digest,
+  harness_integrity_attestation_digest,
   anytime_valid_admission_pass = false,
   error_budget_available = false,
   paired_instance_replay_pass = false,
@@ -557,11 +598,16 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
   current_library_still_exact = false,
   current_governance_still_exact = false,
   no_new_negative_transfer = false,
+  benchmark_poisoning_scan_pass = false,
+  clean_room_requalification_pass = false,
+  harness_tampering_scan_pass = false,
   external_library_owner = false,
   external_statistical_acceptor = false,
   external_source_qualification_owner = false,
   external_least_privilege_reviewer = false,
   external_governance_reviewer = false,
+  external_benchmark_security_attestor = false,
+  external_harness_security_attestor = false,
   authored_by_candidate = true,
 } = {}) {
   const proposal = verifyRsiAnytimeLibraryAdmissionProposal(
@@ -577,6 +623,8 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     || external_source_qualification_owner !== true
     || external_least_privilege_reviewer !== true
     || external_governance_reviewer !== true
+    || external_benchmark_security_attestor !== true
+    || external_harness_security_attestor !== true
     || authored_by_candidate !== false
   ) {
     throw new Error('rsi_phase34_external_certificate_owners_required');
@@ -588,9 +636,17 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     exactDigest(source_qualification_owner_identity_digest, 'source_qualification_owner_identity'),
     exactDigest(least_privilege_reviewer_identity_digest, 'least_privilege_reviewer_identity'),
     exactDigest(governance_reviewer_identity_digest, 'governance_reviewer_identity'),
+    exactDigest(benchmark_security_attestor_identity_digest, 'benchmark_security_attestor_identity'),
+    exactDigest(harness_security_attestor_identity_digest, 'harness_security_attestor_identity'),
   ];
   if (new Set(principalIds).size !== principalIds.length) {
     throw new Error('rsi_phase34_certificate_separation_of_duties_required');
+  }
+  if (
+    !Array.isArray(proposal.phase33_reviewer_identity_digests)
+    || principalIds.some((principal) => proposal.phase33_reviewer_identity_digests.includes(principal))
+  ) {
+    throw new Error('rsi_phase34_cross_stage_reviewer_separation_required');
   }
 
   const sourceQualification = verifyRsiPhase33SourceQualification(predecessor_source_qualification);
@@ -610,6 +666,9 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     proposal.current_library_digest,
     proposal.current_governance_digest,
     proposal.proposed_successor_library_digest,
+    exactDigest(benchmark_ancestry_attestation_digest, 'benchmark_ancestry_attestation'),
+    exactDigest(clean_room_requalification_digest, 'clean_room_requalification'),
+    exactDigest(harness_integrity_attestation_digest, 'harness_integrity_attestation'),
   ];
   if (new Set(roots).size !== roots.length) {
     throw new Error('rsi_phase34_certificate_independent_roots_required');
@@ -624,6 +683,9 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
   if (current_library_still_exact !== true) blockers.push('CURRENT_LIBRARY_DRIFT');
   if (current_governance_still_exact !== true) blockers.push('CURRENT_GOVERNANCE_DRIFT');
   if (no_new_negative_transfer !== true) blockers.push('NEW_NEGATIVE_TRANSFER_DETECTED');
+  if (benchmark_poisoning_scan_pass !== true) blockers.push('BENCHMARK_POISONING_SCAN_FAILED');
+  if (clean_room_requalification_pass !== true) blockers.push('CLEAN_ROOM_REQUALIFICATION_FAILED');
+  if (harness_tampering_scan_pass !== true) blockers.push('HARNESS_TAMPERING_SCAN_FAILED');
 
   const hardReject = blockers.some((code) => [
     'PREDECESSOR_SOURCE_QUALIFICATION_NOT_GREEN',
@@ -631,6 +693,9 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     'CURRENT_LIBRARY_DRIFT',
     'CURRENT_GOVERNANCE_DRIFT',
     'NEW_NEGATIVE_TRANSFER_DETECTED',
+    'BENCHMARK_POISONING_SCAN_FAILED',
+    'CLEAN_ROOM_REQUALIFICATION_FAILED',
+    'HARNESS_TAMPERING_SCAN_FAILED',
   ].includes(code));
   const passed = blockers.length === 0;
   const state = passed
@@ -644,6 +709,15 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     source_sha: proposal.source_sha,
     phase33_policy_source_sha: policySource,
     admission_proposal_digest: proposal.admission_proposal_digest,
+    consumer_model_family: proposal.consumer_model_family,
+    consumer_environment_family: proposal.consumer_environment_family,
+    consumer_context_digest: proposal.consumer_context_digest,
+    consumer_task_set_digest: proposal.consumer_task_set_digest,
+    consumer_harness_digest: proposal.consumer_harness_digest,
+    consumer_retrieval_profile_digest: proposal.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest: proposal.current_consumer_plane_digest,
+    current_verified_library_digest: proposal.current_verified_library_digest,
+    consumer_evaluation_contract_digest: proposal.consumer_evaluation_contract_digest,
     current_library_digest: proposal.current_library_digest,
     current_governance_digest: proposal.current_governance_digest,
     proposed_skill_digest: proposal.proposed_skill_digest,
@@ -662,6 +736,14 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     source_qualification_owner_identity_digest: principalIds[2],
     least_privilege_reviewer_identity_digest: principalIds[3],
     governance_reviewer_identity_digest: principalIds[4],
+    benchmark_security_attestor_identity_digest: principalIds[5],
+    harness_security_attestor_identity_digest: principalIds[6],
+    benchmark_ancestry_attestation_digest:
+      exactDigest(benchmark_ancestry_attestation_digest, 'benchmark_ancestry_attestation'),
+    clean_room_requalification_digest:
+      exactDigest(clean_room_requalification_digest, 'clean_room_requalification'),
+    harness_integrity_attestation_digest:
+      exactDigest(harness_integrity_attestation_digest, 'harness_integrity_attestation'),
     predecessor_source_qualification_pass: sourceQualification.all_required_workflows_green === true,
     anytime_valid_admission_pass: anytime_valid_admission_pass === true,
     error_budget_available: error_budget_available === true,
@@ -670,6 +752,9 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     current_library_still_exact: current_library_still_exact === true,
     current_governance_still_exact: current_governance_still_exact === true,
     no_new_negative_transfer: no_new_negative_transfer === true,
+    benchmark_poisoning_scan_pass: benchmark_poisoning_scan_pass === true,
+    clean_room_requalification_pass: clean_room_requalification_pass === true,
+    harness_tampering_scan_pass: harness_tampering_scan_pass === true,
     blockers: Object.freeze(blockers.sort()),
     state,
     paired_anytime_valid_admission_required: true,
@@ -677,6 +762,14 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     predecessor_source_qualification_required: true,
     exact_library_and_governance_readback_required: true,
     reviewer_separation_of_duties_required: true,
+    exact_consumer_state_lineage_required: true,
+    exact_retrieval_profile_lineage_required: true,
+    exact_current_library_lineage_required: true,
+    independent_benchmark_security_attestor_required: true,
+    clean_room_requalification_required: true,
+    benchmark_poisoning_scan_required: true,
+    harness_tampering_scan_required: true,
+    cross_stage_reviewer_separation_required: true,
     append_handoff_one_attempt_only: true,
     ambiguous_append_retry_allowed: false,
     append_effect_performed: false,
@@ -705,6 +798,14 @@ export function verifyRsiAnytimeLibraryAdmissionCertificate(row, args = {}) {
     || row.predecessor_source_qualification_required !== true
     || row.exact_library_and_governance_readback_required !== true
     || row.reviewer_separation_of_duties_required !== true
+    || row.exact_consumer_state_lineage_required !== true
+    || row.exact_retrieval_profile_lineage_required !== true
+    || row.exact_current_library_lineage_required !== true
+    || row.independent_benchmark_security_attestor_required !== true
+    || row.clean_room_requalification_required !== true
+    || row.benchmark_poisoning_scan_required !== true
+    || row.harness_tampering_scan_required !== true
+    || row.cross_stage_reviewer_separation_required !== true
     || row.append_handoff_one_attempt_only !== true
     || row.ambiguous_append_retry_allowed !== false
     || row.append_effect_performed !== false
@@ -727,6 +828,11 @@ export function verifyRsiAnytimeLibraryAdmissionCertificate(row, args = {}) {
     source_qualification_owner_identity_digest: row.source_qualification_owner_identity_digest,
     least_privilege_reviewer_identity_digest: row.least_privilege_reviewer_identity_digest,
     governance_reviewer_identity_digest: row.governance_reviewer_identity_digest,
+    benchmark_security_attestor_identity_digest: row.benchmark_security_attestor_identity_digest,
+    harness_security_attestor_identity_digest: row.harness_security_attestor_identity_digest,
+    benchmark_ancestry_attestation_digest: row.benchmark_ancestry_attestation_digest,
+    clean_room_requalification_digest: row.clean_room_requalification_digest,
+    harness_integrity_attestation_digest: row.harness_integrity_attestation_digest,
     anytime_valid_admission_pass: row.anytime_valid_admission_pass,
     error_budget_available: row.error_budget_available,
     paired_instance_replay_pass: row.paired_instance_replay_pass,
@@ -734,11 +840,16 @@ export function verifyRsiAnytimeLibraryAdmissionCertificate(row, args = {}) {
     current_library_still_exact: row.current_library_still_exact,
     current_governance_still_exact: row.current_governance_still_exact,
     no_new_negative_transfer: row.no_new_negative_transfer,
+    benchmark_poisoning_scan_pass: row.benchmark_poisoning_scan_pass,
+    clean_room_requalification_pass: row.clean_room_requalification_pass,
+    harness_tampering_scan_pass: row.harness_tampering_scan_pass,
     external_library_owner: true,
     external_statistical_acceptor: true,
     external_source_qualification_owner: true,
     external_least_privilege_reviewer: true,
     external_governance_reviewer: true,
+    external_benchmark_security_attestor: true,
+    external_harness_security_attestor: true,
     authored_by_candidate: false,
   });
   if (
@@ -941,6 +1052,7 @@ export function rsiAnytimeLibraryAdmissionTrustRootSnapshot() {
     schema: 'metaengine.rsi.anytime-library-admission-root.v1',
     version: 1,
     phase33_exact_owner_precommit_required: true,
+    phase33_reviewer_lineage_binding_required: true,
     exact_phase33_policy_source_binding_required: true,
     exact_terminal_phase33_source_qualification_required: true,
     ci_readback_manifest_binding_required: true,
@@ -952,6 +1064,9 @@ export function rsiAnytimeLibraryAdmissionTrustRootSnapshot() {
     second_lifecycle_allowed: false,
     exact_library_snapshot_binding_required: true,
     exact_governance_snapshot_binding_required: true,
+    exact_consumer_state_lineage_required: true,
+    exact_retrieval_profile_lineage_required: true,
+    exact_current_library_lineage_required: true,
     least_privilege_recheck_required: true,
     scope_replay_required: true,
     maturity_sensitive_change_envelope_required: true,
@@ -960,6 +1075,11 @@ export function rsiAnytimeLibraryAdmissionTrustRootSnapshot() {
     fixed_false_admission_error_budget_required: true,
     predecessor_source_qualification_required: true,
     reviewer_separation_of_duties_required: true,
+    independent_benchmark_security_attestor_required: true,
+    clean_room_requalification_required: true,
+    benchmark_poisoning_scan_required: true,
+    harness_tampering_scan_required: true,
+    cross_stage_reviewer_separation_required: true,
     append_handoff_one_attempt_only: true,
     ambiguous_append_retry_allowed: false,
     append_does_not_imply_retrieval_exposure: true,
