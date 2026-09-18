@@ -49,8 +49,8 @@ export class RsiRuntimeObservationSidecar {
       while (this.#pendingLatest) {
         const snapshot = this.#pendingLatest;
         this.#pendingLatest = null;
-        const runtime = assertRuntime(this.#runtimeProvider());
         try {
+          const runtime = assertRuntime(this.#runtimeProvider());
           const observation = await runtime.observeBrainSnapshot(snapshot);
           this.#processed += 1;
           this.#lastObservedAt = observation?.observed_at || null;
