@@ -3797,6 +3797,16 @@ test('Phase34 effect plan consumes only an eligible admission certificate and pr
   assert.equal(fx.plan.current_library_digest,fx.currentLibrary.library_digest);
   assert.equal(fx.plan.proposed_skill_digest,fx.skill.skill_digest);
   assert.equal(fx.plan.proposed_skill_evidence_digest,fx.skillEvidence.evidence_digest);
+  assert.equal(fx.plan.source_evaluation_contract_digest,fx.certificate.source_evaluation_contract_digest);
+  assert.equal(fx.plan.consumer_task_set_digest,fx.certificate.consumer_task_set_digest);
+  assert.equal(fx.plan.consumer_retrieval_profile_digest,fx.certificate.consumer_retrieval_profile_digest);
+  assert.equal(fx.plan.current_consumer_plane_digest,fx.certificate.current_consumer_plane_digest);
+  assert.equal(fx.plan.current_verified_library_digest,fx.certificate.current_verified_library_digest);
+  assert.equal(fx.plan.consumer_evaluation_contract_digest,fx.certificate.consumer_evaluation_contract_digest);
+  assert.equal(fx.plan.certificate_benchmark_security_attestor_identity_digest,fx.certificate.benchmark_security_attestor_identity_digest);
+  assert.equal(fx.plan.exact_consumer_state_lineage_preserved,true);
+  assert.equal(fx.plan.exact_retrieval_profile_lineage_preserved,true);
+  assert.equal(fx.plan.exact_current_library_lineage_preserved,true);
   assert.equal(fx.plan.expected_successor_library_digest,fx.successorLibrary.library_digest);
   assert.equal(fx.plan.expected_successor_entry_count,fx.currentLibrary.entry_count+1);
   assert.equal(fx.plan.existing_verified_skill_library_schema_reused,true);
@@ -3973,6 +3983,10 @@ test('Phase34 effect archive is durable-before-visible and retains unresolved ef
 test('Phase34 storage-only effect trust root keeps append distinct from governance and retrieval exposure',()=>{
   const root=rsiStorageOnlyAppendEffectTrustRootSnapshot();
   assert.equal(root.phase34_anytime_admission_certificate_required,true);
+  assert.equal(root.exact_consumer_state_lineage_required,true);
+  assert.equal(root.exact_retrieval_profile_lineage_required,true);
+  assert.equal(root.exact_current_library_lineage_required,true);
+  assert.equal(root.benchmark_security_attestor_inherited_from_admission,true);
   assert.equal(root.existing_verified_skill_library_schema_reused,true);
   assert.equal(root.second_skill_library_allowed,false);
   assert.equal(root.exact_predecessor_library_binding_required,true);
