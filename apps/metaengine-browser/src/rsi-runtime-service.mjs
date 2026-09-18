@@ -135,6 +135,13 @@ import {
   verifyRsiSelfUpdateFinalInstallCycleAdmission,
   rsiSelfUpdateFinalInstallCycleTrustRootSnapshot,
 } from './rsi-self-update-final-install-cycle-admission.mjs';
+import {
+  createRsiSelfUpdateFinalApplyInvocationReceipt,
+  verifyRsiSelfUpdateFinalApplyInvocationReceipt,
+  createRsiSelfUpdatePostEffectReadback,
+  verifyRsiSelfUpdatePostEffectReadback,
+  rsiSelfUpdateFinalApplyReadbackTrustRootSnapshot,
+} from './rsi-self-update-final-apply-readback.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -156,6 +163,8 @@ const MAX_SELF_UPDATE_DOWNLOAD_READINESS = 128;
 const MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES = 256;
 const MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS = 128;
+const MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS = 128;
+const MAX_SELF_UPDATE_POST_EFFECT_READBACKS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -242,6 +251,7 @@ function trustRoots() {
     self_update_restart_gate_probe: rsiSelfUpdateRestartGateProbeTrustRootSnapshot(),
     self_update_restart_gate_probe_outcome: rsiSelfUpdateRestartGateProbeOutcomeTrustRootSnapshot(),
     self_update_final_install_cycle: rsiSelfUpdateFinalInstallCycleTrustRootSnapshot(),
+    self_update_final_apply_readback: rsiSelfUpdateFinalApplyReadbackTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -311,6 +321,10 @@ export class RsiRuntimeService {
   #lastSelfUpdateRestartGateProbeOutcomeDigest = null;
   #selfUpdateFinalInstallAdmissionDigests = new Set();
   #lastSelfUpdateFinalInstallAdmissionDigest = null;
+  #selfUpdateFinalApplyInvocationDigests = new Set();
+  #lastSelfUpdateFinalApplyInvocationDigest = null;
+  #selfUpdatePostEffectReadbackDigests = new Set();
+  #lastSelfUpdatePostEffectReadbackDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -479,6 +493,22 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateFinalInstallAdmissionDigests.add(admission.final_install_admission_digest);
           this.#lastSelfUpdateFinalInstallAdmissionDigest = admission.final_install_admission_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_FINAL_APPLY_INVOCATION_RECORDED' && row?.payload?.final_apply_invocation_receipt) {
+          const receipt = row.payload.final_apply_invocation_receipt;
+          if (this.#selfUpdateFinalApplyInvocationDigests.size >= MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS) {
+            throw new Error('rsi_runtime_final_apply_invocation_replay_capacity_exhausted');
+          }
+          this.#selfUpdateFinalApplyInvocationDigests.add(exactPrefixedDigest(receipt.invocation_receipt_digest, 'final_apply_invocation_digest'));
+          this.#lastSelfUpdateFinalApplyInvocationDigest = receipt.invocation_receipt_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_POST_EFFECT_READBACK_RECORDED' && row?.payload?.post_effect_readback) {
+          const readback = verifyRsiSelfUpdatePostEffectReadback(row.payload.post_effect_readback);
+          if (this.#selfUpdatePostEffectReadbackDigests.size >= MAX_SELF_UPDATE_POST_EFFECT_READBACKS) {
+            throw new Error('rsi_runtime_post_effect_readback_replay_capacity_exhausted');
+          }
+          this.#selfUpdatePostEffectReadbackDigests.add(readback.post_effect_readback_digest);
+          this.#lastSelfUpdatePostEffectReadbackDigest = readback.post_effect_readback_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1895,6 +1925,102 @@ export class RsiRuntimeService {
     return Object.freeze({ admission, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateFinalApplyInvocationReceipt({
+    final_install_admission,
+    invocation_id,
+    invoked_at,
+    controller_id,
+    external_controller_verified = false,
+    authored_by_candidate = true,
+    invocation_count = 1,
+  } = {}) {
+    this.#assertRunning();
+    const admission = verifyRsiSelfUpdateFinalInstallCycleAdmission(final_install_admission);
+    if (!this.#selfUpdateFinalInstallAdmissionDigests.has(admission.final_install_admission_digest)) {
+      throw new Error('rsi_runtime_final_install_admission_not_persisted');
+    }
+    const receipt = createRsiSelfUpdateFinalApplyInvocationReceipt({
+      final_install_admission: admission,
+      invocation_id,
+      invoked_at,
+      controller_id,
+      external_controller_verified,
+      authored_by_candidate,
+      invocation_count,
+    });
+    verifyRsiSelfUpdateFinalApplyInvocationReceipt(receipt, { final_install_admission: admission });
+    if (this.#selfUpdateFinalApplyInvocationDigests.has(receipt.invocation_receipt_digest)) {
+      return Object.freeze({ receipt, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateFinalApplyInvocationDigests.size >= MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS) {
+      throw new Error('rsi_runtime_final_apply_invocation_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_FINAL_APPLY_INVOCATION_RECORDED', {
+      final_apply_invocation_receipt: receipt,
+      external_controller_verified: true,
+      physical_effect_outcome_asserted: false,
+      transaction_readback_required: true,
+      successor_startup_readback_required: true,
+      same_invocation_retry_allowed: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateFinalApplyInvocationDigests.add(receipt.invocation_receipt_digest);
+    this.#lastSelfUpdateFinalApplyInvocationDigest = receipt.invocation_receipt_digest;
+    return Object.freeze({ receipt, already_recorded: false, authority_effect: false });
+  }
+
+  async recordSelfUpdatePostEffectReadback({
+    final_install_admission,
+    invocation_receipt,
+    transaction_readback = null,
+    observed_at,
+    observer_id,
+    external_transaction_reader = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const admission = verifyRsiSelfUpdateFinalInstallCycleAdmission(final_install_admission);
+    if (!this.#selfUpdateFinalInstallAdmissionDigests.has(admission.final_install_admission_digest)) {
+      throw new Error('rsi_runtime_final_install_admission_not_persisted');
+    }
+    const receipt = verifyRsiSelfUpdateFinalApplyInvocationReceipt(invocation_receipt, {
+      final_install_admission: admission,
+    });
+    if (!this.#selfUpdateFinalApplyInvocationDigests.has(receipt.invocation_receipt_digest)) {
+      throw new Error('rsi_runtime_final_apply_invocation_not_persisted');
+    }
+    const readback = createRsiSelfUpdatePostEffectReadback({
+      final_install_admission: admission,
+      invocation_receipt: receipt,
+      transaction_readback,
+      observed_at,
+      observer_id,
+      external_transaction_reader,
+      authored_by_candidate,
+    });
+    verifyRsiSelfUpdatePostEffectReadback(readback);
+    if (this.#selfUpdatePostEffectReadbackDigests.has(readback.post_effect_readback_digest)) {
+      return Object.freeze({ readback, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdatePostEffectReadbackDigests.size >= MAX_SELF_UPDATE_POST_EFFECT_READBACKS) {
+      throw new Error('rsi_runtime_post_effect_readback_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_POST_EFFECT_READBACK_RECORDED', {
+      post_effect_readback: readback,
+      same_invocation_retry_allowed: false,
+      fresh_physical_effect_retry_allowed: false,
+      automatic_install_retry_allowed: false,
+      successor_qualification_uses_existing_pipeline: true,
+      ambiguous_install_uses_existing_recovery_pipeline: true,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdatePostEffectReadbackDigests.add(readback.post_effect_readback_digest);
+    this.#lastSelfUpdatePostEffectReadbackDigest = readback.post_effect_readback_digest;
+    return Object.freeze({ readback, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2211,6 +2337,25 @@ export class RsiRuntimeService {
         final_apply_invoked: false,
         final_apply_authorized_by_rsi: false,
         installer_launch_authorized_by_rsi: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_final_apply_readback: Object.freeze({
+        invocation_count: this.#selfUpdateFinalApplyInvocationDigests.size,
+        invocation_capacity: MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS,
+        last_invocation_digest: this.#lastSelfUpdateFinalApplyInvocationDigest,
+        readback_count: this.#selfUpdatePostEffectReadbackDigests.size,
+        readback_capacity: MAX_SELF_UPDATE_POST_EFFECT_READBACKS,
+        last_readback_digest: this.#lastSelfUpdatePostEffectReadbackDigest,
+        external_one_shot_invocation_receipt_required: true,
+        invocation_receipt_cannot_claim_effect_success: true,
+        durable_transaction_readback_is_effect_truth: true,
+        write_ahead_barrier_evidence_required_for_attempted_effect: true,
+        successor_qualification_uses_existing_pipeline: true,
+        ambiguous_install_uses_existing_recovery_pipeline: true,
+        same_invocation_retry_allowed: false,
+        fresh_physical_effect_retry_allowed: false,
+        automatic_install_retry_allowed: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
       }),
