@@ -76,3 +76,33 @@ test('S5b delivery ambiguity never manufactures a second FAILED receipt after Br
     'transport ambiguity fence must precede the ordinary execution-failure receipt path');
   assert.match(run, /this\.#lastCommandStatus = 'AMBIGUOUS'/);
 });
+
+
+test('RSI outcome sidecar observes only independently stored receipts after accepted delivery', async () => {
+  const source = await nativeSource();
+  assert.match(source, /onRsiOutcomeReadback = null/);
+  assert.match(source, /native_supervisor_rsi_outcome_readback_handler_invalid/);
+  assert.match(source, /this\.#resultDeliveryAdapter\.readStoredReceipt\(\{ commandId, payload \}\)/);
+  assert.match(source, /this\.#scheduleRsiOutcomeReadback\(command, payload\)/);
+  assert.match(source, /this\.#scheduleRsiOutcomeReadback\(row, payload\)/);
+  const start = source.indexOf('#scheduleRsiOutcomeReadback(command, payload)');
+  const end = source.indexOf('async #postResult', start);
+  assert.ok(start >= 0 && end > start, 'outcome readback sidecar boundary missing');
+  const sidecar = source.slice(start, end);
+  assert.match(sidecar, /void this\.#resultDeliveryAdapter\.readStoredReceipt/);
+  assert.match(sidecar, /await this\.#onRsiOutcomeReadback\(\{ command: binding, readback \}\)/);
+  assert.doesNotMatch(sidecar, /#executeCommand\(|#executeForLane|#executeLocalOrRemote/);
+  assert.doesNotMatch(sidecar, /payload:\s*structuredClone|command_payload|raw_page|input_value/);
+});
+
+test('RSI outcome sidecar remains observability-only and nonblocking', async () => {
+  const source = await nativeSource();
+  assert.match(source, /rsi_outcome_readback:\s*Object\.freeze\(\{/);
+  assert.match(source, /sidecar_only:\s*true/);
+  assert.match(source, /same_client_terminal_receipt_required:\s*true/);
+  assert.match(source, /execution_authority:\s*false/);
+  const runStart = source.indexOf('async #runCommand(command)');
+  const runEnd = source.indexOf('async #runCommandBatch', runStart);
+  const run = source.slice(runStart, runEnd);
+  assert.doesNotMatch(run, /await this\.#scheduleRsiOutcomeReadback/);
+});
