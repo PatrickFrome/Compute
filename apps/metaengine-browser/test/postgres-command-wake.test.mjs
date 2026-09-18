@@ -19,6 +19,18 @@ const commandPayload = (targetClientId = 'browser-a', extra = {}) => JSON.string
   ...extra,
 });
 
+const deployedLegacyCommandPayload = (client = 'browser-a', extra = {}) => JSON.stringify({
+  tbl: 'compute_fabric_a2_browser_supervisor_command_h205f22',
+  op: 'INSERT',
+  client,
+  supervisor: null,
+  cmd: '11111111-1111-4111-8111-111111111111',
+  action: 'CAPTURE',
+  status: 'PENDING',
+  last_seen: null,
+  ...extra,
+});
+
 function harness({ failListen = false, maxWaiters = 128 } = {}) {
   let callback = null;
   let listenCount = 0;
@@ -46,6 +58,25 @@ function harness({ failListen = false, maxWaiters = 128 } = {}) {
     unlistenCount: () => unlistenCount,
   };
 }
+
+test('deployed legacy pulse envelope remains compatible without production DDL', async () => {
+  const h = harness();
+  const a = h.hub.open({ clientId: 'browser-a', timeoutMs: 5000 });
+  const b = h.hub.open({ clientId: 'browser-b', timeoutMs: 5000 });
+  await Promise.all([a.subscribed, b.subscribed]);
+
+  h.notify(deployedLegacyCommandPayload('browser-a'));
+  assert.equal((await a.wake).reason, 'POSTGRES_NOTIFY');
+
+  let bSettled = false;
+  b.wake.then(() => { bSettled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(bSettled, false);
+
+  h.notify(deployedLegacyCommandPayload(null));
+  assert.equal((await b.wake).reason, 'POSTGRES_NOTIFY');
+  await h.hub.close();
+});
 
 test('one DB-native listener multiplexes exact-client wake waiters without command authority', async () => {
   const h = harness();
