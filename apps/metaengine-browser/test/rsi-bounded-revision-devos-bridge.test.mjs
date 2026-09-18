@@ -34,6 +34,8 @@ import {
   createRsiMaterializedCandidateExperimentIntent,
   RsiMaterializedCandidateEvaluationHandoffLedger,
   rsiMaterializedEvaluatorGenerationPredecessorAnchor,
+  createRsiEvaluatorGenerationRotation,
+  verifyRsiEvaluatorGenerationRotation,
   rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot,
 } from '../src/rsi-materialized-candidate-evaluation-handoff.mjs';
 import {
@@ -851,6 +853,9 @@ test('Phase29 trust root freezes external evaluation assets and zero authority',
   assert.equal(root.generation_transition_must_be_contiguous,true);
   assert.equal(root.evaluation_epoch_transition_must_be_contiguous,true);
   assert.equal(root.generation_history_anchor_external,true);
+  assert.equal(root.exact_phase28_evidence_replay_required,true);
+  assert.equal(root.external_rotation_receipt_required,true);
+  assert.equal(root.anchor_recalibration_required_on_rotation,true);
   assert.equal(root.build_and_evaluation_workers_must_differ,true);
   assert.equal(root.existing_evaluation_budget_router_only,true);
   assert.equal(root.existing_candidate_experiment_ledger_only,true);
@@ -877,7 +882,11 @@ test('Phase29 handoff ledger is durable-before-visible and tracks contiguous eva
     evaluation_epoch_seq:1,
     evaluator_generation_history_anchor_digest:labelDigest('phase29-ledger-history-root'),
   });
-  assert.equal((await ledger.add(h1)).state,'HANDOFF_RECORDED_EXTERNAL_EVALUATION_REQUIRED');
+  assert.equal((await ledger.add({
+    handoff:h1,
+    artifact_receipt:fx1.artifactReceipt,
+    artifact_verification:fx1.artifactVerification,
+  })).state,'HANDOFF_RECORDED_EXTERNAL_EVALUATION_REQUIRED');
 
   const fx2=phase28ArtifactFixture('phase29-ledger-g1e2');
   const h2=phase29Handoff(fx2,'phase29-ledger-g1e2',{
@@ -887,7 +896,11 @@ test('Phase29 handoff ledger is durable-before-visible and tracks contiguous eva
     evaluator_generation_history_anchor_digest:h1.evaluator_generation_history_anchor_digest,
     evaluation_epoch_seq:2,
   });
-  assert.equal((await ledger.add(h2)).handoff_seq,2);
+  assert.equal((await ledger.add({
+    handoff:h2,
+    artifact_receipt:fx2.artifactReceipt,
+    artifact_verification:fx2.artifactVerification,
+  })).handoff_seq,2);
 
   const fx3=phase28ArtifactFixture('phase29-ledger-g2e1');
   const h3=phase29Handoff(fx3,'phase29-ledger-g2e1',{
@@ -895,7 +908,37 @@ test('Phase29 handoff ledger is durable-before-visible and tracks contiguous eva
     evaluation_epoch_seq:1,
     evaluator_generation_history_anchor_digest:rsiMaterializedEvaluatorGenerationPredecessorAnchor(h2),
   });
-  assert.equal((await ledger.add(h3)).handoff_seq,3);
+  await assert.rejects(()=>ledger.add({
+    handoff:h3,
+    artifact_receipt:fx3.artifactReceipt,
+    artifact_verification:fx3.artifactVerification,
+  }),/rotation_invalid/);
+  const rotation=createRsiEvaluatorGenerationRotation({
+    rotation_id:'phase29.rotation.ledger.g2',
+    source_sha:SOURCE,
+    previous_evaluator_root_digest:h2.evaluator_root_digest,
+    previous_evaluator_generation_digest:h2.evaluator_generation_digest,
+    previous_evaluator_generation_seq:h2.evaluator_generation_seq,
+    previous_evaluation_epoch_digest:h2.evaluation_epoch_digest,
+    previous_evaluation_epoch_seq:h2.evaluation_epoch_seq,
+    next_evaluator_root_digest:h3.evaluator_root_digest,
+    next_evaluator_generation_digest:h3.evaluator_generation_digest,
+    next_evaluator_generation_seq:h3.evaluator_generation_seq,
+    next_evaluation_epoch_digest:h3.evaluation_epoch_digest,
+    next_evaluation_epoch_seq:h3.evaluation_epoch_seq,
+    next_generation_history_anchor_digest:h3.evaluator_generation_history_anchor_digest,
+    anchor_recalibration_digest:labelDigest('phase29-ledger-g2-anchor-recalibration'),
+    external_rotation_receipt_digest:labelDigest('phase29-ledger-g2-external-rotation'),
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  verifyRsiEvaluatorGenerationRotation(rotation);
+  assert.equal((await ledger.add({
+    handoff:h3,
+    artifact_receipt:fx3.artifactReceipt,
+    artifact_verification:fx3.artifactVerification,
+    rotation,
+  })).handoff_seq,3);
 
   const snap=ledger.snapshot();
   assert.equal(snap.row_count,3);
@@ -909,7 +952,12 @@ test('Phase29 handoff ledger is durable-before-visible and tracks contiguous eva
   const restored=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
   await restored.init();
   assert.equal(restored.snapshot().row_count,3);
-  assert.equal((await restored.add(h3)).state,'IDEMPOTENT');
+  assert.equal((await restored.add({
+    handoff:h3,
+    artifact_receipt:fx3.artifactReceipt,
+    artifact_verification:fx3.artifactVerification,
+    rotation,
+  })).state,'IDEMPOTENT');
 });
 
 test('Phase29 handoff ledger persistence failure cannot publish phantom handoff',async(t)=>{
@@ -928,7 +976,11 @@ test('Phase29 handoff ledger persistence failure cannot publish phantom handoff'
   const originalRename=fs.rename;
   fs.rename=async()=>{throw Object.assign(new Error('injected_phase29_handoff_rename_failure'),{code:'EIO'});};
   try{
-    await assert.rejects(()=>ledger.add(handoff),/injected_phase29_handoff_rename_failure/);
+    await assert.rejects(()=>ledger.add({
+      handoff,
+      artifact_receipt:fx.artifactReceipt,
+      artifact_verification:fx.artifactVerification,
+    }),/injected_phase29_handoff_rename_failure/);
   }finally{
     fs.rename=originalRename;
   }
@@ -951,14 +1003,18 @@ test('Phase29 handoff ledger rejects generation gaps, reorder and self-rehashed 
     evaluator_generation_seq:1,evaluation_epoch_seq:1,
     evaluator_generation_history_anchor_digest:labelDigest('phase29-replay-history'),
   });
-  await ledger.add(h1);
+  await ledger.add({handoff:h1,artifact_receipt:fx1.artifactReceipt,artifact_verification:fx1.artifactVerification});
 
   const fxGap=phase28ArtifactFixture('phase29-replay-g3e1');
   const gap=phase29Handoff(fxGap,'phase29-replay-g3e1',{
     evaluator_generation_seq:3,evaluation_epoch_seq:1,
     evaluator_generation_history_anchor_digest:rsiMaterializedEvaluatorGenerationPredecessorAnchor(h1),
   });
-  await assert.rejects(()=>ledger.add(gap),/generation_sequence_gap/);
+  await assert.rejects(()=>ledger.add({
+    handoff:gap,
+    artifact_receipt:fxGap.artifactReceipt,
+    artifact_verification:fxGap.artifactVerification,
+  }),/generation_sequence_gap/);
 
   const fx2=phase28ArtifactFixture('phase29-replay-g1e2');
   const h2=phase29Handoff(fx2,'phase29-replay-g1e2',{
@@ -967,7 +1023,7 @@ test('Phase29 handoff ledger rejects generation gaps, reorder and self-rehashed 
     evaluator_generation_seq:1,evaluation_epoch_seq:2,
     evaluator_generation_history_anchor_digest:h1.evaluator_generation_history_anchor_digest,
   });
-  await ledger.add(h2);
+  await ledger.add({handoff:h2,artifact_receipt:fx2.artifactReceipt,artifact_verification:fx2.artifactVerification});
 
   const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
 
@@ -993,4 +1049,78 @@ test('Phase29 handoff ledger rejects generation gaps, reorder and self-rehashed 
   await fs.writeFile(reorderedPath,JSON.stringify(reordered),'utf8');
   const reorderedLedger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath:reorderedPath,source_sha:SOURCE});
   await assert.rejects(()=>reorderedLedger.init(),/handoff_sequence_gap/);
+});
+
+
+test('Phase29 handoff ledger restart replays exact Phase28 evidence and rejects self-rehashed artifact tamper',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-exact-phase28-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'handoffs.json');
+  const ledger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const fx=phase28ArtifactFixture('phase29-exact-phase28');
+  const handoff=phase29Handoff(fx,'phase29-exact-phase28',{
+    evaluator_generation_seq:1,
+    evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest('phase29-exact-phase28-history'),
+  });
+  await ledger.add({handoff,artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification});
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  persisted.rows[0].artifact_receipt.candidate_self_attestation_accepted=true;
+  const receiptCore=structuredClone(persisted.rows[0].artifact_receipt);
+  delete receiptCore.artifact_receipt_digest;
+  persisted.rows[0].artifact_receipt.artifact_receipt_digest=dg(receiptCore);
+  const stateCore=structuredClone(persisted);
+  delete stateCore.state_digest;
+  persisted.state_digest=dg(stateCore);
+  await fs.writeFile(statePath,JSON.stringify(persisted),'utf8');
+
+  const restored=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/artifact_receipt_policy_invalid|artifact_receipt_mismatch|artifact_binding_mismatch/);
+});
+
+test('Phase29 evaluator generation rotation is externally witnessed and exact-bound to predecessor and successor',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-rotation-binding-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath:path.join(dir,'handoffs.json'),source_sha:SOURCE});
+  await ledger.init();
+  const fx1=phase28ArtifactFixture('phase29-rotation-bind-g1');
+  const h1=phase29Handoff(fx1,'phase29-rotation-bind-g1',{
+    evaluator_generation_seq:1,evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:labelDigest('phase29-rotation-bind-history'),
+  });
+  await ledger.add({handoff:h1,artifact_receipt:fx1.artifactReceipt,artifact_verification:fx1.artifactVerification});
+
+  const fx2=phase28ArtifactFixture('phase29-rotation-bind-g2');
+  const h2=phase29Handoff(fx2,'phase29-rotation-bind-g2',{
+    evaluator_generation_seq:2,evaluation_epoch_seq:1,
+    evaluator_generation_history_anchor_digest:rsiMaterializedEvaluatorGenerationPredecessorAnchor(h1),
+  });
+  const wrong=createRsiEvaluatorGenerationRotation({
+    rotation_id:'phase29.rotation.wrong',
+    source_sha:SOURCE,
+    previous_evaluator_root_digest:h1.evaluator_root_digest,
+    previous_evaluator_generation_digest:h1.evaluator_generation_digest,
+    previous_evaluator_generation_seq:1,
+    previous_evaluation_epoch_digest:h1.evaluation_epoch_digest,
+    previous_evaluation_epoch_seq:1,
+    next_evaluator_root_digest:labelDigest('wrong-next-root'),
+    next_evaluator_generation_digest:h2.evaluator_generation_digest,
+    next_evaluator_generation_seq:2,
+    next_evaluation_epoch_digest:h2.evaluation_epoch_digest,
+    next_evaluation_epoch_seq:1,
+    next_generation_history_anchor_digest:h2.evaluator_generation_history_anchor_digest,
+    anchor_recalibration_digest:labelDigest('phase29-rotation-bind-anchor'),
+    external_rotation_receipt_digest:labelDigest('phase29-rotation-bind-receipt'),
+    external_generation_owner:true,
+    authored_by_candidate:false,
+  });
+  await assert.rejects(()=>ledger.add({
+    handoff:h2,
+    artifact_receipt:fx2.artifactReceipt,
+    artifact_verification:fx2.artifactVerification,
+    rotation:wrong,
+  }),/rotation_binding_mismatch/);
+  assert.equal(ledger.snapshot().row_count,1);
 });
