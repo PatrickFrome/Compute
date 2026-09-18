@@ -301,6 +301,95 @@ test('exact library CAS rejects stale append preconditions before any adoption e
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
+
+test('library admission barrier is durable, exact-bound and one-attempt before dormant append',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-admission-barrier-'));
+  try{
+    const statePath=path.join(root,'skill-state.json');
+    const first=verifiedSkill({id:'skill.runtime.admission.first',source:'b',impl:'c'});
+    const second=verifiedSkill({id:'skill.runtime.admission.second',source:'c',impl:'d'});
+    const third=verifiedSkill({id:'skill.runtime.admission.third',source:'d',impl:'e'});
+    const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE,clock:()=>1_900_000_000_000});
+    await store.init();
+    const initialLibrary=library([first],'runtime.skill.library.admission');
+    await store.adoptVerifiedLibrary({library:initialLibrary,external_library_owner:true,authored_by_candidate:false});
+    const successor=library([first,second],'runtime.skill.library.admission');
+
+    const prepared=await store.prepareVerifiedLibraryAdmission({
+      attempt_id:'admission.phase34.second.1',
+      expected_current_library_digest:initialLibrary.library_digest,
+      successor_library_digest:successor.library_digest,
+      proposed_skill_digest:second.capsule.skill_digest,
+      phase33_certificate_digest:d('a'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(prepared.state,'PREPARED');
+    assert.equal(prepared.expected_library_digest,initialLibrary.library_digest);
+    assert.equal(prepared.successor_library_digest,successor.library_digest);
+    assert.equal(store.snapshot().unresolved_library_admission_count,1);
+    assert.deepEqual(store.libraryAdmissionAttempts()[0].transitions.map((row)=>row.state),['PREPARED']);
+
+    await assert.rejects(()=>store.prepareVerifiedLibraryAdmission({
+      attempt_id:'admission.phase34.concurrent.2',
+      expected_current_library_digest:initialLibrary.library_digest,
+      successor_library_digest:successor.library_digest,
+      proposed_skill_digest:second.capsule.skill_digest,
+      phase33_certificate_digest:d('b'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/admission_unresolved_prior/);
+
+    const wrongSuccessor=library([first,third],'runtime.skill.library.admission');
+    await assert.rejects(()=>store.adoptVerifiedLibrary({
+      library:wrongSuccessor,
+      expected_current_library_digest:initialLibrary.library_digest,
+      admission_attempt_id:'admission.phase34.second.1',
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/admission_binding_mismatch/);
+    assert.equal(store.libraryAdmissionAttempts()[0].state,'PREPARED');
+
+    const restoredPrepared=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE,clock:()=>1_900_000_001_000});
+    await restoredPrepared.init();
+    assert.equal(restoredPrepared.libraryAdmissionAttempts()[0].state,'PREPARED');
+    assert.equal(restoredPrepared.verifiedLibrarySnapshot().library_digest,initialLibrary.library_digest);
+
+    const applied=await restoredPrepared.adoptVerifiedLibrary({
+      library:successor,
+      expected_current_library_digest:initialLibrary.library_digest,
+      admission_attempt_id:'admission.phase34.second.1',
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(applied.state,'ADOPTED');
+    assert.equal(applied.admission_state,'CONFIRMED');
+    assert.equal(applied.reconciled_pending,0);
+    assert.equal(restoredPrepared.snapshot().unresolved_library_admission_count,0);
+    assert.equal(restoredPrepared.snapshot().active_count,0);
+    const confirmed=restoredPrepared.libraryAdmissionAttempts()[0];
+    assert.equal(confirmed.state,'CONFIRMED');
+    assert.deepEqual(confirmed.transitions.map((row)=>row.state),['PREPARED','ATTEMPTED','CONFIRMED']);
+    assert.equal(confirmed.phase33_certificate_digest,d('a'));
+    assert.equal(confirmed.proposed_skill_digest,second.capsule.skill_digest);
+
+    await assert.rejects(()=>restoredPrepared.adoptVerifiedLibrary({
+      library:successor,
+      expected_current_library_digest:successor.library_digest,
+      admission_attempt_id:'admission.phase34.second.1',
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/admission_one_attempt_only/);
+
+    const restoredConfirmed=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+    await restoredConfirmed.init();
+    assert.equal(restoredConfirmed.verifiedLibrarySnapshot().library_digest,successor.library_digest);
+    assert.equal(restoredConfirmed.libraryAdmissionAttempts()[0].state,'CONFIRMED');
+    assert.equal(restoredConfirmed.snapshot().active_count,0);
+    assert.throws(()=>restoredConfirmed.activationView([second.capsule.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
+});
+
 test('candidate-authored lifecycle evidence and unrouted attribution fail closed',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-authority-'));
   try{
@@ -422,6 +511,11 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   assert.equal(root.verified_library_required,true);
   assert.equal(root.library_updates_append_only,true);
   assert.equal(root.exact_library_digest_cas_supported,true);
+  assert.equal(root.library_admission_write_ahead_barrier,true);
+  assert.equal(root.one_attempt_per_library_admission,true);
+  assert.equal(root.admission_reconciliation_required_after_attempt,true);
+  assert.equal(root.phase33_certificate_digest_binding_required,true);
+  assert.equal(root.retrieval_activation_separate_from_library_admission,true);
   assert.equal(root.independently_credited_outcomes_only,true);
   assert.equal(root.contextual_credit_not_global_truth,true);
   assert.equal(root.candidate_can_write_lifecycle,false);
