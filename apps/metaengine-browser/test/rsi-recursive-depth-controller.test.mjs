@@ -274,7 +274,7 @@ test('archive stores layer chains as evolutionary inputs without creating scalar
     external_meta_operator: true,
     authored_by_candidate: false,
   });
-  const ae1 = evaluation(p, a1, [], { quality: 0.72, novelty: 0.5, cost: 10, ref: 'A1' });
+  const ae1 = evaluation(p, a1, [], { quality: 0.72, novelty: 0.5, cost: 10, ref: 'RUN_A1' });
   const chainA = evaluateRsiRecursiveDepthChain({ policy: p, layers: [a1], evaluations: [ae1] });
 
   const b1 = createRsiRecursiveDepthLayer({
@@ -287,7 +287,7 @@ test('archive stores layer chains as evolutionary inputs without creating scalar
     external_meta_operator: true,
     authored_by_candidate: false,
   });
-  const be1 = evaluation(p, b1, [], { quality: 0.68, novelty: 0.8, cost: 8, ref: 'B1' });
+  const be1 = evaluation(p, b1, [], { quality: 0.68, novelty: 0.8, cost: 8, ref: 'RUN_B1' });
   const chainB = evaluateRsiRecursiveDepthChain({ policy: p, layers: [b1], evaluations: [be1] });
 
   const archive = createRsiRecursiveDepthArchive({
