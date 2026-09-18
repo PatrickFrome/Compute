@@ -60,6 +60,7 @@ import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, crea
 import { RsiBoundedCanaryAdmissionLedger, createRsiBoundedCanaryShadowEvidence, createRsiBoundedCanaryAdmission, rsiBoundedCanaryAdmissionTrustRootSnapshot } from './rsi-bounded-canary-admission.mjs';
 import { RsiMetaProfileCanaryLedger, createRsiMetaProfileCanaryAdmission, createRsiMetaProfileCanaryOutcome, rsiMetaProfileCanaryTrustRootSnapshot } from './rsi-meta-profile-canary-admission.mjs';
 import { RsiSealedCanaryReviewLedger, createRsiSealedCanaryReviewReceipt, createRsiSealedCanaryReview, rsiSealedCanaryReviewTrustRootSnapshot } from './rsi-sealed-canary-review.mjs';
+import { RsiVerifierEvolutionShadowLedger, createRsiVerifierEvolutionCandidate, createRsiVerifierEvolutionExternalReceipt, createRsiVerifierEvolutionShadowAdmission, rsiVerifierEvolutionShadowTrustRootSnapshot } from './rsi-verifier-evolution-shadow-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -143,6 +144,7 @@ function trustRoots() {
     bounded_canary_admission: rsiBoundedCanaryAdmissionTrustRootSnapshot(),
     meta_profile_canary: rsiMetaProfileCanaryTrustRootSnapshot(),
     sealed_canary_review: rsiSealedCanaryReviewTrustRootSnapshot(),
+    verifier_evolution_shadow: rsiVerifierEvolutionShadowTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -175,6 +177,7 @@ export class RsiRuntimeService {
   #boundedCanaryAdmissionLedger;
   #metaProfileCanaryLedger;
   #sealedCanaryReviewLedger;
+  #verifierEvolutionShadowLedger;
   #archive;
   #observer;
   #verifiedArchive;
@@ -192,7 +195,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, boundedCanaryAdmissionPath = null, metaProfileCanaryPath = null, sealedCanaryReviewPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, boundedCanaryAdmissionPath = null, metaProfileCanaryPath = null, sealedCanaryReviewPath = null, verifierEvolutionPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -281,6 +284,11 @@ export class RsiRuntimeService {
       statePath: runtimeSealedCanaryReviewPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeVerifierEvolutionPath = verifierEvolutionPath || (ledgerPath ? `${ledgerPath}.verifier-evolution-shadow.json` : null);
+    this.#verifierEvolutionShadowLedger = new RsiVerifierEvolutionShadowLedger({
+      statePath: runtimeVerifierEvolutionPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -307,6 +315,7 @@ export class RsiRuntimeService {
     await this.#boundedCanaryAdmissionLedger.init();
     await this.#metaProfileCanaryLedger.init();
     await this.#sealedCanaryReviewLedger.init();
+    await this.#verifierEvolutionShadowLedger.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -332,6 +341,7 @@ export class RsiRuntimeService {
       bounded_canary_admission_ledger_schema: this.#boundedCanaryAdmissionLedger.snapshot().schema,
       meta_profile_canary_ledger_schema: this.#metaProfileCanaryLedger.snapshot().schema,
       sealed_canary_review_ledger_schema: this.#sealedCanaryReviewLedger.snapshot().schema,
+      verifier_evolution_shadow_ledger_schema: this.#verifierEvolutionShadowLedger.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -1291,6 +1301,165 @@ export class RsiRuntimeService {
     return this.#sealedCanaryReviewLedger.ready();
   }
 
+  async recordVerifierEvolutionShadowAdmission({
+    admission_id,
+    candidate_id,
+    predecessor_verifier_root_digest,
+    candidate_verifier_root_digest,
+    constitution_digest,
+    candidate_package_digest,
+    training_evidence_digest,
+    self_authored_eval_digest,
+    hidden_suite_root_digest,
+    hidden_acceptance_digest,
+    sabotage_suite_digest,
+    transfer_holdout_digest,
+    trajectory_integrity_digest,
+    legibility_holdout_digest,
+    challenge_archive_digest,
+    predecessor_receipt_id,
+    predecessor_acceptance_pass,
+    predecessor_sabotage_pass,
+    predecessor_transfer_pass,
+    predecessor_trajectory_integrity_pass,
+    predecessor_legibility_pass,
+    predecessor_monitorability_nonregression_pass,
+    predecessor_constitution_match,
+    predecessor_identity_match,
+    predecessor_discovered_exploit_count = 0,
+    predecessor_sabotage_signal_count = 0,
+    predecessor_ambiguous_case_count = 0,
+    predecessor_verdict,
+    predecessor_evidence_refs,
+    secondary_receipt_id,
+    secondary_verifier_root_digest,
+    secondary_acceptance_pass,
+    secondary_sabotage_pass,
+    secondary_transfer_pass,
+    secondary_trajectory_integrity_pass,
+    secondary_legibility_pass,
+    secondary_monitorability_nonregression_pass,
+    secondary_constitution_match,
+    secondary_identity_match,
+    secondary_discovered_exploit_count = 0,
+    secondary_sabotage_signal_count = 0,
+    secondary_ambiguous_case_count = 0,
+    secondary_verdict,
+    secondary_evidence_refs,
+    external_candidate_builder = false,
+    external_predecessor_verifier = false,
+    external_secondary_verifier = false,
+    external_admission_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const candidate = createRsiVerifierEvolutionCandidate({
+      source_sha: this.#sourceSha,
+      candidate_id,
+      predecessor_verifier_root_digest,
+      candidate_verifier_root_digest,
+      constitution_digest,
+      candidate_package_digest,
+      training_evidence_digest,
+      self_authored_eval_digest,
+      external_candidate_builder,
+      authored_by_candidate,
+    });
+    const shared = {
+      candidate,
+      hidden_suite_root_digest,
+      hidden_acceptance_digest,
+      sabotage_suite_digest,
+      transfer_holdout_digest,
+      trajectory_integrity_digest,
+      legibility_holdout_digest,
+      challenge_archive_digest,
+      authored_by_candidate: false,
+    };
+    const predecessorReceipt = createRsiVerifierEvolutionExternalReceipt({
+      ...shared,
+      receipt_id: predecessor_receipt_id,
+      evaluator_role: 'PREDECESSOR',
+      evaluator_root_digest: predecessor_verifier_root_digest,
+      acceptance_pass: predecessor_acceptance_pass,
+      sabotage_pass: predecessor_sabotage_pass,
+      transfer_pass: predecessor_transfer_pass,
+      trajectory_integrity_pass: predecessor_trajectory_integrity_pass,
+      legibility_pass: predecessor_legibility_pass,
+      monitorability_nonregression_pass: predecessor_monitorability_nonregression_pass,
+      constitution_match: predecessor_constitution_match,
+      identity_match: predecessor_identity_match,
+      discovered_exploit_count: predecessor_discovered_exploit_count,
+      sabotage_signal_count: predecessor_sabotage_signal_count,
+      ambiguous_case_count: predecessor_ambiguous_case_count,
+      verdict: predecessor_verdict,
+      evidence_refs: predecessor_evidence_refs,
+      external_evaluator: external_predecessor_verifier,
+    });
+    const secondaryReceipt = createRsiVerifierEvolutionExternalReceipt({
+      ...shared,
+      receipt_id: secondary_receipt_id,
+      evaluator_role: 'SECONDARY',
+      evaluator_root_digest: secondary_verifier_root_digest,
+      acceptance_pass: secondary_acceptance_pass,
+      sabotage_pass: secondary_sabotage_pass,
+      transfer_pass: secondary_transfer_pass,
+      trajectory_integrity_pass: secondary_trajectory_integrity_pass,
+      legibility_pass: secondary_legibility_pass,
+      monitorability_nonregression_pass: secondary_monitorability_nonregression_pass,
+      constitution_match: secondary_constitution_match,
+      identity_match: secondary_identity_match,
+      discovered_exploit_count: secondary_discovered_exploit_count,
+      sabotage_signal_count: secondary_sabotage_signal_count,
+      ambiguous_case_count: secondary_ambiguous_case_count,
+      verdict: secondary_verdict,
+      evidence_refs: secondary_evidence_refs,
+      external_evaluator: external_secondary_verifier,
+    });
+    const admission = createRsiVerifierEvolutionShadowAdmission({
+      admission_id,
+      candidate,
+      predecessor_receipt: predecessorReceipt,
+      secondary_receipt: secondaryReceipt,
+      external_admission_owner,
+      authored_by_candidate: false,
+    });
+    const stored = await this.#verifierEvolutionShadowLedger.add({
+      candidate,
+      predecessor_receipt: predecessorReceipt,
+      secondary_receipt: secondaryReceipt,
+      admission,
+    });
+    await this.#ledger.append('VERIFIER_EVOLUTION_SHADOW_ADMISSION_RECORDED', {
+      admission_id: admission.admission_id,
+      admission_digest: admission.admission_digest,
+      candidate_id: admission.candidate_id,
+      candidate_digest: admission.candidate_digest,
+      candidate_verifier_root_digest: admission.candidate_verifier_root_digest,
+      predecessor_verifier_root_digest: admission.predecessor_verifier_root_digest,
+      secondary_verifier_root_digest: admission.secondary_verifier_root_digest,
+      constitution_digest: admission.constitution_digest,
+      hidden_suite_root_digest: admission.hidden_suite_root_digest,
+      challenge_archive_digest: admission.challenge_archive_digest,
+      predecessor_receipt_digest: admission.predecessor_receipt_digest,
+      secondary_receipt_digest: admission.secondary_receipt_digest,
+      receipts_agree: admission.receipts_agree,
+      state: admission.state,
+      qualified_for_verifier_shadow_only: admission.qualified_for_verifier_shadow_only,
+      active_verifier_remains_predecessor: true,
+      verifier_replacement_authorized: false,
+      verifier_activation_authorized: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ candidate, predecessor_receipt: predecessorReceipt, secondary_receipt: secondaryReceipt, admission, stored });
+  }
+
+  verifierEvolutionShadowAdmissions() {
+    this.#assertRunning();
+    return this.#verifierEvolutionShadowLedger.qualified();
+  }
+
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
     this.#assertRunning();
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
@@ -1692,6 +1861,7 @@ export class RsiRuntimeService {
       bounded_canary_admission_ledger: this.#boundedCanaryAdmissionLedger.snapshot(),
       meta_profile_canary_ledger: this.#metaProfileCanaryLedger.snapshot(),
       sealed_canary_review_ledger: this.#sealedCanaryReviewLedger.snapshot(),
+      verifier_evolution_shadow_ledger: this.#verifierEvolutionShadowLedger.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
         evaluation_count: this.#skillReliabilityEvaluationCount,
