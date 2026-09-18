@@ -52,6 +52,7 @@ import { createRsiVerifiedCandidateMaterialization, rsiVerifiedCandidateMaterial
 import { createRsiExternalEvaluationBundle, verifyRsiExternalEvaluationBundle, rsiExternalEvaluationTrustRootSnapshot } from './rsi-external-evaluation-evidence-adapter.mjs';
 import { createRsiExternalPromotionReviewRequest, finalizeRsiExternalPromotionReview, verifyRsiExternalPromotionReviewRequest, verifyRsiExternalPromotionReviewResult, rsiExternalPromotionReviewTrustRootSnapshot } from './rsi-external-promotion-review.mjs';
 import { createRsiReleaseAuthorityHandoff, verifyRsiReleaseAuthorityHandoff, rsiReleaseAuthorityHandoffTrustRootSnapshot } from './rsi-release-authority-handoff.mjs';
+import { createRsiReleaseExecutorAdmission, verifyRsiReleaseExecutorAdmission, rsiReleaseExecutorAdmissionTrustRootSnapshot } from './rsi-release-executor-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -128,6 +129,7 @@ function trustRoots() {
     external_evaluation: rsiExternalEvaluationTrustRootSnapshot(),
     external_promotion_review: rsiExternalPromotionReviewTrustRootSnapshot(),
     release_authority_handoff: rsiReleaseAuthorityHandoffTrustRootSnapshot(),
+    release_executor_admission: rsiReleaseExecutorAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -182,6 +184,9 @@ export class RsiRuntimeService {
   #releaseAuthorityHandoffCount = 0;
   #lastReleaseAuthorityHandoffDigest = null;
   #lastReleaseAuthorityHandoffState = null;
+  #releaseExecutorAdmissionCount = 0;
+  #lastReleaseExecutorAdmissionDigest = null;
+  #lastReleaseExecutorCommandId = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -478,6 +483,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const handoff = row?.payload?.release_authority_handoff;
         if (handoff?.promotion_review_result_digest === wanted) found = Object.freeze(structuredClone(handoff));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseAuthorityHandoffByDigest(handoffDigest) {
+    const wanted = String(handoffDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const handoff = row?.payload?.release_authority_handoff;
+        if (handoff?.handoff_digest === wanted) found = Object.freeze(structuredClone(handoff));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseExecutorAdmissionByHandoff(handoffDigest) {
+    const wanted = String(handoffDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const admission = row?.payload?.release_executor_admission;
+        if (admission?.release_handoff_digest === wanted) found = Object.freeze(structuredClone(admission));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -1012,6 +1051,54 @@ export class RsiRuntimeService {
     return handoff;
   }
 
+  async prepareReleaseExecutorAdmission({
+    release_handoff_digest,
+    executor_readback,
+    pre_effect_authority_readback,
+    evaluated_at,
+  } = {}) {
+    this.#assertRunning();
+    const handoffDigest = String(release_handoff_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(handoffDigest)) throw new Error('rsi_runtime_release_handoff_digest_invalid');
+    if (this.#findReleaseExecutorAdmissionByHandoff(handoffDigest)) {
+      throw new Error('rsi_runtime_release_executor_admission_already_prepared');
+    }
+    const releaseHandoff = this.#findReleaseAuthorityHandoffByDigest(handoffDigest);
+    if (!releaseHandoff) throw new Error('rsi_runtime_release_authority_handoff_not_persisted');
+    const review = this.#findExternalPromotionReviewByResultDigest(releaseHandoff.promotion_review_result_digest);
+    if (!review) throw new Error('rsi_runtime_external_promotion_review_result_not_persisted');
+    verifyRsiExternalPromotionReviewResult(review.result, review.request);
+    verifyRsiReleaseAuthorityHandoff(releaseHandoff, review.result, review.request);
+    const admission = createRsiReleaseExecutorAdmission({
+      release_handoff: releaseHandoff,
+      promotion_review_result: review.result,
+      promotion_review_request: review.request,
+      executor_readback,
+      pre_effect_authority_readback,
+      evaluated_at,
+    });
+    verifyRsiReleaseExecutorAdmission(admission);
+    await this.#ledger.append('RSI_RELEASE_EXECUTOR_ADMISSION_PREPARED', {
+      release_executor_admission: admission,
+      db_lease_is_execution_authority: true,
+      admission_is_execution_authority: false,
+      command_created_by_rsi: false,
+      command_leased_by_rsi: false,
+      command_completed_by_rsi: false,
+      effect_invoked_by_rsi: false,
+      release_transaction_created: false,
+      installer_effect_started: false,
+      self_update_check_invoked: false,
+      self_update_apply_invoked: false,
+      ambiguous_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#releaseExecutorAdmissionCount += 1;
+    this.#lastReleaseExecutorAdmissionDigest = admission.admission_digest;
+    this.#lastReleaseExecutorCommandId = admission.command_id;
+    return admission;
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1309,6 +1396,28 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      release_executor_admission: Object.freeze({
+        count: this.#releaseExecutorAdmissionCount,
+        last_digest: this.#lastReleaseExecutorAdmissionDigest,
+        last_command_id: this.#lastReleaseExecutorCommandId,
+        db_lease_is_execution_authority: true,
+        external_scheduler_selection_required: true,
+        exact_fresh_readback_required: true,
+        command_created_by_rsi: false,
+        command_leased_by_rsi: false,
+        command_completed_by_rsi: false,
+        effect_invoked_by_rsi: false,
+        release_transaction_created_by_rsi: false,
+        installer_effect_started_by_rsi: false,
+        self_update_check_invoked_by_rsi: false,
+        self_update_apply_invoked_by_rsi: false,
+        ambiguous_effect_replay_allowed: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       release_authority_handoff: Object.freeze({
         count: this.#releaseAuthorityHandoffCount,
         last_digest: this.#lastReleaseAuthorityHandoffDigest,
