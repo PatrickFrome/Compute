@@ -196,7 +196,7 @@ jobs:
                   }
                   if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' `
                       -and $runtimeEvent.state -eq 'ARMED' `
-                      -and $runtimeEvent.origin -eq 'https://chatgpt.com/' `
+                      -and $runtimeEvent.origin -eq 'https://chat.z.ai/' `
                       -and [int]$runtimeEvent.sockets -eq 2 `
                       -and $runtimeEvent.persistent_partition -eq 'persist:metaengine-user-v1' `
                       -and $runtimeEvent.authority_effect -eq $false) {
@@ -260,7 +260,7 @@ jobs:
             $proof.automatic_initial_remote_load_suppressed = $true
             $proof.initial_chatgpt_surface_exposed = $false
             $proof.initial_remote_load_verified = $false
-            $proof | Add-Member -NotePropertyName chatgpt_origin -NotePropertyValue 'https://chatgpt.com/' -Force
+            $proof | Add-Member -NotePropertyName chatgpt_origin -NotePropertyValue 'https://chat.z.ai/' -Force
             $proof | Add-Member -NotePropertyName chatgpt_connection_mode -NotePropertyValue 'PERSISTENT_PRECONNECT_ONLY' -Force
             $proof | Add-Member -NotePropertyName control_state_schema -NotePropertyValue ([string]$controlState.schema) -Force
             $proof | Add-Member -NotePropertyName control_state_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
