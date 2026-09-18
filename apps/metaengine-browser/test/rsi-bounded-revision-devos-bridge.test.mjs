@@ -60,6 +60,14 @@ import {
   verifyRsiKnowledgeConsolidationAdmission,
   rsiSlowKnowledgeConsolidationTrustRootSnapshot,
 } from '../src/rsi-slow-knowledge-consolidation.mjs';
+import {
+  RsiConsumerRevalidationArchive,
+  createRsiValidatedKnowledgeConsumerHandoff,
+  verifyRsiValidatedKnowledgeConsumerHandoff,
+  createRsiConsumerLocalRevalidationReceipt,
+  verifyRsiConsumerLocalRevalidationReceipt,
+  rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot,
+} from '../src/rsi-validated-knowledge-consumer-handoff.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -2173,3 +2181,342 @@ test('Phase31 refuses consolidation across different fixed Phase30 evaluation co
   );
 });
 
+
+
+function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null,consumerGenerationSeq=null,overrides={}}={}){
+  const rows=phase31SourceRows(`${label}-source`,{state});
+  const proposal=phase31Proposal(rows,`${label}-proposal`);
+  const validations=[
+    phase31Validation(proposal,`${label}-transfer-a`),
+    phase31Validation(proposal,`${label}-transfer-b`),
+  ];
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:`phase32.phase31.admission.${label}`,
+    proposal,
+    validations,
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  });
+  const recipe=proposal.knowledge_class==='REUSABLE_RECIPE_CANDIDATE';
+  const handoff=createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.consumer.handoff.${label}`,
+    proposal,validations,admission,source_rows:rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(`${label}-consumer-context`),
+    consumer_task_set_digest:labelDigest(`${label}-consumer-task-set`),
+    consumer_harness_digest:labelDigest(`${label}-consumer-harness`),
+    consumer_retrieval_profile_digest:labelDigest(`${label}-consumer-retrieval-profile`),
+    consumer_evaluator_root_digest:labelDigest(`${label}-consumer-evaluator-root`),
+    consumer_evaluator_generation_digest:consumerGeneration||proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:consumerGenerationSeq??proposal.evaluator_generation_seq,
+    consumer_holdout_digest:labelDigest(`${label}-consumer-holdout`),
+    matched_reference_plan_digest:labelDigest(`${label}-matched-reference`),
+    local_revalidation_protocol_digest:labelDigest(`${label}-local-revalidation`),
+    current_consumer_plane_digest:labelDigest(`${label}-consumer-plane`),
+    current_verified_library_digest:recipe?labelDigest(`${label}-verified-library`):null,
+    external_consumer_router:true,
+    authored_by_candidate:false,
+    ...overrides,
+  });
+  return {rows,proposal,validations,admission,handoff};
+}
+
+function phase32Receipt(fx,label='phase32',overrides={}){
+  const base={
+    receipt_id:`phase32.consumer.receipt.${label}`,
+    handoff:fx.handoff,
+    matched_control_receipt_digest:labelDigest(`${label}-control-receipt`),
+    treatment_receipt_digest:labelDigest(`${label}-treatment-receipt`),
+    local_evidence_digest:labelDigest(`${label}-local-evidence`),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    consumer_state_integrity_pass:true,
+    retrieval_profile_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    hard_invariants_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    process_non_regression:true,
+    outcome_non_regression:true,
+    efficiency_non_regression:true,
+    strict_consumer_improvement:fx.handoff.knowledge_class==='REUSABLE_RECIPE_CANDIDATE',
+    constraint_prediction_confirmed:fx.handoff.knowledge_class==='NEGATIVE_CONSTRAINT'||fx.handoff.knowledge_class==='LOW_YIELD_CONSTRAINT',
+    diagnostic_discrimination_pass:fx.handoff.knowledge_class==='ENVIRONMENT_DIAGNOSTIC'||fx.handoff.knowledge_class==='AMBIGUITY_DIAGNOSTIC',
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  };
+  return createRsiConsumerLocalRevalidationReceipt({...base,...overrides});
+}
+
+test('Phase32 binds exact Phase31 and consumer contracts before any local review',()=>{
+  const fx=phase32Fixture('exact-contract');
+  const checked=verifyRsiValidatedKnowledgeConsumerHandoff(fx.handoff,fx);
+  assert.equal(checked.handoff_digest,fx.handoff.handoff_digest);
+  assert.equal(fx.handoff.phase31_proposal_digest,fx.proposal.proposal_digest);
+  assert.equal(fx.handoff.phase31_admission_digest,fx.admission.admission_digest);
+  assert.equal(fx.handoff.source_evaluator_generation_digest,fx.proposal.evaluator_generation_digest);
+  assert.equal(fx.handoff.source_evaluator_generation_seq,fx.proposal.evaluator_generation_seq);
+  assert.equal(fx.handoff.source_evaluator_generation_history_anchor_digest,fx.proposal.evaluator_generation_history_anchor_digest);
+  assert.equal(fx.handoff.source_evaluation_epoch_digest,fx.proposal.evaluation_epoch_digest);
+  assert.equal(fx.handoff.source_evaluation_epoch_seq,fx.proposal.evaluation_epoch_seq);
+  assert.equal(fx.handoff.source_evaluation_contract_digest,fx.proposal.evaluation_contract_digest);
+  assert.deepEqual(fx.handoff.phase31_transfer_evaluation_contract_digests,fx.admission.transfer_evaluation_contract_digests);
+  assert.match(fx.handoff.consumer_evaluation_contract_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(fx.handoff.current_consumer_state_binding_required,true);
+  assert.equal(fx.handoff.current_verified_library_binding_required_for_recipe,true);
+  assert.equal(fx.handoff.fresh_consumer_assets_required,true);
+  assert.equal(fx.handoff.existing_verified_skill_library_only,true);
+  assert.equal(fx.handoff.handoff_can_write_skill_library,false);
+  assert.equal(fx.handoff.handoff_can_activate_knowledge,false);
+  assert.equal(fx.handoff.authority_effect,false);
+});
+
+test('Phase32 class-sensitive routing keeps counterevidence and diagnostics out of positive skill review',()=>{
+  const recipe=phase32Fixture('route-recipe');
+  assert.equal(recipe.handoff.consumer_route,'VERIFIED_SKILL_CANDIDATE_REVALIDATION');
+  assert.equal(recipe.handoff.matched_no_skill_or_reference_required,true);
+  assert.match(recipe.handoff.current_verified_library_digest,/^sha256:/);
+
+  const negative=phase32Fixture('route-negative',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.equal(negative.handoff.knowledge_class,'NEGATIVE_CONSTRAINT');
+  assert.equal(negative.handoff.consumer_route,'EXPERIENCE_COUNTEREVIDENCE_REVALIDATION');
+  assert.equal(negative.handoff.matched_no_skill_or_reference_required,false);
+  assert.equal(negative.handoff.current_verified_library_digest,null);
+
+  const diagnostic=phase32Fixture('route-diagnostic',{state:'INCONCLUSIVE_AMBIGUOUS'});
+  assert.equal(diagnostic.handoff.knowledge_class,'AMBIGUITY_DIAGNOSTIC');
+  assert.equal(diagnostic.handoff.consumer_route,'ADAPTIVE_RETRIEVAL_DIAGNOSTIC_REVALIDATION');
+  assert.equal(diagnostic.handoff.handoff_can_write_experience_graph,false);
+});
+
+test('Phase32 refuses inherited source verdict and requires fresh consumer generation evidence',()=>{
+  const fx=phase32Fixture('cross-generation',{
+    consumerGeneration:labelDigest('phase32-fresh-consumer-generation'),
+    consumerGenerationSeq:fx=>fx,
+  });
+});
+
+test('Phase32 recipe review requires current verified library state',()=>{
+  const rows=phase31SourceRows('missing-library-source');
+  const proposal=phase31Proposal(rows,'missing-library-proposal');
+  const validations=[phase31Validation(proposal,'missing-library-a'),phase31Validation(proposal,'missing-library-b')];
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:'phase32.phase31.admission.missing-library',
+    proposal,validations,external_admission_owner:true,authored_by_candidate:false,
+  });
+  assert.throws(()=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:'phase32.consumer.handoff.missing-library',
+    proposal,validations,admission,source_rows:rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest('missing-library-context'),
+    consumer_task_set_digest:labelDigest('missing-library-task-set'),
+    consumer_harness_digest:labelDigest('missing-library-harness'),
+    consumer_retrieval_profile_digest:labelDigest('missing-library-retrieval'),
+    consumer_evaluator_root_digest:labelDigest('missing-library-evaluator'),
+    consumer_evaluator_generation_digest:proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:proposal.evaluator_generation_seq,
+    consumer_holdout_digest:labelDigest('missing-library-holdout'),
+    matched_reference_plan_digest:labelDigest('missing-library-reference'),
+    local_revalidation_protocol_digest:labelDigest('missing-library-protocol'),
+    current_consumer_plane_digest:labelDigest('missing-library-plane'),
+    current_verified_library_digest:null,
+    external_consumer_router:true,authored_by_candidate:false,
+  }),/current_verified_library_required/);
+});
+
+test('Phase32 local recipe requires matched improvement plus task safety security process outcome and efficiency non-regression',()=>{
+  const fx=phase32Fixture('positive-local');
+  const receipt=phase32Receipt(fx,'positive-local');
+  assert.equal(verifyRsiConsumerLocalRevalidationReceipt(receipt,{handoff:fx.handoff}).receipt_digest,receipt.receipt_digest);
+  assert.equal(receipt.state,'CONSUMER_REVALIDATED_RECIPE');
+  assert.equal(receipt.eligible_existing_consumer_review,'EXISTING_VERIFIED_SKILL_EVIDENCE_REVIEW');
+  assert.equal(receipt.process_non_regression,true);
+  assert.equal(receipt.outcome_non_regression,true);
+  assert.equal(receipt.negative_transfer_memory,false);
+
+  for(const [label,overrides] of [
+    ['task',{task_non_regression:false}],
+    ['safety',{safety_non_regression:false}],
+    ['security',{security_non_regression:false}],
+    ['process',{process_non_regression:false}],
+    ['outcome',{outcome_non_regression:false}],
+    ['efficiency',{efficiency_non_regression:false}],
+  ]){
+    const regressed=phase32Receipt(fx,`regression-${label}`,overrides);
+    assert.equal(regressed.state,'CONSUMER_NEGATIVE_TRANSFER');
+    assert.equal(regressed.negative_transfer_memory,true);
+    assert.equal(regressed.suppress_repeat_same_consumer_context,true);
+    assert.equal(regressed.eligible_existing_consumer_review,null);
+  }
+  const flat=phase32Receipt(fx,'no-clear-benefit',{strict_consumer_improvement:false});
+  assert.equal(flat.state,'CONSUMER_NO_CLEAR_BENEFIT');
+  assert.equal(flat.eligible_existing_consumer_review,null);
+});
+
+test('Phase32 local evidence fails closed on consumer-state retrieval evaluator holdout and replay drift',()=>{
+  const fx=phase32Fixture('invalid-local');
+  for(const [label,overrides,blocker] of [
+    ['instances',{same_instances_pass:false},'INSTANCE_MISMATCH'],
+    ['harness',{same_harness_pass:false},'HARNESS_MISMATCH'],
+    ['budget',{same_budget_pass:false},'BUDGET_MISMATCH'],
+    ['evaluator',{evaluator_integrity_pass:false},'EVALUATOR_INTEGRITY_FAILURE'],
+    ['consumer-state',{consumer_state_integrity_pass:false},'CONSUMER_STATE_DRIFT'],
+    ['retrieval',{retrieval_profile_integrity_pass:false},'RETRIEVAL_PROFILE_DRIFT'],
+    ['holdout',{hidden_holdout_pass:false},'HIDDEN_HOLDOUT_FAILURE'],
+    ['contamination',{contamination_clear:false},'CONTAMINATION_DETECTED'],
+    ['replay',{from_scratch_replay_pass:false},'FROM_SCRATCH_REPLAY_FAILURE'],
+  ]){
+    const receipt=phase32Receipt(fx,`invalid-${label}`,overrides);
+    assert.equal(receipt.state,'CONSUMER_REVALIDATION_INVALID');
+    assert.ok(receipt.blockers.includes(blocker),blocker);
+    assert.equal(receipt.eligible_existing_consumer_review,null);
+  }
+});
+
+test('Phase32 freshness rejects every reused Phase31 transfer asset and transfer contract',()=>{
+  const fx=phase32Fixture('freshness');
+  const source=fx.validations[0];
+  const build=(label,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.freshness.${label}`,
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(`${label}-context`),
+    consumer_task_set_digest:labelDigest(`${label}-tasks`),
+    consumer_harness_digest:labelDigest(`${label}-harness`),
+    consumer_retrieval_profile_digest:labelDigest(`${label}-retrieval`),
+    consumer_evaluator_root_digest:labelDigest(`${label}-evaluator`),
+    consumer_evaluator_generation_digest:fx.proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:fx.proposal.evaluator_generation_seq,
+    consumer_holdout_digest:labelDigest(`${label}-holdout`),
+    matched_reference_plan_digest:labelDigest(`${label}-reference`),
+    local_revalidation_protocol_digest:labelDigest(`${label}-protocol`),
+    current_consumer_plane_digest:labelDigest(`${label}-plane`),
+    current_verified_library_digest:labelDigest(`${label}-library`),
+    external_consumer_router:true,authored_by_candidate:false,
+    ...overrides,
+  });
+  assert.throws(()=>build('reuse-context',{consumer_context_digest:source.heldout_context_digest}),/source_context_reuse_forbidden/);
+  assert.throws(()=>build('reuse-tasks',{consumer_task_set_digest:source.heldout_task_set_digest}),/source_task_set_reuse_forbidden/);
+  assert.throws(()=>build('reuse-harness',{consumer_harness_digest:source.transfer_harness_digest}),/source_harness_reuse_forbidden/);
+  assert.throws(()=>build('reuse-evaluator',{consumer_evaluator_root_digest:source.external_evaluator_root_digest}),/source_evaluator_reuse_forbidden/);
+  assert.throws(()=>build('reuse-holdout',{consumer_holdout_digest:source.hidden_holdout_root_digest}),/source_holdout_reuse_forbidden/);
+  assert.throws(()=>build('reuse-reference',{matched_reference_plan_digest:fx.proposal.transfer_validation_plan_digest}),/source_reference_plan_reuse_forbidden/);
+  assert.throws(()=>build('reuse-protocol',{local_revalidation_protocol_digest:fx.proposal.transfer_validation_plan_digest}),/source_revalidation_protocol_reuse_forbidden/);
+  assert.throws(()=>build('reuse-transfer-contract',{matched_reference_plan_digest:source.transfer_evaluation_contract_digest}),/source_transfer_contract_reuse_forbidden/);
+});
+
+test('Phase32 counterevidence and diagnostics require consumer-local confirmation and never become skills',()=>{
+  const negative=phase32Fixture('counter',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const nr=phase32Receipt(negative,'counter');
+  assert.equal(nr.state,'CONSUMER_REVALIDATED_COUNTEREVIDENCE');
+  assert.equal(nr.eligible_existing_consumer_review,'EXISTING_EXPERIENCE_COUNTEREVIDENCE_REVIEW');
+  assert.equal(nr.receipt_can_write_skill_library,false);
+
+  const diagnostic=phase32Fixture('diag',{state:'INCONCLUSIVE_ENVIRONMENT'});
+  const dr=phase32Receipt(diagnostic,'diag');
+  assert.equal(dr.state,'CONSUMER_REVALIDATED_DIAGNOSTIC');
+  assert.equal(dr.eligible_existing_consumer_review,'EXISTING_ADAPTIVE_RETRIEVAL_DIAGNOSTIC_REVIEW');
+  assert.equal(dr.receipt_can_write_skill_library,false);
+});
+
+test('Phase32 archive is durable-before-visible, re-resolves Phase31 evidence and retains negative transfer',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-selected-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const fx=phase32Fixture('archive');
+  const receipt=phase32Receipt(fx,'archive',{safety_non_regression:false});
+  const resolver=async()=>({proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows});
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({...fx,receipt}));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.add({...fx,receipt})).state,'CONSUMER_NEGATIVE_TRANSFER');
+  const snap=archive.snapshot();
+  assert.equal(snap.row_count,1);
+  assert.equal(snap.negative_transfer_retained,true);
+  assert.equal(snap.exact_phase31_contract_bound,true);
+  assert.equal(snap.consumer_evaluation_contract_bound,true);
+  assert.equal(snap.consumer_state_drift_requires_revalidation,true);
+  assert.equal(snap.active_skill_library_digest,null);
+  assert.equal(snap.archive_can_write_consumers,false);
+  assert.equal(snap.archive_can_activate_skill,false);
+
+  const restored=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+  assert.equal((await restored.add({...fx,receipt})).state,'IDEMPOTENT');
+
+  const changedPlane=phase32Fixture('archive',{overrides:{
+    current_consumer_plane_digest:labelDigest('archive-changed-plane'),
+  }});
+  assert.notEqual(changedPlane.handoff.consumer_evaluation_contract_digest,fx.handoff.consumer_evaluation_contract_digest);
+});
+
+test('Phase32 archive restart rejects self-rehashed authority widening',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-selected-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const fx=phase32Fixture('tamper');
+  const receipt=phase32Receipt(fx,'tamper');
+  const resolver=async()=>({proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows});
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await archive.add({...fx,receipt});
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.rows[0].handoff.handoff_can_write_skill_library=true;
+  const hc=structuredClone(raw.rows[0].handoff);delete hc.handoff_digest;
+  raw.rows[0].handoff.handoff_digest=dg(hc);
+  raw.rows[0].receipt.handoff_digest=raw.rows[0].handoff.handoff_digest;
+  const rc=structuredClone(raw.rows[0].receipt);delete rc.receipt_digest;
+  raw.rows[0].receipt.receipt_digest=dg(rc);
+  const sc=structuredClone(raw);delete sc.state_digest;
+  raw.state_digest=dg(sc);
+  await fs.writeFile(statePath,`${JSON.stringify(raw)}\n`,'utf8');
+
+  const restored=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await assert.rejects(()=>restored.init(),/handoff_policy_invalid|handoff_digest_mismatch/);
+});
+
+test('Phase32 trust root keeps consumer-local learning fresh, matched and zero-authority',()=>{
+  const root=rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot();
+  assert.equal(root.phase31_multi_context_admission_required,true);
+  assert.equal(root.consumer_task_set_binding_required,true);
+  assert.equal(root.consumer_retrieval_profile_binding_required,true);
+  assert.equal(root.consumer_evaluator_generation_sequence_binding_required,true);
+  assert.equal(root.source_phase30_evaluation_contract_binding_required,true);
+  assert.equal(root.phase31_transfer_contracts_bound,true);
+  assert.equal(root.consumer_evaluation_contract_bound,true);
+  assert.equal(root.current_consumer_state_binding_required,true);
+  assert.equal(root.current_verified_library_binding_required_for_recipe,true);
+  assert.equal(root.fresh_consumer_assets_required,true);
+  assert.equal(root.phase31_context_reuse_forbidden,true);
+  assert.equal(root.phase31_task_set_reuse_forbidden,true);
+  assert.equal(root.phase31_harness_reuse_forbidden,true);
+  assert.equal(root.phase31_holdout_reuse_forbidden,true);
+  assert.equal(root.phase31_evaluator_root_reuse_forbidden,true);
+  assert.equal(root.phase31_transfer_plan_reuse_forbidden,true);
+  assert.equal(root.phase31_transfer_contract_reuse_forbidden,true);
+  assert.equal(root.local_process_outcome_non_regression_required,true);
+  assert.equal(root.consumer_state_integrity_required,true);
+  assert.equal(root.retrieval_profile_integrity_required,true);
+  assert.equal(root.negative_transfer_retained,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.second_experience_graph_allowed,false);
+  assert.equal(root.second_scheduler_allowed,false);
+  assert.equal(root.direct_skill_library_write,false);
+  assert.equal(root.direct_knowledge_activation,false);
+  assert.equal(root.authority_effect,false);
+});
