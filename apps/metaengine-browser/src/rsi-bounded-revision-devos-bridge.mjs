@@ -12,9 +12,14 @@ import {
   verifyRsiIsolatedCandidateBuildPlan,
   finalizeRsiIsolatedCandidateBuild,
 } from './rsi-isolated-candidate-builder.mjs';
+import {
+  createRsiArtifactEvaluationRoutingRequest,
+  verifyRsiArtifactEvaluationRoutingRequest,
+} from './rsi-evaluation-budget-router.mjs';
 
 export const RSI_BOUNDED_REVISION_DEVOS_BRIDGE_SCHEMA='metaengine.rsi.bounded-revision-devos-bridge.v1';
 export const RSI_BOUNDED_REVISION_ARTIFACT_RECEIPT_SCHEMA='metaengine.rsi.bounded-revision-artifact-receipt.v1';
+export const RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA='metaengine.rsi.materialized-candidate-evaluation-handoff.v1';
 
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SLSA_PREDICATE='https://slsa.dev/provenance/v1';
@@ -468,5 +473,224 @@ export function verifyRsiBoundedRevisionArtifactReceipt(row,args={}){
     authored_by_candidate:false,
   });
   if(canonical.artifact_receipt_digest!==receipt.artifact_receipt_digest)throw new Error('rsi_revision_bridge_artifact_receipt_mismatch');
+  return canonical;
+}
+
+
+export function createRsiMaterializedCandidateEvaluationHandoff({
+  artifact_receipt,
+  artifact_verification,
+  evaluator_root_digest,
+  evaluator_generation_digest,
+  evaluation_epoch_digest,
+  sealed_task_set_digest,
+  harness_digest,
+  trial_worker_image_digest,
+  resource_budget_digest,
+  task_order_digest,
+  threshold_policy_digest,
+  stopping_policy_digest,
+  external_measurement_digest,
+  proxy_score_digest,
+  uncertainty,
+  decision_closeness,
+  proxy_reliability_gap,
+  evaluator_cost_units,
+  expected_information_gain,
+  external_evaluation_owner=false,
+  authored_by_candidate=true,
+}={}){
+  if(external_evaluation_owner!==true||authored_by_candidate!==false)throw new Error('rsi_revision_bridge_external_evaluation_owner_required');
+  const verification=artifact_verification||{};
+  const receipt=verifyRsiBoundedRevisionArtifactReceipt(artifact_receipt,verification);
+  const envelope=verification.envelope;
+  if(!envelope||envelope.envelope_digest!==receipt.envelope_digest)throw new Error('rsi_revision_bridge_phase29_envelope_binding_required');
+  if(receipt.eligible_for_fresh_paired_evaluation!==true||receipt.eligible_for_promotion!==false
+    ||receipt.candidate_artifact_is_active!==false||receipt.candidate_artifact_replaces_parent!==false){
+    throw new Error('rsi_revision_bridge_phase29_artifact_not_evaluation_eligible');
+  }
+  const provenanceRoot=digest({
+    artifact_receipt_digest:receipt.artifact_receipt_digest,
+    provenance_attestation_digest:receipt.provenance_attestation_digest,
+    signature_bundle_digest:receipt.signature_bundle_digest,
+    transparency_log_entry_digest:receipt.transparency_log_entry_digest,
+    reproducibility_evidence_digest:receipt.reproducibility_evidence_digest,
+    build_provenance_digest:receipt.build_provenance_digest,
+    artifact_signature_digest:receipt.artifact_signature_digest,
+    transparency_log_inclusion_digest:receipt.transparency_log_inclusion_digest,
+    artifact_reconstruction_digest:receipt.artifact_reconstruction_digest,
+    protected_root_diff_audit_digest:receipt.protected_root_diff_audit_digest,
+    preserved_behavior_review_digest:receipt.preserved_behavior_review_digest,
+    builder_identity_digest:receipt.builder_identity_digest,
+    worker_image_digest:receipt.worker_image_digest,
+    toolchain_image_digest:receipt.toolchain_image_digest,
+    dependency_material_manifest_digest:receipt.dependency_material_manifest_digest,
+    harness_manifest_digest:receipt.harness_manifest_digest,
+    capability_manifest_digest:receipt.capability_manifest_digest,
+    workspace_id:receipt.workspace_id,
+    workspace_generation:receipt.workspace_generation,
+    lease_generation:receipt.lease_generation,
+  });
+  const seed={
+    artifact_receipt_digest:receipt.artifact_receipt_digest,
+    evaluator_root_digest:exactDigest(evaluator_root_digest,'phase29_evaluator_root'),
+    evaluator_generation_digest:exactDigest(evaluator_generation_digest,'phase29_evaluator_generation'),
+    evaluation_epoch_digest:exactDigest(evaluation_epoch_digest,'phase29_evaluation_epoch'),
+    sealed_task_set_digest:exactDigest(sealed_task_set_digest,'phase29_sealed_task_set'),
+    harness_digest:exactDigest(harness_digest,'phase29_harness'),
+    trial_worker_image_digest:exactDigest(trial_worker_image_digest,'phase29_trial_worker'),
+    resource_budget_digest:exactDigest(resource_budget_digest,'phase29_resource_budget'),
+    task_order_digest:exactDigest(task_order_digest,'phase29_task_order'),
+    threshold_policy_digest:exactDigest(threshold_policy_digest,'phase29_threshold_policy'),
+    stopping_policy_digest:exactDigest(stopping_policy_digest,'phase29_stopping_policy'),
+    provenance_root_digest:provenanceRoot,
+  };
+  const seedRoots=Object.values(seed);
+  if(new Set(seedRoots).size!==seedRoots.length)throw new Error('rsi_revision_bridge_phase29_independent_acceptance_roots_required');
+  const requestId=`phase29.eval.${hash(seed).slice(0,24)}`;
+  const request=createRsiArtifactEvaluationRoutingRequest({
+    request_id:requestId,
+    source_sha:receipt.source_sha,
+    phase28_artifact_receipt_digest:receipt.artifact_receipt_digest,
+    parent_artifact_digest:envelope.parent_candidate_artifact_digest,
+    candidate_artifact_digest:receipt.artifact_digest,
+    provenance_root_digest:provenanceRoot,
+    evaluator_root_digest:seed.evaluator_root_digest,
+    evaluator_generation_digest:seed.evaluator_generation_digest,
+    evaluation_epoch_digest:seed.evaluation_epoch_digest,
+    sealed_task_set_digest:seed.sealed_task_set_digest,
+    harness_digest:seed.harness_digest,
+    trial_worker_image_digest:seed.trial_worker_image_digest,
+    resource_budget_digest:seed.resource_budget_digest,
+    task_order_digest:seed.task_order_digest,
+    threshold_policy_digest:seed.threshold_policy_digest,
+    stopping_policy_digest:seed.stopping_policy_digest,
+    external_measurement_digest,
+    proxy_score_digest,
+    uncertainty,
+    decision_closeness,
+    proxy_reliability_gap,
+    evaluator_cost_units,
+    expected_information_gain,
+    scope_tags:['HIDDEN_HOLDOUT','MATERIALIZED_CANDIDATE','SAFETY','SECURITY'],
+    recipient_group_tags:['RSI_CANDIDATE_VALIDATION'],
+    external_measurement_owner:true,
+    authored_by_candidate:false,
+  });
+  verifyRsiArtifactEvaluationRoutingRequest(request);
+  const core={
+    schema:RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA,
+    version:1,
+    source_sha:receipt.source_sha,
+    phase28_artifact_receipt_digest:receipt.artifact_receipt_digest,
+    phase27_envelope_digest:receipt.envelope_digest,
+    phase27_proposal_digest:receipt.proposal_digest,
+    parent_artifact_digest:envelope.parent_candidate_artifact_digest,
+    candidate_artifact_digest:receipt.artifact_digest,
+    provenance_root_digest:provenanceRoot,
+    evaluator_root_digest:request.evaluator_root_digest,
+    evaluator_generation_digest:request.evaluator_generation_digest,
+    evaluation_epoch_digest:request.evaluation_epoch_digest,
+    sealed_task_set_digest:request.sealed_task_set_digest,
+    harness_digest:request.harness_digest,
+    trial_worker_image_digest:request.trial_worker_image_digest,
+    resource_budget_digest:request.resource_budget_digest,
+    task_order_digest:request.task_order_digest,
+    threshold_policy_digest:request.threshold_policy_digest,
+    stopping_policy_digest:request.stopping_policy_digest,
+    fresh_evaluation_request:request,
+    state:'READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING',
+    fresh_budget_epoch_required:true,
+    previous_budget_plan_reuse_allowed:false,
+    evaluator_generation_frozen:true,
+    acceptance_assets_frozen:true,
+    anchor_provenance_survives_evaluator_rotation:true,
+    evaluator_dependent_verdict_reuse_allowed:false,
+    existing_evaluation_budget_router_only:true,
+    existing_candidate_experiment_ledger_only:true,
+    candidate_can_choose_evaluator:false,
+    candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_sealed_tasks:false,
+    candidate_can_choose_harness:false,
+    candidate_can_choose_trial_worker:false,
+    candidate_can_choose_resource_budget:false,
+    candidate_can_choose_task_order:false,
+    candidate_can_choose_thresholds:false,
+    candidate_can_choose_stopping:false,
+    candidate_can_choose_budget:false,
+    handoff_can_schedule_evaluation:false,
+    handoff_can_execute_evaluation:false,
+    handoff_can_promote:false,
+    external_evaluation_owner:true,
+    authored_by_candidate:false,
+    second_evaluation_router_created:false,
+    second_experiment_ledger_created:false,
+    execution_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    scheduler_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  };
+  return Object.freeze({...core,evaluation_handoff_digest:digest(core)});
+}
+
+export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
+  const handoff=verifyDigestObject(
+    row,
+    RSI_MATERIALIZED_CANDIDATE_EVALUATION_HANDOFF_SCHEMA,
+    'evaluation_handoff_digest',
+    'phase29_evaluation_handoff',
+  );
+  if(handoff.state!=='READY_FOR_FRESH_EVALUATION_BUDGET_ROUTING'
+    ||handoff.fresh_budget_epoch_required!==true
+    ||handoff.previous_budget_plan_reuse_allowed!==false
+    ||handoff.evaluator_generation_frozen!==true
+    ||handoff.acceptance_assets_frozen!==true
+    ||handoff.anchor_provenance_survives_evaluator_rotation!==true
+    ||handoff.evaluator_dependent_verdict_reuse_allowed!==false
+    ||handoff.existing_evaluation_budget_router_only!==true
+    ||handoff.existing_candidate_experiment_ledger_only!==true
+    ||handoff.candidate_can_choose_evaluator!==false
+    ||handoff.candidate_can_choose_evaluator_generation!==false
+    ||handoff.candidate_can_choose_sealed_tasks!==false
+    ||handoff.candidate_can_choose_harness!==false
+    ||handoff.candidate_can_choose_trial_worker!==false
+    ||handoff.candidate_can_choose_resource_budget!==false
+    ||handoff.candidate_can_choose_task_order!==false
+    ||handoff.candidate_can_choose_thresholds!==false
+    ||handoff.candidate_can_choose_stopping!==false
+    ||handoff.candidate_can_choose_budget!==false
+    ||handoff.handoff_can_schedule_evaluation!==false
+    ||handoff.handoff_can_execute_evaluation!==false
+    ||handoff.handoff_can_promote!==false
+    ||handoff.external_evaluation_owner!==true
+    ||handoff.authored_by_candidate!==false
+    ||handoff.second_evaluation_router_created!==false
+    ||handoff.second_experiment_ledger_created!==false)throw new Error('rsi_revision_bridge_phase29_handoff_policy_invalid');
+  const canonical=createRsiMaterializedCandidateEvaluationHandoff({
+    ...args,
+    evaluator_root_digest:handoff.evaluator_root_digest,
+    evaluator_generation_digest:handoff.evaluator_generation_digest,
+    evaluation_epoch_digest:handoff.evaluation_epoch_digest,
+    sealed_task_set_digest:handoff.sealed_task_set_digest,
+    harness_digest:handoff.harness_digest,
+    trial_worker_image_digest:handoff.trial_worker_image_digest,
+    resource_budget_digest:handoff.resource_budget_digest,
+    task_order_digest:handoff.task_order_digest,
+    threshold_policy_digest:handoff.threshold_policy_digest,
+    stopping_policy_digest:handoff.stopping_policy_digest,
+    external_measurement_digest:handoff.fresh_evaluation_request.external_measurement_digest,
+    proxy_score_digest:handoff.fresh_evaluation_request.proxy_score_digest,
+    uncertainty:handoff.fresh_evaluation_request.uncertainty,
+    decision_closeness:handoff.fresh_evaluation_request.decision_closeness,
+    proxy_reliability_gap:handoff.fresh_evaluation_request.proxy_reliability_gap,
+    evaluator_cost_units:handoff.fresh_evaluation_request.evaluator_cost_units,
+    expected_information_gain:handoff.fresh_evaluation_request.expected_information_gain,
+    external_evaluation_owner:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.evaluation_handoff_digest!==handoff.evaluation_handoff_digest)throw new Error('rsi_revision_bridge_phase29_handoff_mismatch');
   return canonical;
 }
