@@ -1901,3 +1901,210 @@ test('Phase32 trust root reuses existing consumer planes and keeps all effects e
   assert.equal(root.authority_effect,false);
   assert.match(root.validated_knowledge_consumer_handoff_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
+
+
+function phase33CurrentLibrary(label='phase33'){
+  const capsule=createRsiSkillCapsule({
+    skill_id:`phase33.baseline.${label}`,
+    version:1,
+    source_candidate_sha:SOURCE,
+    role:'ANALYZER',
+    input_schema_digest:labelDigest(`${label}-baseline-input`),
+    output_schema_digest:labelDigest(`${label}-baseline-output`),
+    implementation_digest:labelDigest(`${label}-baseline-impl`),
+    components:[{component_id:'core',artifact_digest:labelDigest(`${label}-baseline-component`),kind:'MODULE'}],
+    capabilities:['READ_VERIFIED_CONTEXT'],
+    max_context_tokens:4096,
+    max_output_tokens:1024,
+    max_invocations:4,
+    external_builder:true,
+    authored_by_candidate:false,
+  });
+  const evidence=createRsiSkillEvidence({
+    capsule,
+    hidden_holdout_digest:labelDigest(`${label}-baseline-holdout`),
+    evaluator_root_digest:labelDigest(`${label}-baseline-evaluator`),
+    unit_test_digest:labelDigest(`${label}-baseline-unit`),
+    runtime_feedback_digest:labelDigest(`${label}-baseline-runtime`),
+    attempt_count:4,
+    success_count:4,
+    hard_invariants_pass:true,
+    verified_for_library:true,
+    evidence_refs:[`phase33.baseline.${label}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+  return createRsiVerifiedSkillLibrary({
+    library_id:`phase33.library.${label}`,
+    entries:[{capsule,evidence}],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+}
+
+function phase33Bundle(label='phase33',{state='SUPPORTED_FOR_BOUNDED_REVISION',receiptOverrides={},consumerSnapshotDigest=null}={}){
+  const fx=phase32Fixture(label,{state});
+  const receipt=phase32Receipt(fx,label,receiptOverrides);
+  const bundle=createRsiExistingConsumerOwnerReviewBundle({
+    bundle_id:`phase33.owner.bundle.${label}`,
+    ...fx,
+    receipt,
+    current_consumer_snapshot_digest:consumerSnapshotDigest||labelDigest(`${label}-consumer-snapshot`),
+    consumer_owner_policy_digest:labelDigest(`${label}-owner-policy`),
+    consumer_owner_identity_digest:labelDigest(`${label}-owner-identity`),
+    external_consumer_owner:true,
+    authored_by_candidate:false,
+  });
+  return {...fx,receipt,bundle};
+}
+
+test('Phase33 binds consumer-revalidated recipes to existing skill owner review without appending library',()=>{
+  const fx=phase33Bundle('recipe-owner');
+  assert.equal(fx.receipt.state,'CONSUMER_REVALIDATED_RECIPE');
+  assert.equal(fx.bundle.review_route,'EXISTING_VERIFIED_SKILL_OWNER_REVIEW');
+  assert.equal(fx.bundle.state,'ELIGIBLE_FOR_EXISTING_CONSUMER_OWNER_REVIEW');
+  assert.equal(fx.bundle.eligible_for_existing_consumer_owner_review,true);
+  assert.equal(fx.bundle.active_skill_library_write_performed,false);
+  assert.equal(fx.bundle.experience_graph_write_performed,false);
+  assert.equal(fx.bundle.adaptive_retrieval_state_write_performed,false);
+  assert.equal(fx.bundle.meta_skill_profile_write_performed,false);
+  assert.equal(fx.bundle.owner_review_token,null);
+  assert.equal(verifyRsiExistingConsumerOwnerReviewBundle(fx.bundle,fx).bundle_digest,fx.bundle.bundle_digest);
+});
+
+test('Phase33 keeps counterevidence and diagnostics in their existing consumer owner lanes',()=>{
+  const negative=phase33Bundle('counter-owner',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.equal(negative.receipt.state,'CONSUMER_REVALIDATED_COUNTEREVIDENCE');
+  assert.equal(negative.bundle.review_route,'EXISTING_EXPERIENCE_COUNTEREVIDENCE_OWNER_REVIEW');
+  assert.equal(negative.bundle.eligible_for_existing_consumer_owner_review,true);
+
+  const diagnostic=phase33Bundle('diag-owner',{state:'INCONCLUSIVE_ENVIRONMENT'});
+  assert.equal(diagnostic.receipt.state,'CONSUMER_REVALIDATED_DIAGNOSTIC');
+  assert.equal(diagnostic.bundle.review_route,'EXISTING_ADAPTIVE_RETRIEVAL_OWNER_REVIEW');
+  assert.equal(diagnostic.bundle.eligible_for_existing_consumer_owner_review,true);
+});
+
+test('Phase33 consumer negative transfer is a durable veto, never an implicit skill admission',()=>{
+  const fx=phase33Bundle('negative-transfer-owner',{receiptOverrides:{safety_non_regression:false}});
+  assert.equal(fx.receipt.state,'CONSUMER_NEGATIVE_TRANSFER');
+  assert.equal(fx.bundle.review_route,'NEGATIVE_TRANSFER_COUNTEREVIDENCE_ONLY');
+  assert.equal(fx.bundle.negative_transfer_veto,true);
+  assert.equal(fx.bundle.eligible_for_existing_consumer_owner_review,false);
+  assert.equal(fx.bundle.state,'PRESERVED_NON_ADMISSIBLE_EVIDENCE');
+  assert.equal(fx.bundle.direct_activation_allowed,false);
+});
+
+test('Phase33 recipe path emits existing skill evidence with exact Phase32 holdout/evaluator roots but no library append',()=>{
+  const library=phase33CurrentLibrary('skill-owner');
+  const fx=phase33Bundle('skill-owner',{consumerSnapshotDigest:library.library_digest});
+  const skill=createRsiSkillCapsule({
+    skill_id:'phase33.proposed.skill-owner',
+    version:1,
+    source_candidate_sha:SOURCE,
+    role:'PROPOSER',
+    input_schema_digest:labelDigest('phase33-skill-owner-input'),
+    output_schema_digest:labelDigest('phase33-skill-owner-output'),
+    implementation_digest:labelDigest('phase33-skill-owner-impl'),
+    components:[{component_id:'core',artifact_digest:labelDigest('phase33-skill-owner-component'),kind:'MODULE'}],
+    capabilities:['PROPOSE_TYPED_TRANSFORM'],
+    max_context_tokens:4096,
+    max_output_tokens:1024,
+    max_invocations:4,
+    external_builder:true,
+    authored_by_candidate:false,
+  });
+  const review=createRsiExistingSkillOwnerEvidenceReview({
+    review_id:'phase33.skill.review.skill-owner',
+    ...fx,
+    current_library:library,
+    skill_capsule:skill,
+    knowledge_to_skill_binding_digest:labelDigest('phase33-skill-owner-binding'),
+    external_materialization_receipt_digest:labelDigest('phase33-skill-owner-materialization'),
+    interface_review_digest:labelDigest('phase33-skill-owner-interface'),
+    capability_review_digest:labelDigest('phase33-skill-owner-capability'),
+    unit_test_digest:labelDigest('phase33-skill-owner-unit'),
+    runtime_feedback_digest:labelDigest('phase33-skill-owner-runtime'),
+    attempt_count:5,
+    success_count:5,
+    hard_invariants_pass:true,
+    matched_reference_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    negative_transfer_clear:true,
+    external_skill_builder:true,
+    external_library_evaluator:true,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(review.state,'ELIGIBLE_FOR_EXISTING_VERIFIED_SKILL_LIBRARY_OWNER_REVIEW');
+  assert.equal(review.skill_evidence.hidden_holdout_digest,fx.handoff.consumer_holdout_digest);
+  assert.equal(review.skill_evidence.evaluator_root_digest,fx.handoff.consumer_evaluator_root_digest);
+  assert.equal(review.skill_evidence.verified_for_library,true);
+  assert.equal(review.library_append_performed,false);
+  assert.equal(review.skill_activation_performed,false);
+  assert.equal(review.library_admission_token,null);
+  assert.equal(verifyRsiExistingSkillOwnerEvidenceReview(review,{
+    ...fx,current_library:library,skill_capsule:skill,
+  }).review_digest,review.review_digest);
+
+  assert.throws(()=>createRsiExistingSkillOwnerEvidenceReview({
+    review_id:'phase33.skill.review.drift',
+    ...fx,
+    bundle:{...fx.bundle,current_consumer_snapshot_digest:labelDigest('phase33-drift')},
+    current_library:library,
+    skill_capsule:skill,
+    knowledge_to_skill_binding_digest:labelDigest('phase33-drift-binding'),
+    external_materialization_receipt_digest:labelDigest('phase33-drift-materialization'),
+    interface_review_digest:labelDigest('phase33-drift-interface'),
+    capability_review_digest:labelDigest('phase33-drift-capability'),
+    unit_test_digest:labelDigest('phase33-drift-unit'),
+    runtime_feedback_digest:labelDigest('phase33-drift-runtime'),
+    attempt_count:1,success_count:1,hard_invariants_pass:true,matched_reference_pass:true,
+    contamination_clear:true,from_scratch_replay_pass:true,negative_transfer_clear:true,
+    external_skill_builder:true,external_library_evaluator:true,external_library_owner:true,authored_by_candidate:false,
+  }),/bundle_digest_mismatch|library_snapshot_drift/);
+});
+
+test('Phase33 owner-review archive is durable-before-visible and revalidates Phase32 evidence on restart',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase33-owner-review-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'owner-review.json');
+  const fx=phase33Bundle('archive-owner');
+  const resolver=async()=>({
+    handoff:fx.handoff,receipt:fx.receipt,proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+  });
+  const archive=new RsiExistingConsumerOwnerReviewArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({bundle:fx.bundle,phase32_evidence:fx}));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+  assert.equal((await archive.add({bundle:fx.bundle,phase32_evidence:fx})).state,'ELIGIBLE_FOR_EXISTING_CONSUMER_OWNER_REVIEW');
+  assert.equal(archive.snapshot().archive_can_write_skill_library,false);
+  assert.equal(archive.snapshot().archive_can_write_experience_graph,false);
+  assert.equal(archive.snapshot().archive_can_write_retrieval_state,false);
+  const restored=new RsiExistingConsumerOwnerReviewArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+  assert.equal((await restored.add({bundle:fx.bundle,phase32_evidence:fx})).state,'IDEMPOTENT');
+});
+
+test('Phase33 trust root reuses existing consumers and keeps owner effects external',()=>{
+  const root=rsiExistingConsumerOwnerReviewTrustRootSnapshot();
+  assert.equal(root.phase32_consumer_local_revalidation_required,true);
+  assert.equal(root.phase32_negative_transfer_is_veto,true);
+  assert.equal(root.existing_verified_skill_library_schema_reused,true);
+  assert.equal(root.second_skill_representation_forbidden,true);
+  assert.equal(root.counterevidence_remains_counterevidence,true);
+  assert.equal(root.diagnostics_remain_diagnostic_only,true);
+  assert.equal(root.current_consumer_snapshot_exact_binding_required,true);
+  assert.equal(root.skill_holdout_must_equal_phase32_consumer_holdout,true);
+  assert.equal(root.skill_evaluator_root_must_equal_phase32_consumer_evaluator_root,true);
+  assert.equal(root.active_skill_library_write_performed_here,false);
+  assert.equal(root.experience_graph_write_performed_here,false);
+  assert.equal(root.adaptive_retrieval_write_performed_here,false);
+  assert.equal(root.meta_skill_profile_write_performed_here,false);
+  assert.equal(root.direct_activation_performed_here,false);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.existing_consumer_owner_review_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
