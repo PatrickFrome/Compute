@@ -20,6 +20,14 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stable(value){
+  if(Array.isArray(value))return value.map(stable);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stable(value[key])]));
+}
+function structuralDigest(value){
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
+}
 
 function experience(label,{cost=8,info=0.8}={}){
   const hypothesis=createRsiSharedExperienceHypothesis({
@@ -202,6 +210,116 @@ test('append-only budget ledger persists exact cost accounting and cannot execut
   await restored.init();
   assert.equal(restored.snapshot().row_count,1);
   assert.equal((await restored.add(plan)).state,'IDEMPOTENT');
+});
+
+
+test('budget plan rejects self-rehashed request policy and priority tampering',()=>{
+  const fx=request('request-policy-tamper');
+  const policyCore={...fx.row,candidate_can_set_priority:true};
+  delete policyCore.request_digest;
+  const policyTampered={...policyCore,request_digest:structuralDigest(policyCore)};
+  assert.throws(()=>createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.request-policy-tamper',
+    source_sha:SOURCE,
+    requests:[policyTampered],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  }),/stored_request_policy_invalid/);
+
+  const priorityCore={...fx.row,routing_priority_score:fx.row.routing_priority_score*100};
+  delete priorityCore.request_digest;
+  const priorityTampered={...priorityCore,request_digest:structuralDigest(priorityCore)};
+  assert.throws(()=>createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.request-priority-tamper',
+    source_sha:SOURCE,
+    requests:[priorityTampered],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  }),/stored_request_priority_mismatch/);
+});
+
+test('ledger rejects self-rehashed plan budget-accounting or policy downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-eval-router-plan-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiEvaluationBudgetLedger({statePath:path.join(dir,'ledger.json'),source_sha:SOURCE});
+  await ledger.init();
+  const row=request('plan-tamper',{cost:8}).row;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.tamper',
+    source_sha:SOURCE,
+    requests:[row],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+
+  const accountingCore={...plan,used_budget_units:0,remaining_budget_units:8};
+  delete accountingCore.plan_digest;
+  const accountingTampered={...accountingCore,plan_digest:structuralDigest(accountingCore)};
+  await assert.rejects(()=>ledger.add(accountingTampered),/stored_budget_accounting_invalid|stored_routing_order_mismatch/);
+
+  const policyCore={...plan,plan_can_execute_evaluation:true};
+  delete policyCore.plan_digest;
+  const policyTampered={...policyCore,plan_digest:structuralDigest(policyCore)};
+  await assert.rejects(()=>ledger.add(policyTampered),/stored_plan_policy_invalid/);
+  assert.equal(ledger.snapshot().row_count,0);
+});
+
+test('failed durable budget-ledger write does not create phantom spend',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-eval-router-persist-fail-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const row=request('persist-fail',{cost:8}).row;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.persist-fail',
+    source_sha:SOURCE,
+    requests:[row],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>ledger.add(plan));
+  const snap=ledger.snapshot();
+  assert.equal(snap.row_count,0);
+  assert.equal(snap.total_budget_units,0);
+  assert.equal(snap.total_used_budget_units,0);
+  assert.equal(snap.total_remaining_budget_units,0);
+});
+
+test('restart rejects self-rehashed persisted plan policy downgrade',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-eval-router-restart-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const row=request('restart-tamper',{cost:8}).row;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:'eval.plan.restart-tamper',
+    source_sha:SOURCE,
+    requests:[row],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  await ledger.add(plan);
+
+  const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const planCore={...persisted.rows[0].plan,candidate_can_override_budget:true};
+  delete planCore.plan_digest;
+  persisted.rows[0].plan={...planCore,plan_digest:structuralDigest(planCore)};
+  const stateCore={...persisted};
+  delete stateCore.state_digest;
+  persisted.state_digest=structuralDigest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(persisted)}\n`,'utf8');
+
+  const restored=new RsiEvaluationBudgetLedger({statePath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/stored_plan_policy_invalid/);
 });
 
 test('evaluation budget router trust root keeps routing advisory and bounded',()=>{
