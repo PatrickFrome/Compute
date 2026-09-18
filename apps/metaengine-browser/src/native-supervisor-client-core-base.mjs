@@ -210,6 +210,7 @@ function delay(ms) {
 export class NativeSupervisorClient extends BaseNativeSupervisorClient {
   #devosTaskCycle;
   #lastDevosError = null;
+  #lastDevosFailure = null;
   #identityRef;
   #boundedFetch;
   #getStateRef;
@@ -477,7 +478,15 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         await this.#devosTaskCycle.runOnce();
         this.#lastDevosError = null;
       } catch (error) {
-        this.#lastDevosError = clipError(error);
+        const reason = clipError(error);
+        this.#lastDevosError = reason;
+        this.#lastDevosFailure = Object.freeze({
+          at: new Date().toISOString(),
+          reason,
+          task_cycle: this.#devosTaskCycle?.snapshot?.() || null,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        });
       }
       supervisor = super.snapshot();
     })()
@@ -518,6 +527,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       worker_observer_second_polling_loop: false,
       devos_task_cycle: this.#devosTaskCycle?.snapshot() || null,
       devos_last_error: this.#lastDevosError,
+      devos_last_failure: this.#lastDevosFailure ? structuredClone(this.#lastDevosFailure) : null,
       devos_scheduler_source: 'NATIVE_SUPERVISOR_IDLE_FAST_LANE',
       devos_second_polling_loop: false,
       devos_execution_mode: 'BOUNDED_RUN_ONCE',
