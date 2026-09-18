@@ -61,7 +61,6 @@ function handoff(){
     parent_sha:PARENT,
     candidate_sha:CANDIDATE,
     target_branch:'work/rsi/external-eval-aaaaaaaa-01234567',
-    handoff_digest:HANDOFF_DIGEST,
     candidate_capsule:{
       candidate_id:CANDIDATE_ID,
       source:{head:CANDIDATE},
