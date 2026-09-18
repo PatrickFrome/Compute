@@ -645,11 +645,11 @@ export function createRsiSkillCompositionPlan({
   const requestedOutput = positiveInt(max_total_output_tokens, 'composition_max_output_tokens', MAX_OUTPUT_TOKENS);
   const declaredContext = checkedNodes.reduce((sum,node)=>{
     const entry=checkedLibrary.entries.find((x)=>x.skill_digest===node.skill_digest);
-    return sum + Math.min(entry.max_context_tokens,node.max_invocations*entry.max_context_tokens);
+    return sum + node.max_invocations * entry.max_context_tokens;
   },0);
   const declaredOutput = checkedNodes.reduce((sum,node)=>{
     const entry=checkedLibrary.entries.find((x)=>x.skill_digest===node.skill_digest);
-    return sum + Math.min(entry.max_output_tokens,node.max_invocations*entry.max_output_tokens);
+    return sum + node.max_invocations * entry.max_output_tokens;
   },0);
   if (declaredContext > requestedContext) throw new Error('rsi_skill_composition_context_budget_exceeded');
   if (declaredOutput > requestedOutput) throw new Error('rsi_skill_composition_output_budget_exceeded');
