@@ -67,7 +67,7 @@ test('generic Browser command attribution cannot manufacture candidate or skill 
 
 test('Browser outcome bridge does not give RSI a Browser effect executor', () => {
   const start = main.indexOf('onRsiOutcomeReadback: async');
-  const end = main.indexOf('workerObservationBudget:', start);
+  const end = main.indexOf('if (nativeSupervisor.snapshot()?.running !== true)', start);
   assert.ok(start >= 0 && end > start, 'Browser RSI sidecar wiring missing');
   const bridge = main.slice(start, end);
   assert.doesNotMatch(bridge, /executeNativeSupervisorCommand|executeSemanticCommand|handleCommand\(/);
