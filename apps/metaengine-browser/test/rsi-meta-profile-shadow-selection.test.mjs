@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { RSI_META_PROFILE_QUALIFICATION_SCHEMA } from '../src/rsi-meta-profile-qualification.mjs';
+import { rsiPromotionGateTrustRootSnapshot } from '../src/rsi-promotion-admission-gate.mjs';
+import { rsiTournamentTrustRootSnapshot } from '../src/rsi-shadow-tournament.mjs';
 import {
   RsiMetaProfileShadowSelectionLedger,
   createRsiMetaProfileShadowSelection,
@@ -232,4 +234,14 @@ test('trust root freezes quality-diversity selection as advisory-only', () => {
   assert.equal(root.live_profile_activation_authorized, false);
   assert.equal(root.authority_effect, false);
   assert.match(root.selection_root_digest, /^sha256:[0-9a-f]{64}$/);
+
+  for (const trustRoot of [rsiPromotionGateTrustRootSnapshot(), rsiTournamentTrustRootSnapshot()]) {
+    for (const path of [
+      'apps/metaengine-browser/src/rsi-runtime-meta-skill-archive.mjs',
+      'apps/metaengine-browser/src/rsi-meta-profile-qualification.mjs',
+      'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
+    ]) {
+      assert.equal(trustRoot.immutable_component_paths.includes(path), true, path);
+    }
+  }
 });
