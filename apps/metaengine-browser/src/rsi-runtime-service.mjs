@@ -57,6 +57,7 @@ import { createRsiReleaseEffectReconciliation, verifyRsiReleaseEffectReconciliat
 import { createRsiReleaseAuthorityConvergence, verifyRsiReleaseAuthorityConvergence, rsiReleaseAuthorityConvergenceTrustRootSnapshot } from './rsi-release-authority-convergence.mjs';
 import { createRsiPostDeploymentLearningReceipt, createRsiPostDeploymentExperienceAdmission, verifyRsiPostDeploymentExperienceAdmission, applyRsiPostDeploymentExperienceAdmission, rsiPostDeploymentLearningTrustRootSnapshot } from './rsi-post-deployment-learning.mjs';
 import { createRsiPostDeploymentUtilityAdmission, verifyRsiPostDeploymentUtilityAdmission, applyRsiPostDeploymentUtilityAdmission, rsiPostDeploymentUtilityTrustRootSnapshot } from './rsi-post-deployment-utility.mjs';
+import { createRsiPostDeploymentCorrectionAdmission, verifyRsiPostDeploymentCorrectionAdmission, applyRsiPostDeploymentCorrectionAdmission, rsiPostDeploymentCorrectionTrustRootSnapshot } from './rsi-post-deployment-correction.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -138,6 +139,7 @@ function trustRoots() {
     release_authority_convergence: rsiReleaseAuthorityConvergenceTrustRootSnapshot(),
     post_deployment_learning: rsiPostDeploymentLearningTrustRootSnapshot(),
     post_deployment_utility: rsiPostDeploymentUtilityTrustRootSnapshot(),
+    post_deployment_correction: rsiPostDeploymentCorrectionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -209,6 +211,9 @@ export class RsiRuntimeService {
   #lastPostDeploymentUtilityAdmissionDigest = null;
   #lastPostDeploymentUtilityReceiptDigest = null;
   #lastPostDeploymentUtilityOutcome = null;
+  #postDeploymentCorrectionCount = 0;
+  #lastPostDeploymentCorrectionAdmissionDigest = null;
+  #lastPostDeploymentCorrectionEdgeDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -663,6 +668,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const admission = row?.payload?.post_deployment_learning_admission;
         if (admission?.admission_digest === wanted) found = Object.freeze(structuredClone(admission));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findPostDeploymentUtilityByAdmissionDigest(admissionDigest) {
+    const wanted = String(admissionDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const admission = row?.payload?.post_deployment_utility_admission;
+        if (admission?.admission_digest === wanted) found = Object.freeze(structuredClone(admission));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findPostDeploymentCorrectionByPairDigest(pairDigest) {
+    const wanted = String(pairDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const admission = row?.payload?.post_deployment_correction_admission;
+        if (admission?.pair_digest === wanted) found = Object.freeze(structuredClone(admission));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -1486,6 +1525,62 @@ export class RsiRuntimeService {
     return utilityAdmission;
   }
 
+  async recordPostDeploymentCorrection({
+    post_deployment_learning_admission_digest,
+    harmful_utility_admission_digest,
+    helpful_utility_admission_digest,
+  } = {}) {
+    this.#assertRunning();
+    const learningDigest = String(post_deployment_learning_admission_digest || '').trim().toLowerCase();
+    const harmfulDigest = String(harmful_utility_admission_digest || '').trim().toLowerCase();
+    const helpfulDigest = String(helpful_utility_admission_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(learningDigest)) throw new Error('rsi_runtime_post_deployment_learning_admission_digest_invalid');
+    if (!SHA256_PREFIXED.test(harmfulDigest) || !SHA256_PREFIXED.test(helpfulDigest)) {
+      throw new Error('rsi_runtime_post_deployment_utility_admission_digest_invalid');
+    }
+    if (harmfulDigest === helpfulDigest) throw new Error('rsi_runtime_post_deployment_correction_distinct_utility_required');
+    const learningAdmission = this.#findPostDeploymentLearningAdmissionByDigest(learningDigest);
+    const harmfulUtility = this.#findPostDeploymentUtilityByAdmissionDigest(harmfulDigest);
+    const helpfulUtility = this.#findPostDeploymentUtilityByAdmissionDigest(helpfulDigest);
+    if (!learningAdmission) throw new Error('rsi_runtime_post_deployment_learning_admission_not_persisted');
+    if (!harmfulUtility || !helpfulUtility) throw new Error('rsi_runtime_post_deployment_utility_admission_not_persisted');
+    verifyRsiPostDeploymentExperienceAdmission(learningAdmission);
+    verifyRsiPostDeploymentUtilityAdmission(harmfulUtility);
+    verifyRsiPostDeploymentUtilityAdmission(helpfulUtility);
+    const correctionAdmission = createRsiPostDeploymentCorrectionAdmission({
+      post_deployment_learning_admission: learningAdmission,
+      harmful_utility_admission: harmfulUtility,
+      helpful_utility_admission: helpfulUtility,
+    });
+    verifyRsiPostDeploymentCorrectionAdmission(correctionAdmission);
+    if (this.#findPostDeploymentCorrectionByPairDigest(correctionAdmission.pair_digest)) {
+      throw new Error('rsi_runtime_post_deployment_correction_already_recorded');
+    }
+    const nextGraph = applyRsiPostDeploymentCorrectionAdmission({
+      previous_snapshot: this.#experienceGraphSnapshot,
+      admission: correctionAdmission,
+    });
+    await this.#ledger.append('RSI_POST_DEPLOYMENT_CORRECTION_RECORDED', {
+      post_deployment_correction_admission: correctionAdmission,
+      post_deployment_learning_admission_digest: learningDigest,
+      harmful_utility_admission_digest: harmfulDigest,
+      helpful_utility_admission_digest: helpfulDigest,
+      original_deployment_case_preserved: true,
+      correction_edge_is_retrieval_signal_only: true,
+      candidate_can_self_certify_recovery: false,
+      rollback_triggered: false,
+      self_update_triggered: false,
+      promotion_triggered: false,
+      graph_applied_after_durable_append: true,
+      authority_effect: false,
+    });
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#postDeploymentCorrectionCount += 1;
+    this.#lastPostDeploymentCorrectionAdmissionDigest = correctionAdmission.admission_digest;
+    this.#lastPostDeploymentCorrectionEdgeDigest = correctionAdmission.correction_edge.evidence_digest;
+    return correctionAdmission;
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1783,6 +1878,24 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      post_deployment_correction: Object.freeze({
+        count: this.#postDeploymentCorrectionCount,
+        last_admission_digest: this.#lastPostDeploymentCorrectionAdmissionDigest,
+        last_correction_edge_digest: this.#lastPostDeploymentCorrectionEdgeDigest,
+        harmful_then_helpful_temporal_order_required: true,
+        original_deployment_case_preserved: true,
+        derived_failure_success_trace_only: true,
+        correction_edge_is_retrieval_signal_only: true,
+        candidate_can_self_certify_recovery: false,
+        rollback_triggered_by_rsi: false,
+        self_update_triggered_by_rsi: false,
+        promotion_triggered_by_rsi: false,
+        execution_authority: false,
+        release_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       post_deployment_utility: Object.freeze({
         count: this.#postDeploymentUtilityCount,
         last_admission_digest: this.#lastPostDeploymentUtilityAdmissionDigest,
