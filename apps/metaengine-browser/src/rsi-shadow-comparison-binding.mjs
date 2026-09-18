@@ -88,6 +88,8 @@ export function createRsiShadowComparisonBinding({
     comparison_can_authorize_canary:false,
     external_canary_gate_still_required:true,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
@@ -110,6 +112,7 @@ export function verifyRsiShadowComparisonBinding(binding,{selection,qualificatio
     ||binding.baseline_execution_path_unchanged!==true||binding.comparison_can_change_execution!==false
     ||binding.comparison_can_activate_profile!==false||binding.comparison_can_authorize_canary!==false
     ||binding.external_canary_gate_still_required!==true)throw new Error('rsi_shadow_comparison_binding_policy_invalid');
+  verifyDigestObject(binding,'binding_digest','binding');
   const canonical=createRsiShadowComparisonBinding({
     selection,qualification,
     context_digest:binding.verified_context_digest,
@@ -146,6 +149,8 @@ export function rsiShadowComparisonBindingTrustRootSnapshot(){
     existing_runtime_ledger_is_only_comparison_receipt_plane:true,
     second_shadow_binding_ledger_allowed:false,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
