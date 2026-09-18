@@ -205,6 +205,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-slow-knowledge-consolidation.mjs',
     'apps/metaengine-browser/src/rsi-exact-existing-consumer-owner-review.mjs',
     'apps/metaengine-browser/src/rsi-anytime-library-admission.mjs',
+    'apps/metaengine-browser/src/rsi-skill-exposure-release.mjs',
     'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
     'apps/metaengine-browser/src/rsi-runtime-service.mjs',
     'apps/metaengine-browser/src/rsi-consolidated-knowledge-skill-review.mjs',
