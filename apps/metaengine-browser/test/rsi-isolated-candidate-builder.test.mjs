@@ -212,6 +212,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-release-effect-reconciliation.mjs',
     'apps/metaengine-browser/src/rsi-release-authority-convergence.mjs',
     'apps/metaengine-browser/src/rsi-post-deployment-learning.mjs',
+    'apps/metaengine-browser/src/rsi-post-deployment-utility.mjs',
     'apps/metaengine-browser/supabase/rsi-shadow-archive-v1.sql',
   ]) {
     assert.throws(() => goodBuildPlan({ mutations: [{ path, change: 'MODIFY' }] }), /mutation_|immutable_/);

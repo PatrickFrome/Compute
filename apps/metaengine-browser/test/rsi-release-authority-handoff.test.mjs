@@ -57,6 +57,12 @@ import {
   applyRsiPostDeploymentExperienceAdmission,
   rsiPostDeploymentLearningTrustRootSnapshot,
 } from '../src/rsi-post-deployment-learning.mjs';
+import {
+  createRsiPostDeploymentUtilityAdmission,
+  verifyRsiPostDeploymentUtilityAdmission,
+  applyRsiPostDeploymentUtilityAdmission,
+  rsiPostDeploymentUtilityTrustRootSnapshot,
+} from '../src/rsi-post-deployment-utility.mjs';
 
 const PARENT='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -1046,5 +1052,153 @@ test('post-deployment learning trust root preserves external contextual feedback
   assert.equal(root.append_only_existing_experience_graph_only,true);
   assert.equal(root.direct_candidate_score_mutation,false);
   assert.equal(root.post_deployment_learning_is_release_authority,false);
+  assert.equal(root.effect_reexecution_authorized,false);
+});
+
+
+function postDeploymentLearningFixture(){
+  const {request,review,releaseHandoff,reconciliation,convergence}=convergedReleaseFixture();
+  const learningReceipt=createRsiPostDeploymentLearningReceipt({
+    source_sha:CANDIDATE,
+    release_authority_convergence:convergence,
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    assessment:learningAssessment(),
+  });
+  const learningAdmission=createRsiPostDeploymentExperienceAdmission({
+    learning_receipt:learningReceipt,
+    release_handoff:releaseHandoff,
+  });
+  const graph=applyRsiPostDeploymentExperienceAdmission({admission:learningAdmission});
+  return {request,review,releaseHandoff,reconciliation,convergence,learningReceipt,learningAdmission,graph};
+}
+
+function delayedUtilityAssessment(overrides={}){
+  return {
+    assessment_id:'delayed-utility-0123456789abcdef',
+    evaluator_id:'external-stability-evaluator-v1',
+    observed_at:'2026-09-18T18:20:10.000Z',
+    window_started_at:'2026-09-18T18:15:00.000Z',
+    window_ended_at:'2026-09-18T18:20:00.000Z',
+    outcome:'HELPFUL',
+    evidence_digest:d('3'),
+    evidence_refs:['native:stability:window-1','github:post-deploy:verification-1'],
+    external_evaluator:true,
+    authored_by_candidate:false,
+    candidate_can_rate_self:false,
+    ...overrides,
+  };
+}
+
+test('delayed external utility appends to the existing deployed case without replacing it',()=>{
+  const {learningAdmission,graph}=postDeploymentLearningFixture();
+  const utility=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment(),
+  });
+  verifyRsiPostDeploymentUtilityAdmission(utility);
+  assert.equal(utility.case_id,learningAdmission.experience_case.case_id);
+  assert.equal(utility.case_digest,learningAdmission.experience_case.case_digest);
+  assert.equal(utility.outcome,'HELPFUL');
+  assert.equal(utility.utility_receipt.outcome,'HELPFUL');
+  assert.equal(utility.utility_is_contextual_not_global_truth,true);
+  assert.equal(utility.candidate_can_rate_self,false);
+  assert.equal(utility.scalar_reward,null);
+  assert.equal(utility.global_candidate_score_delta,null);
+  assert.equal(utility.utility_can_trigger_rollback,false);
+  assert.equal(utility.utility_can_trigger_self_update,false);
+  assert.equal(utility.utility_can_trigger_promotion,false);
+
+  const next=applyRsiPostDeploymentUtilityAdmission({previous_snapshot:graph,admission:utility});
+  assert.equal(next.case_count,graph.case_count);
+  assert.equal(next.utility_receipt_count,1);
+  assert.equal(next.cases[0].case_digest,graph.cases[0].case_digest);
+  assert.equal(next.utility_receipts[0].case_id,learningAdmission.experience_case.case_id);
+});
+
+test('harmful delayed utility remains queryable but cannot trigger rollback or self-update',()=>{
+  const {learningAdmission,graph}=postDeploymentLearningFixture();
+  const harmful=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'delayed-utility-harmful-01234567',
+      outcome:'HARMFUL',
+      evidence_digest:d('4'),
+      evidence_refs:['native:regression:window-1'],
+    }),
+  });
+  const next=applyRsiPostDeploymentUtilityAdmission({previous_snapshot:graph,admission:harmful});
+  assert.equal(harmful.outcome,'HARMFUL');
+  assert.equal(harmful.harmful_utility_remains_queryable,true);
+  assert.equal(harmful.utility_can_trigger_rollback,false);
+  assert.equal(harmful.utility_can_trigger_self_update,false);
+  assert.equal(harmful.utility_can_trigger_promotion,false);
+  assert.equal(harmful.release_authority,false);
+  assert.equal(next.utility_receipts[0].outcome,'HARMFUL');
+});
+
+test('utility rejects immediate windows, candidate self-rating and prior-case replacement',()=>{
+  const {learningAdmission,graph}=postDeploymentLearningFixture();
+  assert.throws(()=>createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment({
+      window_started_at:'2026-09-18T18:14:21.000Z',
+      window_ended_at:'2026-09-18T18:14:30.000Z',
+      observed_at:'2026-09-18T18:14:31.000Z',
+    }),
+  }),/window_invalid/);
+  assert.throws(()=>createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment({authored_by_candidate:true}),
+  }),/external_evaluator_required/);
+
+  const utility=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment(),
+  });
+  const next=applyRsiPostDeploymentUtilityAdmission({previous_snapshot:graph,admission:utility});
+  assert.throws(()=>applyRsiPostDeploymentUtilityAdmission({previous_snapshot:next,admission:utility}),/duplicate/);
+});
+
+test('utility target context is exact to delayed window and external evaluator',()=>{
+  const {learningAdmission}=postDeploymentLearningFixture();
+  const a=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment(),
+  });
+  const b=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'delayed-utility-window2-01234567',
+      evaluator_id:'external-stability-evaluator-v2',
+      window_started_at:'2026-09-18T18:21:00.000Z',
+      window_ended_at:'2026-09-18T18:26:00.000Z',
+      observed_at:'2026-09-18T18:26:10.000Z',
+      evidence_digest:d('5'),
+      evidence_refs:['native:stability:window-2'],
+    }),
+  });
+  assert.notEqual(a.target_context_digest,b.target_context_digest);
+  assert.notEqual(a.utility_receipt.receipt_id,b.utility_receipt.receipt_id);
+});
+
+test('post-deployment utility trust root encodes delayed contextual anti-self-reward semantics',()=>{
+  const root=rsiPostDeploymentUtilityTrustRootSnapshot();
+  assert.equal(root.persisted_post_deployment_case_required,true);
+  assert.equal(root.delayed_external_observation_required,true);
+  assert.equal(root.minimum_observation_window_ms,60000);
+  assert.equal(root.external_evaluator_required,true);
+  assert.equal(root.candidate_can_rate_self,false);
+  assert.equal(root.candidate_can_edit_prior_case,false);
+  assert.equal(root.append_only_existing_experience_graph_only,true);
+  assert.equal(root.utility_is_contextual_not_global_truth,true);
+  assert.equal(root.harmful_utility_remains_queryable,true);
+  assert.equal(root.scalar_reward_allowed,false);
+  assert.equal(root.global_candidate_score_delta_allowed,false);
+  assert.equal(root.utility_can_trigger_rollback,false);
+  assert.equal(root.utility_can_trigger_self_update,false);
+  assert.equal(root.utility_can_trigger_promotion,false);
   assert.equal(root.effect_reexecution_authorized,false);
 });
