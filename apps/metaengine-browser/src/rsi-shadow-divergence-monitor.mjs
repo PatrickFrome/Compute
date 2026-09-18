@@ -12,6 +12,7 @@ import {
 export const RSI_SHADOW_DIVERGENCE_MONITOR_POLICY_SCHEMA = 'metaengine.rsi.shadow-divergence-monitor-policy.v1';
 export const RSI_SHADOW_DIVERGENCE_OBSERVATION_SCHEMA = 'metaengine.rsi.shadow-divergence-observation.v1';
 export const RSI_SHADOW_DIVERGENCE_MONITOR_LEDGER_SCHEMA = 'metaengine.rsi.shadow-divergence-monitor-ledger.v1';
+export const RSI_SHADOW_DIVERGENCE_REVIEW_EVIDENCE_SCHEMA = 'metaengine.rsi.shadow-divergence-review-evidence.v1';
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
@@ -527,6 +528,48 @@ export class RsiShadowDivergenceMonitorLedger {
       ready_for_external_bounded_canary_review: snapshot.ready_for_external_bounded_canary_review,
       canary_activation_authorized: false,
     });
+  }
+
+  reviewEvidence() {
+    if (!this.#initialized) throw new Error('rsi_shadow_monitor_ledger_not_initialized');
+    const state = ledgerState(this.#sourceSha, this.#policy, this.#rows);
+    const core = {
+      schema: RSI_SHADOW_DIVERGENCE_REVIEW_EVIDENCE_SCHEMA,
+      version: 1,
+      source_sha: state.source_sha,
+      monitor_id: state.policy.monitor_id,
+      policy_digest: state.policy.policy_digest,
+      binding_digest: state.policy.binding_digest,
+      qualification_digest: state.policy.qualification_digest,
+      champion_profile_digest: state.active_profile_digest,
+      challenger_profile_digest: state.challenger_profile_digest,
+      verified_context_digest: state.policy.verified_context_digest,
+      monitor_root_digest: state.policy.monitor_root_digest,
+      security_negative_holdout_digest: state.policy.security_negative_holdout_digest,
+      from_scratch_replay_root_digest: state.policy.from_scratch_replay_root_digest,
+      observation_count: state.row_count,
+      relation_counts: Object.freeze({ ...state.relation_counts }),
+      incident_latched: state.incident_latched,
+      first_incident_observation_index: state.first_incident_observation_index,
+      first_incident_codes: Object.freeze([...state.first_incident_codes]),
+      enough_evidence: state.enough_evidence,
+      no_negative_comparative_evidence: state.no_negative_comparative_evidence,
+      challenger_has_positive_evidence: state.challenger_has_positive_evidence,
+      ready_for_external_bounded_canary_review: state.ready_for_external_bounded_canary_review,
+      champion_remains_default: true,
+      active_profile_replacement_authorized: false,
+      canary_activation_authorized: false,
+      external_review_still_required: true,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      scheduler_authority: false,
+      signing_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+    return Object.freeze({ ...core, review_evidence_digest: digest(core) });
   }
 
   snapshot() {
