@@ -53,6 +53,7 @@ import { RsiIntegrityBoundSkillReliabilityLedger, createRsiIntegrityBoundSkillRe
 import { RsiRevisionScopeLedger, createRsiRevisionScopeAdmission, rsiRevisionScopeAdmissionTrustRootSnapshot } from './rsi-revision-scope-admission.mjs';
 import { createRsiRevisionLibraryAdmission, rsiRevisionLibraryAdmissionTrustRootSnapshot } from './rsi-revision-library-admission.mjs';
 import { RsiSkillCoalitionAuditStore, createRsiSkillCoalitionObservation, rsiSkillCoalitionAuditTrustRootSnapshot } from './rsi-skill-coalition-audit.mjs';
+import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGraphTrustRootSnapshot } from './rsi-skill-relation-graph.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -129,6 +130,7 @@ function trustRoots() {
     revision_scope_admission: rsiRevisionScopeAdmissionTrustRootSnapshot(),
     revision_library_admission: rsiRevisionLibraryAdmissionTrustRootSnapshot(),
     skill_coalition_audit: rsiSkillCoalitionAuditTrustRootSnapshot(),
+    skill_relation_graph: rsiSkillRelationGraphTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -154,6 +156,7 @@ export class RsiRuntimeService {
   #skillReliabilityLedger;
   #revisionScopeLedger;
   #skillCoalitionAudit;
+  #skillRelationStore;
   #archive;
   #observer;
   #verifiedArchive;
@@ -171,7 +174,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -228,6 +231,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillCoalitionPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeSkillRelationPath = skillRelationPath || (ledgerPath ? `${ledgerPath}.skill-relations.json` : null);
+    this.#skillRelationStore = new RsiSkillRelationStore({
+      statePath: runtimeSkillRelationPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -247,6 +255,7 @@ export class RsiRuntimeService {
     await this.#skillReliabilityLedger.init();
     await this.#revisionScopeLedger.init();
     await this.#skillCoalitionAudit.init();
+    await this.#skillRelationStore.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -265,6 +274,7 @@ export class RsiRuntimeService {
       skill_revision_reliability_ledger_schema: this.#skillReliabilityLedger.snapshot().schema,
       revision_scope_admission_schema: this.#revisionScopeLedger.snapshot().schema,
       skill_coalition_audit_schema: this.#skillCoalitionAudit.snapshot().schema,
+      skill_relation_store_schema: this.#skillRelationStore.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -541,11 +551,13 @@ export class RsiRuntimeService {
     });
     const coalitionAudit = this.#skillCoalitionAudit.auditIfAvailable(context.context_digest);
     const coalitionMask = coalitionAudit?.masked_skill_digests || [];
+    const relationGraph = this.#skillRelationStore.graph(library);
     const plan = await this.#skillRouter.route({
       library,
       governance,
       context,
       coalition_masked_skill_digests: coalitionMask,
+      relation_graph: relationGraph,
       max_selected,
       exploration_slots,
       external_planner: true,
@@ -558,6 +570,9 @@ export class RsiRuntimeService {
       vetoed_skill_digests: plan.vetoed_negative_transfer.map((row) => row.skill_digest),
       coalition_masked_skill_digests: plan.coalition_masked_skill_digests,
       coalition_audit_digest: coalitionAudit?.audit_digest || null,
+      relation_graph_digest: plan.relation_graph_digest,
+      relation_suppressed: plan.relation_suppressed,
+      relation_ordering_applied: plan.relation_ordering_applied,
       exploration_used: plan.exploration_used,
       routing_is_execution_authority: false,
       authority_effect: false,
@@ -715,6 +730,50 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return Object.freeze({ observation, stored });
+  }
+
+  async recordSkillRelation({
+    relation_id,
+    from_skill_digest,
+    to_skill_digest,
+    relation_type,
+    scope = 'GLOBAL_VERIFIED',
+    context_digest = null,
+    evidence_digest,
+    evidence_refs,
+    external_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    if (!library) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const edge = createRsiSkillRelationEdge({
+      relation_id,
+      library,
+      from_skill_digest,
+      to_skill_digest,
+      relation_type,
+      scope,
+      context_digest,
+      evidence_digest,
+      evidence_refs,
+      external_evaluator,
+      authored_by_candidate,
+    });
+    const stored = await this.#skillRelationStore.add(edge, library);
+    await this.#ledger.append('SKILL_RELATION_RECORDED', {
+      relation_id: edge.relation_id,
+      relation_digest: edge.relation_digest,
+      relation_type: edge.relation_type,
+      scope: edge.scope,
+      context_digest: edge.context_digest,
+      from_skill_digest: edge.from_skill_digest,
+      to_skill_digest: edge.to_skill_digest,
+      state: stored.state,
+      relation_is_execution_authority: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ edge, stored });
   }
 
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
@@ -1111,6 +1170,7 @@ export class RsiRuntimeService {
       skill_revision_reliability_ledger: this.#skillReliabilityLedger.snapshot(),
       revision_scope_admission: this.#revisionScopeLedger.snapshot(),
       skill_coalition_audit: this.#skillCoalitionAudit.snapshot(),
+      skill_relation_store: this.#skillRelationStore.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
         evaluation_count: this.#skillReliabilityEvaluationCount,
