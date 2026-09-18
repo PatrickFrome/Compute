@@ -9,7 +9,7 @@ import {
 const sourceSha = 'a'.repeat(40);
 const trustDigest = 'b'.repeat(64);
 const d = (c) => c.repeat(64);
-const candidateId = \`candidate_sha256_\${'c'.repeat(64)}\`;
+const candidateId = `candidate_sha256_${'c'.repeat(64)}`;
 
 function opened(orchestrator, overrides = {}) {
   const event = orchestrator.prepareOpen({
@@ -44,7 +44,7 @@ function evidence(orchestrator, kind, index, result = 'PASS', extra = {}) {
   const event = orchestrator.prepareEvidence({
     episode_id: 'episode:test:1',
     candidate_id: candidateId,
-    evidence_id: \`evidence:test:\${index}\`,
+    evidence_id: `evidence:test:${index}`,
     evidence_kind: kind,
     evidence_digest: String(index).padStart(64, '0'),
     result,
