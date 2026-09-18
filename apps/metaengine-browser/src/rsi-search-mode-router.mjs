@@ -277,7 +277,7 @@ export function createRsiSearchModeRoutingPlan({
     const invalidRate=s.attempts?s.invalid/s.attempts:0;
     const explorationBonus=Math.sqrt(Math.log(totalAttempts+2)/(s.attempts+1));
     const normalizedCost=s.avgCost==null?0:Math.min(1,s.avgCost/Math.max(1,totalBudget));
-    const score=posteriorMean + 0.25*explorationBonus + 0.15*checked.novelty_pressure/(s.attempts+1) - 0.35*invalidRate - 0.10*normalizedCost;
+    const score=posteriorMean + 0.05*explorationBonus + 0.15*checked.novelty_pressure/(s.attempts+1) - 0.35*invalidRate - 0.10*normalizedCost;
     return Object.freeze({search_mode:m,...s,posterior_mean:posteriorMean,exploration_bonus:explorationBonus,selection_score:score});
   });
 
