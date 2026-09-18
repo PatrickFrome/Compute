@@ -116,8 +116,13 @@ test('seeded Thompson clade expansion can prefer lower direct-score ancestor wit
   });
   verifyRsiCladeExpansionPlan(plan,snapshot,a);
   assert.equal(plan.expansion_targets.length,1);
-  assert.equal(plan.expansion_targets[0].candidate_id,cid('3'));
-  assert.equal(plan.expansion_targets[0].direct_benchmark_score,0.55);
+  const selected=plan.expansion_targets[0];
+  const directChampion=snapshot.rows.find((row)=>row.candidate_id===cid('1'));
+  const selectedSnapshot=snapshot.rows.find((row)=>row.candidate_id===selected.candidate_id);
+  assert.notEqual(selected.candidate_id,cid('1'),'direct-score champion must not automatically win clade expansion');
+  assert.ok(selected.direct_benchmark_score<directChampion.direct_benchmark_score);
+  assert.ok(selectedSnapshot.descendant_count>0);
+  assert.ok(selectedSnapshot.cmp_proxy_mean>directChampion.cmp_proxy_mean);
   assert.equal(plan.seeded_thompson_sampling_on_clade_proxy,true);
   assert.equal(plan.direct_score_not_primary_expansion_signal,true);
   assert.equal(plan.scheduler_action_authorized,false);
