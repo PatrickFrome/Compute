@@ -232,6 +232,41 @@ export class RsiRuntimeService {
           this.#candidateSynthesisPlanCount += 1;
           this.#lastContextAwareBuildDigest = row.payload.candidate_synthesis.context_candidate_build.context_aware_build_digest || null;
         }
+        if (row?.payload?.materialization_handoff) {
+          this.#materializationHandoffCount += 1;
+          this.#lastMaterializationHandoffDigest = row.payload.materialization_handoff.handoff_digest || null;
+        }
+        if (row?.payload?.materialization_admission) {
+          this.#materializationAdmissionCount += 1;
+          this.#lastMaterializationAdmissionDigest = row.payload.materialization_admission.admission_digest || null;
+        }
+        if (row?.payload?.verified_candidate_materialization) {
+          this.#verifiedCandidateMaterializationCount += 1;
+          this.#lastVerifiedCandidateMaterializationDigest = row.payload.verified_candidate_materialization.verified_materialization_digest || null;
+        }
+        if (row?.payload?.external_evaluation_bundle) {
+          this.#externalEvaluationBundleCount += 1;
+          this.#lastExternalEvaluationBundleDigest = row.payload.external_evaluation_bundle.bundle_digest || null;
+        }
+        if (row?.payload?.external_promotion_review_request) {
+          this.#externalPromotionReviewRequestCount += 1;
+          this.#lastExternalPromotionReviewRequestDigest = row.payload.external_promotion_review_request.request_digest || null;
+        }
+        if (row?.payload?.external_promotion_review_result) {
+          const request = row.payload.external_promotion_review_request;
+          const admission = row.payload.verified_archive_admission;
+          if (!request || !admission) throw new Error('rsi_runtime_external_promotion_review_replay_evidence_missing');
+          const replayedAdmission = this.#verifiedArchive.admit({
+            plan: request.tournament_plan,
+            result: request.tournament_result,
+            receipts: request.tournament_receipts,
+          });
+          if (replayedAdmission.admission_digest !== admission.admission_digest) {
+            throw new Error('rsi_runtime_verified_archive_replay_mismatch');
+          }
+          this.#externalPromotionReviewResultCount += 1;
+          this.#lastExternalPromotionReviewResultDigest = row.payload.external_promotion_review_result.result_digest || null;
+        }
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
