@@ -184,6 +184,7 @@ const MAX_SELF_UPDATE_POST_EFFECT_READBACKS = 256;
 const MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS = 256;
 const MAX_POST_ADOPTION_CAUSAL_MEASUREMENTS = 256;
 const MAX_POST_ADOPTION_EXPERIENCE_ADMISSIONS = 256;
+const MAX_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLES = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -353,6 +354,8 @@ export class RsiRuntimeService {
   #lastPostAdoptionCausalMeasurementDigest = null;
   #postAdoptionExperienceAdmissionDigests = new Set();
   #lastPostAdoptionExperienceAdmissionDigest = null;
+  #experienceGuidedAutonomousCycleDigests = new Set();
+  #lastExperienceGuidedAutonomousCycleDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -565,6 +568,14 @@ export class RsiRuntimeService {
           });
           this.#postAdoptionExperienceAdmissionDigests.add(admission.admission_digest);
           this.#lastPostAdoptionExperienceAdmissionDigest = admission.admission_digest;
+        }
+        if (row?.type === 'RSI_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLE_PREPARED' && row?.payload?.cycle_digest) {
+          if (this.#experienceGuidedAutonomousCycleDigests.size >= MAX_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLES) {
+            throw new Error('rsi_runtime_experience_guided_cycle_replay_capacity_exhausted');
+          }
+          const cycleDigest = exactDigest(row.payload.cycle_digest, 'experience_guided_cycle_digest');
+          this.#experienceGuidedAutonomousCycleDigests.add(cycleDigest);
+          this.#lastExperienceGuidedAutonomousCycleDigest = cycleDigest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1209,6 +1220,92 @@ export class RsiRuntimeService {
       readiness: this.#episodes.nominationReadiness({ episode_id: episodeId, candidate_id: candidateId }),
       authority_effect: false,
       automatic_retry_allowed: false,
+    });
+  }
+
+  async prepareExperienceGuidedAutonomousEpisodeCycle({
+    bridge_case_ids = [],
+    experience_environment_fingerprint = 'metaengine.browser.runtime',
+    experience_model_family = 'METAENGINE_RSI',
+    ...cycleInput
+  } = {}) {
+    this.#assertRunning();
+    if (cycleInput.experience_context_plan != null) {
+      throw new Error('rsi_runtime_experience_guided_context_is_runtime_derived');
+    }
+    const contextPlan = this.experienceContextForOpportunity({
+      opportunity_id: cycleInput.opportunity_id,
+      bridge_case_ids,
+      environment_fingerprint: experience_environment_fingerprint,
+      model_family: experience_model_family,
+    });
+    const cycle = await this.prepareAutonomousEpisodeCycle({
+      ...cycleInput,
+      experience_context_plan: contextPlan,
+    });
+    if (
+      cycle.controller_plan?.experience_context_digest
+      !== String(contextPlan.context_plan_digest || '').replace(/^sha256:/, '')
+    ) {
+      throw new Error('rsi_runtime_experience_guided_controller_binding_mismatch');
+    }
+    const cycleDigest = digest({
+      controller_plan_digest: cycle.controller_plan.controller_plan_digest,
+      episode_id: cycle.episode.episode_id,
+      experience_context_plan_digest: contextPlan.context_plan_digest,
+      graph_snapshot_digest: contextPlan.graph_snapshot_digest,
+      request_digests: cycle.requests.map((row) => row.request.request_digest).sort(),
+    });
+    const alreadyRecorded = this.#experienceGuidedAutonomousCycleDigests.has(cycleDigest);
+    if (!alreadyRecorded) {
+      if (this.#experienceGuidedAutonomousCycleDigests.size >= MAX_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLES) {
+        throw new Error('rsi_runtime_experience_guided_cycle_capacity_exhausted');
+      }
+      await this.#ledger.append('RSI_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLE_PREPARED', {
+        cycle_digest: cycleDigest,
+        episode_id: cycle.episode.episode_id,
+        controller_plan_digest: cycle.controller_plan.controller_plan_digest,
+        experience_context_plan: contextPlan,
+        experience_context_plan_digest: contextPlan.context_plan_digest,
+        graph_snapshot_digest: contextPlan.graph_snapshot_digest,
+        retrieval_digest: contextPlan.retrieval_digest,
+        selected_case_count: contextPlan.selected_case_count,
+        request_digests: cycle.requests.map((row) => row.request.request_digest).sort(),
+        existing_autonomous_controller_reused: true,
+        existing_devos_scheduler_required: true,
+        second_scheduler_created: false,
+        second_frontier_created: false,
+        retrieval_is_advisory_only: true,
+        scheduler_action_authorized: false,
+        task_created: false,
+        lease_created: false,
+        command_created: false,
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      });
+      this.#experienceGuidedAutonomousCycleDigests.add(cycleDigest);
+      this.#lastExperienceGuidedAutonomousCycleDigest = cycleDigest;
+    }
+    return Object.freeze({
+      schema: 'metaengine.rsi.experience-guided-autonomous-runtime-cycle.v1',
+      cycle_digest: cycleDigest,
+      experience_context_plan: contextPlan,
+      autonomous_cycle: cycle,
+      already_recorded: alreadyRecorded,
+      existing_autonomous_controller_reused: true,
+      existing_devos_scheduler_required: true,
+      second_scheduler_created: false,
+      second_frontier_created: false,
+      retrieval_is_advisory_only: true,
+      scheduler_action_authorized: false,
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
     });
   }
 
@@ -2633,6 +2730,20 @@ export class RsiRuntimeService {
         skill_library_write_performed_here: false,
         next_episode_created_here: false,
         graph_write_authorizes_execution: false,
+        authority_effect: false,
+      }),
+      experience_guided_autonomous_cycle: Object.freeze({
+        count: this.#experienceGuidedAutonomousCycleDigests.size,
+        capacity: MAX_EXPERIENCE_GUIDED_AUTONOMOUS_CYCLES,
+        last_digest: this.#lastExperienceGuidedAutonomousCycleDigest,
+        existing_autonomous_controller_reused: true,
+        existing_devos_scheduler_required: true,
+        second_scheduler_created: false,
+        second_frontier_created: false,
+        verified_experience_graph_only: true,
+        retrieval_is_advisory_only: true,
+        candidate_can_modify_experience_context: false,
+        scheduler_action_authorized: false,
         authority_effect: false,
       }),
       devos_materialization: Object.freeze({
