@@ -58,3 +58,18 @@ test('S5b batch ambiguity falls back to immutable per-command receipt reconcilia
   assert.match(batch, /readbackBeforeReplay: true/);
   assert.doesNotMatch(batch, /#executeForLane|#executeLocalOrRemote|#executeCommand\(/);
 });
+
+
+test('S5b delivery ambiguity never manufactures a second FAILED receipt after Browser execution', async () => {
+  const source = await nativeSource();
+  assert.match(source, /error\.code = state === 'REJECTED' \? 'NATIVE_RESULT_DELIVERY_REJECTED' : 'NATIVE_RESULT_DELIVERY_AMBIGUOUS'/);
+  const runStart = source.indexOf('async #runCommand(command)');
+  const runEnd = source.indexOf('async #runCommandBatch', runStart);
+  assert.ok(runStart >= 0 && runEnd > runStart, 'single-command runtime boundary missing');
+  const run = source.slice(runStart, runEnd);
+  const transportFence = run.indexOf("startsWith('NATIVE_RESULT_DELIVERY_')");
+  const failureReceipt = run.indexOf('await this.#postResult(command, false');
+  assert.ok(transportFence >= 0 && failureReceipt > transportFence,
+    'transport ambiguity fence must precede the ordinary execution-failure receipt path');
+  assert.match(run, /this\.#lastCommandStatus = 'AMBIGUOUS'/);
+});
