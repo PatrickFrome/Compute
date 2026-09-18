@@ -409,6 +409,81 @@ function normalizeWorkspaceBindingSnapshot(value, { parentSha, targetBranch, wor
   return Object.freeze({ ...projection, binding_snapshot_digest: sha256(projection) });
 }
 
+export function verifyRsiCandidateWorkspacePreflight(value, {
+  parent_sha,
+  target_branch,
+  workspace_id,
+  expected_task_id,
+  now_ms = Date.now(),
+  max_snapshot_age_ms = 30_000,
+} = {}) {
+  const parentSha = exactSha(parent_sha, 'preflight_parent');
+  const targetBranch = clip(target_branch, 240);
+  const workspaceId = String(workspace_id || '').toLowerCase();
+  const taskId = String(expected_task_id || '').toLowerCase();
+  if (!UUID_RE.test(workspaceId) || !UUID_RE.test(taskId)) {
+    throw new Error('rsi_candidate_preflight_identity_invalid');
+  }
+  const now = Number(now_ms);
+  const maxAge = Number(max_snapshot_age_ms);
+  if (!Number.isFinite(now) || !Number.isSafeInteger(maxAge) || maxAge < 1_000 || maxAge > 300_000) {
+    throw new Error('rsi_candidate_preflight_clock_invalid');
+  }
+  const observedAt = Date.parse(String(value?.observed_at || ''));
+  if (!Number.isFinite(observedAt)) throw new Error('rsi_candidate_preflight_observed_at_invalid');
+  if (observedAt > now + 5_000 || now - observedAt > maxAge) {
+    throw new Error('rsi_candidate_preflight_snapshot_stale');
+  }
+
+  const normalized = normalizeWorkspaceBindingSnapshot(value, {
+    parentSha,
+    targetBranch,
+    workspaceId,
+  });
+  const binding = normalized.binding;
+  if (binding.task_id !== taskId) throw new Error('rsi_candidate_preflight_task_mismatch');
+  if (binding.state !== 'READY') throw new Error('rsi_candidate_preflight_workspace_not_ready');
+
+  const updatedAt = Date.parse(binding.updated_at);
+  const expiresAt = Date.parse(binding.lease_expires_at);
+  if (updatedAt > now + 5_000 || now - updatedAt > maxAge) {
+    throw new Error('rsi_candidate_preflight_binding_stale');
+  }
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+    throw new Error('rsi_candidate_preflight_lease_expired');
+  }
+
+  const core = {
+    schema: 'metaengine.rsi.candidate-workspace-preflight.v1',
+    parent_sha: parentSha,
+    target_branch: targetBranch,
+    workspace_id: workspaceId,
+    task_id: taskId,
+    workspace_generation: binding.workspace_generation,
+    lease_generation: binding.lease_generation,
+    agent_id: binding.agent_id,
+    agent_generation_epoch: binding.agent_generation_epoch,
+    tab_id: binding.tab_id,
+    target_id: binding.target_id,
+    observed_at: new Date(observedAt).toISOString(),
+    binding_updated_at: binding.updated_at,
+    lease_expires_at: binding.lease_expires_at,
+    binding_snapshot_digest: normalized.binding_snapshot_digest,
+    exact_base_sha_verified: true,
+    exact_head_sha_verified: true,
+    current_lease_verified: true,
+    workspace_ready: true,
+    ambiguity_absent: true,
+    dirty_hold_absent: true,
+    filesystem_paths_exposed: false,
+    scheduler_authority: false,
+    browser_actuation_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+  return Object.freeze({ ...core, preflight_digest: sha256(core) });
+}
+
 function normalizeWorkspaceReceipt(value, plan) {
   if (!plainObject(value)) throw new Error('rsi_candidate_workspace_receipt_invalid');
   const workspaceId = String(value.workspace_id || '').toLowerCase();
