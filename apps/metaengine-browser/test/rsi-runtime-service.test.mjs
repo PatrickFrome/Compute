@@ -907,7 +907,11 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     });
     assert.equal(libraryAdmission.admission.append_only_library_update, true);
     assert.equal(libraryAdmission.adoption.entry_count, 2);
+    assert.equal(libraryAdmission.adoption.retrieval_exposure_changed, false);
+    assert.deepEqual(libraryAdmission.adoption.admission_exposure_hold_skill_digests, [successorSkill.skill_digest]);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 2);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count, 1);
+    assert.throws(()=>runtime.createSkillActivationView([successorSkill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
     assert.equal(runtime.snapshot().execution_authority, false);
