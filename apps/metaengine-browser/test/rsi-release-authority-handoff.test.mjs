@@ -49,6 +49,14 @@ import {
   verifyRsiReleaseAuthorityConvergence,
   rsiReleaseAuthorityConvergenceTrustRootSnapshot,
 } from '../src/rsi-release-authority-convergence.mjs';
+import {
+  createRsiPostDeploymentLearningReceipt,
+  verifyRsiPostDeploymentLearningReceipt,
+  createRsiPostDeploymentExperienceAdmission,
+  verifyRsiPostDeploymentExperienceAdmission,
+  applyRsiPostDeploymentExperienceAdmission,
+  rsiPostDeploymentLearningTrustRootSnapshot,
+} from '../src/rsi-post-deployment-learning.mjs';
 
 const PARENT='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -908,4 +916,135 @@ test('release authority convergence trust root keeps authority mutation outside 
   assert.equal(root.effect_reexecution_authorized,false);
   assert.equal(root.retry_authorized,false);
   assert.equal(root.ambiguous_effect_replay_allowed,false);
+});
+
+
+function convergedReleaseFixture(){
+  const {request,review,releaseHandoff,reconciliation,successor}=confirmedReconciliationFixture();
+  const convergence=createRsiReleaseAuthorityConvergence({
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    external_authority_readback:externalAuthorityReadback(releaseHandoff,successor),
+    converged_at:'2026-09-18T18:14:12.000Z',
+  });
+  return {request,review,releaseHandoff,reconciliation,successor,convergence};
+}
+
+function learningAssessment(overrides={}){
+  return {
+    assessment_id:'post-deploy-assessment-0123456789abcdef',
+    observed_at:'2026-09-18T18:14:20.000Z',
+    environment_fingerprint:'metaengine-browser-windows-x64-release-v1',
+    challenge_family:'POST_DEPLOYMENT_RELEASE',
+    confidence:0.98,
+    mechanism_tags:['AUTHORITY_CONVERGENCE','QUALIFIED_SUCCESSOR'],
+    lesson_digests:[d('1'),d('2')],
+    evidence_refs:['github:release:verified-candidate','native:successor:qualification'],
+    external_learning_assigner:true,
+    authored_by_candidate:false,
+    candidate_can_self_reward:false,
+    ...overrides,
+  };
+}
+
+test('post-deployment learning is admitted only after exact external authority convergence and remains contextual',()=>{
+  const {request,review,releaseHandoff,reconciliation,convergence}=convergedReleaseFixture();
+  const receipt=createRsiPostDeploymentLearningReceipt({
+    source_sha:CANDIDATE,
+    release_authority_convergence:convergence,
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    assessment:learningAssessment(),
+  });
+  verifyRsiPostDeploymentLearningReceipt(receipt);
+  assert.equal(receipt.deployment_outcome,'SUCCESS');
+  assert.equal(receipt.source_sha,CANDIDATE);
+  assert.equal(receipt.candidate_sha,CANDIDATE);
+  assert.equal(receipt.candidate_can_self_reward,false);
+  assert.equal(receipt.candidate_global_score_delta,null);
+  assert.equal(receipt.reward_scalar,null);
+  assert.equal(receipt.deployment_success_is_contextual_not_global_truth,true);
+  assert.equal(receipt.physical_effect_replay_allowed,false);
+  assert.equal(receipt.release_authority,false);
+
+  const admission=createRsiPostDeploymentExperienceAdmission({
+    learning_receipt:receipt,
+    release_handoff:releaseHandoff,
+  });
+  verifyRsiPostDeploymentExperienceAdmission(admission);
+  assert.equal(admission.append_only_graph_admission,true);
+  assert.equal(admission.candidate_can_write_graph,false);
+  assert.equal(admission.direct_candidate_score_mutation,false);
+  assert.equal(admission.experience_case.outcome,'SUCCESS');
+  assert.equal(admission.experience_case.candidate_sha,CANDIDATE);
+  assert.equal(admission.experience_case.model_family,'DEPLOYED_RSI');
+
+  const graph=applyRsiPostDeploymentExperienceAdmission({admission});
+  assert.equal(graph.case_count,1);
+  assert.equal(graph.task_anchor_count,1);
+  assert.equal(graph.candidate_can_write_graph,false);
+  assert.equal(graph.utility_is_global_truth,false);
+});
+
+test('post-deployment learning rejects old-parent source and candidate-authored self reward',()=>{
+  const {request,review,releaseHandoff,reconciliation,convergence}=convergedReleaseFixture();
+  assert.throws(()=>createRsiPostDeploymentLearningReceipt({
+    source_sha:PARENT,
+    release_authority_convergence:convergence,
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    assessment:learningAssessment(),
+  }),/source_not_converged_candidate/);
+
+  assert.throws(()=>createRsiPostDeploymentLearningReceipt({
+    source_sha:CANDIDATE,
+    release_authority_convergence:convergence,
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    assessment:learningAssessment({authored_by_candidate:true}),
+  }),/external_assigner_required/);
+});
+
+test('post-deployment learning cannot manufacture scalar reward or mutate an existing case',()=>{
+  const {request,review,releaseHandoff,reconciliation,convergence}=convergedReleaseFixture();
+  const receipt=createRsiPostDeploymentLearningReceipt({
+    source_sha:CANDIDATE,
+    release_authority_convergence:convergence,
+    release_effect_reconciliation:reconciliation,
+    release_handoff:releaseHandoff,
+    promotion_review_result:review,
+    promotion_review_request:request,
+    assessment:learningAssessment(),
+  });
+  const admission=createRsiPostDeploymentExperienceAdmission({learning_receipt:receipt,release_handoff:releaseHandoff});
+  const graph=applyRsiPostDeploymentExperienceAdmission({admission});
+  assert.throws(()=>applyRsiPostDeploymentExperienceAdmission({previous_snapshot:graph,admission}),/case_replacement_forbidden/);
+
+  const tampered=structuredClone(receipt);
+  tampered.reward_scalar=1;
+  assert.throws(()=>verifyRsiPostDeploymentLearningReceipt(tampered),/receipt_policy_invalid/);
+});
+
+test('post-deployment learning trust root preserves external contextual feedback semantics',()=>{
+  const root=rsiPostDeploymentLearningTrustRootSnapshot();
+  assert.equal(root.exact_external_release_authority_convergence_required,true);
+  assert.equal(root.exact_qualified_successor_required,true);
+  assert.equal(root.running_source_must_equal_converged_candidate,true);
+  assert.equal(root.contextual_deployment_success_only,true);
+  assert.equal(root.external_learning_assigner_required,true);
+  assert.equal(root.candidate_can_self_reward,false);
+  assert.equal(root.candidate_global_score_delta_allowed,false);
+  assert.equal(root.scalar_reward_from_deployment_success_allowed,false);
+  assert.equal(root.append_only_existing_experience_graph_only,true);
+  assert.equal(root.direct_candidate_score_mutation,false);
+  assert.equal(root.post_deployment_learning_is_release_authority,false);
+  assert.equal(root.effect_reexecution_authorized,false);
 });
