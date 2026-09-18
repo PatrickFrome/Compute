@@ -3191,8 +3191,10 @@ function phase34Fixture(label='phase34'){
     least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
     governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
     benchmark_security_attestor_identity_digest:labelDigest(label+'-benchmark-security-attestor-id'),
+    harness_security_attestor_identity_digest:labelDigest(label+'-harness-security-attestor-id'),
     benchmark_ancestry_attestation_digest:labelDigest(label+'-benchmark-ancestry-attestation'),
     clean_room_requalification_digest:labelDigest(label+'-clean-room-requalification'),
+    harness_integrity_attestation_digest:labelDigest(label+'-harness-integrity-attestation'),
     anytime_valid_admission_pass:true,
     error_budget_available:true,
     paired_instance_replay_pass:true,
@@ -3202,12 +3204,14 @@ function phase34Fixture(label='phase34'){
     no_new_negative_transfer:true,
     benchmark_poisoning_scan_pass:true,
     clean_room_requalification_pass:true,
+    harness_tampering_scan_pass:true,
     external_library_owner:true,
     external_statistical_acceptor:true,
     external_source_qualification_owner:true,
     external_least_privilege_reviewer:true,
     external_governance_reviewer:true,
     external_benchmark_security_attestor:true,
+    external_harness_security_attestor:true,
     authored_by_candidate:false,
   };
   return {p33,p33Args,p33Certificate,currentGovernance,proposalArgs,proposal,sourceQualification,certificateArgs};
@@ -3378,6 +3382,30 @@ test('Phase34 blocks benchmark poisoning or failed clean-room requalification wi
   assert.equal(contaminatedLineage.skill_activation_authorized,false);
 });
 
+test('Phase34 blocks harness tampering evidence failures and keeps the effect path closed',()=>{
+  const fx=phase34Fixture('harness-security');
+  const tampered=createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    harness_tampering_scan_pass:false,
+  });
+  assert.equal(tampered.state,'REJECTED_LIBRARY_ADMISSION');
+  assert.ok(tampered.blockers.includes('HARNESS_TAMPERING_SCAN_FAILED'));
+  assert.equal(tampered.append_effect_performed,false);
+  assert.equal(tampered.skill_activation_authorized,false);
+});
+
+test('Phase34 requires reviewer independence across Phase33 and Phase34, not just within one stage',()=>{
+  const fx=phase34Fixture('cross-stage-separation');
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    library_owner_identity_digest:fx.p33Certificate.owner_reviewer_identity_digest,
+  }),/cross_stage_reviewer_separation_required/);
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    harness_security_attestor_identity_digest:fx.p33Certificate.artifact_auditor_identity_digest,
+  }),/cross_stage_reviewer_separation_required/);
+});
+
 test('Phase34 reviewer separation of duties prevents owner acceptor and reviewers collapsing into one identity',()=>{
   const fx=phase34Fixture('separation');
   assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
@@ -3391,6 +3419,10 @@ test('Phase34 reviewer separation of duties prevents owner acceptor and reviewer
   assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
     ...fx.certificateArgs,
     benchmark_security_attestor_identity_digest:fx.certificateArgs.statistical_acceptor_identity_digest,
+  }),/certificate_separation_of_duties_required/);
+  assert.throws(()=>createRsiAnytimeLibraryAdmissionCertificate({
+    ...fx.certificateArgs,
+    harness_security_attestor_identity_digest:fx.certificateArgs.governance_reviewer_identity_digest,
   }),/certificate_separation_of_duties_required/);
 });
 
@@ -3442,6 +3474,7 @@ test('Phase34 archive is durable-before-visible and retains rejected or abstaine
 test('Phase34 trust root preserves external admission without creating activation or lifecycle authority',()=>{
   const root=rsiAnytimeLibraryAdmissionTrustRootSnapshot();
   assert.equal(root.phase33_exact_owner_precommit_required,true);
+  assert.equal(root.phase33_reviewer_lineage_binding_required,true);
   assert.equal(root.exact_terminal_phase33_source_qualification_required,true);
   assert.equal(root.required_source_workflows.length,7);
   assert.equal(root.existing_verified_skill_library_reused,true);
@@ -3456,6 +3489,8 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.independent_benchmark_security_attestor_required,true);
   assert.equal(root.clean_room_requalification_required,true);
   assert.equal(root.benchmark_poisoning_scan_required,true);
+  assert.equal(root.harness_tampering_scan_required,true);
+  assert.equal(root.cross_stage_reviewer_separation_required,true);
   assert.equal(root.append_handoff_one_attempt_only,true);
   assert.equal(root.ambiguous_append_retry_allowed,false);
   assert.equal(root.append_does_not_imply_retrieval_exposure,true);
