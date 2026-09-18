@@ -1,0 +1,245 @@
+name: METAENGINE RSI Hypothesis Evidence Producer
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/scripts/rsi-l1-result-delivery-evaluator.mjs'
+      - 'apps/metaengine-browser/scripts/rsi-l1-evidence-bundle.mjs'
+      - 'apps/metaengine-browser/test/rsi-l1-result-delivery-evaluator.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-l1-evidence-bundle.test.mjs'
+      - '.github/workflows/rsi-hypothesis-evidence-producer.yml'
+  workflow_dispatch:
+    inputs:
+      parent_sha:
+        description: 'Exact trusted main parent SHA for bounded L1 replay'
+        required: true
+        type: string
+      candidate_sha:
+        description: 'Exact one-commit candidate SHA'
+        required: true
+        type: string
+      confirmation:
+        description: 'Type EVALUATE_RSI_L1_RESULT_DELIVERY'
+        required: true
+        type: string
+
+permissions: {}
+concurrency:
+  group: rsi-hypothesis-evidence-producer-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RSI_CANDIDATE_PATH: apps/metaengine-browser/src/result-delivery-transport.mjs
+  RSI_SUPPORT_ARTIFACT: rsi-hypothesis-evidence-support
+  RSI_NODE_SANDBOX_IMAGE: node:24.21-bookworm-slim@sha256:713cfbf4a0ac19f40e1bb9919893e126b74a5c8cf5d0623c9f89515c8f74c6fa
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Run trusted L1 producer contracts
+        run: |
+          set -euo pipefail
+          node --check apps/metaengine-browser/scripts/rsi-l1-result-delivery-evaluator.mjs
+          node --check apps/metaengine-browser/scripts/rsi-l1-evidence-bundle.mjs
+          cd apps/metaengine-browser
+          node --test test/rsi-l1-result-delivery-evaluator.test.mjs test/rsi-l1-evidence-bundle.test.mjs
+      - name: Prove producer isolation contract
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/rsi-hypothesis-evidence-producer.yml').read_text()
+          assert ('pull_request_'+'target:') not in p
+          assert 'apps/metaengine-browser/src/result-delivery-transport.mjs' in p
+          assert 'node:24.21-bookworm-slim@sha256:713cfbf4a0ac19f40e1bb9919893e126b74a5c8cf5d0623c9f89515c8f74c6fa' in p
+          sandbox=p.split('\n  sandbox-evaluate:',1)[1].split('\n  bundle-evidence:',1)[0]
+          for token in ('--network none','--read-only','--cap-drop ALL','no-new-privileges','--pids-limit 64','--memory 512m','--cpus 1'):
+              assert token in sandbox
+          assert 'GH_TOKEN:' not in sandbox
+          assert ('id-token:'+' write') not in p and ('attestations:'+' write') not in p
+          assert 'rsi-hypothesis-evidence-support' in p
+          assert ".files|length==1" in p
+          assert ('head_branch=='+'"main"') not in p
+          PY
+
+  preflight:
+    if: github.event_name == 'workflow_dispatch'
+    needs: contract-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      parent_sha: ${{ steps.verify.outputs.parent_sha }}
+      candidate_sha: ${{ steps.verify.outputs.candidate_sha }}
+      change: ${{ steps.verify.outputs.change }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact main parent and one-file candidate lineage
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PARENT_SHA: ${{ inputs.parent_sha }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$CONFIRMATION" == 'EVALUATE_RSI_L1_RESULT_DELIVERY' ]]
+          [[ "$PARENT_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$PARENT_SHA" = "$GITHUB_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$CANDIDATE_SHA" > /tmp/candidate.json
+          jq -e --arg parent "$PARENT_SHA" '.parents|length==1 and .[0].sha==$parent' /tmp/candidate.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/compare/$PARENT_SHA...$CANDIDATE_SHA" > /tmp/compare.json
+          jq -e --arg path "$RSI_CANDIDATE_PATH" '.ahead_by==1 and .behind_by==0 and .total_commits==1 and (.files|length==1) and .files[0].filename==$path and (.files[0].status=="added" or .files[0].status=="modified")' /tmp/compare.json >/dev/null
+          CHANGE="$(jq -r '.files[0].status|ascii_upcase' /tmp/compare.json)"
+          [[ "$CHANGE" == 'ADDED' || "$CHANGE" == 'MODIFIED' ]]
+          [[ "$CHANGE" == 'ADDED' ]] && CHANGE='CREATE' || CHANGE='MODIFY'
+          echo "parent_sha=$PARENT_SHA" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+          echo "change=$CHANGE" >> "$GITHUB_OUTPUT"
+
+  sandbox-evaluate:
+    if: github.event_name == 'workflow_dispatch'
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      evaluation_artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout exact trusted evaluator revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Checkout exact candidate in isolated path
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Prove candidate checkout and fixed surface
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = '${{ needs.preflight.outputs.candidate_sha }}'
+          test -s "candidate/$RSI_CANDIDATE_PATH"
+      - name: Pull exact sandbox image
+        run: |
+          set -euo pipefail
+          docker pull "$RSI_NODE_SANDBOX_IMAGE"
+          docker image inspect "$RSI_NODE_SANDBOX_IMAGE" >/dev/null
+      - name: Evaluate candidate with no network credentials or host write access
+        id: evaluate
+        run: |
+          set -euo pipefail
+          mkdir -p sandbox-out
+          chmod 0777 sandbox-out
+          set +e
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 64 \
+            --memory 512m \
+            --cpus 1 \
+            --user 65534:65534 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/apps/metaengine-browser/scripts/rsi-l1-result-delivery-evaluator.mjs,dst=/trusted/evaluator.mjs,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/candidate/$RSI_CANDIDATE_PATH,dst=/candidate/result-delivery-transport.mjs,readonly" \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/sandbox-out,dst=/out" \
+            "$RSI_NODE_SANDBOX_IMAGE" \
+            node /trusted/evaluator.mjs /candidate/result-delivery-transport.mjs /out/evaluation.json
+          CODE=$?
+          set -e
+          [[ "$CODE" == '0' || "$CODE" == '2' ]]
+          test -s sandbox-out/evaluation.json
+          echo "candidate_exit_code=$CODE" > sandbox-out/sandbox-receipt.txt
+          echo 'network=NONE' >> sandbox-out/sandbox-receipt.txt
+          echo 'browser_actuation=UNAVAILABLE' >> sandbox-out/sandbox-receipt.txt
+          echo 'production_credentials=UNAVAILABLE' >> sandbox-out/sandbox-receipt.txt
+      - name: Upload sandbox measurements
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rsi-l1-sandbox-evaluation
+          path: sandbox-out/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+  bundle-evidence:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [preflight, sandbox-evaluate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact trusted producer revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Checkout exact candidate only for immutable component hash
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ needs.preflight.outputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Download immutable sandbox measurements
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.sandbox-evaluate.outputs.evaluation_artifact_id }}
+          path: sandbox-readback
+          digest-mismatch: error
+      - name: Build canonical V1.10 evidence bundle from measurements
+        run: |
+          set -euo pipefail
+          EVALUATION="$(find sandbox-readback -name evaluation.json -print -quit)"
+          test -s "$EVALUATION"
+          COMPONENT_SHA="$(sha256sum "candidate/$RSI_CANDIDATE_PATH" | awk '{print $1}')"
+          [[ "$COMPONENT_SHA" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p evidence/support
+          node apps/metaengine-browser/scripts/rsi-l1-evidence-bundle.mjs \
+            "$EVALUATION" \
+            '${{ needs.preflight.outputs.parent_sha }}' \
+            '${{ needs.preflight.outputs.candidate_sha }}' \
+            "$COMPONENT_SHA" \
+            '${{ needs.preflight.outputs.change }}' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            evidence/support
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const result=JSON.parse(fs.readFileSync('evidence/support/result.json','utf8'));
+          const context=JSON.parse(fs.readFileSync('evidence/support/producer-context.json','utf8'));
+          if(result.complete!==true||!['ADMITTED','FALSIFIED','REJECTED'].includes(result.state)) throw Error('producer_terminal_evidence_required');
+          if(result.promotion_authority!==false||result.self_update_authority!==false||result.automatic_retry_allowed!==false||result.authority_effect!==false) throw Error('producer_authority_boundary_invalid');
+          if(context.candidate_authored_verdict!==false||context.candidate_authored_receipts!==false||context.authority_effect!==false) throw Error('producer_context_boundary_invalid');
+          console.log(`RSI_L1_EVIDENCE_STATE=${result.state}:${result.disposition}`);
+          NODE
+      - name: Upload fixed producer artifact for S2b origin attestation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rsi-hypothesis-evidence-support
+          path: evidence/support/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
