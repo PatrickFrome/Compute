@@ -1,0 +1,55 @@
+name: METAENGINE Browser Guardian Owner Session Binding V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/browser-guardian-owner-session-binding.mjs'
+      - 'apps/metaengine-browser/src/browser-guardian-session-broker-*.mjs'
+      - 'apps/metaengine-browser/test/browser-guardian-owner-session-binding.test.mjs'
+      - '.github/workflows/browser-guardian-owner-session-binding-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owner-session-binding-contract:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Prove owner device session binding remains effect-poor
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test test/browser-guardian-owner-session-binding.test.mjs test/browser-guardian-session-broker-controller.test.mjs test/browser-guardian-session-broker-effect-gate.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_session_binding_contract_exit_$LASTEXITCODE" }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src/browser-guardian-owner-session-binding.mjs apps/metaengine-browser/src/browser-guardian-session-broker-controller.mjs apps/metaengine-browser/src/browser-guardian-session-broker-core.mjs apps/metaengine-browser/src/browser-guardian-session-broker-effect-gate.mjs apps/metaengine-browser/test/browser-guardian-owner-session-binding.test.mjs .github/workflows/browser-guardian-owner-session-binding-v1.yml)"

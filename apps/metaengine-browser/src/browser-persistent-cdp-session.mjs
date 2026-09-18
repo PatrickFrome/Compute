@@ -1,0 +1,747 @@
+export const BROWSER_PERSISTENT_CDP_SESSION_SCHEMA = 'metaengine.browser.persistent-cdp-session.v1';
+
+const DEFAULT_PROTOCOL_VERSION = '1.3';
+const MAX_SUBTARGETS = 256;
+// D-L4 repair: per-command JS-side deadline for the bounded Runtime re-seed so
+// a wedged debugger transport can never hang the recovery path.
+const RUNTIME_RESEED_TIMEOUT_MS = 5000;
+const RUNTIME_CONTEXT_RECOVERY_MIN_INTERVAL_MS = 2000;
+const RUNTIME_CONTEXT_RECOVERY_SETTLE_MS = 25;
+const clip = (value, max = 240) => String(value ?? '').slice(0, max);
+
+function liveWebContents(webContents) {
+  if (!webContents || typeof webContents !== 'object') return false;
+  try { return webContents.isDestroyed?.() !== true; } catch { return false; }
+}
+
+function exactId(webContents) {
+  const id = Number(webContents?.id);
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error('persistent_cdp_webcontents_id_invalid');
+  return id;
+}
+
+function safeCall(target, method, fallback = null) {
+  try {
+    if (!target || typeof target[method] !== 'function') return fallback;
+    return target[method]();
+  } catch {
+    return fallback;
+  }
+}
+
+function targetIdOf(webContents) {
+  const exact = safeCall(webContents, 'getOrCreateDevToolsTargetId', null);
+  return exact ? clip(exact, 160) : `webcontents:${exactId(webContents)}`;
+}
+
+function rootExecutionContextUniqueId(row) {
+  if (!row.mainFrameId) return null;
+  const matches = [...row.executionContexts.values()].filter((context) => (
+    context.isDefault === true
+    && context.frameId === row.mainFrameId
+    && context.uniqueId
+  ));
+  if (matches.length !== 1) return null;
+  return matches[0].uniqueId;
+}
+
+function subtargetProjection(row) {
+  return Object.freeze({
+    target_id: row.targetId,
+    session_id: row.sessionId,
+    parent_session_id: row.parentSessionId,
+    parent_target_id: row.parentTargetId,
+    type: row.type,
+    subtype: row.subtype,
+    url: row.url,
+    title: row.title,
+    opener_id: row.openerId,
+    browser_context_id: row.browserContextId,
+    attached: row.attached === true,
+    nested_auto_attach: row.nestedAutoAttach === true,
+    event_count: row.eventCount,
+    last_method: row.lastMethod,
+    attached_at: row.attachedAt,
+    last_event_at: row.lastEventAt,
+    raw_event_payload_exposed: false,
+    authority_effect: false,
+  });
+}
+
+function rowProjection(row) {
+  const subtargets = [...row.subtargets.values()].map(subtargetProjection);
+  return Object.freeze({
+    schema: BROWSER_PERSISTENT_CDP_SESSION_SCHEMA,
+    web_contents_id: row.id,
+    target_id: row.targetId,
+    main_frame_id: row.mainFrameId,
+    main_execution_context_unique_id: rootExecutionContextUniqueId(row),
+    execution_context_count: row.executionContexts.size,
+    os_pid: Number(safeCall(row.webContents, 'getOSProcessId', 0)) || null,
+    attached: row.dbg?.isAttached?.() === true,
+    ready: row.ready === true,
+    event_stream_capable: row.eventCapable === true,
+    attachment_generation: row.attachmentGeneration,
+    document_generation: row.documentGeneration,
+    binding_generation: row.bindingGeneration,
+    semantic_generation: row.semanticGeneration,
+    subtarget_generation: row.subtargetGeneration,
+    attached_at: row.attachedAt,
+    last_event_at: row.lastEventAt,
+    last_detach_reason: row.lastDetachReason,
+    last_error: row.lastError,
+    subscriber_count: row.subscribers.size,
+    domains: row.ready && row.eventCapable
+      ? ['PAGE','DOM','ACCESSIBILITY','RUNTIME','NETWORK', ...(row.targetAutoAttachEnabled ? ['TARGET'] : [])]
+      : [],
+    target_auto_attach_enabled: row.targetAutoAttachEnabled === true,
+    target_auto_attach_flatten: row.targetAutoAttachEnabled === true,
+    target_wait_for_debugger_on_start: false,
+    target_auto_attach_last_error: row.targetAutoAttachLastError,
+    subtarget_count: subtargets.length,
+    attached_subtarget_count: subtargets.filter((item) => item.attached).length,
+    subtarget_capacity: MAX_SUBTARGETS,
+    subtarget_overflow_count: row.subtargetOverflowCount,
+    subtarget_nested_auto_attach_failures: row.subtargetNestedAutoAttachFailures,
+    runtime_reseed_count: row.runtimeReseedCount,
+    last_runtime_reseed_at: row.lastRuntimeReseedAt,
+    last_runtime_reseed_error: row.lastRuntimeReseedError,
+    runtime_context_recovery_count: row.runtimeContextRecoveryCount,
+    last_runtime_context_recovery_at: row.lastRuntimeContextRecoveryAtMs > 0
+      ? new Date(row.lastRuntimeContextRecoveryAtMs).toISOString()
+      : null,
+    last_runtime_context_recovery_error: row.lastRuntimeContextRecoveryError,
+    subtargets,
+    root_document_generation_ignores_subtarget_sessions: true,
+    same_document_revision_requires_main_frame_match: true,
+    subtarget_raw_event_payloads_exposed: false,
+    raw_cdp_passthrough: false,
+    control_authority: false,
+    command_leasing: false,
+    authority_effect: false,
+  });
+}
+
+function emitEnvelope(row, method, params = {}, sessionId = null, extra = {}) {
+  row.lastEventAt = new Date().toISOString();
+  const envelope = Object.freeze({
+    schema: 'metaengine.browser.cdp-event.v1',
+    web_contents_id: row.id,
+    target_id: row.targetId,
+    attachment_generation: row.attachmentGeneration,
+    document_generation: row.documentGeneration,
+    binding_generation: row.bindingGeneration,
+    semantic_generation: row.semanticGeneration,
+    subtarget_generation: row.subtargetGeneration,
+    method: clip(method, 160),
+    params,
+    session_id: sessionId ? clip(sessionId, 160) : null,
+    root_session: !sessionId,
+    observed_at: row.lastEventAt,
+    ...extra,
+    authority_effect: false,
+  });
+  for (const subscriber of [...row.subscribers]) {
+    try { subscriber(envelope); } catch {}
+  }
+  return envelope;
+}
+
+function targetInfoProjection(info = {}) {
+  return Object.freeze({
+    target_id: clip(info?.targetId, 192) || null,
+    type: clip(info?.type, 80) || null,
+    subtype: clip(info?.subtype, 80) || null,
+    url: clip(info?.url, 1200) || null,
+    title: clip(info?.title, 240) || null,
+    opener_id: clip(info?.openerId, 192) || null,
+    browser_context_id: clip(info?.browserContextId, 192) || null,
+  });
+}
+
+function upsertSubtarget(row, targetInfo = {}, sessionId = null, parentSessionId = null) {
+  const info = targetInfoProjection(targetInfo);
+  const targetId = info.target_id;
+  if (!targetId || targetId === row.targetId) return null;
+  const now = new Date().toISOString();
+  const prior = row.subtargets.get(targetId) || null;
+  const parentSession = parentSessionId ? clip(parentSessionId, 160) : null;
+  const parentTargetId = parentSession ? row.subtargetBySession.get(parentSession) || null : null;
+  const next = {
+    targetId,
+    sessionId: sessionId ? clip(sessionId, 160) : (prior?.sessionId || null),
+    parentSessionId: parentSession || prior?.parentSessionId || null,
+    parentTargetId: parentTargetId || prior?.parentTargetId || null,
+    type: info.type || prior?.type || null,
+    subtype: info.subtype || prior?.subtype || null,
+    url: info.url || prior?.url || null,
+    title: info.title || prior?.title || null,
+    openerId: info.opener_id || prior?.openerId || null,
+    browserContextId: info.browser_context_id || prior?.browserContextId || null,
+    attached: Boolean(sessionId || prior?.attached),
+    nestedAutoAttach: prior?.nestedAutoAttach === true,
+    eventCount: Number(prior?.eventCount || 0),
+    lastMethod: prior?.lastMethod || null,
+    attachedAt: prior?.attachedAt || (sessionId ? now : null),
+    lastEventAt: now,
+  };
+  row.subtargets.set(targetId, next);
+  if (sessionId) row.subtargetBySession.set(String(sessionId), targetId);
+  row.subtargetGeneration += 1;
+  while (row.subtargets.size > MAX_SUBTARGETS) {
+    const oldestId = row.subtargets.keys().next().value;
+    const oldest = row.subtargets.get(oldestId);
+    if (oldest?.sessionId) row.subtargetBySession.delete(oldest.sessionId);
+    row.subtargets.delete(oldestId);
+    row.subtargetOverflowCount += 1;
+  }
+  return next;
+}
+
+function removeSubtarget(row, targetIdRaw = null, sessionIdRaw = null) {
+  const sessionId = sessionIdRaw ? String(sessionIdRaw) : null;
+  const targetId = targetIdRaw ? String(targetIdRaw) : (sessionId ? row.subtargetBySession.get(sessionId) || null : null);
+  if (!targetId) return null;
+  const existing = row.subtargets.get(targetId) || null;
+  if (!existing) {
+    if (sessionId) row.subtargetBySession.delete(sessionId);
+    return null;
+  }
+  if (existing.sessionId) row.subtargetBySession.delete(existing.sessionId);
+  row.subtargets.delete(targetId);
+  row.subtargetGeneration += 1;
+  return existing;
+}
+
+export class PersistentBrowserCdpSessionPool {
+  #rows = new Map();
+  #protocolVersion;
+
+  constructor({ protocolVersion = DEFAULT_PROTOCOL_VERSION } = {}) {
+    this.#protocolVersion = clip(protocolVersion || DEFAULT_PROTOCOL_VERSION, 16);
+  }
+
+  async #armAutoAttach(row, sessionId = null) {
+    try {
+      await row.dbg.sendCommand('Target.setAutoAttach', {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      }, sessionId || undefined);
+      if (!sessionId) {
+        row.targetAutoAttachEnabled = true;
+        row.targetAutoAttachLastError = null;
+      } else {
+        const targetId = row.subtargetBySession.get(String(sessionId));
+        const subtarget = targetId ? row.subtargets.get(targetId) : null;
+        if (subtarget) subtarget.nestedAutoAttach = true;
+      }
+      return true;
+    } catch (error) {
+      if (!sessionId) row.targetAutoAttachLastError = clip(error?.message || error, 300);
+      else row.subtargetNestedAutoAttachFailures += 1;
+      return false;
+    }
+  }
+
+  #row(webContents) {
+    if (!liveWebContents(webContents)) throw new Error('persistent_cdp_webcontents_unavailable');
+    const id = exactId(webContents);
+    const existing = this.#rows.get(id);
+    if (existing?.webContents === webContents) return existing;
+    if (existing) this.release(existing.webContents);
+
+    const dbg = webContents.debugger;
+    if (!dbg || typeof dbg.attach !== 'function' || typeof dbg.sendCommand !== 'function') {
+      throw new Error('persistent_cdp_debugger_unavailable');
+    }
+    const eventCapable = typeof dbg.on === 'function';
+
+    const row = {
+      id,
+      webContents,
+      dbg,
+      eventCapable,
+      targetId: targetIdOf(webContents),
+      mainFrameId: null,
+      mainFrameIdentityVersion: 0,
+      subscribers: new Set(),
+      ensurePromise: null,
+      ready: false,
+      attachedByPool: false,
+      attachmentGeneration: 0,
+      documentGeneration: 1,
+      bindingGeneration: 0,
+      semanticGeneration: 1,
+      subtargetGeneration: 0,
+      // D-L4 repair: bounded Runtime.enable re-seed bookkeeping.
+      runtimeReseedCount: 0,
+      runtimeReseedInFlight: false,
+      lastRuntimeReseedAt: null,
+      lastRuntimeReseedError: null,
+      // D-L4 v2: toggle-based execution-context recovery bookkeeping.
+      // Chromium's Runtime.enable is idempotent — re-invoking it on an
+      // already-enabled domain does NOT re-deliver executionContextCreated,
+      // so a context wiped by a document replacement never comes back via a
+      // plain re-enable. Only a bounded Runtime.disable -> Runtime.enable
+      // toggle forces V8 to report every live context again.
+      runtimeContextRecoveryCount: 0,
+      runtimeContextRecoveryInFlight: false,
+      lastRuntimeContextRecoveryAtMs: 0,
+      lastRuntimeContextRecoveryError: null,
+      subtargets: new Map(),
+      subtargetBySession: new Map(),
+      executionContexts: new Map(),
+      subtargetOverflowCount: 0,
+      subtargetNestedAutoAttachFailures: 0,
+      targetAutoAttachEnabled: false,
+      targetAutoAttachLastError: null,
+      attachedAt: null,
+      lastEventAt: null,
+      lastDetachReason: null,
+      lastError: null,
+      reattachScheduled: false,
+      messageHandler: null,
+      detachHandler: null,
+      destroyedHandler: null,
+    };
+
+    row.messageHandler = (_event, method, params = {}, sessionId = null) => {
+      const name = clip(method, 160);
+
+      if (!sessionId) {
+        if (name === 'DOM.documentUpdated') {
+          row.executionContexts.clear();
+          row.documentGeneration += 1;
+          row.bindingGeneration += 1;
+          row.semanticGeneration += 1;
+          // D-L4 repair: the document the DOM/Runtime agents were anchored to
+          // was replaced. Execution contexts are gone and, without a re-seed,
+          // no Runtime.executionContextCreated events ever arrive again, so
+          // semantic refs silently collapse to zero. Recovery is a bounded
+          // Runtime.enable + DOM.getDocument re-anchor — NEVER a navigation:
+          // a RELOAD here would re-enter auth redirects and destroy user
+          // state (see reload-auth-redirect-gate.mjs).
+          this.#scheduleDocumentRuntimeReseed(row);
+        } else if (name === 'Page.frameNavigated' && !params?.frame?.parentId) {
+          row.executionContexts.clear();
+          row.mainFrameIdentityVersion += 1;
+          row.mainFrameId = clip(params?.frame?.id, 192) || row.mainFrameId;
+          row.documentGeneration += 1;
+          row.bindingGeneration += 1;
+          row.semanticGeneration += 1;
+        } else if (
+          name === 'Page.navigatedWithinDocument'
+          && row.mainFrameId
+          && clip(params?.frameId, 192) === row.mainFrameId
+        ) {
+          // Same-document navigation changes operator-visible page identity but
+          // retains the committed loader/runtime binding. Advance only the
+          // document revision fence so stale observations cannot survive history
+          // API or fragment navigation without inventing a new binding authority.
+          row.documentGeneration += 1;
+          row.semanticGeneration += 1;
+        } else if (
+          name === 'Accessibility.nodesUpdated'
+          || name === 'DOM.childNodeInserted'
+          || name === 'DOM.childNodeRemoved'
+          || name === 'DOM.attributeModified'
+          || name === 'DOM.attributeRemoved'
+          || name === 'DOM.characterDataModified'
+        ) {
+          row.semanticGeneration += 1;
+        } else if (name === 'Runtime.executionContextCreated') {
+          const contextId = Number(params?.context?.id);
+          const uniqueId = clip(params?.context?.uniqueId, 240) || null;
+          const frameId = clip(params?.context?.auxData?.frameId, 192) || null;
+          const isDefault = params?.context?.auxData?.isDefault === true;
+          if (Number.isSafeInteger(contextId) && contextId > 0 && uniqueId && frameId) {
+            row.executionContexts.set(contextId, { contextId, uniqueId, frameId, isDefault });
+          }
+        } else if (name === 'Runtime.executionContextDestroyed') {
+          const contextId = Number(params?.executionContextId);
+          const uniqueId = clip(params?.executionContextUniqueId, 240) || null;
+          if (Number.isSafeInteger(contextId) && contextId > 0) row.executionContexts.delete(contextId);
+          if (uniqueId) {
+            for (const [id, context] of row.executionContexts) {
+              if (context.uniqueId === uniqueId) row.executionContexts.delete(id);
+            }
+          }
+        } else if (name === 'Runtime.executionContextsCleared') {
+          row.executionContexts.clear();
+        }
+      }
+
+      if (name === 'Target.attachedToTarget') {
+        const attachedSessionId = clip(params?.sessionId, 160);
+        const subtarget = upsertSubtarget(row, params?.targetInfo || {}, attachedSessionId || null, sessionId || null);
+        if (subtarget) {
+          emitEnvelope(row, 'METAENGINE.SubtargetAttached', subtargetProjection(subtarget), attachedSessionId || null, {
+            subtarget_event: true,
+            subtarget_target_id: subtarget.targetId,
+            parent_session_id: sessionId ? clip(sessionId, 160) : null,
+          });
+          if (attachedSessionId) void this.#armAutoAttach(row, attachedSessionId);
+        }
+        return;
+      }
+
+      if (name === 'Target.detachedFromTarget') {
+        const detachedSessionId = clip(params?.sessionId, 160);
+        const targetId = clip(params?.targetId, 192) || row.subtargetBySession.get(detachedSessionId) || null;
+        const prior = removeSubtarget(row, targetId, detachedSessionId);
+        emitEnvelope(row, 'METAENGINE.SubtargetDetached', {
+          target_id: targetId,
+          type: prior?.type || null,
+          reason: clip(params?.reason, 160) || null,
+          raw_event_payload_exposed: false,
+        }, detachedSessionId || null, {
+          subtarget_event: true,
+          subtarget_target_id: targetId,
+          parent_session_id: sessionId ? clip(sessionId, 160) : null,
+        });
+        return;
+      }
+
+      if (name === 'Target.targetCrashed' || (sessionId && name === 'Inspector.targetCrashed')) {
+        const targetId = clip(params?.targetId, 192)
+          || (sessionId ? row.subtargetBySession.get(String(sessionId)) || null : null);
+        const prior = removeSubtarget(row, targetId, sessionId || null);
+        emitEnvelope(row, 'METAENGINE.SubtargetCrashed', {
+          target_id: targetId,
+          type: prior?.type || null,
+          status: clip(params?.status, 120) || null,
+          error_code: Number.isFinite(Number(params?.errorCode)) ? Number(params.errorCode) : null,
+          raw_event_payload_exposed: false,
+        }, sessionId || null, {
+          subtarget_event: true,
+          subtarget_target_id: targetId,
+        });
+        return;
+      }
+
+      if (sessionId) {
+        const targetId = row.subtargetBySession.get(String(sessionId)) || null;
+        const subtarget = targetId ? row.subtargets.get(targetId) : null;
+        if (subtarget) {
+          subtarget.eventCount += 1;
+          subtarget.lastMethod = name;
+          subtarget.lastEventAt = new Date().toISOString();
+        }
+        // Subtarget payloads are intentionally not replayed into the root semantic
+        // state. Their lifecycle/identity is represented by bounded attach, detach
+        // and crash envelopes. This prevents worker/iframe DOM events from
+        // invalidating the root generation fence or flooding cognition.
+        return;
+      }
+
+      emitEnvelope(row, name, params, null);
+    };
+
+    row.detachHandler = (_event, reason) => {
+      row.ready = false;
+      row.attachedByPool = false;
+      row.bindingGeneration += 1;
+      row.mainFrameIdentityVersion += 1;
+      row.mainFrameId = null;
+      row.executionContexts.clear();
+      row.subtargets.clear();
+      row.subtargetBySession.clear();
+      row.subtargetGeneration += 1;
+      row.targetAutoAttachEnabled = false;
+      row.lastDetachReason = clip(reason || 'UNKNOWN', 160);
+      emitEnvelope(row, 'METAENGINE.DebuggerDetached', { reason: row.lastDetachReason });
+      this.#scheduleOneReattach(row);
+    };
+
+    row.destroyedHandler = () => { this.release(webContents); };
+    if (eventCapable) {
+      dbg.on('message', row.messageHandler);
+      dbg.on('detach', row.detachHandler);
+    }
+    webContents.once?.('destroyed', row.destroyedHandler);
+    this.#rows.set(id, row);
+    return row;
+  }
+
+  #scheduleOneReattach(row) {
+    if (row.reattachScheduled || !liveWebContents(row.webContents)) return;
+    row.reattachScheduled = true;
+    setImmediate(() => {
+      row.reattachScheduled = false;
+      if (!liveWebContents(row.webContents) || !this.#rows.has(row.id)) return;
+      void this.ensure(row.webContents).catch(() => {});
+    });
+  }
+
+  // D-L4 repair: bounded, single-flight, navigation-free recovery for the
+  // document-replaced event. One attempt, no retries, each CDP call wrapped in
+  // a JS-side deadline so a hung debugger transport cannot wedge the pool.
+  // Runtime.enable re-delivers executionContextCreated for the new document
+  // (restoring semantic refs without a reload); DOM.getDocument re-anchors
+  // the DOM agent exactly like #initialize does.
+  #scheduleDocumentRuntimeReseed(row) {
+    if (!row.eventCapable || row.runtimeReseedInFlight) return;
+    row.runtimeReseedInFlight = true;
+    setImmediate(() => {
+      row.runtimeReseedInFlight = false;
+      if (!liveWebContents(row.webContents) || !this.#rows.has(row.id)) return;
+      if (row.dbg.isAttached?.() !== true) return;
+      const bounded = (promise) => Promise.race([
+        Promise.resolve(promise).catch((error) => { throw error; }),
+        new Promise((resolve) => { const timer = setTimeout(() => resolve(null), RUNTIME_RESEED_TIMEOUT_MS); timer.unref?.(); }),
+      ]);
+      void Promise.resolve()
+        .then(() => bounded(Promise.resolve(row.dbg.sendCommand('Runtime.disable')).catch(() => null)))
+        .then(() => bounded(row.dbg.sendCommand('Runtime.enable')))
+        .then(() => bounded(row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true })))
+        .then(() => {
+          row.runtimeReseedCount += 1;
+          row.lastRuntimeReseedAt = new Date().toISOString();
+          row.lastRuntimeReseedError = null;
+        })
+        .catch((error) => {
+          row.lastRuntimeReseedError = clip(error?.message || error, 300);
+        });
+    });
+  }
+
+  // D-L4 v2: bounded, single-flight, rate-limited recovery of the main
+  // execution-context binding. Invoked by the perception path when the
+  // runtime identity is otherwise complete but the context unique id is
+  // missing (the signature of a post-attach document replacement). Uses the
+  // disable -> enable toggle — the ONLY reliable way to force V8 to report
+  // pre-existing contexts — and never touches navigation or page state.
+  async recoverExecutionContextBinding(webContents) {
+    if (!liveWebContents(webContents)) return null;
+    let row = null;
+    try {
+      row = this.#rows.get(exactId(webContents));
+    } catch {
+      return null;
+    }
+    if (!row || row.webContents !== webContents) return null;
+    if (row.ready !== true || row.dbg.isAttached?.() !== true || !row.eventCapable) return null;
+    const current = rowProjection(row);
+    if (current.main_execution_context_unique_id) return current;
+    if (row.runtimeContextRecoveryInFlight) return null;
+    const now = Date.now();
+    if (now - row.lastRuntimeContextRecoveryAtMs < RUNTIME_CONTEXT_RECOVERY_MIN_INTERVAL_MS) return null;
+    row.runtimeContextRecoveryInFlight = true;
+    row.lastRuntimeContextRecoveryAtMs = now;
+    try {
+      const bounded = (promise) => Promise.race([
+        Promise.resolve(promise),
+        new Promise((resolve) => { const timer = setTimeout(() => resolve(null), RUNTIME_RESEED_TIMEOUT_MS); timer.unref?.(); }),
+      ]);
+      await bounded(Promise.resolve(row.dbg.sendCommand('Runtime.disable')).catch(() => null));
+      await bounded(row.dbg.sendCommand('Runtime.enable'));
+      // Give protocol events a settle tick so executionContextCreated lands
+      // before the caller re-reads the binding identity.
+      await new Promise((resolve) => { const timer = setTimeout(resolve, RUNTIME_CONTEXT_RECOVERY_SETTLE_MS); timer.unref?.(); });
+      row.runtimeContextRecoveryCount += 1;
+      row.lastRuntimeContextRecoveryError = null;
+      const after = rowProjection(row);
+      // Report success only when the binding actually healed; otherwise the
+      // caller treats this attempt as exhausted (rate limit applies).
+      return after.main_execution_context_unique_id ? after : null;
+    } catch (error) {
+      row.lastRuntimeContextRecoveryError = clip(error?.message || error, 300);
+      return null;
+    } finally {
+      row.runtimeContextRecoveryInFlight = false;
+    }
+  }
+
+  #seedMainFrameIdentity(row) {
+    const identityVersion = row.mainFrameIdentityVersion;
+    void Promise.resolve()
+      .then(() => row.dbg.sendCommand('Page.getFrameTree'))
+      .then((frameTree) => {
+        if (this.#rows.get(row.id) !== row) return;
+        if (!liveWebContents(row.webContents) || row.dbg.isAttached?.() !== true) return;
+        if (row.mainFrameIdentityVersion !== identityVersion) return;
+        const mainFrameId = clip(frameTree?.frameTree?.frame?.id, 192) || null;
+        if (mainFrameId) row.mainFrameId = mainFrameId;
+      })
+      .catch(() => {});
+  }
+
+  async #initialize(row) {
+    if (!liveWebContents(row.webContents)) throw new Error('persistent_cdp_webcontents_unavailable');
+    if (!row.dbg.isAttached()) {
+      row.dbg.attach(this.#protocolVersion);
+      row.attachedByPool = true;
+    }
+
+    if (row.eventCapable) {
+      await row.dbg.sendCommand('Page.enable');
+      this.#seedMainFrameIdentity(row);
+      await row.dbg.sendCommand('DOM.enable');
+      await row.dbg.sendCommand('Accessibility.enable');
+      await row.dbg.sendCommand('Runtime.enable');
+      await row.dbg.sendCommand('Page.setLifecycleEventsEnabled', { enabled: true });
+      await row.dbg.sendCommand('Network.enable').catch(() => null);
+      await row.dbg.sendCommand('DOM.getDocument', { depth: 1, pierce: true }).catch(() => null);
+      await this.#armAutoAttach(row);
+    }
+
+    row.targetId = targetIdOf(row.webContents);
+    row.ready = true;
+    row.attachmentGeneration += 1;
+    row.bindingGeneration += 1;
+    row.attachedAt = new Date().toISOString();
+    row.lastDetachReason = null;
+    row.lastError = null;
+    return rowProjection(row);
+  }
+
+  async ensure(webContents) {
+    const row = this.#row(webContents);
+    if (row.ready && row.dbg.isAttached()) return rowProjection(row);
+    if (row.ensurePromise) return row.ensurePromise;
+    row.ensurePromise = this.#initialize(row)
+      .catch((error) => {
+        row.ready = false;
+        row.lastError = clip(error?.message || error, 300);
+        throw error;
+      })
+      .finally(() => { row.ensurePromise = null; });
+    return row.ensurePromise;
+  }
+
+  identity(webContents, { require_ready = true, require_event_stream = true } = {}) {
+    if (!liveWebContents(webContents)) return null;
+    let id;
+    try { id = exactId(webContents); } catch { return null; }
+    const row = this.#rows.get(id);
+    if (!row || row.webContents !== webContents) return null;
+    const projection = rowProjection(row);
+    if (require_ready && (projection.ready !== true || projection.attached !== true)) return null;
+    if (require_event_stream && projection.event_stream_capable !== true) return null;
+    return projection;
+  }
+
+  subscribe(webContents, listener) {
+    if (typeof listener !== 'function') throw new Error('persistent_cdp_listener_required');
+    const row = this.#row(webContents);
+    // Real Electron debugger sessions expose the CDP message stream. Lightweight
+    // local/test shims may not. They can still subscribe so a successful physical
+    // Input dispatch can produce one synthetic post-dispatch readback edge below;
+    // no polling timer or repeated inspection loop is introduced.
+    row.subscribers.add(listener);
+    return () => { row.subscribers.delete(listener); };
+  }
+
+  async send(webContents, method, params = {}, sessionId = null) {
+    const name = clip(method, 160);
+    if (!name || !/^[A-Za-z][A-Za-z0-9_.]+$/.test(name)) throw new Error('persistent_cdp_method_invalid');
+    const row = this.#row(webContents);
+    await this.ensure(webContents);
+    try {
+      const result = await row.dbg.sendCommand(name, params ?? {}, sessionId || undefined);
+      if (
+        !row.eventCapable
+        && name === 'Input.dispatchKeyEvent'
+        && String(params?.type || '') === 'keyUp'
+        && String(params?.key || '') === 'Enter'
+        && row.subscribers.size > 0
+      ) {
+        emitEnvelope(row, 'METAENGINE.PostDispatch', {
+          source_method: name,
+          event_stream_capable: false,
+        }, null, {
+          synthetic_post_dispatch: true,
+        });
+      }
+      return result;
+    } catch (error) {
+      row.lastError = clip(error?.message || error, 300);
+      row.ready = row.dbg.isAttached() === true;
+      throw error;
+    }
+  }
+
+  release(webContents) {
+    if (!webContents || typeof webContents !== 'object') return false;
+    let id;
+    try { id = exactId(webContents); } catch { return false; }
+    const row = this.#rows.get(id);
+    if (!row || row.webContents !== webContents) return false;
+    this.#rows.delete(id);
+    row.subscribers.clear();
+    row.subtargets.clear();
+    row.subtargetBySession.clear();
+    try { row.dbg.off?.('message', row.messageHandler); } catch {}
+    try { row.dbg.off?.('detach', row.detachHandler); } catch {}
+    try { webContents.off?.('destroyed', row.destroyedHandler); } catch {}
+    if (row.attachedByPool && row.dbg.isAttached?.()) {
+      try { row.dbg.detach(); } catch {}
+    }
+    row.ready = false;
+    return true;
+  }
+
+  snapshot() {
+    const sessions = [...this.#rows.values()].map(rowProjection);
+    return Object.freeze({
+      schema: BROWSER_PERSISTENT_CDP_SESSION_SCHEMA,
+      session_count: sessions.length,
+      ready_count: sessions.filter((row) => row.ready).length,
+      attached_count: sessions.filter((row) => row.attached).length,
+      event_stream_count: sessions.filter((row) => row.event_stream_capable).length,
+      subtarget_count: sessions.reduce((sum, row) => sum + Number(row.subtarget_count || 0), 0),
+      attached_subtarget_count: sessions.reduce((sum, row) => sum + Number(row.attached_subtarget_count || 0), 0),
+      sessions,
+      attach_per_command: false,
+      persistent_transport: true,
+      binding_generation_event_driven: true,
+      document_generation_event_driven: true,
+      related_chromium_subtargets_event_driven: true,
+      subtarget_auto_attach_flatten: true,
+      subtarget_wait_for_debugger_on_start: false,
+      root_document_generation_ignores_subtarget_sessions: true,
+      same_document_revision_requires_main_frame_match: true,
+      eventless_post_dispatch_polling_required: false,
+      raw_cdp_passthrough: false,
+      control_authority: false,
+      command_leasing: false,
+      second_scheduler: false,
+      authority_effect: false,
+    });
+  }
+}
+
+export const nativeBrowserCdpPool = new PersistentBrowserCdpSessionPool();
+
+export async function withPersistentBrowserDebugger(webContents, fn) {
+  if (typeof fn !== 'function') throw new Error('persistent_cdp_callback_required');
+  await nativeBrowserCdpPool.ensure(webContents);
+  const adapter = Object.freeze({
+    sendCommand: (method, params = {}, sessionId = null) => nativeBrowserCdpPool.send(webContents, method, params, sessionId),
+    bindingIdentity: () => nativeBrowserCdpPool.identity(webContents, { require_ready: true, require_event_stream: true }),
+  });
+  return fn(adapter);
+}
+
+// D-L4 v2: best-effort, bounded execution-context binding recovery for the
+// perception path. Never throws — a failed recovery simply leaves semantic
+// refs unissued (fail-closed) instead of failing the whole capture.
+export async function recoverNativeExecutionContextBinding(webContents) {
+  try {
+    return await nativeBrowserCdpPool.recoverExecutionContextBinding(webContents);
+  } catch {
+    return null;
+  }
+}
+
+export async function persistentBrowserDebuggerBinding(webContents) {
+  await nativeBrowserCdpPool.ensure(webContents);
+  const identity = nativeBrowserCdpPool.identity(webContents, { require_ready: true, require_event_stream: true });
+  if (!identity) throw new Error('persistent_cdp_binding_identity_unavailable');
+  return identity;
+}
+
+export function releasePersistentBrowserDebugger(webContents) {
+  return nativeBrowserCdpPool.release(webContents);
+}

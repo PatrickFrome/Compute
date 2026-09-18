@@ -1,0 +1,72 @@
+name: METAENGINE Browser Guardian Owner Enrollment Runtime V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-store.*'
+      - 'apps/metaengine-browser/test/native/browser-guardian-owner-enrollment-store-runtime-probe.cpp'
+      - 'apps/metaengine-browser/test/browser-guardian-owner-enrollment-store-runtime.ps1'
+      - '.github/workflows/browser-guardian-owner-enrollment-runtime-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-owner-enrollment-runtime:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Compile exact-head durable-store runtime probe
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
+
+          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $store = Join-Path $sourceDir 'browser-guardian-owner-enrollment-store.cpp'
+          $probeSource = (Resolve-Path 'apps/metaengine-browser/test/native/browser-guardian-owner-enrollment-store-runtime-probe.cpp').Path
+          $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-owner-enrollment-runtime'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $probeExe = Join-Path $outDir 'METAENGINEBrowserGuardianOwnerEnrollmentRuntimeProbe.exe'
+
+          $compileCmd = 'call "{0}" >nul && cd /d "{1}" && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{2}" "{3}" "{4}" /Fe:"{5}" /link advapi32.lib shell32.lib ole32.lib' -f $vcvars, $outDir, $sourceDir, $store, $probeSource, $probeExe
+          & $env:ComSpec /d /s /c $compileCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_store_runtime_compile_exit_$LASTEXITCODE" }
+          if (-not (Test-Path $probeExe)) { throw 'guardian_owner_store_runtime_probe_missing' }
+          "OWNER_ENROLLMENT_RUNTIME_PROBE=$probeExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Exercise durable-store ACL, corruption, idempotence, and race semantics
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./apps/metaengine-browser/test/browser-guardian-owner-enrollment-store-runtime.ps1 -ProbeExe $env:OWNER_ENROLLMENT_RUNTIME_PROBE
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"

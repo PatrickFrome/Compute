@@ -1,0 +1,122 @@
+name: A2 Browser Operator v0.6.3 Supervisor
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-operator-v063-supervisor*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supervisor-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: JavaScript syntax
+        run: |
+          for f in coordination/chat-control-plane/extension/*.js; do node --check "$f"; done
+          for f in tests/a2_v060_*.mjs tests/a2_v063_*.mjs; do node --check "$f"; done
+
+      - name: v0.6.3 supervisor failure injection
+        run: |
+          node tests/a2_v063_supervisor_session_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v063_snapshot_ingress_lab.mjs
+          node tests/a2_v063_supervisor_chat_session_lab.mjs
+          node tests/a2_v063_trusted_supervisor_chat_lab.mjs
+          node tests/a2_v063_supervisor_incident_lab.mjs
+          node tests/a2_v063_supervisor_chat_action_lab.mjs
+          node tests/a2_v063_supervisor_device_transport_lab.mjs
+          node tests/a2_v063_supervisor_device_edge_contract_lab.mjs
+
+      - name: Existing Browser Operator regression labs
+        run: |
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_operator_control_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_v060_operator_actions_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_update_manager_lab.mjs
+          node tests/a2_v060_compat_config_lab.mjs
+          node tests/a2_v060_supervisor_control_lab.mjs
+          node tests/a2_v060_sidepanel_board_lab.mjs
+          node tests/a2_v060_pairing_epoch_lab.mjs
+
+      - name: Python contracts
+        run: |
+          python3 -m unittest -v tests.test_a2_browser_operator_v060_p0
+          python3 -m unittest -v tests.test_a2_browser_operator_v060_debugger_integration
+
+      - name: MV3 pack smoke
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/coordination/chat-control-plane/extension"
+          test -s coordination/chat-control-plane/extension.crx
+
+      - name: Build reproducible install bundle
+        run: |
+          rm -rf dist/a2-browser-operator-v0.6.3
+          mkdir -p dist/a2-browser-operator-v0.6.3
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path('coordination/chat-control-plane/extension')
+          out = Path('dist/a2-browser-operator-v0.6.3/METAENGINE_A2_Browser_Operator_v0.6.3.zip')
+          fixed = (1980, 1, 1, 0, 0, 0)
+          with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+              for path in sorted(p for p in root.rglob('*') if p.is_file()):
+                  rel = path.relative_to(root).as_posix()
+                  info = zipfile.ZipInfo(rel, fixed)
+                  info.compress_type = zipfile.ZIP_DEFLATED
+                  info.external_attr = (0o644 & 0xFFFF) << 16
+                  zf.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+          PY
+          cp coordination/chat-control-plane/extension.crx dist/a2-browser-operator-v0.6.3/METAENGINE_A2_Browser_Operator_v0.6.3.crx
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-browser-operator-v0.6.3/GIT_COMMIT
+          (cd dist/a2-browser-operator-v0.6.3 && sha256sum METAENGINE_A2_Browser_Operator_v0.6.3.zip METAENGINE_A2_Browser_Operator_v0.6.3.crx > SHA256SUMS)
+          unzip -t dist/a2-browser-operator-v0.6.3/METAENGINE_A2_Browser_Operator_v0.6.3.zip
+          test "$(unzip -p dist/a2-browser-operator-v0.6.3/METAENGINE_A2_Browser_Operator_v0.6.3.zip manifest.json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "0.6.3"
+
+      - name: Assert active v0.6.3 entrypoint
+        run: |
+          node -e 'const m=require("./coordination/chat-control-plane/extension/manifest.json"); if(m.version!=="0.6.3") process.exit(1); if(Number(m.minimum_chrome_version)<120) process.exit(2)'
+          grep -F 'METAENGINE A2 Browser Operator 0.6.3' coordination/chat-control-plane/extension/manifest.json
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-device-transport-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./background-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063-authority\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-chat-session-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./trusted-supervisor-chat-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-chat-action-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-chat-action-monitor-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -E '^[[:space:]]*importScripts\("\./supervisor-incident-router-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          grep -F '0.6.3-supervisor-authority-dev.2' coordination/chat-control-plane/extension/runtime-marker-v063.js
+          grep -F 'a2-browser-supervisor-v3-canary' coordination/chat-control-plane/extension/supervisor-client-v063-authority.js
+          grep -F 'a2-browser-supervisor-v4-canary' coordination/chat-control-plane/extension/supervisor-device-transport-v063.js
+          grep -F 'DEVICE_SIGNED_NO_BEARER_FALLBACK' coordination/chat-control-plane/extension/supervisor-device-transport-v063.js
+          grep -F 'SET_SUPERVISOR_MODE' coordination/chat-control-plane/extension/supervisor-client-v063-authority.js
+          grep -F 'A2_SUPERVISOR_CHAT_RECOVER' coordination/chat-control-plane/extension/supervisor-chat-session-v063.js
+          grep -F 'A2_SUPERVISOR_CHAT_SEND_INCIDENT' coordination/chat-control-plane/extension/trusted-supervisor-chat-v063.js
+          grep -F 'A2_SUPERVISOR_CHAT_PROCESS_RESPONSE' coordination/chat-control-plane/extension/supervisor-chat-action-v063.js
+          grep -F 'A2_SUPERVISOR_CHAT_MAYBE_PROCESS_ACTION' coordination/chat-control-plane/extension/supervisor-chat-action-monitor-v063.js
+          grep -F 'A2_SUPERVISOR_ESCALATE_ERROR' coordination/chat-control-plane/extension/supervisor-incident-router-v063.js
+          ! grep -E '^[[:space:]]*importScripts\("\./background\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+          ! grep -E '^[[:space:]]*importScripts\("\./supervisor-client-v063\.js"\);' coordination/chat-control-plane/extension/background-entry.js
+
+      - name: Upload install evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: a2-browser-operator-v0.6.3-${{ github.sha }}
+          path: dist/a2-browser-operator-v0.6.3/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

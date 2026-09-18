@@ -1,0 +1,94 @@
+name: A2 Compute Browser R4 Semantic Perception
+
+on:
+  push:
+    branches:
+      - 'work/a2-compute-browser-r4-semantic-perception*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  semantic-perception-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Static, shared-blob, and protocol contracts
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1)'
+          find src tests -type f -name '*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --check ../browser-shared/semantic-perception-compiler.mjs
+          node --test tests/*.test.mjs
+          test "$(git hash-object ../browser-shared/semantic-perception-compiler.mjs)" = "59418a8db529a2b723ea4f51b2389b6b80ef9357"
+          grep -q '"target.semantic_snapshot"' protocol-v1.json
+          grep -q '"page_script_evaluation": false' protocol-v1.json
+          ! grep -R -n -E 'Runtime\.evaluate|Runtime\.enable|document\.body|innerText|cookie|authorization_header|storage_state' src/semantic-capture-adapter.mjs ../browser-shared/semantic-perception-compiler.mjs
+          ! grep -R -n -E -- '--remote-debugging-port|--remote-debugging-address|/json/version' src/chrome-process.mjs src/cdp-pipe-client.mjs
+
+      - name: Real Chromium native-pipe semantic smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-r4"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json"
+          grep -q '"semantic_perception_verified":true' "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json"
+          grep -q '"semantic_structural_rebind_verified":true' "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json"
+          grep -q '"semantic_page_script_evaluation":false' "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json"
+          grep -q '"devtools_tcp_exposed":false' "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json"
+
+      - name: Assert durable state contains no semantic raw secrets or physical snapshot cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -d "$RUNNER_TEMP/a2-compute-browser-r4"; then
+            ! grep -R -n -E 'IGNORE PREVIOUS INSTRUCTIONS|cdp_session_id|backend_dom_node_id|ax_node_id|authorization_header|storage_state' "$RUNNER_TEMP/a2-compute-browser-r4" 2>/dev/null
+          fi
+
+      - name: Build deterministic R4 adapter evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          mkdir -p dist/a2-compute-browser-r4
+          cp "$RUNNER_TEMP/a2-compute-browser-r4-self-test.json" dist/a2-compute-browser-r4/SELF_TEST.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-compute-browser-r4/SOURCE_COMMIT.txt
+          printf '%s\n' '59418a8db529a2b723ea4f51b2389b6b80ef9357' > dist/a2-compute-browser-r4/SHARED_COMPILER_BLOB.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-compute-browser-r4/A2_COMPUTE_BROWSER_R4_SEMANTIC_PERCEPTION.tar \
+            coordination/browser-compute coordination/browser-shared/semantic-perception-compiler.mjs research/A2_SEMANTIC_PERCEPTION_R4_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-compute-browser-r4/A2_COMPUTE_BROWSER_R4_SEMANTIC_PERCEPTION.tar > dist/a2-compute-browser-r4/SHA256SUMS.txt
+
+      - name: Attest R4 adapter provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-compute-browser-r4/A2_COMPUTE_BROWSER_R4_SEMANTIC_PERCEPTION.tar
+
+      - name: Upload R4 adapter evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-compute-browser-r4-semantic-${{ github.sha }}
+          path: dist/a2-compute-browser-r4/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

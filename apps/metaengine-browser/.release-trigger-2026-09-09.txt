@@ -1,0 +1,4 @@
+METAENGINE Browser trusted dev release trigger
+Parent qualified candidate: 4df132c410f31f8c3fb93895f2ccfbefc1e9a8c5
+Purpose: trigger exact fast physical E2E and verified publisher on the sanctioned work/self-update-fast-loop-v1 lane.
+No runtime, authority, receipt, journal, installer, or recovery semantics are changed by this marker.

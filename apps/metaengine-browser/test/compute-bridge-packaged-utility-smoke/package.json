@@ -1,0 +1,5 @@
+{
+  "name": "metaengine-compute-packaged-utility-smoke",
+  "private": true,
+  "main": "main.cjs"
+}

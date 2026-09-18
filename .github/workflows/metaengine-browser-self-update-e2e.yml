@@ -1,0 +1,175 @@
+name: METAENGINE Browser Self Update E2E
+
+on:
+  push:
+    branches:
+      - work/self-update-finalization-v1
+      - release/self-update-ambiguity-live-v2
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/**'
+      - '.github/workflows/metaengine-browser-self-update-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: metaengine-browser-self-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Parse and contract gates
+        working-directory: apps/metaengine-browser
+        run: |
+          npm run check
+          npm test
+      - name: Static update invariants
+        run: |
+          grep -q 'requestSingleInstanceLock' apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q 'com.metaengine.browser.test' apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q 'installer_shutdown_control' apps/metaengine-browser/src/single-instance-guard.mjs
+          grep -q 'planned_shutdown_signal_exit_' apps/metaengine-browser/test/installer-resident-upgrade-physical.ps1
+          grep -q 'reported-broken-resident-baseline' apps/metaengine-browser/test/installer-resident-upgrade-physical.ps1
+          grep -q '"allowToChangeInstallationDirectory": false' apps/metaengine-browser/electron-builder.test.json
+          grep -q '"beforePack": "./scripts/electron-builder-before-pack.cjs"' apps/metaengine-browser/electron-builder.test.json
+          grep -q 'guardian-native' apps/metaengine-browser/electron-builder.test.json
+          grep -q 'service_activation_authorized = \$false' apps/metaengine-browser/scripts/build-guardian-native-staging.ps1
+          grep -q 'guardian_native_staging_verified' apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1
+          grep -q 'self_update_test_feed_not_allowed' apps/metaengine-browser/src/self-update-runtime.mjs
+          grep -q 'persistUpdatedSuccessorReceipt' apps/metaengine-browser/src/main-entry.mjs
+          grep -q 'SUCCESSOR_STARTUP_PROBE_ONLY' apps/metaengine-browser/src/self-update-smoke.mjs
+          grep -q 'pre_install_receipt_sha256' apps/metaengine-browser/src/self-update-handoff.mjs
+          grep -q 'published_baseline_reused=PASS' apps/metaengine-browser/test/self-update-fast-physical.ps1
+          grep -q 'target_build_count=1' apps/metaengine-browser/test/self-update-fast-physical.ps1
+          grep -q 'automatic_retry_allowed = \$false' apps/metaengine-browser/test/self-update-fast-physical-ci.ps1
+          grep -q 'self-update-diagnostic-failure.json' apps/metaengine-browser/test/self-update-fast-physical-ci.ps1
+          ! grep -q 'NEON' apps/metaengine-browser/src/self-update-runtime.mjs
+
+  windows-published-n-to-one-build-target:
+    needs: contract
+    runs-on: windows-2022
+    timeout-minutes: 46
+    env:
+      GITHUB_ACTIONS: 'true'
+      METAENGINE_SELF_UPDATE_TEST_MODE: '1'
+      METAENGINE_DISABLE_CRASH_SENTINEL: '1'
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prove exact candidate head
+        shell: powershell
+        run: |
+          $expected = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) { throw "candidate_head_mismatch:${actual}:${expected}" }
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install physical-test dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund
+      - name: Bind physical harness to live 0.7.0 line and exact run identity
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $raw = Get-Content './test/self-update-fast-physical.ps1' -Raw
+          $raw = $raw.Replace('0.6.3', '0.7.0')
+          $raw = $raw.Replace('0\.6\.3', '0\.7\.0')
+          if ($raw.Contains('0.6.3') -or $raw.Contains('0\.6\.3')) { throw 'legacy_release_core_rewrite_incomplete' }
+          if ($raw -notmatch "currentVersion: '0\.7\.0-dev\.0\.1'") { throw 'published_070_baseline_resolver_missing' }
+          $pattern = '(?ms)# Build exactly one new target\..*?npm pkg set version=\$target'
+          $replacement = @'
+          # Build exactly one target from the exact PR head. The immutable Actions
+          # run identity keeps the candidate monotonic without editing source version.
+          $target = "0.7.0-dev.$env:GITHUB_RUN_ID.1"
+          if ($target -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "target_version_invalid:$target" }
+          npm pkg set version=$target
+          '@
+          $replacementLiteral = $replacement.Replace('$', '$$')
+          $next = [regex]::Replace($raw, $pattern, $replacementLiteral, 1)
+          if ($next -eq $raw) { throw 'physical_target_patch_not_applied' }
+          if ($next -notmatch 'GITHUB_RUN_ID') { throw 'physical_target_run_identity_lost' }
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'test/self-update-fast-physical.ps1'), $next, [System.Text.UTF8Encoding]::new($false))
+      - name: Published baseline to one-built exact candidate
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          METAENGINE_GITHUB_API_TOKEN: ${{ github.token }}
+        run: ./test/self-update-fast-physical-ci.ps1
+      - name: Prove installed Guardian staging after physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          ./scripts/verify-installed-guardian-native-staging.ps1 `
+            -ExpectedSourceHead '${{ github.event.pull_request.head.sha || github.sha }}' `
+            -EvidenceDir './self-update-fast-evidence'
+      - name: Prove exact physical evidence contract
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $manifestPath = './self-update-fast-evidence/verified-self-update-manifest.json'
+          if (-not (Test-Path $manifestPath)) { throw 'verified_self_update_manifest_missing' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          if ([string]$manifest.git_sha -ne $expectedHead) { throw "physical_evidence_head_mismatch:$($manifest.git_sha):${expectedHead}" }
+          if ([string]$manifest.version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw "physical_evidence_version_not_070:$($manifest.version)" }
+          if ($manifest.physical_n_to_n_plus_1 -ne $true) { throw 'physical_update_not_proven' }
+          if ($manifest.durable_successor_binding -ne $true) { throw 'durable_successor_not_proven' }
+          if ($manifest.profile_continuity -ne $true -or $manifest.physical_singleton -ne $true) { throw 'continuity_or_singleton_not_proven' }
+          if ($manifest.published_baseline_reused -ne $true) { throw 'published_baseline_reuse_not_proven' }
+          if ([int]$manifest.target_build_count -ne 1) { throw 'target_build_count_invalid' }
+          if ($manifest.guardian_native_staging_present -ne $true -or $manifest.guardian_native_staging_verified -ne $true) { throw 'guardian_native_staging_not_proven' }
+          if ($manifest.guardian_native_no_activation -ne $true -or $manifest.guardian_native_requires_machine_secure_copy -ne $true) { throw 'guardian_native_activation_boundary_invalid' }
+          if ([string]$manifest.guardian_native_manifest_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'guardian_native_manifest_digest_invalid' }
+          $guardianEvidence = './self-update-fast-evidence/guardian-native-staging-manifest.json'
+          if (-not (Test-Path $guardianEvidence -PathType Leaf)) { throw 'guardian_native_evidence_manifest_missing' }
+          $actualGuardianSha = (Get-FileHash $guardianEvidence -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualGuardianSha -ne [string]$manifest.guardian_native_manifest_sha256) { throw 'guardian_native_evidence_digest_mismatch' }
+      - name: Reproduce reported resident installer upgrade with real Sentinel
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: ./test/installer-resident-upgrade-physical.ps1
+      - name: Seal resident installer upgrade evidence
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $proofPath = Join-Path $env:RUNNER_TEMP 'installer-resident-upgrade-proof.json'
+          if (-not (Test-Path $proofPath -PathType Leaf)) { throw 'installer_resident_upgrade_proof_missing' }
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          if ([string]$proof.schema -ne 'metaengine.browser.installer-resident-upgrade-proof.v1') { throw 'installer_resident_upgrade_schema_invalid' }
+          if ([string]$proof.legacy_version -ne '0.7.0-dev.34759310781.1') { throw 'installer_resident_upgrade_legacy_binding_invalid' }
+          if ([string]$proof.target_version -notmatch '^0\.7\.0-dev\.[0-9]+\.1$') { throw 'installer_resident_upgrade_target_invalid' }
+          if ([int]$proof.resident_upgrade_installer_exit -ne 0) { throw 'installer_resident_upgrade_exit_invalid' }
+          if ([int]$proof.planned_shutdown_signal_exit -ne 0) { throw 'installer_shutdown_signal_exit_invalid' }
+          if ($proof.legacy_primary_gone -ne $true -or $proof.legacy_sentinel_gone -ne $true) { throw 'installer_legacy_processes_not_drained' }
+          if ($proof.new_primary_started -ne $true -or $proof.new_sentinel_started -ne $true) { throw 'installer_target_runtime_not_started' }
+          if ($proof.planned_shutdown_verified -ne $true -or $proof.retry_dialog_required -ne $false) { throw 'installer_shutdown_contract_invalid' }
+          Copy-Item $proofPath './self-update-fast-evidence/installer-resident-upgrade-proof.json' -Force
+      - name: Upload self-update evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: metaengine-browser-self-update-e2e-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: apps/metaengine-browser/self-update-fast-evidence/
+          if-no-files-found: warn
+          compression-level: 0

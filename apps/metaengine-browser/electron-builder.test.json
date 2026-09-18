@@ -1,0 +1,93 @@
+{
+  "appId": "com.metaengine.browser.test",
+  "productName": "METAENGINE Browser Test",
+  "asar": true,
+  "electronFuses": {
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "onlyLoadAppFromAsar": true
+  },
+  "asarUnpack": [
+    "src/browser-sentinel-worker.cjs",
+    "src/browser-sentinel-liveness.cjs",
+    "src/browser-sentinel-action-journal.cjs",
+    "src/durable-json-file.cjs",
+    "src/compute-bridge-worker.cjs"
+  ],
+  "directories": {
+    "output": "dist-test"
+  },
+  "files": [
+    "src/**/*",
+    "ui/**/*",
+    "package.json"
+  ],
+  "beforePack": "./scripts/electron-builder-before-pack.cjs",
+  "afterAllArtifactBuild": "./scripts/electron-builder-after-all-artifact-build.cjs",
+  "extraResources": [
+    {
+      "from": "native-dist/guardian",
+      "to": "guardian-native",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "devos-source-snapshot",
+      "to": "devos-source-snapshot",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
+      "from": "../../coordination/browser-compute",
+      "to": "a2-compute-browser",
+      "filter": [
+        "package.json",
+        "protocol-v1.json",
+        "engine-lock.json",
+        "src/**/*"
+      ]
+    },
+    {
+      "from": "../../coordination/browser-shared",
+      "to": "browser-shared",
+      "filter": [
+        "action-contract.mjs",
+        "node-registry.mjs",
+        "receipt-contract.mjs",
+        "semantic-perception-compiler.mjs"
+      ]
+    }
+  ],
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "PatrickFrome",
+      "repo": "Compute",
+      "releaseType": "prerelease",
+      "channel": "dev"
+    }
+  ],
+  "win": {
+    "icon": "build/icon.ico",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "artifactName": "METAENGINE-Browser-Test-Setup-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "METAENGINE Browser Test",
+    "runAfterFinish": true,
+    "deleteAppDataOnUninstall": false
+  }
+}

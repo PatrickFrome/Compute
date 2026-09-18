@@ -1,0 +1,16 @@
+{
+  "schema": "metaengine.a2-compute-browser.engine-policy.v1",
+  "production": {
+    "engine": "installed_chrome_or_chromium",
+    "minimum_major": 136,
+    "dedicated_user_data_dir_required": true,
+    "default_profile_import_forbidden": true,
+    "headful_default": true
+  },
+  "ci_benchmark": {
+    "engine": "chrome_for_testing",
+    "version": "152.0.7977.64",
+    "revision": "1669021",
+    "pinned_on": "2026-08-27"
+  }
+}

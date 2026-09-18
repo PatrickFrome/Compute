@@ -1,0 +1,162 @@
+name: A2 Browser Operator R0 Source of Truth
+
+on:
+  push:
+    branches:
+      - 'work/a2-browser-operator-r0-source-of-truth*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  parity-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Syntax gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          find coordination/chat-control-plane/extension -maxdepth 1 -name '*.js' -print0 | sort -z | xargs -0 -n1 node --check
+          find tests -maxdepth 1 -name 'a2_*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --check supabase/functions/a2-browser-supervisor-v4/index.ts
+
+      - name: R0 source-of-truth contract
+        run: node tests/a2_r0_source_of_truth_lab.mjs
+
+      - name: v0.6.7 targeted repair labs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v067_release_contract_lab.mjs
+          node tests/a2_v067_supervisor_prompt_ready_lab.mjs
+          node tests/a2_v067_supervisor_session_singleton_lab.mjs
+          node tests/a2_v067_supervisor_transport_backoff_lab.mjs
+
+      - name: Compatible historical invariant regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/a2_v064_supervisor_chat_guard_lab.mjs
+          node tests/a2_v063_supervisor_device_edge_contract_lab.mjs
+          node tests/a2_v063_supervisor_session_lab.mjs
+          node tests/a2_v063_bridge_disarm_lab.mjs
+          node tests/a2_v063_remote_authority_lab.mjs
+          node tests/a2_v060_debugger_broker_lab.mjs
+          node tests/a2_v060_perception_lab.mjs
+          node tests/a2_v060_oopif_perception_lab.mjs
+          node tests/a2_v060_semantic_actions_lab.mjs
+          node tests/a2_v060_rollover_v062_lab.mjs
+
+      - name: MV3 pack smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --no-sandbox --disable-gpu --pack-extension="$GITHUB_WORKSPACE/coordination/chat-control-plane/extension"
+          test -s coordination/chat-control-plane/extension.crx
+
+      - name: Reproducible generic ZIP and parity manifest
+        shell: bash
+        env:
+          SOURCE_DATE_EPOCH: '1787855837'
+        run: |
+          set -euo pipefail
+          rm -rf dist/a2-browser-operator-r0
+          mkdir -p dist/a2-browser-operator-r0
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, zipfile
+
+          root = Path('coordination/chat-control-plane/extension')
+          dist = Path('dist/a2-browser-operator-r0')
+          a = dist / 'METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC_A.zip'
+          b = dist / 'METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC_B.zip'
+          canonical = dist / 'METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC.zip'
+          fixed = (1980, 1, 1, 0, 0, 0)
+
+          def build(out):
+              with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+                  for p in sorted(x for x in root.rglob('*') if x.is_file()):
+                      info = zipfile.ZipInfo(p.relative_to(root).as_posix(), fixed)
+                      info.compress_type = zipfile.ZIP_DEFLATED
+                      info.external_attr = (0o644 & 0xFFFF) << 16
+                      zf.writestr(info, p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+
+          build(a); build(b)
+          if a.read_bytes() != b.read_bytes():
+              raise SystemExit('reproducible_zip_mismatch')
+          canonical.write_bytes(a.read_bytes())
+          a.unlink(); b.unlink()
+
+          def sha256(p):
+              return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+          source_files = {
+              p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in sorted(x for x in root.rglob('*') if x.is_file())
+          }
+          (dist / 'SOURCE_FILES_SHA256.json').write_text(json.dumps(source_files, sort_keys=True, indent=2) + '\n')
+
+          manifest = json.loads((root / 'manifest.json').read_text())
+          parity = {
+              'schema': 'metaengine.a2-browser-operator.source-parity.v1',
+              'source_commit': os.environ['GITHUB_SHA'],
+              'architecture': 'A2_BROWSER_OPERATOR_V1_ARCHITECTURE_2026-08-27',
+              'extension_version': manifest['version'],
+              'generic_zip_sha256': sha256(canonical),
+              'edge_source_sha256': sha256('supabase/functions/a2-browser-supervisor-v4/index.ts'),
+              'bootstrap_rotation_migration_sha256': sha256('supabase/migrations/20260827190000_a2_browser_device_bootstrap_rotation_scope_v6.sql'),
+              'production_edge': {
+                  'slug': 'a2-browser-supervisor-v4',
+                  'version': 3,
+                  'ezbr_sha256': '6caaeabf2d9138c568255d70833f1a78484d9270d8c8d9c78ffe07e8ada74afe'
+              },
+              'verified_personalized_artifact': {
+                  'sha256': '48b299ffcd00719a42ee04b7984207f8957922a4ee273caf3da4ad38fdd6681e',
+                  'allowed_source_difference': ['bootstrap-config.js']
+              },
+              'reproducible_zip': True,
+              'source_date_epoch': os.environ.get('SOURCE_DATE_EPOCH')
+          }
+          (dist / 'PARITY_MANIFEST.json').write_text(json.dumps(parity, sort_keys=True, indent=2) + '\n')
+          (dist / 'GIT_COMMIT').write_text(os.environ['GITHUB_SHA'] + '\n')
+          PY
+          sha256sum dist/a2-browser-operator-r0/METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC.zip > dist/a2-browser-operator-r0/SHA256SUMS
+          unzip -t dist/a2-browser-operator-r0/METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC.zip
+
+      - name: Assert generic package has no credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import zipfile
+          p='dist/a2-browser-operator-r0/METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC.zip'
+          with zipfile.ZipFile(p) as z:
+              b=z.read('bootstrap-config.js').decode()
+          assert 'bridgeSecret: ""' in b
+          assert 'supervisorBootstrapSecret: ""' in b
+          assert 'pairingEpoch: ""' in b
+          PY
+
+      - name: Attest canonical generic ZIP provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-browser-operator-r0/METAENGINE_A2_Browser_Operator_v0.6.7_GENERIC.zip
+
+      - name: Upload R0 parity evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-browser-operator-r0-parity-${{ github.sha }}
+          path: dist/a2-browser-operator-r0/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

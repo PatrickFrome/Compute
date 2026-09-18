@@ -1,0 +1,82 @@
+name: A2 Compute Browser B3 Native Pipe
+
+on:
+  push:
+    branches:
+      - 'work/a2-compute-browser-b3-native-pipe*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  native-pipe-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Static and pipe unit contracts
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          node -e 'const m=Number(process.versions.node.split(".")[0]); if (m < 22) process.exit(1)'
+          find src tests -type f -name '*.mjs' -print0 | sort -z | xargs -0 -n1 node --check
+          node --test tests/*.test.mjs
+          grep -q -- '--remote-debugging-pipe' src/chrome-process.mjs
+          ! grep -R -n -E -- '--remote-debugging-port|--remote-debugging-address|/json/version|new WebSocket\(' src/chrome-process.mjs src/cdp-pipe-client.mjs
+          ! grep -R -n -E 'Runtime\.evaluate.*case|rpc.*cdp\.call|nodeIntegration[[:space:]]*:[[:space:]]*true' src tests
+          grep -q '"devtools_tcp_exposed": false' protocol-v1.json
+
+      - name: Real Chromium native-pipe lifecycle smoke
+        shell: bash
+        working-directory: coordination/browser-compute
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          printf 'A2_CHROME_EXECUTABLE=%s\n' "$CHROME"
+          readlink -f "$CHROME" || true
+          "$CHROME" --version || true
+          export A2_CHROME_EXECUTABLE="$CHROME"
+          export A2_COMPUTE_STATE_ROOT="$RUNNER_TEMP/a2-compute-browser-b3"
+          export CI=true
+          export A2_CI_ALLOW_NO_SANDBOX=1
+          export A2_SELF_TEST_REMOVE_STATE=1
+          node src/cli.mjs self-test | tee "$RUNNER_TEMP/a2-compute-browser-b3-self-test.json"
+          grep -q '"ok":true' "$RUNNER_TEMP/a2-compute-browser-b3-self-test.json"
+          grep -q '"debug_transport":"native_pipe_b3"' "$RUNNER_TEMP/a2-compute-browser-b3-self-test.json"
+          grep -q '"devtools_tcp_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b3-self-test.json"
+          grep -q '"raw_cdp_rpc_exposed":false' "$RUNNER_TEMP/a2-compute-browser-b3-self-test.json"
+
+      - name: Build deterministic B3 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          mkdir -p dist/a2-compute-browser-b3
+          cp "$RUNNER_TEMP/a2-compute-browser-b3-self-test.json" dist/a2-compute-browser-b3/SELF_TEST.json
+          printf '%s\n' "$GITHUB_SHA" > dist/a2-compute-browser-b3/SOURCE_COMMIT.txt
+          tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+            -cf dist/a2-compute-browser-b3/A2_COMPUTE_BROWSER_B3_NATIVE_PIPE.tar \
+            coordination/browser-compute research/A2_COMPUTE_BROWSER_B1_B3_DEEP_RESEARCH_2026-08-28.md
+          sha256sum dist/a2-compute-browser-b3/A2_COMPUTE_BROWSER_B3_NATIVE_PIPE.tar > dist/a2-compute-browser-b3/SHA256SUMS.txt
+
+      - name: Attest B3 evidence provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/a2-compute-browser-b3/A2_COMPUTE_BROWSER_B3_NATIVE_PIPE.tar
+
+      - name: Upload B3 evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: a2-compute-browser-b3-native-pipe-${{ github.sha }}
+          path: dist/a2-compute-browser-b3/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

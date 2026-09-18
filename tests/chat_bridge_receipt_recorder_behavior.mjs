@@ -1,0 +1,207 @@
+import assert from 'node:assert/strict';
+import { BridgeReceiptRecorder, sha256 } from '../coordination/chat-control-plane/daemon/receipt-recorder.mjs';
+import { supabaseBackendHeaders } from '../coordination/chat-control-plane/daemon/supabase-auth.mjs';
+
+function response(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async text() { return JSON.stringify(body); }
+  };
+}
+
+function command(overrides = {}) {
+  const prompt = 'PRIVATE PROMPT MUST NEVER BE PERSISTED';
+  return {
+    command_id: '11111111-1111-4111-8111-111111111111',
+    idempotency_key: sha256('wake-key'),
+    prompt,
+    prompt_sha256: sha256(prompt),
+    target_platform: 'GLM_ZAI',
+    target_agent: 'GLM',
+    a2_head_message_seq: 108,
+    a2_peer_payloads_exposed: false,
+    duel_id: null,
+    authority_effect: false,
+    ...overrides
+  };
+}
+
+const snapshot = {
+  url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db?secret=query#fragment',
+  message_count: 42,
+  generating: false
+};
+const normalizedTarget = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
+
+assert.deepEqual(supabaseBackendHeaders('sb_secret_example'), { apikey: 'sb_secret_example' });
+assert.deepEqual(supabaseBackendHeaders('legacy-service-role-jwt'), {
+  apikey: 'legacy-service-role-jwt',
+  authorization: 'Bearer legacy-service-role-jwt'
+});
+assert.throws(() => supabaseBackendHeaders('sb_publishable_example'), /supabase_backend_secret_required/);
+
+{
+  let calls = 0;
+  const recorder = new BridgeReceiptRecorder({
+    mode: 'OFF', workspaceId: '', supabaseUrl: '', serviceRoleKey: '',
+    fetchImpl: async () => { calls += 1; return response(200, {}); }
+  });
+  recorder.noteSnapshot('GLM_ZAI', snapshot);
+  const result = await recorder.recordLease(command());
+  assert.equal(result.persisted, false);
+  assert.equal(result.mode, 'OFF');
+  assert.equal(calls, 0);
+}
+
+{
+  const recorder = new BridgeReceiptRecorder({
+    mode: 'BEST_EFFORT',
+    bridgeInstanceId: 'ci-best-effort',
+    workspaceId: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    supabaseUrl: 'https://example.invalid',
+    serviceRoleKey: 'test-only',
+    fetchImpl: async () => response(503, { error: 'down' }),
+    logger: { error() {} }
+  });
+  recorder.noteSnapshot('GLM_ZAI', snapshot);
+  const result = await recorder.recordLease(command());
+  assert.equal(result.persisted, false);
+  assert.match(result.error, /receipt_rpc_503/);
+}
+
+{
+  const recorder = new BridgeReceiptRecorder({
+    mode: 'REQUIRED',
+    bridgeInstanceId: 'ci-required-fail',
+    workspaceId: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    supabaseUrl: 'https://example.invalid',
+    serviceRoleKey: 'test-only',
+    fetchImpl: async () => response(503, { error: 'down' }),
+    logger: { error() {} }
+  });
+  recorder.noteSnapshot('GLM_ZAI', snapshot);
+  await assert.rejects(recorder.recordLease(command()), /receipt_rpc_503/);
+  assert.equal(recorder.hasLease(command().command_id), false);
+}
+
+{
+  const calls = [];
+  const recorder = new BridgeReceiptRecorder({
+    mode: 'REQUIRED',
+    bridgeInstanceId: 'ci-required-pass',
+    workspaceId: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    supabaseUrl: 'https://example.invalid',
+    serviceRoleKey: 'test-only',
+    fetchImpl: async (_url, init) => {
+      calls.push(JSON.parse(init.body));
+      return response(200, {
+        receipt_id: `${calls.length}`,
+        receipt_sha256: sha256(`receipt-${calls.length}`),
+        canonical: false,
+        authority_effect: false
+      });
+    },
+    logger: { error() {} }
+  });
+  recorder.noteSnapshot('GLM_ZAI', snapshot);
+  const cmd = command();
+  const lease = await recorder.recordLease(cmd);
+  assert.equal(lease.persisted, true);
+  assert.equal(recorder.hasLease(cmd.command_id), true);
+  assert.equal(calls[0].p_event_kind, 'COMMAND_LEASED');
+  assert.equal(calls[0].p_target_agent, 'GLM');
+  assert.equal(calls[0].p_target_platform, 'GLM_ZAI');
+  assert.equal(calls[0].p_a2_head_message_seq, 108);
+  assert.equal(calls[0].p_pending_payloads_exposed, false);
+  assert.equal(calls[0].p_duel_id, null);
+  assert.equal(calls[0].p_prompt_sha256, cmd.prompt_sha256);
+  assert.equal(calls[0].p_idempotency_key_sha256, cmd.idempotency_key);
+  assert.equal(calls[0].p_target_url_sha256, sha256(normalizedTarget));
+  const serializedLease = JSON.stringify(calls[0]);
+  assert.equal(serializedLease.includes(cmd.prompt), false);
+  assert.equal(serializedLease.includes('secret=query'), false);
+
+  await recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: `${normalizedTarget}?ignored=query#fragment`,
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: false
+  });
+  assert.equal(calls[1].p_event_kind, 'SEND_RESULT');
+  assert.equal(calls[1].p_dom_send_verified, true);
+  assert.equal(calls[1].p_clicked_send_button, true);
+
+  await recorder.recordResult(cmd.command_id, {
+    status: 'SENT_WEAK_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: normalizedTarget,
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: false },
+    authority_effect: false
+  });
+  assert.equal(calls[2].p_dom_send_verified, false);
+
+  await recorder.recordResult(cmd.command_id, {
+    status: 'SENT_ALREADY_DURABLE',
+    target_platform: 'GLM_ZAI',
+    target_url: normalizedTarget,
+    clicked_send_button: true,
+    verification: { verified: true, durable_replay: true },
+    authority_effect: false
+  });
+  assert.equal(calls[3].p_dom_send_verified, true);
+
+  await assert.rejects(recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'CHATGPT',
+    target_url: normalizedTarget,
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: false
+  }), /receipt_result_platform_mismatch/);
+
+  await assert.rejects(recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: 'https://chat.z.ai/c/different-chat',
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: false
+  }), /receipt_result_target_url_mismatch/);
+
+  await assert.rejects(recorder.recordResult(cmd.command_id, {
+    status: 'SENT_AND_DOM_VERIFIED',
+    target_platform: 'GLM_ZAI',
+    target_url: normalizedTarget,
+    clicked_send_button: true,
+    verification: { verified: true, exact_user_turn_seen: true },
+    authority_effect: true
+  }), /receipt_result_authority_forbidden/);
+}
+
+{
+  const recorder = new BridgeReceiptRecorder({
+    mode: 'REQUIRED',
+    bridgeInstanceId: 'ci-bindings',
+    workspaceId: '2de9f84b-7c0a-4091-911c-894ff1d6eaf4',
+    supabaseUrl: 'https://example.invalid',
+    serviceRoleKey: 'test-only',
+    fetchImpl: async () => response(200, {})
+  });
+  recorder.noteSnapshot('GLM_ZAI', snapshot);
+  await assert.rejects(recorder.recordLease(command({ idempotency_key: 'not-a-hash' })), /receipt_invalid_idempotency_key/);
+  await assert.rejects(recorder.recordLease(command({ target_agent: 'GPT' })), /receipt_target_pair_invalid/);
+  await assert.rejects(recorder.recordLease(command({ target_agent: undefined })), /receipt_target_agent_required/);
+  await assert.rejects(recorder.recordLease(command({ a2_head_message_seq: undefined })), /receipt_a2_frontier_invalid/);
+  await assert.rejects(recorder.recordLease(command({ a2_head_message_seq: '108.5' })), /receipt_a2_frontier_invalid/);
+  await assert.rejects(recorder.recordLease(command({ a2_peer_payloads_exposed: undefined })), /receipt_visibility_flag_required/);
+  await assert.rejects(recorder.recordLease(command({ authority_effect: undefined })), /receipt_command_nonauthority_required/);
+  const missingDuel = command();
+  delete missingDuel.duel_id;
+  await assert.rejects(recorder.recordLease(missingDuel), /receipt_duel_lineage_required/);
+}
+
+console.log('chat bridge receipt recorder behavioral contract: PASS');

@@ -1,0 +1,41 @@
+rules:
+  - id: metaengine-no-dynamic-eval
+    message: Dynamic code evaluation is forbidden in METAENGINE production code.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: new Function(...)
+          - pattern: $WC.executeJavaScript(...)
+          - pattern: $CDP.send("Runtime.evaluate", ...)
+
+  - id: metaengine-electron-node-integration-forbidden
+    message: Electron renderer nodeIntegration must remain disabled.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern: "{..., nodeIntegration: true, ...}"
+
+  - id: metaengine-electron-sandbox-disable-forbidden
+    message: Electron renderer sandbox must not be disabled.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern: "{..., sandbox: false, ...}"
+
+  - id: metaengine-electron-context-isolation-disable-forbidden
+    message: Electron contextIsolation must not be disabled.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern: "{..., contextIsolation: false, ...}"
+
+  - id: metaengine-electron-web-security-disable-forbidden
+    message: Electron webSecurity must not be disabled.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern: "{..., webSecurity: false, ...}"
+
+  - id: metaengine-shell-true-forbidden
+    message: shell:true creates an avoidable command-injection boundary.
+    severity: ERROR
+    languages: [javascript, typescript]
+    pattern: "{..., shell: true, ...}"

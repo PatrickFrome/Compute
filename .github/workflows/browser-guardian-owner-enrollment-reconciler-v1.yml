@@ -1,0 +1,67 @@
+name: METAENGINE Browser Guardian Owner Enrollment Reconciler V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-reconciler.*'
+      - '.github/workflows/browser-guardian-owner-enrollment-reconciler-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-owner-enrollment-reconciler:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Compile and execute ambiguity reconciliation contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path $vswhere)) { throw 'vswhere_missing' }
+          $vsRoot = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          if (-not $vsRoot) { throw 'visual_studio_cpp_toolchain_missing' }
+          $vcvars = Join-Path $vsRoot 'VC\Auxiliary\Build\vcvars64.bat'
+          if (-not (Test-Path $vcvars)) { throw 'vcvars64_missing' }
+
+          $sourceDir = (Resolve-Path 'apps/metaengine-browser/native/browser-guardian-scm').Path
+          $outDir = Join-Path $env:RUNNER_TEMP 'metaengine-guardian-owner-reconciler'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+          $reconciler = Join-Path $sourceDir 'browser-guardian-owner-enrollment-reconciler.cpp'
+          $test = Join-Path $sourceDir 'browser-guardian-owner-enrollment-reconciler-test.cpp'
+          $exe = Join-Path $outDir 'METAENGINEBrowserGuardianOwnerEnrollmentReconcilerTest.exe'
+
+          $compileCmd = 'call "{0}" >nul && cl.exe /nologo /std:c++20 /EHsc /W4 /WX /DUNICODE /D_UNICODE /I"{1}" "{2}" "{3}" /Fe:"{4}" /link advapi32.lib' -f $vcvars, $sourceDir, $reconciler, $test, $exe
+          & $env:ComSpec /d /s /c $compileCmd
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_reconciler_compile_exit_$LASTEXITCODE" }
+          if (-not (Test-Path $exe)) { throw 'guardian_owner_reconciler_test_missing' }
+
+          $output = & $exe
+          if ($LASTEXITCODE -ne 0) { throw "guardian_owner_reconciler_test_exit_$LASTEXITCODE" }
+          if (($output | Select-Object -Last 1) -ne 'OWNER_ENROLLMENT_RECONCILER_OK') { throw 'guardian_owner_reconciler_contract_missing' }
+
+      - name: Prove source checkout unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-reconciler.cpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-reconciler.hpp apps/metaengine-browser/native/browser-guardian-scm/browser-guardian-owner-enrollment-reconciler-test.cpp .github/workflows/browser-guardian-owner-enrollment-reconciler-v1.yml)"
