@@ -329,6 +329,12 @@ export class RsiRuntimeSkillCurationQueue{
     const record=this.#records.find(x=>x.request.request_id===id);
     return record ? structuredClone(record.request) : null;
   }
+  record(request_id){
+    this.#assertInit();
+    const id=boundedId(request_id,'request_id');
+    const record=this.#records.find(x=>x.request.request_id===id);
+    return record ? structuredClone(record) : null;
+  }
   async evaluateRevision({
     request_id,library,governance,successor_skill,
     baseline_validation_score,candidate_validation_score,

@@ -12,6 +12,11 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
+import {
+  createRsiEvaluationIntegrityPolicy,
+  createRsiEvaluationIntegrityReceipt,
+  assessRsiEvaluationIntegrity,
+} from '../src/rsi-evaluation-integrity-guard.mjs';
 
 test('unified RSI runtime binds the full converged trust-root set with zero authority', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-runtime-'));
@@ -623,6 +628,50 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(revisionFrontier.length, 1);
     assert.equal(revisionFrontier[0].successor_skill_digest, successorSkill.skill_digest);
     assert.equal(revisionFrontier[0].frontier_is_execution_authority, false);
+
+    const integrityPolicy = createRsiEvaluationIntegrityPolicy({
+      policy_id: 'integrity.runtime.skill.1',
+      visible_suite_digest: d('5'),
+      compositional_holdout_digest: d('4'),
+      evaluator_root_digest: d('6'),
+      workspace_baseline_digest: d('7'),
+      max_visible_holdout_gap: 0.15,
+      min_holdout_pass_rate: 0.8,
+      external_policy_owner: true,
+      authored_by_candidate: false,
+    });
+    const integrityReceipt = createRsiEvaluationIntegrityReceipt({
+      policy: integrityPolicy,
+      receipt_id: 'integrity.runtime.skill.receipt.1',
+      candidate_id: `candidate_sha256_${successorSkill.skill_digest.slice('sha256:'.length)}`,
+      candidate_sha: successorSkill.source_candidate_sha,
+      visible_pass_rate: 0.92,
+      holdout_pass_rate: 0.90,
+      evaluator_root_digest: d('6'),
+      workspace_before_digest: d('7'),
+      workspace_after_digest: d('8'),
+      patch_audit_digest: d('9'),
+      file_access_audit_digest: d('a'),
+      network_audit_digest: d('b'),
+      external_integrity_monitor: true,
+      authored_by_candidate: false,
+      evidence_refs: ['integrity:runtime:skill:1'],
+    });
+    const integrityAssessment = assessRsiEvaluationIntegrity({ policy: integrityPolicy, receipt: integrityReceipt });
+    assert.equal(integrityAssessment.state, 'INTEGRITY_VERIFIED');
+    const integrity = await runtime.recordSkillRevisionIntegrity({
+      request_id: curation.request.request_id,
+      admission_id: 'admission.runtime.skill.1',
+      integrity_policy: integrityPolicy,
+      integrity_receipt: integrityReceipt,
+      integrity_assessment: integrityAssessment,
+      external_admission_owner: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(integrity.admission.state, 'INTEGRITY_ADMITTED');
+    assert.equal(integrity.admission.eligible_for_existing_reliability_gate, true);
+    assert.equal(runtime.snapshot().skill_revision_integrity.admitted_count, 1);
+    assert.equal(runtime.integrityAdmittedSkillRevisions({ parent_skill_digest: skill.skill_digest }).length, 1);
     assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 1);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);

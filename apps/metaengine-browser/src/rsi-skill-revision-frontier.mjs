@@ -204,6 +204,12 @@ export class RsiSkillRevisionFrontier{
       .some(x=>x.frontier_candidate_digest===digestValue);
     return zero({state:'ARCHIVED',frontier_candidate_digest:digestValue,pareto_frontier:isFrontier});
   }
+  candidateByRequest(request_id){
+    this.#assertInit();
+    const id=boundedId(request_id,'request_id');
+    const row=this.#archive.find(x=>x.request_id===id);
+    return row ? Object.freeze(structuredClone(row)) : null;
+  }
   frontier({parent_skill_digest,max_candidates=MAX_FRONTIER_RETURN}={}){
     this.#assertInit();
     const parent=parent_skill_digest==null?null:exactDigest(parent_skill_digest,'parent_skill');

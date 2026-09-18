@@ -48,6 +48,7 @@ import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } f
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
 import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
 import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
+import { RsiSkillRevisionIntegrityLedger, createRsiSkillRevisionIntegrityAdmission, rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot } from './rsi-skill-revision-integrity-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -119,6 +120,7 @@ function trustRoots() {
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
+    skill_revision_integrity: rsiSkillRevisionIntegrityAdmissionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -140,6 +142,7 @@ export class RsiRuntimeService {
   #skillRouter;
   #skillCuration;
   #skillRevisionFrontier;
+  #skillRevisionIntegrity;
   #archive;
   #observer;
   #verifiedArchive;
@@ -154,7 +157,7 @@ export class RsiRuntimeService {
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -191,6 +194,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillRevisionFrontierPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeSkillRevisionIntegrityPath = skillRevisionIntegrityPath || (ledgerPath ? `${ledgerPath}.skill-revision-integrity.json` : null);
+    this.#skillRevisionIntegrity = new RsiSkillRevisionIntegrityLedger({
+      statePath: runtimeSkillRevisionIntegrityPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -206,6 +214,7 @@ export class RsiRuntimeService {
     await this.#skillRouter.init();
     await this.#skillCuration.init();
     await this.#skillRevisionFrontier.init();
+    await this.#skillRevisionIntegrity.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -220,6 +229,7 @@ export class RsiRuntimeService {
       runtime_skill_router_schema: this.#skillRouter.snapshot().schema,
       runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
       skill_revision_frontier_schema: this.#skillRevisionFrontier.snapshot().schema,
+      skill_revision_integrity_schema: this.#skillRevisionIntegrity.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -743,6 +753,59 @@ export class RsiRuntimeService {
     return this.#skillRevisionFrontier.frontier({ parent_skill_digest, max_candidates });
   }
 
+  async recordSkillRevisionIntegrity({
+    request_id,
+    admission_id,
+    integrity_policy,
+    integrity_receipt,
+    integrity_assessment,
+    external_admission_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const record = this.#skillCuration.record(request_id);
+    if (!record?.request || !record?.evaluation) throw new Error('rsi_runtime_skill_curation_evaluation_unavailable');
+    const frontierCandidate = this.#skillRevisionFrontier.candidateByRequest(request_id);
+    if (!frontierCandidate) throw new Error('rsi_runtime_skill_revision_frontier_candidate_unavailable');
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const admission = createRsiSkillRevisionIntegrityAdmission({
+      source_sha: this.#sourceSha,
+      admission_id,
+      frontier_candidate: frontierCandidate,
+      request: record.request,
+      evaluation: record.evaluation,
+      library,
+      governance,
+      integrity_policy,
+      integrity_receipt,
+      integrity_assessment,
+      external_admission_owner,
+      authored_by_candidate,
+    });
+    const stored = await this.#skillRevisionIntegrity.append(admission);
+    await this.#ledger.append('SKILL_REVISION_INTEGRITY_ASSESSED', {
+      admission_id: admission.admission_id,
+      admission_digest: admission.admission_digest,
+      request_id: admission.request_id,
+      frontier_candidate_digest: admission.frontier_candidate_digest,
+      successor_skill_digest: admission.successor_skill_digest,
+      integrity_state: admission.integrity_state,
+      state: admission.state,
+      eligible_for_existing_reliability_gate: admission.eligible_for_existing_reliability_gate,
+      self_authored_verification_sufficient: false,
+      direct_library_replacement_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ admission, stored });
+  }
+
+  integrityAdmittedSkillRevisions({ parent_skill_digest = null } = {}) {
+    this.#assertRunning();
+    return this.#skillRevisionIntegrity.admitted({ parent_skill_digest });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -799,6 +862,7 @@ export class RsiRuntimeService {
       runtime_skill_router: this.#skillRouter.snapshot(),
       runtime_skill_curation: this.#skillCuration.snapshot(),
       skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
+      skill_revision_integrity: this.#skillRevisionIntegrity.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
