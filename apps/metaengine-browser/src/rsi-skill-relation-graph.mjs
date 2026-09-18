@@ -136,20 +136,20 @@ function stateCore(sourceSha,libraryId,edges){
 }
 
 export class RsiSkillRelationStore{
-  #path;#source;#libraryId;#edges=[];#initialized=false;
-  constructor({statePath,source_sha,library_id}={}){
+  #path;#source;#libraryId=null;#edges=[];#initialized=false;
+  constructor({statePath,source_sha}={}){
     if(!statePath)throw new Error('rsi_relation_state_path_required');
     this.#path=path.resolve(statePath);
     this.#source=String(source_sha||'').toLowerCase();if(!/^[0-9a-f]{40}$/.test(this.#source))throw new Error('rsi_relation_source_sha_invalid');
-    this.#libraryId=id(library_id,'library_id');
   }
   async init(){
     if(this.#initialized)return this.snapshot();
     await fs.mkdir(path.dirname(this.#path),{recursive:true});
     try{
       const parsed=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(parsed,'state');
-      if(parsed.schema!==RSI_SKILL_RELATION_STORE_SCHEMA||parsed.version!==1||parsed.source_sha!==this.#source||parsed.library_id!==this.#libraryId
+      if(parsed.schema!==RSI_SKILL_RELATION_STORE_SCHEMA||parsed.version!==1||parsed.source_sha!==this.#source
         ||parsed.append_only!==true||parsed.candidate_can_delete!==false||parsed.candidate_can_rewrite!==false)throw new Error('rsi_relation_state_invalid');
+      this.#libraryId=id(parsed.library_id,'library_id');
       const clone=structuredClone(parsed);delete clone.state_digest;
       if(dg(clone)!==digest(parsed.state_digest,'state'))throw new Error('rsi_relation_state_digest_mismatch');
       if(!Array.isArray(parsed.edges)||parsed.edges.length>MAX_EDGES)throw new Error('rsi_relation_state_edges_invalid');
@@ -169,6 +169,7 @@ export class RsiSkillRelationStore{
   async add(edge,library){
     if(!this.#initialized)throw new Error('rsi_relation_store_not_initialized');
     const checked=verifyRsiSkillRelationEdge(edge,library);
+    if(this.#libraryId==null)this.#libraryId=checked.library_id;
     if(checked.library_id!==this.#libraryId)throw new Error('rsi_relation_library_identity_mismatch');
     const semanticKey=`${checked.scope}:${checked.context_digest||'-'}:${checked.relation_type}:${checked.from_skill_digest}->${checked.to_skill_digest}`;
     const existing=this.#edges.find(x=>x.relation_digest===checked.relation_digest);
@@ -180,7 +181,9 @@ export class RsiSkillRelationStore{
   }
   graph(library){
     if(!this.#initialized)throw new Error('rsi_relation_store_not_initialized');
-    return createRsiSkillRelationGraph({graph_id:`graph.${this.#libraryId}`,library,edges:this.#edges,external_graph_owner:true,authored_by_candidate:false});
+    const lib=verifyRsiVerifiedSkillLibrary(library);
+    if(this.#libraryId!=null&&lib.library_id!==this.#libraryId)throw new Error('rsi_relation_library_identity_mismatch');
+    return createRsiSkillRelationGraph({graph_id:`graph.${lib.library_id}`,library:lib,edges:this.#edges,external_graph_owner:true,authored_by_candidate:false});
   }
   snapshot(){return Object.freeze({schema:RSI_SKILL_RELATION_STORE_SCHEMA,version:1,source_sha:this.#source,library_id:this.#libraryId,initialized:this.#initialized,edge_count:this.#edges.length,max_edges:MAX_EDGES,authority_effect:false})}
 }
