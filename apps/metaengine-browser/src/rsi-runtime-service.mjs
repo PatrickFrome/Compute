@@ -94,6 +94,11 @@ import {
   verifyRsiExternalReleaseHandoffIntent,
   rsiExternalReleaseHandoffTrustRootSnapshot,
 } from './rsi-external-release-handoff-intent.mjs';
+import {
+  createRsiPublishedReleaseReconciliation,
+  verifyRsiPublishedReleaseReconciliation,
+  rsiPublishedReleaseReconciliationTrustRootSnapshot,
+} from './rsi-published-release-reconciliation.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -107,6 +112,7 @@ const PREFIXED_SHA256 = /^sha256:[0-9a-f]{64}$/;
 const MAX_PENDING_LEARNING_OUTCOMES = 4096;
 const MAX_EPISODE_PROMOTION_REVIEWS = 256;
 const MAX_EXTERNAL_RELEASE_HANDOFF_INTENTS = 128;
+const MAX_PUBLISHED_RELEASE_RECONCILIATIONS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -185,6 +191,7 @@ function trustRoots() {
     verified_candidate_materialization: rsiVerifiedCandidateMaterializationTrustRootSnapshot(),
     episode_promotion_review: rsiEpisodePromotionReviewTrustRootSnapshot(),
     external_release_handoff: rsiExternalReleaseHandoffTrustRootSnapshot(),
+    published_release_reconciliation: rsiPublishedReleaseReconciliationTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -238,6 +245,8 @@ export class RsiRuntimeService {
   #lastEpisodePromotionReviewDigest = null;
   #externalReleaseHandoffDigests = new Set();
   #lastExternalReleaseHandoffDigest = null;
+  #publishedReleaseReconciliationDigests = new Set();
+  #lastPublishedReleaseReconciliationDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -342,6 +351,14 @@ export class RsiRuntimeService {
           }
           this.#externalReleaseHandoffDigests.add(intent.handoff_intent_digest);
           this.#lastExternalReleaseHandoffDigest = intent.handoff_intent_digest;
+        }
+        if (row?.type === 'RSI_PUBLISHED_RELEASE_RECONCILIATION_READY' && row?.payload?.published_release_reconciliation) {
+          const reconciliation = verifyRsiPublishedReleaseReconciliation(row.payload.published_release_reconciliation);
+          if (this.#publishedReleaseReconciliationDigests.size >= MAX_PUBLISHED_RELEASE_RECONCILIATIONS) {
+            throw new Error('rsi_runtime_published_release_reconciliation_replay_capacity_exhausted');
+          }
+          this.#publishedReleaseReconciliationDigests.add(reconciliation.reconciliation_digest);
+          this.#lastPublishedReleaseReconciliationDigest = reconciliation.reconciliation_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1411,6 +1428,51 @@ export class RsiRuntimeService {
     return Object.freeze({ intent, already_recorded: false, authority_effect: false });
   }
 
+  async preparePublishedReleaseReconciliation({
+    release_handoff_intent,
+    current_authority_sha,
+    trusted_release,
+    immutable_release_evidence,
+    provenance_evidence,
+    source_ancestry_evidence,
+    now = new Date(),
+  } = {}) {
+    this.#assertRunning();
+    const intent = verifyRsiExternalReleaseHandoffIntent(release_handoff_intent);
+    if (!this.#externalReleaseHandoffDigests.has(intent.handoff_intent_digest)) {
+      throw new Error('rsi_runtime_external_release_handoff_not_persisted');
+    }
+    const reconciliation = createRsiPublishedReleaseReconciliation({
+      release_handoff_intent: intent,
+      current_authority_sha,
+      trusted_release,
+      immutable_release_evidence,
+      provenance_evidence,
+      source_ancestry_evidence,
+      now,
+    });
+    verifyRsiPublishedReleaseReconciliation(reconciliation);
+    if (this.#publishedReleaseReconciliationDigests.has(reconciliation.reconciliation_digest)) {
+      return Object.freeze({ reconciliation, already_recorded: true, authority_effect: false });
+    }
+    if (this.#publishedReleaseReconciliationDigests.size >= MAX_PUBLISHED_RELEASE_RECONCILIATIONS) {
+      throw new Error('rsi_runtime_published_release_reconciliation_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_PUBLISHED_RELEASE_RECONCILIATION_READY', {
+      published_release_reconciliation: reconciliation,
+      authority_advance_authorized: false,
+      release_authority_mutation_performed: false,
+      separate_journaled_promotion_effect_required: true,
+      self_update_handoff_authorized: false,
+      direct_install_authorized: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#publishedReleaseReconciliationDigests.add(reconciliation.reconciliation_digest);
+    this.#lastPublishedReleaseReconciliationDigest = reconciliation.reconciliation_digest;
+    return Object.freeze({ reconciliation, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -1586,6 +1648,22 @@ export class RsiRuntimeService {
         self_update_handoff_authorized: false,
         direct_install_authorized: false,
         promotion_token_minted: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      published_release_reconciliation: Object.freeze({
+        count: this.#publishedReleaseReconciliationDigests.size,
+        capacity: MAX_PUBLISHED_RELEASE_RECONCILIATIONS,
+        last_digest: this.#lastPublishedReleaseReconciliationDigest,
+        immutable_release_required: true,
+        source_ancestry_proof_required: true,
+        installed_executable_binding_required: true,
+        authority_advance_candidate_only: true,
+        authority_advance_authorized: false,
+        release_authority_mutation_performed: false,
+        separate_journaled_promotion_effect_required: true,
+        self_update_handoff_authorized: false,
+        direct_install_authorized: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
       }),
