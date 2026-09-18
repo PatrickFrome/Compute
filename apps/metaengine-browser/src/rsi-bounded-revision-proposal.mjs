@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   RSI_CANDIDATE_EXPERIMENT_INTENT_SCHEMA,
   RSI_CANDIDATE_EXPERIMENT_RECEIPT_SCHEMA,
+  verifyRsiCandidateExperimentIntent,
   verifyRsiCandidateExperimentReceipt,
 } from './rsi-candidate-experiment-ledger.mjs';
 
@@ -39,15 +40,13 @@ function zero(extra={}){return Object.freeze({...extra,execution_authority:false
 function verifySupportedExperiment(intent,receipt){
   if(!intent||intent.schema!==RSI_CANDIDATE_EXPERIMENT_INTENT_SCHEMA)throw new Error('rsi_revision_experiment_intent_invalid');
   if(!receipt||receipt.schema!==RSI_CANDIDATE_EXPERIMENT_RECEIPT_SCHEMA)throw new Error('rsi_revision_experiment_receipt_invalid');
-  assertZero(intent,'experiment_intent');
-  const ic=structuredClone(intent);delete ic.intent_digest;
-  if(digest(ic)!==exactDigest(intent.intent_digest,'experiment_intent'))throw new Error('rsi_revision_experiment_intent_digest_mismatch');
-  const checked=verifyRsiCandidateExperimentReceipt(receipt,{intent});
-  if(checked.state!=='SUPPORTED_FOR_BOUNDED_REVISION'||checked.eligible_for_bounded_revision!==true
-    ||checked.no_metric_regression!==true||checked.strict_metric_improvement!==true
-    ||checked.validity_blockers.length!==0||checked.ambiguous_effect!==false||checked.inconclusive_environment!==false
-    ||checked.retry_count!==0)throw new Error('rsi_revision_supported_experiment_required');
-  return Object.freeze({intent:Object.freeze(structuredClone(intent)),receipt:checked});
+  const checkedIntent=verifyRsiCandidateExperimentIntent(intent);
+  const checkedReceipt=verifyRsiCandidateExperimentReceipt(receipt,{intent:checkedIntent});
+  if(checkedReceipt.state!=='SUPPORTED_FOR_BOUNDED_REVISION'||checkedReceipt.eligible_for_bounded_revision!==true
+    ||checkedReceipt.no_metric_regression!==true||checkedReceipt.strict_metric_improvement!==true
+    ||checkedReceipt.validity_blockers.length!==0||checkedReceipt.ambiguous_effect!==false||checkedReceipt.inconclusive_environment!==false
+    ||checkedReceipt.retry_count!==0)throw new Error('rsi_revision_supported_experiment_required');
+  return Object.freeze({intent:checkedIntent,receipt:checkedReceipt});
 }
 
 export function createRsiBoundedRevisionEnvelope({
@@ -98,6 +97,8 @@ export function createRsiBoundedRevisionEnvelope({
     source_sha:exactSha(experiment.receipt.source_sha,'source'),
     experiment_intent_digest:experiment.intent.intent_digest,
     experiment_receipt_digest:experiment.receipt.receipt_digest,
+    experiment_intent_snapshot:experiment.intent,
+    experiment_receipt_snapshot:experiment.receipt,
     parent_candidate_artifact_digest:experiment.receipt.candidate_artifact_digest,
     baseline_artifact_digest:experiment.receipt.baseline_artifact_digest,
     experiment_ledger_state_digest:roots[0],
@@ -143,8 +144,11 @@ export function verifyRsiBoundedRevisionEnvelope(envelope,{intent,receipt}={}){
     ||envelope.external_validation_required!==true||envelope.envelope_can_apply_revision!==false
     ||envelope.envelope_can_schedule_implementation!==false||envelope.envelope_is_execution_authority!==false)throw new Error('rsi_revision_envelope_policy_invalid');
   const p=envelope.protected_policy_roots||{};
+  const embeddedIntent=intent??envelope.experiment_intent_snapshot;
+  const embeddedReceipt=receipt??envelope.experiment_receipt_snapshot;
+  if(!embeddedIntent||!embeddedReceipt)throw new Error('rsi_revision_embedded_experiment_evidence_required');
   const canonical=createRsiBoundedRevisionEnvelope({
-    envelope_id:envelope.envelope_id,intent,receipt,
+    envelope_id:envelope.envelope_id,intent:embeddedIntent,receipt:embeddedReceipt,
     experiment_ledger_state_digest:envelope.experiment_ledger_state_digest,
     editable_scope_digest:envelope.editable_scope_digest,preserved_behavior_digest:envelope.preserved_behavior_digest,
     negative_evidence_root_digest:envelope.negative_evidence_root_digest,regression_budget_digest:envelope.regression_budget_digest,
@@ -255,6 +259,14 @@ function verifyStoredRevisionEnvelope(envelope){
   }
   exactSha(envelope.source_sha,'persisted_envelope_source');
   id(envelope.envelope_id,'persisted_envelope_id');
+  const experiment=verifySupportedExperiment(envelope.experiment_intent_snapshot,envelope.experiment_receipt_snapshot);
+  if(experiment.intent.source_sha!==envelope.source_sha||experiment.receipt.source_sha!==envelope.source_sha
+    ||experiment.intent.intent_digest!==envelope.experiment_intent_digest
+    ||experiment.receipt.receipt_digest!==envelope.experiment_receipt_digest
+    ||experiment.receipt.candidate_artifact_digest!==envelope.parent_candidate_artifact_digest
+    ||experiment.receipt.baseline_artifact_digest!==envelope.baseline_artifact_digest){
+    throw new Error('rsi_revision_persisted_experiment_binding_mismatch');
+  }
   boundedInt(envelope.max_mutated_files,'persisted_max_mutated_files',MAX_MUTATED_FILES);
   boundedInt(envelope.max_edit_operations,'persisted_max_edit_operations',MAX_EDIT_OPERATIONS);
   boundedInt(envelope.max_changed_bytes,'persisted_max_changed_bytes',MAX_CHANGED_BYTES);
