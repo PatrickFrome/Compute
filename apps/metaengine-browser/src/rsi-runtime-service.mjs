@@ -40,6 +40,7 @@ import { rsiSearchModeRouterTrustRootSnapshot } from './rsi-search-mode-router.m
 import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integrity-guard.mjs';
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
+import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -118,6 +119,7 @@ export class RsiRuntimeService {
   #clock;
   #ledger;
   #experienceGate;
+  #improvementFrontier;
   #archive;
   #observer;
   #verifiedArchive;
@@ -134,6 +136,7 @@ export class RsiRuntimeService {
     this.#clock = clock;
     this.#ledger = new RsiRuntimeLedger({ ledgerPath, source_sha: this.#sourceSha, clock });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
+    this.#improvementFrontier = new RsiRuntimeImprovementFrontier();
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
     this.#verifiedArchive = new RsiVerifiedEvolutionArchive({ clock });
@@ -150,6 +153,7 @@ export class RsiRuntimeService {
       source_sha: this.#sourceSha,
       trust_root_set_digest: digest(this.#roots),
       experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
+      improvement_frontier_schema: RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -169,6 +173,7 @@ export class RsiRuntimeService {
       throw new Error('rsi_runtime_observation_admission_invalid');
     }
     const observation = admission.observation;
+    const prepared = this.#improvementFrontier.prepare(observation);
     await this.#ledger.append('BRAIN_OBSERVATION', {
       observation_schema: observation?.schema || null,
       observation_digest: observation.observation_digest,
@@ -176,9 +181,23 @@ export class RsiRuntimeService {
       admission_reason: admission.reason,
       critical: admission.critical === true,
       opportunity_count: Array.isArray(observation?.opportunities) ? observation.opportunities.length : 0,
+      observation,
+      prepared_experiments: prepared.map((entry) => ({
+        opportunity_id: entry.opportunity_id,
+        signal: entry.signal,
+        priority: entry.priority,
+        mutation_surface: entry.mutation_surface,
+        hypothesis_id: entry.hypothesis.hypothesis_id,
+        hypothesis_digest: entry.hypothesis.hypothesis_digest,
+        experiment_id: entry.plan.experiment_id,
+        plan_digest: entry.plan.plan_digest,
+        target_branch: entry.plan.target_branch,
+        authority_effect: false,
+      })),
       authority_effect: false,
     });
     this.#experienceGate.commitPersist(admission);
+    this.#improvementFrontier.commit(prepared);
     return observation;
   }
 
@@ -295,6 +314,10 @@ export class RsiRuntimeService {
     return this.#verifiedArchive;
   }
 
+  improvementFrontier(options = {}) {
+    return this.#improvementFrontier.entries(options);
+  }
+
   snapshot() {
     const shadow = this.#archive.snapshot();
     return Object.freeze({
@@ -317,6 +340,7 @@ export class RsiRuntimeService {
       last_observation_at: this.#lastObservationAt,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       experience_gate: this.#experienceGate.snapshot(),
+      improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
