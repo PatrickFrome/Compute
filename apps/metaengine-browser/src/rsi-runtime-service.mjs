@@ -293,6 +293,45 @@ export class RsiRuntimeService {
           this.#externalPromotionReviewResultCount += 1;
           this.#lastExternalPromotionReviewResultDigest = row.payload.external_promotion_review_result.result_digest || null;
         }
+        if (row?.payload?.release_authority_handoff) {
+          const handoff = row.payload.release_authority_handoff;
+          const review = this.#findExternalPromotionReviewByResultDigest(handoff.promotion_review_result_digest);
+          if (!review) throw new Error('rsi_runtime_release_handoff_replay_review_missing');
+          verifyRsiExternalPromotionReviewResult(review.result, review.request);
+          verifyRsiReleaseAuthorityHandoff(handoff, review.result, review.request);
+          this.#releaseAuthorityHandoffCount += 1;
+          this.#lastReleaseAuthorityHandoffDigest = handoff.handoff_digest || null;
+          this.#lastReleaseAuthorityHandoffState = handoff.state || null;
+        }
+        if (row?.payload?.release_executor_admission) {
+          const admission = verifyRsiReleaseExecutorAdmission(row.payload.release_executor_admission);
+          this.#releaseExecutorAdmissionCount += 1;
+          this.#lastReleaseExecutorAdmissionDigest = admission.admission_digest || null;
+          this.#lastReleaseExecutorCommandId = admission.command_id || null;
+        }
+        if (row?.payload?.release_effect_reconciliation) {
+          const reconciliation = verifyRsiReleaseEffectReconciliation(row.payload.release_effect_reconciliation);
+          this.#releaseEffectReconciliationCount += 1;
+          this.#lastReleaseEffectReconciliationDigest = reconciliation.reconciliation_digest || null;
+          this.#lastReleaseEffectOutcome = reconciliation.result || null;
+        }
+        if (row?.payload?.release_authority_convergence) {
+          const convergence = verifyRsiReleaseAuthorityConvergence(row.payload.release_authority_convergence);
+          this.#releaseAuthorityConvergenceCount += 1;
+          this.#lastReleaseAuthorityConvergenceDigest = convergence.convergence_digest || null;
+          this.#lastConvergedReleaseSha = convergence.candidate_sha || null;
+        }
+        if (row?.payload?.post_deployment_learning_admission) {
+          const learningAdmission = verifyRsiPostDeploymentExperienceAdmission(row.payload.post_deployment_learning_admission);
+          this.#experienceGraphSnapshot = applyRsiPostDeploymentExperienceAdmission({
+            previous_snapshot: this.#experienceGraphSnapshot,
+            admission: learningAdmission,
+          });
+          this.#postDeploymentLearningConvergenceDigests.add(learningAdmission.release_authority_convergence_digest);
+          this.#postDeploymentLearningCount += 1;
+          this.#lastPostDeploymentLearningAdmissionDigest = learningAdmission.admission_digest || null;
+          this.#lastPostDeploymentLearningCaseDigest = learningAdmission.experience_case?.case_digest || null;
+        }
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
