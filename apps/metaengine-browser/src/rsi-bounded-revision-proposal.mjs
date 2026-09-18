@@ -246,86 +246,6 @@ export function verifyRsiBoundedRevisionProposal(proposal,{envelope}={}){
 }
 
 
-function verifyStoredRevisionEnvelope(envelope){
-  if(!envelope||envelope.schema!==RSI_REVISION_ENVELOPE_SCHEMA||envelope.version!==1)throw new Error('rsi_revision_envelope_invalid');
-  assertZero(envelope,'persisted_envelope');
-  if(envelope.external_revision_controller!==true||envelope.parent_artifact_preserved!==true
-    ||envelope.candidate_must_be_new_artifact!==true||envelope.protected_policy_roots_immutable!==true
-    ||envelope.rejected_experiment_evidence_must_be_considered!==true||envelope.preserved_behavior_contract_required!==true
-    ||envelope.regression_budget_precommitted!==true||envelope.external_implementation_required!==true
-    ||envelope.external_validation_required!==true||envelope.envelope_can_apply_revision!==false
-    ||envelope.envelope_can_schedule_implementation!==false||envelope.envelope_is_execution_authority!==false){
-    throw new Error('rsi_revision_envelope_policy_invalid');
-  }
-  exactSha(envelope.source_sha,'persisted_envelope_source');
-  id(envelope.envelope_id,'persisted_envelope_id');
-  const experiment=verifySupportedExperiment(envelope.experiment_intent_snapshot,envelope.experiment_receipt_snapshot);
-  if(experiment.intent.source_sha!==envelope.source_sha||experiment.receipt.source_sha!==envelope.source_sha
-    ||experiment.intent.intent_digest!==envelope.experiment_intent_digest
-    ||experiment.receipt.receipt_digest!==envelope.experiment_receipt_digest
-    ||experiment.receipt.candidate_artifact_digest!==envelope.parent_candidate_artifact_digest
-    ||experiment.receipt.baseline_artifact_digest!==envelope.baseline_artifact_digest){
-    throw new Error('rsi_revision_persisted_experiment_binding_mismatch');
-  }
-  boundedInt(envelope.max_mutated_files,'persisted_max_mutated_files',MAX_MUTATED_FILES);
-  boundedInt(envelope.max_edit_operations,'persisted_max_edit_operations',MAX_EDIT_OPERATIONS);
-  boundedInt(envelope.max_changed_bytes,'persisted_max_changed_bytes',MAX_CHANGED_BYTES);
-  const roots=[
-    envelope.experiment_intent_digest,envelope.experiment_receipt_digest,envelope.parent_candidate_artifact_digest,
-    envelope.baseline_artifact_digest,envelope.experiment_ledger_state_digest,envelope.editable_scope_digest,
-    envelope.preserved_behavior_digest,envelope.negative_evidence_root_digest,envelope.regression_budget_digest,
-    envelope.validation_plan_digest,
-  ];
-  for(const [index,value] of roots.entries())exactDigest(value,`persisted_envelope_root_${index}`);
-  const protectedRoots=envelope.protected_policy_roots;
-  if(!protectedRoots||typeof protectedRoots!=='object'||Array.isArray(protectedRoots))throw new Error('rsi_revision_protected_policy_roots_invalid');
-  const protectedValues=[
-    protectedRoots.trust_root_policy_digest,protectedRoots.evaluator_policy_digest,protectedRoots.scheduler_policy_digest,
-    protectedRoots.self_update_policy_digest,protectedRoots.production_authority_policy_digest,protectedRoots.security_boundary_digest,
-  ];
-  protectedValues.forEach((value,index)=>exactDigest(value,`persisted_protected_root_${index}`));
-  const independentlyBound=[
-    envelope.experiment_ledger_state_digest,envelope.editable_scope_digest,envelope.preserved_behavior_digest,
-    envelope.negative_evidence_root_digest,envelope.regression_budget_digest,envelope.validation_plan_digest,...protectedValues,
-  ];
-  if(new Set(independentlyBound).size!==independentlyBound.length)throw new Error('rsi_revision_independent_policy_roots_required');
-  const clone=structuredClone(envelope);delete clone.envelope_digest;
-  if(digest(clone)!==exactDigest(envelope.envelope_digest,'persisted_envelope'))throw new Error('rsi_revision_envelope_digest_mismatch');
-  return Object.freeze(structuredClone(envelope));
-}
-
-function verifyStoredRevisionProposal(proposal,envelope){
-  if(!proposal||proposal.schema!==RSI_REVISION_PROPOSAL_SCHEMA||proposal.version!==1)throw new Error('rsi_revision_proposal_invalid');
-  assertZero(proposal,'persisted_proposal');
-  if(proposal.authored_by_optimizer!==true||proposal.proposal_within_external_envelope!==true
-    ||proposal.proposal_does_not_apply_changes!==true||proposal.parent_artifact_remains_immutable!==true
-    ||proposal.protected_policy_roots_untouched!==true||proposal.external_implementation_review_required!==true
-    ||proposal.external_paired_validation_required!==true||proposal.proposal_can_mutate_active_state!==false
-    ||proposal.proposal_can_write_repository!==false||proposal.proposal_can_schedule_implementation!==false
-    ||proposal.proposal_is_execution_authority!==false||proposal.state!=='ELIGIBLE_FOR_EXTERNAL_IMPLEMENTATION_REVIEW'){
-    throw new Error('rsi_revision_proposal_policy_invalid');
-  }
-  id(proposal.proposal_id,'persisted_proposal_id');
-  if(proposal.source_sha!==envelope.source_sha||proposal.envelope_digest!==envelope.envelope_digest
-    ||proposal.experiment_receipt_digest!==envelope.experiment_receipt_digest
-    ||proposal.parent_candidate_artifact_digest!==envelope.parent_candidate_artifact_digest){
-    throw new Error('rsi_revision_proposal_envelope_mismatch');
-  }
-  const child=exactDigest(proposal.proposed_child_artifact_identity_digest,'persisted_child_artifact');
-  if(child===envelope.parent_candidate_artifact_digest||child===envelope.baseline_artifact_digest)throw new Error('rsi_revision_new_child_identity_required');
-  exactDigest(proposal.candidate_revision_spec_digest,'persisted_revision_spec');
-  exactDigest(proposal.expected_preserved_behavior_receipt_digest,'persisted_preserved_behavior_receipt');
-  exactDigest(proposal.expected_regression_test_root_digest,'persisted_regression_test_root');
-  exactDigest(proposal.candidate_optimizer_id_digest,'persisted_optimizer_id');
-  tags(proposal.mutation_categories,'persisted_mutation_categories');
-  boundedInt(proposal.estimated_mutated_files,'persisted_estimated_mutated_files',envelope.max_mutated_files);
-  boundedInt(proposal.estimated_edit_operations,'persisted_estimated_edit_operations',envelope.max_edit_operations);
-  boundedInt(proposal.estimated_changed_bytes,'persisted_estimated_changed_bytes',envelope.max_changed_bytes);
-  const clone=structuredClone(proposal);delete clone.proposal_digest;
-  if(digest(clone)!==exactDigest(proposal.proposal_digest,'persisted_proposal'))throw new Error('rsi_revision_proposal_digest_mismatch');
-  return Object.freeze(structuredClone(proposal));
-}
-
 function archiveState(sourceSha,rows){
   const categories=[...new Set(rows.flatMap(r=>r.proposal.mutation_categories))].sort();
   const core=zero({
@@ -363,22 +283,26 @@ export class RsiBoundedRevisionProposalArchive{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'archive'))throw new Error('rsi_revision_archive_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_revision_archive_rows_invalid');
       const ids=new Set();
+      const proposalIds=new Set();
       const childIds=new Set();
       const checkedRows=[];
       for(const row of p.rows){
         if(!row||typeof row!=='object'||row.source_sha!==this.#sourceSha)throw new Error('rsi_revision_archive_source_mismatch');
-        const envelope=verifyStoredRevisionEnvelope(row.envelope);
-        const proposal=verifyStoredRevisionProposal(row.proposal,envelope);
+        const expectedSeq=checkedRows.length+1;
+        if(row.archive_seq!==expectedSeq)throw new Error('rsi_revision_archive_sequence_invalid');
+        const envelope=verifyRsiBoundedRevisionEnvelope(row.envelope);
+        const proposal=verifyRsiBoundedRevisionProposal(row.proposal,{envelope});
         if(envelope.source_sha!==this.#sourceSha||proposal.source_sha!==this.#sourceSha)throw new Error('rsi_revision_archive_source_mismatch');
         if(ids.has(proposal.proposal_digest))throw new Error('rsi_revision_archive_proposal_duplicate');
+        if(proposalIds.has(proposal.proposal_id))throw new Error('rsi_revision_archive_proposal_id_duplicate');
         if(childIds.has(proposal.proposed_child_artifact_identity_digest))throw new Error('rsi_revision_archive_child_identity_duplicate');
         ids.add(proposal.proposal_digest);
+        proposalIds.add(proposal.proposal_id);
         childIds.add(proposal.proposed_child_artifact_identity_digest);
-        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,envelope,proposal}));
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,archive_seq:expectedSeq,envelope,proposal}));
       }
       const recomputed=archiveState(this.#sourceSha,checkedRows);
-      if(recomputed.row_count!==p.row_count
-        ||JSON.stringify(recomputed.represented_mutation_categories)!==JSON.stringify(p.represented_mutation_categories)){
+      if(recomputed.state_digest!==exactDigest(p.state_digest,'archive')){
         throw new Error('rsi_revision_archive_derived_state_mismatch');
       }
       this.#rows=checkedRows;
@@ -389,20 +313,22 @@ export class RsiBoundedRevisionProposalArchive{
   async add({envelope,proposal}={}){
     if(!this.#initialized)throw new Error('rsi_revision_archive_not_initialized');
     if(!envelope||envelope.schema!==RSI_REVISION_ENVELOPE_SCHEMA||!proposal||proposal.schema!==RSI_REVISION_PROPOSAL_SCHEMA)throw new Error('rsi_revision_archive_input_invalid');
-    assertZero(envelope,'archive_envelope');assertZero(proposal,'archive_proposal');
-    const ec=structuredClone(envelope);delete ec.envelope_digest;if(digest(ec)!==exactDigest(envelope.envelope_digest,'archive_envelope'))throw new Error('rsi_revision_envelope_digest_mismatch');
-    const pc=structuredClone(proposal);delete pc.proposal_digest;if(digest(pc)!==exactDigest(proposal.proposal_digest,'archive_proposal'))throw new Error('rsi_revision_proposal_digest_mismatch');
-    if(envelope.source_sha!==this.#sourceSha||proposal.source_sha!==this.#sourceSha||proposal.envelope_digest!==envelope.envelope_digest)throw new Error('rsi_revision_archive_binding_mismatch');
-    const existing=this.#rows.find(r=>r.proposal.proposal_digest===proposal.proposal_digest||r.proposal.proposed_child_artifact_identity_digest===proposal.proposed_child_artifact_identity_digest);
+    const checkedEnvelope=verifyRsiBoundedRevisionEnvelope(envelope);
+    const checkedProposal=verifyRsiBoundedRevisionProposal(proposal,{envelope:checkedEnvelope});
+    if(checkedEnvelope.source_sha!==this.#sourceSha||checkedProposal.source_sha!==this.#sourceSha)throw new Error('rsi_revision_archive_binding_mismatch');
+    const existing=this.#rows.find(r=>
+      r.proposal.proposal_digest===checkedProposal.proposal_digest
+      ||r.proposal.proposal_id===checkedProposal.proposal_id
+      ||r.proposal.proposed_child_artifact_identity_digest===checkedProposal.proposed_child_artifact_identity_digest
+    );
     if(existing){
-      if(existing.proposal.proposal_digest!==proposal.proposal_digest)throw new Error('rsi_revision_archive_identity_conflict');
-      return zero({state:'IDEMPOTENT',proposal_digest:proposal.proposal_digest});
+      if(existing.proposal.proposal_digest!==checkedProposal.proposal_digest)throw new Error('rsi_revision_archive_identity_conflict');
+      return zero({state:'IDEMPOTENT',proposal_digest:checkedProposal.proposal_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_revision_archive_capacity_exceeded');
-    const checkedEnvelope=verifyStoredRevisionEnvelope(envelope);
-    const checkedProposal=verifyStoredRevisionProposal(proposal,checkedEnvelope);
     const nextRows=[...this.#rows,Object.freeze({
       source_sha:this.#sourceSha,
+      archive_seq:this.#rows.length+1,
       envelope:structuredClone(checkedEnvelope),
       proposal:structuredClone(checkedProposal),
     })];
@@ -410,7 +336,7 @@ export class RsiBoundedRevisionProposalArchive{
     this.#rows=nextRows;
     return zero({state:'ARCHIVED_FOR_EXTERNAL_IMPLEMENTATION_REVIEW',proposal_digest:checkedProposal.proposal_digest});
   }
-  snapshot(){const s=archiveState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,represented_mutation_categories:s.represented_mutation_categories,append_only:true,preserves_multiple_proposals:true,scalar_winner_forbidden:true,active_artifact_digest:null,archive_can_apply_revision:false,archive_can_write_repository:false,archive_can_schedule_implementation:false,authority_effect:false});}
+  snapshot(){const s=archiveState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,last_archive_seq:s.rows.length,monotonic_archive_sequence:true,represented_mutation_categories:s.represented_mutation_categories,append_only:true,preserves_multiple_proposals:true,scalar_winner_forbidden:true,active_artifact_digest:null,archive_can_apply_revision:false,archive_can_write_repository:false,archive_can_schedule_implementation:false,authority_effect:false});}
 }
 
 export function rsiBoundedRevisionProposalTrustRootSnapshot(){
@@ -419,6 +345,11 @@ export function rsiBoundedRevisionProposalTrustRootSnapshot(){
     version:1,
     supported_phase26_experiment_required:true,
     external_revision_envelope_required:true,
+    embedded_phase26_evidence_required:true,
+    canonical_phase26_replay_required:true,
+    durable_before_visible_required:true,
+    restart_revalidation_required:true,
+    monotonic_archive_sequence_required:true,
     max_mutated_files:MAX_MUTATED_FILES,
     max_edit_operations:MAX_EDIT_OPERATIONS,
     max_changed_bytes:MAX_CHANGED_BYTES,
