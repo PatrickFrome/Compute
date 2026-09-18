@@ -739,6 +739,59 @@ export function finalizeRsiGroupTransfer({ plan, pool, receipts } = {}) {
   return Object.freeze({ ...core, result_digest: digest(core) });
 }
 
+export function verifyRsiGroupTransferResult(result, plan, pool) {
+  const checkedPlan = verifyRsiGroupTransferPlan(plan, pool);
+  if (!plainObject(result) || result.schema !== RSI_GROUP_TRANSFER_RESULT_SCHEMA || result.version !== 1) throw new Error('rsi_group_transfer_result_invalid');
+  assertZeroAuthority(result, 'transfer_result');
+  if (
+    result.plan_id !== checkedPlan.plan_id
+    || result.plan_digest !== checkedPlan.plan_digest
+    || result.pool_digest !== checkedPlan.pool_digest
+    || result.all_selected_items_evaluated !== true
+    || result.target_search_may_consume_verified_transfers_only !== true
+    || result.negative_transfer_is_memory_not_authority !== true
+    || result.group_experience_is_promotion_authority !== false
+  ) throw new Error('rsi_group_transfer_result_policy_invalid');
+  if (!Array.isArray(result.records) || result.records.length !== checkedPlan.selected_items.length) throw new Error('rsi_group_transfer_result_records_invalid');
+  const ids = new Set();
+  for (const row of result.records) {
+    if (!plainObject(row)) throw new Error('rsi_group_transfer_result_record_invalid');
+    assertZeroAuthority(row, 'transfer_result_record');
+    if (
+      row.candidate_can_activate_transfer !== false
+      || row.transfer_is_promotion_authority !== false
+      || !TRANSFER_OUTCOMES.has(String(row.transfer_outcome || ''))
+    ) throw new Error('rsi_group_transfer_result_record_policy_invalid');
+    if (ids.has(row.item_id)) throw new Error('rsi_group_transfer_result_record_duplicate');
+    ids.add(row.item_id);
+    const selected = checkedPlan.selected_items.find((item) => item.item_id === row.item_id);
+    if (!selected || selected.item_digest !== row.item_digest) throw new Error('rsi_group_transfer_result_record_binding_mismatch');
+    const positive = row.transfer_outcome === 'TRANSFER_VERIFIED';
+    const negative = row.transfer_outcome === 'NEGATIVE_TRANSFER';
+    const insufficient = row.transfer_outcome === 'INSUFFICIENT_EVIDENCE';
+    if (
+      row.portable_for_target_search !== positive
+      || row.negative_transfer_memory !== negative
+      || row.insufficient_evidence !== insufficient
+    ) throw new Error('rsi_group_transfer_result_record_semantics_invalid');
+    exactDigest(row.receipt_digest, 'transfer_result_receipt');
+    exactDigest(row.target_holdout_digest, 'transfer_result_holdout');
+    exactDigest(row.evaluator_root_digest, 'transfer_result_evaluator_root');
+  }
+  const verified = result.records.filter((row) => row.portable_for_target_search).length;
+  const negative = result.records.filter((row) => row.negative_transfer_memory).length;
+  const insufficient = result.records.filter((row) => row.insufficient_evidence).length;
+  if (
+    result.verified_transfer_count !== verified
+    || result.negative_transfer_count !== negative
+    || result.insufficient_evidence_count !== insufficient
+  ) throw new Error('rsi_group_transfer_result_count_mismatch');
+  const clone = structuredClone(result);
+  delete clone.result_digest;
+  if (exactDigest(result.result_digest, 'transfer_result') !== digest(clone)) throw new Error('rsi_group_transfer_result_digest_mismatch');
+  return result;
+}
+
 export function rsiGroupExperienceTrustRootSnapshot() {
   const root = {
     schema: 'metaengine.rsi.group-experience-root.v1',
