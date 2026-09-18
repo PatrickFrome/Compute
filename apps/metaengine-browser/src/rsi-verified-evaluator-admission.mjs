@@ -10,6 +10,12 @@ import {
   applyRsiEvaluatorMesh,
   verifyRsiEvaluatorMeshPlan,
 } from './rsi-evaluator-mesh.mjs';
+import {
+  assessRsiArtifactSpecAudit,
+} from './rsi-artifact-spec-audit.mjs';
+import {
+  assessRsiSandboxBoundary,
+} from './rsi-sandbox-boundary-admission.mjs';
 
 export const RSI_VERIFIED_EVALUATOR_ADMISSION_SCHEMA = 'metaengine.rsi.verified-evaluator-admission.v1';
 export const RSI_VERIFIED_EVALUATOR_RESULT_SCHEMA = 'metaengine.rsi.verified-evaluator-result.v1';
@@ -57,6 +63,13 @@ export function createRsiVerifiedEvaluatorAdmission({
   integrity_policy,
   integrity_receipt,
   integrity_assessment,
+  candidate_handoff,
+  hypothesis,
+  mutation_contract,
+  artifact_receipt,
+  sandbox_backend_binding,
+  sandbox_backend_observation,
+  sandbox_boundary_receipt,
 } = {}) {
   const candidate = candidateFromPlan(evaluator_plan);
   const benchmark = verifyRsiBenchmarkEvidenceAdmission(
@@ -70,8 +83,30 @@ export function createRsiVerifiedEvaluatorAdmission({
     integrity_policy,
     integrity_receipt,
   );
+  const artifact = assessRsiArtifactSpecAudit({
+    receipt: artifact_receipt,
+    candidate_handoff,
+    hypothesis,
+    mutation_contract,
+  });
+  const sandbox = assessRsiSandboxBoundary({
+    receipt: sandbox_boundary_receipt,
+    candidate_handoff,
+    backend_binding: sandbox_backend_binding,
+    backend_observation: sandbox_backend_observation,
+  });
   zeroAuthority(benchmark, 'benchmark_admission');
   zeroAuthority(integrity, 'integrity_assessment');
+  zeroAuthority(artifact, 'artifact_assessment');
+  zeroAuthority(sandbox, 'sandbox_assessment');
+
+  if (
+    String(candidate_handoff?.candidate_capsule?.candidate_id || '').toLowerCase() !== candidate.candidate_id
+    || String(candidate_handoff?.candidate_sha || '').toLowerCase() !== candidate.candidate_sha
+    || String(candidate_handoff?.handoff_digest || '').toLowerCase() !== candidate.handoff_digest
+  ) {
+    throw new Error('rsi_verified_evaluator_handoff_candidate_mismatch');
+  }
 
   if (String(integrity.candidate_id || '').toLowerCase() !== candidate.candidate_id) {
     throw new Error('rsi_verified_evaluator_integrity_candidate_id_mismatch');
@@ -85,6 +120,10 @@ export function createRsiVerifiedEvaluatorAdmission({
   if (Number(benchmark.contaminated_task_count || 0) > 0) blockers.push('CONTAMINATED_BENCHMARK_TASK');
   if (integrity.state !== 'INTEGRITY_VERIFIED') blockers.push(`EVALUATION_INTEGRITY_${integrity.state}`);
   if (integrity.eligible_for_archive_evidence !== true) blockers.push('INTEGRITY_NOT_ARCHIVE_ELIGIBLE');
+  if (artifact.state !== 'ARTIFACT_VERIFIED') blockers.push(`ARTIFACT_${artifact.state}`);
+  if (artifact.eligible_for_archive_evidence !== true) blockers.push('ARTIFACT_NOT_ARCHIVE_ELIGIBLE');
+  if (sandbox.state !== 'BOUNDARY_VERIFIED') blockers.push(`SANDBOX_${sandbox.state}`);
+  if (sandbox.eligible_for_archive_evidence !== true) blockers.push('SANDBOX_NOT_ARCHIVE_ELIGIBLE');
 
   const core = {
     schema: RSI_VERIFIED_EVALUATOR_ADMISSION_SCHEMA,
@@ -98,11 +137,21 @@ export function createRsiVerifiedEvaluatorAdmission({
     evaluator_plan_digest: evaluator_plan.plan_digest,
     benchmark_admission_digest: benchmark.admission_digest,
     integrity_assessment_digest: integrity.assessment_digest,
+    artifact_assessment_digest: artifact.assessment_digest,
+    sandbox_boundary_assessment_digest: sandbox.assessment_digest,
     benchmark_provenance_required: true,
     contamination_resistant_holdout_required: true,
     harness_integrity_required: true,
+    mechanical_artifact_audit_required: true,
+    no_op_ablation_required: true,
+    sandbox_boundary_evidence_required: true,
+    host_source_absence_required: true,
+    credential_absence_required: true,
+    network_egress_absence_required: true,
     evaluator_root_immutable: true,
     candidate_authored_integrity_evidence_allowed: false,
+    candidate_authored_artifact_evidence_allowed: false,
+    candidate_authored_sandbox_evidence_allowed: false,
     visible_suite_success_alone_sufficient: false,
     archive_apply_authorized: blockers.length === 0,
     promotion_authority: false,
@@ -139,6 +188,12 @@ export function applyRsiVerifiedEvaluatorMesh({
   integrity_policy,
   integrity_receipt,
   integrity_assessment,
+  hypothesis,
+  mutation_contract,
+  artifact_receipt,
+  sandbox_backend_binding,
+  sandbox_backend_observation,
+  sandbox_boundary_receipt,
   verified_admission,
 } = {}) {
   const inputs = {
@@ -150,6 +205,13 @@ export function applyRsiVerifiedEvaluatorMesh({
     integrity_policy,
     integrity_receipt,
     integrity_assessment,
+    candidate_handoff,
+    hypothesis,
+    mutation_contract,
+    artifact_receipt,
+    sandbox_backend_binding,
+    sandbox_backend_observation,
+    sandbox_boundary_receipt,
   };
   const admission = verifyRsiVerifiedEvaluatorAdmission(verified_admission, inputs);
   if (admission.state !== 'READY' || admission.archive_apply_authorized !== true) {
@@ -175,6 +237,9 @@ export function applyRsiVerifiedEvaluatorMesh({
     archive_apply_performed: true,
     benchmark_provenance_verified: true,
     harness_integrity_verified: true,
+    mechanical_artifact_audit_verified: true,
+    no_op_ablation_verified: true,
+    sandbox_boundary_verified: true,
     direct_promotion_enabled: false,
     direct_self_update_enabled: false,
     promotion_authority: false,
