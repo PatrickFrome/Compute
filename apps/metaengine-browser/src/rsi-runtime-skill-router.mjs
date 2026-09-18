@@ -85,6 +85,31 @@ export function createRsiSkillContextEvidence({
   return Object.freeze({...core,evidence_digest:digest(core)});
 }
 
+export function verifyRsiSkillContextEvidence(row){
+  if(!row||typeof row!=='object'||Array.isArray(row)||row.schema!==RSI_SKILL_CONTEXT_EVIDENCE_SCHEMA||row.version!==1)throw new Error('rsi_skill_router_context_evidence_invalid');
+  assertZero(row,'evidence');
+  if(row.external_evaluator!==true||row.authored_by_candidate!==false||row.candidate_can_edit_evidence!==false||row.contextual_utility_not_global_truth!==true
+    ||row.raw_trajectory_stored!==false||row.raw_page_text_stored!==false||row.raw_user_input_stored!==false){
+    throw new Error('rsi_skill_router_context_evidence_policy_invalid');
+  }
+  exactSha(row.source_sha,'evidence_source');
+  exactDigest(row.skill_digest,'skill');
+  exactDigest(row.episode_digest,'episode');
+  exactDigest(row.credit_receipt_digest,'credit_receipt');
+  exactDigest(row.task_signature_digest,'task_signature');
+  boundedId(row.environment_fingerprint,'environment_fingerprint');
+  token(row.model_family,'model_family');
+  token(row.action,'action');
+  boundedId(row.trajectory_id,'trajectory_id');
+  positiveInt(row.step_index,'step_index',10000);
+  token(row.credit_sign,'credit_sign');
+  token(row.credit_method,'credit_method');
+  exactDigest(row.evaluator_digest,'evaluator');
+  const clone=structuredClone(row);delete clone.evidence_digest;
+  if(digest(clone)!==exactDigest(row.evidence_digest,'evidence'))throw new Error('rsi_skill_router_context_evidence_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
 export function createRsiSkillRouteContext({
   context_id,task_signature_digest,environment_fingerprint,model_family,
   challenge_family,required_role=null,required_capabilities=[],
@@ -182,12 +207,9 @@ export function createRsiSkillRoutingPlan({
   if(!Array.isArray(evidence)||evidence.length>MAX_EVIDENCE)throw new Error('rsi_skill_router_evidence_set_invalid');
   const seenEvidence=new Set();
   const checkedEvidence=evidence.map(row=>{
-    if(!row||row.schema!==RSI_SKILL_CONTEXT_EVIDENCE_SCHEMA||row.version!==1)throw new Error('rsi_skill_router_context_evidence_invalid');
-    assertZero(row,'evidence');
-    if(row.source_sha==null||row.external_evaluator!==true||row.authored_by_candidate!==false||row.candidate_can_edit_evidence!==false||row.contextual_utility_not_global_truth!==true)throw new Error('rsi_skill_router_context_evidence_policy_invalid');
-    exactSha(row.source_sha,'evidence_source');exactDigest(row.skill_digest,'skill');exactDigest(row.evidence_digest,'evidence');
-    if(seenEvidence.has(row.evidence_digest))throw new Error('rsi_skill_router_context_evidence_duplicate');
-    seenEvidence.add(row.evidence_digest);return row;
+    const checked=verifyRsiSkillContextEvidence(row);
+    if(seenEvidence.has(checked.evidence_digest))throw new Error('rsi_skill_router_context_evidence_duplicate');
+    seenEvidence.add(checked.evidence_digest);return checked;
   });
   const maxSelected=positiveInt(max_selected,'max_selected',MAX_SELECTED);
   const explore=nonNegativeInt(exploration_slots,'exploration_slots',maxSelected);
@@ -295,10 +317,10 @@ export class RsiRuntimeSkillRouter{
       if(!Array.isArray(parsed.evidence)||parsed.evidence.length>MAX_EVIDENCE)throw new Error('rsi_skill_router_state_evidence_invalid');
       const seen=new Set();
       for(const row of parsed.evidence){
-        if(row.schema!==RSI_SKILL_CONTEXT_EVIDENCE_SCHEMA||row.source_sha!==this.#sourceSha)throw new Error('rsi_skill_router_state_evidence_invalid');
-        assertZero(row,'evidence');
-        if(seen.has(row.evidence_digest))throw new Error('rsi_skill_router_state_evidence_duplicate');
-        seen.add(row.evidence_digest);
+        const checked=verifyRsiSkillContextEvidence(row);
+        if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_skill_router_state_evidence_invalid');
+        if(seen.has(checked.evidence_digest))throw new Error('rsi_skill_router_state_evidence_duplicate');
+        seen.add(checked.evidence_digest);
       }
       this.#evidence=parsed.evidence;
       this.#routeCount=nonNegativeInt(parsed.route_count,'route_count');
