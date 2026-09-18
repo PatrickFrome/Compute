@@ -556,6 +556,8 @@ export function evaluateRsiRecursiveDepthChain({ policy, layers, evaluations } =
     best_observed_layer_digest: best?.layer_digest ?? null,
     best_observed_evaluation_digest: best?.evaluation_digest ?? null,
     best_observed_quality_score: best?.quality_score ?? null,
+    best_observed_novelty_score: best?.novelty_score ?? null,
+    best_observed_cost_units: best?.cost_units ?? null,
     depth_selection_is_promotion: false,
     chain_result_is_archive_input_only: true,
     external_evaluation_required_for_every_depth: true,
@@ -607,14 +609,13 @@ export function createRsiRecursiveDepthArchive({
     if (row.best_observed_quality_score == null || row.best_observed_layer_digest == null) throw new Error('rsi_depth_archive_chain_no_valid_depth');
     const bestIndex = row.layer_digests.indexOf(row.best_observed_layer_digest);
     if (bestIndex < 0) throw new Error('rsi_depth_archive_best_layer_binding_invalid');
-    const cost = finiteNonNegative(row.cost_growth_ratios.length ? row.depth_count : row.depth_count, 'archive_cost_proxy');
     return Object.freeze({
       chain_id: boundedId(row.chain_id, 'archive_chain_id'),
       chain_digest: exactDigest(row.chain_digest, 'archive_chain'),
       best_observed_layer_digest: exactDigest(row.best_observed_layer_digest, 'archive_best_layer'),
       best_observed_quality_score: boundedScore(row.best_observed_quality_score, 'archive_quality'),
-      novelty_score: 0,
-      cost_units: cost,
+      novelty_score: boundedScore(row.best_observed_novelty_score, 'archive_novelty'),
+      cost_units: finiteNonNegative(row.best_observed_cost_units, 'archive_cost'),
       state: String(row.state || ''),
       depth_count: positiveInt(row.depth_count, 'archive_depth_count', checked.max_depth),
     });
