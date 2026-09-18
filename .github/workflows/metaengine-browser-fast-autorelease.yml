@@ -25,6 +25,52 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       EXPECTED_SHA: ${{ github.sha }}
     steps:
+      - name: Checkout exact target for publisher authorization preflight
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Fail fast when target workflow drift requires external publisher authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}" > repository.json
+          DEFAULT_BRANCH="$(python3 - <<'PY'
+          import json
+          print(str(json.load(open('repository.json','r',encoding='utf-8')).get('default_branch') or ''))
+          PY
+          )"
+          test -n "$DEFAULT_BRANCH" || { echo release_default_branch_missing >&2; exit 2; }
+          DEFAULT_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq .sha)"
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows?ref=${DEFAULT_SHA}" > default-workflows.json
+          gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows?ref=${EXPECTED_SHA}" > target-workflows.json
+          set +e
+          node apps/metaengine-browser/scripts/release-target-workflow-auth-preflight.cjs \
+            --default-manifest default-workflows.json \
+            --target-manifest target-workflows.json \
+            --default-branch "$DEFAULT_BRANCH" \
+            --target-sha "$EXPECTED_SHA" > release-auth-preflight.json
+          PRECHECK_STATUS=$?
+          set -e
+          cat release-auth-preflight.json
+          {
+            echo '### Release workflow authorization preflight'
+            echo
+            echo '```json'
+            cat release-auth-preflight.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PRECHECK_STATUS" -eq 42 ]; then
+            echo "release_workflow_authority_blocked:target_workflow_drift_requires_external_workflows_write_actor" >&2
+            exit 42
+          fi
+          if [ "$PRECHECK_STATUS" -ne 0 ]; then
+            echo "release_workflow_authority_preflight_invalid:${PRECHECK_STATUS}" >&2
+            exit "$PRECHECK_STATUS"
+          fi
+
       - name: Wait for exact release evidence gate success
         shell: bash
         run: |
