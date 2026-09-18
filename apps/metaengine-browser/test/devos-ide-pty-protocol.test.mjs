@@ -7,6 +7,7 @@ import {
   assertCurrentDevOSPtySessionRef,
   classifyDevOSPtyInputSequence,
   classifyDevOSPtyResizeSequence,
+  classifyDevOSPtySessionTransition,
   classifyDevOSPtyTransportFence,
   classifyDevOSPtyTreeCleanup,
   projectDevOSPtyOutputPressure,
@@ -268,6 +269,8 @@ test('all protocol limits are centralized and contract forbids second scheduler 
 
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.pid_is_identity, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.input_blind_replay_allowed, false);
+  assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.spawn_ambiguous_auto_retry_allowed, false);
+  assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.host_lost_process_reattach_allowed, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.arbitrary_executable_allowed, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.arbitrary_argv_allowed, false);
   assert.equal(DEVOS_PTY_PROTOCOL_CONTRACT.arbitrary_cwd_allowed, false);
@@ -360,4 +363,38 @@ test('bounded PTY claim requires descendant cleanup evidence, never root-exit as
   assert.equal(verified.state, 'VERIFIED');
   assert.equal(verified.accepted, true);
   assert.equal(verified.authority_effect, false);
+});
+
+
+test('PTY session state machine makes spawn ambiguity and host loss terminal no-retry tombstones', () => {
+  const valid = [
+    ['ALLOCATED', 'SPAWNING'],
+    ['SPAWNING', 'RUNNING'],
+    ['SPAWNING', 'SPAWN_FAILED_NO_EFFECT'],
+    ['SPAWNING', 'SPAWN_AMBIGUOUS_NO_RETRY'],
+    ['RUNNING', 'BACKPRESSURED'],
+    ['BACKPRESSURED', 'RUNNING'],
+    ['RUNNING', 'EXIT_SEEN'],
+    ['EXIT_SEEN', 'EXITED'],
+    ['RUNNING', 'ORPHANED_WORKSPACE'],
+    ['ORPHANED_WORKSPACE', 'EXITED'],
+    ['RUNNING', 'HOST_LOST'],
+  ];
+  for (const [from_state, to_state] of valid) {
+    const row = classifyDevOSPtySessionTransition({ from_state, to_state });
+    assert.equal(row.state, 'TRANSITION_ACCEPTED');
+    assert.equal(row.accepted, true);
+    assert.equal(row.spawn_retry_allowed, false);
+    assert.equal(row.process_reattach_allowed, false);
+  }
+
+  for (const terminal of ['SPAWN_AMBIGUOUS_NO_RETRY', 'HOST_LOST', 'EXITED']) {
+    for (const to_state of ['SPAWNING', 'RUNNING', 'ALLOCATED']) {
+      const row = classifyDevOSPtySessionTransition({ from_state: terminal, to_state });
+      assert.equal(row.state, 'TRANSITION_REJECTED_NO_EFFECT');
+      assert.equal(row.accepted, false);
+      assert.equal(row.spawn_retry_allowed, false);
+      assert.equal(row.process_reattach_allowed, false);
+    }
+  }
 });
