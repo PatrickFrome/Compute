@@ -103,6 +103,9 @@ function verifyAdmission(admission, manifest) {
   ) throw new Error('rsi_canary_controller_admission_not_ready');
   const clone = structuredClone(admission);
   delete clone.admission_digest;
+  delete clone.durable_ledger_readback_required;
+  delete clone.durable_ledger_incident_latched;
+  delete clone.durable_ledger_state_digest;
   if (digest(clone) !== exactDigest(admission.admission_digest, 'admission')) {
     throw new Error('rsi_canary_controller_admission_digest_mismatch');
   }
