@@ -3703,6 +3703,9 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.existing_skill_library_governance_reused,true);
   assert.equal(root.second_skill_library_allowed,false);
   assert.equal(root.second_lifecycle_allowed,false);
+  assert.equal(root.exact_consumer_state_lineage_required,true);
+  assert.equal(root.exact_retrieval_profile_lineage_required,true);
+  assert.equal(root.exact_current_library_lineage_required,true);
   assert.equal(root.least_privilege_recheck_required,true);
   assert.equal(root.scope_replay_required,true);
   assert.equal(root.maturity_sensitive_change_envelope_required,true);
