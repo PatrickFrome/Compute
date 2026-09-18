@@ -46,6 +46,7 @@ import { createRsiStepCreditReceipt, rsiStepCreditTrustRootSnapshot } from './rs
 import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiRuntimeExperienceStoreTrustRootSnapshot } from './rsi-runtime-experience-store.mjs';
 import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } from './rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
+import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -115,6 +116,7 @@ function trustRoots() {
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
+    runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -134,6 +136,7 @@ export class RsiRuntimeService {
   #experienceStore;
   #skillLifecycle;
   #skillRouter;
+  #skillCuration;
   #archive;
   #observer;
   #verifiedArchive;
@@ -148,7 +151,7 @@ export class RsiRuntimeService {
   #browserOutcomeQuarantinedCount = 0;
   #lastBrowserOutcomeDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -175,6 +178,11 @@ export class RsiRuntimeService {
       statePath: runtimeSkillRouterPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeSkillCurationPath = skillCurationPath || (ledgerPath ? `${ledgerPath}.skill-curation.json` : null);
+    this.#skillCuration = new RsiRuntimeSkillCurationQueue({
+      statePath: runtimeSkillCurationPath,
+      source_sha: this.#sourceSha,
+    });
     this.#experienceGate = new RsiRuntimeExperienceGate({ source_sha: this.#sourceSha, clock });
     this.#archive = new RsiShadowArchive({ clock });
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
@@ -188,6 +196,7 @@ export class RsiRuntimeService {
     await this.#experienceStore.init();
     await this.#skillLifecycle.init();
     await this.#skillRouter.init();
+    await this.#skillCuration.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
@@ -200,6 +209,7 @@ export class RsiRuntimeService {
       runtime_experience_store_schema: this.#experienceStore.snapshot().schema,
       runtime_skill_lifecycle_schema: this.#skillLifecycle.snapshot().schema,
       runtime_skill_router_schema: this.#skillRouter.snapshot().schema,
+      runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
@@ -495,6 +505,106 @@ export class RsiRuntimeService {
     return plan;
   }
 
+  async requestSkillCuration({
+    request_id,
+    parent_skill_digest,
+    reason,
+    trigger_evidence_digests,
+    training_context_digest,
+    validation_holdout_digest,
+    meta_holdout_digest,
+    optimizer_model_family,
+    allowed_edit_ops = ['ADD','DELETE','REPLACE'],
+    edit_budget = 4,
+    external_curator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const request = createRsiSkillCurationRequest({
+      source_sha: this.#sourceSha,
+      request_id,
+      library,
+      governance,
+      parent_skill_digest,
+      reason,
+      trigger_evidence_digests,
+      training_context_digest,
+      validation_holdout_digest,
+      meta_holdout_digest,
+      optimizer_model_family,
+      allowed_edit_ops,
+      edit_budget,
+      external_curator,
+      authored_by_candidate,
+    });
+    const queued = await this.#skillCuration.enqueue({ request, library, governance });
+    await this.#ledger.append('SKILL_CURATION_REQUESTED', {
+      request_id: request.request_id,
+      request_digest: request.request_digest,
+      parent_skill_digest: request.parent_skill_digest,
+      reason: request.reason,
+      edit_budget: request.edit_budget,
+      validation_holdout_digest: request.validation_holdout_digest,
+      meta_holdout_digest: request.meta_holdout_digest,
+      state: queued.state,
+      request_is_execution_authority: false,
+      direct_library_replacement_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ request, queued });
+  }
+
+  async evaluateSkillRevision({
+    request_id,
+    successor_skill,
+    baseline_validation_score,
+    candidate_validation_score,
+    baseline_meta_score,
+    candidate_meta_score,
+    hard_invariants_pass,
+    evaluator_digest,
+    evaluation_digest,
+    evidence_refs,
+    external_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const outcome = await this.#skillCuration.evaluateRevision({
+      request_id,
+      library,
+      governance,
+      successor_skill,
+      baseline_validation_score,
+      candidate_validation_score,
+      baseline_meta_score,
+      candidate_meta_score,
+      hard_invariants_pass,
+      evaluator_digest,
+      evaluation_digest,
+      evidence_refs,
+      external_evaluator,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_REVISION_EVALUATED', {
+      request_id,
+      evaluation_digest: outcome.evaluation.result_digest,
+      successor_skill_digest: outcome.evaluation.successor_skill_digest,
+      state: outcome.evaluation.state,
+      accepted_for_existing_reliability_gate: outcome.evaluation.accepted_for_existing_reliability_gate,
+      direct_library_replacement_allowed: false,
+      existing_reliability_gate_required: true,
+      existing_scope_preservation_gate_required: true,
+      authority_effect: false,
+    });
+    return outcome;
+  }
+
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
     this.#assertRunning();
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
@@ -656,6 +766,7 @@ export class RsiRuntimeService {
       runtime_experience_store: this.#experienceStore.snapshot(),
       runtime_skill_lifecycle: this.#skillLifecycle.snapshot(),
       runtime_skill_router: this.#skillRouter.snapshot(),
+      runtime_skill_curation: this.#skillCuration.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
