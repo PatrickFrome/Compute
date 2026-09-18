@@ -205,6 +205,7 @@ function summarizeEvidence(skillDigest,context,evidence){
 
 export function createRsiSkillRoutingPlan({
   library,governance,context,evidence=[],
+  coalition_masked_skill_digests=[],
   max_selected=4,exploration_slots=1,
   external_planner=false,authored_by_candidate=true,
 }={}){
@@ -220,13 +221,20 @@ export function createRsiSkillRoutingPlan({
     if(seenEvidence.has(checked.evidence_digest))throw new Error('rsi_skill_router_context_evidence_duplicate');
     seenEvidence.add(checked.evidence_digest);return checked;
   });
+  if(!Array.isArray(coalition_masked_skill_digests)||coalition_masked_skill_digests.length>checkedLibrary.entries.length)throw new Error('rsi_skill_router_coalition_mask_invalid');
+  const coalitionMask=[...new Set(coalition_masked_skill_digests.map(value=>exactDigest(value,'coalition_mask_skill')))].sort();
+  if(coalitionMask.length!==coalition_masked_skill_digests.length)throw new Error('rsi_skill_router_coalition_mask_duplicate');
+  const coalitionMaskSet=new Set(coalitionMask);
   const maxSelected=positiveInt(max_selected,'max_selected',MAX_SELECTED);
   const explore=nonNegativeInt(exploration_slots,'exploration_slots',maxSelected);
 
   const govByDigest=new Map(checkedGovernance.entries.map(row=>[row.skill_digest,row]));
-  const eligible=checkedLibrary.entries
+  const activeCompatible=checkedLibrary.entries
     .filter(entry=>govByDigest.get(entry.skill_digest)?.active_for_composition===true)
-    .filter(entry=>compatible(entry,checkedContext))
+    .filter(entry=>compatible(entry,checkedContext));
+  const coalitionMasked=activeCompatible.filter(entry=>coalitionMaskSet.has(entry.skill_digest));
+  const eligible=activeCompatible
+    .filter(entry=>!coalitionMaskSet.has(entry.skill_digest))
     .map(entry=>{
       const utility=summarizeEvidence(entry.skill_digest,checkedContext,checkedEvidence);
       return {entry,governance:govByDigest.get(entry.skill_digest),utility,tie:deterministicTie(checkedContext.context_digest,entry.skill_digest)};
@@ -273,6 +281,11 @@ export function createRsiSkillRoutingPlan({
       skill_id:row.entry.skill_id,skill_digest:row.entry.skill_digest,context_utility:row.utility,
       reason:'EXACT_CONTEXT_NEGATIVE_TRANSFER',
     })).sort((a,b)=>a.skill_digest.localeCompare(b.skill_digest)),
+    masked_coalition_pollution:coalitionMasked.map(entry=>Object.freeze({
+      skill_id:entry.skill_id,skill_digest:entry.skill_digest,reason:'NEGATIVE_COALITION_MARGINAL',
+    })).sort((a,b)=>a.skill_digest.localeCompare(b.skill_digest)),
+    coalition_masked_count:coalitionMasked.length,
+    coalition_masked_skill_digests:Object.freeze(coalitionMask),
     selected_count:selected.length,
     vetoed_count:vetoed.length,
     max_selected:maxSelected,
@@ -281,8 +294,12 @@ export function createRsiSkillRoutingPlan({
     only_governance_active_skills:true,
     exact_interface_compatibility_required:true,
     exact_context_negative_transfer_veto:true,
+    coalition_pollution_mask_supported:true,
+    coalition_mask_cannot_grant_activity:true,
     negative_transfer_exact_min:NEGATIVE_TRANSFER_EXACT_MIN,
     contextual_utility_not_global_truth:true,
+    coalition_pollution_mask_is_advisory_input:true,
+    coalition_mask_cannot_grant_activity:true,
     candidate_can_select_skills:false,
     candidate_can_override_negative_transfer_veto:false,
     candidate_can_choose_router_thresholds:false,
@@ -362,10 +379,10 @@ export class RsiRuntimeSkillRouter{
     if(additions.length>0)await this.#persist();
     return zero({state:additions.length>0?'APPENDED':'IDEMPOTENT',appended_count:additions.length,evidence_digests:additions.map(x=>x.evidence_digest)});
   }
-  async route({library,governance,context,max_selected=4,exploration_slots=1,external_planner=false,authored_by_candidate=true}={}){
+  async route({library,governance,context,coalition_masked_skill_digests=[],max_selected=4,exploration_slots=1,external_planner=false,authored_by_candidate=true}={}){
     this.#assertInit();
     const plan=createRsiSkillRoutingPlan({
-      library,governance,context,evidence:this.#evidence,max_selected,exploration_slots,external_planner,authored_by_candidate,
+      library,governance,context,evidence:this.#evidence,coalition_masked_skill_digests,max_selected,exploration_slots,external_planner,authored_by_candidate,
     });
     this.#routeCount+=1;this.#lastPlanDigest=plan.plan_digest;await this.#persist();return plan;
   }
