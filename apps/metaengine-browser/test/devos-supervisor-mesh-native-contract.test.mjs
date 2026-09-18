@@ -24,8 +24,8 @@ test('mesh continuity is preserved in exact base and the public DevOS client can
   assert.match(publicClient, /await super\.cycle\(\)/);
   assert.match(publicClient, /buildSupervisorMeshWireProjectionV1\(base\?\.supervisor_mesh \|\| null\)/,
     'realtime state push must derive the same bounded mesh projection as the primary heartbeat');
-  assert.match(publicClient, /\.\.\.\(supervisorMesh \? \{ supervisor_mesh: supervisorMesh \} : \{\}\)/,
-    'realtime state push must carry a valid mesh projection instead of clobbering it with null');
+  assert.match(publicClient, /supervisor_mesh:\s*supervisorMesh,/s,
+    'realtime state push must always carry the mesh plane (explicit null when not running) for per-plane server merge');
   assert.doesNotMatch(runtime, /canRestart/);
   assert.doesNotMatch(base, /mesh.*isQuiescent.*canRestart|canRestart[\s\S]{0,300}mesh\.isQuiescent/i);
 });
