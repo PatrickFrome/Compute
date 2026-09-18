@@ -30,9 +30,13 @@ function experience(label,{cost=8,info=0.8,scopeTags=['VERIFIER']}={}){
     origin_candidate_digest:dg(`candidate-${label}`),
     origin_lineage_digest:dg(`lineage-${label}`),
     sanitized_summary_digest:dg(`summary-${label}`),
+    distilled_recipe_digest:dg(`recipe-${label}`),
     supporting_evidence_digest:dg(`support-${label}`),
     counterevidence_digest:dg(`counter-${label}`),
     falsification_test_digest:dg(`falsify-${label}`),
+    source_context_digest:dg(`source-context-${label}`),
+    local_revalidation_protocol_digest:dg(`revalidate-${label}`),
+    negative_transfer_probe_digest:dg(`negative-transfer-${label}`),
     scope_tags:scopeTags,
     recipient_group_tags:['CODING'],
     evaluator_cost_units:cost,
@@ -50,6 +54,9 @@ function experience(label,{cost=8,info=0.8,scopeTags=['VERIFIER']}={}){
     counterevidence_reviewed:true,
     falsification_test_precommitted:true,
     hidden_data_non_disclosure_pass:true,
+    recipe_distillation_verified:true,
+    context_compatibility_pass:true,
+    negative_transfer_probe_pass:true,
     scope_precision_pass:true,
     evaluator_budget_available:true,
     marginal_information_gain_certified:true,
@@ -79,6 +86,13 @@ test('routing request binds admitted hypothesis provenance and remains zero-auth
   const fx=request('one');
   const checked=verifyRsiEvaluationRoutingRequest(fx.row,{hypothesis:fx.hypothesis,admission:fx.admission});
   assert.equal(checked.request_digest,fx.row.request_digest);
+  assert.equal(fx.row.distilled_recipe_digest,fx.hypothesis.distilled_recipe_digest);
+  assert.equal(fx.row.source_context_digest,fx.hypothesis.source_context_digest);
+  assert.equal(fx.row.local_revalidation_protocol_digest,fx.hypothesis.local_revalidation_protocol_digest);
+  assert.equal(fx.row.negative_transfer_probe_digest,fx.hypothesis.negative_transfer_probe_digest);
+  assert.equal(fx.row.recipe_distillation_verified,true);
+  assert.equal(fx.row.context_compatibility_pass,true);
+  assert.equal(fx.row.negative_transfer_probe_pass,true);
   assert.equal(fx.row.cheap_proxy_is_final_truth,false);
   assert.equal(fx.row.independent_audit_required,true);
   assert.equal(fx.row.candidate_can_set_priority,false);
@@ -209,6 +223,10 @@ test('append-only budget ledger persists exact cost accounting and cannot execut
 test('evaluation budget router trust root keeps routing advisory and bounded',()=>{
   const root=rsiEvaluationBudgetRouterTrustRootSnapshot();
   assert.equal(root.admitted_experience_required,true);
+  assert.equal(root.recipe_distillation_verified_required,true);
+  assert.equal(root.context_compatible_experience_required,true);
+  assert.equal(root.negative_transfer_clearance_required,true);
+  assert.equal(root.local_revalidation_protocol_binding_required,true);
   assert.equal(root.external_measurement_owner_required,true);
   assert.equal(root.external_budget_owner_required,true);
   assert.equal(root.uncertainty_aware_routing,true);
