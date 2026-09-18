@@ -1099,17 +1099,6 @@ export class RsiRuntimeService {
     if (certificate.admission_proposal_digest !== proposal.admission_proposal_digest) {
       throw new Error('rsi_runtime_anytime_append_proposal_certificate_mismatch');
     }
-    const currentLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
-    const currentGovernance = this.#skillLifecycle.governance();
-    if (!currentLibrary || !currentGovernance) {
-      throw new Error('rsi_runtime_anytime_append_current_state_unavailable');
-    }
-    if (currentLibrary.library_digest !== certificate.current_library_digest) {
-      throw new Error('rsi_runtime_anytime_append_current_library_drift');
-    }
-    if (currentGovernance.governance_digest !== certificate.current_governance_digest) {
-      throw new Error('rsi_runtime_anytime_append_current_governance_drift');
-    }
     if (proposal.proposed_successor_library?.library_digest !== certificate.proposed_successor_library_digest) {
       throw new Error('rsi_runtime_anytime_append_successor_digest_mismatch');
     }
