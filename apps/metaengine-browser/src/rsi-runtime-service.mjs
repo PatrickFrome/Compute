@@ -142,6 +142,11 @@ import {
   verifyRsiSelfUpdatePostEffectReadback,
   rsiSelfUpdateFinalApplyReadbackTrustRootSnapshot,
 } from './rsi-self-update-final-apply-readback.mjs';
+import {
+  createRsiSelfUpdateSuccessorVerification,
+  verifyRsiSelfUpdateSuccessorVerification,
+  rsiSelfUpdateSuccessorVerificationTrustRootSnapshot,
+} from './rsi-self-update-successor-verification.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -165,6 +170,7 @@ const MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES = 256;
 const MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_FINAL_APPLY_INVOCATIONS = 128;
 const MAX_SELF_UPDATE_POST_EFFECT_READBACKS = 256;
+const MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS = 256;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -252,6 +258,7 @@ function trustRoots() {
     self_update_restart_gate_probe_outcome: rsiSelfUpdateRestartGateProbeOutcomeTrustRootSnapshot(),
     self_update_final_install_cycle: rsiSelfUpdateFinalInstallCycleTrustRootSnapshot(),
     self_update_final_apply_readback: rsiSelfUpdateFinalApplyReadbackTrustRootSnapshot(),
+    self_update_successor_verification: rsiSelfUpdateSuccessorVerificationTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -325,6 +332,8 @@ export class RsiRuntimeService {
   #lastSelfUpdateFinalApplyInvocationDigest = null;
   #selfUpdatePostEffectReadbackDigests = new Set();
   #lastSelfUpdatePostEffectReadbackDigest = null;
+  #selfUpdateSuccessorVerificationDigests = new Set();
+  #lastSelfUpdateSuccessorVerificationDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -509,6 +518,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdatePostEffectReadbackDigests.add(readback.post_effect_readback_digest);
           this.#lastSelfUpdatePostEffectReadbackDigest = readback.post_effect_readback_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_SUCCESSOR_VERIFICATION_RECORDED' && row?.payload?.successor_verification) {
+          const verification = verifyRsiSelfUpdateSuccessorVerification(row.payload.successor_verification);
+          if (this.#selfUpdateSuccessorVerificationDigests.size >= MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS) {
+            throw new Error('rsi_runtime_successor_verification_replay_capacity_exhausted');
+          }
+          this.#selfUpdateSuccessorVerificationDigests.add(verification.successor_verification_digest);
+          this.#lastSelfUpdateSuccessorVerificationDigest = verification.successor_verification_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -2021,6 +2038,62 @@ export class RsiRuntimeService {
     return Object.freeze({ readback, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateSuccessorVerification({
+    final_install_admission,
+    post_effect_readback,
+    startup_inspection = null,
+    transaction_readback = null,
+    successor_receipt = null,
+    recovery_diagnostic = null,
+    installed_executable_readback = null,
+    observed_at,
+    observer_id,
+  } = {}) {
+    this.#assertRunning();
+    const admission = verifyRsiSelfUpdateFinalInstallCycleAdmission(final_install_admission);
+    if (!this.#selfUpdateFinalInstallAdmissionDigests.has(admission.final_install_admission_digest)) {
+      throw new Error('rsi_runtime_final_install_admission_not_persisted');
+    }
+    const postEffect = verifyRsiSelfUpdatePostEffectReadback(post_effect_readback);
+    if (!this.#selfUpdatePostEffectReadbackDigests.has(postEffect.post_effect_readback_digest)) {
+      throw new Error('rsi_runtime_post_effect_readback_not_persisted');
+    }
+    const verification = createRsiSelfUpdateSuccessorVerification({
+      final_install_admission: admission,
+      post_effect_readback: postEffect,
+      startup_inspection,
+      transaction_readback,
+      successor_receipt,
+      recovery_diagnostic,
+      installed_executable_readback,
+      observed_at,
+      observer_id,
+    });
+    verifyRsiSelfUpdateSuccessorVerification(verification);
+    if (this.#selfUpdateSuccessorVerificationDigests.has(verification.successor_verification_digest)) {
+      return Object.freeze({ verification, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateSuccessorVerificationDigests.size >= MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS) {
+      throw new Error('rsi_runtime_successor_verification_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_SUCCESSOR_VERIFICATION_RECORDED', {
+      successor_verification: verification,
+      qualified_only_post_adoption_measurement: true,
+      qualified_only_experience_admission: true,
+      qualified_only_skill_evolution: true,
+      existing_successor_qualification_pipeline_required: verification.existing_successor_qualification_pipeline_required,
+      existing_ambiguous_recovery_pipeline_required: verification.existing_ambiguous_recovery_pipeline_required,
+      new_installer_effect_allowed: false,
+      same_invocation_retry_allowed: false,
+      fresh_physical_effect_retry_allowed: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateSuccessorVerificationDigests.add(verification.successor_verification_digest);
+    this.#lastSelfUpdateSuccessorVerificationDigest = verification.successor_verification_digest;
+    return Object.freeze({ verification, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2356,6 +2429,23 @@ export class RsiRuntimeService {
         same_invocation_retry_allowed: false,
         fresh_physical_effect_retry_allowed: false,
         automatic_install_retry_allowed: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_successor_verification: Object.freeze({
+        count: this.#selfUpdateSuccessorVerificationDigests.size,
+        capacity: MAX_SELF_UPDATE_SUCCESSOR_VERIFICATIONS,
+        last_digest: this.#lastSelfUpdateSuccessorVerificationDigest,
+        exact_startup_transaction_receipt_binding_required: true,
+        external_installed_executable_readback_required: true,
+        qualified_transaction_required_for_post_adoption_measurement: true,
+        qualified_only_experience_admission: true,
+        qualified_only_skill_evolution: true,
+        existing_successor_qualification_pipeline_required: true,
+        ambiguous_successor_uses_existing_recovery_pipeline: true,
+        new_installer_effect_allowed: false,
+        same_invocation_retry_allowed: false,
+        fresh_physical_effect_retry_allowed: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
       }),
