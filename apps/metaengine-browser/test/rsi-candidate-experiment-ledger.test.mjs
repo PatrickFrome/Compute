@@ -24,6 +24,14 @@ import {
 
 const SOURCE='a'.repeat(40);
 function dg(label){return `sha256:${crypto.createHash('sha256').update(String(label),'utf8').digest('hex')}`;}
+function stableForDigest(v){
+  if(Array.isArray(v))return v.map(stableForDigest);
+  if(!v||typeof v!=='object')return v;
+  return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stableForDigest(v[k])]));
+}
+function objectDigest(v){
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableForDigest(v)),'utf8').digest('hex')}`;
+}
 
 function routingFixture(label='one'){
   const hypothesis=createRsiSharedExperienceHypothesis({
@@ -357,4 +365,86 @@ test('candidate experiment trust root keeps paired trials external and zero-auth
   assert.equal(root.ledger_can_schedule_followup,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.candidate_experiment_ledger_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('failed durable rename cannot expose a phantom experiment row',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-candidate-experiment-crash-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+  const fx=routingFixture('crash-consistency');
+  const i=intent(fx,'crash-consistency');
+  const rec=receipt(i,'crash-consistency');
+
+  const originalRename=fs.rename;
+  fs.rename=async()=>{throw Object.assign(new Error('injected_rename_failure'),{code:'EIO'});};
+  try{
+    await assert.rejects(()=>ledger.add({intent:i,receipt:rec}),/injected_rename_failure/);
+  }finally{
+    fs.rename=originalRename;
+  }
+
+  assert.equal(ledger.snapshot().row_count,0);
+  assert.equal(ledger.supported().length,0);
+
+  const restored=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,0);
+
+  assert.equal((await ledger.add({intent:i,receipt:rec})).state,'SUPPORTED_FOR_BOUNDED_REVISION');
+  assert.equal(ledger.snapshot().row_count,1);
+});
+
+test('restart rejects self-rehashed policy weakening and forged derived experiment verdicts',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-candidate-experiment-replay-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+
+  const fx=routingFixture('replay-hardening');
+  const i=intent(fx,'replay-hardening');
+  const rec=receipt(i,'replay-hardening',{
+    treatment_metrics:treatmentMetrics({safety:0.80}),
+  });
+  assert.equal(rec.state,'CANDIDATE_EXPERIMENT_REJECTED');
+  await ledger.add({intent:i,receipt:rec});
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  const weakened=structuredClone(raw);
+  weakened.rows[0].receipt.receipt_can_retry_experiment=true;
+  const weakenedReceipt=structuredClone(weakened.rows[0].receipt);
+  delete weakenedReceipt.receipt_digest;
+  weakened.rows[0].receipt.receipt_digest=objectDigest(weakenedReceipt);
+  const weakenedState=structuredClone(weakened);
+  delete weakenedState.state_digest;
+  weakened.state_digest=objectDigest(weakenedState);
+  const weakenedPath=path.join(dir,'weakened.json');
+  await fs.writeFile(weakenedPath,JSON.stringify(weakened),'utf8');
+  const weakenedLedger=new RsiCandidateExperimentLedger({statePath:weakenedPath,source_sha:SOURCE});
+  await assert.rejects(()=>weakenedLedger.init(),/receipt_policy_invalid/);
+
+  const forged=structuredClone(raw);
+  forged.rows[0].receipt.state='SUPPORTED_FOR_BOUNDED_REVISION';
+  forged.rows[0].receipt.eligible_for_bounded_revision=true;
+  forged.rows[0].receipt.rejected_or_inconclusive=false;
+  const forgedReceipt=structuredClone(forged.rows[0].receipt);
+  delete forgedReceipt.receipt_digest;
+  forged.rows[0].receipt.receipt_digest=objectDigest(forgedReceipt);
+  forged.state_counts={
+    supported:1,
+    no_material_improvement:0,
+    rejected:0,
+    inconclusive_environment:0,
+    inconclusive_ambiguous:0,
+  };
+  const forgedState=structuredClone(forged);
+  delete forgedState.state_digest;
+  forged.state_digest=objectDigest(forgedState);
+  const forgedPath=path.join(dir,'forged.json');
+  await fs.writeFile(forgedPath,JSON.stringify(forged),'utf8');
+  const forgedLedger=new RsiCandidateExperimentLedger({statePath:forgedPath,source_sha:SOURCE});
+  await assert.rejects(()=>forgedLedger.init(),/state_derivation_mismatch/);
 });
