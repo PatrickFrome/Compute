@@ -55,6 +55,7 @@ import { createRsiReleaseAuthorityHandoff, verifyRsiReleaseAuthorityHandoff, rsi
 import { createRsiReleaseExecutorAdmission, verifyRsiReleaseExecutorAdmission, rsiReleaseExecutorAdmissionTrustRootSnapshot } from './rsi-release-executor-admission.mjs';
 import { createRsiReleaseEffectReconciliation, verifyRsiReleaseEffectReconciliation, rsiReleaseEffectReconciliationTrustRootSnapshot } from './rsi-release-effect-reconciliation.mjs';
 import { createRsiReleaseAuthorityConvergence, verifyRsiReleaseAuthorityConvergence, rsiReleaseAuthorityConvergenceTrustRootSnapshot } from './rsi-release-authority-convergence.mjs';
+import { createRsiPostDeploymentLearningReceipt, createRsiPostDeploymentExperienceAdmission, verifyRsiPostDeploymentExperienceAdmission, applyRsiPostDeploymentExperienceAdmission, rsiPostDeploymentLearningTrustRootSnapshot } from './rsi-post-deployment-learning.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -134,6 +135,7 @@ function trustRoots() {
     release_executor_admission: rsiReleaseExecutorAdmissionTrustRootSnapshot(),
     release_effect_reconciliation: rsiReleaseEffectReconciliationTrustRootSnapshot(),
     release_authority_convergence: rsiReleaseAuthorityConvergenceTrustRootSnapshot(),
+    post_deployment_learning: rsiPostDeploymentLearningTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -197,6 +199,10 @@ export class RsiRuntimeService {
   #releaseAuthorityConvergenceCount = 0;
   #lastReleaseAuthorityConvergenceDigest = null;
   #lastConvergedReleaseSha = null;
+  #postDeploymentLearningCount = 0;
+  #lastPostDeploymentLearningAdmissionDigest = null;
+  #lastPostDeploymentLearningCaseDigest = null;
+  #postDeploymentLearningConvergenceDigests = new Set();
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -595,6 +601,23 @@ export class RsiRuntimeService {
       for (const row of page) {
         const convergence = row?.payload?.release_authority_convergence;
         if (convergence?.release_effect_reconciliation_digest === wanted) found = Object.freeze(structuredClone(convergence));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findReleaseAuthorityConvergenceByDigest(convergenceDigest) {
+    const wanted = String(convergenceDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const convergence = row?.payload?.release_authority_convergence;
+        if (convergence?.convergence_digest === wanted) found = Object.freeze(structuredClone(convergence));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
