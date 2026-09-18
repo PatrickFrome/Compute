@@ -351,6 +351,92 @@ export function verifyRsiCandidateExperimentReceipt(receipt,{intent}={}){
   return canonical;
 }
 
+const MATERIALIZED_OUTCOME_STATES=Object.freeze([
+  'SUPPORTED_FOR_BOUNDED_REVISION',
+  'NO_MATERIAL_IMPROVEMENT',
+  'CANDIDATE_EXPERIMENT_REJECTED',
+  'INCONCLUSIVE_ENVIRONMENT',
+  'INCONCLUSIVE_AMBIGUOUS',
+]);
+
+function deriveEvaluationGenerationHistory(rows){
+  const history=[];
+  const seenGenerations=new Set();
+  let current=null;
+  let materializedOutcomeCount=0;
+  for(const row of rows){
+    const intent=row.intent;
+    const receipt=row.receipt;
+    if(intent?.evaluation_request_kind!=='MATERIALIZED_CANDIDATE')continue;
+    materializedOutcomeCount+=1;
+    const generation=exactDigest(intent.evaluator_generation_digest,'history_evaluator_generation');
+    const evaluatorRoot=exactDigest(intent.evaluator_root_digest,'history_evaluator_root');
+    const epoch=exactDigest(intent.evaluation_epoch_digest,'history_evaluation_epoch');
+    const artifactReceipt=exactDigest(intent.phase28_artifact_receipt_digest,'history_artifact_receipt');
+    const provenance=exactDigest(intent.provenance_root_digest,'history_provenance_root');
+    const hiddenHoldout=exactDigest(intent.hidden_holdout_root_digest,'history_hidden_holdout');
+    const safetySuite=exactDigest(intent.safety_suite_root_digest,'history_safety_suite');
+    const securitySuite=exactDigest(intent.security_suite_root_digest,'history_security_suite');
+    if(intent.acceptance_assets_frozen!==true||intent.fresh_budget_epoch_required!==true)throw new Error('rsi_experiment_generation_history_phase29_policy_invalid');
+    if(!MATERIALIZED_OUTCOME_STATES.includes(receipt.state))throw new Error('rsi_experiment_generation_history_outcome_state_invalid');
+
+    if(!current||current.evaluator_generation_digest!==generation){
+      if(seenGenerations.has(generation))throw new Error('rsi_experiment_generation_history_rollback_detected');
+      seenGenerations.add(generation);
+      current={
+        generation_sequence:history.length+1,
+        evaluator_generation_digest:generation,
+        evaluator_root_digest:evaluatorRoot,
+        evaluation_epoch_digests:[],
+        artifact_receipt_digests:[],
+        provenance_root_digests:[],
+        protected_suite_root_sets:[],
+        receipt_digests:[],
+        state_counts:{
+          supported:0,
+          no_material_improvement:0,
+          rejected:0,
+          inconclusive_environment:0,
+          inconclusive_ambiguous:0,
+        },
+        evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+        negative_outcomes_retained:true,
+      };
+      history.push(current);
+    }else if(current.evaluator_root_digest!==evaluatorRoot){
+      throw new Error('rsi_experiment_generation_history_evaluator_root_drift');
+    }
+
+    if(!current.evaluation_epoch_digests.includes(epoch))current.evaluation_epoch_digests.push(epoch);
+    if(!current.artifact_receipt_digests.includes(artifactReceipt))current.artifact_receipt_digests.push(artifactReceipt);
+    if(!current.provenance_root_digests.includes(provenance))current.provenance_root_digests.push(provenance);
+    const suiteSet=digest({hidden_holdout_root_digest:hiddenHoldout,safety_suite_root_digest:safetySuite,security_suite_root_digest:securitySuite});
+    if(!current.protected_suite_root_sets.includes(suiteSet))current.protected_suite_root_sets.push(suiteSet);
+    current.receipt_digests.push(receipt.receipt_digest);
+    if(receipt.state==='SUPPORTED_FOR_BOUNDED_REVISION')current.state_counts.supported+=1;
+    else if(receipt.state==='NO_MATERIAL_IMPROVEMENT')current.state_counts.no_material_improvement+=1;
+    else if(receipt.state==='CANDIDATE_EXPERIMENT_REJECTED')current.state_counts.rejected+=1;
+    else if(receipt.state==='INCONCLUSIVE_ENVIRONMENT')current.state_counts.inconclusive_environment+=1;
+    else if(receipt.state==='INCONCLUSIVE_AMBIGUOUS')current.state_counts.inconclusive_ambiguous+=1;
+  }
+
+  const frozen=history.map(entry=>Object.freeze({
+    ...entry,
+    evaluation_epoch_digests:Object.freeze([...entry.evaluation_epoch_digests]),
+    artifact_receipt_digests:Object.freeze([...entry.artifact_receipt_digests]),
+    provenance_root_digests:Object.freeze([...entry.provenance_root_digests]),
+    protected_suite_root_sets:Object.freeze([...entry.protected_suite_root_sets]),
+    receipt_digests:Object.freeze([...entry.receipt_digests]),
+    state_counts:Object.freeze({...entry.state_counts}),
+    outcome_count:entry.receipt_digests.length,
+  }));
+  return Object.freeze({
+    generation_history:Object.freeze(frozen),
+    generation_count:frozen.length,
+    materialized_outcome_count:materializedOutcomeCount,
+  });
+}
+
 function ledgerState(sourceSha,rows){
   const counts=Object.freeze({
     supported:rows.filter(r=>r.receipt.state==='SUPPORTED_FOR_BOUNDED_REVISION').length,
@@ -359,6 +445,7 @@ function ledgerState(sourceSha,rows){
     inconclusive_environment:rows.filter(r=>r.receipt.state==='INCONCLUSIVE_ENVIRONMENT').length,
     inconclusive_ambiguous:rows.filter(r=>r.receipt.state==='INCONCLUSIVE_AMBIGUOUS').length,
   });
+  const generationHistory=deriveEvaluationGenerationHistory(rows);
   const core=zero({
     schema:RSI_CANDIDATE_EXPERIMENT_LEDGER_SCHEMA,
     version:1,
@@ -366,6 +453,13 @@ function ledgerState(sourceSha,rows){
     rows,
     row_count:rows.length,
     state_counts:counts,
+    evaluation_generation_history:generationHistory.generation_history,
+    evaluation_generation_count:generationHistory.generation_count,
+    materialized_candidate_outcome_count:generationHistory.materialized_outcome_count,
+    generation_history_append_only:true,
+    evaluator_generation_rollback_allowed:false,
+    evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+    all_materialized_outcome_classes_retained:true,
     append_only:true,
     rejected_evidence_retained:true,
     inconclusive_evidence_retained:true,
@@ -388,6 +482,12 @@ export class RsiCandidateExperimentLedger{
       const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'ledger');
       if(p.schema!==RSI_CANDIDATE_EXPERIMENT_LEDGER_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha||p.append_only!==true
         ||p.rejected_evidence_retained!==true||p.inconclusive_evidence_retained!==true
+        ||(p.evaluation_generation_history!==undefined&&(
+          p.generation_history_append_only!==true
+          ||p.evaluator_generation_rollback_allowed!==false
+          ||p.evaluator_dependent_verdict_reuse_across_generation_allowed!==false
+          ||p.all_materialized_outcome_classes_retained!==true
+        ))
         ||p.ledger_can_mutate_active_state!==false||p.ledger_can_retry_experiment!==false||p.ledger_can_schedule_followup!==false
         ||p.candidate_can_delete!==false||p.candidate_can_rewrite!==false)throw new Error('rsi_experiment_ledger_state_invalid');
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_experiment_ledger_digest_mismatch');
@@ -406,7 +506,11 @@ export class RsiCandidateExperimentLedger{
         checkedRows.push(Object.freeze({source_sha:this.#sourceSha,intent,receipt}));
       }
       const canonical=ledgerState(this.#sourceSha,checkedRows);
-      if(p.row_count!==canonical.row_count||JSON.stringify(p.state_counts)!==JSON.stringify(canonical.state_counts))throw new Error('rsi_experiment_ledger_summary_mismatch');
+      if(p.evaluation_generation_history!==undefined){
+        if(canonical.state_digest!==p.state_digest)throw new Error('rsi_experiment_ledger_derived_state_mismatch');
+      }else if(p.row_count!==canonical.row_count||JSON.stringify(p.state_counts)!==JSON.stringify(canonical.state_counts)){
+        throw new Error('rsi_experiment_ledger_summary_mismatch');
+      }
       this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
@@ -430,7 +534,8 @@ export class RsiCandidateExperimentLedger{
   }
   supported(){if(!this.#initialized)throw new Error('rsi_experiment_ledger_not_initialized');return Object.freeze(this.#rows.filter(r=>r.receipt.eligible_for_bounded_revision===true).map(r=>Object.freeze(structuredClone(r.receipt))));}
   rejectedOrInconclusive(){if(!this.#initialized)throw new Error('rsi_experiment_ledger_not_initialized');return Object.freeze(this.#rows.filter(r=>r.receipt.rejected_or_inconclusive===true).map(r=>Object.freeze(structuredClone(r.receipt))));}
-  snapshot(){const s=ledgerState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,state_counts:s.state_counts,append_only:true,rejected_evidence_retained:true,inconclusive_evidence_retained:true,ledger_can_mutate_active_state:false,ledger_can_retry_experiment:false,ledger_can_schedule_followup:false,authority_effect:false});}
+  evaluationGenerationHistory(){if(!this.#initialized)throw new Error('rsi_experiment_ledger_not_initialized');return ledgerState(this.#sourceSha,this.#rows).evaluation_generation_history;}
+  snapshot(){const s=ledgerState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,state_counts:s.state_counts,evaluation_generation_history:s.evaluation_generation_history,evaluation_generation_count:s.evaluation_generation_count,materialized_candidate_outcome_count:s.materialized_candidate_outcome_count,generation_history_append_only:true,evaluator_generation_rollback_allowed:false,evaluator_dependent_verdict_reuse_across_generation_allowed:false,all_materialized_outcome_classes_retained:true,append_only:true,rejected_evidence_retained:true,inconclusive_evidence_retained:true,ledger_can_mutate_active_state:false,ledger_can_retry_experiment:false,ledger_can_schedule_followup:false,authority_effect:false});}
 }
 
 export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
@@ -453,6 +558,10 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     hidden_holdout_binding_required:true,
     safety_suite_binding_required:true,
     security_suite_binding_required:true,
+    evaluation_generation_history_append_only:true,
+    evaluator_generation_rollback_allowed:false,
+    evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+    all_materialized_outcome_classes_retained:true,
     paired_control_treatment_required:true,
     unchanged_baseline_artifact_required:true,
     same_sealed_tasks_required:true,
