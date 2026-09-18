@@ -14,6 +14,9 @@ test('S5b receipt readback route is device-authenticated and same-client scoped'
   assert.match(source, /where workspace_id=\$1::uuid and command_id=\$2::uuid and leased_by=\$3 limit 1/);
   assert.match(source, /\/v1\\\/commands\\\/\(\[\^\/\]\+\)\\\/receipt\$\/\)/);
   assert.match(source, /authority_effect:false/);
+  assert.match(source, /result_receipt_readback:true/);
+  assert.match(source, /result_receipt_readback_is_authority:false/);
+  assert.match(source, /result_receipt_terminal_statuses:\['COMPLETED','FAILED'\]/);
 });
 
 test('S5b native seam is opt-in and never exposes the Browser effect executor', async () => {
