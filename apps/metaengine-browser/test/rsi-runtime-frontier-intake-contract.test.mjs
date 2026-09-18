@@ -26,12 +26,19 @@ test('RSI frontier intake uses the existing DevOS scheduler and advisory Planner
 test('RSI frontier intake validates exact source and bounded zero-authority envelopes', () => {
   assert.match(sql, /v_source_sha !~ '\^\[0-9a-f\]\{40\}\$'/);
   assert.match(sql, /jsonb_array_length\(v_frontier\) > 4/);
+  assert.match(sql, /frontier_count/);
+  assert.match(sql, /v_active_reviews >= 16/);
   assert.match(sql, /browser_can_enqueue_devos_tasks/);
   assert.match(sql, /direct_execution_enabled/);
   assert.match(sql, /direct_promotion_enabled/);
   assert.match(sql, /direct_self_update_enabled/);
   assert.match(sql, /requires_independent_evaluator/);
   assert.match(sql, /candidate_can_modify_acceptance_contract/);
+  assert.match(sql, /paired_parent_candidate_required/);
+  assert.match(sql, /holdout_required/);
+  assert.match(sql, /no_optional_stopping/);
+  assert.match(sql, /scalar_reward_authoritative/);
+  assert.match(sql, /candidate_authored_receipts_allowed/);
   assert.match(sql, /command_created/);
   assert.match(sql, /automatic_retry_allowed/);
 });
@@ -42,4 +49,15 @@ test('RSI frontier intake is service-role only and the state route remains the o
   assert.match(edge, /path==='\/v1\/state'/);
   assert.match(edge, /rsiFrontierIntake\(\{workspaceId:WORKSPACE_ID,clientId:id,state:body\?\.state\}\)/);
   assert.doesNotMatch(edge, /path==='\/v1\/rsi/);
+});
+
+
+test('RSI frontier intake binds opportunity, observation, signal and mutation surface across all envelopes', () => {
+  assert.match(sql, /v_hypothesis ->> 'opportunity_id'/);
+  assert.match(sql, /v_entry ->> 'observation_digest'/);
+  assert.match(sql, /task_spec,rsi,observation_digest/);
+  assert.match(sql, /v_entry ->> 'signal'/);
+  assert.match(sql, /task_spec,rsi,signal/);
+  assert.match(sql, /v_entry ->> 'mutation_surface'/);
+  assert.match(sql, /task_spec,rsi,mutation_surface/);
 });
