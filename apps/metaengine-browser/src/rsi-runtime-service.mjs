@@ -130,6 +130,11 @@ import {
   verifyRsiSelfUpdateRestartGateProbeOutcome,
   rsiSelfUpdateRestartGateProbeOutcomeTrustRootSnapshot,
 } from './rsi-self-update-restart-gate-probe-outcome.mjs';
+import {
+  createRsiSelfUpdateFinalInstallCycleAdmission,
+  verifyRsiSelfUpdateFinalInstallCycleAdmission,
+  rsiSelfUpdateFinalInstallCycleTrustRootSnapshot,
+} from './rsi-self-update-final-install-cycle-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -150,6 +155,7 @@ const MAX_SELF_UPDATE_CHECK_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_DOWNLOAD_READINESS = 128;
 const MAX_SELF_UPDATE_RESTART_GATE_PROBE_ADMISSIONS = 128;
 const MAX_SELF_UPDATE_RESTART_GATE_PROBE_OUTCOMES = 256;
+const MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS = 128;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -235,6 +241,7 @@ function trustRoots() {
     self_update_download_readiness: rsiSelfUpdateDownloadReadinessTrustRootSnapshot(),
     self_update_restart_gate_probe: rsiSelfUpdateRestartGateProbeTrustRootSnapshot(),
     self_update_restart_gate_probe_outcome: rsiSelfUpdateRestartGateProbeOutcomeTrustRootSnapshot(),
+    self_update_final_install_cycle: rsiSelfUpdateFinalInstallCycleTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -302,6 +309,8 @@ export class RsiRuntimeService {
   #lastSelfUpdateRestartGateProbeDigest = null;
   #selfUpdateRestartGateProbeOutcomeDigests = new Set();
   #lastSelfUpdateRestartGateProbeOutcomeDigest = null;
+  #selfUpdateFinalInstallAdmissionDigests = new Set();
+  #lastSelfUpdateFinalInstallAdmissionDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -462,6 +471,14 @@ export class RsiRuntimeService {
           }
           this.#selfUpdateRestartGateProbeOutcomeDigests.add(outcome.outcome_digest);
           this.#lastSelfUpdateRestartGateProbeOutcomeDigest = outcome.outcome_digest;
+        }
+        if (row?.type === 'RSI_SELF_UPDATE_FINAL_INSTALL_ADMISSION_READY' && row?.payload?.final_install_admission) {
+          const admission = verifyRsiSelfUpdateFinalInstallCycleAdmission(row.payload.final_install_admission);
+          if (this.#selfUpdateFinalInstallAdmissionDigests.size >= MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS) {
+            throw new Error('rsi_runtime_final_install_admission_replay_capacity_exhausted');
+          }
+          this.#selfUpdateFinalInstallAdmissionDigests.add(admission.final_install_admission_digest);
+          this.#lastSelfUpdateFinalInstallAdmissionDigest = admission.final_install_admission_digest;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -1829,6 +1846,55 @@ export class RsiRuntimeService {
     return Object.freeze({ outcome, already_recorded: false, authority_effect: false });
   }
 
+  async recordSelfUpdateFinalInstallCycleAdmission({
+    probe_outcome,
+    probe_admission,
+    download_readiness,
+    fresh_runtime_snapshot,
+    prior_transaction = null,
+    trusted_release,
+    observed_at,
+    observer_id,
+  } = {}) {
+    this.#assertRunning();
+    const outcome = verifyRsiSelfUpdateRestartGateProbeOutcome(probe_outcome);
+    if (!this.#selfUpdateRestartGateProbeOutcomeDigests.has(outcome.outcome_digest)) {
+      throw new Error('rsi_runtime_restart_gate_probe_outcome_not_persisted');
+    }
+    const admission = createRsiSelfUpdateFinalInstallCycleAdmission({
+      probe_outcome: outcome,
+      probe_admission,
+      download_readiness,
+      fresh_runtime_snapshot,
+      prior_transaction,
+      trusted_release,
+      observed_at,
+      observer_id,
+    });
+    verifyRsiSelfUpdateFinalInstallCycleAdmission(admission);
+    if (this.#selfUpdateFinalInstallAdmissionDigests.has(admission.final_install_admission_digest)) {
+      return Object.freeze({ admission, already_recorded: true, authority_effect: false });
+    }
+    if (this.#selfUpdateFinalInstallAdmissionDigests.size >= MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS) {
+      throw new Error('rsi_runtime_final_install_admission_capacity_exhausted');
+    }
+    await this.#ledger.append('RSI_SELF_UPDATE_FINAL_INSTALL_ADMISSION_READY', {
+      final_install_admission: admission,
+      external_self_update_controller_required: true,
+      final_apply_invoked: false,
+      final_apply_authorized_by_rsi: false,
+      installer_launch_authorized_by_rsi: false,
+      one_attempt_physical_effect_required: true,
+      post_effect_transaction_readback_required: true,
+      successor_startup_readback_required: true,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#selfUpdateFinalInstallAdmissionDigests.add(admission.final_install_admission_digest);
+    this.#lastSelfUpdateFinalInstallAdmissionDigest = admission.final_install_admission_digest;
+    return Object.freeze({ admission, already_recorded: false, authority_effect: false });
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -2125,6 +2191,26 @@ export class RsiRuntimeService {
         install_cycle_invoked: false,
         install_cycle_authorized_by_rsi: false,
         installer_launch_authorized: false,
+        physical_effect_replay_allowed: false,
+        authority_effect: false,
+      }),
+      self_update_final_install_cycle: Object.freeze({
+        count: this.#selfUpdateFinalInstallAdmissionDigests.size,
+        capacity: MAX_SELF_UPDATE_FINAL_INSTALL_ADMISSIONS,
+        last_digest: this.#lastSelfUpdateFinalInstallAdmissionDigest,
+        exact_candidate_chain_required: true,
+        restart_gate_and_elapsed_grace_reverification_required: true,
+        fresh_prior_transaction_and_host_readback_required: true,
+        external_self_update_controller_required: true,
+        single_final_apply_cycle_only: true,
+        write_ahead_install_effect_barrier_required: true,
+        one_attempt_physical_effect_required: true,
+        post_effect_transaction_readback_required: true,
+        successor_startup_readback_required: true,
+        ambiguous_install_reconciliation_only: true,
+        final_apply_invoked: false,
+        final_apply_authorized_by_rsi: false,
+        installer_launch_authorized_by_rsi: false,
         physical_effect_replay_allowed: false,
         authority_effect: false,
       }),

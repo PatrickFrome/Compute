@@ -219,6 +219,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-self-update-download-readiness.mjs',
     'apps/metaengine-browser/src/rsi-self-update-restart-gate-probe-admission.mjs',
     'apps/metaengine-browser/src/rsi-self-update-restart-gate-probe-outcome.mjs',
+    'apps/metaengine-browser/src/rsi-self-update-final-install-cycle-admission.mjs',
     'apps/metaengine-browser/src/host-resilience-runtime.mjs',
     'apps/metaengine-browser/src/browser-fabric-effect-ledger.mjs',
     'apps/metaengine-browser/src/browser-fabric-effect-domain-policy.mjs',
