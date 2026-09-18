@@ -649,12 +649,13 @@ export class NativeSupervisorClient {
     return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'POST', headers, body: bodyText, cache: 'no-store' });
   }
 
-  async #signedRequest(path, { method = 'POST', payload = null } = {}) {
+  async #signedRequest(path, { method = 'POST', payload = null, signal = null } = {}) {
     const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
     const headers = await this.#identity.deviceHeaders(method, requestPath, bodyText);
     const init = { method, headers, cache: 'no-store' };
     if (method !== 'GET') init.body = bodyText;
+    if (signal) init.signal = signal;
     return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
   }
 
@@ -837,9 +838,26 @@ export class NativeSupervisorClient {
     throw lastError || new Error('native_supervisor_result_delivery_failed');
   }
 
+  #assertRsiResultDeliveryOutcome(outcome, commandId) {
+    const state = String(outcome?.state || '').toUpperCase();
+    if (state === 'DELIVERED' || state === 'RECONCILED') return outcome;
+    const detail = String(outcome?.error || state || 'UNKNOWN').slice(0, 240);
+    if (state === 'REJECTED') throw new Error(`native_supervisor_result_rejected:${commandId}:${detail}`);
+    throw new Error(`native_supervisor_result_delivery_ambiguous:${commandId}:${detail}`);
+  }
+
   async #postResult(command, ok, result, error = null, effectOutcome = null) {
     const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, recorded_at: new Date().toISOString(), authority_effect: false }, error };
+    if (this.#resultDeliveryAdapter) {
+      const outcome = await this.#resultDeliveryAdapter.deliver({
+        commandId: command.command_id,
+        effectKey: command.effect_key || null,
+        payload,
+      });
+      return this.#assertRsiResultDeliveryOutcome(outcome, command.command_id);
+    }
     await this.#deliverResultWithRetry(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, payload);
+    return null;
   }
 
   async #postBatchResults(rows) {
@@ -865,10 +883,50 @@ export class NativeSupervisorClient {
   const chunks = partitionNativeSupervisorBatchResults(results);
   const acknowledgements = [];
   for (const chunk of chunks) {
-    const response = await this.#deliverResultWithRetry('/v1/commands/result-batch', { results: chunk });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
-    acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+    if (!this.#resultDeliveryAdapter) {
+      const response = await this.#deliverResultWithRetry('/v1/commands/result-batch', { results: chunk });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
+      acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+      continue;
+    }
+
+    let batchResponse = null;
+    let batchError = null;
+    try {
+      batchResponse = await this.#signedRequest('/v1/commands/result-batch', { payload: { results: chunk } });
+    } catch (error) {
+      batchError = error;
+    }
+    if (batchResponse?.ok === true) {
+      const body = await batchResponse.json().catch(() => ({}));
+      acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+      continue;
+    }
+    if (batchResponse && !NativeSupervisorClient.#retryableResultDeliveryFailure(batchResponse.status)) {
+      const body = await batchResponse.json().catch(() => ({}));
+      throw new Error(`native_supervisor_batch_result_http_${batchResponse.status}:${body?.error || 'unknown'}`);
+    }
+
+    // Ambiguous batch transport never causes Browser-effect replay. Reconcile each
+    // immutable receipt independently before any same-receipt single-result replay.
+    for (const row of chunk) {
+      const payload = { ok: row.ok === true, receipt: row.receipt, error: row.ok === true ? null : row.error };
+      const outcome = await this.#resultDeliveryAdapter.deliver({
+        commandId: row.command_id,
+        effectKey: row.effect_key || row.receipt?.effect_key || null,
+        payload,
+        readbackBeforeReplay: true,
+      });
+      this.#assertRsiResultDeliveryOutcome(outcome, row.command_id);
+      acknowledgements.push(Object.freeze({
+        command_id: String(row.command_id).toLowerCase(),
+        accepted: true,
+        status: row.ok === true ? 'COMPLETED' : 'FAILED',
+        reconciled_after_batch_ambiguity: true,
+      }));
+    }
+    void batchError;
   }
   return Object.freeze({
     schema: 'metaengine.native-supervisor.batch-result-delivery.v1',
