@@ -10,6 +10,7 @@ import {
   verifyRsiSkillLibraryGovernance,
 } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
+import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
 
 export const RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA='metaengine.rsi.runtime-skill-lifecycle.v1';
 
@@ -19,6 +20,13 @@ const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const PRIORS=new Set(['VERIFIED_META_SKILL','VERIFIED_DIRECT_SKILL','LEGACY_IMPORTED']);
 const MAX_PENDING=4096;
 const MAX_EVIDENCE=16384;
+const MAX_APPEND_ADMISSIONS=512;
+const APPEND_TERMINAL_STATES=new Set([
+  'APPLIED_STORAGE_ONLY_DORMANT',
+  'NOT_APPLIED_REPLAN_REQUIRED',
+  'RECONCILED_APPLIED_STORAGE_ONLY_DORMANT',
+  'RECONCILED_NOT_APPLIED_REPLAN_REQUIRED',
+]);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -35,14 +43,20 @@ function assertEpisode(e){
   return e;
 }
 function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
-function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill}){
+function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill,appendAdmissions}){
   const core={
     schema:RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA,version:1,source_sha:sourceSha,
     library:library||null,library_digest:library?.library_digest||null,
     lifecycle_evidence:lifecycleEvidence,
     pending,
+    append_admissions:appendAdmissions,
+    append_admission_count:appendAdmissions.length,
+    ambiguous_append_count:appendAdmissions.filter(row=>row.state==='AMBIGUOUS_RECONCILIATION_REQUIRED').length,
     window_seq_by_skill:Object.fromEntries([...windowSeqBySkill.entries()].sort(([a],[b])=>a.localeCompare(b))),
     evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,
+    append_admissions_bounded:true,max_append_admissions:MAX_APPEND_ADMISSIONS,
+    append_plan_durable_before_effect:true,append_effect_attempt_limit:1,blind_append_retry_forbidden:true,
+    append_reconciliation_readback_only:true,append_does_not_imply_activation:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     credit_required_for_lifecycle_update:true,contextual_credit_not_global_truth:true,
     raw_model_transcript_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
@@ -53,7 +67,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
 }
 
 export class RsiRuntimeSkillLifecycle{
-  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#seq=new Map();#initialized=false;
+  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#appendAdmissions=[];#seq=new Map();#initialized=false;
   constructor({statePath,source_sha,clock=()=>Date.now()}={}){
     if(!statePath||typeof statePath!=='string')throw new Error('rsi_runtime_skill_state_path_required');
     if(typeof clock!=='function')throw new Error('rsi_runtime_skill_clock_required');
@@ -73,8 +87,25 @@ export class RsiRuntimeSkillLifecycle{
       }
       if(!Array.isArray(parsed.lifecycle_evidence)||parsed.lifecycle_evidence.length>MAX_EVIDENCE)throw new Error('rsi_runtime_skill_evidence_state_invalid');
       if(!Array.isArray(parsed.pending)||parsed.pending.length>MAX_PENDING)throw new Error('rsi_runtime_skill_pending_state_invalid');
+      const appendAdmissions=parsed.append_admissions??[];
+      if(!Array.isArray(appendAdmissions)||appendAdmissions.length>MAX_APPEND_ADMISSIONS)throw new Error('rsi_runtime_skill_append_admissions_state_invalid');
+      const seenAppendIds=new Set(),seenEffectIds=new Set(),seenIdempotency=new Set();
+      for(const row of appendAdmissions){
+        if(!row||typeof row!=='object'||Array.isArray(row))throw new Error('rsi_runtime_skill_append_admission_invalid');
+        const admissionId=boundedId(row.admission_id,'append_admission_id');
+        const effectId=exactDigest(row.append_effect_id_digest,'append_effect_id');
+        const idempotency=exactDigest(row.idempotency_key_digest,'append_idempotency_key');
+        exactDigest(row.admission_certificate_digest,'append_certificate');
+        exactDigest(row.expected_predecessor_library_digest,'append_predecessor');
+        exactDigest(row.expected_successor_library_digest,'append_successor');
+        if(seenAppendIds.has(admissionId)||seenEffectIds.has(effectId)||seenIdempotency.has(idempotency))throw new Error('rsi_runtime_skill_append_admission_duplicate');
+        seenAppendIds.add(admissionId);seenEffectIds.add(effectId);seenIdempotency.add(idempotency);
+        if(!Number.isSafeInteger(row.effect_attempt_count)||row.effect_attempt_count<0||row.effect_attempt_count>1)throw new Error('rsi_runtime_skill_append_attempt_count_invalid');
+        if(row.blind_retry_authorized!==false||row.retrieval_exposure_changed!==false||row.skill_activation_performed!==false||row.lifecycle_mutation_performed!==false)throw new Error('rsi_runtime_skill_append_admission_policy_invalid');
+      }
       this.#evidence=parsed.lifecycle_evidence;
       this.#pending=parsed.pending;
+      this.#appendAdmissions=appendAdmissions;
       this.#seq=new Map(Object.entries(parsed.window_seq_by_skill||{}).map(([k,v])=>[exactDigest(k,'skill_seq'),positiveInt(v,'window_seq')]));
       if(this.#library){
         createRsiSkillLibraryGovernance({
@@ -88,7 +119,7 @@ export class RsiRuntimeSkillLifecycle{
   #now(){const n=Number(this.#clock());if(!Number.isFinite(n))throw new Error('rsi_runtime_skill_clock_invalid');return new Date(n).toISOString()}
   #governanceId(){return `runtime.skill.governance.${this.#sourceSha.slice(0,16)}`}
   async #persist(){
-    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq});
+    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,appendAdmissions:this.#appendAdmissions});
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
     await fs.rename(temp,this.#path);return state;
