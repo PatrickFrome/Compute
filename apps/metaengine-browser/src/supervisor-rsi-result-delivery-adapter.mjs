@@ -61,9 +61,29 @@ export function createSupervisorRsiResultDeliveryAdapter({
   if (typeof signedRequest !== 'function') throw new Error('rsi_result_adapter_signed_request_required');
   if (typeof sleep !== 'function') throw new Error('rsi_result_adapter_sleep_required');
 
-  async function matchingReadback(commandId, payload) {
+  async function matchingReadback(commandId, payload, { boundedMs = null } = {}) {
     const path = `/v1/commands/${encodeURIComponent(commandId)}/receipt`;
-    const response = await signedRequest(path, { method: 'GET' });
+    let response;
+    if (boundedMs == null) {
+      response = await signedRequest(path, { method: 'GET' });
+    } else {
+      const controller = new AbortController();
+      let timer = null;
+      const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort(new Error('rsi_result_adapter_readback_deadline'));
+          resolve(null);
+        }, boundedMs);
+      });
+      try {
+        response = await Promise.race([
+          signedRequest(path, { method: 'GET', signal: controller.signal }),
+          timeout,
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
     const body = await parseReadbackResponse(response);
     if (!body || String(body.command_id || '') !== String(commandId)) return null;
     if (!readbackMatchesPayload(body, payload)) return null;
@@ -79,6 +99,16 @@ export function createSupervisorRsiResultDeliveryAdapter({
     automatic_effect_retry_allowed: false,
     physical_effect_replay_allowed: false,
     authority_effect: false,
+
+    async readStoredReceipt({ commandId, payload } = {}) {
+      const normalizedCommandId = String(commandId || '').trim();
+      if (!normalizedCommandId) throw new Error('rsi_result_adapter_command_id_required');
+      assertPayload(normalizedCommandId, payload);
+      const observed = await matchingReadback(normalizedCommandId, payload, {
+        boundedMs: Math.max(50, Math.min(2_000, Number(deadlineMs) || 2_000)),
+      }).catch(() => null);
+      return observed ? structuredClone(observed) : null;
+    },
 
     async deliver({ commandId, effectKey = null, payload, readbackBeforeReplay = false } = {}) {
       const normalizedCommandId = String(commandId || '').trim();
