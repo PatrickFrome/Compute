@@ -327,6 +327,7 @@ test('existing isolated candidate builder inherits stricter Phase27 edit budgets
   assert.equal(build.materialization_contract.max_mutated_bytes,4096);
   assert.equal(build.materialization_contract.revision_limits.envelope_digest,fx.envelope.envelope_digest);
   assert.equal(build.materialization_contract.revision_limits.proposal_digest,fx.proposal.proposal_digest);
+  assert.equal(build.materialization_contract.revision_limits.parent_candidate_artifact_digest,fx.envelope.parent_candidate_artifact_digest);
   assert.equal(build.materialization_contract.revision_limits.implementation_manifest_digest,bridge.implementation_manifest.manifest_digest);
   assert.equal(build.materialization_contract.revision_limits.toolchain_digest,bridge.implementation_manifest.toolchain_digest);
   assert.equal(build.materialization_contract.revision_limits.dependency_closure_digest,bridge.implementation_manifest.dependency_closure_digest);
