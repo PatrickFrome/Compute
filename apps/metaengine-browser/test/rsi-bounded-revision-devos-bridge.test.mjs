@@ -15,6 +15,7 @@ import {
   verifyRsiArtifactEvaluationRoutingRequest,
 } from '../src/rsi-evaluation-budget-router.mjs';
 import {
+  RsiCandidateExperimentLedger,
   createRsiCandidateExperimentIntent,
   createRsiCandidateExperimentReceipt,
 } from '../src/rsi-candidate-experiment-ledger.mjs';
@@ -1120,3 +1121,157 @@ test('Phase29 evaluator generation rotation is externally witnessed and exact-bo
   }),/rotation_binding_mismatch/);
   assert.equal(ledger.snapshot().row_count,1);
 });
+
+
+function evaluatedPhase29(label,{generation='generation-a',outcome='SUPPORTED',evaluatorRoot=null}={}){
+  const fx=phase28ArtifactFixture(label);
+  const handoff=phase29Handoff(fx,label,{
+    evaluator_root_digest:evaluatorRoot??labelDigest(`${generation}-evaluator-root`),
+    evaluator_generation_digest:labelDigest(`${generation}-evaluator-generation`),
+  });
+  const request=handoff.fresh_evaluation_request;
+  const plan=createRsiEvaluationBudgetPlan({
+    plan_id:`phase29.history.plan.${label}`,
+    source_sha:SOURCE,
+    requests:[request],
+    epoch_budget_units:8,
+    external_budget_owner:true,
+    authored_by_candidate:false,
+  });
+  const intent=createRsiMaterializedCandidateExperimentIntent({
+    handoff,
+    handoff_verification:{artifact_receipt:fx.artifactReceipt,artifact_verification:fx.artifactVerification},
+    fresh_budget_plan:plan,
+    fresh_plan_requests:[request],
+    intent_id:`phase29.history.intent.${label}`,
+    external_experiment_owner:true,
+    authored_by_candidate:false,
+  });
+  const control={
+    task_utility:0.70,safety:0.95,security:0.95,
+    process_integrity:0.90,outcome_integrity:0.90,efficiency:0.70,
+  };
+  let treatment={
+    task_utility:0.80,safety:0.95,security:0.96,
+    process_integrity:0.92,outcome_integrity:0.91,efficiency:0.72,
+  };
+  if(outcome==='NO_MATERIAL')treatment={...control};
+  if(outcome==='REJECTED')treatment={...treatment,safety:0.80};
+  const receipt=createRsiCandidateExperimentReceipt({
+    receipt_id:`phase29.history.receipt.${label}`,
+    intent,
+    control_metrics:control,
+    treatment_metrics:treatment,
+    control_attempts:1,
+    treatment_attempts:1,
+    retry_count:0,
+    same_tasks_pass:true,
+    same_task_order_pass:true,
+    harness_identity_pass:true,
+    resource_budget_identity_pass:true,
+    evaluator_integrity_pass:true,
+    trial_isolation_pass:true,
+    from_scratch_replay_pass:true,
+    contamination_clear:true,
+    reward_hack_detected:false,
+    blind_retry_detected:false,
+    environment_blocker_detected:outcome==='ENVIRONMENT',
+    controllable_failure_detected:false,
+    ambiguous_effect:outcome==='AMBIGUOUS',
+    evidence_digest:labelDigest(`phase29-history-evidence-${label}`),
+    external_runner:true,
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+  return {fx,handoff,request,plan,intent,receipt};
+}
+
+test('Phase29 existing experiment ledger retains every outcome class inside one evaluator generation',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-generation-history-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiCandidateExperimentLedger({statePath:path.join(dir,'ledger.json'),source_sha:SOURCE});
+  await ledger.init();
+
+  for(const [label,outcome] of [
+    ['supported','SUPPORTED'],
+    ['no-material','NO_MATERIAL'],
+    ['rejected','REJECTED'],
+    ['environment','ENVIRONMENT'],
+    ['ambiguous','AMBIGUOUS'],
+  ]){
+    const row=evaluatedPhase29(`history-${label}`,{generation:'shared-generation',outcome});
+    await ledger.add({intent:row.intent,receipt:row.receipt});
+  }
+
+  const snap=ledger.snapshot();
+  assert.equal(snap.materialized_candidate_outcome_count,5);
+  assert.equal(snap.evaluation_generation_count,1);
+  assert.equal(snap.all_materialized_outcome_classes_retained,true);
+  assert.equal(snap.evaluator_dependent_verdict_reuse_across_generation_allowed,false);
+  const generation=snap.evaluation_generation_history[0];
+  assert.equal(generation.generation_sequence,1);
+  assert.equal(generation.outcome_count,5);
+  assert.equal(generation.state_counts.supported,1);
+  assert.equal(generation.state_counts.no_material_improvement,1);
+  assert.equal(generation.state_counts.rejected,1);
+  assert.equal(generation.state_counts.inconclusive_environment,1);
+  assert.equal(generation.state_counts.inconclusive_ambiguous,1);
+  assert.equal(generation.negative_outcomes_retained,true);
+});
+
+test('Phase29 evaluator generations advance monotonically and cannot roll back or drift root',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-generation-monotonic-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiCandidateExperimentLedger({statePath:path.join(dir,'ledger.json'),source_sha:SOURCE});
+  await ledger.init();
+
+  const a1=evaluatedPhase29('generation-a-one',{generation:'generation-a'});
+  const b1=evaluatedPhase29('generation-b-one',{generation:'generation-b'});
+  await ledger.add({intent:a1.intent,receipt:a1.receipt});
+  await ledger.add({intent:b1.intent,receipt:b1.receipt});
+  assert.equal(ledger.snapshot().evaluation_generation_count,2);
+
+  const rollback=evaluatedPhase29('generation-a-return',{generation:'generation-a'});
+  await assert.rejects(
+    ()=>ledger.add({intent:rollback.intent,receipt:rollback.receipt}),
+    /generation_history_rollback_detected/,
+  );
+
+  const drift=evaluatedPhase29('generation-b-root-drift',{
+    generation:'generation-b',
+    evaluatorRoot:labelDigest('generation-b-different-evaluator-root'),
+  });
+  await assert.rejects(
+    ()=>ledger.add({intent:drift.intent,receipt:drift.receipt}),
+    /generation_history_evaluator_root_drift/,
+  );
+  assert.equal(ledger.snapshot().row_count,2);
+});
+
+test('Phase29 generation history is durable-before-visible and restart rejects forged derived history',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-generation-durable-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'ledger.json');
+  const ledger=new RsiCandidateExperimentLedger({statePath,source_sha:SOURCE});
+  await ledger.init();
+
+  const first=evaluatedPhase29('generation-durable',{generation:'generation-durable'});
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>ledger.add({intent:first.intent,receipt:first.receipt}));
+  assert.equal(ledger.snapshot().row_count,0);
+  assert.equal(ledger.snapshot().evaluation_generation_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  await ledger.add({intent:first.intent,receipt:first.receipt});
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.evaluation_generation_history[0].state_counts.supported=99;
+  const core=structuredClone(raw);
+  delete core.state_digest;
+  raw.state_digest=dg(core);
+  const forgedPath=path.join(dir,'forged-ledger.json');
+  await fs.writeFile(forgedPath,JSON.stringify(raw),'utf8');
+
+  const restored=new RsiCandidateExperimentLedger({statePath:forgedPath,source_sha:SOURCE});
+  await assert.rejects(()=>restored.init(),/ledger_derived_state_mismatch/);
+});
+
