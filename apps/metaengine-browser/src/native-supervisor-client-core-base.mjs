@@ -8,6 +8,7 @@ import {
 } from './native-effect-binding.mjs';
 import { classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
 import { buildSupervisorMeshWireProjectionV1 } from './supervisor-mesh-wire-projection.mjs';
+import { buildDevosRuntimeObservability, mergeDevosRuntimeObservability } from './devos-runtime-observability.mjs';
 import {
   NativeSupervisorClient as BaseNativeSupervisorClient,
   NATIVE_SUPERVISOR_BASE,
@@ -255,8 +256,11 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       const localMeshRuntime = localSnapshot?.supervisor_mesh || null;
       const supervisorMesh = buildSupervisorMeshWireProjectionV1(localMeshRuntime);
       const workerObserver = localSnapshot?.worker_observer || null;
+      const devosRuntime = buildDevosRuntimeObservability(localSnapshot || {});
+      const supervisorLifecycle = mergeDevosRuntimeObservability(state?.supervisor_lifecycle, devosRuntime);
       return {
         ...state,
+        supervisor_lifecycle: supervisorLifecycle,
         // P1-2 multi-writer repair: the Edge now merges /v1/state per plane
         // (present keys — including explicit null — overwrite, absent keys are
         // preserved). The mesh plane must therefore ALWAYS be present on the
