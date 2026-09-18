@@ -236,12 +236,14 @@ function normalizeExperimentPlan(plan) {
     if (!plainObject(rawProvenance)) throw new Error('rsi_candidate_provenance_contract_invalid');
     implementationProvenanceContract = Object.freeze({
       builder_identity_digest: exactDigest(rawProvenance.builder_identity_digest, 'provenance_builder'),
+      worker_image_digest: exactDigest(rawProvenance.worker_image_digest, 'provenance_worker'),
       toolchain_image_digest: exactDigest(rawProvenance.toolchain_image_digest, 'provenance_toolchain'),
       dependency_material_manifest_digest: exactDigest(rawProvenance.dependency_material_manifest_digest, 'provenance_materials'),
       harness_manifest_digest: exactDigest(rawProvenance.harness_manifest_digest, 'provenance_harness'),
       capability_manifest_digest: exactDigest(rawProvenance.capability_manifest_digest, 'provenance_capabilities'),
       build_provenance_policy_digest: exactDigest(rawProvenance.build_provenance_policy_digest, 'provenance_policy'),
       artifact_signature_policy_digest: exactDigest(rawProvenance.artifact_signature_policy_digest, 'signature_policy'),
+      transparency_log_policy_digest: exactDigest(rawProvenance.transparency_log_policy_digest, 'transparency_policy'),
       immutable_materials_required: rawProvenance.immutable_materials_required === true,
       network_deny_required: rawProvenance.network_deny_required === true,
       private_writable_layer_required: rawProvenance.private_writable_layer_required === true,
@@ -253,11 +255,13 @@ function normalizeExperimentPlan(plan) {
       artifact_signature_required: rawProvenance.artifact_signature_required === true,
       transparency_log_inclusion_required: rawProvenance.transparency_log_inclusion_required === true,
       candidate_can_choose_builder: rawProvenance.candidate_can_choose_builder === false ? false : true,
+      candidate_can_choose_worker: rawProvenance.candidate_can_choose_worker === false ? false : true,
       candidate_can_choose_toolchain: rawProvenance.candidate_can_choose_toolchain === false ? false : true,
       candidate_can_choose_dependencies: rawProvenance.candidate_can_choose_dependencies === false ? false : true,
       candidate_can_choose_harness: rawProvenance.candidate_can_choose_harness === false ? false : true,
       candidate_can_choose_capabilities: rawProvenance.candidate_can_choose_capabilities === false ? false : true,
       candidate_can_sign_artifact: rawProvenance.candidate_can_sign_artifact === false ? false : true,
+      candidate_can_choose_transparency_log: rawProvenance.candidate_can_choose_transparency_log === false ? false : true,
       provenance_is_activation_authority: rawProvenance.provenance_is_activation_authority === false ? false : true,
     });
     if (Object.values(implementationProvenanceContract).slice(7,17).some(v=>v!==true)
@@ -423,10 +427,10 @@ export function verifyRsiIsolatedCandidateBuildPlan(plan) {
     ]) exactDigest(revisionLimits[field],label);
     if (!plainObject(provenance) || sha256(provenance)!==revisionLimits.implementation_provenance_contract_digest) throw new Error('rsi_candidate_revision_provenance_contract_digest_mismatch');
     for (const [field,label] of [
-      ['builder_identity_digest','provenance_builder'],['toolchain_image_digest','provenance_toolchain'],
+      ['builder_identity_digest','provenance_builder'],['worker_image_digest','provenance_worker'],['toolchain_image_digest','provenance_toolchain'],
       ['dependency_material_manifest_digest','provenance_materials'],['harness_manifest_digest','provenance_harness'],
       ['capability_manifest_digest','provenance_capabilities'],['build_provenance_policy_digest','provenance_policy'],
-      ['artifact_signature_policy_digest','signature_policy'],
+      ['artifact_signature_policy_digest','signature_policy'],['transparency_log_policy_digest','transparency_policy'],
     ]) exactDigest(provenance[field],label);
     for (const field of [
       'immutable_materials_required','network_deny_required','private_writable_layer_required','materials_complete_required',
@@ -434,9 +438,9 @@ export function verifyRsiIsolatedCandidateBuildPlan(plan) {
       'external_build_attestation_required','artifact_signature_required','transparency_log_inclusion_required',
     ]) if (provenance[field]!==true) throw new Error('rsi_candidate_provenance_contract_policy_invalid');
     for (const field of [
-      'candidate_can_choose_builder','candidate_can_choose_toolchain','candidate_can_choose_dependencies',
+      'candidate_can_choose_builder','candidate_can_choose_worker','candidate_can_choose_toolchain','candidate_can_choose_dependencies',
       'candidate_can_choose_harness','candidate_can_choose_capabilities','candidate_can_sign_artifact',
-      'provenance_is_activation_authority',
+      'candidate_can_choose_transparency_log','provenance_is_activation_authority',
     ]) if (provenance[field]!==false) throw new Error('rsi_candidate_provenance_contract_policy_invalid');
   } else if (provenance != null) {
     throw new Error('rsi_candidate_revision_provenance_pair_required');
@@ -593,15 +597,19 @@ function normalizeMaterializationReceipt(receipt, plan) {
     const expectedProvenance=plan.materialization_contract.implementation_provenance_contract;
     const actual=receipt.implementation_provenance;
     if (!plainObject(expectedProvenance) || !plainObject(actual)) throw new Error('rsi_candidate_materialization_provenance_required');
-    for (const field of ['builder_identity_digest','toolchain_image_digest','dependency_material_manifest_digest','harness_manifest_digest','capability_manifest_digest']) {
+    for (const field of ['builder_identity_digest','worker_image_digest','toolchain_image_digest','dependency_material_manifest_digest','harness_manifest_digest','capability_manifest_digest']) {
       if (exactDigest(actual[field],`materialization_${field}`) !== expectedProvenance[field]) throw new Error('rsi_candidate_materialization_provenance_identity_mismatch');
     }
     implementationProvenance=Object.freeze({
       builder_identity_digest:expectedProvenance.builder_identity_digest,
+      worker_image_digest:expectedProvenance.worker_image_digest,
       toolchain_image_digest:expectedProvenance.toolchain_image_digest,
       dependency_material_manifest_digest:expectedProvenance.dependency_material_manifest_digest,
       harness_manifest_digest:expectedProvenance.harness_manifest_digest,
       capability_manifest_digest:expectedProvenance.capability_manifest_digest,
+      build_provenance_policy_digest:expectedProvenance.build_provenance_policy_digest,
+      artifact_signature_policy_digest:expectedProvenance.artifact_signature_policy_digest,
+      transparency_log_policy_digest:expectedProvenance.transparency_log_policy_digest,
       build_provenance_digest:exactDigest(actual.build_provenance_digest,'materialization_build_provenance'),
       artifact_signature_digest:exactDigest(actual.artifact_signature_digest,'materialization_artifact_signature'),
       transparency_log_inclusion_digest:exactDigest(actual.transparency_log_inclusion_digest,'materialization_transparency_log'),
