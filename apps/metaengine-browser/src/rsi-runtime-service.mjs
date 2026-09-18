@@ -977,7 +977,8 @@ export class RsiRuntimeService {
     authored_by_candidate = true,
   } = {}) {
     this.#assertRunning();
-    const wanted = exactDigest(selection_digest, 'selection_digest');
+    const wanted = String(selection_digest || '').trim().toLowerCase();
+    if (!/^sha256:[0-9a-f]{64}$/.test(wanted)) throw new Error('rsi_runtime_selection_digest_invalid');
     const selection = this.#metaProfileShadowSelection.history().find((row) => row.selection_digest === wanted);
     if (!selection) throw new Error('rsi_runtime_meta_profile_shadow_selection_required');
     const binding = createRsiSelectedShadowContextBinding({
