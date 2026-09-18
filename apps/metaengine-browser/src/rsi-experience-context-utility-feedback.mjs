@@ -262,6 +262,8 @@ export function verifyRsiExperienceContextUtilityFeedback(row){
   exactHexDigest(row.controller_plan_digest,'controller_plan');
   exactHexDigest(row.observation_digest,'observation');
   exactSha(row.source_sha,'source');
+  safeId(row.evaluation_kind,'evaluation_kind');
+  safeId(row.evaluator_id,'evaluator_id');
   if(!Array.isArray(row.judgments)||!Array.isArray(row.utility_receipts)
     ||row.judgments.length!==row.receipt_count
     ||row.utility_receipts.length!==row.receipt_count
@@ -280,6 +282,17 @@ export function verifyRsiExperienceContextUtilityFeedback(row){
       ||receipt.target_context_digest!==row.target_context_digest){
       throw new Error('rsi_context_utility_receipt_binding_mismatch');
     }
+    if(
+      judgment.contextual_only!==true
+      ||judgment.causal_credit_claimed!==false
+      ||judgment.global_portability_claimed!==false
+      ||judgment.authority_effect!==false
+    ){
+      throw new Error('rsi_context_utility_judgment_policy_invalid');
+    }
+    exactDigest(judgment.case_digest,'judgment_case');
+    exactDigest(judgment.evidence_digest,'judgment_evidence');
+    evidenceRefs(judgment.evidence_refs);
     if(receiptIds.has(receipt.receipt_id))throw new Error('rsi_context_utility_receipt_duplicate');
     receiptIds.add(receipt.receipt_id);
     if(receipt.outcome==='HELPFUL')helpful+=1;
