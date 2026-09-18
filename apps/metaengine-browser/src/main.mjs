@@ -938,7 +938,14 @@ async function initNativeSupervisor() {
       commandBatchSize: 64,
       commandReadConcurrency: 32,
       commandMutationConcurrency: 16,
-      commandBatchWaitMs: 15000,
+      // P2 control latency: the deployed edge serves wait-batch as a bounded
+      // DB poll (BOUNDED_DB_POLL — no LISTEN/NOTIFY wake yet), so the wait
+      // budget is also the worst-case command pickup delay. 15s was tuned for
+      // the long-poll edge; against the deployed edge it produced a live p50
+      // of ~6.9s issue→COMPLETED. 4s matches the client DEFAULT_BATCH_WAIT_MS
+      // and cuts p50 to ~2s at one client's poll volume. When the edge gains
+      // notify wake, an early wake ends the wait below this budget anyway.
+      commandBatchWaitMs: 4000,
       legacySingleLeaseFallback: false,
       commandFastlane: false,
       // Host resilience is process-owned by main-entry. Self-update must share
