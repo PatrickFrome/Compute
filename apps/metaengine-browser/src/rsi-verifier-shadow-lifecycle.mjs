@@ -227,6 +227,83 @@ export function verifyRsiVerifierShadowReview(review,{evaluation,admission,recei
   return canonical;
 }
 
+
+function verifyStoredShadowEvaluation(evaluation){
+  if(!evaluation||evaluation.schema!==RSI_VERIFIER_SHADOW_EVALUATION_SCHEMA||evaluation.version!==1)throw new Error('rsi_verifier_shadow_archive_evaluation_invalid');
+  assertZero(evaluation,'archive_evaluation');
+  if(evaluation.external_observer!==true||evaluation.authored_by_candidate!==false
+    ||evaluation.candidate_can_read_heldout_anchor!==false||evaluation.candidate_can_read_semantic_audit!==false
+    ||evaluation.candidate_can_modify_trusted_runtime!==false||evaluation.candidate_can_choose_anchor!==false
+    ||evaluation.candidate_can_choose_freshness_probe!==false||evaluation.candidate_can_choose_specialty_tags!==false
+    ||evaluation.evaluation_is_activation_authority!==false)throw new Error('rsi_verifier_shadow_archive_evaluation_policy_invalid');
+  if(!/^[0-9a-f]{40}$/.test(String(evaluation.source_sha||'')))throw new Error('rsi_verifier_shadow_archive_source_sha_invalid');
+  for(const [field,label] of [
+    ['admission_digest','admission'],['receipt_digest','receipt'],
+    ['incumbent_verifier_root_digest','incumbent_verifier_root'],['candidate_verifier_root_digest','candidate_verifier_root'],
+    ['trusted_runtime_digest','trusted_runtime'],['anchor_set_digest','anchor_set'],['heldout_anchor_digest','heldout_anchor'],
+    ['semantic_audit_digest','semantic_audit'],['freshness_probe_digest','freshness_probe'],
+  ]) exactDigest(evaluation[field],label);
+  if(evaluation.incumbent_verifier_root_digest===evaluation.candidate_verifier_root_digest)throw new Error('rsi_verifier_shadow_archive_verifier_root_alias');
+  const independent=[
+    evaluation.trusted_runtime_digest,evaluation.anchor_set_digest,evaluation.heldout_anchor_digest,
+    evaluation.semantic_audit_digest,evaluation.freshness_probe_digest,
+  ];
+  if(new Set(independent).size!==independent.length)throw new Error('rsi_verifier_shadow_archive_independent_roots_required');
+  const incumbent=metricObject(evaluation.incumbent_metrics,'archive_incumbent');
+  const candidate=metricObject(evaluation.candidate_metrics,'archive_candidate');
+  const specialty=tags(evaluation.specialty_tags);
+  const regressed=METRICS.filter(k=>candidate[k]<incumbent[k]).sort();
+  const improved=METRICS.filter(k=>candidate[k]>incumbent[k]).sort();
+  const blockers=[];
+  if(regressed.length>0)blockers.push('SHADOW_METRIC_REGRESSION');
+  if(improved.length===0)blockers.push('NO_SHADOW_IMPROVEMENT');
+  if(evaluation.contamination_detected===true)blockers.push('BENCHMARK_CONTAMINATION_DETECTED');
+  if(evaluation.trusted_runtime_integrity_pass!==true)blockers.push('TRUSTED_RUNTIME_INTEGRITY_FAILURE');
+  if(evaluation.sealed_anchor_integrity_pass!==true)blockers.push('SEALED_ANCHOR_INTEGRITY_FAILURE');
+  if(evaluation.semantic_construction_audit_pass!==true)blockers.push('SEMANTIC_CONSTRUCTION_AUDIT_FAILURE');
+  blockers.sort();
+  if(JSON.stringify(regressed)!==JSON.stringify(evaluation.regressed_metrics)||JSON.stringify(improved)!==JSON.stringify(evaluation.improved_metrics)
+    ||JSON.stringify(blockers)!==JSON.stringify(evaluation.blockers))throw new Error('rsi_verifier_shadow_archive_evaluation_derived_state_invalid');
+  if(evaluation.clean_shadow_evidence!==(blockers.length===0))throw new Error('rsi_verifier_shadow_archive_clean_state_invalid');
+  if(JSON.stringify(specialty)!==JSON.stringify(evaluation.specialty_tags))throw new Error('rsi_verifier_shadow_archive_specialty_tags_noncanonical');
+  const clone=structuredClone(evaluation);delete clone.evaluation_digest;
+  if(digest(clone)!==exactDigest(evaluation.evaluation_digest,'archive_evaluation'))throw new Error('rsi_verifier_shadow_archive_evaluation_digest_mismatch');
+  return Object.freeze(structuredClone(evaluation));
+}
+
+function verifyStoredShadowReview(review,evaluation){
+  if(!review||review.schema!==RSI_VERIFIER_SHADOW_REVIEW_SCHEMA||review.version!==1)throw new Error('rsi_verifier_shadow_archive_review_invalid');
+  assertZero(review,'archive_review');
+  if(review.incumbent_verifier_remains_active!==true||review.archive_preserves_multiple_candidates!==true
+    ||review.greedy_replacement_forbidden!==true||review.candidate_can_self_archive!==false
+    ||review.candidate_can_become_active_verifier!==false||review.review_is_activation_authority!==false
+    ||review.external_activation_gate_required!==true||review.external_reviewer!==true||review.authored_by_candidate!==false)throw new Error('rsi_verifier_shadow_archive_review_policy_invalid');
+  const checkedEvaluation=verifyStoredShadowEvaluation(evaluation);
+  for(const [field,label] of [
+    ['evaluation_digest','review_evaluation'],['admission_digest','review_admission'],
+    ['incumbent_verifier_root_digest','review_incumbent_verifier_root'],['candidate_verifier_root_digest','review_candidate_verifier_root'],
+    ['archive_identity_digest','archive_identity'],
+  ]) exactDigest(review[field],label);
+  if(review.source_sha!==checkedEvaluation.source_sha||review.evaluation_digest!==checkedEvaluation.evaluation_digest
+    ||review.admission_digest!==checkedEvaluation.admission_digest
+    ||review.incumbent_verifier_root_digest!==checkedEvaluation.incumbent_verifier_root_digest
+    ||review.candidate_verifier_root_digest!==checkedEvaluation.candidate_verifier_root_digest)throw new Error('rsi_verifier_shadow_archive_review_binding_mismatch');
+  if(JSON.stringify(review.specialty_tags)!==JSON.stringify(checkedEvaluation.specialty_tags))throw new Error('rsi_verifier_shadow_archive_review_specialty_mismatch');
+  const eligible=checkedEvaluation.clean_shadow_evidence===true&&checkedEvaluation.blockers.length===0;
+  if(review.eligible_for_verifier_archive!==eligible
+    ||review.state!==(eligible?'ELIGIBLE_FOR_VERIFIER_ARCHIVE':'VERIFIER_SHADOW_REJECTED'))throw new Error('rsi_verifier_shadow_archive_review_eligibility_invalid');
+  const archiveIdentity={
+    source_sha:review.source_sha,
+    candidate_verifier_root_digest:review.candidate_verifier_root_digest,
+    evaluation_digest:review.evaluation_digest,
+    specialty_tags:review.specialty_tags,
+  };
+  if(digest(archiveIdentity)!==review.archive_identity_digest)throw new Error('rsi_verifier_shadow_archive_identity_digest_mismatch');
+  const clone=structuredClone(review);delete clone.review_digest;
+  if(digest(clone)!==exactDigest(review.review_digest,'archive_review'))throw new Error('rsi_verifier_shadow_archive_review_digest_mismatch');
+  return Object.freeze(structuredClone(review));
+}
+
 function archiveState(sourceSha,rows){
   const eligible=rows.filter(r=>r.review.eligible_for_verifier_archive===true);
   const niches=[...new Set(eligible.flatMap(r=>r.review.specialty_tags))].sort();
@@ -266,40 +343,39 @@ export class RsiVerifierShadowArchive{
       const clone=structuredClone(parsed);delete clone.state_digest;if(digest(clone)!==exactDigest(parsed.state_digest,'archive'))throw new Error('rsi_verifier_shadow_archive_digest_mismatch');
       if(!Array.isArray(parsed.rows)||parsed.rows.length>MAX_ROWS)throw new Error('rsi_verifier_shadow_archive_rows_invalid');
       const ids=new Set();
+      const checkedRows=[];
       for(const row of parsed.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_verifier_shadow_archive_source_mismatch');
-        const ec=structuredClone(row.evaluation);delete ec.evaluation_digest;if(digest(ec)!==exactDigest(row.evaluation.evaluation_digest,'archive_evaluation'))throw new Error('rsi_verifier_shadow_archive_evaluation_digest_mismatch');
-        const rc=structuredClone(row.review);delete rc.review_digest;if(digest(rc)!==exactDigest(row.review.review_digest,'archive_review'))throw new Error('rsi_verifier_shadow_archive_review_digest_mismatch');
-        if(row.review.evaluation_digest!==row.evaluation.evaluation_digest)throw new Error('rsi_verifier_shadow_archive_binding_mismatch');
-        if(ids.has(row.review.archive_identity_digest))throw new Error('rsi_verifier_shadow_archive_identity_duplicate');
-        ids.add(row.review.archive_identity_digest);
+        const evaluation=verifyStoredShadowEvaluation(row.evaluation);
+        const review=verifyStoredShadowReview(row.review,evaluation);
+        if(ids.has(review.archive_identity_digest))throw new Error('rsi_verifier_shadow_archive_identity_duplicate');
+        ids.add(review.archive_identity_digest);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,evaluation,review}));
       }
-      this.#rows=parsed.rows;
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){
-    const state=archiveState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);
+  async #persist(rows=this.#rows){
+    const state=archiveState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);
     try{await h.writeFile(`${JSON.stringify(state)}\n`,'utf8');await h.sync();}finally{await h.close();}
     await fs.rename(tmp,this.#path);
   }
   async add({evaluation,review}={}){
     if(!this.#initialized)throw new Error('rsi_verifier_shadow_archive_not_initialized');
-    if(!evaluation||evaluation.schema!==RSI_VERIFIER_SHADOW_EVALUATION_SCHEMA)throw new Error('rsi_verifier_shadow_evaluation_invalid');
-    if(!review||review.schema!==RSI_VERIFIER_SHADOW_REVIEW_SCHEMA)throw new Error('rsi_verifier_shadow_review_invalid');
-    assertZero(evaluation,'archive_evaluation');assertZero(review,'archive_review');
-    const ec=structuredClone(evaluation);delete ec.evaluation_digest;if(digest(ec)!==exactDigest(evaluation.evaluation_digest,'archive_evaluation'))throw new Error('rsi_verifier_shadow_archive_evaluation_digest_mismatch');
-    const rc=structuredClone(review);delete rc.review_digest;if(digest(rc)!==exactDigest(review.review_digest,'archive_review'))throw new Error('rsi_verifier_shadow_archive_review_digest_mismatch');
-    if(evaluation.source_sha!==this.#sourceSha||review.source_sha!==this.#sourceSha||review.evaluation_digest!==evaluation.evaluation_digest)throw new Error('rsi_verifier_shadow_archive_binding_mismatch');
-    const existing=this.#rows.find(r=>r.review.archive_identity_digest===review.archive_identity_digest||r.review.candidate_verifier_root_digest===review.candidate_verifier_root_digest);
+    const checkedEvaluation=verifyStoredShadowEvaluation(evaluation);
+    const checkedReview=verifyStoredShadowReview(review,checkedEvaluation);
+    if(checkedEvaluation.source_sha!==this.#sourceSha||checkedReview.source_sha!==this.#sourceSha)throw new Error('rsi_verifier_shadow_archive_binding_mismatch');
+    const existing=this.#rows.find(r=>r.review.archive_identity_digest===checkedReview.archive_identity_digest||r.review.candidate_verifier_root_digest===checkedReview.candidate_verifier_root_digest);
     if(existing){
-      if(existing.review.review_digest!==review.review_digest||existing.evaluation.evaluation_digest!==evaluation.evaluation_digest)throw new Error('rsi_verifier_shadow_archive_identity_conflict');
-      return zero({state:'IDEMPOTENT',review_digest:review.review_digest});
+      if(existing.review.review_digest!==checkedReview.review_digest||existing.evaluation.evaluation_digest!==checkedEvaluation.evaluation_digest)throw new Error('rsi_verifier_shadow_archive_identity_conflict');
+      return zero({state:'IDEMPOTENT',review_digest:checkedReview.review_digest});
     }
     if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_verifier_shadow_archive_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,evaluation:structuredClone(evaluation),review:structuredClone(review)}));
-    await this.#persist();
-    return zero({state:review.state,review_digest:review.review_digest});
+    const nextRows=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,evaluation:structuredClone(checkedEvaluation),review:structuredClone(checkedReview)})];
+    await this.#persist(nextRows);
+    this.#rows=nextRows;
+    return zero({state:checkedReview.state,review_digest:checkedReview.review_digest});
   }
   eligible(){
     if(!this.#initialized)throw new Error('rsi_verifier_shadow_archive_not_initialized');
