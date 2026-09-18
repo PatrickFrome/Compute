@@ -94,6 +94,14 @@ import {
   rsiAnytimeLibraryAdmissionTrustRootSnapshot,
 } from '../src/rsi-anytime-library-admission.mjs';
 import {
+  RsiExistingLibraryCasAppendArchive,
+  createRsiExistingLibraryCasAppendRequest,
+  verifyRsiExistingLibraryCasAppendRequest,
+  createRsiExistingLibraryCasAppendReceipt,
+  verifyRsiExistingLibraryCasAppendReceipt,
+  rsiExistingLibraryCasAppendTrustRootSnapshot,
+} from '../src/rsi-existing-library-cas-append.mjs';
+import {
   RsiExactOwnerReviewArchive,
   createRsiExactConsumerOwnerReviewBundle,
   verifyRsiExactConsumerOwnerReviewBundle,
@@ -3726,4 +3734,265 @@ test('Phase34 trust root preserves external admission without creating activatio
   assert.equal(root.direct_scheduler_action,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.phase34_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+function phase34bFixture(label='phase34b'){
+  const p34=phase34Fixture(label);
+  const admissionCertificate=createRsiAnytimeLibraryAdmissionCertificate(p34.certificateArgs);
+  assert.equal(admissionCertificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF');
+  const requestArgs={
+    request_id:'phase34b.append.request.'+label,
+    admission_proposal:p34.proposal,
+    admission_proposal_args:p34.proposalArgs,
+    admission_certificate:admissionCertificate,
+    admission_certificate_args:p34.certificateArgs,
+    current_library:p34.p33.skillFx.currentLibrary,
+    library_writer_identity_digest:labelDigest(label+'-library-writer'),
+    storage_backend_identity_digest:labelDigest(label+'-storage-backend'),
+    compare_and_swap_policy_digest:labelDigest(label+'-cas-policy'),
+    readback_policy_digest:labelDigest(label+'-readback-policy'),
+    external_library_writer:true,
+    authored_by_candidate:false,
+  };
+  const request=createRsiExistingLibraryCasAppendRequest(requestArgs);
+  return {p34,admissionCertificate,requestArgs,request};
+}
+
+function phase34bSuccessReceipt(fx,label='phase34b',overrides={}){
+  const args={
+    receipt_id:'phase34b.append.receipt.'+label,
+    request:fx.request,
+    request_args:fx.requestArgs,
+    outcome:'APPENDED_WITH_READBACK',
+    observed_predecessor_library_digest:fx.p34.p33.skillFx.currentLibrary.library_digest,
+    predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+    successor_library_readback:fx.p34.proposal.proposed_successor_library,
+    storage_effect_receipt_digest:labelDigest(label+'-storage-effect'),
+    readback_receipt_digest:labelDigest(label+'-readback'),
+    append_attempt_count:1,
+    external_library_writer:true,
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+    ...overrides,
+  };
+  return {args,receipt:createRsiExistingLibraryCasAppendReceipt(args)};
+}
+
+test('Phase34B prepares a one-attempt storage CAS request without performing a library effect',()=>{
+  const fx=phase34bFixture('request');
+  const checked=verifyRsiExistingLibraryCasAppendRequest(fx.request,fx.requestArgs);
+  assert.equal(checked.append_request_digest,fx.request.append_request_digest);
+  assert.equal(fx.request.state,'READY_FOR_EXTERNAL_STORAGE_CAS_APPEND');
+  assert.equal(fx.request.expected_predecessor_library_digest,fx.p34.p33.skillFx.currentLibrary.library_digest);
+  assert.equal(fx.request.expected_successor_library_digest,fx.p34.proposal.proposed_successor_library_digest);
+  assert.equal(fx.request.proposed_skill_digest,fx.p34.proposal.proposed_skill_digest);
+  assert.equal(fx.request.proposed_skill_evidence_digest,fx.p34.proposal.proposed_skill_evidence_digest);
+  assert.equal(fx.request.source_evaluation_contract_digest,fx.p34.proposal.source_evaluation_contract_digest);
+  assert.equal(fx.request.consumer_task_set_digest,fx.p34.proposal.consumer_task_set_digest);
+  assert.equal(fx.request.consumer_retrieval_profile_digest,fx.p34.proposal.consumer_retrieval_profile_digest);
+  assert.equal(fx.request.current_consumer_plane_digest,fx.p34.proposal.current_consumer_plane_digest);
+  assert.equal(fx.request.current_verified_library_digest,fx.p34.proposal.current_verified_library_digest);
+  assert.equal(fx.request.phase34_security_and_verifier_lineage_bound,true);
+  assert.equal(fx.request.one_attempt_only,true);
+  assert.equal(fx.request.append_attempt_budget,1);
+  assert.equal(fx.request.retry_after_ambiguous_allowed,false);
+  assert.equal(fx.request.append_effect_performed,false);
+  assert.equal(fx.request.library_append_observed,false);
+  assert.equal(fx.request.retrieval_exposure_changed,false);
+  assert.equal(fx.request.skill_activation_performed,false);
+  assert.equal(fx.request.lifecycle_mutation_performed,false);
+  assert.equal(fx.request.authority_effect,false);
+});
+
+test('Phase34B successful receipt requires exact successor readback and exactly one intended skill',()=>{
+  const fx=phase34bFixture('success');
+  const {args,receipt}=phase34bSuccessReceipt(fx,'success');
+  const checked=verifyRsiExistingLibraryCasAppendReceipt(receipt,args);
+  assert.equal(checked.append_receipt_digest,receipt.append_receipt_digest);
+  assert.equal(receipt.outcome,'APPENDED_WITH_READBACK');
+  assert.equal(receipt.cas_precondition_pass,true);
+  assert.equal(receipt.library_append_observed,true);
+  assert.equal(receipt.effect_unknown,false);
+  assert.equal(receipt.exact_successor_readback_verified,true);
+  assert.equal(receipt.predecessor_entries_preserved,true);
+  assert.equal(receipt.exactly_one_intended_skill_appended,true);
+  assert.equal(receipt.observed_successor_library_digest,fx.request.expected_successor_library_digest);
+  assert.equal(receipt.appended_skill_digest,fx.request.proposed_skill_digest);
+  assert.equal(receipt.appended_skill_evidence_digest,fx.request.proposed_skill_evidence_digest);
+  assert.equal(receipt.retry_allowed,false);
+  assert.equal(receipt.retrieval_exposure_changed,false);
+  assert.equal(receipt.skill_activation_performed,false);
+  assert.equal(receipt.lifecycle_mutation_performed,false);
+  assert.equal(receipt.governance_mutation_performed,false);
+  assert.equal(receipt.browser_effect_performed,false);
+  assert.equal(receipt.self_update_effect_performed,false);
+});
+
+test('Phase34B rejects stale CAS predecessor before claiming any append effect',()=>{
+  const fx=phase34bFixture('cas-mismatch');
+  const other=phase34bFixture('cas-mismatch-other');
+  const args={
+    receipt_id:'phase34b.append.receipt.cas-mismatch',
+    request:fx.request,
+    request_args:fx.requestArgs,
+    outcome:'REJECTED_NO_EFFECT',
+    rejection_code:'CAS_PREDECESSOR_MISMATCH',
+    observed_predecessor_library_digest:other.p34.p33.skillFx.currentLibrary.library_digest,
+    predecessor_library:other.p34.p33.skillFx.currentLibrary,
+    successor_library_readback:null,
+    storage_effect_receipt_digest:labelDigest('phase34b-cas-mismatch-storage'),
+    readback_receipt_digest:labelDigest('phase34b-cas-mismatch-readback'),
+    append_attempt_count:1,
+    external_library_writer:true,
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  };
+  const receipt=createRsiExistingLibraryCasAppendReceipt(args);
+  assert.equal(receipt.outcome,'REJECTED_NO_EFFECT');
+  assert.equal(receipt.cas_precondition_pass,false);
+  assert.equal(receipt.library_append_observed,false);
+  assert.equal(receipt.rejection_code,'CAS_PREDECESSOR_MISMATCH');
+  assert.equal(receipt.retry_allowed,false);
+  assert.equal(receipt.retrieval_exposure_changed,false);
+});
+
+test('Phase34B ambiguous storage outcome is terminal evidence and cannot claim successor readback or retry',()=>{
+  const fx=phase34bFixture('ambiguous');
+  const args={
+    receipt_id:'phase34b.append.receipt.ambiguous',
+    request:fx.request,
+    request_args:fx.requestArgs,
+    outcome:'AMBIGUOUS_EFFECT_UNKNOWN',
+    observed_predecessor_library_digest:fx.p34.p33.skillFx.currentLibrary.library_digest,
+    predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+    successor_library_readback:null,
+    storage_effect_receipt_digest:labelDigest('phase34b-ambiguous-storage'),
+    readback_receipt_digest:labelDigest('phase34b-ambiguous-readback'),
+    append_attempt_count:1,
+    external_library_writer:true,
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  };
+  const receipt=createRsiExistingLibraryCasAppendReceipt(args);
+  assert.equal(receipt.outcome,'AMBIGUOUS_EFFECT_UNKNOWN');
+  assert.equal(receipt.effect_unknown,true);
+  assert.equal(receipt.terminal_effect_evidence,true);
+  assert.equal(receipt.retry_allowed,false);
+  assert.equal(receipt.requires_external_reconciliation,true);
+  assert.equal(receipt.library_append_observed,false);
+  assert.equal(receipt.observed_successor_library_digest,null);
+  assert.throws(()=>createRsiExistingLibraryCasAppendReceipt({
+    ...args,
+    successor_library_readback:fx.p34.proposal.proposed_successor_library,
+  }),/ambiguous_successor_claim_forbidden/);
+});
+
+test('Phase34B success rejects forged or incomplete successor readback',()=>{
+  const fx=phase34bFixture('forged-readback');
+  assert.throws(()=>createRsiExistingLibraryCasAppendReceipt({
+    receipt_id:'phase34b.append.receipt.forged-readback',
+    request:fx.request,
+    request_args:fx.requestArgs,
+    outcome:'APPENDED_WITH_READBACK',
+    observed_predecessor_library_digest:fx.p34.p33.skillFx.currentLibrary.library_digest,
+    predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+    successor_library_readback:fx.p34.p33.skillFx.currentLibrary,
+    storage_effect_receipt_digest:labelDigest('phase34b-forged-readback-storage'),
+    readback_receipt_digest:labelDigest('phase34b-forged-readback-readback'),
+    append_attempt_count:1,
+    external_library_writer:true,
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  }),/successor_digest_mismatch|successor_entry_count_invalid|exactly_one_new_skill_required/);
+});
+
+test('Phase34B archive is durable-before-visible and retains terminal ambiguous evidence across restart',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-cas-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'cas.json');
+  const fx=phase34bFixture('archive');
+  const receiptArgs={
+    receipt_id:'phase34b.append.receipt.archive',
+    request:fx.request,
+    request_args:fx.requestArgs,
+    outcome:'AMBIGUOUS_EFFECT_UNKNOWN',
+    observed_predecessor_library_digest:fx.p34.p33.skillFx.currentLibrary.library_digest,
+    predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+    successor_library_readback:null,
+    storage_effect_receipt_digest:labelDigest('phase34b-archive-storage'),
+    readback_receipt_digest:labelDigest('phase34b-archive-readback'),
+    append_attempt_count:1,
+    external_library_writer:true,
+    external_readback_verifier:true,
+    authored_by_candidate:false,
+  };
+  const receipt=createRsiExistingLibraryCasAppendReceipt(receiptArgs);
+  const resolver=async()=>({
+    request_args:fx.requestArgs,
+    receipt_args:{
+      predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+      successor_library_readback:null,
+    },
+  });
+  const archive=new RsiExistingLibraryCasAppendArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({
+    request:fx.request,receipt,request_args:fx.requestArgs,receipt_args:{
+      predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+      successor_library_readback:null,
+    },
+  }));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  const result=await archive.add({
+    request:fx.request,receipt,request_args:fx.requestArgs,receipt_args:{
+      predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+      successor_library_readback:null,
+    },
+  });
+  assert.equal(result.state,'AMBIGUOUS_EFFECT_UNKNOWN');
+  const snap=archive.snapshot();
+  assert.equal(snap.row_count,1);
+  assert.equal(snap.ambiguous_effects_retained,true);
+  assert.equal(snap.retry_after_ambiguous_allowed,false);
+  assert.equal(snap.storage_append_receipts_do_not_change_retrieval_exposure,true);
+  assert.equal(snap.archive_can_write_library,false);
+
+  const restored=new RsiExistingLibraryCasAppendArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+  const idem=await restored.add({
+    request:fx.request,receipt,request_args:fx.requestArgs,receipt_args:{
+      predecessor_library:fx.p34.p33.skillFx.currentLibrary,
+      successor_library_readback:null,
+    },
+  });
+  assert.equal(idem.state,'IDEMPOTENT');
+});
+
+test('Phase34B trust root separates storage append evidence from retrieval activation and runtime authority',()=>{
+  const root=rsiExistingLibraryCasAppendTrustRootSnapshot();
+  assert.equal(root.phase34_exact_admission_certificate_required,true);
+  assert.equal(root.exact_green_source_qualification_required,true);
+  assert.equal(root.existing_verified_skill_library_only,true);
+  assert.equal(root.compare_and_swap_required,true);
+  assert.equal(root.exact_predecessor_entries_preserved,true);
+  assert.equal(root.exactly_one_intended_skill_append_required,true);
+  assert.equal(root.external_library_writer_required,true);
+  assert.equal(root.external_readback_verifier_required,true);
+  assert.equal(root.one_attempt_only,true);
+  assert.equal(root.ambiguous_effect_is_terminal,true);
+  assert.equal(root.retry_after_ambiguous_allowed,false);
+  assert.equal(root.phase34_harness_and_benchmark_security_lineage_bound,true);
+  assert.equal(root.append_does_not_imply_retrieval_exposure,true);
+  assert.equal(root.append_does_not_imply_skill_activation,true);
+  assert.equal(root.append_does_not_change_lifecycle,true);
+  assert.equal(root.direct_library_append,false);
+  assert.equal(root.direct_retrieval_exposure_change,false);
+  assert.equal(root.direct_skill_activation,false);
+  assert.equal(root.authority_effect,false);
 });

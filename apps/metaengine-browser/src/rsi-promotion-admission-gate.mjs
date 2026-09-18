@@ -76,6 +76,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-validated-knowledge-consumer-handoff.mjs',
   'apps/metaengine-browser/src/rsi-exact-existing-consumer-owner-review.mjs',
   'apps/metaengine-browser/src/rsi-anytime-library-admission.mjs',
+  'apps/metaengine-browser/src/rsi-existing-library-cas-append.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
