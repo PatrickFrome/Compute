@@ -5,10 +5,10 @@ function boundedError(error) {
   return String(error?.message || error || 'unknown').slice(0, 240);
 }
 
-function noOp(reason) {
+function terminal(state, reason) {
   return Object.freeze({
     schema: RSI_RUNTIME_FRONTIER_INTAKE_SCHEMA,
-    state: 'SKIPPED',
+    state,
     reason,
     rpc_called: false,
     scheduler: 'DEVOS_EXISTING_ONLY',
@@ -26,16 +26,25 @@ export function createRsiRuntimeFrontierIntake({ rpc } = {}) {
 
   return async function intake({ workspaceId, clientId, state } = {}) {
     const client = String(clientId || '').trim().slice(0, 160);
-    if (!workspaceId || !client) return noOp('IDENTITY_INCOMPLETE');
-    if (!state || typeof state !== 'object' || Array.isArray(state)) return noOp('STATE_INVALID');
-    if (!Object.prototype.hasOwnProperty.call(state, 'rsi')) return noOp('RSI_NOT_PRESENT');
-    if (state.rsi == null) return noOp('RSI_NULL');
+    if (!workspaceId || !client) return terminal('SKIPPED','IDENTITY_INCOMPLETE');
+    if (!state || typeof state !== 'object' || Array.isArray(state)) return terminal('SKIPPED','STATE_INVALID');
+    if (!Object.prototype.hasOwnProperty.call(state, 'rsi')) return terminal('SKIPPED','RSI_NOT_PRESENT');
+    if (state.rsi == null) return terminal('SKIPPED','RSI_NULL');
+    if (typeof state.rsi !== 'object' || Array.isArray(state.rsi)) return terminal('REJECTED','RSI_INVALID');
+    let rsi;
+    try {
+      const encoded = JSON.stringify(state.rsi);
+      if (encoded.length > 65_536) return terminal('REJECTED','RSI_OVERSIZED');
+      rsi = JSON.parse(encoded);
+    } catch {
+      return terminal('REJECTED','RSI_UNSERIALIZABLE');
+    }
 
     try {
       const result = await rpc(RSI_RUNTIME_FRONTIER_INTAKE_RPC, {
         p_workspace: workspaceId,
         p_client: client,
-        p_state: state,
+        p_state: { rsi },
       });
       return Object.freeze({
         schema: RSI_RUNTIME_FRONTIER_INTAKE_SCHEMA,
