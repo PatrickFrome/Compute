@@ -284,6 +284,34 @@ test('append-only archive preserves multiple proposals and never selects or appl
   assert.equal((await restored.add({envelope:env1,proposal:p1})).state,'IDEMPOTENT');
 });
 
+
+test('revision envelope independently replays embedded supported Phase26 evidence',()=>{
+  const fx=experimentFixture('embedded-phase26');
+  const env=envelope(fx,'embedded-phase26');
+  const checked=verifyRsiBoundedRevisionEnvelope(env);
+  assert.equal(checked.envelope_digest,env.envelope_digest);
+  assert.equal(checked.experiment_intent_snapshot.intent_digest,fx.intent.intent_digest);
+  assert.equal(checked.experiment_receipt_snapshot.receipt_digest,fx.receipt.receipt_digest);
+  assert.equal(checked.experiment_receipt_snapshot.state,'SUPPORTED_FOR_BOUNDED_REVISION');
+});
+
+test('self-rehashed embedded experiment verdict cannot authorize revision envelope replay',()=>{
+  const fx=experimentFixture('embedded-tamper');
+  const env=envelope(fx,'embedded-tamper');
+  const bad=structuredClone(env);
+  bad.experiment_receipt_snapshot.state='NO_MATERIAL_IMPROVEMENT';
+  bad.experiment_receipt_snapshot.eligible_for_bounded_revision=false;
+  bad.experiment_receipt_snapshot.rejected_or_inconclusive=true;
+  const receiptCore=structuredClone(bad.experiment_receipt_snapshot);
+  delete receiptCore.receipt_digest;
+  bad.experiment_receipt_snapshot.receipt_digest=objectDigest(receiptCore);
+  bad.experiment_receipt_digest=bad.experiment_receipt_snapshot.receipt_digest;
+  const envelopeCore=structuredClone(bad);
+  delete envelopeCore.envelope_digest;
+  bad.envelope_digest=objectDigest(envelopeCore);
+  assert.throws(()=>verifyRsiBoundedRevisionEnvelope(bad),/receipt_digest_mismatch|supported_experiment_required/);
+});
+
 test('revision trust root preserves external boundaries and zero authority',()=>{
   const root=rsiBoundedRevisionProposalTrustRootSnapshot();
   assert.equal(root.supported_phase26_experiment_required,true);
