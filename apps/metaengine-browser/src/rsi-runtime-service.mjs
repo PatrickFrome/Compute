@@ -39,6 +39,7 @@ import { rsiFixedSkeletonTrustRootSnapshot } from './rsi-fixed-skeleton-mutation
 import { rsiSearchModeRouterTrustRootSnapshot } from './rsi-search-mode-router.mjs';
 import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integrity-guard.mjs';
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
+import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -102,6 +103,7 @@ function trustRoots() {
     fixed_skeleton_mutation: rsiFixedSkeletonTrustRootSnapshot(),
     search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
+    browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -125,6 +127,10 @@ export class RsiRuntimeService {
   #lastObservationDigest = null;
   #lastObservationAt = null;
   #promotionNominationCount = 0;
+  #browserOutcomeCount = 0;
+  #browserOutcomeLearningEligibleCount = 0;
+  #browserOutcomeQuarantinedCount = 0;
+  #lastBrowserOutcomeDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -240,6 +246,41 @@ export class RsiRuntimeService {
     return candidate;
   }
 
+  async ingestBrowserOutcome({ readback, attribution } = {}) {
+    this.#assertRunning();
+    const episode = createRsiBrowserOutcomeEpisode({
+      source_sha: this.#sourceSha,
+      readback,
+      attribution,
+    });
+    await this.#ledger.append('BROWSER_OUTCOME_INGESTED', {
+      episode_digest: episode.episode_digest,
+      receipt_digest: episode.receipt_digest,
+      context_digest: episode.context_digest,
+      command_id: episode.command_id,
+      terminal_status: episode.terminal_status,
+      action: episode.action,
+      effect_outcome: episode.effect_outcome,
+      outcome_state: episode.outcome_state,
+      candidate_id: episode.candidate_id,
+      candidate_sha: episode.candidate_sha,
+      proposal_digest: episode.proposal_digest,
+      skill_digests: episode.skill_digests,
+      eligible_for_experience_graph: episode.eligible_for_experience_graph,
+      eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
+      quarantined: episode.quarantined,
+      raw_result_stored: false,
+      raw_error_stored: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    this.#browserOutcomeCount += 1;
+    if (episode.eligible_for_experience_graph) this.#browserOutcomeLearningEligibleCount += 1;
+    if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
+    this.#lastBrowserOutcomeDigest = episode.episode_digest;
+    return episode;
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -289,6 +330,16 @@ export class RsiRuntimeService {
       last_observation_digest: this.#lastObservationDigest,
       last_observation_at: this.#lastObservationAt,
       promotion_nomination_count: this.#promotionNominationCount,
+      browser_outcome_ingest: Object.freeze({
+        terminal_receipt_readback_required: true,
+        outcome_count: this.#browserOutcomeCount,
+        learning_eligible_count: this.#browserOutcomeLearningEligibleCount,
+        quarantined_count: this.#browserOutcomeQuarantinedCount,
+        last_episode_digest: this.#lastBrowserOutcomeDigest,
+        ambiguous_outcome_learning_allowed: false,
+        raw_result_stored: false,
+        authority_effect: false,
+      }),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
       candidate_effect_executor_exposed: false,
