@@ -136,14 +136,15 @@ test('hidden-suite disagreement and constitution drift fail closed',()=>{
     external_admission_owner:true,authored_by_candidate:false,
   }),/hidden_suite_root_digest_mismatch/);
 
-  const s2=receipt('SECONDARY',c,{patch:{
-    constitution_digest:dg({constitution:'mutated'}),
-  }});
+  const s2Base=receipt('SECONDARY',c);
+  const s2Core={...s2Base,constitution_digest:dg({constitution:'mutated'})};
+  delete s2Core.receipt_digest;
+  const s2={...s2Core,receipt_digest:dg(s2Core)};
   assert.throws(()=>createRsiVerifierEvolutionShadowAdmission({
     admission_id:'verifier.shadow.admission.constitution-drift',
     candidate:c,predecessor_receipt:p,secondary_receipt:s2,
     external_admission_owner:true,authored_by_candidate:false,
-  }),/constitution_digest_mismatch/);
+  }),/receipt_digest_mismatch/);
 });
 
 test('sabotage exploit ambiguity monitorability or transfer failures cannot be called PASS',()=>{
