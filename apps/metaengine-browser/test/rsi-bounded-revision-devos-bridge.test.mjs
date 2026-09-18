@@ -2194,7 +2194,7 @@ test('Phase31 refuses consolidation across different fixed Phase30 evaluation co
 });
 
 
-function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null}={}){
+function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null,consumerGenerationSeq=null,consumerGenerationAnchor=null,consumerEpochSeq=null,consumerEpochDigest=null}={}){
   const rows=phase31SourceRows(`${label}-source`,{state});
   const proposal=phase31Proposal(rows,`${label}-proposal`);
   const validations=[
@@ -2217,6 +2217,10 @@ function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',
     consumer_harness_digest:labelDigest(`${label}-consumer-harness`),
     consumer_evaluator_root_digest:labelDigest(`${label}-consumer-evaluator-root`),
     consumer_evaluator_generation_digest:consumerGeneration||proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:consumerGenerationSeq||proposal.evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:consumerGenerationAnchor||proposal.evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:consumerEpochSeq||proposal.evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:consumerEpochDigest||proposal.evaluation_epoch_digest,
     consumer_holdout_digest:labelDigest(`${label}-consumer-holdout`),
     matched_reference_plan_digest:labelDigest(`${label}-matched-reference`),
     local_revalidation_protocol_digest:labelDigest(`${label}-local-revalidation`),
@@ -2420,6 +2424,12 @@ test('Phase32 trust root reuses existing consumer planes and keeps all effects e
   assert.equal(root.second_scheduler_allowed,false);
   assert.equal(root.consumer_local_paired_validation_required,true);
   assert.equal(root.matched_no_skill_or_reference_required_for_recipes,true);
+  assert.equal(root.consumer_evaluator_generation_sequence_binding_required,true);
+  assert.equal(root.consumer_evaluator_history_anchor_binding_required,true);
+  assert.equal(root.consumer_evaluation_epoch_binding_required,true);
+  assert.equal(root.consumer_evaluation_contract_binding_required,true);
+  assert.equal(root.source_evaluation_contract_preserved,true);
+  assert.equal(root.archive_consumer_identity_exact_lineage_bound,true);
   assert.equal(root.cross_generation_revalidation_required,true);
   assert.equal(root.source_generation_verdict_inherited,false);
   assert.equal(root.negative_transfer_retained,true);
@@ -2701,6 +2711,10 @@ test('Phase32 consumer-local revalidation rejects Phase31 transfer-evidence repl
     consumer_harness_digest:labelDigest(label+'-harness'),
     consumer_evaluator_root_digest:labelDigest(label+'-evaluator'),
     consumer_evaluator_generation_digest:fx.proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:fx.proposal.evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:fx.proposal.evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:fx.proposal.evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:fx.proposal.evaluation_epoch_digest,
     consumer_holdout_digest:labelDigest(label+'-holdout'),
     matched_reference_plan_digest:labelDigest(label+'-reference'),
     local_revalidation_protocol_digest:labelDigest(label+'-protocol'),
@@ -2722,4 +2736,57 @@ test('Phase32 consumer-local revalidation rejects Phase31 transfer-evidence repl
   assert.equal(root.phase31_holdout_reuse_forbidden,true);
   assert.equal(root.phase31_evaluator_root_reuse_forbidden,true);
   assert.equal(root.phase31_transfer_plan_reuse_forbidden,true);
+});
+
+test('Phase32 exact consumer contract binds sequence history anchor epoch and fixed source contract',()=>{
+  const fx=phase32Fixture('exact-consumer-contract');
+  const h=fx.handoff;
+  assert.equal(h.source_evaluator_generation_seq,fx.proposal.evaluator_generation_seq);
+  assert.equal(h.source_evaluator_generation_history_anchor_digest,fx.proposal.evaluator_generation_history_anchor_digest);
+  assert.equal(h.source_evaluation_epoch_seq,fx.proposal.evaluation_epoch_seq);
+  assert.equal(h.source_evaluation_contract_digest,fx.proposal.evaluation_contract_digest);
+  assert.deepEqual(h.phase31_transfer_evaluation_contract_digests,fx.admission.transfer_evaluation_contract_digests);
+  assert.equal(h.consumer_evaluator_generation_seq,fx.proposal.evaluator_generation_seq);
+  assert.equal(h.consumer_evaluator_generation_history_anchor_digest,fx.proposal.evaluator_generation_history_anchor_digest);
+  assert.equal(h.consumer_evaluation_epoch_seq,fx.proposal.evaluation_epoch_seq);
+  assert.equal(h.consumer_evaluation_epoch_digest,fx.proposal.evaluation_epoch_digest);
+  assert.match(h.consumer_evaluation_contract_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(verifyRsiValidatedKnowledgeConsumerHandoff(h,fx).handoff_digest,h.handoff_digest);
+});
+
+test('Phase32 rejects partial evaluator or epoch identity drift and exact archive identity sees evaluator incarnation changes',async(t)=>{
+  const base=phase32Fixture('identity-drift');
+  assert.throws(()=>phase32Fixture('generation-seq-drift',{consumerGenerationSeq:base.proposal.evaluator_generation_seq+1}),/evaluator_generation_identity_drift/);
+  assert.throws(()=>phase32Fixture('generation-anchor-drift',{consumerGenerationAnchor:labelDigest('other-generation-anchor')}),/evaluator_generation_identity_drift/);
+  assert.throws(()=>phase32Fixture('epoch-seq-drift',{consumerEpochSeq:base.proposal.evaluation_epoch_seq+1}),/evaluation_epoch_identity_drift/);
+
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-identity-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const resolver=async({phase31_admission_digest})=>{
+    if(phase31_admission_digest!==base.admission.admission_digest)return null;
+    return {proposal:base.proposal,validations:base.validations,admission:base.admission,source_rows:base.rows};
+  };
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  const receipt=phase32Receipt(base,'identity-base');
+  await archive.add({...base,receipt});
+  const changed=phase32Fixture('identity-drift-changed',{
+    consumerGeneration:labelDigest('new-consumer-generation'),
+    consumerGenerationSeq:base.proposal.evaluator_generation_seq+1,
+    consumerGenerationAnchor:labelDigest('new-consumer-generation-anchor'),
+    consumerEpochSeq:base.proposal.evaluation_epoch_seq+1,
+    consumerEpochDigest:labelDigest('new-consumer-epoch'),
+  });
+  // Different evaluator incarnation receives a different exact consumer identity
+  // and therefore cannot collide with the prior archive row.
+  const changedResolver=async({phase31_admission_digest})=>{
+    if(phase31_admission_digest!==changed.admission.admission_digest)return resolver({phase31_admission_digest});
+    return {proposal:changed.proposal,validations:changed.validations,admission:changed.admission,source_rows:changed.rows};
+  };
+  const secondPath=path.join(dir,'consumer-second.json');
+  const second=new RsiConsumerRevalidationArchive({statePath:secondPath,source_sha:SOURCE,evidenceResolver:changedResolver});
+  await second.init();
+  await second.add({...changed,receipt:phase32Receipt(changed,'identity-changed')});
+  assert.equal(second.snapshot().row_count,1);
 });
