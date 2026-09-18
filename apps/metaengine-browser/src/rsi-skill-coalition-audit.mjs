@@ -9,6 +9,7 @@ export const RSI_SKILL_COALITION_STATE_SCHEMA='metaengine.rsi.skill-coalition-st
 const SHA256=/^sha256:[0-9a-f]{64}$/;
 const SAFE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const MAX_ROWS=8192;
+const MIN_NEGATIVE_PAIRS=2;
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function dg(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
 function digest(v,l){const x=String(v||'').toLowerCase();if(!SHA256.test(x))throw new Error(`rsi_coalition_${l}_digest_invalid`);return x}
@@ -34,7 +35,7 @@ function diffOne(a,b){
   const A=new Set(a),B=new Set(b);const add=[...A].filter(x=>!B.has(x));const rem=[...B].filter(x=>!A.has(x));
   return add.length===1&&rem.length===0?add[0]:null;
 }
-export function createRsiSkillCoalitionAudit({context_digest,observations,min_negative_pairs=2}={}){
+export function createRsiSkillCoalitionAudit({context_digest,observations}={}){
   const ctx=digest(context_digest,'context');
   if(!Array.isArray(observations)||observations.length<2)throw new Error('rsi_coalition_observations_insufficient');
   const rows=observations.map(verifyRsiSkillCoalitionObservation).filter(r=>r.context_digest===ctx);
@@ -49,10 +50,10 @@ export function createRsiSkillCoalitionAudit({context_digest,observations,min_ne
   const summaries=[...marginals.entries()].map(([skill,vals])=>{
     const mean=vals.reduce((a,b)=>a+b,0)/vals.length;
     const neg=vals.filter(v=>v<0).length,pos=vals.filter(v=>v>0).length;
-    return Object.freeze({skill_digest:skill,pair_count:vals.length,mean_marginal:Math.round(mean*1e9)/1e9,negative_pair_count:neg,positive_pair_count:pos,mask:neg>=min_negative_pairs&&pos===0&&mean<0});
+    return Object.freeze({skill_digest:skill,pair_count:vals.length,mean_marginal:Math.round(mean*1e9)/1e9,negative_pair_count:neg,positive_pair_count:pos,mask:neg>=MIN_NEGATIVE_PAIRS&&pos===0&&mean<0});
   }).sort((a,b)=>a.skill_digest.localeCompare(b.skill_digest));
   const masked=summaries.filter(x=>x.mask).map(x=>x.skill_digest);
-  const core={schema:RSI_SKILL_COALITION_AUDIT_SCHEMA,version:1,context_digest:ctx,observation_digests:rows.map(x=>x.observation_digest).sort(),summaries,masked_skill_digests:Object.freeze(masked),min_negative_pairs,candidate_can_choose_threshold:false,coalition_pollution_checked:true,cross_skill_interaction_evidence_required:true,mask_is_execution_authority:false,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
+  const core={schema:RSI_SKILL_COALITION_AUDIT_SCHEMA,version:1,context_digest:ctx,observation_digests:rows.map(x=>x.observation_digest).sort(),summaries,masked_skill_digests:Object.freeze(masked),min_negative_pairs:MIN_NEGATIVE_PAIRS,candidate_can_choose_threshold:false,coalition_pollution_checked:true,cross_skill_interaction_evidence_required:true,mask_is_execution_authority:false,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
   return Object.freeze({...core,audit_digest:dg(core)});
 }
 function state(source,rows){const core={schema:RSI_SKILL_COALITION_STATE_SCHEMA,version:1,source_sha:source,rows,append_only:true,candidate_can_delete:false,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};return {...core,state_digest:dg(core)}}
@@ -66,4 +67,4 @@ export class RsiSkillCoalitionAuditStore{
   auditIfAvailable(context_digest){if(!this.#init)throw new Error('rsi_coalition_not_initialized');const ctx=digest(context_digest,'context');const rows=this.#rows.filter(r=>r.context_digest===ctx);if(rows.length<2)return null;try{return createRsiSkillCoalitionAudit({context_digest:ctx,observations:rows})}catch(e){if(e?.message==='rsi_coalition_observations_insufficient')return null;throw e}}
   snapshot(){return Object.freeze({schema:RSI_SKILL_COALITION_STATE_SCHEMA,version:1,source_sha:this.#source,initialized:this.#init,row_count:this.#rows.length,authority_effect:false})}
 }
-export function rsiSkillCoalitionAuditTrustRootSnapshot(){const root={schema:'metaengine.rsi.skill-coalition-audit-root.v1',version:1,external_evaluator_required:true,matched_coalition_pairs_required:true,coalition_pollution_checked:true,context_bound:true,candidate_can_choose_coalition:false,candidate_can_write_utility:false,candidate_can_choose_threshold:false,mask_is_execution_authority:false,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};return Object.freeze({...root,coalition_root_digest:dg(root)})}
+export function rsiSkillCoalitionAuditTrustRootSnapshot(){const root={schema:'metaengine.rsi.skill-coalition-audit-root.v1',version:1,external_evaluator_required:true,matched_coalition_pairs_required:true,coalition_pollution_checked:true,context_bound:true,candidate_can_choose_coalition:false,candidate_can_write_utility:false,candidate_can_choose_threshold:false,min_negative_pairs:MIN_NEGATIVE_PAIRS,mask_is_execution_authority:false,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};return Object.freeze({...root,coalition_root_digest:dg(root)})}
