@@ -66,6 +66,14 @@ import {
   verifyRsiVerifiedSearchFeedback,
   rsiVerifiedSearchFeedbackTrustRootSnapshot,
 } from './rsi-verified-search-feedback.mjs';
+import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
+import { RsiBrowserCommandAttributionRegistry, rsiBrowserCommandAttributionTrustRootSnapshot } from './rsi-browser-command-attribution-registry.mjs';
+import {
+  createRsiTrustedCreditReceipt,
+  createRsiExperienceGraphAdmission,
+  applyRsiExperienceGraphAdmission,
+  rsiTrustedCreditTrustRootSnapshot,
+} from './rsi-trusted-credit-assignment.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -76,6 +84,7 @@ const MAX_AUTONOMOUS_PREPARED_REQUESTS = 256;
 const MAX_HARNESS_EVIDENCE_DIGESTS = 1024;
 const MAX_VERIFIED_SEARCH_FEEDBACK = 512;
 const PREFIXED_SHA256 = /^sha256:[0-9a-f]{64}$/;
+const MAX_PENDING_LEARNING_OUTCOMES = 4096;
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -145,6 +154,9 @@ function trustRoots() {
     autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
     devos_admission_adapter: rsiDevosAdmissionAdapterTrustRootSnapshot(),
     verified_search_feedback: rsiVerifiedSearchFeedbackTrustRootSnapshot(),
+    browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
+    browser_command_attribution: rsiBrowserCommandAttributionTrustRootSnapshot(),
+    trusted_credit: rsiTrustedCreditTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -175,6 +187,14 @@ export class RsiRuntimeService {
   #harnessEvidenceDigests = new Set();
   #verifiedSearchFeedback = [];
   #verifiedSearchFeedbackDigests = new Set();
+  #commandAttributions;
+  #pendingLearningOutcomes = new Map();
+  #creditedOutcomeDigests = new Set();
+  #experienceGraphSnapshot = null;
+  #browserOutcomeCount = 0;
+  #browserOutcomeLearningEligibleCount = 0;
+  #browserOutcomeQuarantinedCount = 0;
+  #lastBrowserOutcomeDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -191,6 +211,7 @@ export class RsiRuntimeService {
       source_sha: this.#sourceSha,
       trust_root_set_digest: digest(this.#roots),
     });
+    this.#commandAttributions = new RsiBrowserCommandAttributionRegistry({ source_sha: this.#sourceSha });
   }
 
   async start() {
@@ -226,6 +247,16 @@ export class RsiRuntimeService {
             }
           }
         }
+        if (row?.payload?.command_attribution_event) this.#commandAttributions.apply(row.payload.command_attribution_event);
+        if (row?.payload?.learning_episode) this.#rememberLearningOutcome(row.payload.learning_episode);
+        if (row?.payload?.credit_admission) {
+          this.#experienceGraphSnapshot = applyRsiExperienceGraphAdmission({
+            previous_snapshot: this.#experienceGraphSnapshot,
+            admission: row.payload.credit_admission,
+          });
+          this.#creditedOutcomeDigests.add(row.payload.credit_admission.outcome_episode_digest);
+          this.#pendingLearningOutcomes.delete(row.payload.credit_admission.outcome_episode_digest);
+        }
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -251,6 +282,35 @@ export class RsiRuntimeService {
 
   #assertRunning() {
     if (!this.#running) throw new Error('rsi_runtime_not_started');
+  }
+
+  #rememberLearningOutcome(episode) {
+    if (!episode || episode.eligible_for_experience_graph !== true || typeof episode.episode_digest !== 'string') return;
+    if (this.#creditedOutcomeDigests.has(episode.episode_digest)) return;
+    if (!this.#pendingLearningOutcomes.has(episode.episode_digest) && this.#pendingLearningOutcomes.size >= MAX_PENDING_LEARNING_OUTCOMES) {
+      const oldest = this.#pendingLearningOutcomes.keys().next().value;
+      if (oldest) this.#pendingLearningOutcomes.delete(oldest);
+    }
+    this.#pendingLearningOutcomes.set(episode.episode_digest, Object.freeze(structuredClone(episode)));
+  }
+
+  #findPersistedLearningOutcome(episodeDigest) {
+    const cached = this.#pendingLearningOutcomes.get(episodeDigest);
+    if (cached) return Object.freeze(structuredClone(cached));
+    let cursor = 0;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const candidate = row?.payload?.learning_episode;
+        if (candidate?.episode_digest === episodeDigest && candidate?.eligible_for_experience_graph === true) {
+          return Object.freeze(structuredClone(candidate));
+        }
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return null;
   }
 
   async #persistObservationAdmission(admission) {
@@ -714,6 +774,114 @@ export class RsiRuntimeService {
     return candidate;
   }
 
+  async registerBrowserCommandAttribution(input = {}) {
+    this.#assertRunning();
+    const event = this.#commandAttributions.prepareRegister(input);
+    await this.#ledger.append('BROWSER_COMMAND_ATTRIBUTION_REGISTERED', {
+      command_attribution_event: event,
+      command_id: event.attribution.command_id,
+      attribution_digest: event.attribution.attribution_digest,
+      candidate_id: event.attribution.candidate_id,
+      candidate_sha: event.attribution.candidate_sha,
+      proposal_digest: event.attribution.proposal_digest,
+      producer: event.attribution.producer,
+      db_lease_is_execution_authority: true,
+      registry_is_execution_authority: false,
+      authority_effect: false,
+    });
+    return this.#commandAttributions.apply(event);
+  }
+
+  browserCommandAttribution(commandId) {
+    this.#assertRunning();
+    return this.#commandAttributions.lookup(commandId);
+  }
+
+  async ingestBrowserOutcome({ readback, attribution } = {}) {
+    this.#assertRunning();
+    const commandId = String(readback?.command_id || '').trim().toLowerCase();
+    const registered = commandId ? this.#commandAttributions.lookup(commandId) : null;
+    const candidateRequested = attribution?.candidate_id != null
+      || attribution?.candidate_sha != null
+      || attribution?.proposal_digest != null
+      || (Array.isArray(attribution?.skill_digests) && attribution.skill_digests.length > 0);
+    if (!registered && candidateRequested) {
+      throw new Error('rsi_runtime_candidate_attribution_requires_trusted_registry');
+    }
+    const effectiveAttribution = registered || attribution;
+    const episode = createRsiBrowserOutcomeEpisode({
+      source_sha: this.#sourceSha,
+      readback,
+      attribution: effectiveAttribution,
+    });
+    const consumeEvent = registered
+      ? this.#commandAttributions.prepareConsume({
+        command_id: episode.command_id,
+        outcome_episode_digest: episode.episode_digest,
+      })
+      : null;
+    await this.#ledger.append('BROWSER_OUTCOME_INGESTED', {
+      episode_digest: episode.episode_digest,
+      receipt_digest: episode.receipt_digest,
+      context_digest: episode.context_digest,
+      command_id: episode.command_id,
+      terminal_status: episode.terminal_status,
+      action: episode.action,
+      effect_outcome: episode.effect_outcome,
+      outcome_state: episode.outcome_state,
+      candidate_id: episode.candidate_id,
+      candidate_sha: episode.candidate_sha,
+      proposal_digest: episode.proposal_digest,
+      skill_digests: episode.skill_digests,
+      trusted_command_attribution_digest: registered?.attribution_digest || null,
+      trusted_command_attribution_producer: registered?.producer || null,
+      command_attribution_event: consumeEvent,
+      learning_episode: episode.eligible_for_experience_graph ? episode : null,
+      eligible_for_experience_graph: episode.eligible_for_experience_graph,
+      eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
+      quarantined: episode.quarantined,
+      raw_result_stored: false,
+      raw_error_stored: false,
+      physical_effect_replay_allowed: false,
+      authority_effect: false,
+    });
+    if (consumeEvent) this.#commandAttributions.apply(consumeEvent);
+    if (episode.eligible_for_experience_graph) this.#rememberLearningOutcome(episode);
+    this.#browserOutcomeCount += 1;
+    if (episode.eligible_for_experience_graph) this.#browserOutcomeLearningEligibleCount += 1;
+    if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
+    this.#lastBrowserOutcomeDigest = episode.episode_digest;
+    return episode;
+  }
+
+  async recordTrustedCredit({ outcome_episode_digest, assignment } = {}) {
+    this.#assertRunning();
+    const episodeDigest = String(outcome_episode_digest || '').trim().toLowerCase();
+    if (!PREFIXED_SHA256.test(episodeDigest)) throw new Error('rsi_runtime_outcome_episode_digest_invalid');
+    if (this.#creditedOutcomeDigests.has(episodeDigest)) throw new Error('rsi_runtime_outcome_credit_already_recorded');
+    const episode = this.#findPersistedLearningOutcome(episodeDigest);
+    if (!episode) throw new Error('rsi_runtime_persisted_learning_outcome_required');
+    const receipt = createRsiTrustedCreditReceipt({ outcome_episode: episode, assignment });
+    const admission = createRsiExperienceGraphAdmission({ outcome_episode: episode, credit_receipt: receipt });
+    const nextGraph = applyRsiExperienceGraphAdmission({
+      previous_snapshot: this.#experienceGraphSnapshot,
+      admission,
+    });
+    await this.#ledger.append('TRUSTED_CREDIT_ASSIGNED', {
+      outcome_episode_digest: episodeDigest,
+      credit_receipt_digest: receipt.credit_receipt_digest,
+      experience_case_digest: admission.experience_case.case_digest,
+      credit_admission: admission,
+      terminal_task_reward_is_step_credit: false,
+      candidate_can_write_graph: false,
+      authority_effect: false,
+    });
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#creditedOutcomeDigests.add(episodeDigest);
+    this.#pendingLearningOutcomes.delete(episodeDigest);
+    return admission;
+  }
+
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
     this.#assertRunning();
     const candidate = this.#archive.get(candidate_id);
@@ -817,6 +985,29 @@ export class RsiRuntimeService {
       verified_search_feedback_count: this.#verifiedSearchFeedback.length,
       verified_search_feedback_capacity: MAX_VERIFIED_SEARCH_FEEDBACK,
       verified_search_feedback_scalar_reward_authoritative: false,
+      command_attribution_registry: this.#commandAttributions.snapshot(),
+      trusted_credit: Object.freeze({
+        pending_learning_outcome_count: this.#pendingLearningOutcomes.size,
+        credited_outcome_count: this.#creditedOutcomeDigests.size,
+        experience_graph_snapshot_digest: this.#experienceGraphSnapshot?.snapshot_digest || null,
+        experience_graph_case_count: this.#experienceGraphSnapshot?.case_count || 0,
+        terminal_task_reward_is_step_credit: false,
+        candidate_can_write_graph: false,
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
+      browser_outcome_ingest: Object.freeze({
+        terminal_receipt_readback_required: true,
+        outcome_count: this.#browserOutcomeCount,
+        learning_eligible_count: this.#browserOutcomeLearningEligibleCount,
+        quarantined_count: this.#browserOutcomeQuarantinedCount,
+        last_episode_digest: this.#lastBrowserOutcomeDigest,
+        ambiguous_outcome_learning_allowed: false,
+        raw_result_stored: false,
+        authority_effect: false,
+      }),
       episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
