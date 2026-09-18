@@ -105,7 +105,9 @@ test('two-timescale meta record archives a Pareto advance under a fixed non-self
   const fx=fixture();
   assert.equal(fx.result.state,'ELIGIBLE_FOR_META_ARCHIVE');
   const record=createRsiRuntimeMetaSkillRecord({
-    source_sha:SOURCE,record_id:'meta.record.1',...fx,
+    source_sha:SOURCE,record_id:'meta.record.1',library:fx.library,
+    parent_profile:fx.parent,successor_profile:fx.successor,fast_loop_summary:fx.fast,
+    plan:fx.plan,evaluation:fx.evaluation,result:fx.result,
     external_archive_owner:true,authored_by_candidate:false,
   });
   verifyRsiRuntimeMetaSkillRecord(record);
@@ -133,7 +135,9 @@ test('runtime meta archive is append-only, restart durable, and cannot activate 
   try{
     const fx=fixture();
     const record=createRsiRuntimeMetaSkillRecord({
-      source_sha:SOURCE,record_id:'meta.record.persist',...fx,
+      source_sha:SOURCE,record_id:'meta.record.persist',library:fx.library,
+      parent_profile:fx.parent,successor_profile:fx.successor,fast_loop_summary:fx.fast,
+      plan:fx.plan,evaluation:fx.evaluation,result:fx.result,
       external_archive_owner:true,authored_by_candidate:false,
     });
     const statePath=path.join(root,'meta.json');
@@ -156,12 +160,16 @@ test('runtime meta archive is append-only, restart durable, and cannot activate 
 test('tampered fixed meta operation or candidate-authored archive record fails closed',()=>{
   const fx=fixture();
   const record=createRsiRuntimeMetaSkillRecord({
-    source_sha:SOURCE,record_id:'meta.record.tamper',...fx,
+    source_sha:SOURCE,record_id:'meta.record.tamper',library:fx.library,
+    parent_profile:fx.parent,successor_profile:fx.successor,fast_loop_summary:fx.fast,
+    plan:fx.plan,evaluation:fx.evaluation,result:fx.result,
     external_archive_owner:true,authored_by_candidate:false,
   });
   assert.throws(()=>verifyRsiRuntimeMetaSkillRecord({...record,fixed_meta_operation_digest:d('f')}),/record_policy_invalid/);
   assert.throws(()=>createRsiRuntimeMetaSkillRecord({
-    source_sha:SOURCE,record_id:'meta.record.candidate',...fx,
+    source_sha:SOURCE,record_id:'meta.record.candidate',library:fx.library,
+    parent_profile:fx.parent,successor_profile:fx.successor,fast_loop_summary:fx.fast,
+    plan:fx.plan,evaluation:fx.evaluation,result:fx.result,
     external_archive_owner:false,authored_by_candidate:true,
   }),/external_archive_owner_required/);
 });
