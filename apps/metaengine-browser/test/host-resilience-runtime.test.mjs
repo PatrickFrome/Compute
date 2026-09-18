@@ -212,9 +212,19 @@ test('pending Sentinel recovery never blocks a later exact parent-progress heart
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(recoveryCalls, 1);
 
+  // Deadlock guard, not a latency assertion: the property under test is that
+  // markProgress resolves at all while Sentinel recovery is pending. Shared CI
+  // runners can stall the event loop well past 250ms under parallel suite load
+  // (observed as a one-off contract-gate flake on an unrelated PR head with a
+  // ~9ms local margin), so the guard is widened to keep failing true isolation
+  // deadlocks while tolerating runner scheduling noise.
+  const ISOLATION_DEADLOCK_GUARD_MS = 2_000;
   const heartbeat = await Promise.race([
     runtime.markProgress({ kind: 'RECOVERY_STILL_PENDING' }),
-    new Promise((_, reject) => setTimeout(() => reject(new Error('isolated_parent_progress_timeout')), 250)),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error('isolated_parent_progress_timeout')),
+      ISOLATION_DEADLOCK_GUARD_MS,
+    )),
   ]);
   assert.equal(heartbeat.parent_progress.progress_seq, initialSeq + 2);
   assert.equal(heartbeat.parent_progress.progress_kind, 'RECOVERY_STILL_PENDING');
