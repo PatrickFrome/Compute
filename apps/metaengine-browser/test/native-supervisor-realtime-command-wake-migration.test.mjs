@@ -65,7 +65,8 @@ test('modern non-JWT service keys use the existing Postgres NOTIFY channel inste
   assert.match(edge, /command_wait_batch:\(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN\)\?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY'/);
   assert.match(edge, /postgres_notify_delivery_is_authority:false/);
 
-  assert.match(wake, /String\(row\.table \|\| ''\) !== COMMAND_TABLE/);
-  assert.match(wake, /row\.target_client_id == null \? null : String\(row\.target_client_id\)/);
+  assert.match(wake, /row\.table \?\? row\.tbl/);
+  assert.match(wake, /row\.target_client_id !== undefined \? row\.target_client_id : row\.client/);
   assert.match(wake, /POSTGRES_RELISTEN/);
+  assert.match(wake, /does not require a production DDL rewrite/);
 });
