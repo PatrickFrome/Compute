@@ -151,6 +151,16 @@ test('Phase36 runtime releases exactly one held skill into exploration without f
   assert.equal(active.selected[0].governance_state,'EXPLORATION_ACTIVE');
   assert.equal(fx.runtime.snapshot().execution_authority,false);
   assert.equal(fx.runtime.snapshot().promotion_authority,false);
+
+  const duplicate=await fx.runtime.applySkillExposureRelease({
+    attempt_id:'phase36.exposure.release.runtime.1',
+    certificate:cert,
+    certificate_args:args,
+  });
+  assert.equal(duplicate.state,'ALREADY_RECORDED');
+  assert.equal(duplicate.attempt_state,'CONFIRMED');
+  assert.equal(duplicate.retrieval_exposure_changed,true);
+  assert.equal(fx.runtime.verifiedSkillStateReadback().governance_digest,preview.next_governance_digest);
 });
 
 test('Phase36 preview refuses unheld skills and certificate requires reviewer separation of duties',async(t)=>{
