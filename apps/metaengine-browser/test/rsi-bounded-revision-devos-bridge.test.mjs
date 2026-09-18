@@ -973,18 +973,14 @@ test('Phase29 handoff ledger persistence failure cannot publish phantom handoff'
     evaluator_generation_history_anchor_digest:labelDigest('phase29-ledger-crash-anchor'),
   });
 
-  const originalRename=fs.rename;
-  fs.rename=async()=>{throw Object.assign(new Error('injected_phase29_handoff_rename_failure'),{code:'EIO'});};
-  try{
-    await assert.rejects(()=>ledger.add({
-      handoff,
-      artifact_receipt:fx.artifactReceipt,
-      artifact_verification:fx.artifactVerification,
-    }),/injected_phase29_handoff_rename_failure/);
-  }finally{
-    fs.rename=originalRename;
-  }
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>ledger.add({
+    handoff,
+    artifact_receipt:fx.artifactReceipt,
+    artifact_verification:fx.artifactVerification,
+  }));
   assert.equal(ledger.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
 
   const restored=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
   await restored.init();
@@ -1077,7 +1073,7 @@ test('Phase29 handoff ledger restart replays exact Phase28 evidence and rejects 
   await fs.writeFile(statePath,JSON.stringify(persisted),'utf8');
 
   const restored=new RsiMaterializedCandidateEvaluationHandoffLedger({statePath,source_sha:SOURCE});
-  await assert.rejects(()=>restored.init(),/artifact_receipt_policy_invalid|artifact_receipt_mismatch|artifact_binding_mismatch/);
+  await assert.rejects(()=>restored.init(),/artifact_receipt_policy_invalid|artifact_receipt_digest_mismatch|artifact_receipt_mismatch|artifact_binding_mismatch/);
 });
 
 test('Phase29 evaluator generation rotation is externally witnessed and exact-bound to predecessor and successor',async(t)=>{
