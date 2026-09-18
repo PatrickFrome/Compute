@@ -332,9 +332,13 @@ export class RsiRuntimeService {
     });
   }
 
-  async recordHarnessFlaw({ flaw_record } = {}) {
+  async recordHarnessFlaw({ flaw_record, registry } = {}) {
     this.#assertRunning();
+    const checkedRegistry = verifyRsiHarnessComponentRegistry(registry);
     const flaw = verifyRsiHarnessFlawRecord(flaw_record);
+    if (checkedRegistry.source_sha !== this.#sourceSha || flaw.registry_digest !== checkedRegistry.registry_digest) {
+      throw new Error('rsi_runtime_harness_flaw_source_or_registry_mismatch');
+    }
     return this.#recordHarnessEvidence('RSI_HARNESS_FLAW_RECORDED', flaw.flaw_digest, {
       flaw_id: flaw.flaw_id,
       registry_digest: flaw.registry_digest,
@@ -365,9 +369,13 @@ export class RsiRuntimeService {
     });
   }
 
-  async recordHarnessRepairOutcome({ repair_outcome } = {}) {
+  async recordHarnessRepairOutcome({ repair_outcome, repair_spec } = {}) {
     this.#assertRunning();
+    const spec = verifyRsiHarnessRepairSpec(repair_spec);
     const outcome = verifyRsiHarnessRepairOutcome(repair_outcome);
+    if (spec.source_sha !== this.#sourceSha || outcome.repair_digest !== spec.repair_digest || outcome.repair_id !== spec.repair_id) {
+      throw new Error('rsi_runtime_harness_outcome_source_or_repair_mismatch');
+    }
     return this.#recordHarnessEvidence('RSI_HARNESS_REPAIR_OUTCOME_RECORDED', outcome.outcome_digest, {
       repair_id: outcome.repair_id,
       repair_digest: outcome.repair_digest,
