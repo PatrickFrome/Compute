@@ -27,6 +27,7 @@ import {
   unavailableDevosRuntimeControl,
 } from './devos-runtime-control.mjs';
 import { classifyFleetReconcileOutcome, projectFleetReconcileSemantics } from './fleet-provisioner.mjs';
+import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-result-delivery-adapter.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -234,6 +235,7 @@ export class NativeSupervisorClient {
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
   #resultDeliveryAttempts;
   #resultDeliveryBackoffMs;
+  #resultDeliveryAdapter = null;
 
   constructor({
     identity,
@@ -257,6 +259,7 @@ export class NativeSupervisorClient {
     hostResilience = undefined,
     resultDeliveryAttempts = 3,
     resultDeliveryBackoffMs = [1000, 3000],
+    rsiResultReceiptReconciliation = false,
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -281,6 +284,14 @@ export class NativeSupervisorClient {
     this.#resultDeliveryBackoffMs = Array.isArray(resultDeliveryBackoffMs) && resultDeliveryBackoffMs.length
       ? resultDeliveryBackoffMs.map((ms) => Math.max(0, Number(ms) || 0))
       : [1000, 3000];
+    this.#resultDeliveryAdapter = rsiResultReceiptReconciliation === true
+      ? createSupervisorRsiResultDeliveryAdapter({
+          signedRequest: (path, options = {}) => this.#signedRequest(path, options),
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          attempts: this.#resultDeliveryAttempts,
+          backoffMs: this.#resultDeliveryBackoffMs,
+        })
+      : null;
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
@@ -416,6 +427,15 @@ export class NativeSupervisorClient {
         runtime_control: structuredClone(this.#runtimeControl),
         authoritative_admission_required: true,
         actuation_allowed: devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+        authority_effect: false,
+      },
+      result_receipt_reconciliation: {
+        enabled: this.#resultDeliveryAdapter != null,
+        same_receipt_transport_only: true,
+        independent_terminal_readback_required: true,
+        candidate_effect_executor_exposed: false,
+        physical_effect_replay_allowed: false,
+        automatic_effect_retry_allowed: false,
         authority_effect: false,
       },
       developer_emergency_update: {
