@@ -14,6 +14,7 @@ import {
 
 export const RSI_STORAGE_ONLY_APPEND_EFFECT_PLAN_SCHEMA='metaengine.rsi.storage-only-append-effect-plan.v1';
 export const RSI_STORAGE_ONLY_APPEND_EFFECT_READBACK_SCHEMA='metaengine.rsi.storage-only-append-effect-readback.v1';
+export const RSI_STORAGE_ONLY_APPEND_EFFECT_RECONCILIATION_SCHEMA='metaengine.rsi.storage-only-append-effect-reconciliation.v1';
 export const RSI_STORAGE_ONLY_APPEND_EFFECT_ARCHIVE_SCHEMA='metaengine.rsi.storage-only-append-effect-archive.v1';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
@@ -382,6 +383,118 @@ export function verifyRsiStorageOnlyAppendEffectReadback(receipt,{plan,plan_args
   return canonical;
 }
 
+export function createRsiStorageOnlyAppendEffectReconciliation({
+  reconciliation_id,
+  plan,
+  plan_args,
+  ambiguous_receipt,
+  ambiguous_observed_library=null,
+  observed_library,
+  reconciliation_evidence_digest,
+  reconciliation_owner_identity_digest,
+  external_reconciliation_owner=false,
+  authored_by_candidate=true,
+}={}){
+  const checkedPlan=verifyRsiStorageOnlyAppendEffectPlan(plan,plan_args||{});
+  const ambiguous=verifyRsiStorageOnlyAppendEffectReadback(ambiguous_receipt,{
+    plan:checkedPlan,plan_args,observed_library:ambiguous_observed_library,
+  });
+  if(ambiguous.state!=='APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED'||ambiguous.reconciliation_required!==true
+    ||ambiguous.same_effect_id_retry_allowed!==false||ambiguous.effect_attempt_count!==1){
+    throw new Error('rsi_phase34_effect_ambiguous_receipt_required');
+  }
+  if(!observed_library)throw new Error('rsi_phase34_effect_reconciliation_observed_library_required');
+  if(external_reconciliation_owner!==true||authored_by_candidate!==false){
+    throw new Error('rsi_phase34_effect_external_reconciliation_owner_required');
+  }
+  const state=readbackLibraryState(checkedPlan,plan_args.current_library,observed_library);
+  if(state.kind==='OTHER')throw new Error('rsi_phase34_effect_reconciliation_still_unresolved');
+  const evidence=exactDigest(reconciliation_evidence_digest,'reconciliation_evidence');
+  const owner=exactDigest(reconciliation_owner_identity_digest,'reconciliation_owner_identity');
+  const principals=[
+    checkedPlan.effect_planner_identity_digest,
+    checkedPlan.certificate_library_owner_identity_digest,
+    checkedPlan.certificate_statistical_acceptor_identity_digest,
+    checkedPlan.certificate_source_qualification_owner_identity_digest,
+    checkedPlan.certificate_least_privilege_reviewer_identity_digest,
+    checkedPlan.certificate_governance_reviewer_identity_digest,
+    ambiguous.effect_executor_identity_digest,
+    ambiguous.readback_owner_identity_digest,
+    owner,
+  ];
+  if(new Set(principals).size!==principals.length)throw new Error('rsi_phase34_effect_reconciliation_separation_required');
+
+  const applied=state.kind==='SUCCESSOR';
+  if(applied){
+    const current=verifyRsiVerifiedSkillLibrary(plan_args.current_library);
+    const added=state.library.entries.filter(row=>!current.entries.some(before=>before.skill_digest===row.skill_digest));
+    if(added.length!==1||added[0].skill_digest!==checkedPlan.proposed_skill_digest||added[0].evidence_digest!==checkedPlan.proposed_skill_evidence_digest){
+      throw new Error('rsi_phase34_effect_reconciliation_exact_single_append_not_observed');
+    }
+  }
+  const core=zero({
+    schema:RSI_STORAGE_ONLY_APPEND_EFFECT_RECONCILIATION_SCHEMA,
+    version:1,
+    reconciliation_id:id(reconciliation_id,'reconciliation_id'),
+    source_sha:checkedPlan.source_sha,
+    plan_digest:checkedPlan.plan_digest,
+    ambiguous_receipt_digest:ambiguous.receipt_digest,
+    append_effect_id_digest:checkedPlan.append_effect_id_digest,
+    effect_attempt_count:1,
+    reconciliation_evidence_digest:evidence,
+    reconciliation_owner_identity_digest:owner,
+    resolved_library_kind:state.kind,
+    resolved_library_digest:state.library.library_digest,
+    resolved_library_manifest_digest:state.manifest.manifest_digest,
+    resolved_library_entry_count:state.library.entry_count,
+    append_confirmed:applied,
+    storage_only_pending_governance:applied,
+    new_plan_required_for_future_attempt:!applied,
+    reconciliation_complete:true,
+    additional_effect_attempt_performed:false,
+    same_effect_id_retry_allowed:false,
+    blind_retry_forbidden:true,
+    governance_recompute_performed:false,
+    activation_view_rebuilt:false,
+    retrieval_exposure_changed:false,
+    skill_activation_performed:false,
+    lifecycle_mutation_performed:false,
+    external_reconciliation_owner:true,
+    authored_by_candidate:false,
+    state:applied
+      ?'RECONCILED_APPLIED_STORAGE_ONLY_PENDING_GOVERNANCE'
+      :'RECONCILED_NOT_APPLIED_NEW_PLAN_REQUIRED',
+  });
+  return Object.freeze({...core,reconciliation_digest:digest(core)});
+}
+
+export function verifyRsiStorageOnlyAppendEffectReconciliation(row,args={}){
+  if(!row||row.schema!==RSI_STORAGE_ONLY_APPEND_EFFECT_RECONCILIATION_SCHEMA||row.version!==1){
+    throw new Error('rsi_phase34_effect_reconciliation_invalid');
+  }
+  assertZero(row,'reconciliation');
+  if(row.effect_attempt_count!==1||row.reconciliation_complete!==true||row.additional_effect_attempt_performed!==false
+    ||row.same_effect_id_retry_allowed!==false||row.blind_retry_forbidden!==true
+    ||row.governance_recompute_performed!==false||row.activation_view_rebuilt!==false
+    ||row.retrieval_exposure_changed!==false||row.skill_activation_performed!==false
+    ||row.lifecycle_mutation_performed!==false||row.external_reconciliation_owner!==true
+    ||row.authored_by_candidate!==false){
+    throw new Error('rsi_phase34_effect_reconciliation_policy_invalid');
+  }
+  const canonical=createRsiStorageOnlyAppendEffectReconciliation({
+    ...args,
+    reconciliation_id:row.reconciliation_id,
+    reconciliation_evidence_digest:row.reconciliation_evidence_digest,
+    reconciliation_owner_identity_digest:row.reconciliation_owner_identity_digest,
+    external_reconciliation_owner:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.reconciliation_digest!==exactDigest(row.reconciliation_digest,'reconciliation')){
+    throw new Error('rsi_phase34_effect_reconciliation_digest_mismatch');
+  }
+  return canonical;
+}
+
 function archiveState(sourceSha,events){
   const core=zero({
     schema:RSI_STORAGE_ONLY_APPEND_EFFECT_ARCHIVE_SCHEMA,
@@ -391,10 +504,12 @@ function archiveState(sourceSha,events){
     event_count:events.length,
     plan_count:events.filter(e=>e.event_type==='PLAN').length,
     readback_count:events.filter(e=>e.event_type==='READBACK').length,
+    reconciliation_count:events.filter(e=>e.event_type==='RECONCILIATION').length,
     append_only:true,
     durable_before_visible:true,
     plan_must_be_durable_before_effect:true,
     one_readback_per_plan:true,
+    one_reconciliation_per_ambiguous_plan:true,
     one_effect_identity_per_plan:true,
     ambiguous_effects_retained:true,
     non_applied_evidence_retained:true,
@@ -421,7 +536,8 @@ export class RsiStorageOnlyAppendEffectArchive{
       const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'archive');
       if(p.schema!==RSI_STORAGE_ONLY_APPEND_EFFECT_ARCHIVE_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
         ||p.append_only!==true||p.durable_before_visible!==true||p.plan_must_be_durable_before_effect!==true
-        ||p.one_readback_per_plan!==true||p.one_effect_identity_per_plan!==true||p.ambiguous_effects_retained!==true
+        ||p.one_readback_per_plan!==true||p.one_reconciliation_per_ambiguous_plan!==true
+        ||p.one_effect_identity_per_plan!==true||p.ambiguous_effects_retained!==true
         ||p.non_applied_evidence_retained!==true||p.archive_can_write_skill_library!==false
         ||p.archive_can_recompute_governance!==false||p.archive_can_change_retrieval_exposure!==false
         ||p.archive_can_activate_skill!==false||p.archive_can_schedule_work!==false){
@@ -430,7 +546,7 @@ export class RsiStorageOnlyAppendEffectArchive{
       const clone=structuredClone(p);delete clone.state_digest;
       if(digest(clone)!==exactDigest(p.state_digest,'archive'))throw new Error('rsi_phase34_effect_archive_digest_mismatch');
       if(!Array.isArray(p.events)||p.events.length>MAX_EVENTS)throw new Error('rsi_phase34_effect_archive_events_invalid');
-      const checked=[];const plans=new Map();const effectIds=new Set();const readbacks=new Set();
+      const checked=[];const plans=new Map();const effectIds=new Set();const readbacks=new Map();const reconciliations=new Set();
       for(const event of p.events){
         if(event.event_type==='PLAN'){
           const evidence=await this.#resolver({event_type:'PLAN',plan_digest:event.plan.plan_digest});
@@ -445,7 +561,23 @@ export class RsiStorageOnlyAppendEffectArchive{
           const receipt=verifyRsiStorageOnlyAppendEffectReadback(event.receipt,{
             plan,plan_args:evidence?.plan_args||{},observed_library:evidence?.observed_library??null,
           });
-          readbacks.add(plan.plan_digest);checked.push(Object.freeze({event_type:'READBACK',plan_digest:plan.plan_digest,receipt}));
+          readbacks.set(plan.plan_digest,receipt);checked.push(Object.freeze({event_type:'READBACK',plan_digest:plan.plan_digest,receipt}));
+        }else if(event.event_type==='RECONCILIATION'){
+          const plan=plans.get(event.plan_digest);
+          if(!plan)throw new Error('rsi_phase34_effect_archive_reconciliation_without_plan');
+          const ambiguous=readbacks.get(plan.plan_digest);
+          if(!ambiguous||ambiguous.state!=='APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED'){
+            throw new Error('rsi_phase34_effect_archive_ambiguous_readback_required');
+          }
+          if(reconciliations.has(plan.plan_digest))throw new Error('rsi_phase34_effect_archive_duplicate_reconciliation');
+          const evidence=await this.#resolver({event_type:'RECONCILIATION',plan_digest:plan.plan_digest,reconciliation_digest:event.reconciliation.reconciliation_digest});
+          const reconciliation=verifyRsiStorageOnlyAppendEffectReconciliation(event.reconciliation,{
+            plan,plan_args:evidence?.plan_args||{},ambiguous_receipt:ambiguous,
+            ambiguous_observed_library:evidence?.ambiguous_observed_library??null,
+            observed_library:evidence?.observed_library??null,
+          });
+          reconciliations.add(plan.plan_digest);
+          checked.push(Object.freeze({event_type:'RECONCILIATION',plan_digest:plan.plan_digest,reconciliation}));
         }else throw new Error('rsi_phase34_effect_archive_event_type_invalid');
       }
       const canonical=archiveState(this.#sourceSha,checked);
@@ -489,13 +621,42 @@ export class RsiStorageOnlyAppendEffectArchive{
     await this.#persist(next);this.#events=next;
     return zero({state:checkedReceipt.state,receipt_digest:checkedReceipt.receipt_digest});
   }
+  async recordReconciliation({plan,ambiguous_receipt,reconciliation,plan_args,ambiguous_observed_library=null,observed_library}={}){
+    if(!this.#initialized)throw new Error('rsi_phase34_effect_archive_not_initialized');
+    const checkedPlan=verifyRsiStorageOnlyAppendEffectPlan(plan,plan_args||{});
+    const storedPlan=this.#events.find(e=>e.event_type==='PLAN'&&e.plan.plan_digest===checkedPlan.plan_digest);
+    if(!storedPlan)throw new Error('rsi_phase34_effect_archive_plan_must_precede_reconciliation');
+    const storedReadback=this.#events.find(e=>e.event_type==='READBACK'&&e.plan_digest===checkedPlan.plan_digest);
+    if(!storedReadback||storedReadback.receipt.state!=='APPEND_EFFECT_AMBIGUOUS_RECONCILIATION_REQUIRED'){
+      throw new Error('rsi_phase34_effect_archive_ambiguous_readback_required');
+    }
+    if(storedReadback.receipt.receipt_digest!==ambiguous_receipt?.receipt_digest){
+      throw new Error('rsi_phase34_effect_archive_ambiguous_receipt_mismatch');
+    }
+    const existing=this.#events.find(e=>e.event_type==='RECONCILIATION'&&e.plan_digest===checkedPlan.plan_digest);
+    if(existing){
+      if(existing.reconciliation.reconciliation_digest!==reconciliation?.reconciliation_digest){
+        throw new Error('rsi_phase34_effect_archive_reconciliation_identity_conflict');
+      }
+      return zero({state:'IDEMPOTENT',reconciliation_digest:existing.reconciliation.reconciliation_digest});
+    }
+    const checked=verifyRsiStorageOnlyAppendEffectReconciliation(reconciliation,{
+      plan:checkedPlan,plan_args,ambiguous_receipt:storedReadback.receipt,
+      ambiguous_observed_library,observed_library,
+    });
+    if(this.#events.length>=MAX_EVENTS)throw new Error('rsi_phase34_effect_archive_capacity_exceeded');
+    const next=[...this.#events,Object.freeze({event_type:'RECONCILIATION',plan_digest:checkedPlan.plan_digest,reconciliation:checked})];
+    await this.#persist(next);this.#events=next;
+    return zero({state:checked.state,reconciliation_digest:checked.reconciliation_digest});
+  }
   snapshot(){
     const s=archiveState(this.#sourceSha,this.#events);
     return Object.freeze({
       schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,
-      event_count:s.event_count,plan_count:s.plan_count,readback_count:s.readback_count,
+      event_count:s.event_count,plan_count:s.plan_count,readback_count:s.readback_count,reconciliation_count:s.reconciliation_count,
       append_only:true,durable_before_visible:true,plan_must_be_durable_before_effect:true,
-      one_readback_per_plan:true,one_effect_identity_per_plan:true,ambiguous_effects_retained:true,
+      one_readback_per_plan:true,one_reconciliation_per_ambiguous_plan:true,
+      one_effect_identity_per_plan:true,ambiguous_effects_retained:true,
       non_applied_evidence_retained:true,archive_can_write_skill_library:false,
       archive_can_recompute_governance:false,archive_can_change_retrieval_exposure:false,
       archive_can_activate_skill:false,archive_can_schedule_work:false,authority_effect:false,
@@ -518,6 +679,8 @@ export function rsiStorageOnlyAppendEffectTrustRootSnapshot(){
     blind_retry_forbidden:true,
     ambiguous_effect_requires_reconciliation:true,
     resolved_readback_cannot_be_classified_ambiguous:true,
+    append_only_reconciliation_event_required:true,
+    reconciliation_performs_no_second_effect_attempt:true,
     planner_executor_readback_separation_required:true,
     append_is_storage_only:true,
     governance_recompute_forbidden:true,
