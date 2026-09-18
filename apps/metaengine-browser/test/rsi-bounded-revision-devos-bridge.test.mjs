@@ -88,6 +88,11 @@ import {
   verifyRsiExactSkillPrecommitCertificate,
   rsiExactExistingConsumerOwnerReviewTrustRootSnapshot,
 } from '../src/rsi-exact-existing-consumer-owner-review.mjs';
+import {
+  createRsiExternalSkillLibraryAdmissionPlan,
+  verifyRsiExternalSkillLibraryAdmissionPlan,
+  rsiExternalSkillLibraryAdmissionTrustRootSnapshot,
+} from '../src/rsi-external-skill-library-admission.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -3096,4 +3101,122 @@ test('Phase33 reviewer separation of duties rejects owner, critic and attestor i
 
   const root=rsiExactExistingConsumerOwnerReviewTrustRootSnapshot();
   assert.equal(root.reviewer_separation_of_duties_required,true);
+});
+
+
+test('Phase34 storage admission plan verifies actual Phase33 certificate and appends exactly one verified entry without effect',()=>{
+  const fx=phase33ExactOwnerFixture('phase34-plan');
+  const certificateArgs=phase33CertificateArgs(fx,'phase34-plan');
+  const certificate=createRsiExactSkillPrecommitCertificate(certificateArgs);
+  const planArgs={
+    plan_id:'phase34.external.library.admission.plan.1',
+    phase33_certificate:certificate,
+    phase33_certificate_args:certificateArgs,
+    current_library:fx.skillFx.currentLibrary,
+    skill_capsule:fx.skillFx.skill,
+    standard_skill_evidence:fx.skillEvidenceReview.standard_skill_evidence,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  };
+  const plan=createRsiExternalSkillLibraryAdmissionPlan(planArgs);
+  assert.equal(plan.expected_current_library_digest,fx.skillFx.currentLibrary.library_digest);
+  assert.equal(plan.current_entry_count,fx.skillFx.currentLibrary.entry_count);
+  assert.equal(plan.successor_entry_count,fx.skillFx.currentLibrary.entry_count+1);
+  assert.equal(plan.proposed_skill_digest,fx.skillFx.skill.skill_digest);
+  assert.equal(plan.standard_skill_evidence_digest,fx.skillEvidenceReview.standard_skill_evidence_digest);
+  assert.equal(plan.phase33_certificate_digest,certificate.certificate_digest);
+  assert.equal(plan.successor_library.entries.filter((entry)=>entry.skill_digest===fx.skillFx.skill.skill_digest).length,1);
+  assert.equal(plan.direct_library_append_performed,false);
+  assert.equal(plan.retrieval_exposure_changed,false);
+  assert.equal(plan.skill_activation_performed,false);
+  assert.equal(plan.lifecycle_evidence_written,false);
+  assert.equal(plan.browser_effect_performed,false);
+  assert.equal(plan.authority_effect,false);
+  assert.equal(verifyRsiExternalSkillLibraryAdmissionPlan(plan,planArgs).plan_digest,plan.plan_digest);
+
+  assert.equal(fx.skillFx.currentLibrary.entries.some((entry)=>entry.skill_digest===fx.skillFx.skill.skill_digest),false);
+  assert.equal(fx.skillFx.currentLibrary.entry_count,plan.current_entry_count);
+});
+
+test('Phase34 admission plan fails closed on stale library, non-eligible certificate, or evidence substitution',()=>{
+  const fx=phase33ExactOwnerFixture('phase34-failclosed');
+  const certificateArgs=phase33CertificateArgs(fx,'phase34-failclosed');
+  const certificate=createRsiExactSkillPrecommitCertificate(certificateArgs);
+  const otherFx=phase33ExactOwnerFixture('phase34-other');
+
+  const extra=phase32ExactSkillCapsule({
+    skillId:'skill.phase34.drift.extra',
+    role:'VERIFIER',
+    sourceSha:'c'.repeat(40),
+    inputDigest:labelDigest('phase34-drift-input'),
+    outputDigest:labelDigest('phase34-drift-output'),
+    implDigest:labelDigest('phase34-drift-impl'),
+    capabilities:['READ_VERIFIED_CONTEXT','CHECK_TYPED_OUTPUT'],
+  });
+  const drifted=createRsiVerifiedSkillLibrary({
+    library_id:fx.skillFx.currentLibrary.library_id,
+    entries:[
+      ...fx.skillFx.currentLibrary.entries.map((entry)=>({capsule:entry.capsule,evidence:entry.evidence})),
+      {capsule:extra,evidence:phase32ExactSkillEvidence(extra,'phase34-drift-extra')},
+    ],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+
+  assert.throws(()=>createRsiExternalSkillLibraryAdmissionPlan({
+    plan_id:'phase34.external.library.admission.stale',
+    phase33_certificate:certificate,
+    phase33_certificate_args:certificateArgs,
+    current_library:drifted,
+    skill_capsule:fx.skillFx.skill,
+    standard_skill_evidence:fx.skillEvidenceReview.standard_skill_evidence,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  }),/current_library_drift/);
+
+  const insufficientArgs=phase33CertificateArgs(fx,'phase34-insufficient',{anytime_valid_e_value_microunits:19000000});
+  const insufficient=createRsiExactSkillPrecommitCertificate(insufficientArgs);
+  assert.equal(insufficient.state,'INSUFFICIENT_ANYTIME_VALID_EVIDENCE');
+  assert.throws(()=>createRsiExternalSkillLibraryAdmissionPlan({
+    plan_id:'phase34.external.library.admission.insufficient',
+    phase33_certificate:insufficient,
+    phase33_certificate_args:insufficientArgs,
+    current_library:fx.skillFx.currentLibrary,
+    skill_capsule:fx.skillFx.skill,
+    standard_skill_evidence:fx.skillEvidenceReview.standard_skill_evidence,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  }),/certificate_not_eligible/);
+
+  assert.throws(()=>createRsiExternalSkillLibraryAdmissionPlan({
+    plan_id:'phase34.external.library.admission.substitution',
+    phase33_certificate:certificate,
+    phase33_certificate_args:certificateArgs,
+    current_library:fx.skillFx.currentLibrary,
+    skill_capsule:fx.skillFx.skill,
+    standard_skill_evidence:otherFx.skillEvidenceReview.standard_skill_evidence,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  }),/evidence_digest_mismatch|standard_evidence_digest_mismatch/);
+});
+
+test('Phase34 admission trust root keeps storage admission distinct from retrieval, activation and execution',()=>{
+  const root=rsiExternalSkillLibraryAdmissionTrustRootSnapshot();
+  assert.equal(root.actual_phase33_certificate_required,true);
+  assert.equal(root.actual_standard_skill_evidence_required,true);
+  assert.equal(root.exact_current_library_binding_required,true);
+  assert.equal(root.exactly_one_append_required,true);
+  assert.equal(root.existing_verified_skill_library_reused,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.exact_library_cas_required,true);
+  assert.equal(root.write_ahead_attempt_required,true);
+  assert.equal(root.one_attempt_only,true);
+  assert.equal(root.post_effect_readback_required,true);
+  assert.equal(root.zero_evidence_skill_must_remain_dormant,true);
+  assert.equal(root.direct_library_append_performed_here,false);
+  assert.equal(root.direct_retrieval_exposure_change,false);
+  assert.equal(root.direct_skill_activation,false);
+  assert.equal(root.direct_browser_effect,false);
+  assert.equal(root.scheduler_authority,false);
+  assert.equal(root.authority_effect,false);
 });
