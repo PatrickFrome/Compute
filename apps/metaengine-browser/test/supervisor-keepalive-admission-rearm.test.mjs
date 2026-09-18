@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 
-const CONVERSATION_URL = 'https://chatgpt.com/c/00000000-0000-4000-8000-000000000028';
+const CONVERSATION_URL = 'https://chat.z.ai/c/00000000-0000-4000-8000-000000000028';
 const OPEN = Object.freeze({
   authoritative: true,
   state: 'OPEN',

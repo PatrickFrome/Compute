@@ -42,7 +42,7 @@ function seedState() {
 
 function rootFrame() {
   return {
-    url: 'https://chatgpt.com/',
+    url: 'https://chat.z.ai/',
     title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
@@ -63,16 +63,16 @@ async function makeRuntime({ tabs, seed = seedState() }) {
     actions.push(action);
     if (action === 'CAPTURE') {
       const tab = currentTabs.find((row) => String(row?.tab_id || '') === String(payload?.tab_id || ''));
-      return { ...rootFrame(), url: String(tab?.url || 'https://chatgpt.com/'), tab_id: String(payload?.tab_id || '') };
+      return { ...rootFrame(), url: String(tab?.url || 'https://chat.z.ai/'), tab_id: String(payload?.tab_id || '') };
     }
     if (action === 'SEMANTIC_TYPE') {
       typed += 1;
       currentTabs = currentTabs.map((row) => String(row?.tab_id || '') === String(payload?.tab_id || '')
-        ? { ...row, url: 'https://chatgpt.com/c/r5-recovered' }
+        ? { ...row, url: 'https://chat.z.ai/c/r5-recovered' }
         : row);
       return {
         effect_state: 'PROVEN_NEW_CONVERSATION',
-        url: 'https://chatgpt.com/c/r5-recovered',
+        url: 'https://chat.z.ai/c/r5-recovered',
         tab_id: String(payload?.tab_id || ''),
         text_excerpt: '',
         semantic_targets: [],
@@ -93,11 +93,11 @@ async function makeRuntime({ tabs, seed = seedState() }) {
 
 test('process-boundary bootstrap ambiguity retires predecessor and reuses one clean root for a new wake', async () => {
   const { runtime, actions, statePath, typed } = await makeRuntime({
-    tabs: [{ tab_id: 'replacement-root', url: 'https://chatgpt.com/', selected: false }],
+    tabs: [{ tab_id: 'replacement-root', url: 'https://chat.z.ai/', selected: false }],
   });
   const snap = await runtime.start();
   assert.equal(snap.keepalive.state, 'ACTIVE');
-  assert.equal(snap.keepalive.conversation_url, 'https://chatgpt.com/c/r5-recovered');
+  assert.equal(snap.keepalive.conversation_url, 'https://chat.z.ai/c/r5-recovered');
   assert.equal(snap.keepalive.tab_id, 'replacement-root');
   assert.notEqual(snap.keepalive.active_wake?.wake_id, OLD_WAKE);
   assert.equal(snap.keepalive.active_wake?.reason, 'RESEARCH_ACCELERATOR_DUE');
@@ -116,8 +116,8 @@ test('process-boundary bootstrap ambiguity retires predecessor and reuses one cl
 test('process-boundary ambiguity stays fail-closed when replacement roots are not unique', async () => {
   const { runtime, actions, typed } = await makeRuntime({
     tabs: [
-      { tab_id: 'replacement-root-a', url: 'https://chatgpt.com/', selected: false },
-      { tab_id: 'replacement-root-b', url: 'https://chatgpt.com/', selected: false },
+      { tab_id: 'replacement-root-a', url: 'https://chat.z.ai/', selected: false },
+      { tab_id: 'replacement-root-b', url: 'https://chat.z.ai/', selected: false },
     ],
   });
   const snap = await runtime.start();
@@ -137,7 +137,7 @@ test('multi-hop process restarts retain a durable wake-local fence and recover w
   seed.predecessor_fenced_at = '2026-09-16T00:10:00.000Z';
   const { runtime, actions, statePath, typed } = await makeRuntime({
     seed,
-    tabs: [{ tab_id: 'replacement-root-multihop', url: 'https://chatgpt.com/', selected: false }],
+    tabs: [{ tab_id: 'replacement-root-multihop', url: 'https://chat.z.ai/', selected: false }],
   });
   const snap = await runtime.start();
   assert.equal(snap.keepalive.state, 'ACTIVE');
@@ -161,7 +161,7 @@ test('missing pending process identity stays fail-closed under the multihop fenc
   seed.pending_wake.process_incarnation_id = null;
   const { runtime, actions, typed } = await makeRuntime({
     seed,
-    tabs: [{ tab_id: 'identity-missing-root', url: 'https://chatgpt.com/', selected: false }],
+    tabs: [{ tab_id: 'identity-missing-root', url: 'https://chat.z.ai/', selected: false }],
   });
   const snap = await runtime.start();
   assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');

@@ -17,7 +17,7 @@ function harness() {
 test('simultaneous fleet loss is coalesced into one supervisor wake', async () => {
   const h = harness();
   await h.keepalive.init();
-  await h.keepalive.bindConversation({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'supervisor' });
+  await h.keepalive.bindConversation({ url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', tab_id: 'supervisor' });
 
   const lost = Array.from({ length: 6 }, (_, i) => ({
     agent_id: `agent_${i + 1}`,

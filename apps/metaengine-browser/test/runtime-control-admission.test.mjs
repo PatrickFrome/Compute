@@ -65,7 +65,7 @@ test('client and server normalize the same authoritative runtime-control row', (
 test('closed admission parks queued wakes without send or replay after reopen', async () => {
   const keepalive = memoryKeepalive();
   await keepalive.init();
-  await keepalive.bindConversation({ url: 'https://chatgpt.com/c/11111111-1111-4111-8111-111111111111', tab_id: 'tab_supervisor' });
+  await keepalive.bindConversation({ url: 'https://chat.z.ai/c/11111111-1111-4111-8111-111111111111', tab_id: 'tab_supervisor' });
   await keepalive.enqueueWake('RESEARCH_ACCELERATOR_DUE', { key: 'research' });
   await keepalive.enqueueWake('WORKER_LOST', { agent_id: 'agent_lost' });
 
@@ -93,7 +93,7 @@ test('closed admission parks queued wakes without send or replay after reopen', 
 test('closed admission preserves a genuinely ambiguous pending wake fail-closed', async () => {
   const keepalive = memoryKeepalive();
   await keepalive.init();
-  await keepalive.bindConversation({ url: 'https://chatgpt.com/c/22222222-2222-4222-8222-222222222222', tab_id: 'tab_supervisor' });
+  await keepalive.bindConversation({ url: 'https://chat.z.ai/c/22222222-2222-4222-8222-222222222222', tab_id: 'tab_supervisor' });
   await keepalive.enqueueWake('WORKER_RESULT_READY', { agent_id: 'agent_ready' });
   const prepared = await keepalive.prepareNextWake();
   await keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'SEND_WITHOUT_POSITIVE_READBACK');
@@ -110,7 +110,7 @@ test('closed admission preserves a genuinely ambiguous pending wake fail-closed'
 test('closed admission retires unstarted rollover intent and positive ambiguous readback remains parked', async () => {
   const queued = memoryKeepalive();
   await queued.init();
-  await queued.bindConversation({ url: 'https://chatgpt.com/c/33333333-3333-4333-8333-333333333333', tab_id: 'tab_supervisor' });
+  await queued.bindConversation({ url: 'https://chat.z.ai/c/33333333-3333-4333-8333-333333333333', tab_id: 'tab_supervisor' });
   await queued.requestRollover('CONVERSATION_LIMIT');
   await queued.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
   const parked = await queued.applyAdmissionClosed(normalizeDevosRuntimeControl(rawControl()));
@@ -123,13 +123,13 @@ test('closed admission retires unstarted rollover intent and positive ambiguous 
 
   const ambiguous = memoryKeepalive();
   await ambiguous.init();
-  await ambiguous.bindConversation({ url: 'https://chatgpt.com/c/44444444-4444-4444-8444-444444444444', tab_id: 'tab_old' });
+  await ambiguous.bindConversation({ url: 'https://chat.z.ai/c/44444444-4444-4444-8444-444444444444', tab_id: 'tab_old' });
   await ambiguous.requestRollover('CONVERSATION_LIMIT');
   await ambiguous.approveRollover('TRUSTED_CONTINUOUS_SERVICE');
   await ambiguous.beginRolloverAttempt();
   await ambiguous.markRolloverAmbiguous('SEND_EFFECT_UNKNOWN');
   await ambiguous.applyAdmissionClosed(normalizeDevosRuntimeControl(rawControl()));
-  const rebound = await ambiguous.bindRollover({ url: 'https://chatgpt.com/c/55555555-5555-4555-8555-555555555555', tab_id: 'tab_new' });
+  const rebound = await ambiguous.bindRollover({ url: 'https://chat.z.ai/c/55555555-5555-4555-8555-555555555555', tab_id: 'tab_new' });
   assert.equal(rebound.state, 'PARKED');
   assert.equal(rebound.admission_state, 'CLOSED');
 });

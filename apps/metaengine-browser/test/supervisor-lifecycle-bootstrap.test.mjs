@@ -7,9 +7,9 @@ import test from 'node:test';
 import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.mjs';
 
 const WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
-const ROOT_URL = 'https://chatgpt.com/';
-const BOOTSTRAP_URL = 'https://chatgpt.com/c/11111111-2222-4333-8444-555555555555';
-const FLEET_URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const ROOT_URL = 'https://chat.z.ai/';
+const BOOTSTRAP_URL = 'https://chat.z.ai/c/11111111-2222-4333-8444-555555555555';
+const FLEET_URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 
 const runtimeOpen = Object.freeze({
   schema: 'metaengine.devos.environment-state.v1',
@@ -26,7 +26,7 @@ function idleFrame(url, text = '') {
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Send' },
     ],
   };
@@ -38,7 +38,7 @@ function generatingFrame(url, text = '') {
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Stop generating' },
     ],
   };

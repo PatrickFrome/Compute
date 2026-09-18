@@ -12,7 +12,7 @@ test('heartbeat perception projection is bounded while retaining exact target an
     value_sha256: 'a'.repeat(64),
   }));
   const source = {
-    tabs: [{ tab_id: 'tab_a', url: 'https://chatgpt.com/c/a' }],
+    tabs: [{ tab_id: 'tab_a', url: 'https://chat.z.ai/c/a' }],
     perception: {
       schema: 'metaengine.native-browser.perception.v1',
       tab_id: 'tab_a',

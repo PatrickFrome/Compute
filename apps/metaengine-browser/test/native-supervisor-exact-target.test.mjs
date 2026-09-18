@@ -22,8 +22,8 @@ function webContents(id) {
 
 function harness() {
   const registryRows = new Map([
-    [TAB_A, { tab_id: TAB_A, url: 'https://chatgpt.com/c/a' }],
-    [TAB_B, { tab_id: TAB_B, url: 'https://chatgpt.com/c/b' }],
+    [TAB_A, { tab_id: TAB_A, url: 'https://chat.z.ai/c/a' }],
+    [TAB_B, { tab_id: TAB_B, url: 'https://chat.z.ai/c/b' }],
   ]);
   const registry = { get: (tabId) => registryRows.get(String(tabId).toLowerCase()) || null };
   const views = new ExactBrowserTabViewMap();

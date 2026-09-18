@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSupervisorSendBoundaryExecutor } from '../src/supervisor-lifecycle-runtime.mjs';
 
-const URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 function nativeFrame({ tabId = 'tab1', processId = 'process-1', targetId = 'webcontents:11', width = 900, height = 600 } = {}) {
   return {
@@ -15,7 +15,7 @@ function nativeFrame({ tabId = 'tab1', processId = 'process-1', targetId = 'webc
     text_excerpt: '',
     viewport: { width, height, page_x: 0, page_y: 0, scale: 1 },
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Send' },
     ],
     authority_effect: false,

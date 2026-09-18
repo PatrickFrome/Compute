@@ -18,7 +18,7 @@ function row(targetVersion = '0.6.3-dev.2.1') {
       selected_tab_id: 'tab_12345678',
       tabs: [{
         tab_id: 'tab_12345678',
-        url: 'https://chatgpt.com/c/test',
+        url: 'https://chat.z.ai/c/test',
         kind: 'CHATGPT',
         generation_state: 'GENERATING',
       }],

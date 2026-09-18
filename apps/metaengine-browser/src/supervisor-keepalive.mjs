@@ -8,7 +8,7 @@ export const KEEPALIVE_STATES = Object.freeze([
   'PAUSED','RECOVERING','PARKED',
 ]);
 
-const CHATGPT_CONVERSATION_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+(?:[/?#].*)?$/i;
+const AGENT_PLATFORM_CONVERSATION_RE = /^https:\/\/chat\.z\.ai\/c\/[a-z0-9-]+(?:[/?#].*)?$/i;
 const WAKE_REASONS = new Set([
   'CONTINUE_DEVELOPMENT',
   'WORKER_RESULT_READY','WORKER_FAILED','WORKER_LOST','CI_TERMINAL',
@@ -25,7 +25,7 @@ const iso = (clock) => new Date(clock()).toISOString();
 
 function normalizeUrl(value) {
   const url = String(value || '').trim();
-  if (!CHATGPT_CONVERSATION_RE.test(url)) throw new Error('keepalive_supervisor_conversation_invalid');
+  if (!AGENT_PLATFORM_CONVERSATION_RE.test(url)) throw new Error('keepalive_supervisor_conversation_invalid');
   return url;
 }
 

@@ -26,8 +26,8 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 //   5. a successful bootstrap clears the stale supervisor_bootstrap* error.
 
 const AUTH_URL = 'https://chatgpt.com/auth/login';
-const ROOT_URL = 'https://chatgpt.com/';
-const CONV_URL = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const ROOT_URL = 'https://chat.z.ai/';
+const CONV_URL = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
 function authFrame() {
   return { url: AUTH_URL, title: 'Начать работу | ChatGPT', text_excerpt: 'Log in', semantic_targets: [] };
@@ -46,7 +46,7 @@ function convFrame() {
     title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Stop generating' },
     ],
   };
@@ -257,13 +257,13 @@ test('bound-conversation path reuses an auth-redirect tab instead of creating on
 
   await runtime.start();
   let snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'NOT_CHATGPT_CONVERSATION', 'the auth tab becomes the observation target');
+  assert.equal(snap.supervisor_generation, 'NOT_AGENT_PLATFORM_CONVERSATION', 'the auth tab becomes the observation target');
   assert.equal(snap.keepalive.conversation_url, CONV_URL, 'the durable conversation binding is preserved');
   assert.equal(reg.tabs.length, 1);
 
   await runtime.cycle({ force: true });
   snap = runtime.snapshot();
-  assert.equal(snap.supervisor_generation, 'NOT_CHATGPT_CONVERSATION');
+  assert.equal(snap.supervisor_generation, 'NOT_AGENT_PLATFORM_CONVERSATION');
   assert.equal(reg.tabs.length, 1, 'repeated ticks must not add tabs');
 
   await fs.rm(dir, { recursive: true, force: true });

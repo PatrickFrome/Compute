@@ -7,11 +7,11 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime.
 
 function limitFrame() {
   return {
-    url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
     title: 'ChatGPT',
     text_excerpt: 'Maximum conversation length reached. Start a new chat.',
     semantic_targets: [
-      { role: 'textbox', name: 'Message ChatGPT' },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
       { role: 'button', name: 'Send' },
     ],
   };
@@ -30,7 +30,7 @@ test('conversation limit never auto-creates a replacement supervisor before expl
     getState: async () => ({
       tabs: [{
         tab_id: 'current-supervisor',
-        url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
         selected: true,
       }],
       fleet: { agents: [] },
@@ -48,7 +48,7 @@ test('conversation limit never auto-creates a replacement supervisor before expl
 
   const snapshot = runtime.snapshot();
   assert.equal(snapshot.keepalive?.state, 'ROLLOVER_DEFERRED');
-  assert.equal(snapshot.keepalive?.conversation_url, 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+  assert.equal(snapshot.keepalive?.conversation_url, 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
   assert.equal(actions.some((row) => row.action === 'NEW_TAB'), false);
   assert.equal(snapshot.actuation_enabled, true);
 

@@ -7,8 +7,8 @@ import { EventEmitter } from 'node:events';
 import { SupervisorKeepalive } from '../src/supervisor-keepalive.mjs';
 import { HostResilienceRuntime } from '../src/host-resilience-runtime.mjs';
 
-const CONVERSATION = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const NEXT_CONVERSATION = 'https://chatgpt.com/c/ffffffff-1111-2222-3333-444444444444';
+const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const NEXT_CONVERSATION = 'https://chat.z.ai/c/ffffffff-1111-2222-3333-444444444444';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, '../src');
 
