@@ -225,6 +225,7 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-post-adoption-causal-measurement.mjs',
     'apps/metaengine-browser/src/rsi-post-adoption-experience-admission.mjs',
     'apps/metaengine-browser/src/rsi-experience-context-utility-feedback.mjs',
+    'apps/metaengine-browser/src/rsi-experience-context-ablation-attribution.mjs',
     'apps/metaengine-browser/src/self-update-handoff.mjs',
     'apps/metaengine-browser/src/self-update-runtime-v8.mjs',
     'apps/metaengine-browser/src/self-update-transaction-journal.mjs',
