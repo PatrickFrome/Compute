@@ -38,6 +38,32 @@ const EXIT_REASONS = new Set([
 
 const CLEANUP_STATES = new Set(['VERIFIED', 'PARTIAL_UNVERIFIED', 'NOT_APPLICABLE']);
 
+export const DEVOS_PTY_SESSION_STATES = Object.freeze([
+  'ALLOCATED',
+  'SPAWNING',
+  'RUNNING',
+  'SPAWN_FAILED_NO_EFFECT',
+  'SPAWN_AMBIGUOUS_NO_RETRY',
+  'BACKPRESSURED',
+  'EXIT_SEEN',
+  'ORPHANED_WORKSPACE',
+  'HOST_LOST',
+  'EXITED',
+]);
+
+const PTY_SESSION_TRANSITIONS = Object.freeze({
+  ALLOCATED: new Set(['SPAWNING']),
+  SPAWNING: new Set(['RUNNING', 'SPAWN_FAILED_NO_EFFECT', 'SPAWN_AMBIGUOUS_NO_RETRY']),
+  RUNNING: new Set(['BACKPRESSURED', 'EXIT_SEEN', 'ORPHANED_WORKSPACE', 'HOST_LOST']),
+  BACKPRESSURED: new Set(['RUNNING', 'EXIT_SEEN', 'ORPHANED_WORKSPACE', 'HOST_LOST']),
+  EXIT_SEEN: new Set(['EXITED']),
+  ORPHANED_WORKSPACE: new Set(['EXITED']),
+  SPAWN_FAILED_NO_EFFECT: new Set([]),
+  SPAWN_AMBIGUOUS_NO_RETRY: new Set([]),
+  HOST_LOST: new Set([]),
+  EXITED: new Set([]),
+});
+
 function exactObject(value, code) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(code);
   return value;
@@ -148,6 +174,32 @@ export function sameDevOSPtySessionRef(a, b) {
 export function assertCurrentDevOSPtySessionRef(expected, actual) {
   if (!sameDevOSPtySessionRef(expected, actual)) throw new Error('devos_pty_session_fence_stale');
   return validateDevOSPtySessionRef(actual);
+}
+
+export function classifyDevOSPtySessionTransition({ from_state, to_state } = {}) {
+  const from = String(from_state || '').toUpperCase();
+  const to = String(to_state || '').toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(PTY_SESSION_TRANSITIONS, from)) throw new Error('devos_pty_session_state_invalid');
+  if (!Object.prototype.hasOwnProperty.call(PTY_SESSION_TRANSITIONS, to)) throw new Error('devos_pty_session_state_invalid');
+  const allowed = PTY_SESSION_TRANSITIONS[from].has(to);
+  if (!allowed) {
+    return zeroAuthority({
+      state: 'TRANSITION_REJECTED_NO_EFFECT',
+      accepted: false,
+      from_state: from,
+      to_state: to,
+      spawn_retry_allowed: false,
+      process_reattach_allowed: false,
+    });
+  }
+  return zeroAuthority({
+    state: 'TRANSITION_ACCEPTED',
+    accepted: true,
+    from_state: from,
+    to_state: to,
+    spawn_retry_allowed: false,
+    process_reattach_allowed: false,
+  });
 }
 
 export function classifyDevOSPtyTransportFence({
@@ -439,6 +491,8 @@ export const DEVOS_PTY_PROTOCOL_CONTRACT = Object.freeze({
   pid_is_identity: false,
   input_is_non_idempotent_effect: true,
   input_blind_replay_allowed: false,
+  spawn_ambiguous_auto_retry_allowed: false,
+  host_lost_process_reattach_allowed: false,
   resize_is_latest_state_control: true,
   arbitrary_executable_allowed: false,
   arbitrary_argv_allowed: false,
