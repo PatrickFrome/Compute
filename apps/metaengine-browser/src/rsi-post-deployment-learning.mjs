@@ -96,6 +96,7 @@ export function createRsiPostDeploymentLearningReceipt({
     throw new Error('rsi_post_deploy_external_assigner_required');
   }
   const mechanismTags=[...new Set(['EXTERNAL_AUTHORITY_CONVERGED','PHYSICAL_SUCCESSOR_QUALIFIED','POST_DEPLOYMENT',...tokens(assessment.mechanism_tags||[],'mechanism_tag')])].sort();
+  if(mechanismTags.length>MAX_TAGS)throw new Error('rsi_post_deploy_mechanism_tag_budget_exceeded');
   const evidenceRefs=[...new Set([
     safeId(convergence.authority_journal_ref,'authority_journal_ref'),
     ...refs(assessment.evidence_refs),
@@ -168,6 +169,7 @@ export function verifyRsiPostDeploymentLearningReceipt(row){
   )throw new Error('rsi_post_deploy_receipt_policy_invalid');
   sha(row.source_sha,'source');candidateId(row.candidate_id);sha(row.candidate_sha,'candidate');sha(row.predecessor_sha,'predecessor');
   safeId(row.assessment_id,'assessment_id');iso(row.observed_at,'observed_at');safeId(row.environment_fingerprint,'environment_fingerprint');
+  safeId(row.release_version,'release_version');safeId(row.release_tag,'release_tag');
   token(row.challenge_family,'challenge_family');unit(row.confidence,'confidence');positive(row.attempt_index,'attempt_index');
   tokens(row.mechanism_tags,'mechanism_tag');digests(row.lesson_digests,'lesson');refs(row.evidence_refs);
   for(const [value,label] of [
@@ -262,9 +264,25 @@ export function verifyRsiPostDeploymentExperienceAdmission(row){
   )throw new Error('rsi_post_deploy_admission_policy_invalid');
   const receipt=verifyRsiPostDeploymentLearningReceipt(row.learning_receipt);
   const experienceCase=verifyRsiExperienceCase(row.experience_case);
+  const expectedTaskId=`release:${receipt.candidate_sha.slice(0,24)}`;
+  createRsiExperienceGraphSnapshot({
+    graph_id:`rsi.runtime.experience.${receipt.source_sha.slice(0,16)}`,
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:[row.task_anchor],
+    cases:[experienceCase],
+    similarity_edges:[],
+    correction_edges:[],
+    utility_receipts:[],
+  });
   if(
     receipt.source_sha!==row.source_sha
     || receipt.release_authority_convergence_digest!==row.release_authority_convergence_digest
+    || row.task_anchor?.task_id!==expectedTaskId
+    || row.task_anchor?.task_signature_digest!==receipt.release_authority_convergence_digest
+    || row.task_anchor?.challenge_family!==receipt.challenge_family
+    || experienceCase.task_id!==expectedTaskId
+    || experienceCase.task_signature_digest!==receipt.release_authority_convergence_digest
     || experienceCase.candidate_id!==receipt.candidate_id
     || experienceCase.candidate_sha!==receipt.candidate_sha
     || experienceCase.evidence_digest!==receipt.release_authority_convergence_digest
