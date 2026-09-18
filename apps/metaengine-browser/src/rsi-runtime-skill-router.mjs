@@ -224,6 +224,9 @@ export function createRsiSkillRoutingPlan({
   if(!Array.isArray(coalition_masked_skill_digests)||coalition_masked_skill_digests.length>checkedLibrary.entries.length)throw new Error('rsi_skill_router_coalition_mask_invalid');
   const coalitionMask=[...new Set(coalition_masked_skill_digests.map(value=>exactDigest(value,'coalition_mask_skill')))].sort();
   if(coalitionMask.length!==coalition_masked_skill_digests.length)throw new Error('rsi_skill_router_coalition_mask_duplicate');
+  for(const skillDigest of coalitionMask){
+    if(!checkedLibrary.entries.some(entry=>entry.skill_digest===skillDigest))throw new Error('rsi_skill_router_coalition_mask_skill_not_in_library');
+  }
   const coalitionMaskSet=new Set(coalitionMask);
   const maxSelected=positiveInt(max_selected,'max_selected',MAX_SELECTED);
   const explore=nonNegativeInt(exploration_slots,'exploration_slots',maxSelected);
