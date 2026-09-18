@@ -562,6 +562,60 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
     assert.equal(activation.selected_count, 1);
     assert.equal(activation.selected[0].skill_digest, skill.skill_digest);
     assert.equal(activation.activation_view_is_execution_authority, false);
+
+    const curation = await runtime.requestSkillCuration({
+      request_id: 'curation.runtime.skill.1',
+      parent_skill_digest: skill.skill_digest,
+      reason: 'RELIABILITY_GAP',
+      trigger_evidence_digests: [episode.episode_digest, credited.credit_receipt.receipt_digest],
+      training_context_digest: d('1'),
+      validation_holdout_digest: d('2'),
+      meta_holdout_digest: d('3'),
+      optimizer_model_family: 'GPT_5_6_SOL',
+      allowed_edit_ops: ['ADD','DELETE','REPLACE'],
+      edit_budget: 3,
+      external_curator: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(curation.queued.state, 'QUEUED');
+    assert.equal(curation.request.direct_library_replacement_allowed, false);
+
+    const successorSkill = createRsiSkillCapsule({
+      skill_id: skill.skill_id,
+      version: 2,
+      parent_skill_digest: skill.skill_digest,
+      source_candidate_sha: 'd'.repeat(40),
+      role: skill.role,
+      input_schema_digest: skill.input_schema_digest,
+      output_schema_digest: skill.output_schema_digest,
+      implementation_digest: d('9'),
+      components: [{ component_id: 'skill.runtime.integrated.component.v2', artifact_digest: d('a'), kind: 'TYPED_TRANSFORM' }],
+      capabilities: skill.capabilities,
+      max_context_tokens: skill.max_context_tokens,
+      max_output_tokens: skill.max_output_tokens,
+      max_invocations: skill.max_invocations,
+      external_builder: true,
+      authored_by_candidate: false,
+    });
+    const revision = await runtime.evaluateSkillRevision({
+      request_id: curation.request.request_id,
+      successor_skill: successorSkill,
+      baseline_validation_score: 0.60,
+      candidate_validation_score: 0.72,
+      baseline_meta_score: 0.55,
+      candidate_meta_score: 0.56,
+      hard_invariants_pass: true,
+      evaluator_digest: d('b'),
+      evaluation_digest: d('c'),
+      evidence_refs: ['evidence:runtime:curation:1'],
+      external_evaluator: true,
+      authored_by_candidate: false,
+    });
+    assert.equal(revision.evaluation.state, 'ELIGIBLE_FOR_EXISTING_RELIABILITY_GATE');
+    assert.equal(revision.evaluation.accepted_for_existing_reliability_gate, true);
+    assert.equal(revision.evaluation.direct_library_replacement_allowed, false);
+    assert.equal(runtime.snapshot().runtime_skill_curation.accepted_count, 1);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 1);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
   } finally {
