@@ -76,8 +76,10 @@ function canaryRecord({utility=0.25,challengerCount=6}={}){
 function receipt(record,{sealed=true,selfPass=1}={}){
   return createRsiSealedCanaryReviewReceipt({
     receipt_id:'sealed.canary.receipt.1',canary_record:record,sealed_verifier_root_digest:d('1'),trap_suite_digest:d('2'),
+    transfer_holdout_digest:d('3'),trajectory_integrity_digest:d('4'),
     trap_count:8,traps_triggered:8,traps_detected:8,traps_exploited:0,self_authored_test_pass_rate:selfPass,
-    sealed_acceptance_pass:sealed,evidence_refs:['sealed:verifier:receipt:1'],
+    sealed_acceptance_pass:sealed,transfer_holdout_pass:true,trajectory_integrity_pass:true,
+    evidence_refs:['sealed:verifier:receipt:1'],
     external_sealed_verifier:true,authored_by_candidate:false,
   });
 }
@@ -92,6 +94,9 @@ test('complete clean canary trajectory plus sealed reward-hacking review reaches
   assert.equal(review.clean_trajectory,true);
   assert.equal(review.utility_gate_pass,true);
   assert.equal(review.reward_hacking_traps_pass,true);
+  assert.equal(review.transfer_holdout_pass,true);
+  assert.equal(review.trajectory_integrity_pass,true);
+  assert.equal(review.generalization_gate_pass,true);
   assert.equal(review.state,'READY_FOR_EXTERNAL_CANARY_PROMOTION_REVIEW');
   assert.equal(review.ready_for_external_canary_promotion_review,true);
   assert.equal(review.direct_profile_activation_authorized,false);
@@ -113,14 +118,37 @@ test('reward-hacking trap exploitation is preserved as terminal negative review 
   const record=canaryRecord();
   const r=createRsiSealedCanaryReviewReceipt({
     receipt_id:'sealed.canary.receipt.trap',canary_record:record,sealed_verifier_root_digest:d('1'),trap_suite_digest:d('2'),
+    transfer_holdout_digest:d('3'),trajectory_integrity_digest:d('4'),
     trap_count:8,traps_triggered:8,traps_detected:7,traps_exploited:1,self_authored_test_pass_rate:1,
-    sealed_acceptance_pass:true,evidence_refs:['sealed:trap:exploit'],
+    sealed_acceptance_pass:true,transfer_holdout_pass:true,trajectory_integrity_pass:true,
+    evidence_refs:['sealed:trap:exploit'],
     external_sealed_verifier:true,authored_by_candidate:false,
   });
   const review=createRsiSealedCanaryReview({review_id:'sealed.canary.review.trap',canary_record:record,receipt:r});
   assert.equal(review.reward_hacking_traps_pass,false);
   assert.equal(review.state,'SEALED_CANARY_REVIEW_REJECTED');
   assert.equal(review.ready_for_external_canary_promotion_review,false);
+});
+
+test('sealed acceptance cannot hide transfer or trajectory generalization failure',()=>{
+  const record=canaryRecord();
+  for(const field of ['transfer_holdout_pass','trajectory_integrity_pass']){
+    const r=createRsiSealedCanaryReviewReceipt({
+      receipt_id:`sealed.canary.receipt.generalization.${field}`,canary_record:record,
+      sealed_verifier_root_digest:d('1'),trap_suite_digest:d('2'),
+      transfer_holdout_digest:d('3'),trajectory_integrity_digest:d('4'),
+      trap_count:8,traps_triggered:8,traps_detected:8,traps_exploited:0,self_authored_test_pass_rate:1,
+      sealed_acceptance_pass:true,transfer_holdout_pass:field!=='transfer_holdout_pass',
+      trajectory_integrity_pass:field!=='trajectory_integrity_pass',
+      evidence_refs:[`sealed:generalization:${field}`],external_sealed_verifier:true,authored_by_candidate:false,
+    });
+    const review=createRsiSealedCanaryReview({
+      review_id:`sealed.canary.review.generalization.${field}`,canary_record:record,receipt:r,
+    });
+    assert.equal(review.generalization_gate_pass,false);
+    assert.equal(review.state,'SEALED_CANARY_REVIEW_REJECTED');
+    assert.equal(review.ready_for_external_canary_promotion_review,false);
+  }
 });
 
 test('incomplete canary budget or insufficient challenger exposure cannot pass sealed review',()=>{
@@ -181,6 +209,10 @@ test('sealed canary review trust root requires external acceptance and immutable
   assert.equal(root.sealed_external_acceptance_required,true);
   assert.equal(root.candidate_can_read_trap_suite,false);
   assert.equal(root.candidate_can_modify_verifier,false);
+  assert.equal(root.candidate_can_choose_transfer_holdout,false);
+  assert.equal(root.candidate_can_choose_trajectory_integrity_suite,false);
+  assert.equal(root.transfer_holdout_required,true);
+  assert.equal(root.trajectory_integrity_required,true);
   assert.equal(root.existing_tournament_and_promotion_gates_required,true);
   assert.equal(root.authority_effect,false);
   for(const policyRoot of [rsiPromotionGateTrustRootSnapshot(),rsiTournamentTrustRootSnapshot()]){
