@@ -264,14 +264,16 @@ export function verifyRsiPostDeploymentCorrectionAdmission(row){
 export function applyRsiPostDeploymentCorrectionAdmission({previous_snapshot,admission}={}){
   const checked=verifyRsiPostDeploymentCorrectionAdmission(admission);
   const previous=verifyRsiExperienceGraphSnapshot(previous_snapshot);
-  const originalCase=previous.cases.find(row=>row.case_digest===checked.post_deployment_learning_admission_digest)||null;
-  // The Phase17 case digest is not the admission digest; use the persisted
-  // utility receipts as the exact proof that both temporal observations belong
-  // to an existing case in this graph.
+  // The immutable Phase18 utility receipts are the graph-local proof that both
+  // temporal observations belong to the original deployed case. Never rewrite
+  // that case; append a separate derived failure -> recovery trace.
   const harmfulReceipt=previous.utility_receipts.find(row=>row.receipt_digest===checked.harmful_utility_receipt_digest)||null;
   const helpfulReceipt=previous.utility_receipts.find(row=>row.receipt_digest===checked.helpful_utility_receipt_digest)||null;
   if(!harmfulReceipt||!helpfulReceipt)throw new Error('rsi_post_deploy_correction_utility_receipts_not_in_graph');
   if(harmfulReceipt.case_id!==helpfulReceipt.case_id)throw new Error('rsi_post_deploy_correction_utility_case_mismatch');
+  if(harmfulReceipt.outcome!=='HARMFUL'||helpfulReceipt.outcome!=='HELPFUL')throw new Error('rsi_post_deploy_correction_utility_outcomes_invalid');
+  const originalCase=previous.cases.find(row=>row.case_id===harmfulReceipt.case_id)||null;
+  if(!originalCase||originalCase.candidate_sha!==checked.candidate_sha)throw new Error('rsi_post_deploy_correction_original_case_binding_mismatch');
   if(previous.cases.some(row=>row.case_id===checked.failure_case.case_id||row.case_id===checked.success_case.case_id)){
     throw new Error('rsi_post_deploy_correction_trace_duplicate');
   }
