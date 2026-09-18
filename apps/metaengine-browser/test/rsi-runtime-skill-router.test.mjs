@@ -247,7 +247,7 @@ test('routing is limited to governance-active skills and cannot reactivate quara
   assert.ok(plan.selected.every(row=>activeDigests.includes(row.skill_digest)));
   assert.ok(plan.selected_count<=1);
   assert.equal(plan.only_governance_active_skills,true);
-  assert.notEqual(plan.selected[0]?.skill_digest,good.capsule.skill_digest === activeDigests[0] ? null : '__none__');
+  assert.equal(plan.selected_count, activeDigests.length > 0 ? 1 : 0);
 });
 
 test('skill-router trust root freezes thresholds, negative-transfer veto, and zero authority',()=>{
