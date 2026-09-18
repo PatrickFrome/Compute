@@ -141,6 +141,7 @@ function validateAdmissionAttemptRow(row){
     throw new Error('rsi_runtime_skill_admission_certificate_not_eligible');
   }
   if(certificate.admission_certificate_digest!==row.admission_certificate_digest)throw new Error('rsi_runtime_skill_admission_certificate_digest_mismatch');
+  if(exactSha(row.source_sha,'admission_source')!==certificate.source_sha)throw new Error('rsi_runtime_skill_admission_source_sha_mismatch');
   const exact=assertExactSingleAppend(row.predecessor_library,row.successor_library,certificate);
   if(exact.before.library_digest!==row.predecessor_library_digest||exact.after.library_digest!==row.successor_library_digest){
     throw new Error('rsi_runtime_skill_admission_library_digest_mismatch');
@@ -154,6 +155,9 @@ function validateAdmissionAttemptRow(row){
   exactDigest(row.effect_executor_identity_digest,'admission_effect_executor');
   const currentState=validateAdmissionTransitions(row.transitions);
   if(currentState!==row.current_state)throw new Error('rsi_runtime_skill_admission_current_state_mismatch');
+  if(!Number.isInteger(row.effect_attempt_count)||row.effect_attempt_count<0||row.effect_attempt_count>1)throw new Error('rsi_runtime_skill_admission_effect_attempt_count_invalid');
+  const hasAttempted=row.transitions.some(transition=>transition.state==='ATTEMPTED');
+  if((hasAttempted&&row.effect_attempt_count!==1)||(!hasAttempted&&row.effect_attempt_count!==0))throw new Error('rsi_runtime_skill_admission_effect_attempt_count_transition_mismatch');
   const core=structuredClone(row);delete core.attempt_digest;
   if(digest(core)!==exactDigest(row.attempt_digest,'admission_attempt'))throw new Error('rsi_runtime_skill_admission_attempt_digest_mismatch');
   return Object.freeze({...row,predecessor_library:exact.before,successor_library:exact.after});
@@ -290,6 +294,7 @@ export class RsiRuntimeSkillLifecycle{
     if(certificate.state!=='ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF'){
       throw new Error('rsi_runtime_skill_admission_certificate_not_eligible');
     }
+    if(certificate.source_sha!==this.#sourceSha)throw new Error('rsi_runtime_skill_admission_source_sha_mismatch');
     if(certificate.append_handoff_one_attempt_only!==true||certificate.ambiguous_append_retry_allowed!==false
       ||certificate.append_effect_performed!==false||certificate.retrieval_exposure_change_authorized!==false
       ||certificate.skill_activation_authorized!==false||certificate.lifecycle_mutation_authorized!==false){
@@ -588,7 +593,8 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     verified_library_required:true,library_updates_append_only:true,exact_library_digest_cas_supported:true,
     phase34_anytime_admission_certificate_required:true,admission_attempts_durable_before_effect:true,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
-    ambiguous_attempt_readback_only_reconciliation:true,storage_append_does_not_reconcile_pending_evidence:true,
+    ambiguous_attempt_readback_only_reconciliation:true,admission_attempt_state_is_append_only:true,
+    storage_append_does_not_reconcile_pending_evidence:true,
     storage_append_does_not_activate_skill:true,zero_evidence_skill_activation_forbidden:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
