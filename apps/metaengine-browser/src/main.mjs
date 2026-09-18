@@ -868,6 +868,7 @@ async function nativeSupervisorState() {
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     compute,
     perception,
+    rsi: rsiRuntime?.controlPlaneProjection?.({ limit: 4 }) || null,
   };
 }
 
