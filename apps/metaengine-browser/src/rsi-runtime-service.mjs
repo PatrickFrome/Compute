@@ -61,6 +61,7 @@ import { RsiBoundedCanaryAdmissionLedger, createRsiBoundedCanaryShadowEvidence, 
 import { RsiMetaProfileCanaryLedger, createRsiMetaProfileCanaryAdmission, createRsiMetaProfileCanaryOutcome, rsiMetaProfileCanaryTrustRootSnapshot } from './rsi-meta-profile-canary-admission.mjs';
 import { RsiSealedCanaryReviewLedger, createRsiSealedCanaryReviewReceipt, createRsiSealedCanaryReview, rsiSealedCanaryReviewTrustRootSnapshot } from './rsi-sealed-canary-review.mjs';
 import { createRsiVerifierEvolutionAdmission, rsiVerifierEvolutionAdmissionTrustRootSnapshot } from './rsi-verifier-evolution-admission.mjs';
+import { createRsiVerifierShadowQualification, rsiVerifierShadowQualificationTrustRootSnapshot } from './rsi-verifier-shadow-qualification.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -145,6 +146,7 @@ function trustRoots() {
     meta_profile_canary: rsiMetaProfileCanaryTrustRootSnapshot(),
     sealed_canary_review: rsiSealedCanaryReviewTrustRootSnapshot(),
     verifier_evolution_admission: rsiVerifierEvolutionAdmissionTrustRootSnapshot(),
+    verifier_shadow_qualification: rsiVerifierShadowQualificationTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1331,6 +1333,57 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return admission;
+  }
+
+  async recordVerifierShadowQualification({
+    qualification_id,
+    admission,
+    plan,
+    predecessor_receipt,
+    secondary_receipt,
+    observations,
+    external_qualification_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const qualification = createRsiVerifierShadowQualification({
+      qualification_id,
+      admission,
+      plan,
+      predecessor_receipt,
+      secondary_receipt,
+      observations,
+      external_qualification_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('VERIFIER_SHADOW_QUALIFICATION_RECORDED', {
+      qualification_id: qualification.qualification_id,
+      qualification_digest: qualification.qualification_digest,
+      admission_digest: qualification.admission_digest,
+      plan_digest: qualification.plan_digest,
+      predecessor_verifier_root_digest: qualification.predecessor_verifier_root_digest,
+      candidate_verifier_root_digest: qualification.candidate_verifier_root_digest,
+      secondary_verifier_root_digest: qualification.secondary_verifier_root_digest,
+      observation_count: qualification.observation_count,
+      observation_root_digest: qualification.observation_root_digest,
+      category_coverage: qualification.category_coverage,
+      blind_spot_repair_count: qualification.blind_spot_repair_count,
+      candidate_regression_count: qualification.candidate_regression_count,
+      candidate_reference_error_count: qualification.candidate_reference_error_count,
+      secondary_reference_error_count: qualification.secondary_reference_error_count,
+      audit_integrity_failure_count: qualification.audit_integrity_failure_count,
+      state: qualification.state,
+      qualified_for_verifier_shadow_continuation: qualification.qualified_for_verifier_shadow_continuation,
+      active_verifier_remains_predecessor: true,
+      verifier_root_replacement_authorized: false,
+      verifier_activation_authorized: false,
+      majority_vote_authoritative: false,
+      scalar_score_authoritative: false,
+      raw_case_content_stored: false,
+      second_scheduler_created: false,
+      authority_effect: false,
+    });
+    return qualification;
   }
 
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
