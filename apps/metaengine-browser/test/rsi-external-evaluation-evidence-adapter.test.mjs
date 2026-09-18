@@ -10,6 +10,7 @@ import {
 } from '../src/rsi-evaluator-mesh.mjs';
 import { RsiShadowArchive, RSI_HARD_INVARIANTS } from '../src/rsi-shadow-core.mjs';
 import { RSI_ISOLATED_CANDIDATE_HANDOFF_SCHEMA } from '../src/rsi-isolated-candidate-builder.mjs';
+import { RsiEpisodeOrchestrator } from '../src/rsi-episode-orchestrator.mjs';
 import {
   createRsiBenchmarkProvenancePolicy,
   createRsiBenchmarkTaskProvenance,
@@ -422,4 +423,72 @@ test('external evaluation trust root requires all six independent gates and rema
   assert.equal(root.direct_promotion_enabled,false);
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);
+});
+
+
+function orchestratorForBundle(bundle){
+  const root='0'.repeat(64);
+  const episodes=new RsiEpisodeOrchestrator({source_sha:PARENT,trust_root_set_digest:root});
+  episodes.apply(episodes.prepareOpen({
+    episode_id:bundle.episode_id,
+    observation_digest:'1'.repeat(64),
+    opportunity_id:'opp:external-evaluation',
+    hypothesis_digest:'2'.repeat(64),
+    mutation_surface:'BROWSER_RUNTIME',
+    search_context_digest:'3'.repeat(64),
+    max_candidates:2,
+  }));
+  episodes.apply(episodes.prepareCandidate({
+    episode_id:bundle.episode_id,
+    candidate_id:CANDIDATE_ID,
+    candidate_sha:CANDIDATE,
+    parent_sha:PARENT,
+    build_plan_digest:'4'.repeat(64),
+    mutation_surface:'BROWSER_RUNTIME',
+  }));
+  for(const row of bundle.evidence_classes){
+    episodes.apply(episodes.prepareEvidence({
+      episode_id:bundle.episode_id,
+      candidate_id:CANDIDATE_ID,
+      evidence_id:row.evidence_id,
+      evidence_kind:row.evidence_kind,
+      evidence_digest:row.evidence_digest,
+      result:row.result,
+      source_sha:PARENT,
+      trust_root_set_digest:root,
+      ambiguous_effect:false,
+    }));
+  }
+  return episodes;
+}
+
+test('all six PASS classes are exactly sufficient for NOMINATION_READY but still not promotion authority',()=>{
+  const bundle=createRsiExternalEvaluationBundle(passingInput());
+  const episodes=orchestratorForBundle(bundle);
+  const readiness=episodes.nominationReadiness({
+    episode_id:bundle.episode_id,
+    candidate_id:CANDIDATE_ID,
+  });
+  assert.equal(readiness.state,'NOMINATION_READY');
+  assert.equal(readiness.ready,true);
+  assert.deepEqual(readiness.missing_evidence_kinds,[]);
+  assert.deepEqual(readiness.blocking_evidence_kinds,[]);
+  assert.equal(readiness.requires_external_promotion_gate,true);
+  assert.equal(readiness.direct_promotion_enabled,false);
+  assert.equal(readiness.promotion_authority,false);
+});
+
+test('one failed independent class holds the candidate and cannot be traded against performance',()=>{
+  const input=passingInput();
+  input.integrity=integrityFixture({hidden_tests_read:true,visible_pass_rate:1,holdout_pass_rate:1});
+  const bundle=createRsiExternalEvaluationBundle(input);
+  const episodes=orchestratorForBundle(bundle);
+  const readiness=episodes.nominationReadiness({
+    episode_id:bundle.episode_id,
+    candidate_id:CANDIDATE_ID,
+  });
+  assert.equal(readiness.state,'HELD');
+  assert.equal(readiness.ready,false);
+  assert.ok(readiness.blocking_evidence_kinds.includes('EVALUATION_INTEGRITY'));
+  assert.equal(readiness.direct_promotion_enabled,false);
 });
