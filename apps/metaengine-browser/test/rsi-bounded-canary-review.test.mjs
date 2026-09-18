@@ -15,6 +15,8 @@ import {
   verifyRsiBoundedCanaryReview,
   verifyRsiShadowReviewEvidence,
 } from '../src/rsi-bounded-canary-review.mjs';
+import { rsiPromotionGateTrustRootSnapshot } from '../src/rsi-promotion-admission-gate.mjs';
+import { rsiTournamentTrustRootSnapshot } from '../src/rsi-shadow-tournament.mjs';
 
 const SOURCE='a'.repeat(40);
 
@@ -232,4 +234,21 @@ test('bounded review trust root preserves baseline and zero authority',()=>{
   assert.equal(root.production_activation_authorized,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.review_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+test('downstream tournament and promotion roots freeze the entire meta-profile review policy',()=>{
+  const required=[
+    'apps/metaengine-browser/src/rsi-runtime-meta-skill-archive.mjs',
+    'apps/metaengine-browser/src/rsi-meta-profile-qualification.mjs',
+    'apps/metaengine-browser/src/rsi-meta-profile-shadow-selection.mjs',
+    'apps/metaengine-browser/src/rsi-shadow-profile-binding.mjs',
+    'apps/metaengine-browser/src/rsi-shadow-comparison-binding.mjs',
+    'apps/metaengine-browser/src/rsi-shadow-divergence-monitor.mjs',
+    'apps/metaengine-browser/src/rsi-bounded-canary-review.mjs',
+    'apps/metaengine-browser/src/rsi-meta-profile-canary-admission.mjs',
+  ];
+  for(const root of [rsiPromotionGateTrustRootSnapshot(),rsiTournamentTrustRootSnapshot()]){
+    for(const path of required)assert.equal(root.immutable_component_paths.includes(path),true,path);
+  }
 });
