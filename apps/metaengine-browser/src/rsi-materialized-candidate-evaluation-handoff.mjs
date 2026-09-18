@@ -128,7 +128,16 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     workspace_generation:receipt.workspace_generation,
     lease_generation:receipt.lease_generation,
   });
-  const seed={artifact_receipt_digest:receipt.artifact_receipt_digest,evaluator_root_digest:evaluator,evaluator_generation_digest:generation,evaluation_epoch_digest:epoch,provenance_root_digest:provenanceRoot};
+  const seed={
+    artifact_receipt_digest:receipt.artifact_receipt_digest,
+    evaluator_root_digest:evaluator,
+    evaluator_generation_digest:generation,
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:generationHistoryAnchor,
+    evaluation_epoch_digest:epoch,
+    evaluation_epoch_seq:epochSeq,
+    provenance_root_digest:provenanceRoot,
+  };
   const request=createRsiArtifactEvaluationRoutingRequest({
     request_id:`phase29.eval.${crypto.createHash('sha256').update(JSON.stringify(stable(seed)),'utf8').digest('hex').slice(0,24)}`,
     source_sha:receipt.source_sha,
@@ -174,7 +183,10 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     provenance_root_digest:provenanceRoot,
     evaluator_root_digest:evaluator,
     evaluator_generation_digest:generation,
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:generationHistoryAnchor,
     evaluation_epoch_digest:epoch,
+    evaluation_epoch_seq:epochSeq,
     sealed_task_set_digest:taskSet,
     evaluation_harness_digest:harness,
     trial_worker_image_digest:trialWorker,
@@ -200,6 +212,9 @@ export function createRsiMaterializedCandidateEvaluationHandoff({
     existing_candidate_experiment_ledger_only:true,
     candidate_can_choose_evaluator:false,
     candidate_can_choose_evaluator_generation:false,
+    candidate_can_choose_evaluator_generation_seq:false,
+    candidate_can_choose_evaluation_epoch_seq:false,
+    candidate_can_choose_generation_history_anchor:false,
     candidate_can_choose_task_set:false,
     candidate_can_choose_harness:false,
     candidate_can_choose_trial_worker:false,
@@ -233,7 +248,8 @@ export function verifyRsiMaterializedCandidateEvaluationHandoff(row,args={}){
     ||row.build_and_evaluation_workers_distinct!==true
     ||row.existing_evaluation_budget_router_only!==true||row.existing_candidate_experiment_ledger_only!==true
     ||row.candidate_can_choose_evaluator!==false||row.candidate_can_choose_evaluator_generation!==false
-    ||row.candidate_can_choose_task_set!==false||row.candidate_can_choose_harness!==false
+    ||row.candidate_can_choose_evaluator_generation_seq!==false||row.candidate_can_choose_evaluation_epoch_seq!==false
+    ||row.candidate_can_choose_generation_history_anchor!==false||row.candidate_can_choose_task_set!==false||row.candidate_can_choose_harness!==false
     ||row.candidate_can_choose_trial_worker!==false||row.candidate_can_choose_resource_budget!==false
     ||row.candidate_can_choose_task_order!==false||row.candidate_can_choose_acceptance_policy!==false
     ||row.candidate_can_choose_stopping_policy!==false||row.candidate_can_choose_hidden_holdout!==false
@@ -718,6 +734,11 @@ export function rsiMaterializedCandidateEvaluationHandoffTrustRootSnapshot(){
     evaluator_generation_history_append_only:true,
     evaluator_generation_sequence_external:true,
     evaluation_epoch_sequence_external:true,
+    exact_request_sequence_binding_required:true,
+    exact_intent_sequence_binding_required:true,
+    candidate_can_choose_evaluator_generation_seq:false,
+    candidate_can_choose_evaluation_epoch_seq:false,
+    candidate_can_choose_generation_history_anchor:false,
     generation_transition_must_be_contiguous:true,
     evaluation_epoch_transition_must_be_contiguous:true,
     generation_history_anchor_external:true,
