@@ -2298,8 +2298,13 @@ test('Phase32 class-sensitive routing keeps counterevidence and diagnostics out 
 test('Phase32 refuses inherited source verdict and requires fresh consumer generation evidence',()=>{
   const fx=phase32Fixture('cross-generation',{
     consumerGeneration:labelDigest('phase32-fresh-consumer-generation'),
-    consumerGenerationSeq:fx=>fx,
+    consumerGenerationSeq:2,
   });
+  assert.notEqual(fx.handoff.consumer_evaluator_generation_digest,fx.handoff.source_evaluator_generation_digest);
+  assert.notEqual(fx.handoff.consumer_evaluator_generation_seq,fx.handoff.source_evaluator_generation_seq);
+  assert.equal(fx.handoff.cross_generation_revalidation_required,true);
+  assert.equal(fx.handoff.source_generation_verdict_inherited,false);
+  assert.equal(fx.handoff.consumer_can_inherit_source_success,false);
 });
 
 test('Phase32 recipe review requires current verified library state',()=>{
