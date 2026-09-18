@@ -19,6 +19,17 @@ const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const PRIORS=new Set(['VERIFIED_META_SKILL','VERIFIED_DIRECT_SKILL','LEGACY_IMPORTED']);
 const MAX_PENDING=4096;
 const MAX_EVIDENCE=16384;
+const MAX_ADMISSION_ATTEMPTS=256;
+const ADMISSION_ATTEMPT_SCHEMA='metaengine.rsi.runtime-skill-library-admission-attempt.v1';
+const ADMISSION_STATES=new Set(['PREPARED','ATTEMPTED','CONFIRMED','ABSENT_PROVEN','AMBIGUOUS']);
+const ADMISSION_UNRESOLVED=new Set(['PREPARED','ATTEMPTED','AMBIGUOUS']);
+const ADMISSION_TRANSITIONS=new Map([
+  ['PREPARED',new Set(['ATTEMPTED'])],
+  ['ATTEMPTED',new Set(['CONFIRMED','ABSENT_PROVEN','AMBIGUOUS'])],
+  ['AMBIGUOUS',new Set(['CONFIRMED','ABSENT_PROVEN'])],
+  ['CONFIRMED',new Set()],
+  ['ABSENT_PROVEN',new Set()],
+]);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -34,26 +45,66 @@ function assertEpisode(e){
   exactDigest(e.episode_digest,'episode');
   return e;
 }
-function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
-function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill}){
+function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false})}
+function admissionCore({attempt_id,expected_library_digest,successor_library_digest,proposed_skill_digest,phase33_certificate_digest,state,transitions}){
+  const core={
+    schema:ADMISSION_ATTEMPT_SCHEMA,version:1,
+    attempt_id:boundedId(attempt_id,'admission_attempt_id'),
+    expected_library_digest:exactDigest(expected_library_digest,'admission_expected_library'),
+    successor_library_digest:exactDigest(successor_library_digest,'admission_successor_library'),
+    proposed_skill_digest:exactDigest(proposed_skill_digest,'admission_proposed_skill'),
+    phase33_certificate_digest:exactDigest(phase33_certificate_digest,'admission_phase33_certificate'),
+    state:String(state||'').toUpperCase(),
+    transitions:transitions.map((row,index)=>{
+      const s=String(row?.state||'').toUpperCase();
+      const at=String(row?.at||'');
+      if(!ADMISSION_STATES.has(s)||!Number.isFinite(Date.parse(at))||row?.seq!==index+1)throw new Error('rsi_runtime_skill_admission_transition_invalid');
+      return Object.freeze({seq:index+1,state:s,at:new Date(Date.parse(at)).toISOString()});
+    }),
+    one_attempt_only:true,post_effect_readback_required:true,reconciliation_only_after_attempt:true,
+    retrieval_activation_separate:true,automatic_retry_allowed:false,authority_effect:false,
+  };
+  if(!ADMISSION_STATES.has(core.state)||core.transitions.length<1||core.transitions.at(-1).state!==core.state)throw new Error('rsi_runtime_skill_admission_state_invalid');
+  return core;
+}
+function createAdmissionAttempt(args,at){
+  const core=admissionCore({...args,state:'PREPARED',transitions:[{seq:1,state:'PREPARED',at}]});
+  return Object.freeze({...core,attempt_digest:digest(core)});
+}
+function verifyAdmissionAttempt(row){
+  if(!row||row.schema!==ADMISSION_ATTEMPT_SCHEMA||row.version!==1||row.one_attempt_only!==true||row.post_effect_readback_required!==true||row.reconciliation_only_after_attempt!==true||row.retrieval_activation_separate!==true||row.automatic_retry_allowed!==false||row.authority_effect!==false)throw new Error('rsi_runtime_skill_admission_attempt_invalid');
+  const core=admissionCore(row);
+  if(digest(core)!==exactDigest(row.attempt_digest,'admission_attempt'))throw new Error('rsi_runtime_skill_admission_attempt_digest_mismatch');
+  return Object.freeze({...core,attempt_digest:row.attempt_digest});
+}
+function transitionAdmissionAttempt(row,nextState,at){
+  const current=verifyAdmissionAttempt(row);
+  const next=String(nextState||'').toUpperCase();
+  if(next===current.state)return current;
+  if(!(ADMISSION_TRANSITIONS.get(current.state)||new Set()).has(next))throw new Error(`rsi_runtime_skill_admission_transition_invalid:${current.state}:${next}`);
+  const core=admissionCore({...current,state:next,transitions:[...current.transitions,{seq:current.transitions.length+1,state:next,at}]});
+  return Object.freeze({...core,attempt_digest:digest(core)});
+}
+function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill,admissionAttempts}){
   const core={
     schema:RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA,version:1,source_sha:sourceSha,
     library:library||null,library_digest:library?.library_digest||null,
     lifecycle_evidence:lifecycleEvidence,
     pending,
+    library_admission_attempts:admissionAttempts,
     window_seq_by_skill:Object.fromEntries([...windowSeqBySkill.entries()].sort(([a],[b])=>a.localeCompare(b))),
-    evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,
+    evidence_append_only:true,pending_is_bounded:true,library_admission_attempts_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,max_admission_attempts:MAX_ADMISSION_ATTEMPTS,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     credit_required_for_lifecycle_update:true,contextual_credit_not_global_truth:true,
     raw_model_transcript_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,
     automatic_retry_allowed:false,authority_effect:false,
   };
   return {...core,state_digest:digest(core)};
 }
 
 export class RsiRuntimeSkillLifecycle{
-  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#seq=new Map();#initialized=false;
+  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#seq=new Map();#admissions=[];#initialized=false;
   constructor({statePath,source_sha,clock=()=>Date.now()}={}){
     if(!statePath||typeof statePath!=='string')throw new Error('rsi_runtime_skill_state_path_required');
     if(typeof clock!=='function')throw new Error('rsi_runtime_skill_clock_required');
@@ -73,6 +124,10 @@ export class RsiRuntimeSkillLifecycle{
       }
       if(!Array.isArray(parsed.lifecycle_evidence)||parsed.lifecycle_evidence.length>MAX_EVIDENCE)throw new Error('rsi_runtime_skill_evidence_state_invalid');
       if(!Array.isArray(parsed.pending)||parsed.pending.length>MAX_PENDING)throw new Error('rsi_runtime_skill_pending_state_invalid');
+      const admissions=parsed.library_admission_attempts??[];
+      if(!Array.isArray(admissions)||admissions.length>MAX_ADMISSION_ATTEMPTS)throw new Error('rsi_runtime_skill_admission_attempts_state_invalid');
+      const seenAdmissionIds=new Set();
+      this.#admissions=admissions.map((row)=>{const checked=verifyAdmissionAttempt(row);if(seenAdmissionIds.has(checked.attempt_id))throw new Error('rsi_runtime_skill_admission_attempt_duplicate');seenAdmissionIds.add(checked.attempt_id);return checked;});
       this.#evidence=parsed.lifecycle_evidence;
       this.#pending=parsed.pending;
       this.#seq=new Map(Object.entries(parsed.window_seq_by_skill||{}).map(([k,v])=>[exactDigest(k,'skill_seq'),positiveInt(v,'window_seq')]));
@@ -88,7 +143,7 @@ export class RsiRuntimeSkillLifecycle{
   #now(){const n=Number(this.#clock());if(!Number.isFinite(n))throw new Error('rsi_runtime_skill_clock_invalid');return new Date(n).toISOString()}
   #governanceId(){return `runtime.skill.governance.${this.#sourceSha.slice(0,16)}`}
   async #persist(){
-    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq});
+    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,admissionAttempts:this.#admissions});
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
     await fs.rename(temp,this.#path);return state;
@@ -105,16 +160,85 @@ export class RsiRuntimeSkillLifecycle{
       if(!candidate||candidate.evidence_digest!==row.evidence_digest||candidate.skill_id!==row.skill_id||candidate.skill_version!==row.skill_version)throw new Error('rsi_runtime_skill_library_non_append_only_update');
     }
   }
-  async adoptVerifiedLibrary({library,expected_current_library_digest=null,external_library_owner=false,authored_by_candidate=true}={}){
+  async prepareVerifiedLibraryAdmission({
+    attempt_id,expected_current_library_digest,successor_library_digest,proposed_skill_digest,phase33_certificate_digest,
+    external_library_owner=false,authored_by_candidate=true,
+  }={}){
+    this.#assertInit();
+    if(external_library_owner!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_library_external_origin_required');
+    if(!this.#library)throw new Error('rsi_runtime_skill_library_cas_requires_current_library');
+    const expected=exactDigest(expected_current_library_digest,'expected_library');
+    const successor=exactDigest(successor_library_digest,'successor_library');
+    const proposed=exactDigest(proposed_skill_digest,'proposed_skill');
+    const certificate=exactDigest(phase33_certificate_digest,'phase33_certificate');
+    if(this.#library.library_digest!==expected)throw new Error('rsi_runtime_skill_library_cas_mismatch');
+    if(successor===expected)throw new Error('rsi_runtime_skill_admission_successor_must_change');
+    if(this.#library.entries.some((entry)=>entry.skill_digest===proposed))throw new Error('rsi_runtime_skill_admission_skill_already_present');
+    if(this.#admissions.some((row)=>ADMISSION_UNRESOLVED.has(row.state)))throw new Error('rsi_runtime_skill_admission_unresolved_prior');
+    const id=boundedId(attempt_id,'admission_attempt_id');
+    if(this.#admissions.some((row)=>row.attempt_id===id))throw new Error('rsi_runtime_skill_admission_attempt_id_reuse');
+    if(this.#admissions.length>=MAX_ADMISSION_ATTEMPTS)throw new Error('rsi_runtime_skill_admission_attempt_capacity_exceeded');
+    const row=createAdmissionAttempt({attempt_id:id,expected_library_digest:expected,successor_library_digest:successor,proposed_skill_digest:proposed,phase33_certificate_digest:certificate},this.#now());
+    this.#admissions.push(row);
+    try{await this.#persist()}catch(error){this.#admissions.pop();throw error}
+    return zero({state:'PREPARED',attempt_id:id,attempt_digest:row.attempt_digest,expected_library_digest:expected,successor_library_digest:successor,proposed_skill_digest:proposed,phase33_certificate_digest:certificate});
+  }
+  async reconcileVerifiedLibraryAdmission({attempt_id,external_library_owner=false,authored_by_candidate=true}={}){
+    this.#assertInit();
+    if(external_library_owner!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_library_external_origin_required');
+    const id=boundedId(attempt_id,'admission_attempt_id');
+    const index=this.#admissions.findIndex((row)=>row.attempt_id===id);
+    if(index<0)throw new Error('rsi_runtime_skill_admission_attempt_missing');
+    const current=this.#admissions[index];
+    if(!['ATTEMPTED','AMBIGUOUS'].includes(current.state))throw new Error(`rsi_runtime_skill_admission_reconciliation_state_invalid:${current.state}`);
+    const observed=this.#library?.library_digest||null;
+    const next=observed===current.successor_library_digest?'CONFIRMED':observed===current.expected_library_digest?'ABSENT_PROVEN':'AMBIGUOUS';
+    if(next!==current.state){
+      const prior=current;this.#admissions[index]=transitionAdmissionAttempt(current,next,this.#now());
+      try{await this.#persist()}catch(error){this.#admissions[index]=prior;throw error}
+    }
+    const row=this.#admissions[index];
+    return zero({state:row.state,attempt_id:id,attempt_digest:row.attempt_digest,observed_library_digest:observed,retry_authorized:false,reconciliation_required:row.state==='AMBIGUOUS'});
+  }
+  async adoptVerifiedLibrary({library,expected_current_library_digest=null,admission_attempt_id=null,external_library_owner=false,authored_by_candidate=true}={}){
     this.#assertInit();
     if(external_library_owner!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_library_external_origin_required');
     const checked=verifyRsiVerifiedSkillLibrary(library);
+    let expected=null;
     if(expected_current_library_digest!=null){
       if(!this.#library)throw new Error('rsi_runtime_skill_library_cas_requires_current_library');
-      const expected=exactDigest(expected_current_library_digest,'expected_library');
+      expected=exactDigest(expected_current_library_digest,'expected_library');
       if(this.#library.library_digest!==expected)throw new Error('rsi_runtime_skill_library_cas_mismatch');
     }
     this.#assertAppendOnlyLibrary(checked);
+
+    if(admission_attempt_id!=null){
+      if(expected==null)throw new Error('rsi_runtime_skill_admission_cas_required');
+      const id=boundedId(admission_attempt_id,'admission_attempt_id');
+      const index=this.#admissions.findIndex((row)=>row.attempt_id===id);
+      if(index<0)throw new Error('rsi_runtime_skill_admission_attempt_missing');
+      const prepared=this.#admissions[index];
+      if(prepared.state!=='PREPARED')throw new Error(`rsi_runtime_skill_admission_one_attempt_only:${prepared.state}`);
+      if(prepared.expected_library_digest!==expected||prepared.successor_library_digest!==checked.library_digest)throw new Error('rsi_runtime_skill_admission_binding_mismatch');
+      const currentDigests=new Set(this.#library.entries.map((entry)=>entry.skill_digest));
+      const added=checked.entries.filter((entry)=>!currentDigests.has(entry.skill_digest));
+      if(added.length!==1||added[0].skill_digest!==prepared.proposed_skill_digest)throw new Error('rsi_runtime_skill_admission_exactly_one_bound_skill_required');
+
+      const attempted=transitionAdmissionAttempt(prepared,'ATTEMPTED',this.#now());
+      this.#admissions[index]=attempted;
+      try{await this.#persist()}catch(error){this.#admissions[index]=prepared;throw error}
+
+      const previousLibrary=this.#library;
+      this.#library=checked;
+      this.#admissions[index]=transitionAdmissionAttempt(attempted,'CONFIRMED',this.#now());
+      try{await this.#persist()}catch(error){
+        this.#library=previousLibrary;
+        this.#admissions[index]=attempted;
+        throw new Error('rsi_runtime_skill_admission_effect_ambiguous_requires_reconciliation',{cause:error});
+      }
+      return zero({state:'ADOPTED',library_digest:checked.library_digest,entry_count:checked.entry_count,reconciled_pending:0,cas_checked:true,admission_attempt_id:id,admission_state:'CONFIRMED',post_effect_readback_required:true});
+    }
+
     const changed=this.#library?.library_digest!==checked.library_digest;
     this.#library=checked;
     const reconciled=await this.#reconcilePendingInternal();
@@ -204,6 +328,10 @@ export class RsiRuntimeSkillLifecycle{
     this.#assertInit();
     return this.#library ? structuredClone(this.#library) : null;
   }
+  libraryAdmissionAttempts(){
+    this.#assertInit();
+    return Object.freeze(this.#admissions.map((row)=>Object.freeze(structuredClone(row))));
+  }
   governance(){
     this.#assertInit();if(!this.#library)return null;
     return createRsiSkillLibraryGovernance({
@@ -225,12 +353,13 @@ export class RsiRuntimeSkillLifecycle{
       schema:RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA,version:1,source_sha:this.#sourceSha,initialized:this.#initialized,
       library_present:this.#library!=null,library_digest:this.#library?.library_digest||null,
       library_entry_count:this.#library?.entry_count||0,lifecycle_evidence_count:this.#evidence.length,pending_count:this.#pending.length,
+      library_admission_attempt_count:this.#admissions.length,unresolved_library_admission_count:this.#admissions.filter((row)=>ADMISSION_UNRESOLVED.has(row.state)).length,
       governance_digest:governance?.governance_digest||null,
       active_count:governance?.active_count||0,quarantined_count:governance?.quarantined_count||0,
       retired_count:governance?.retired_count||0,dormant_count:governance?.dormant_count||0,
       evidence_append_only:true,pending_is_bounded:true,contextual_credit_not_global_truth:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
-      execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+      execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,
       automatic_retry_allowed:false,authority_effect:false,
     });
   }
@@ -241,11 +370,13 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     schema:'metaengine.rsi.runtime-skill-lifecycle-root.v1',version:1,
     policy_path:'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
     verified_library_required:true,library_updates_append_only:true,exact_library_digest_cas_supported:true,
+    library_admission_write_ahead_barrier:true,one_attempt_per_library_admission:true,admission_reconciliation_required_after_attempt:true,
+    phase33_certificate_digest_binding_required:true,retrieval_activation_separate_from_library_admission:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     skill_activation_view_is_execution_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,
     automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...root,skill_lifecycle_root_digest:digest(root)});
