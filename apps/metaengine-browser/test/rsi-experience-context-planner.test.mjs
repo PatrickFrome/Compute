@@ -22,6 +22,7 @@ function frontier(overrides={}) {
     mutation_surface:'BROWSER_RUNTIME',
     observation_digest:'2'.repeat(64),
     hypothesis:{
+      source_sha:'a'.repeat(40),
       opportunity_id:'opp:111111111111111111111111',
       signal:'AMBIGUOUS_COMMAND_OUTCOMES',
       mutation_surface:'BROWSER_RUNTIME',
@@ -34,6 +35,7 @@ function frontier(overrides={}) {
       authority_effect:false,
     },
     plan:{
+      source_sha:'a'.repeat(40),
       experiment_id:'rsi_exp_111111111111111111111111',
       plan_digest:'4'.repeat(64),
       target_branch:'work/rsi/ambiguous-command-outcomes-a1b2c3d4-12345678',
@@ -104,6 +106,7 @@ test('planner explicitly records absence of verified experience without inventin
   const plan=createRsiExperienceContextPlan({frontier_entry:frontier()});
   verifyRsiExperienceContextPlan(plan);
   assert.equal(plan.mode,'NO_VERIFIED_EXPERIENCE');
+  assert.equal(plan.source_sha,'a'.repeat(40));
   assert.equal(plan.selected_case_count,0);
   assert.equal(plan.graph_snapshot_digest,null);
   assert.equal(plan.retrieval_digest,null);
