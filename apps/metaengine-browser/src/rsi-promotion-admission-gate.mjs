@@ -39,6 +39,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-component-attribution.mjs',
   'apps/metaengine-browser/src/rsi-group-experience-exchange.mjs',
   'apps/metaengine-browser/src/rsi-adaptive-experience-retrieval.mjs',
+  'apps/metaengine-browser/src/rsi-agent-architecture-search.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/candidate-capsule.cjs',
   'apps/metaengine-browser/src/verification-sandbox-plan.cjs',
