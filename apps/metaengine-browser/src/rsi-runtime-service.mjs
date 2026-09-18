@@ -56,6 +56,7 @@ import { RsiSkillCoalitionAuditStore, createRsiSkillCoalitionObservation, rsiSki
 import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGraphTrustRootSnapshot } from './rsi-skill-relation-graph.mjs';
 import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntimeMetaSkillArchiveTrustRootSnapshot } from './rsi-runtime-meta-skill-archive.mjs';
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
+import { createRsiMetaProfileShadowPortfolio, selectRsiMetaProfileShadowCandidate, rsiMetaProfileShadowPortfolioTrustRootSnapshot } from './rsi-meta-profile-shadow-portfolio.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -135,6 +136,7 @@ function trustRoots() {
     skill_relation_graph: rsiSkillRelationGraphTrustRootSnapshot(),
     runtime_meta_skill_archive: rsiRuntimeMetaSkillArchiveTrustRootSnapshot(),
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
+    meta_profile_shadow_portfolio: rsiMetaProfileShadowPortfolioTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -905,6 +907,40 @@ export class RsiRuntimeService {
   qualifiedMetaProfiles() {
     this.#assertRunning();
     return this.#metaProfileQualification.qualified();
+  }
+
+  metaProfileShadowPortfolio() {
+    this.#assertRunning();
+    const qualifications = this.#metaProfileQualification.qualified();
+    if (qualifications.length < 1) return null;
+    const qualified_entries = qualifications.map((qualification) => {
+      const meta_record = this.#metaSkillArchive.recordByDigest(qualification.meta_record_digest);
+      if (!meta_record) throw new Error('rsi_runtime_meta_profile_qualified_record_missing');
+      return { qualification, meta_record };
+    });
+    return createRsiMetaProfileShadowPortfolio({
+      qualified_entries,
+      external_portfolio_owner: true,
+      authored_by_candidate: false,
+    });
+  }
+
+  selectMetaProfileShadowCandidate({
+    requested_meta_role,
+    qualification_digest = null,
+    external_selector = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const portfolio = this.metaProfileShadowPortfolio();
+    if (!portfolio) throw new Error('rsi_runtime_meta_profile_portfolio_empty');
+    return selectRsiMetaProfileShadowCandidate({
+      portfolio,
+      requested_meta_role,
+      qualification_digest,
+      external_selector,
+      authored_by_candidate,
+    });
   }
 
   async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
