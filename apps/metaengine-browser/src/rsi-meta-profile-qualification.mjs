@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import { verifyRsiRuntimeMetaSkillRecord } from './rsi-runtime-meta-skill-archive.mjs';
 import {
+  RSI_RISK_SPENDING_POLICIES,
+  createRsiRecursiveRiskBudget,
   verifyRsiRecursiveRiskBudget,
   rsiRiskAllocationForConfirmation,
 } from './rsi-recursive-risk-budget.mjs';
@@ -21,6 +23,12 @@ const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const PAIR_COUNT=7;
 const MAX_ROWS=1024;
 const EPS=1e-12;
+const META_PROFILE_RISK_BUDGET=createRsiRecursiveRiskBudget({
+  budget_id:'rsi.meta-profile.activation.risk.v1',
+  global_alpha:0.05,
+  spending_policy:RSI_RISK_SPENDING_POLICIES.TELESCOPING_ANYTIME,
+  evidence_family:'RSI_META_PROFILE_ACTIVATION',
+});
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -218,6 +226,7 @@ export function createRsiMetaProfileStatisticalCertificate({
   if(verifiedShadow.eligible_for_statistical_confirmation!==true)throw new Error('rsi_meta_profile_shadow_pass_required');
   if(external_verifier!==true||authored_by_candidate!==false)throw new Error('rsi_meta_profile_external_stat_verifier_required');
   const checkedBudget=verifyRsiRecursiveRiskBudget(budget);
+  if(checkedBudget.budget_digest!==META_PROFILE_RISK_BUDGET.budget_digest)throw new Error('rsi_meta_profile_fixed_risk_budget_required');
   const index=Number(confirmation_index);if(!Number.isSafeInteger(index)||index<1)throw new Error('rsi_meta_profile_confirmation_index_invalid');
   const allocated=rsiRiskAllocationForConfirmation(checkedBudget,index);
   const used=Number(alpha_used);if(!Number.isFinite(used)||used<=0||used-allocated>EPS)throw new Error('rsi_meta_profile_alpha_over_budget');
@@ -285,6 +294,11 @@ export function createRsiMetaProfileQualification({
     meta_record_digest:record.record_digest,parent_profile_digest:record.parent_profile_digest,
     successor_profile_digest:record.successor_profile_digest,shadow_plan_digest:plan.plan_digest,
     shadow_result_digest:verifiedShadow.result_digest,certificate_digest:checkedCertificate.certificate_digest,
+    risk_budget_digest:checkedCertificate.budget_digest,
+    confirmation_index:checkedCertificate.confirmation_index,
+    allocated_alpha:checkedCertificate.allocated_alpha,
+    alpha_used:checkedCertificate.alpha_used,
+    global_alpha:META_PROFILE_RISK_BUDGET.global_alpha,
     state:pass?'QUALIFIED_FOR_SHADOW_PROFILE_SELECTION':'STATISTICAL_CONFIRMATION_REJECTED',
     qualified_for_shadow_profile_selection:pass,
     live_profile_activation_authorized:false,profile_replacement_authorized:false,
@@ -296,9 +310,14 @@ export function createRsiMetaProfileQualification({
 }
 
 function ledgerState(sourceSha,rows){
-  const core={schema:RSI_META_PROFILE_QUALIFICATION_LEDGER_SCHEMA,version:1,source_sha:sourceSha,rows,row_count:rows.length,
-    qualified_count:rows.filter(x=>x.qualified_for_shadow_profile_selection===true).length,append_only:true,
-    active_profile_digest:null,shadow_profile_digest:null,ledger_can_activate_profile:false,
+  const cumulative=rows.reduce((sum,row)=>sum+Number(row.alpha_used||0),0);
+  const nextIndex=rows.length+1;
+  const core={schema:RSI_META_PROFILE_QUALIFICATION_LEDGER_SCHEMA,version:1,source_sha:sourceSha,
+    fixed_risk_budget:META_PROFILE_RISK_BUDGET,fixed_risk_budget_digest:META_PROFILE_RISK_BUDGET.budget_digest,
+    rows,row_count:rows.length,qualified_count:rows.filter(x=>x.qualified_for_shadow_profile_selection===true).length,
+    cumulative_alpha_spent:cumulative,global_alpha:META_PROFILE_RISK_BUDGET.global_alpha,
+    next_confirmation_index:nextIndex,next_confirmation_alpha_allocation:rsiRiskAllocationForConfirmation(META_PROFILE_RISK_BUDGET,nextIndex),
+    append_only:true,active_profile_digest:null,shadow_profile_digest:null,ledger_can_activate_profile:false,
     candidate_can_delete_rows:false,candidate_can_rewrite_rows:false,
     execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
@@ -307,17 +326,36 @@ function ledgerState(sourceSha,rows){
 export class RsiMetaProfileQualificationLedger{
   #path;#sourceSha;#rows=[];#initialized=false;
   constructor({statePath,source_sha}={}){if(!statePath)throw new Error('rsi_meta_profile_ledger_path_required');this.#path=path.resolve(statePath);this.#sourceSha=exactSha(source_sha,'source')}
-  async init(){if(this.#initialized)return this.snapshot();await fs.mkdir(path.dirname(this.#path),{recursive:true});try{const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'ledger');if(p.schema!==RSI_META_PROFILE_QUALIFICATION_LEDGER_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha||p.append_only!==true||p.ledger_can_activate_profile!==false)throw new Error('rsi_meta_profile_ledger_state_invalid');const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_meta_profile_ledger_digest_mismatch');if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_meta_profile_ledger_rows_invalid');for(const row of p.rows){if(row.source_sha!==this.#sourceSha)throw new Error('rsi_meta_profile_ledger_row_source_mismatch');const rc=structuredClone(row);delete rc.qualification_digest;if(digest(rc)!==exactDigest(row.qualification_digest,'qualification'))throw new Error('rsi_meta_profile_ledger_row_digest_mismatch')}this.#rows=p.rows}catch(e){if(e?.code!=='ENOENT')throw e}this.#initialized=true;return this.snapshot()}
+  async init(){if(this.#initialized)return this.snapshot();await fs.mkdir(path.dirname(this.#path),{recursive:true});try{const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'ledger');if(p.schema!==RSI_META_PROFILE_QUALIFICATION_LEDGER_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
+        ||p.fixed_risk_budget_digest!==META_PROFILE_RISK_BUDGET.budget_digest||p.append_only!==true||p.ledger_can_activate_profile!==false)throw new Error('rsi_meta_profile_ledger_state_invalid');const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_meta_profile_ledger_digest_mismatch');if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_meta_profile_ledger_rows_invalid');let cumulative=0;
+      for(let i=0;i<p.rows.length;i++){
+        const row=p.rows[i];
+        if(row.source_sha!==this.#sourceSha)throw new Error('rsi_meta_profile_ledger_row_source_mismatch');
+        const rc=structuredClone(row);delete rc.qualification_digest;
+        if(digest(rc)!==exactDigest(row.qualification_digest,'qualification'))throw new Error('rsi_meta_profile_ledger_row_digest_mismatch');
+        if(row.risk_budget_digest!==META_PROFILE_RISK_BUDGET.budget_digest||row.confirmation_index!==i+1)throw new Error('rsi_meta_profile_ledger_risk_sequence_invalid');
+        const allocated=rsiRiskAllocationForConfirmation(META_PROFILE_RISK_BUDGET,i+1);
+        if(Number(row.alpha_used)<=0||Number(row.alpha_used)-allocated>EPS)throw new Error('rsi_meta_profile_ledger_alpha_invalid');
+        cumulative+=Number(row.alpha_used);
+        if(cumulative-META_PROFILE_RISK_BUDGET.global_alpha>EPS)throw new Error('rsi_meta_profile_ledger_global_alpha_exhausted');
+      }
+      this.#rows=p.rows}catch(e){if(e?.code!=='ENOENT')throw e}this.#initialized=true;return this.snapshot()}
   async #persist(){const s=ledgerState(this.#sourceSha,this.#rows);const t=`${this.#path}.tmp`;const h=await fs.open(t,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync()}finally{await h.close()}await fs.rename(t,this.#path)}
-  async add(q){if(!this.#initialized)throw new Error('rsi_meta_profile_ledger_not_initialized');if(!q||q.schema!==RSI_META_PROFILE_QUALIFICATION_SCHEMA)throw new Error('rsi_meta_profile_qualification_invalid');assertZero(q,'qualification');if(q.source_sha!==this.#sourceSha)throw new Error('rsi_meta_profile_qualification_source_mismatch');const clone=structuredClone(q);delete clone.qualification_digest;if(digest(clone)!==exactDigest(q.qualification_digest,'qualification'))throw new Error('rsi_meta_profile_qualification_digest_mismatch');const existing=this.#rows.find(x=>x.qualification_id===q.qualification_id||x.meta_record_digest===q.meta_record_digest);if(existing){if(existing.qualification_digest!==q.qualification_digest)throw new Error('rsi_meta_profile_qualification_conflict');return zero({state:'IDEMPOTENT',qualification_digest:q.qualification_digest})}if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_meta_profile_ledger_capacity_exceeded');this.#rows.push(structuredClone(q));await this.#persist();return zero({state:q.state,qualification_digest:q.qualification_digest})}
+  async add(q){if(!this.#initialized)throw new Error('rsi_meta_profile_ledger_not_initialized');if(!q||q.schema!==RSI_META_PROFILE_QUALIFICATION_SCHEMA)throw new Error('rsi_meta_profile_qualification_invalid');assertZero(q,'qualification');if(q.source_sha!==this.#sourceSha)throw new Error('rsi_meta_profile_qualification_source_mismatch');const clone=structuredClone(q);delete clone.qualification_digest;if(digest(clone)!==exactDigest(q.qualification_digest,'qualification'))throw new Error('rsi_meta_profile_qualification_digest_mismatch');if(q.risk_budget_digest!==META_PROFILE_RISK_BUDGET.budget_digest)throw new Error('rsi_meta_profile_fixed_risk_budget_required');const expectedIndex=this.#rows.length+1;if(q.confirmation_index!==expectedIndex)throw new Error('rsi_meta_profile_confirmation_index_out_of_sequence');const allocated=rsiRiskAllocationForConfirmation(META_PROFILE_RISK_BUDGET,expectedIndex);if(Number(q.alpha_used)<=0||Number(q.alpha_used)-allocated>EPS)throw new Error('rsi_meta_profile_alpha_over_budget');const cumulative=this.#rows.reduce((sum,row)=>sum+Number(row.alpha_used),0)+Number(q.alpha_used);if(cumulative-META_PROFILE_RISK_BUDGET.global_alpha>EPS)throw new Error('rsi_meta_profile_global_alpha_exhausted');const existing=this.#rows.find(x=>x.qualification_id===q.qualification_id||x.meta_record_digest===q.meta_record_digest);if(existing){if(existing.qualification_digest!==q.qualification_digest)throw new Error('rsi_meta_profile_qualification_conflict');return zero({state:'IDEMPOTENT',qualification_digest:q.qualification_digest})}if(this.#rows.length>=MAX_ROWS)throw new Error('rsi_meta_profile_ledger_capacity_exceeded');this.#rows.push(structuredClone(q));await this.#persist();return zero({state:q.state,qualification_digest:q.qualification_digest})}
   qualified(){if(!this.#initialized)throw new Error('rsi_meta_profile_ledger_not_initialized');return Object.freeze(this.#rows.filter(x=>x.qualified_for_shadow_profile_selection===true).map(x=>Object.freeze(structuredClone(x))))}
-  snapshot(){const s=ledgerState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,qualified_count:s.qualified_count,append_only:true,active_profile_digest:null,shadow_profile_digest:null,ledger_can_activate_profile:false,authority_effect:false})}
+  snapshot(){const s=ledgerState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,qualified_count:s.qualified_count,fixed_risk_budget_digest:s.fixed_risk_budget_digest,cumulative_alpha_spent:s.cumulative_alpha_spent,global_alpha:s.global_alpha,next_confirmation_index:s.next_confirmation_index,next_confirmation_alpha_allocation:s.next_confirmation_alpha_allocation,append_only:true,active_profile_digest:null,shadow_profile_digest:null,ledger_can_activate_profile:false,authority_effect:false})}
+}
+
+export function rsiMetaProfileRiskBudgetSnapshot(){
+  return META_PROFILE_RISK_BUDGET;
 }
 
 export function rsiMetaProfileQualificationTrustRootSnapshot(){
   const root={schema:'metaengine.rsi.meta-profile-qualification-root.v1',version:1,
     exact_meta_archive_record_required:true,source_sha_fencing_required:true,independent_activation_holdout_required:true,pair_count:PAIR_COUNT,
     paired_shadow_required:true,early_stop_allowed:false,recursive_risk_budget_reused:true,
+    fixed_risk_budget_digest:META_PROFILE_RISK_BUDGET.budget_digest,global_alpha:META_PROFILE_RISK_BUDGET.global_alpha,
+    confirmation_index_ledger_owned:true,cumulative_alpha_enforced:true,
     external_statistical_verifier_required:true,tradeoff_is_not_activation_eligible:true,
     candidate_can_choose_pair_count:false,candidate_can_choose_holdout:false,candidate_can_choose_seed_schedule:false,
     qualification_only_for_shadow_profile_selection:true,live_profile_activation_authorized:false,
