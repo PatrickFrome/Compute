@@ -144,6 +144,13 @@ export class RsiRuntimeExperienceGate {
     this.#offered += 1;
 
     if (signature === this.#lastPersistedSignature) {
+      // A newer observation may have reverted a coalesced transient change back
+      // to the already durable state. Drop that pending transient so a later
+      // flush cannot persist stale experience after the system has recovered.
+      if (this.#pending) {
+        this.#pending = null;
+        this.#coalesced += 1;
+      }
       this.#deduplicated += 1;
       return decision('DEDUPLICATE', 'UNCHANGED_FROM_PERSISTED', checked, signature);
     }
