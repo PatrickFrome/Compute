@@ -495,6 +495,7 @@ export function rsiAutonomousEpisodeControllerTrustRootSnapshot() {
       'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
       'apps/metaengine-browser/src/rsi-evaluation-integrity-guard.mjs',
       'apps/metaengine-browser/src/rsi-trace-guided-harness-repair.mjs',
+      'apps/metaengine-browser/src/rsi-verified-search-feedback.mjs',
     ],
     contextual_search_routing: true,
     explicit_exploration_budget: true,

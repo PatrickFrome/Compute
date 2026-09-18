@@ -43,7 +43,7 @@ import { rsiVerifiedSkillLibraryTrustRootSnapshot } from './rsi-verified-skill-l
 import { rsiMemoryGovernanceTrustRootSnapshot } from './rsi-memory-governance.mjs';
 import { rsiOperationalDistillationTrustRootSnapshot } from './rsi-operational-knowledge-distillation.mjs';
 import { rsiFixedSkeletonTrustRootSnapshot } from './rsi-fixed-skeleton-mutation.mjs';
-import { rsiSearchModeRouterTrustRootSnapshot } from './rsi-search-mode-router.mjs';
+import { rsiSearchModeRouterTrustRootSnapshot, verifyRsiSearchContext } from './rsi-search-mode-router.mjs';
 import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integrity-guard.mjs';
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
@@ -61,6 +61,11 @@ import {
   rsiAutonomousEpisodeControllerTrustRootSnapshot,
 } from './rsi-autonomous-episode-controller.mjs';
 import { createRsiDevosAdmissionEnvelopes, rsiDevosAdmissionAdapterTrustRootSnapshot } from './rsi-devos-admission-adapter.mjs';
+import {
+  createRsiVerifiedSearchFeedback,
+  verifyRsiVerifiedSearchFeedback,
+  rsiVerifiedSearchFeedbackTrustRootSnapshot,
+} from './rsi-verified-search-feedback.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -69,6 +74,7 @@ const SHA40 = /^[0-9a-f]{40}$/;
 const DIGEST64 = /^[0-9a-f]{64}$/;
 const MAX_AUTONOMOUS_PREPARED_REQUESTS = 256;
 const MAX_HARNESS_EVIDENCE_DIGESTS = 1024;
+const MAX_VERIFIED_SEARCH_FEEDBACK = 512;
 const PREFIXED_SHA256 = /^sha256:[0-9a-f]{64}$/;
 
 function stable(value) {
@@ -138,6 +144,7 @@ function trustRoots() {
     episode_evaluation_ingest: rsiEpisodeEvaluationIngestTrustRootSnapshot(),
     autonomous_episode_controller: rsiAutonomousEpisodeControllerTrustRootSnapshot(),
     devos_admission_adapter: rsiDevosAdmissionAdapterTrustRootSnapshot(),
+    verified_search_feedback: rsiVerifiedSearchFeedbackTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -166,6 +173,8 @@ export class RsiRuntimeService {
   #promotionNominationCount = 0;
   #preparedRequestDigests = new Set();
   #harnessEvidenceDigests = new Set();
+  #verifiedSearchFeedback = [];
+  #verifiedSearchFeedbackDigests = new Set();
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -204,6 +213,18 @@ export class RsiRuntimeService {
             throw new Error('rsi_runtime_harness_evidence_replay_capacity_exhausted');
           }
           this.#harnessEvidenceDigests.add(exactPrefixedDigest(row.payload.evidence_digest, 'harness_evidence_digest'));
+        }
+        if (row?.type === 'RSI_VERIFIED_SEARCH_FEEDBACK_RECORDED' && row?.payload?.feedback) {
+          const feedback = verifyRsiVerifiedSearchFeedback(row.payload.feedback);
+          if (feedback.source_sha !== this.#sourceSha) throw new Error('rsi_runtime_search_feedback_source_mismatch');
+          if (!this.#verifiedSearchFeedbackDigests.has(feedback.feedback_digest)) {
+            this.#verifiedSearchFeedback.push(feedback);
+            this.#verifiedSearchFeedbackDigests.add(feedback.feedback_digest);
+            if (this.#verifiedSearchFeedback.length > MAX_VERIFIED_SEARCH_FEEDBACK) {
+              const retired = this.#verifiedSearchFeedback.shift();
+              this.#verifiedSearchFeedbackDigests.delete(retired.feedback_digest);
+            }
+          }
         }
       }
       replayCursor = page.at(-1).seq;
@@ -474,7 +495,21 @@ export class RsiRuntimeService {
 
   async prepareAutonomousEpisodeCycle(input = {}) {
     this.#assertRunning();
-    const plan = createRsiAutonomousEpisodePlan(input);
+    let controllerInput = input;
+    if (input.search_outcomes == null) {
+      const context = verifyRsiSearchContext(input.search_context);
+      const searchOutcomes = this.#verifiedSearchFeedback
+        .filter((row) => (
+          row.source_sha === this.#sourceSha
+          && (
+            row.routing_outcome?.context_digest === context.context_digest
+            || row.routing_outcome?.context_digest === 'sha256:' + context.context_digest
+          )
+        ))
+        .map((row) => row.routing_outcome);
+      controllerInput = { ...input, search_outcomes: searchOutcomes };
+    }
+    const plan = createRsiAutonomousEpisodePlan(controllerInput);
     verifyRsiAutonomousEpisodePlan(plan);
 
     let episode;
@@ -556,6 +591,31 @@ export class RsiRuntimeService {
       automatic_retry_allowed: false,
       authority_effect: false,
     });
+  }
+
+  async recordVerifiedSearchFeedback(input = {}) {
+    this.#assertRunning();
+    const feedback = createRsiVerifiedSearchFeedback(input);
+    verifyRsiVerifiedSearchFeedback(feedback);
+    if (feedback.source_sha !== this.#sourceSha) throw new Error('rsi_runtime_search_feedback_source_mismatch');
+    if (this.#verifiedSearchFeedbackDigests.has(feedback.feedback_digest)) {
+      return Object.freeze({ feedback, already_recorded: true, authority_effect: false });
+    }
+    await this.#ledger.append('RSI_VERIFIED_SEARCH_FEEDBACK_RECORDED', {
+      feedback,
+      candidate_authored_feedback_allowed: false,
+      scalar_reward_authoritative: false,
+      search_feedback_is_scheduler_authority: false,
+      search_feedback_is_promotion_authority: false,
+      authority_effect: false,
+    });
+    this.#verifiedSearchFeedback.push(feedback);
+    this.#verifiedSearchFeedbackDigests.add(feedback.feedback_digest);
+    if (this.#verifiedSearchFeedback.length > MAX_VERIFIED_SEARCH_FEEDBACK) {
+      const retired = this.#verifiedSearchFeedback.shift();
+      this.#verifiedSearchFeedbackDigests.delete(retired.feedback_digest);
+    }
+    return Object.freeze({ feedback, already_recorded: false, authority_effect: false });
   }
 
   async prepareAutonomousDevosAdmissions({ workspace_id, priority = 80, ...cycleInput } = {}) {
@@ -754,6 +814,9 @@ export class RsiRuntimeService {
       harness_evidence_count: this.#harnessEvidenceDigests.size,
       harness_evidence_capacity: MAX_HARNESS_EVIDENCE_DIGESTS,
       harness_evidence_mode: 'VERIFIED_DIGEST_SUMMARY_ONLY',
+      verified_search_feedback_count: this.#verifiedSearchFeedback.length,
+      verified_search_feedback_capacity: MAX_VERIFIED_SEARCH_FEEDBACK,
+      verified_search_feedback_scalar_reward_authoritative: false,
       episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
