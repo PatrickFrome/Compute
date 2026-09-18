@@ -10,14 +10,15 @@ const migrationPath = resolve(
   '../../../supabase/migrations/20260918150000_devos_transport_promotion_json_null_admission_fix_v1.sql',
 );
 const sql = readFileSync(migrationPath, 'utf8');
+const executableSql = sql.replace(/--.*$/gm, '');
 
 test('promotion repair accepts only an explicitly present JSON-null transport proof before promotion', () => {
   assert.match(sql, /not \(v_agent \? 'transport_proof'\)/i,
     'missing transport_proof key must remain fail-closed');
   assert.match(sql, /jsonb_typeof\(v_agent->'transport_proof'\) <> 'null'/i,
     'explicit JSON null must be distinguished from a non-null proof');
-  assert.doesNotMatch(sql, /v_agent->'transport_proof'\s+is\s+not\s+null/i,
-    'SQL NULL semantics must not be used for JSON null');
+  assert.doesNotMatch(executableSql, /v_agent->'transport_proof'\s+is\s+not\s+null/i,
+    'SQL NULL semantics must not be used for JSON null in executable SQL');
 });
 
 test('promotion repair preserves exact binding and authority fences', () => {
