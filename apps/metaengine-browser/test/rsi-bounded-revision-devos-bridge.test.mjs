@@ -697,7 +697,16 @@ test('Phase29 provenance-bound child re-enters only the existing fresh budget an
   assert.equal(request.hidden_holdout_root_digest,handoff.hidden_holdout_root_digest);
   assert.equal(request.safety_suite_root_digest,handoff.safety_suite_root_digest);
   assert.equal(request.security_suite_root_digest,handoff.security_suite_root_digest);
+  assert.equal(request.evaluator_generation_seq,handoff.evaluator_generation_seq);
+  assert.equal(request.evaluator_generation_history_anchor_digest,handoff.evaluator_generation_history_anchor_digest);
+  assert.equal(request.evaluation_epoch_seq,handoff.evaluation_epoch_seq);
+  assert.equal(request.evaluator_generation_sequence_external,true);
+  assert.equal(request.evaluation_epoch_sequence_external,true);
+  assert.equal(request.evaluator_generation_history_anchor_external,true);
   assert.equal(request.candidate_can_choose_evaluator,false);
+  assert.equal(request.candidate_can_choose_evaluator_generation_seq,false);
+  assert.equal(request.candidate_can_choose_evaluation_epoch_seq,false);
+  assert.equal(request.candidate_can_choose_generation_history_anchor,false);
   assert.equal(request.candidate_can_choose_hidden_holdout,false);
   assert.equal(request.candidate_can_choose_safety_suite,false);
   assert.equal(request.candidate_can_choose_security_suite,false);
@@ -732,7 +741,10 @@ test('Phase29 provenance-bound child re-enters only the existing fresh budget an
   assert.equal(intent.candidate_artifact_digest,handoff.candidate_artifact_digest);
   assert.equal(intent.evaluator_root_digest,handoff.evaluator_root_digest);
   assert.equal(intent.evaluator_generation_digest,handoff.evaluator_generation_digest);
+  assert.equal(intent.evaluator_generation_seq,handoff.evaluator_generation_seq);
+  assert.equal(intent.evaluator_generation_history_anchor_digest,handoff.evaluator_generation_history_anchor_digest);
   assert.equal(intent.evaluation_epoch_digest,handoff.evaluation_epoch_digest);
+  assert.equal(intent.evaluation_epoch_seq,handoff.evaluation_epoch_seq);
   assert.equal(intent.sealed_task_set_digest,handoff.sealed_task_set_digest);
   assert.equal(intent.harness_digest,handoff.evaluation_harness_digest);
   assert.equal(intent.trial_worker_image_digest,handoff.trial_worker_image_digest);
@@ -1123,11 +1135,23 @@ test('Phase29 evaluator generation rotation is externally witnessed and exact-bo
 });
 
 
-function evaluatedPhase29(label,{generation='generation-a',outcome='SUPPORTED',evaluatorRoot=null}={}){
+function evaluatedPhase29(label,{
+  generation='generation-a',
+  generationSeq=1,
+  epochSeq=1,
+  outcome='SUPPORTED',
+  evaluatorRoot=null,
+  historyAnchor=null,
+  epochDigest=null,
+}={}){
   const fx=phase28ArtifactFixture(label);
   const handoff=phase29Handoff(fx,label,{
     evaluator_root_digest:evaluatorRoot??labelDigest(`${generation}-evaluator-root`),
     evaluator_generation_digest:labelDigest(`${generation}-evaluator-generation`),
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:historyAnchor??labelDigest(`${generation}-generation-history-anchor`),
+    evaluation_epoch_digest:epochDigest??labelDigest(`${generation}-epoch-${epochSeq}`),
+    evaluation_epoch_seq:epochSeq,
   });
   const request=handoff.fresh_evaluation_request;
   const plan=createRsiEvaluationBudgetPlan({
@@ -1199,7 +1223,12 @@ test('Phase29 existing experiment ledger retains every outcome class inside one 
     ['environment','ENVIRONMENT'],
     ['ambiguous','AMBIGUOUS'],
   ]){
-    const row=evaluatedPhase29(`history-${label}`,{generation:'shared-generation',outcome});
+    const row=evaluatedPhase29(`history-${label}`,{
+      generation:'shared-generation',
+      generationSeq:1,
+      epochSeq:1,
+      outcome,
+    });
     await ledger.add({intent:row.intent,receipt:row.receipt});
   }
 
@@ -1225,13 +1254,13 @@ test('Phase29 evaluator generations advance monotonically and cannot roll back o
   const ledger=new RsiCandidateExperimentLedger({statePath:path.join(dir,'ledger.json'),source_sha:SOURCE});
   await ledger.init();
 
-  const a1=evaluatedPhase29('generation-a-one',{generation:'generation-a'});
-  const b1=evaluatedPhase29('generation-b-one',{generation:'generation-b'});
+  const a1=evaluatedPhase29('generation-a-one',{generation:'generation-a',generationSeq:1,epochSeq:1});
+  const b1=evaluatedPhase29('generation-b-one',{generation:'generation-b',generationSeq:2,epochSeq:1});
   await ledger.add({intent:a1.intent,receipt:a1.receipt});
   await ledger.add({intent:b1.intent,receipt:b1.receipt});
   assert.equal(ledger.snapshot().evaluation_generation_count,2);
 
-  const rollback=evaluatedPhase29('generation-a-return',{generation:'generation-a'});
+  const rollback=evaluatedPhase29('generation-a-return',{generation:'generation-a',generationSeq:1,epochSeq:2});
   await assert.rejects(
     ()=>ledger.add({intent:rollback.intent,receipt:rollback.receipt}),
     /generation_history_rollback_detected/,
@@ -1239,11 +1268,13 @@ test('Phase29 evaluator generations advance monotonically and cannot roll back o
 
   const drift=evaluatedPhase29('generation-b-root-drift',{
     generation:'generation-b',
+    generationSeq:2,
+    epochSeq:1,
     evaluatorRoot:labelDigest('generation-b-different-evaluator-root'),
   });
   await assert.rejects(
     ()=>ledger.add({intent:drift.intent,receipt:drift.receipt}),
-    /generation_history_evaluator_root_drift/,
+    /generation_history_generation_identity_drift/,
   );
   assert.equal(ledger.snapshot().row_count,2);
 });
@@ -1275,3 +1306,61 @@ test('Phase29 generation history is durable-before-visible and restart rejects f
   await assert.rejects(()=>restored.init(),/ledger_derived_state_mismatch/);
 });
 
+
+
+test('Phase29 outcome history rejects sequence gaps and generation-anchor drift',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase29-sequence-binding-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledger=new RsiCandidateExperimentLedger({statePath:path.join(dir,'ledger.json'),source_sha:SOURCE});
+  await ledger.init();
+
+  const g1=evaluatedPhase29('sequence-g1',{generation:'seq-a',generationSeq:1,epochSeq:1});
+  await ledger.add({intent:g1.intent,receipt:g1.receipt});
+
+  const gap=evaluatedPhase29('sequence-g3',{generation:'seq-c',generationSeq:3,epochSeq:1});
+  await assert.rejects(()=>ledger.add({intent:gap.intent,receipt:gap.receipt}),/generation_sequence_gap/);
+
+  const epoch2=evaluatedPhase29('sequence-g1-e2',{
+    generation:'seq-a',
+    generationSeq:1,
+    epochSeq:2,
+    historyAnchor:g1.intent.evaluator_generation_history_anchor_digest,
+    evaluatorRoot:g1.intent.evaluator_root_digest,
+  });
+  await ledger.add({intent:epoch2.intent,receipt:epoch2.receipt});
+
+  const anchorDrift=evaluatedPhase29('sequence-anchor-drift',{
+    generation:'seq-a',
+    generationSeq:1,
+    epochSeq:2,
+    historyAnchor:labelDigest('seq-a-forged-history-anchor'),
+    evaluatorRoot:g1.intent.evaluator_root_digest,
+    epochDigest:epoch2.intent.evaluation_epoch_digest,
+  });
+  await assert.rejects(()=>ledger.add({intent:anchorDrift.intent,receipt:anchorDrift.receipt}),/generation_identity_drift/);
+
+  const snap=ledger.snapshot();
+  assert.equal(snap.evaluation_generation_count,1);
+  assert.equal(snap.evaluation_generation_history[0].evaluator_generation_seq,1);
+  assert.deepEqual(snap.evaluation_generation_history[0].evaluation_epoch_sequences,[1,2]);
+  assert.equal(
+    snap.evaluation_generation_history[0].evaluator_generation_history_anchor_digest,
+    g1.intent.evaluator_generation_history_anchor_digest,
+  );
+});
+
+test('Phase29 artifact request digest commits exact external generation and epoch sequence',()=>{
+  const fx=phase28ArtifactFixture('sequence-request-binding');
+  const handoff=phase29Handoff(fx,'sequence-request-binding',{
+    evaluator_generation_seq:7,
+    evaluation_epoch_seq:3,
+    evaluator_generation_history_anchor_digest:labelDigest('sequence-request-history-anchor'),
+  });
+  const request=handoff.fresh_evaluation_request;
+  assert.equal(request.evaluator_generation_seq,7);
+  assert.equal(request.evaluation_epoch_seq,3);
+  assert.equal(request.evaluator_generation_history_anchor_digest,handoff.evaluator_generation_history_anchor_digest);
+
+  const forged={...request,evaluator_generation_seq:8};
+  assert.throws(()=>verifyRsiArtifactEvaluationRoutingRequest(forged),/digest_mismatch/);
+});
