@@ -25,9 +25,14 @@ function parseWakePayload(value) {
   let row;
   try { row = JSON.parse(String(value || '')); } catch { return null; }
   if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-  if (String(row.table || '') !== COMMAND_TABLE) return null;
+  // Source migration v1 emits {table,target_client_id}; the currently deployed
+  // legacy pulse function still emits {tbl,client}. Accept both bounded wake-only
+  // envelopes so this accelerator does not require a production DDL rewrite.
+  const table = String(row.table ?? row.tbl ?? '');
+  if (table !== COMMAND_TABLE) return null;
   if (String(row.status || '').toUpperCase() !== 'PENDING') return null;
-  const targetClientId = row.target_client_id == null ? null : String(row.target_client_id).slice(0, 160);
+  const targetValue = row.target_client_id !== undefined ? row.target_client_id : row.client;
+  const targetClientId = targetValue == null ? null : String(targetValue).slice(0, 160);
   return Object.freeze({ target_client_id: targetClientId });
 }
 
