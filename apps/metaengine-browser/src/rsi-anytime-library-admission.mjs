@@ -511,9 +511,10 @@ export function verifyRsiAnytimeLibraryAdmissionProposal(row, args = {}) {
   if (canonical.admission_proposal_digest !== exactDigest(row.admission_proposal_digest, 'admission_proposal')) {
     throw new Error('rsi_phase34_admission_proposal_digest_mismatch');
   }
+  const rowSuccessor = verifyRsiVerifiedSkillLibrary(row.proposed_successor_library);
   if (
-    canonical.proposed_successor_library.library_digest
-    !== row.proposed_successor_library?.library_digest
+    canonical.proposed_successor_library.library_digest !== rowSuccessor.library_digest
+    || canonical.proposed_successor_library.entry_count !== rowSuccessor.entry_count
   ) {
     throw new Error('rsi_phase34_successor_library_digest_mismatch');
   }
