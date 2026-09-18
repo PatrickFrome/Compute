@@ -3233,6 +3233,17 @@ test('Phase34 builds only an append-only successor-library proposal and preserve
   assert.equal(fx.proposal.authority_effect,false);
 });
 
+test('Phase34 verification rejects a forged successor-library payload even when attacker preserves the advertised digest',()=>{
+  const fx=phase34Fixture('forged-successor');
+  const forged=structuredClone(fx.proposal);
+  forged.proposed_successor_library.entries=[];
+  forged.proposed_successor_library.entry_count=0;
+  assert.throws(
+    ()=>verifyRsiAnytimeLibraryAdmissionProposal(forged,fx.proposalArgs),
+    /skill_library_entries_invalid|successor_library_digest_mismatch/,
+  );
+});
+
 test('Phase34 source qualification requires the exact seven terminal workflows on one exact head',()=>{
   const good=phase34SourceQualification('source-good');
   assert.equal(verifyRsiPhase33SourceQualification(good).qualification_digest,good.qualification_digest);
