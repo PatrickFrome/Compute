@@ -247,6 +247,60 @@ test('library append does not imply activation and one external shadow evidence 
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
+
+test('exact library CAS rejects stale append preconditions before any adoption effect',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-library-cas-'));
+  try{
+    const first=verifiedSkill({id:'skill.runtime.cas.first',source:'b',impl:'c'});
+    const second=verifiedSkill({id:'skill.runtime.cas.second',source:'c',impl:'d'});
+    const store=new RsiRuntimeSkillLifecycle({statePath:path.join(root,'skill-state.json'),source_sha:SOURCE});
+    await store.init();
+
+    await assert.rejects(()=>store.adoptVerifiedLibrary({
+      library:library([first],'runtime.skill.library.cas'),
+      expected_current_library_digest:d('f'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/cas_requires_current_library/);
+
+    const initial=await store.adoptVerifiedLibrary({
+      library:library([first],'runtime.skill.library.cas'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(initial.cas_checked,false);
+    const before=store.verifiedLibrarySnapshot();
+
+    const successor=library([first,second],'runtime.skill.library.cas');
+    await assert.rejects(()=>store.adoptVerifiedLibrary({
+      library:successor,
+      expected_current_library_digest:d('f'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/cas_mismatch/);
+    assert.equal(store.verifiedLibrarySnapshot().library_digest,before.library_digest);
+    assert.equal(store.verifiedLibrarySnapshot().entry_count,1);
+
+    const applied=await store.adoptVerifiedLibrary({
+      library:successor,
+      expected_current_library_digest:before.library_digest,
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(applied.state,'ADOPTED');
+    assert.equal(applied.cas_checked,true);
+    assert.equal(store.verifiedLibrarySnapshot().library_digest,successor.library_digest);
+    assert.equal(store.verifiedLibrarySnapshot().entry_count,2);
+
+    await assert.rejects(()=>store.adoptVerifiedLibrary({
+      library:successor,
+      expected_current_library_digest:before.library_digest,
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/cas_mismatch/);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
+});
+
 test('candidate-authored lifecycle evidence and unrouted attribution fail closed',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-authority-'));
   try{
@@ -367,6 +421,7 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   const root=rsiRuntimeSkillLifecycleTrustRootSnapshot();
   assert.equal(root.verified_library_required,true);
   assert.equal(root.library_updates_append_only,true);
+  assert.equal(root.exact_library_digest_cas_supported,true);
   assert.equal(root.independently_credited_outcomes_only,true);
   assert.equal(root.contextual_credit_not_global_truth,true);
   assert.equal(root.candidate_can_write_lifecycle,false);
