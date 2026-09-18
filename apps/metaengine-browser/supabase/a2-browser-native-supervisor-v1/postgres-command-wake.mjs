@@ -25,10 +25,10 @@ function parseWakePayload(value) {
   let row;
   try { row = JSON.parse(String(value || '')); } catch { return null; }
   if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
-  if (String(row.tbl || '') !== COMMAND_TABLE) return null;
+  if (String(row.table || '') !== COMMAND_TABLE) return null;
   if (String(row.status || '').toUpperCase() !== 'PENDING') return null;
-  const client = row.client == null ? null : String(row.client).slice(0, 160);
-  return Object.freeze({ client });
+  const targetClientId = row.target_client_id == null ? null : String(row.target_client_id).slice(0, 160);
+  return Object.freeze({ target_client_id: targetClientId });
 }
 
 export function createPostgresCommandWakeHub({
@@ -44,6 +44,7 @@ export function createPostgresCommandWakeHub({
   let listenerHandle = null;
   let lastError = null;
   let started = false;
+  let listenGeneration = 0;
 
   const settleWaiter = (id, reason) => {
     const row = waiters.get(id);
@@ -61,9 +62,18 @@ export function createPostgresCommandWakeHub({
     const wake = parseWakePayload(payload);
     if (!wake) return;
     for (const [id, row] of waiters) {
-      if (wake.client && wake.client !== row.clientId) continue;
+      if (wake.target_client_id && wake.target_client_id !== row.clientId) continue;
       settleWaiter(id, 'POSTGRES_NOTIFY');
     }
+  };
+
+  const onListenReady = () => {
+    listenGeneration += 1;
+    if (listenGeneration <= 1) return;
+    // LISTEN/NOTIFY has no history. A reconnect therefore means a notification
+    // could have been lost while the socket was down. Wake every bounded waiter
+    // once so callers immediately re-read the durable lease queue.
+    for (const id of [...waiters.keys()]) settleWaiter(id, 'POSTGRES_RELISTEN');
   };
 
   async function start() {
@@ -71,7 +81,7 @@ export function createPostgresCommandWakeHub({
     if (startPromise) return startPromise;
     startPromise = (async () => {
       try {
-        const handle = await listen(channel, onNotify);
+        const handle = await listen(channel, onNotify, onListenReady);
         listenerHandle = handle || null;
         started = true;
         lastError = null;
@@ -151,6 +161,7 @@ export function createPostgresCommandWakeHub({
         waiter_count: waiters.size,
         last_error: lastError,
         max_waiters: boundedMaxWaiters,
+        listen_generation: listenGeneration,
       });
     },
     authority_effect: false,
