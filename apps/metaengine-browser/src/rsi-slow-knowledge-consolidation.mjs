@@ -32,6 +32,7 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_consolidation_${l}_sha_invalid`);return x;}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_consolidation_${l}_digest_invalid`);return x;}
 function id(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_consolidation_${l}_invalid`);return x;}
+function positiveInt(v,l,max=1_000_000){const n=Number(v);if(!Number.isSafeInteger(n)||n<1||n>max)throw new Error(`rsi_consolidation_${l}_invalid`);return n;}
 function tags(v,l){
   if(!Array.isArray(v)||v.length<1||v.length>16)throw new Error(`rsi_consolidation_${l}_invalid`);
   const out=[...new Set(v.map(x=>String(x||'').trim().toUpperCase()))].sort();
@@ -75,29 +76,45 @@ function normalizeSourceRows(rows){
   const checked=rows.map(verifySourceRow);
   const sourceSha=checked[0].entry.source_sha;
   const generation=checked[0].entry.evaluator_generation_digest;
+  const generationSeq=positiveInt(checked[0].entry.evaluator_generation_seq,'generation_seq');
+  const generationAnchor=exactDigest(checked[0].entry.evaluator_generation_history_anchor_digest,'generation_history_anchor');
   const epoch=checked[0].entry.evaluation_epoch_digest;
+  const epochSeq=positiveInt(checked[0].entry.evaluation_epoch_seq,'epoch_seq');
   const kind=checked[0].entry.learning_kind;
   if(!KNOWLEDGE_CLASSES.has(kind))throw new Error('rsi_consolidation_knowledge_class_invalid');
-  const ids=new Set(), receipts=new Set(), candidates=new Set();
+  const ids=new Set(), receipts=new Set(), candidates=new Set(), provenanceRoots=new Set();
+  const sealedAcceptance=new Set(), differentialReferences=new Set(), counterevidence=new Set();
   for(const row of checked){
     const e=row.entry;
     if(e.source_sha!==sourceSha)throw new Error('rsi_consolidation_source_sha_mismatch');
-    if(e.evaluator_generation_digest!==generation)throw new Error('rsi_consolidation_cross_generation_forbidden');
-    if(e.evaluation_epoch_digest!==epoch)throw new Error('rsi_consolidation_cross_epoch_forbidden');
+    if(e.evaluator_generation_digest!==generation||e.evaluator_generation_seq!==generationSeq)throw new Error('rsi_consolidation_cross_generation_forbidden');
+    if(e.evaluator_generation_history_anchor_digest!==generationAnchor)throw new Error('rsi_consolidation_generation_history_anchor_mismatch');
+    if(e.evaluation_epoch_digest!==epoch||e.evaluation_epoch_seq!==epochSeq)throw new Error('rsi_consolidation_cross_epoch_forbidden');
     if(e.learning_kind!==kind)throw new Error('rsi_consolidation_mixed_learning_kind_forbidden');
     if(ids.has(e.entry_digest)||receipts.has(e.experiment_receipt_digest))throw new Error('rsi_consolidation_duplicate_source_evidence');
     ids.add(e.entry_digest);receipts.add(e.experiment_receipt_digest);candidates.add(e.candidate_artifact_digest);
+    provenanceRoots.add(exactDigest(e.provenance_root_digest,'source_provenance_root'));
+    counterevidence.add(exactDigest(e.counterevidence_digest,'source_counterevidence'));
+    if(e.sealed_exogenous_acceptance_digest)sealedAcceptance.add(exactDigest(e.sealed_exogenous_acceptance_digest,'source_sealed_acceptance'));
+    if(e.differential_reference_digest)differentialReferences.add(exactDigest(e.differential_reference_digest,'source_differential_reference'));
   }
   if(candidates.size<2)throw new Error('rsi_consolidation_source_diversity_required');
   return Object.freeze({
     rows:Object.freeze(checked),
     source_sha:sourceSha,
     evaluator_generation_digest:generation,
+    evaluator_generation_seq:generationSeq,
+    evaluator_generation_history_anchor_digest:generationAnchor,
     evaluation_epoch_digest:epoch,
+    evaluation_epoch_seq:epochSeq,
     knowledge_class:kind,
     source_entry_digests:Object.freeze([...ids].sort()),
     source_receipt_digests:Object.freeze([...receipts].sort()),
     source_candidate_digests:Object.freeze([...candidates].sort()),
+    source_provenance_root_digests:Object.freeze([...provenanceRoots].sort()),
+    source_sealed_acceptance_digests:Object.freeze([...sealedAcceptance].sort()),
+    source_differential_reference_digests:Object.freeze([...differentialReferences].sort()),
+    source_counterevidence_digests:Object.freeze([...counterevidence].sort()),
   });
 }
 
@@ -132,11 +149,18 @@ export function createRsiKnowledgeConsolidationProposal({
     proposal_id:id(proposal_id,'proposal_id'),
     source_sha:exactSha(source.source_sha,'source'),
     evaluator_generation_digest:source.evaluator_generation_digest,
+    evaluator_generation_seq:source.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:source.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:source.evaluation_epoch_digest,
+    evaluation_epoch_seq:source.evaluation_epoch_seq,
     knowledge_class:source.knowledge_class,
     source_entry_digests:source.source_entry_digests,
     source_experiment_receipt_digests:source.source_receipt_digests,
     source_candidate_artifact_digests:source.source_candidate_digests,
+    source_provenance_root_digests:source.source_provenance_root_digests,
+    source_sealed_acceptance_digests:source.source_sealed_acceptance_digests,
+    source_differential_reference_digests:source.source_differential_reference_digests,
+    source_counterevidence_digests:source.source_counterevidence_digests,
     source_entry_count:source.source_entry_digests.length,
     source_candidate_count:source.source_candidate_digests.length,
     consolidation_tags:tags(consolidation_tags,'tags'),
@@ -149,9 +173,18 @@ export function createRsiKnowledgeConsolidationProposal({
     external_scope_owner:true,
     authored_by_candidate:false,
     same_evaluator_generation_required:true,
+    same_evaluator_generation_sequence_required:true,
+    generation_history_anchor_required:true,
     same_evaluation_epoch_required:true,
+    same_evaluation_epoch_sequence_required:true,
+    cross_generation_consolidation_allowed:false,
+    cross_generation_revalidation_required_before_new_proposal:true,
     source_diversity_required:true,
     source_evidence_preserved_by_digest:true,
+    source_provenance_roots_preserved:true,
+    source_external_acceptance_evidence_preserved:true,
+    source_counterevidence_preserved:true,
+    slow_loop_distinct_from_fast_candidate_loop:true,
     raw_source_trajectory_copied:false,
     raw_hidden_holdout_copied:false,
     raw_evaluator_assets_copied:false,
@@ -169,8 +202,13 @@ export function verifyRsiKnowledgeConsolidationProposal(proposal,{source_rows}={
   if(!proposal||proposal.schema!==RSI_KNOWLEDGE_CONSOLIDATION_PROPOSAL_SCHEMA||proposal.version!==1)throw new Error('rsi_consolidation_proposal_invalid');
   assertZero(proposal,'proposal');
   if(proposal.external_consolidator!==true||proposal.external_scope_owner!==true||proposal.authored_by_candidate!==false
-    ||proposal.same_evaluator_generation_required!==true||proposal.same_evaluation_epoch_required!==true
+    ||proposal.same_evaluator_generation_required!==true||proposal.same_evaluator_generation_sequence_required!==true
+    ||proposal.generation_history_anchor_required!==true||proposal.same_evaluation_epoch_required!==true
+    ||proposal.same_evaluation_epoch_sequence_required!==true||proposal.cross_generation_consolidation_allowed!==false
+    ||proposal.cross_generation_revalidation_required_before_new_proposal!==true
     ||proposal.source_diversity_required!==true||proposal.source_evidence_preserved_by_digest!==true
+    ||proposal.source_provenance_roots_preserved!==true||proposal.source_external_acceptance_evidence_preserved!==true
+    ||proposal.source_counterevidence_preserved!==true||proposal.slow_loop_distinct_from_fast_candidate_loop!==true
     ||proposal.raw_source_trajectory_copied!==false||proposal.raw_hidden_holdout_copied!==false
     ||proposal.raw_evaluator_assets_copied!==false||proposal.proposal_can_write_skill_library!==false
     ||proposal.proposal_can_write_experience_graph!==false||proposal.proposal_can_modify_meta_skill_profile!==false
@@ -277,7 +315,10 @@ export function createRsiKnowledgeTransferValidation({
     source_sha:proposal.source_sha,
     proposal_digest:proposal.proposal_digest,
     evaluator_generation_digest:proposal.evaluator_generation_digest,
+    evaluator_generation_seq:proposal.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:proposal.evaluator_generation_history_anchor_digest,
     source_evaluation_epoch_digest:proposal.evaluation_epoch_digest,
+    source_evaluation_epoch_seq:proposal.evaluation_epoch_seq,
     knowledge_class:proposal.knowledge_class,
     heldout_context_digest:roots[0],
     heldout_task_set_digest:roots[1],
@@ -390,7 +431,10 @@ export function createRsiKnowledgeConsolidationAdmission({
     source_sha:proposal.source_sha,
     proposal_digest:proposal.proposal_digest,
     evaluator_generation_digest:proposal.evaluator_generation_digest,
+    evaluator_generation_seq:proposal.evaluator_generation_seq,
+    evaluator_generation_history_anchor_digest:proposal.evaluator_generation_history_anchor_digest,
     evaluation_epoch_digest:proposal.evaluation_epoch_digest,
+    evaluation_epoch_seq:proposal.evaluation_epoch_seq,
     knowledge_class:proposal.knowledge_class,
     validation_digests:Object.freeze(checked.map(v=>v.validation_digest).sort()),
     target_context_digests:Object.freeze([...contexts].sort()),
@@ -557,9 +601,18 @@ export function rsiSlowKnowledgeConsolidationTrustRootSnapshot(){
     max_source_entries:MAX_SOURCE_ROWS,
     source_candidate_diversity_required:true,
     same_evaluator_generation_required:true,
+    same_evaluator_generation_sequence_required:true,
+    generation_history_anchor_required:true,
     same_evaluation_epoch_required:true,
+    same_evaluation_epoch_sequence_required:true,
+    cross_generation_consolidation_allowed:false,
+    cross_generation_revalidation_required_before_new_proposal:true,
     mixed_learning_kind_forbidden:true,
     source_evidence_preserved_by_digest:true,
+    source_provenance_roots_preserved:true,
+    source_external_acceptance_evidence_preserved:true,
+    source_counterevidence_preserved:true,
+    slow_loop_distinct_from_fast_candidate_loop:true,
     raw_trajectory_copy_forbidden:true,
     raw_hidden_holdout_copy_forbidden:true,
     raw_evaluator_assets_copy_forbidden:true,
