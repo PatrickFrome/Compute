@@ -64,6 +64,7 @@ import { createRsiVerifierEvolutionAdmission, rsiVerifierEvolutionAdmissionTrust
 import { createRsiVerifierShadowQualification, rsiVerifierShadowQualificationTrustRootSnapshot } from './rsi-verifier-shadow-qualification.mjs';
 import { createRsiVerifierRootChangeReview, rsiVerifierRootChangeReviewTrustRootSnapshot } from './rsi-verifier-root-change-review.mjs';
 import { createRsiVerifierRootStagingReview, rsiVerifierRootStagingTrustRootSnapshot } from './rsi-verifier-root-staging.mjs';
+import { createRsiVerifierRootActivationPrepareReview, rsiVerifierRootActivationPrepareTrustRootSnapshot } from './rsi-verifier-root-activation-prepare.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -151,6 +152,7 @@ function trustRoots() {
     verifier_shadow_qualification: rsiVerifierShadowQualificationTrustRootSnapshot(),
     verifier_root_change_review: rsiVerifierRootChangeReviewTrustRootSnapshot(),
     verifier_root_staging: rsiVerifierRootStagingTrustRootSnapshot(),
+    verifier_root_activation_prepare: rsiVerifierRootActivationPrepareTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1472,6 +1474,49 @@ export class RsiRuntimeService {
       root_change_authorized: false,
       verifier_activation_authorized: false,
       root_activation_token: null,
+      second_scheduler_created: false,
+      authority_effect: false,
+    });
+    return review;
+  }
+
+  async recordVerifierRootActivationPrepareReview({
+    review_id,
+    prepare,
+    readiness_receipts,
+    external_review_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const review = createRsiVerifierRootActivationPrepareReview({
+      review_id,
+      prepare,
+      readiness_receipts,
+      external_review_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('VERIFIER_ROOT_ACTIVATION_PREPARE_REVIEW_RECORDED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      prepare_digest: review.prepare_digest,
+      staging_review_digest: review.staging_review_digest,
+      staging_bundle_digest: review.staging_bundle_digest,
+      current_root_generation: review.current_root_generation,
+      prepared_root_generation: review.prepared_root_generation,
+      predecessor_verifier_root_digest: review.predecessor_verifier_root_digest,
+      candidate_verifier_root_digest: review.candidate_verifier_root_digest,
+      next_root_history_digest: review.next_root_history_digest,
+      readiness_domains: review.readiness_domains,
+      readiness_receipt_digests: review.readiness_receipt_digests,
+      all_readiness_domains_pass: review.all_readiness_domains_pass,
+      state: review.state,
+      prepared_for_external_root_activation_commit_review: review.prepared_for_external_root_activation_commit_review,
+      active_verifier_root_digest: review.active_verifier_root_digest,
+      candidate_role: 'LEARNER_NON_AUTHORITATIVE',
+      predecessor_retirement_authorized: false,
+      root_activation_commit_authorized: false,
+      verifier_activation_authorized: false,
+      activation_commit_token: null,
       second_scheduler_created: false,
       authority_effect: false,
     });
