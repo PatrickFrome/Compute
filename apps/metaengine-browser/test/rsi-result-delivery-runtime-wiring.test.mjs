@@ -106,3 +106,16 @@ test('RSI outcome sidecar remains observability-only and nonblocking', async () 
   const run = source.slice(runStart, runEnd);
   assert.doesNotMatch(run, /await this\.#scheduleRsiOutcomeReadback/);
 });
+
+
+test('single-command immutable receipts carry the classified effect identity needed for trusted credit binding', async () => {
+  const source = await nativeSource();
+  const start = source.indexOf('async #postResult(command, ok, result, error = null, effectOutcome = null)');
+  const end = source.indexOf('async #postBatchResults', start);
+  assert.ok(start >= 0 && end > start, 'single-result receipt boundary missing');
+  const single = source.slice(start, end);
+  assert.match(single, /const receiptDescriptor = classifyNativeSupervisorCommand\(command\)/);
+  assert.match(single, /lane: receiptDescriptor\.lane/);
+  assert.match(single, /effect_key: receiptDescriptor\.effect_key/);
+  assert.match(single, /authority_effect: false/);
+});
