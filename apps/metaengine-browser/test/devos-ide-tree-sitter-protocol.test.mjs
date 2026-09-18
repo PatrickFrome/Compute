@@ -58,7 +58,8 @@ test('open source is bounded and requires worker digest readback', () => {
 test('Monaco edit does not grant renderer byte-offset authority', () => {
   const edit=validateDevOSTreeSitterMonacoEdit({start:{line_number:2,column:4},end:{line_number:2,column:7},replacement_text:'π'});
   assert.equal(edit.replacement_utf8_bytes,2);
-  assert.equal(edit.renderer_byte_offsets_trusted,false);
+  assert.equal(edit.replacement_utf16_code_units,1);
+  assert.equal(edit.renderer_edit_indices_trusted,false);
   assert.equal(edit.renderer_tree_points_trusted,false);
   assert.throws(()=>validateDevOSTreeSitterMonacoEdit({start:{line_number:3,column:1},end:{line_number:2,column:1},replacement_text:''}),/range_invalid/);
 });
@@ -66,25 +67,28 @@ test('Monaco edit does not grant renderer byte-offset authority', () => {
 test('incremental edit requires same identity, revision +1 and changed digest', () => {
   const value=validateDevOSTreeSitterEditRequest({schema:'metaengine.devos.tree-sitter.edit.v1',protocol_version:1,request_id:'e1',previous_document:doc(),next_document:doc({revision:12,source_sha256:'sha256:'+'c'.repeat(64)}),parser:parser(),edit:{start:{line_number:1,column:1},end:{line_number:1,column:1},replacement_text:'x'}});
   assert.equal(value.edit_count,1);
-  assert.equal(value.worker_byte_mapping_required,true);
+  assert.equal(value.worker_code_unit_mapping_required,true);
   assert.equal(value.old_tree_edit_before_parse_required,true);
   assert.throws(()=>validateDevOSTreeSitterEditRequest({schema:'metaengine.devos.tree-sitter.edit.v1',protocol_version:1,request_id:'gap',previous_document:doc(),next_document:doc({revision:13,source_sha256:'sha256:'+'c'.repeat(64)}),parser:parser(),edit:{start:{line_number:1,column:1},end:{line_number:1,column:1},replacement_text:'x'}}),/revision_gap/);
 });
 
-test('worker-derived edit uses UTF-8 byte indices and byte columns', () => {
-  const value=validateDevOSTreeSitterDerivedEditReceipt({schema:'metaengine.devos.tree-sitter.derived-edit.v1',protocol_version:1,previous_document:doc(),next_document:doc({revision:12,source_sha256:'sha256:'+'c'.repeat(64)}),start_index:10,old_end_index:13,new_end_index:12,start_position:{row:0,column:10},old_end_position:{row:0,column:13},new_end_position:{row:0,column:12},replacement_utf8_bytes:2,worker_source_sha256_verified:true});
-  assert.equal(value.byte_offsets_are_utf8,true);
-  assert.equal(value.tree_point_columns_are_bytes,true);
-  assert.throws(()=>validateDevOSTreeSitterDerivedEditReceipt({schema:'metaengine.devos.tree-sitter.derived-edit.v1',protocol_version:1,previous_document:doc(),next_document:doc({revision:12,source_sha256:'sha256:'+'c'.repeat(64)}),start_index:10,old_end_index:13,new_end_index:14,start_position:{row:0,column:10},old_end_position:{row:0,column:13},new_end_position:{row:0,column:14},replacement_utf8_bytes:2,worker_source_sha256_verified:true}),/byte_edit/);
+test('worker-derived edit uses web-binding UTF-16 units while retaining UTF-8 byte metadata', () => {
+  const value=validateDevOSTreeSitterDerivedEditReceipt({schema:'metaengine.devos.tree-sitter.derived-edit.v1',protocol_version:1,previous_document:doc(),next_document:doc({revision:12,source_sha256:'sha256:'+'c'.repeat(64)}),start_index:10,old_end_index:13,new_end_index:11,start_position:{row:0,column:10},old_end_position:{row:0,column:13},new_end_position:{row:0,column:11},replacement_utf8_bytes:2,replacement_utf16_code_units:1,worker_source_sha256_verified:true});
+  assert.equal(value.replacement_utf8_bytes,2);
+  assert.equal(value.replacement_utf16_code_units,1);
+  assert.equal(value.edit_indices_are_utf16_code_units,true);
+  assert.equal(value.tree_point_columns_are_utf16_code_units,true);
+  assert.equal(value.wasm_shim_converts_code_units_to_core_bytes,true);
+  assert.throws(()=>validateDevOSTreeSitterDerivedEditReceipt({schema:'metaengine.devos.tree-sitter.derived-edit.v1',protocol_version:1,previous_document:doc(),next_document:doc({revision:12,source_sha256:'sha256:'+'c'.repeat(64)}),start_index:10,old_end_index:13,new_end_index:14,start_position:{row:0,column:10},old_end_position:{row:0,column:13},new_end_position:{row:0,column:14},replacement_utf8_bytes:2,replacement_utf16_code_units:1,worker_source_sha256_verified:true}),/code_unit_edit/);
 });
 
 test('ambiguous continuity falls back to full reparse, never guessed incremental reuse', () => {
   const previous=doc(), next=doc({revision:12,source_sha256:'sha256:'+'c'.repeat(64)});
-  const base={previous_document:previous,next_document:next,previous_parser:parser(),next_parser:parser(),edit_count:1,old_tree_available:true,byte_mapping_verified:true};
+  const base={previous_document:previous,next_document:next,previous_parser:parser(),next_parser:parser(),edit_count:1,old_tree_available:true,code_unit_mapping_verified:true};
   assert.equal(classifyDevOSTreeSitterIncrementalEligibility(base).state,'INCREMENTAL_ALLOWED');
   assert.equal(classifyDevOSTreeSitterIncrementalEligibility({...base,edit_count:2}).reason,'EDIT_BATCH_NOT_SINGLE');
   assert.equal(classifyDevOSTreeSitterIncrementalEligibility({...base,old_tree_available:false}).reason,'OLD_TREE_MISSING');
-  assert.equal(classifyDevOSTreeSitterIncrementalEligibility({...base,byte_mapping_verified:false}).reason,'BYTE_MAPPING_UNVERIFIED');
+  assert.equal(classifyDevOSTreeSitterIncrementalEligibility({...base,code_unit_mapping_verified:false}).reason,'CODE_UNIT_MAPPING_UNVERIFIED');
   assert.equal(classifyDevOSTreeSitterIncrementalEligibility({...base,next_parser:parser({worker_generation:6})}).reason,'PARSER_DRIFT');
   assert.equal(classifyDevOSTreeSitterIncrementalEligibility({...base,next_document:doc({revision:14,source_sha256:'sha256:'+'c'.repeat(64)})}).reason,'REVISION_GAP');
 });
@@ -100,6 +104,9 @@ test('source digest mismatch is fail-closed and non-retry-authoritative', () => 
 test('protocol preserves Development OS authority invariants', () => {
   assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.multiple_edits_require_full_reparse,true);
   assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.mapping_ambiguity_requires_full_reparse,true);
+  assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.tree_sitter_edit_indices,'WEB_BINDING_UTF16_CODE_UNITS');
+  assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.tree_sitter_point_columns,'WEB_BINDING_UTF16_CODE_UNITS');
+  assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.wasm_core_bridge,'CODE_UNIT_TO_BYTE_IN_BINDING_WEB_SHIM');
   assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.renderer_supplied_wasm_url_allowed,false);
   assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.renderer_supplied_query_allowed,false);
   assert.equal(DEVOS_TREE_SITTER_PROTOCOL_CONTRACT.second_scheduler_allowed,false);
