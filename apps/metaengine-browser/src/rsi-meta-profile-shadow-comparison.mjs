@@ -555,8 +555,8 @@ export class RsiMetaProfileShadowComparisonLedger {
     return this.snapshot();
   }
 
-  async #persist() {
-    const state = ledgerState(this.#sourceSha, this.#bindings, this.#comparisons);
+  async #persist(bindings = this.#bindings, comparisons = this.#comparisons) {
+    const state = ledgerState(this.#sourceSha, bindings, comparisons);
     const temp = `${this.#path}.tmp`;
     const handle = await fs.open(temp, 'w', 0o600);
     try {
@@ -578,8 +578,9 @@ export class RsiMetaProfileShadowComparisonLedger {
       return zeroAuthority({ state: 'IDEMPOTENT', binding_digest: checked.binding_digest });
     }
     if (this.#bindings.length >= MAX_ROWS) throw new Error('rsi_meta_comparison_ledger_capacity_exceeded');
-    this.#bindings.push(structuredClone(checked));
-    await this.#persist();
+    const nextBindings = [...this.#bindings, structuredClone(checked)];
+    await this.#persist(nextBindings, this.#comparisons);
+    this.#bindings = nextBindings;
     return zeroAuthority({ state: 'SHADOW_BOUND', binding_digest: checked.binding_digest });
   }
 
@@ -596,8 +597,9 @@ export class RsiMetaProfileShadowComparisonLedger {
       return zeroAuthority({ state: 'IDEMPOTENT', comparison_digest: checked.comparison_digest });
     }
     if (this.#comparisons.length >= MAX_ROWS) throw new Error('rsi_meta_comparison_ledger_capacity_exceeded');
-    this.#comparisons.push(structuredClone(checked));
-    await this.#persist();
+    const nextComparisons = [...this.#comparisons, structuredClone(checked)];
+    await this.#persist(this.#bindings, nextComparisons);
+    this.#comparisons = nextComparisons;
     return zeroAuthority({ state: 'COMPARISON_RECORDED', comparison_digest: checked.comparison_digest });
   }
 

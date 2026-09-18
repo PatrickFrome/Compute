@@ -277,6 +277,55 @@ test('ledger rejects self-rehashed rows that weaken policy', async (t) => {
   await assert.rejects(() => ledger.addComparison(badComparison), /comparison_.*invalid|receipt_policy_invalid/);
 });
 
+
+
+test('failed durable binding write does not advance visible comparison ledger state', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-qd-shadow-binding-fail-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const fx = fixture();
+  const statePath = path.join(root, 'comparison.json');
+  const ledger = new RsiMetaProfileShadowComparisonLedger({ statePath, source_sha: SOURCE });
+  await ledger.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(() => ledger.addBinding(fx.binding));
+  assert.equal(ledger.snapshot().binding_count, 0);
+  assert.equal(ledger.snapshot().comparison_count, 0);
+});
+
+test('failed durable comparison write preserves only the previously committed binding', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-qd-shadow-comparison-fail-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const fx = fixture();
+  const comparison = createRsiMetaProfileDualPlanComparison({
+    comparison_id: 'qd.comparison.persist.fail',
+    binding: fx.binding,
+    selection: fx.selection,
+    selected_qualification: fx.selected,
+    champion_plan_digest: dg({ plan: 'champion-fail' }),
+    challenger_plan_digest: dg({ plan: 'challenger-fail' }),
+    champion_projection_digest: dg({ projection: 'champion-fail' }),
+    challenger_projection_digest: dg({ projection: 'challenger-fail' }),
+    hard_invariants_pass: true,
+    incident_observed: false,
+    divergence_kind: 'ROUTING_DECISION',
+    evidence_digest: dg({ evidence: 'persist-fail' }),
+    evidence_refs: ['shadow:comparison:persist-fail'],
+    external_comparator: true,
+    authored_by_candidate: false,
+  });
+  const statePath = path.join(root, 'comparison.json');
+  const ledger = new RsiMetaProfileShadowComparisonLedger({ statePath, source_sha: SOURCE });
+  await ledger.init();
+  await ledger.addBinding(fx.binding);
+  assert.equal(ledger.snapshot().binding_count, 1);
+
+  await fs.unlink(statePath);
+  await fs.mkdir(statePath);
+  await assert.rejects(() => ledger.addComparison(comparison));
+  assert.equal(ledger.snapshot().binding_count, 1);
+  assert.equal(ledger.snapshot().comparison_count, 0);
+});
 test('trust root keeps comparison external, read-only and separate from future canary admission', () => {
   const root = rsiMetaProfileShadowComparisonTrustRootSnapshot();
   assert.equal(root.phase18_qd_selection_required, true);
