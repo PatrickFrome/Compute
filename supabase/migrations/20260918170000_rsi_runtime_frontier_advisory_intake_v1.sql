@@ -190,6 +190,18 @@ begin
       'rsi_hypothesis_digest',v_hypothesis ->> 'hypothesis_digest',
       'rsi_hypothesis',v_hypothesis,
       'rsi_experiment_plan',v_plan,
+      'required_result_schema','metaengine.rsi.frontier-review-result.v1',
+      'review_result_contract',jsonb_build_object(
+        'verdict_required','ACCEPT',
+        'external_reviewer_required',true,
+        'authored_by_candidate',false,
+        'candidate_materialization_performed',false,
+        'implementation_dispatched',false,
+        'review_is_execution_authority',false,
+        'exact_hypothesis_plan_mutation_binding_required',true,
+        'mutation_contract_required',true,
+        'authority_effect',false
+      ),
       'claim_class','ADVISORY',
       'requires_independent_review',true,
       'candidate_materialization_allowed',false,
