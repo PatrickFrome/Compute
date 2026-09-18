@@ -235,6 +235,7 @@ test('promotion gate independently rejects candidate mutation of promotion and s
     'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
     'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
     'apps/metaengine-browser/src/rsi-generation-scoped-outcome-frontier.mjs',
+    'apps/metaengine-browser/src/rsi-slow-knowledge-consolidation.mjs',
     'apps/metaengine-browser/src/self-update-runtime.mjs',
   ]) {
     const candidateHandoff = handoff(path);
