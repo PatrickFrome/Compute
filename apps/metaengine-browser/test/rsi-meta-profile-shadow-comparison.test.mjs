@@ -240,6 +240,43 @@ test('comparison ledger is append-only, source-fenced and restart durable', asyn
   assert.equal((await restored.addComparison(comparison)).state, 'IDEMPOTENT');
 });
 
+test('ledger rejects self-rehashed rows that weaken policy', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-rsi-qd-shadow-policy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const fx = fixture();
+  const statePath = path.join(root, 'comparison.json');
+  const ledger = new RsiMetaProfileShadowComparisonLedger({ statePath, source_sha: SOURCE });
+  await ledger.init();
+
+  const badBindingCore = { ...fx.binding, plan_execution_allowed: true };
+  delete badBindingCore.binding_digest;
+  const badBinding = { ...badBindingCore, binding_digest: dg(badBindingCore) };
+  await assert.rejects(() => ledger.addBinding(badBinding), /binding_policy_invalid/);
+
+  await ledger.addBinding(fx.binding);
+  const comparison = createRsiMetaProfileDualPlanComparison({
+    comparison_id: 'qd.comparison.policy',
+    binding: fx.binding,
+    selection: fx.selection,
+    selected_qualification: fx.selected,
+    champion_plan_digest: dg({ plan: 'champion-policy' }),
+    challenger_plan_digest: dg({ plan: 'challenger-policy' }),
+    champion_projection_digest: dg({ projection: 'champion-policy' }),
+    challenger_projection_digest: dg({ projection: 'challenger-policy' }),
+    hard_invariants_pass: true,
+    incident_observed: false,
+    divergence_kind: 'ROUTING_DECISION',
+    evidence_digest: dg({ evidence: 'policy' }),
+    evidence_refs: ['shadow:comparison:policy'],
+    external_comparator: true,
+    authored_by_candidate: false,
+  });
+  const badComparisonCore = { ...comparison, canary_activation_authorized: true };
+  delete badComparisonCore.comparison_digest;
+  const badComparison = { ...badComparisonCore, comparison_digest: dg(badComparisonCore) };
+  await assert.rejects(() => ledger.addComparison(badComparison), /comparison_.*invalid|receipt_policy_invalid/);
+});
+
 test('trust root keeps comparison external, read-only and separate from future canary admission', () => {
   const root = rsiMetaProfileShadowComparisonTrustRootSnapshot();
   assert.equal(root.phase18_qd_selection_required, true);
