@@ -22,6 +22,7 @@ function exactSha(v,l){const o=String(v||'').trim().toLowerCase();if(!SHA40_RE.t
 function exactDigest(v,l){const o=String(v||'').trim().toLowerCase();if(!DIGEST_RE.test(o))throw new Error(`rsi_command_attribution_${l}_digest_invalid`);return o}
 function exactHash64(v,l){const o=String(v||'').trim().toLowerCase();if(!HASH64_RE.test(o))throw new Error(`rsi_command_attribution_${l}_hash_invalid`);return o}
 function uuid(v,l){const o=String(v||'').trim().toLowerCase();if(!UUID_RE.test(o))throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
+function positiveInt(v,l,max=1000000){const o=Number(v);if(!Number.isSafeInteger(o)||o<1||o>max)throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
 function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
 function token(v,l,{nullable=false}={}){if(nullable&&(v==null||v===''))return null;const o=String(v||'').trim().toUpperCase();if(!SAFE_TOKEN_RE.test(o))throw new Error(`rsi_command_attribution_${l}_invalid`);return o}
 function iso(v,l){const raw=String(v||'').trim();if(!raw||Number.isNaN(Date.parse(raw)))throw new Error(`rsi_command_attribution_${l}_invalid`);return new Date(raw).toISOString()}
@@ -34,9 +35,20 @@ export function createRsiCommandAttributionBinding({
   source_sha,command_id,action,platform=null,effect_key=null,
   task_id,task_signature_digest,environment_fingerprint,model_family,
   runtime_candidate_id,candidate_digest,candidate_sha,proposal_digest,skill_digests=[],
+  trajectory_id=null,step_index=null,step_count=null,predecessor_episode_digest=null,
   bound_at,external_planner=false,authored_by_candidate=true,
 }={}){
   if(external_planner!==true||authored_by_candidate!==false)throw new Error('rsi_command_attribution_external_planner_required');
+  const trajectoryPresent=trajectory_id!=null||step_index!=null||step_count!=null||predecessor_episode_digest!=null;
+  let trajectoryId=null,stepIndex=null,stepCount=null,predecessorDigest=null;
+  if(trajectoryPresent){
+    if(trajectory_id==null||step_index==null||step_count==null)throw new Error('rsi_command_attribution_trajectory_incomplete');
+    trajectoryId=boundedId(trajectory_id,'trajectory_id');
+    stepIndex=positiveInt(step_index,'step_index',10000);
+    stepCount=positiveInt(step_count,'step_count',10000);
+    if(stepIndex>stepCount)throw new Error('rsi_command_attribution_step_index_exceeds_count');
+    predecessorDigest=predecessor_episode_digest==null?null:exactDigest(predecessor_episode_digest,'predecessor_episode');
+  }
   const core={
     schema:RSI_COMMAND_ATTRIBUTION_BINDING_SCHEMA,version:1,
     source_sha:exactSha(source_sha,'source'),
@@ -54,6 +66,7 @@ export function createRsiCommandAttributionBinding({
     candidate_sha:exactSha(candidate_sha,'candidate'),
     proposal_digest:exactDigest(proposal_digest,'proposal'),
     skill_digests:skillDigests(skill_digests),
+    trajectory_id:trajectoryId,step_index:stepIndex,step_count:stepCount,predecessor_episode_digest:predecessorDigest,
     bound_at:iso(bound_at,'bound_at'),
     state:'BOUND',
     consumed_episode_digest:null,
@@ -79,7 +92,8 @@ export function verifyRsiCommandAttributionBinding(row){
     source_sha:row.source_sha,command_id:row.command_id,action:row.action,platform:row.platform,effect_key:row.effect_key,
     task_id:row.task_id,task_signature_digest:row.task_signature_digest,environment_fingerprint:row.environment_fingerprint,
     model_family:row.model_family,runtime_candidate_id:row.runtime_candidate_id,candidate_digest:row.candidate_record_digest,
-    candidate_sha:row.candidate_sha,proposal_digest:row.proposal_digest,skill_digests:row.skill_digests,bound_at:row.bound_at,
+    candidate_sha:row.candidate_sha,proposal_digest:row.proposal_digest,skill_digests:row.skill_digests,
+    trajectory_id:row.trajectory_id,step_index:row.step_index,step_count:row.step_count,predecessor_episode_digest:row.predecessor_episode_digest,bound_at:row.bound_at,
     external_planner:true,authored_by_candidate:false,
   });
   if(canonical.binding_digest!==exactDigest(row.binding_digest,'binding'))throw new Error('rsi_command_attribution_binding_digest_mismatch');
@@ -205,6 +219,7 @@ export function rsiCommandAttributionTrustRootSnapshot(){
     exact_command_binding_required:true,
     external_planner_required:true,
     candidate_evidence_id_derived_from_candidate_record_digest:true,
+    exact_trajectory_step_identity_supported:true,
     candidate_can_write_registry:false,binding_is_effect_authority:false,
     raw_command_payload_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
     consumed_binding_tombstones:true,
