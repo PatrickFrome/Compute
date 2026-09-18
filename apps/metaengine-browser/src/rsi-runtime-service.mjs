@@ -43,6 +43,7 @@ import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './
 import { RsiRuntimeImprovementFrontier, RSI_RUNTIME_IMPROVEMENT_FRONTIER_SCHEMA } from './rsi-runtime-improvement-frontier.mjs';
 import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
 import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
+import { RsiBrowserCommandAttributionRegistry, rsiBrowserCommandAttributionTrustRootSnapshot } from './rsi-browser-command-attribution-registry.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -108,6 +109,7 @@ function trustRoots() {
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
     browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
     episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
+    browser_command_attribution: rsiBrowserCommandAttributionTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -125,6 +127,7 @@ export class RsiRuntimeService {
   #experienceGate;
   #improvementFrontier;
   #episodes;
+  #commandAttributions;
   #archive;
   #observer;
   #verifiedArchive;
@@ -154,6 +157,7 @@ export class RsiRuntimeService {
       source_sha: this.#sourceSha,
       trust_root_set_digest: digest(this.#roots),
     });
+    this.#commandAttributions = new RsiBrowserCommandAttributionRegistry({ source_sha: this.#sourceSha });
   }
 
   async start() {
@@ -165,6 +169,7 @@ export class RsiRuntimeService {
       if (page.length === 0) break;
       for (const row of page) {
         if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
+        if (row?.payload?.command_attribution_event) this.#commandAttributions.apply(row.payload.command_attribution_event);
       }
       replayCursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -336,13 +341,52 @@ export class RsiRuntimeService {
     return candidate;
   }
 
+  async registerBrowserCommandAttribution(input = {}) {
+    this.#assertRunning();
+    const event = this.#commandAttributions.prepareRegister(input);
+    await this.#ledger.append('BROWSER_COMMAND_ATTRIBUTION_REGISTERED', {
+      command_attribution_event: event,
+      command_id: event.attribution.command_id,
+      attribution_digest: event.attribution.attribution_digest,
+      candidate_id: event.attribution.candidate_id,
+      candidate_sha: event.attribution.candidate_sha,
+      proposal_digest: event.attribution.proposal_digest,
+      producer: event.attribution.producer,
+      db_lease_is_execution_authority: true,
+      registry_is_execution_authority: false,
+      authority_effect: false,
+    });
+    return this.#commandAttributions.apply(event);
+  }
+
+  browserCommandAttribution(commandId) {
+    this.#assertRunning();
+    return this.#commandAttributions.lookup(commandId);
+  }
+
   async ingestBrowserOutcome({ readback, attribution } = {}) {
     this.#assertRunning();
+    const commandId = String(readback?.command_id || '').trim().toLowerCase();
+    const registered = commandId ? this.#commandAttributions.lookup(commandId) : null;
+    const candidateRequested = attribution?.candidate_id != null
+      || attribution?.candidate_sha != null
+      || attribution?.proposal_digest != null
+      || (Array.isArray(attribution?.skill_digests) && attribution.skill_digests.length > 0);
+    if (!registered && candidateRequested) {
+      throw new Error('rsi_runtime_candidate_attribution_requires_trusted_registry');
+    }
+    const effectiveAttribution = registered || attribution;
     const episode = createRsiBrowserOutcomeEpisode({
       source_sha: this.#sourceSha,
       readback,
-      attribution,
+      attribution: effectiveAttribution,
     });
+    const consumeEvent = registered
+      ? this.#commandAttributions.prepareConsume({
+        command_id: episode.command_id,
+        outcome_episode_digest: episode.episode_digest,
+      })
+      : null;
     await this.#ledger.append('BROWSER_OUTCOME_INGESTED', {
       episode_digest: episode.episode_digest,
       receipt_digest: episode.receipt_digest,
@@ -356,6 +400,9 @@ export class RsiRuntimeService {
       candidate_sha: episode.candidate_sha,
       proposal_digest: episode.proposal_digest,
       skill_digests: episode.skill_digests,
+      trusted_command_attribution_digest: registered?.attribution_digest || null,
+      trusted_command_attribution_producer: registered?.producer || null,
+      command_attribution_event: consumeEvent,
       eligible_for_experience_graph: episode.eligible_for_experience_graph,
       eligible_for_skill_evidence: episode.eligible_for_skill_evidence,
       quarantined: episode.quarantined,
@@ -364,6 +411,7 @@ export class RsiRuntimeService {
       physical_effect_replay_allowed: false,
       authority_effect: false,
     });
+    if (consumeEvent) this.#commandAttributions.apply(consumeEvent);
     this.#browserOutcomeCount += 1;
     if (episode.eligible_for_experience_graph) this.#browserOutcomeLearningEligibleCount += 1;
     if (episode.quarantined) this.#browserOutcomeQuarantinedCount += 1;
@@ -466,6 +514,7 @@ export class RsiRuntimeService {
       experience_gate: this.#experienceGate.snapshot(),
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
+      command_attribution_registry: this.#commandAttributions.snapshot(),
       browser_outcome_ingest: Object.freeze({
         terminal_receipt_readback_required: true,
         outcome_count: this.#browserOutcomeCount,
