@@ -194,6 +194,10 @@ export class RsiRuntimeSkillLifecycle{
     const rows=this.#materializeOne(item);await this.#persist();
     return zero({state:'APPLIED',applied:true,credit_receipt_digest:credit.receipt_digest,evidence_digests:rows.map(r=>r.evidence_digest)});
   }
+  verifiedLibrarySnapshot(){
+    this.#assertInit();
+    return this.#library ? structuredClone(this.#library) : null;
+  }
   governance(){
     this.#assertInit();if(!this.#library)return null;
     return createRsiSkillLibraryGovernance({
