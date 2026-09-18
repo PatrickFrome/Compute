@@ -63,6 +63,16 @@ import {
   applyRsiPostDeploymentUtilityAdmission,
   rsiPostDeploymentUtilityTrustRootSnapshot,
 } from '../src/rsi-post-deployment-utility.mjs';
+import {
+  createRsiPostDeploymentCorrectionAdmission,
+  verifyRsiPostDeploymentCorrectionAdmission,
+  applyRsiPostDeploymentCorrectionAdmission,
+  rsiPostDeploymentCorrectionTrustRootSnapshot,
+} from '../src/rsi-post-deployment-correction.mjs';
+import {
+  createRsiExperienceGraphQuery,
+  retrieveRsiExperienceGraph,
+} from '../src/rsi-experience-graph.mjs';
 
 const PARENT='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -1201,4 +1211,179 @@ test('post-deployment utility trust root encodes delayed contextual anti-self-re
   assert.equal(root.utility_can_trigger_self_update,false);
   assert.equal(root.utility_can_trigger_promotion,false);
   assert.equal(root.effect_reexecution_authorized,false);
+});
+
+
+function harmfulThenHelpfulFixture(){
+  const base=postDeploymentLearningFixture();
+  const harmful=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'correction-harmful-0123456789abcdef',
+      evaluator_id:'external-regression-evaluator-v1',
+      outcome:'HARMFUL',
+      evidence_digest:d('6'),
+      evidence_refs:['native:regression:window-correction-1'],
+      window_started_at:'2026-09-18T18:15:00.000Z',
+      window_ended_at:'2026-09-18T18:20:00.000Z',
+      observed_at:'2026-09-18T18:20:10.000Z',
+    }),
+  });
+  const graphWithHarmful=applyRsiPostDeploymentUtilityAdmission({
+    previous_snapshot:base.graph,
+    admission:harmful,
+  });
+  const helpful=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'correction-helpful-0123456789abcdef',
+      evaluator_id:'external-recovery-evaluator-v1',
+      outcome:'HELPFUL',
+      evidence_digest:d('7'),
+      evidence_refs:['native:recovery:window-correction-2'],
+      window_started_at:'2026-09-18T18:21:00.000Z',
+      window_ended_at:'2026-09-18T18:26:00.000Z',
+      observed_at:'2026-09-18T18:26:10.000Z',
+    }),
+  });
+  const graph=applyRsiPostDeploymentUtilityAdmission({
+    previous_snapshot:graphWithHarmful,
+    admission:helpful,
+  });
+  return {...base,harmful,helpful,graph};
+}
+
+test('harmful then later helpful utility appends a derived failure-to-success correction trace',()=>{
+  const {learningAdmission,harmful,helpful,graph}=harmfulThenHelpfulFixture();
+  const correction=createRsiPostDeploymentCorrectionAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    harmful_utility_admission:harmful,
+    helpful_utility_admission:helpful,
+  });
+  verifyRsiPostDeploymentCorrectionAdmission(correction);
+  assert.equal(correction.failure_case.outcome,'FAILURE');
+  assert.equal(correction.success_case.outcome,'SUCCESS');
+  assert.equal(correction.failure_case.attempt_index,1);
+  assert.equal(correction.success_case.attempt_index,2);
+  assert.equal(correction.correction_edge.from_case_id,correction.failure_case.case_id);
+  assert.equal(correction.correction_edge.to_case_id,correction.success_case.case_id);
+  assert.equal(correction.original_deployment_case_preserved,true);
+  assert.equal(correction.derived_trace_only,true);
+  assert.equal(correction.rollback_triggered,false);
+  assert.equal(correction.self_update_triggered,false);
+  assert.equal(correction.promotion_triggered,false);
+
+  const originalCaseDigest=learningAdmission.experience_case.case_digest;
+  const next=applyRsiPostDeploymentCorrectionAdmission({previous_snapshot:graph,admission:correction});
+  assert.equal(next.case_count,graph.case_count+2);
+  assert.equal(next.correction_edge_count,graph.correction_edge_count+1);
+  assert.equal(next.utility_receipt_count,graph.utility_receipt_count);
+  assert.ok(next.cases.some(row=>row.case_digest===originalCaseDigest));
+
+  const query=createRsiExperienceGraphQuery({
+    query_id:'query.post-deployment-correction',
+    target_context_digest:helpful.target_context_digest,
+    task_signature_digest:correction.task_anchor.task_signature_digest,
+    challenge_family:'POST_DEPLOYMENT_CORRECTION',
+    environment_fingerprint:learningAdmission.learning_receipt.environment_fingerprint,
+    model_family:'DEPLOYED_RSI',
+    failure_codes:['POST_DEPLOYMENT_REGRESSION'],
+    mechanism_tags:['REGRESSION'],
+    bridge_case_ids:[correction.failure_case.case_id],
+    external_query_context:true,
+    authored_by_candidate:false,
+  });
+  const retrieval=retrieveRsiExperienceGraph({snapshot:next,query});
+  assert.equal(retrieval.items[0].case_id,correction.success_case.case_id);
+  assert.equal(retrieval.items[0].corrective_trace_target,true);
+  assert.equal(retrieval.items[0].outcome,'SUCCESS');
+  assert.equal(retrieval.retrieval_is_execution_authority,false);
+});
+
+test('correction trace rejects reversed temporal evidence and non-helpful recovery',()=>{
+  const base=postDeploymentLearningFixture();
+  const harmful=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'correction-order-harmful-01234567',
+      outcome:'HARMFUL',
+      evidence_digest:d('8'),
+      evidence_refs:['native:regression:late'],
+      window_started_at:'2026-09-18T18:25:00.000Z',
+      window_ended_at:'2026-09-18T18:30:00.000Z',
+      observed_at:'2026-09-18T18:30:10.000Z',
+    }),
+  });
+  const tooEarlyHelpful=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'correction-order-helpful-01234567',
+      outcome:'HELPFUL',
+      evidence_digest:d('9'),
+      evidence_refs:['native:recovery:too-early'],
+      window_started_at:'2026-09-18T18:21:00.000Z',
+      window_ended_at:'2026-09-18T18:26:00.000Z',
+      observed_at:'2026-09-18T18:26:10.000Z',
+    }),
+  });
+  assert.throws(()=>createRsiPostDeploymentCorrectionAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    harmful_utility_admission:harmful,
+    helpful_utility_admission:tooEarlyHelpful,
+  }),/temporal_order_invalid/);
+
+  const neutral=createRsiPostDeploymentUtilityAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    assessment:delayedUtilityAssessment({
+      assessment_id:'correction-neutral-0123456789',
+      outcome:'NEUTRAL',
+      evidence_digest:d('a'),
+      evidence_refs:['native:recovery:neutral'],
+      window_started_at:'2026-09-18T18:31:00.000Z',
+      window_ended_at:'2026-09-18T18:36:00.000Z',
+      observed_at:'2026-09-18T18:36:10.000Z',
+    }),
+  });
+  assert.throws(()=>createRsiPostDeploymentCorrectionAdmission({
+    post_deployment_learning_admission:base.learningAdmission,
+    harmful_utility_admission:harmful,
+    helpful_utility_admission:neutral,
+  }),/helpful_utility_required/);
+});
+
+test('correction admission requires both immutable utility receipts to already exist in the graph',()=>{
+  const {learningAdmission,harmful,helpful,graph}=harmfulThenHelpfulFixture();
+  const correction=createRsiPostDeploymentCorrectionAdmission({
+    post_deployment_learning_admission:learningAdmission,
+    harmful_utility_admission:harmful,
+    helpful_utility_admission:helpful,
+  });
+  const onlyHarmful=applyRsiPostDeploymentUtilityAdmission({
+    previous_snapshot:postDeploymentLearningFixture().graph,
+    admission:harmful,
+  });
+  assert.throws(()=>applyRsiPostDeploymentCorrectionAdmission({
+    previous_snapshot:onlyHarmful,
+    admission:correction,
+  }),/utility_receipts_not_in_graph/);
+  const next=applyRsiPostDeploymentCorrectionAdmission({previous_snapshot:graph,admission:correction});
+  assert.throws(()=>applyRsiPostDeploymentCorrectionAdmission({previous_snapshot:next,admission:correction}),/trace_duplicate|task_duplicate/);
+});
+
+test('post-deployment correction trust root forbids autonomous recovery authority',()=>{
+  const root=rsiPostDeploymentCorrectionTrustRootSnapshot();
+  assert.equal(root.persisted_post_deployment_learning_required,true);
+  assert.equal(root.persisted_harmful_utility_required,true);
+  assert.equal(root.later_persisted_helpful_utility_required,true);
+  assert.equal(root.temporal_order_required,true);
+  assert.equal(root.original_deployment_case_preserved,true);
+  assert.equal(root.derived_failure_success_trace_only,true);
+  assert.equal(root.correction_edge_is_retrieval_signal_only,true);
+  assert.equal(root.correction_edge_is_authority,false);
+  assert.equal(root.candidate_can_self_certify_recovery,false);
+  assert.equal(root.scalar_reward_allowed,false);
+  assert.equal(root.candidate_score_mutation_allowed,false);
+  assert.equal(root.autonomous_rollback_allowed,false);
+  assert.equal(root.autonomous_self_update_allowed,false);
+  assert.equal(root.autonomous_promotion_allowed,false);
 });
