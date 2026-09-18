@@ -199,7 +199,7 @@ test('fast lane keeps bounded admission even under very large command bursts', a
 
 
 test('maintenance cooldown starts after maintenance settles so DevOS receives an idle window', async () => {
-  const source = await fs.readFile(path.join(here, '../src/native-supervisor-client-base.mjs'), 'utf8');
+  const source = await fs.readFile(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
   const begin = source.indexOf('#kickMaintenance()');
   const end = source.indexOf('async #nextCommand()', begin);
   assert.ok(begin >= 0 && end > begin, 'maintenance source boundary missing');
