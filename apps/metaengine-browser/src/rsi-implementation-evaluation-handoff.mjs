@@ -350,15 +350,15 @@ export class RsiImplementationEvaluationLedger{
       if(!Array.isArray(p.rows)||p.rows.length>MAX_ROWS)throw new Error('rsi_impl_eval_ledger_rows_invalid');
       const handoffIds=new Set();
       const resultIds=new Set();
-      const childArtifacts=new Set();
+      const intentDigests=new Set();
       const checked=p.rows.map(row=>{
         const x=verifyStoredRow(row,this.#sourceSha);
         if(handoffIds.has(x.handoff.handoff_id))throw new Error('rsi_impl_eval_ledger_handoff_duplicate');
         if(resultIds.has(x.result.result_id))throw new Error('rsi_impl_eval_ledger_result_duplicate');
-        if(childArtifacts.has(x.result.child_candidate_artifact_digest))throw new Error('rsi_impl_eval_ledger_child_duplicate');
+        if(intentDigests.has(x.result.experiment_intent_digest))throw new Error('rsi_impl_eval_ledger_intent_duplicate');
         handoffIds.add(x.handoff.handoff_id);
         resultIds.add(x.result.result_id);
-        childArtifacts.add(x.result.child_candidate_artifact_digest);
+        intentDigests.add(x.result.experiment_intent_digest);
         return x;
       });
       const canonical=ledgerState(this.#sourceSha,checked);
@@ -387,7 +387,7 @@ export class RsiImplementationEvaluationLedger{
     const row=verifyStoredRow({source_sha:this.#sourceSha,handoff,experiment_receipt,result},this.#sourceSha);
     const existing=this.#rows.find(r=>r.handoff.handoff_id===row.handoff.handoff_id
       ||r.result.result_id===row.result.result_id
-      ||r.result.child_candidate_artifact_digest===row.result.child_candidate_artifact_digest);
+      ||r.result.experiment_intent_digest===row.result.experiment_intent_digest);
     if(existing){
       if(existing.result.result_digest!==row.result.result_digest)throw new Error('rsi_impl_eval_ledger_identity_conflict');
       return zero({state:'IDEMPOTENT',result_digest:row.result.result_digest});
@@ -423,6 +423,7 @@ export function rsiImplementationEvaluationHandoffTrustRootSnapshot(){
     ambiguity_separate:true,
     negative_evidence_retained:true,
     inconclusive_evidence_retained:true,
+    repeated_independent_child_evaluations_allowed:true,
     scalar_winner_forbidden:true,
     candidate_can_choose_baseline:false,
     candidate_can_choose_harness:false,
