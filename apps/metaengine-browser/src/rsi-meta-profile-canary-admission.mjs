@@ -271,6 +271,21 @@ export class RsiMetaProfileCanaryLedger{
     return zero({state:entry.rollback_required?'ROLLBACK_REQUIRED':'OUTCOME_RECORDED',outcome_digest:checked.outcome_digest,rollback_required:entry.rollback_required});
   }
   admission(canaryId){if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');const e=this.#entry(canaryId);return e?Object.freeze(structuredClone(e.admission)):null}
+  completionEvidence(canaryId){
+    if(!this.#initialized)throw new Error('rsi_canary_ledger_not_initialized');
+    const e=this.#entry(canaryId);if(!e)return null;
+    return Object.freeze({
+      admission:Object.freeze(structuredClone(e.admission)),
+      decisions:Object.freeze(e.decisions.map(x=>Object.freeze(structuredClone(x)))),
+      outcomes:Object.freeze(e.outcomes.map(x=>Object.freeze(structuredClone(x)))),
+      rollback_required:e.rollback_required===true,
+      rollback_reason:e.rollback_reason||null,
+      decision_count:e.decisions.length,
+      outcome_count:e.outcomes.length,
+      fixed_budget_complete:e.decisions.length===e.admission.max_decisions&&e.outcomes.length===e.admission.max_decisions,
+      authority_effect:false,
+    });
+  }
   snapshot(){
     const s=stateCore(this.#sourceSha,this.#entries);
     return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,canary_count:s.canary_count,
