@@ -121,6 +121,7 @@ export function createRsiReleaseEffectCommandReadback({
   const expiresAt=iso(expires_at,'command_expires_at');
   const completedAt=optionalIso(completed_at,'command_completed_at');
   if(completedAt&&Date.parse(completedAt)<Date.parse(leasedAt))throw new Error('rsi_effect_reconcile_command_completion_before_lease');
+  if(completedAt&&Date.parse(completedAt)>Date.parse(observedAt))throw new Error('rsi_effect_reconcile_command_completion_after_observation');
   const canonical=canonicalReceipt(receipt,command);
   if(state==='COMPLETED'&&canonical==null)throw new Error('rsi_effect_reconcile_completed_receipt_required');
   if(state==='FAILED'&&canonical==null&&boundedError(error)==null)throw new Error('rsi_effect_reconcile_failed_evidence_required');
