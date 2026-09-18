@@ -395,6 +395,11 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     phase33_certificate_digest: p33.certificate.certificate_digest,
     phase32_handoff_digest: p33.certificate.phase32_handoff_digest,
     phase32_receipt_digest: p33.certificate.phase32_receipt_digest,
+    source_evaluation_contract_digest: p33.certificate.source_evaluation_contract_digest,
+    consumer_task_set_digest: p33.certificate.consumer_task_set_digest,
+    consumer_retrieval_profile_digest: p33.certificate.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest: p33.certificate.current_consumer_plane_digest,
+    current_verified_library_digest: p33.certificate.current_verified_library_digest,
     consumer_evaluation_contract_digest: p33.certificate.consumer_evaluation_contract_digest,
     current_library_id: library.library_id,
     current_library_digest: library.library_digest,
@@ -440,6 +445,9 @@ export function createRsiAnytimeLibraryAdmissionProposal({
     scope_replay_required: true,
     maturity_sensitive_change_envelope_required: true,
     phase33_anytime_valid_certificate_reused: true,
+    exact_consumer_state_lineage_preserved: true,
+    exact_retrieval_profile_lineage_preserved: true,
+    exact_current_library_lineage_preserved: true,
     proposed_successor_is_append_only: true,
     proposed_successor_preserves_current_entries: true,
     proposed_successor_is_not_active_runtime_state: true,
@@ -478,6 +486,9 @@ export function verifyRsiAnytimeLibraryAdmissionProposal(row, args = {}) {
     || row.scope_replay_required !== true
     || row.maturity_sensitive_change_envelope_required !== true
     || row.phase33_anytime_valid_certificate_reused !== true
+    || row.exact_consumer_state_lineage_preserved !== true
+    || row.exact_retrieval_profile_lineage_preserved !== true
+    || row.exact_current_library_lineage_preserved !== true
     || row.proposed_successor_is_append_only !== true
     || row.proposed_successor_preserves_current_entries !== true
     || row.proposed_successor_is_not_active_runtime_state !== true
@@ -637,6 +648,12 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     source_sha: proposal.source_sha,
     phase33_policy_source_sha: policySource,
     admission_proposal_digest: proposal.admission_proposal_digest,
+    source_evaluation_contract_digest: proposal.source_evaluation_contract_digest,
+    consumer_task_set_digest: proposal.consumer_task_set_digest,
+    consumer_retrieval_profile_digest: proposal.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest: proposal.current_consumer_plane_digest,
+    current_verified_library_digest: proposal.current_verified_library_digest,
+    consumer_evaluation_contract_digest: proposal.consumer_evaluation_contract_digest,
     current_library_digest: proposal.current_library_digest,
     current_governance_digest: proposal.current_governance_digest,
     proposed_skill_digest: proposal.proposed_skill_digest,
@@ -674,6 +691,9 @@ export function createRsiAnytimeLibraryAdmissionCertificate({
     state,
     paired_anytime_valid_admission_required: true,
     fixed_false_admission_error_budget_required: true,
+    exact_consumer_state_lineage_required: true,
+    exact_retrieval_profile_lineage_required: true,
+    exact_current_library_lineage_required: true,
     predecessor_source_qualification_required: true,
     exact_library_and_governance_readback_required: true,
     reviewer_separation_of_duties_required: true,
@@ -705,6 +725,9 @@ export function verifyRsiAnytimeLibraryAdmissionCertificate(row, args = {}) {
   if (
     row.paired_anytime_valid_admission_required !== true
     || row.fixed_false_admission_error_budget_required !== true
+    || row.exact_consumer_state_lineage_required !== true
+    || row.exact_retrieval_profile_lineage_required !== true
+    || row.exact_current_library_lineage_required !== true
     || row.predecessor_source_qualification_required !== true
     || row.exact_library_and_governance_readback_required !== true
     || row.reviewer_separation_of_duties_required !== true
@@ -961,6 +984,9 @@ export function rsiAnytimeLibraryAdmissionTrustRootSnapshot() {
     second_lifecycle_allowed: false,
     exact_library_snapshot_binding_required: true,
     exact_governance_snapshot_binding_required: true,
+    exact_consumer_state_lineage_required: true,
+    exact_retrieval_profile_lineage_required: true,
+    exact_current_library_lineage_required: true,
     least_privilege_recheck_required: true,
     scope_replay_required: true,
     maturity_sensitive_change_envelope_required: true,
