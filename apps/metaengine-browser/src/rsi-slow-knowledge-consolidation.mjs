@@ -9,6 +9,7 @@ import {
 
 export const RSI_KNOWLEDGE_CONSOLIDATION_PROPOSAL_SCHEMA='metaengine.rsi.knowledge-consolidation-proposal.v1';
 export const RSI_KNOWLEDGE_TRANSFER_VALIDATION_SCHEMA='metaengine.rsi.knowledge-transfer-validation.v1';
+export const RSI_KNOWLEDGE_CONSOLIDATION_ADMISSION_SCHEMA='metaengine.rsi.knowledge-consolidation-admission.v1';
 export const RSI_KNOWLEDGE_CONSOLIDATION_ARCHIVE_SCHEMA='metaengine.rsi.knowledge-consolidation-archive.v1';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
@@ -202,6 +203,10 @@ export function createRsiKnowledgeTransferValidation({
   proposal,
   heldout_context_digest,
   heldout_task_set_digest,
+  task_family_digest,
+  transfer_harness_digest,
+  acceptance_policy_digest,
+  hidden_holdout_root_digest,
   external_evaluator_root_digest,
   control_receipt_digest,
   treatment_receipt_digest,
@@ -234,6 +239,10 @@ export function createRsiKnowledgeTransferValidation({
   const roots=[
     exactDigest(heldout_context_digest,'heldout_context'),
     exactDigest(heldout_task_set_digest,'heldout_tasks'),
+    exactDigest(task_family_digest,'task_family'),
+    exactDigest(transfer_harness_digest,'transfer_harness'),
+    exactDigest(acceptance_policy_digest,'acceptance_policy'),
+    exactDigest(hidden_holdout_root_digest,'hidden_holdout_root'),
     exactDigest(external_evaluator_root_digest,'external_evaluator'),
     exactDigest(control_receipt_digest,'control_receipt'),
     exactDigest(treatment_receipt_digest,'treatment_receipt'),
@@ -272,10 +281,14 @@ export function createRsiKnowledgeTransferValidation({
     knowledge_class:proposal.knowledge_class,
     heldout_context_digest:roots[0],
     heldout_task_set_digest:roots[1],
-    external_evaluator_root_digest:roots[2],
-    control_receipt_digest:roots[3],
-    treatment_receipt_digest:roots[4],
-    transfer_evidence_digest:roots[5],
+    task_family_digest:roots[2],
+    transfer_harness_digest:roots[3],
+    acceptance_policy_digest:roots[4],
+    hidden_holdout_root_digest:roots[5],
+    external_evaluator_root_digest:roots[6],
+    control_receipt_digest:roots[7],
+    treatment_receipt_digest:roots[8],
+    transfer_evidence_digest:roots[9],
     source_context_exclusion_pass:source_context_exclusion_pass===true,
     hidden_holdout_pass:hidden_holdout_pass===true,
     evaluator_integrity_pass:evaluator_integrity_pass===true,
@@ -319,6 +332,10 @@ export function verifyRsiKnowledgeTransferValidation(validation,{proposal}={}){
     validation_id:validation.validation_id,proposal,
     heldout_context_digest:validation.heldout_context_digest,
     heldout_task_set_digest:validation.heldout_task_set_digest,
+    task_family_digest:validation.task_family_digest,
+    transfer_harness_digest:validation.transfer_harness_digest,
+    acceptance_policy_digest:validation.acceptance_policy_digest,
+    hidden_holdout_root_digest:validation.hidden_holdout_root_digest,
     external_evaluator_root_digest:validation.external_evaluator_root_digest,
     control_receipt_digest:validation.control_receipt_digest,
     treatment_receipt_digest:validation.treatment_receipt_digest,
@@ -343,6 +360,79 @@ export function verifyRsiKnowledgeTransferValidation(validation,{proposal}={}){
   return canonical;
 }
 
+export function createRsiKnowledgeConsolidationAdmission({
+  admission_id,
+  proposal,
+  validations,
+  external_admission_owner=false,
+  authored_by_candidate=true,
+}={}){
+  if(!proposal||proposal.schema!==RSI_KNOWLEDGE_CONSOLIDATION_PROPOSAL_SCHEMA)throw new Error('rsi_consolidation_proposal_invalid');
+  assertZero(proposal,'admission_proposal');
+  const pc=structuredClone(proposal);delete pc.proposal_digest;
+  if(digest(pc)!==exactDigest(proposal.proposal_digest,'admission_proposal'))throw new Error('rsi_consolidation_proposal_digest_mismatch');
+  if(external_admission_owner!==true||authored_by_candidate!==false)throw new Error('rsi_consolidation_external_admission_owner_required');
+  if(!Array.isArray(validations)||validations.length<2||validations.length>8)throw new Error('rsi_consolidation_transfer_validation_quorum_invalid');
+  const checked=validations.map(v=>verifyRsiKnowledgeTransferValidation(v,{proposal}));
+  const contexts=new Set(), tasks=new Set(), families=new Set(), harnesses=new Set();
+  for(const v of checked){
+    if(v.state!=='TRANSFER_VALIDATED_ADVISORY_KNOWLEDGE'||v.eligible_for_advisory_knowledge_archive!==true){
+      throw new Error('rsi_consolidation_only_passed_transfer_validations_admissible');
+    }
+    if(contexts.has(v.heldout_context_digest))throw new Error('rsi_consolidation_distinct_target_contexts_required');
+    contexts.add(v.heldout_context_digest);tasks.add(v.heldout_task_set_digest);families.add(v.task_family_digest);harnesses.add(v.transfer_harness_digest);
+  }
+  if(contexts.size<2||tasks.size<2||families.size<2)throw new Error('rsi_consolidation_transfer_diversity_required');
+  const core=zero({
+    schema:RSI_KNOWLEDGE_CONSOLIDATION_ADMISSION_SCHEMA,
+    version:1,
+    admission_id:id(admission_id,'admission_id'),
+    source_sha:proposal.source_sha,
+    proposal_digest:proposal.proposal_digest,
+    evaluator_generation_digest:proposal.evaluator_generation_digest,
+    evaluation_epoch_digest:proposal.evaluation_epoch_digest,
+    knowledge_class:proposal.knowledge_class,
+    validation_digests:Object.freeze(checked.map(v=>v.validation_digest).sort()),
+    target_context_digests:Object.freeze([...contexts].sort()),
+    heldout_task_set_digests:Object.freeze([...tasks].sort()),
+    task_family_digests:Object.freeze([...families].sort()),
+    transfer_harness_digests:Object.freeze([...harnesses].sort()),
+    passed_transfer_context_count:contexts.size,
+    all_transfer_validations_passed:true,
+    zero_observed_negative_transfer:true,
+    external_admission_owner:true,
+    authored_by_candidate:false,
+    state:'ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW',
+    eligible_for_library_admission_review:true,
+    library_admission_token:null,
+    admission_can_write_skill_library:false,
+    admission_can_write_experience_graph:false,
+    admission_can_modify_meta_skill_profile:false,
+    admission_can_activate_knowledge:false,
+    admission_can_schedule_work:false,
+  });
+  return Object.freeze({...core,admission_digest:digest(core)});
+}
+
+export function verifyRsiKnowledgeConsolidationAdmission(admission,{proposal,validations}={}){
+  if(!admission||admission.schema!==RSI_KNOWLEDGE_CONSOLIDATION_ADMISSION_SCHEMA||admission.version!==1)throw new Error('rsi_consolidation_admission_invalid');
+  assertZero(admission,'admission');
+  if(admission.external_admission_owner!==true||admission.authored_by_candidate!==false
+    ||admission.all_transfer_validations_passed!==true||admission.zero_observed_negative_transfer!==true
+    ||admission.eligible_for_library_admission_review!==true||admission.library_admission_token!==null
+    ||admission.admission_can_write_skill_library!==false||admission.admission_can_write_experience_graph!==false
+    ||admission.admission_can_modify_meta_skill_profile!==false||admission.admission_can_activate_knowledge!==false
+    ||admission.admission_can_schedule_work!==false||admission.state!=='ELIGIBLE_FOR_LIBRARY_ADMISSION_REVIEW'){
+    throw new Error('rsi_consolidation_admission_policy_invalid');
+  }
+  const canonical=createRsiKnowledgeConsolidationAdmission({
+    admission_id:admission.admission_id,proposal,validations,
+    external_admission_owner:true,authored_by_candidate:false,
+  });
+  if(canonical.admission_digest!==exactDigest(admission.admission_digest,'admission'))throw new Error('rsi_consolidation_admission_digest_mismatch');
+  return canonical;
+}
+
 function archiveState(sourceSha,rows){
   const counts={};
   for(const row of rows)counts[row.proposal.knowledge_class]=(counts[row.proposal.knowledge_class]||0)+1;
@@ -352,7 +442,7 @@ function archiveState(sourceSha,rows){
     source_sha:sourceSha,
     rows,
     row_count:rows.length,
-    validated_count:rows.filter(r=>r.validation.eligible_for_advisory_knowledge_archive===true).length,
+    validated_count:rows.filter(r=>r.admission.eligible_for_library_admission_review===true).length,
     knowledge_class_counts:Object.freeze(counts),
     append_only:true,
     durable_before_visible:true,
@@ -403,11 +493,13 @@ export class RsiKnowledgeConsolidationArchive{
           source_entry_digests:row.proposal.source_entry_digests,
         });
         const proposal=verifyRsiKnowledgeConsolidationProposal(row.proposal,{source_rows:sourceRows});
-        const validation=verifyRsiKnowledgeTransferValidation(row.validation,{proposal});
-        if(validation.proposal_digest!==proposal.proposal_digest)throw new Error('rsi_consolidation_archive_binding_mismatch');
+        if(!Array.isArray(row.validations))throw new Error('rsi_consolidation_archive_validations_invalid');
+        const validations=row.validations.map(v=>verifyRsiKnowledgeTransferValidation(v,{proposal}));
+        const admission=verifyRsiKnowledgeConsolidationAdmission(row.admission,{proposal,validations});
+        if(admission.proposal_digest!==proposal.proposal_digest)throw new Error('rsi_consolidation_archive_binding_mismatch');
         if(ids.has(proposal.proposal_digest))throw new Error('rsi_consolidation_archive_duplicate');
         ids.add(proposal.proposal_digest);
-        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,proposal,validation}));
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,proposal,validations:Object.freeze(validations),admission}));
       }
       this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
@@ -418,27 +510,29 @@ export class RsiKnowledgeConsolidationArchive{
     try{await h.writeFile(`${JSON.stringify(state)}\n`,'utf8');await h.sync();}finally{await h.close();}
     await fs.rename(tmp,this.#path);
   }
-  async add({proposal,validation,source_rows}={}){
+  async add({proposal,validations,admission,source_rows}={}){
     if(!this.#initialized)throw new Error('rsi_consolidation_archive_not_initialized');
     const checkedProposal=verifyRsiKnowledgeConsolidationProposal(proposal,{source_rows});
-    const checkedValidation=verifyRsiKnowledgeTransferValidation(validation,{proposal:checkedProposal});
-    if(checkedProposal.source_sha!==this.#sourceSha||checkedValidation.source_sha!==this.#sourceSha||checkedValidation.proposal_digest!==checkedProposal.proposal_digest){
+    if(!Array.isArray(validations))throw new Error('rsi_consolidation_archive_validations_invalid');
+    const checkedValidations=validations.map(v=>verifyRsiKnowledgeTransferValidation(v,{proposal:checkedProposal}));
+    const checkedAdmission=verifyRsiKnowledgeConsolidationAdmission(admission,{proposal:checkedProposal,validations:checkedValidations});
+    if(checkedProposal.source_sha!==this.#sourceSha||checkedAdmission.source_sha!==this.#sourceSha||checkedAdmission.proposal_digest!==checkedProposal.proposal_digest){
       throw new Error('rsi_consolidation_archive_binding_mismatch');
     }
-    proposal=checkedProposal;validation=checkedValidation;
+    proposal=checkedProposal;validations=checkedValidations;admission=checkedAdmission;
     const existing=this.#rows.find(r=>r.proposal.proposal_digest===proposal.proposal_digest);
     if(existing){
-      if(existing.validation.validation_digest!==validation.validation_digest)throw new Error('rsi_consolidation_archive_identity_conflict');
-      return zero({state:'IDEMPOTENT',validation_digest:validation.validation_digest});
+      if(existing.admission.admission_digest!==admission.admission_digest)throw new Error('rsi_consolidation_archive_identity_conflict');
+      return zero({state:'IDEMPOTENT',admission_digest:admission.admission_digest});
     }
     if(this.#rows.length>=MAX_ARCHIVE_ROWS)throw new Error('rsi_consolidation_archive_capacity_exceeded');
-    const next=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,proposal:structuredClone(proposal),validation:structuredClone(validation)})];
+    const next=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,proposal:structuredClone(proposal),validations:structuredClone(validations),admission:structuredClone(admission)})];
     await this.#persist(next);this.#rows=next;
-    return zero({state:validation.state,validation_digest:validation.validation_digest});
+    return zero({state:admission.state,admission_digest:admission.admission_digest});
   }
   validated(){
     if(!this.#initialized)throw new Error('rsi_consolidation_archive_not_initialized');
-    return Object.freeze(this.#rows.filter(r=>r.validation.eligible_for_advisory_knowledge_archive===true).map(r=>Object.freeze(structuredClone(r))));
+    return Object.freeze(this.#rows.filter(r=>r.admission.eligible_for_library_admission_review===true).map(r=>Object.freeze(structuredClone(r))));
   }
   snapshot(){
     const s=archiveState(this.#sourceSha,this.#rows);
@@ -473,6 +567,10 @@ export function rsiSlowKnowledgeConsolidationTrustRootSnapshot(){
     external_scope_owner_required:true,
     external_transfer_validator_required:true,
     external_holdout_owner_required:true,
+    min_distinct_passed_transfer_contexts:2,
+    distinct_heldout_task_sets_required:true,
+    distinct_task_families_required:true,
+    zero_observed_negative_transfer_required:true,
     heldout_source_context_exclusion_required:true,
     common_non_regression_floor_required:true,
     knowledge_class_specific_transfer_goal_required:true,
