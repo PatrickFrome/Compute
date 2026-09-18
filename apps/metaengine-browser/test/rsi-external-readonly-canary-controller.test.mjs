@@ -16,6 +16,10 @@ import {
   createRsiExternalCanaryRun,
   rsiExternalReadOnlyCanaryControllerTrustRootSnapshot,
 } from '../src/rsi-external-readonly-canary-controller.mjs';
+import {
+  createRsiExternalCanaryStatisticalReview,
+  rsiExternalCanaryStatisticalReviewTrustRootSnapshot,
+} from '../src/rsi-external-canary-statistical-review.mjs';
 
 const SOURCE='a'.repeat(40);
 function stable(value){
@@ -149,6 +153,30 @@ async function readyFixture(t,{decisionBudget=2}={}){
     authored_by_candidate:false,
   });
   assert.equal(admission.state,'READY_FOR_EXTERNAL_CANARY_REVIEW');
+  const statisticalReview=createRsiExternalCanaryStatisticalReview({
+    review_id:'controller.statistical.review.one',
+    source_sha:SOURCE,
+    manifest,
+    selection:sel,
+    admission,
+    confirmation_index:1,
+    method:'E_VALUE_EXTERNAL_V1',
+    alpha_used:0.004,
+    independent_holdout_digest:tagged('statistical-holdout'),
+    evaluator_root_digest:tagged('statistical-evaluator'),
+    sample_count:decisionBudget,
+    safety_noninferiority_certified:true,
+    security_noninferiority_certified:true,
+    utility_noninferiority_certified:true,
+    material_improvement_certified:true,
+    familywise_valid:true,
+    independent_holdout:true,
+    stopping_rule_precommitted:true,
+    optional_stopping_used:false,
+    external_verifier:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(statisticalReview.state,'ELIGIBLE_FOR_EXTERNAL_READ_ONLY_CANARY_CONTROLLER');
   const run=createRsiExternalCanaryRun({
     run_id:'controller.run.one',
     source_sha:SOURCE,
@@ -156,13 +184,14 @@ async function readyFixture(t,{decisionBudget=2}={}){
     selection:sel,
     admission,
     ledger_readback:admission,
+    statistical_review:statisticalReview,
     external_controller_root_digest:tagged('controller-root'),
     reward_hack_challenge_root_digest:tagged('reward-hack-root'),
     sealed_evaluator_root_digest:tagged('sealed-evaluator-root'),
     external_controller:true,
     authored_by_candidate:false,
   });
-  return {dir,sel,manifest,admission,run};
+  return {dir,sel,manifest,admission,statisticalReview,run};
 }
 
 function cleanOutcome(run,decision,overrides={}){
@@ -286,6 +315,7 @@ test('controller roots must be independent and candidate cannot own the environm
     selection:fx.sel,
     admission:fx.admission,
     ledger_readback:fx.admission,
+    statistical_review:fx.statisticalReview,
     external_controller_root_digest:tagged('same-root'),
     reward_hack_challenge_root_digest:tagged('same-root'),
     sealed_evaluator_root_digest:tagged('sealed-root'),
@@ -299,6 +329,7 @@ test('controller roots must be independent and candidate cannot own the environm
     selection:fx.sel,
     admission:fx.admission,
     ledger_readback:fx.admission,
+    statistical_review:fx.statisticalReview,
     external_controller_root_digest:tagged('controller-root-x'),
     reward_hack_challenge_root_digest:tagged('hack-root-x'),
     sealed_evaluator_root_digest:tagged('sealed-root-x'),
@@ -307,9 +338,71 @@ test('controller roots must be independent and candidate cannot own the environm
   }),/external_owner_required/);
 });
 
+test('anytime-valid statistical review fails closed on alpha overspend or noninferiority failure',async(t)=>{
+  const fx=await readyFixture(t);
+  assert.throws(()=>createRsiExternalCanaryStatisticalReview({
+    review_id:'controller.statistical.review.alpha-over',
+    source_sha:SOURCE,
+    manifest:fx.manifest,
+    selection:fx.sel,
+    admission:fx.admission,
+    confirmation_index:1,
+    method:'E_VALUE_EXTERNAL_V1',
+    alpha_used:0.006,
+    independent_holdout_digest:tagged('statistical-holdout-2'),
+    evaluator_root_digest:tagged('statistical-evaluator-2'),
+    sample_count:2,
+    safety_noninferiority_certified:true,
+    security_noninferiority_certified:true,
+    utility_noninferiority_certified:true,
+    material_improvement_certified:true,
+    familywise_valid:true,
+    independent_holdout:true,
+    stopping_rule_precommitted:true,
+    optional_stopping_used:false,
+    external_verifier:true,
+    authored_by_candidate:false,
+  }),/alpha_over_budget/);
+
+  const rejected=createRsiExternalCanaryStatisticalReview({
+    review_id:'controller.statistical.review.rejected',
+    source_sha:SOURCE,
+    manifest:fx.manifest,
+    selection:fx.sel,
+    admission:fx.admission,
+    confirmation_index:1,
+    method:'PAIRED_CONFIDENCE_SEQUENCE_EXTERNAL_V1',
+    alpha_used:0.004,
+    independent_holdout_digest:tagged('statistical-holdout-3'),
+    evaluator_root_digest:tagged('statistical-evaluator-3'),
+    sample_count:2,
+    safety_noninferiority_certified:true,
+    security_noninferiority_certified:true,
+    utility_noninferiority_certified:true,
+    material_improvement_certified:false,
+    familywise_valid:true,
+    independent_holdout:true,
+    stopping_rule_precommitted:true,
+    optional_stopping_used:false,
+    external_verifier:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(rejected.state,'STATISTICAL_REVIEW_REJECTED');
+  assert.equal(rejected.eligible_for_external_read_only_canary_controller,false);
+  const root=rsiExternalCanaryStatisticalReviewTrustRootSnapshot();
+  assert.equal(root.telescoping_anytime_risk_spending_required,true);
+  assert.equal(root.optional_stopping_forbidden,true);
+  assert.equal(root.material_improvement_required,true);
+  assert.equal(root.review_only_not_activation_authority,true);
+});
+
 test('external canary controller trust root keeps harness ownership and forbids activation',()=>{
   const root=rsiExternalReadOnlyCanaryControllerTrustRootSnapshot();
   assert.equal(root.phase19_clean_durable_admission_required,true);
+  assert.equal(root.external_anytime_valid_statistical_review_required,true);
+  assert.equal(root.familywise_validity_required,true);
+  assert.equal(root.independent_statistical_holdout_required,true);
+  assert.equal(root.material_improvement_required,true);
   assert.equal(root.external_harness_owns_environment_loop,true);
   assert.equal(root.one_pending_decision_max,true);
   assert.equal(root.prior_outcome_required_before_next_decision,true);
