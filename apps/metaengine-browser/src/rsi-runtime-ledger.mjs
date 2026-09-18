@@ -191,6 +191,18 @@ export class RsiRuntimeLedger {
     return Object.freeze(this.#events.slice(-bounded).map((row) => Object.freeze(structuredClone(row))));
   }
 
+  eventsSince({ after_seq = 0, limit = 256 } = {}) {
+    const after = Number(after_seq);
+    const bounded = Number(limit);
+    if (!Number.isSafeInteger(after) || after < 0) throw new Error('rsi_runtime_ledger_after_seq_invalid');
+    if (!Number.isSafeInteger(bounded) || bounded < 1 || bounded > 256) throw new Error('rsi_runtime_ledger_replay_limit_invalid');
+    return Object.freeze(
+      this.#events
+        .slice(after, after + bounded)
+        .map((row) => Object.freeze(structuredClone(row))),
+    );
+  }
+
   snapshot() {
     return Object.freeze({
       schema: RSI_RUNTIME_LEDGER_SNAPSHOT_SCHEMA,
