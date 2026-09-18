@@ -7,6 +7,7 @@ import test from 'node:test';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 import { BROWSER_BRAIN_WORKING_MEMORY_SCHEMA } from '../src/browser-brain-working-memory.mjs';
 import { createRsiSearchContext } from '../src/rsi-search-mode-router.mjs';
+import { createRsiExperienceContextAblationReceipt } from '../src/rsi-experience-context-ablation-attribution.mjs';
 
 const SOURCE='a'.repeat(40);
 const COMMAND='11111111-1111-4111-8111-111111111112';
@@ -214,6 +215,104 @@ test('runtime refuses utility feedback for an unpersisted guided cycle',async()=
       }),
       /experience_guided_cycle_not_persisted/,
     );
+  }finally{
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
+
+
+test('runtime persists matched memory ablation attribution before applying derived utility feedback',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-context-attribution-runtime-'));
+  const ledgerPath=path.join(root,'rsi.jsonl');
+  try{
+    const runtime=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
+    await runtime.start();
+    await runtime.registerBrowserCommandAttribution(registration());
+    const outcome=await runtime.ingestBrowserOutcome({readback:readback(),attribution:genericAttribution()});
+    const credit=await runtime.recordTrustedCredit({
+      outcome_episode_digest:outcome.episode_digest,
+      assignment:creditAssignment(),
+    });
+
+    const observation=await runtime.observeBrainSnapshot(ambiguousBrain());
+    const [entry]=runtime.improvementFrontier({limit:32});
+    const cycle=await runtime.prepareExperienceGuidedAutonomousEpisodeCycle({
+      observation,
+      opportunity_id:entry.opportunity_id,
+      search_context:searchContext(),
+      bridge_case_ids:[credit.experience_case.case_id],
+      cycle_generation:2,
+      max_candidates:4,
+      proposal_budget_units:100,
+      exploration_fraction:0.2,
+    });
+    assert.equal(cycle.experience_context_plan.selected_case_count,1);
+
+    const plan=runtime.prepareExperienceContextAttribution({
+      cycle_digest:cycle.cycle_digest,
+      autonomous_controller_plan:cycle.autonomous_cycle.controller_plan,
+      evaluation_protocol_digest:d('a'),
+      objective_spec:[
+        {metric:'TASK_SUCCESS',direction:'HIGHER_BETTER',epsilon:0.01},
+        {metric:'P95_LATENCY_MS',direction:'LOWER_BETTER',epsilon:2},
+      ],
+    });
+    assert.equal(plan.ablation_count,1);
+    const receipt=createRsiExperienceContextAblationReceipt({
+      plan,
+      ablation_id:plan.ablations[0].ablation_id,
+      baseline_hard_invariants_pass:true,
+      ablated_hard_invariants_pass:true,
+      baseline_objectives:[
+        {metric:'TASK_SUCCESS',value:0.82},
+        {metric:'P95_LATENCY_MS',value:100},
+      ],
+      ablated_objectives:[
+        {metric:'TASK_SUCCESS',value:0.68},
+        {metric:'P95_LATENCY_MS',value:118},
+      ],
+      workload_digest:d('b'),
+      seed_set_digest:d('c'),
+      budget_digest:d('d'),
+      evaluator_id:'external-memory-ablation-runtime-v1',
+      evidence_digest:d('e'),
+      evidence_refs:['eval:runtime-memory-ablation'],
+      external_evaluator:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(receipt.outcome,'HELPFUL');
+
+    const result=await runtime.recordAttributedExperienceContextUtilityFeedback({
+      cycle_digest:cycle.cycle_digest,
+      autonomous_controller_plan:cycle.autonomous_cycle.controller_plan,
+      attribution_plan:plan,
+      ablation_receipts:[receipt],
+    });
+    assert.equal(result.attribution.state,'ATTRIBUTION_READY');
+    assert.equal(result.attribution.eligible_for_context_utility_feedback,true);
+    assert.equal(result.utility_feedback_recorded,true);
+    assert.equal(result.utility_feedback.helpful_count,1);
+    assert.equal(runtime.snapshot().experience_context_attribution.count,1);
+    assert.equal(runtime.snapshot().experience_context_attribution.ambiguous_interaction_count,0);
+    assert.equal(runtime.snapshot().experience_context_utility_feedback.count,1);
+
+    const duplicate=await runtime.recordAttributedExperienceContextUtilityFeedback({
+      cycle_digest:cycle.cycle_digest,
+      autonomous_controller_plan:cycle.autonomous_cycle.controller_plan,
+      attribution_plan:plan,
+      ablation_receipts:[receipt],
+    });
+    assert.equal(duplicate.attribution_already_recorded,true);
+    assert.equal(duplicate.utility_feedback_already_recorded,true);
+    assert.equal(runtime.snapshot().experience_context_attribution.count,1);
+    assert.equal(runtime.snapshot().experience_context_utility_feedback.count,1);
+
+    const replay=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
+    await replay.start();
+    assert.equal(replay.snapshot().experience_context_attribution.count,1);
+    assert.equal(replay.snapshot().experience_context_utility_feedback.count,1);
+    assert.equal(replay.snapshot().experience_context_attribution.attribution_is_skill_evidence,false);
+    assert.equal(replay.snapshot().experience_context_attribution.attribution_is_scheduler_authority,false);
   }finally{
     await fs.rm(root,{recursive:true,force:true});
   }
