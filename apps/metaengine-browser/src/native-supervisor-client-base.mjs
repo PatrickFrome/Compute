@@ -842,8 +842,11 @@ export class NativeSupervisorClient {
     const state = String(outcome?.state || '').toUpperCase();
     if (state === 'DELIVERED' || state === 'RECONCILED') return outcome;
     const detail = String(outcome?.error || state || 'UNKNOWN').slice(0, 240);
-    if (state === 'REJECTED') throw new Error(`native_supervisor_result_rejected:${commandId}:${detail}`);
-    throw new Error(`native_supervisor_result_delivery_ambiguous:${commandId}:${detail}`);
+    const error = new Error(state === 'REJECTED'
+      ? `native_supervisor_result_rejected:${commandId}:${detail}`
+      : `native_supervisor_result_delivery_ambiguous:${commandId}:${detail}`);
+    error.code = state === 'REJECTED' ? 'NATIVE_RESULT_DELIVERY_REJECTED' : 'NATIVE_RESULT_DELIVERY_AMBIGUOUS';
+    throw error;
   }
 
   async #postResult(command, ok, result, error = null, effectOutcome = null) {
@@ -1112,6 +1115,14 @@ export class NativeSupervisorClient {
       this.#lastCommandStatus = descriptor.read_only || ['CONFIRMED','NO_EFFECT_PROVEN'].includes(effectOutcome) ? 'COMPLETED' : 'AMBIGUOUS';
       return result;
     } catch (error) {
+      if (String(error?.code || '').startsWith('NATIVE_RESULT_DELIVERY_')) {
+        // The Browser command already ran and the immutable original receipt is now
+        // unresolved/rejected. Never manufacture a second FAILED receipt and never
+        // replay the physical effect from this transport failure path.
+        this.#lastCommandId = command.command_id;
+        this.#lastCommandStatus = 'AMBIGUOUS';
+        throw error;
+      }
       const message = clipError(error);
       effectOutcome = failedCommandEffectOutcome(command, descriptor, error);
       await this.#postResult(command, false, result, message, effectOutcome).catch(() => {});
