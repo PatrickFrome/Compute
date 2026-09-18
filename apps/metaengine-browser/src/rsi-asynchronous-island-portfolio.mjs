@@ -390,7 +390,7 @@ export function createRsiIslandMigrationPlan({
   const checked = verifyRsiIslandPortfolio(portfolio);
   const round = positiveInt(migration_round, 'migration_round', 1_000_000);
   if (round % checked.migration_interval !== 0) {
-    return zeroAuthority({
+    const core = {
       schema: RSI_ISLAND_MIGRATION_PLAN_SCHEMA,
       version: 1,
       portfolio_id: checked.portfolio_id,
@@ -404,12 +404,14 @@ export function createRsiIslandMigrationPlan({
       target_validation_required: true,
       scheduler_action_authorized: false,
       second_scheduler_allowed: false,
-      plan_digest: digest({
-        portfolio_digest: checked.portfolio_digest,
-        migration_round: round,
-        state: 'NO_MIGRATION_DUE',
-      }),
-    });
+      execution_authority: false,
+      production_mutation_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    };
+    return Object.freeze({ ...core, plan_digest: digest(core) });
   }
 
   const seed = digest({ portfolio_digest: checked.portfolio_digest, migration_round: round });
