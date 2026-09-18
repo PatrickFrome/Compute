@@ -306,6 +306,8 @@ export function rsiReleaseExecutorAdmissionTrustRootSnapshot(){
     command_payload_must_be_empty:true,
     db_lease_is_execution_authority:true,
     external_scheduler_selection_required:true,
+    command_issuer_must_equal_qualification_digest:true,
+    deterministic_release_handoff_idempotency_required:true,
     control_mode_required:true,
     armed_required:true,
     fresh_pre_effect_authority_readback_required:true,
