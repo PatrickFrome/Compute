@@ -58,6 +58,14 @@ import {
   verifyRsiKnowledgeConsolidationAdmission,
   rsiSlowKnowledgeConsolidationTrustRootSnapshot,
 } from '../src/rsi-slow-knowledge-consolidation.mjs';
+import {
+  RsiConsumerRevalidationArchive,
+  createRsiValidatedKnowledgeConsumerHandoff,
+  verifyRsiValidatedKnowledgeConsumerHandoff,
+  createRsiConsumerLocalRevalidationReceipt,
+  verifyRsiConsumerLocalRevalidationReceipt,
+  rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot,
+} from '../src/rsi-validated-knowledge-consumer-handoff.mjs';
 
 const SOURCE='a'.repeat(40);
 const CANDIDATE='b'.repeat(40);
@@ -1640,4 +1648,243 @@ test('Phase31 trust root enforces slow external consolidation without authority 
   assert.equal(root.archive_can_schedule_work,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.slow_knowledge_consolidation_root_digest,/^sha256:[0-9a-f]{64}$/);
+});
+
+
+function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null}={}){
+  const rows=phase31SourceRows(`${label}-source`,{state});
+  const proposal=phase31Proposal(rows,`${label}-proposal`);
+  const validations=[
+    phase31Validation(proposal,`${label}-transfer-a`),
+    phase31Validation(proposal,`${label}-transfer-b`),
+  ];
+  const admission=createRsiKnowledgeConsolidationAdmission({
+    admission_id:`phase32.phase31.admission.${label}`,
+    proposal,
+    validations,
+    external_admission_owner:true,
+    authored_by_candidate:false,
+  });
+  const handoff=createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.consumer.handoff.${label}`,
+    proposal,validations,admission,source_rows:rows,
+    consumer_model_family:'METAENGINE_RSI',
+    consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(`${label}-consumer-context`),
+    consumer_harness_digest:labelDigest(`${label}-consumer-harness`),
+    consumer_evaluator_root_digest:labelDigest(`${label}-consumer-evaluator-root`),
+    consumer_evaluator_generation_digest:consumerGeneration||proposal.evaluator_generation_digest,
+    consumer_holdout_digest:labelDigest(`${label}-consumer-holdout`),
+    matched_reference_plan_digest:labelDigest(`${label}-matched-reference`),
+    local_revalidation_protocol_digest:labelDigest(`${label}-local-revalidation`),
+    external_consumer_router:true,
+    authored_by_candidate:false,
+  });
+  return {rows,proposal,validations,admission,handoff};
+}
+
+function phase32Receipt(fx,label='phase32',overrides={}){
+  const base={
+    receipt_id:`phase32.consumer.receipt.${label}`,
+    handoff:fx.handoff,
+    matched_control_receipt_digest:labelDigest(`${label}-control-receipt`),
+    treatment_receipt_digest:labelDigest(`${label}-treatment-receipt`),
+    local_evidence_digest:labelDigest(`${label}-local-evidence`),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    hard_invariants_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    efficiency_non_regression:true,
+    strict_consumer_improvement:fx.handoff.knowledge_class==='REUSABLE_RECIPE_CANDIDATE',
+    constraint_prediction_confirmed:fx.handoff.knowledge_class==='NEGATIVE_CONSTRAINT'||fx.handoff.knowledge_class==='LOW_YIELD_CONSTRAINT',
+    diagnostic_discrimination_pass:fx.handoff.knowledge_class==='ENVIRONMENT_DIAGNOSTIC'||fx.handoff.knowledge_class==='AMBIGUITY_DIAGNOSTIC',
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  };
+  return createRsiConsumerLocalRevalidationReceipt({...base,...overrides});
+}
+
+test('Phase32 routes transfer-validated recipes only to existing verified-skill consumer revalidation',()=>{
+  const fx=phase32Fixture('recipe');
+  assert.equal(fx.handoff.knowledge_class,'REUSABLE_RECIPE_CANDIDATE');
+  assert.equal(fx.handoff.consumer_route,'VERIFIED_SKILL_CANDIDATE_REVALIDATION');
+  assert.equal(fx.handoff.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+  assert.equal(fx.handoff.existing_verified_skill_library_only,true);
+  assert.equal(fx.handoff.existing_experience_graph_only,true);
+  assert.equal(fx.handoff.existing_adaptive_retrieval_only,true);
+  assert.equal(fx.handoff.existing_meta_skill_plane_only,true);
+  assert.equal(fx.handoff.second_skill_library_created,false);
+  assert.equal(fx.handoff.second_experience_graph_created,false);
+  assert.equal(fx.handoff.second_scheduler_created,false);
+  assert.equal(fx.handoff.matched_no_skill_or_reference_required,true);
+  assert.equal(fx.handoff.consumer_can_inherit_source_success,false);
+  assert.equal(fx.handoff.handoff_can_write_skill_library,false);
+  assert.equal(fx.handoff.handoff_can_activate_knowledge,false);
+  assert.equal(verifyRsiValidatedKnowledgeConsumerHandoff(fx.handoff,fx).handoff_digest,fx.handoff.handoff_digest);
+});
+
+test('Phase32 class-sensitive routing keeps negative constraints and diagnostics out of positive skill path',()=>{
+  const negative=phase32Fixture('negative',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.equal(negative.handoff.knowledge_class,'NEGATIVE_CONSTRAINT');
+  assert.equal(negative.handoff.consumer_route,'EXPERIENCE_COUNTEREVIDENCE_REVALIDATION');
+  assert.equal(negative.handoff.matched_no_skill_or_reference_required,false);
+
+  const diagnostic=phase32Fixture('diagnostic',{state:'INCONCLUSIVE_ENVIRONMENT'});
+  assert.equal(diagnostic.handoff.knowledge_class,'ENVIRONMENT_DIAGNOSTIC');
+  assert.equal(diagnostic.handoff.consumer_route,'ADAPTIVE_RETRIEVAL_DIAGNOSTIC_REVALIDATION');
+  assert.equal(diagnostic.handoff.handoff_can_write_experience_graph,false);
+});
+
+test('Phase32 never inherits source evaluator-generation verdict into a consumer context',()=>{
+  const fx=phase32Fixture('cross-generation',{consumerGeneration:labelDigest('phase32-new-consumer-generation')});
+  assert.notEqual(fx.handoff.consumer_evaluator_generation_digest,fx.handoff.source_evaluator_generation_digest);
+  assert.equal(fx.handoff.cross_generation_revalidation_required,true);
+  assert.equal(fx.handoff.source_generation_verdict_inherited,false);
+  assert.equal(fx.handoff.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+});
+
+test('Phase32 positive recipe requires matched local improvement and hard non-regression before existing skill review',()=>{
+  const fx=phase32Fixture('positive-local');
+  const receipt=phase32Receipt(fx,'positive-local');
+  assert.equal(verifyRsiConsumerLocalRevalidationReceipt(receipt,{handoff:fx.handoff}).receipt_digest,receipt.receipt_digest);
+  assert.equal(receipt.state,'CONSUMER_REVALIDATED_RECIPE');
+  assert.equal(receipt.eligible_existing_consumer_review,'EXISTING_VERIFIED_SKILL_EVIDENCE_REVIEW');
+  assert.equal(receipt.negative_transfer_memory,false);
+  assert.equal(receipt.receipt_can_write_skill_library,false);
+  assert.equal(receipt.receipt_can_activate_skill,false);
+
+  const noBenefit=phase32Receipt(fx,'positive-no-benefit',{strict_consumer_improvement:false});
+  assert.equal(noBenefit.state,'CONSUMER_NO_CLEAR_BENEFIT');
+  assert.equal(noBenefit.eligible_existing_consumer_review,null);
+
+  const regression=phase32Receipt(fx,'positive-regression',{efficiency_non_regression:false});
+  assert.equal(regression.state,'CONSUMER_NEGATIVE_TRANSFER');
+  assert.equal(regression.negative_transfer_memory,true);
+  assert.equal(regression.suppress_repeat_same_consumer_context,true);
+  assert.equal(regression.eligible_existing_consumer_review,null);
+});
+
+test('Phase32 counterevidence and diagnostic paths require local confirmation and never become skills',()=>{
+  const negative=phase32Fixture('counter',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  const nr=phase32Receipt(negative,'counter');
+  assert.equal(nr.state,'CONSUMER_REVALIDATED_COUNTEREVIDENCE');
+  assert.equal(nr.eligible_existing_consumer_review,'EXISTING_EXPERIENCE_COUNTEREVIDENCE_REVIEW');
+  assert.equal(nr.receipt_can_write_skill_library,false);
+
+  const diag=phase32Fixture('diag-local',{state:'INCONCLUSIVE_AMBIGUOUS'});
+  const dr=phase32Receipt(diag,'diag-local');
+  assert.equal(dr.state,'CONSUMER_REVALIDATED_DIAGNOSTIC');
+  assert.equal(dr.eligible_existing_consumer_review,'EXISTING_ADAPTIVE_RETRIEVAL_DIAGNOSTIC_REVIEW');
+  assert.equal(dr.receipt_can_write_experience_graph,false);
+});
+
+test('Phase32 local revalidation rejects invalid harness/evaluator/holdout evidence before consumer review',()=>{
+  const fx=phase32Fixture('invalid-local');
+  for(const [label,overrides,blocker] of [
+    ['instances',{same_instances_pass:false},'INSTANCE_MISMATCH'],
+    ['harness',{same_harness_pass:false},'HARNESS_MISMATCH'],
+    ['budget',{same_budget_pass:false},'BUDGET_MISMATCH'],
+    ['evaluator',{evaluator_integrity_pass:false},'EVALUATOR_INTEGRITY_FAILURE'],
+    ['holdout',{hidden_holdout_pass:false},'HIDDEN_HOLDOUT_FAILURE'],
+    ['contamination',{contamination_clear:false},'CONTAMINATION_DETECTED'],
+    ['replay',{from_scratch_replay_pass:false},'FROM_SCRATCH_REPLAY_FAILURE'],
+  ]){
+    const receipt=phase32Receipt(fx,`invalid-${label}`,overrides);
+    assert.equal(receipt.state,'CONSUMER_REVALIDATION_INVALID');
+    assert.ok(receipt.blockers.includes(blocker),blocker);
+    assert.equal(receipt.eligible_existing_consumer_review,null);
+  }
+});
+
+test('Phase32 archive is durable-before-visible, revalidates Phase31 evidence on restart and retains negative transfer',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-consumer-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const fx=phase32Fixture('archive');
+  const receipt=phase32Receipt(fx,'archive',{safety_non_regression:false});
+  const resolver=async()=>({
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+  });
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>archive.add({...fx,receipt}));
+  assert.equal(archive.snapshot().row_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  assert.equal((await archive.add({...fx,receipt})).state,'CONSUMER_NEGATIVE_TRANSFER');
+  const snap=archive.snapshot();
+  assert.equal(snap.row_count,1);
+  assert.equal(snap.negative_transfer_retained,true);
+  assert.equal(snap.active_skill_library_digest,null);
+  assert.equal(snap.active_experience_graph_digest,null);
+  assert.equal(snap.active_meta_skill_profile_digest,null);
+  assert.equal(snap.archive_can_write_consumers,false);
+  assert.equal(snap.archive_can_activate_skill,false);
+  assert.equal(snap.archive_can_schedule_work,false);
+
+  const restored=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await restored.init();
+  assert.equal(restored.snapshot().row_count,1);
+  assert.equal((await restored.add({...fx,receipt})).state,'IDEMPOTENT');
+});
+
+test('Phase32 archive restart rejects self-rehashed authority widening',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase32-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'consumer.json');
+  const fx=phase32Fixture('tamper');
+  const receipt=phase32Receipt(fx,'tamper');
+  const resolver=async()=>({
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+  });
+  const archive=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await archive.init();
+  await archive.add({...fx,receipt});
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.rows[0].handoff.handoff_can_write_skill_library=true;
+  const hc=structuredClone(raw.rows[0].handoff);delete hc.handoff_digest;
+  raw.rows[0].handoff.handoff_digest=dg(hc);
+  raw.rows[0].receipt.handoff_digest=raw.rows[0].handoff.handoff_digest;
+  const rc=structuredClone(raw.rows[0].receipt);delete rc.receipt_digest;
+  raw.rows[0].receipt.receipt_digest=dg(rc);
+  const sc=structuredClone(raw);delete sc.state_digest;
+  raw.state_digest=dg(sc);
+  await fs.writeFile(statePath,`${JSON.stringify(raw)}\n`,'utf8');
+
+  const restored=new RsiConsumerRevalidationArchive({statePath,source_sha:SOURCE,evidenceResolver:resolver});
+  await assert.rejects(()=>restored.init(),/handoff_policy_invalid|handoff_digest_mismatch/);
+});
+
+test('Phase32 trust root reuses existing consumer planes and keeps all effects external',()=>{
+  const root=rsiValidatedKnowledgeConsumerHandoffTrustRootSnapshot();
+  assert.equal(root.phase31_multi_context_admission_required,true);
+  assert.equal(root.existing_verified_skill_library_only,true);
+  assert.equal(root.existing_experience_graph_only,true);
+  assert.equal(root.existing_adaptive_retrieval_only,true);
+  assert.equal(root.existing_meta_skill_plane_only,true);
+  assert.equal(root.second_skill_library_allowed,false);
+  assert.equal(root.second_experience_graph_allowed,false);
+  assert.equal(root.second_scheduler_allowed,false);
+  assert.equal(root.consumer_local_paired_validation_required,true);
+  assert.equal(root.matched_no_skill_or_reference_required_for_recipes,true);
+  assert.equal(root.cross_generation_revalidation_required,true);
+  assert.equal(root.source_generation_verdict_inherited,false);
+  assert.equal(root.negative_transfer_retained,true);
+  assert.equal(root.direct_skill_library_write,false);
+  assert.equal(root.direct_experience_graph_write,false);
+  assert.equal(root.direct_meta_skill_profile_mutation,false);
+  assert.equal(root.direct_knowledge_activation,false);
+  assert.equal(root.direct_scheduler_action,false);
+  assert.equal(root.authority_effect,false);
+  assert.match(root.validated_knowledge_consumer_handoff_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
