@@ -428,7 +428,7 @@ function normalizeObjectiveSpec(spec){
     const threshold=Number(row.materiality_threshold);
     if(!Number.isFinite(threshold)||threshold<0) throw new Error('rsi_meta_skill_objective_threshold_invalid');
     return Object.freeze({metric,direction,materiality_threshold:threshold});
-  }).sort((a,b)=>a.metric.localeCompare(b.metric))));
+  }).sort((a,b)=>a.metric.localeCompare(b.metric)));
 }
 
 function normalizeMetricMap(value,spec,label){
