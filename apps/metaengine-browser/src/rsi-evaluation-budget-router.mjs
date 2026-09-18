@@ -18,6 +18,7 @@ const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const MAX_REQUESTS=1024;
 const MAX_PLAN_BUDGET_UNITS=256;
+const PROTECTED_SCOPE_TAGS=Object.freeze(['SAFETY','SECURITY','HIDDEN_HOLDOUT']);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]));}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`;}
@@ -85,6 +86,8 @@ export function createRsiEvaluationRoutingRequest({
     decision_closeness:close,
     proxy_reliability_gap:gap,
     routing_priority_score:score,
+    hypothesis_snapshot:exp.hypothesis,
+    admission_snapshot:exp.admission,
     external_measurement_owner:true,
     authored_by_candidate:false,
     cheap_proxy_is_final_truth:false,
@@ -106,10 +109,13 @@ export function verifyRsiEvaluationRoutingRequest(request,{hypothesis,admission}
     ||request.candidate_can_set_priority!==false||request.candidate_can_set_uncertainty!==false
     ||request.candidate_can_set_proxy_reliability!==false||request.request_can_schedule_evaluation!==false
     ||request.request_can_execute_evaluation!==false)throw new Error('rsi_eval_router_request_policy_invalid');
+  const embeddedHypothesis=hypothesis??request.hypothesis_snapshot;
+  const embeddedAdmission=admission??request.admission_snapshot;
+  if(!embeddedHypothesis||!embeddedAdmission)throw new Error('rsi_eval_router_request_embedded_experience_required');
   const canonical=createRsiEvaluationRoutingRequest({
     request_id:request.request_id,
-    hypothesis,
-    admission,
+    hypothesis:embeddedHypothesis,
+    admission:embeddedAdmission,
     external_measurement_digest:request.external_measurement_digest,
     proxy_score_digest:request.proxy_score_digest,
     uncertainty:request.uncertainty,
@@ -127,16 +133,45 @@ function selectRequests(rows,budgetUnits){
     if(b.routing_priority_score!==a.routing_priority_score)return b.routing_priority_score-a.routing_priority_score;
     return a.request_digest.localeCompare(b.request_digest);
   });
-  let used=0;
+  const protectedPresent=PROTECTED_SCOPE_TAGS.filter(tag=>sorted.some(row=>row.scope_tags.includes(tag)));
   const selected=[];
-  const deferred=[];
+  const selectedDigests=new Set();
+  let used=0;
+  for(const tag of protectedPresent){
+    if(selected.some(row=>row.scope_tags.includes(tag)))continue;
+    const candidate=sorted.find(row=>row.scope_tags.includes(tag)&&!selectedDigests.has(row.request_digest));
+    if(!candidate||used+candidate.evaluator_cost_units>budgetUnits){
+      return {
+        selected:[],
+        deferred:sorted,
+        used:0,
+        safetyFloorSatisfied:false,
+        protectedScopesPresent:Object.freeze(protectedPresent),
+        protectedScopesCovered:Object.freeze([]),
+      };
+    }
+    selected.push(candidate);
+    selectedDigests.add(candidate.request_digest);
+    used+=candidate.evaluator_cost_units;
+  }
   for(const row of sorted){
+    if(selectedDigests.has(row.request_digest))continue;
     if(used+row.evaluator_cost_units<=budgetUnits){
       selected.push(row);
+      selectedDigests.add(row.request_digest);
       used+=row.evaluator_cost_units;
-    }else deferred.push(row);
+    }
   }
-  return {selected,deferred,used};
+  const deferred=sorted.filter(row=>!selectedDigests.has(row.request_digest));
+  const covered=protectedPresent.filter(tag=>selected.some(row=>row.scope_tags.includes(tag)));
+  return {
+    selected,
+    deferred,
+    used,
+    safetyFloorSatisfied:covered.length===protectedPresent.length,
+    protectedScopesPresent:Object.freeze(protectedPresent),
+    protectedScopesCovered:Object.freeze(covered),
+  };
 }
 
 export function createRsiEvaluationBudgetPlan({
@@ -152,14 +187,11 @@ export function createRsiEvaluationBudgetPlan({
   if(!Array.isArray(requests)||requests.length<1||requests.length>MAX_REQUESTS)throw new Error('rsi_eval_router_requests_invalid');
   const seen=new Set();
   const rows=requests.map(row=>{
-    if(!row||row.schema!==RSI_EVALUATION_ROUTING_REQUEST_SCHEMA)throw new Error('rsi_eval_router_request_invalid');
-    assertZero(row,'plan_request');
-    const clone=structuredClone(row);delete clone.request_digest;
-    if(digest(clone)!==exactDigest(row.request_digest,'plan_request'))throw new Error('rsi_eval_router_request_digest_mismatch');
-    if(row.source_sha!==source)throw new Error('rsi_eval_router_request_source_mismatch');
-    if(seen.has(row.request_digest))throw new Error('rsi_eval_router_request_duplicate');
-    seen.add(row.request_digest);
-    return Object.freeze(structuredClone(row));
+    const checked=verifyRsiEvaluationRoutingRequest(row);
+    if(checked.source_sha!==source)throw new Error('rsi_eval_router_request_source_mismatch');
+    if(seen.has(checked.request_digest))throw new Error('rsi_eval_router_request_duplicate');
+    seen.add(checked.request_digest);
+    return checked;
   });
   const budget=boundedInt(epoch_budget_units,'epoch_budget_units',MAX_PLAN_BUDGET_UNITS);
   const routed=selectRequests(rows,budget);
@@ -172,6 +204,7 @@ export function createRsiEvaluationBudgetPlan({
     used_budget_units:routed.used,
     remaining_budget_units:budget-routed.used,
     request_count:rows.length,
+    request_snapshots:Object.freeze(rows.map(r=>Object.freeze(structuredClone(r)))),
     selected_request_digests:Object.freeze(routed.selected.map(r=>r.request_digest)),
     deferred_request_digests:Object.freeze(routed.deferred.map(r=>r.request_digest)),
     routing_order:Object.freeze([...routed.selected,...routed.deferred].map(r=>r.request_digest)),
@@ -183,6 +216,12 @@ export function createRsiEvaluationBudgetPlan({
     proxy_bias_aware:true,
     close_decision_priority:true,
     budget_fail_closed:true,
+    safety_floor_fail_closed:true,
+    protected_scope_floor_tags:PROTECTED_SCOPE_TAGS,
+    protected_scopes_present:routed.protectedScopesPresent,
+    protected_scopes_covered:routed.protectedScopesCovered,
+    safety_floor_satisfied:routed.safetyFloorSatisfied,
+    state:routed.safetyFloorSatisfied?'EVALUATION_BUDGET_ROUTED':'EVALUATION_BUDGET_FLOOR_UNSATISFIED',
     cheap_proxy_is_final_truth:false,
     selected_requests_are_execution_authority:false,
     selected_requests_are_scheduler_authority:false,
@@ -199,14 +238,16 @@ export function verifyRsiEvaluationBudgetPlan(plan,{requests}={}){
   assertZero(plan,'plan');
   if(plan.external_budget_owner!==true||plan.authored_by_candidate!==false||plan.deterministic_priority_routing!==true
     ||plan.uncertainty_aware!==true||plan.information_gain_aware!==true||plan.proxy_bias_aware!==true
-    ||plan.close_decision_priority!==true||plan.budget_fail_closed!==true||plan.cheap_proxy_is_final_truth!==false
+    ||plan.close_decision_priority!==true||plan.budget_fail_closed!==true||plan.safety_floor_fail_closed!==true
+    ||JSON.stringify(plan.protected_scope_floor_tags)!==JSON.stringify(PROTECTED_SCOPE_TAGS)
+    ||plan.cheap_proxy_is_final_truth!==false
     ||plan.selected_requests_are_execution_authority!==false||plan.selected_requests_are_scheduler_authority!==false
     ||plan.candidate_can_override_budget!==false||plan.candidate_can_override_priority!==false
     ||plan.plan_can_schedule_evaluation!==false||plan.plan_can_execute_evaluation!==false)throw new Error('rsi_eval_router_plan_policy_invalid');
   const canonical=createRsiEvaluationBudgetPlan({
     plan_id:plan.plan_id,
     source_sha:plan.source_sha,
-    requests,
+    requests:requests??plan.request_snapshots,
     epoch_budget_units:plan.epoch_budget_units,
     external_budget_owner:true,
     authored_by_candidate:false,
@@ -251,32 +292,36 @@ export class RsiEvaluationBudgetLedger{
       const clone=structuredClone(p);delete clone.state_digest;if(digest(clone)!==exactDigest(p.state_digest,'ledger'))throw new Error('rsi_eval_router_ledger_digest_mismatch');
       if(!Array.isArray(p.rows)||p.rows.length>MAX_REQUESTS)throw new Error('rsi_eval_router_ledger_rows_invalid');
       const ids=new Set();
+      const checkedRows=[];
       for(const row of p.rows){
         if(row.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
-        const pc=structuredClone(row.plan);delete pc.plan_digest;if(digest(pc)!==exactDigest(row.plan.plan_digest,'ledger_plan'))throw new Error('rsi_eval_router_ledger_plan_digest_mismatch');
-        if(ids.has(row.plan.plan_digest))throw new Error('rsi_eval_router_ledger_plan_duplicate');
-        ids.add(row.plan.plan_digest);
+        const plan=verifyRsiEvaluationBudgetPlan(row.plan);
+        if(plan.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
+        if(ids.has(plan.plan_digest))throw new Error('rsi_eval_router_ledger_plan_duplicate');
+        ids.add(plan.plan_digest);
+        checkedRows.push(Object.freeze({source_sha:this.#sourceSha,plan}));
       }
-      this.#rows=p.rows;
+      const canonicalState=ledgerState(this.#sourceSha,checkedRows);
+      if(canonicalState.state_digest!==p.state_digest)throw new Error('rsi_eval_router_ledger_derived_state_mismatch');
+      this.#rows=checkedRows;
     }catch(error){if(error?.code!=='ENOENT')throw error;}
     this.#initialized=true;return this.snapshot();
   }
-  async #persist(){const s=ledgerState(this.#sourceSha,this.#rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
+  async #persist(rows=this.#rows){const s=ledgerState(this.#sourceSha,rows);const tmp=`${this.#path}.tmp`;const h=await fs.open(tmp,'w',0o600);try{await h.writeFile(`${JSON.stringify(s)}\n`,'utf8');await h.sync();}finally{await h.close();}await fs.rename(tmp,this.#path);}
   async add(plan){
     if(!this.#initialized)throw new Error('rsi_eval_router_ledger_not_initialized');
-    if(!plan||plan.schema!==RSI_EVALUATION_BUDGET_PLAN_SCHEMA)throw new Error('rsi_eval_router_plan_invalid');
-    assertZero(plan,'ledger_plan');
-    const clone=structuredClone(plan);delete clone.plan_digest;if(digest(clone)!==exactDigest(plan.plan_digest,'ledger_plan'))throw new Error('rsi_eval_router_plan_digest_mismatch');
-    if(plan.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
-    const existing=this.#rows.find(r=>r.plan.plan_id===plan.plan_id||r.plan.plan_digest===plan.plan_digest);
+    const checked=verifyRsiEvaluationBudgetPlan(plan);
+    if(checked.source_sha!==this.#sourceSha)throw new Error('rsi_eval_router_ledger_source_mismatch');
+    const existing=this.#rows.find(r=>r.plan.plan_id===checked.plan_id||r.plan.plan_digest===checked.plan_digest);
     if(existing){
-      if(existing.plan.plan_digest!==plan.plan_digest)throw new Error('rsi_eval_router_ledger_identity_conflict');
-      return zero({state:'IDEMPOTENT',plan_digest:plan.plan_digest});
+      if(existing.plan.plan_digest!==checked.plan_digest)throw new Error('rsi_eval_router_ledger_identity_conflict');
+      return zero({state:'IDEMPOTENT',plan_digest:checked.plan_digest});
     }
     if(this.#rows.length>=MAX_REQUESTS)throw new Error('rsi_eval_router_ledger_capacity_exceeded');
-    this.#rows.push(Object.freeze({source_sha:this.#sourceSha,plan:structuredClone(plan)}));
-    await this.#persist();
-    return zero({state:'RECORDED',plan_digest:plan.plan_digest});
+    const nextRows=[...this.#rows,Object.freeze({source_sha:this.#sourceSha,plan:structuredClone(checked)})];
+    await this.#persist(nextRows);
+    this.#rows=nextRows;
+    return zero({state:'RECORDED',plan_digest:checked.plan_digest});
   }
   snapshot(){const s=ledgerState(this.#sourceSha,this.#rows);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,row_count:s.row_count,total_budget_units:s.total_budget_units,total_used_budget_units:s.total_used_budget_units,total_remaining_budget_units:s.total_remaining_budget_units,append_only:true,ledger_can_schedule_evaluation:false,ledger_can_execute_evaluation:false,ledger_can_increase_budget:false,authority_effect:false});}
 }
@@ -297,6 +342,12 @@ export function rsiEvaluationBudgetRouterTrustRootSnapshot(){
     cheap_proxy_is_final_truth:false,
     independent_audit_required:true,
     budget_fail_closed:true,
+    protected_scope_floor_tags:PROTECTED_SCOPE_TAGS,
+    safety_floor_fail_closed:true,
+    request_embeds_admitted_experience:true,
+    plan_embeds_request_snapshots:true,
+    durable_before_visible_required:true,
+    restart_revalidation_required:true,
     candidate_can_set_priority:false,
     candidate_can_override_budget:false,
     router_can_schedule_evaluation:false,
