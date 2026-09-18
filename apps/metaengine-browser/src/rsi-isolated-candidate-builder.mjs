@@ -67,6 +67,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-evaluation-budget-router.mjs',
   'apps/metaengine-browser/src/rsi-candidate-experiment-ledger.mjs',
   'apps/metaengine-browser/src/rsi-bounded-revision-proposal.mjs',
+  'apps/metaengine-browser/src/rsi-bounded-revision-devos-bridge.mjs',
   'apps/metaengine-browser/src/rsi-skill-scope-expansion.mjs',
   'apps/metaengine-browser/src/rsi-contrastive-skill-reliability.mjs',
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
@@ -202,7 +203,45 @@ function normalizeExperimentPlan(plan) {
   const experimentId = clip(plan.experiment_id, 128);
   const targetBranch = clip(plan.target_branch, 240);
   if (!/^rsi_exp_[0-9a-f]{24}$/.test(experimentId) || !/^work\/rsi\/[a-z0-9-]{1,200}$/.test(targetBranch)) throw new Error('rsi_candidate_experiment_identity_invalid');
-  return Object.freeze({ source_sha: sourceSha, mutation_surface: mutationSurface, experiment_id: experimentId, target_branch: targetBranch });
+  let revisionLimits = null;
+  const rawRevisionLimits = plan.task_spec?.rsi?.revision_limits;
+  if (rawRevisionLimits != null) {
+    if (!plainObject(rawRevisionLimits)) throw new Error('rsi_candidate_revision_limits_invalid');
+    const maxFiles = Number(rawRevisionLimits.max_mutated_files);
+    const maxOps = Number(rawRevisionLimits.max_edit_operations);
+    const maxBytes = Number(rawRevisionLimits.max_changed_bytes);
+    if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > MAX_MUTATED_FILES) throw new Error('rsi_candidate_revision_max_files_invalid');
+    if (!Number.isSafeInteger(maxOps) || maxOps < 1 || maxOps > 1024) throw new Error('rsi_candidate_revision_max_ops_invalid');
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_MUTATED_BYTES) throw new Error('rsi_candidate_revision_max_bytes_invalid');
+    revisionLimits = Object.freeze({
+      envelope_digest: exactDigest(rawRevisionLimits.envelope_digest, 'revision_envelope'),
+      proposal_digest: exactDigest(rawRevisionLimits.proposal_digest, 'revision_proposal'),
+      approved_mutation_manifest_digest: exactDigest(rawRevisionLimits.approved_mutation_manifest_digest, 'revision_manifest'),
+      implementation_reviewer_root_digest: exactDigest(rawRevisionLimits.implementation_reviewer_root_digest, 'revision_reviewer'),
+      max_mutated_files: maxFiles,
+      max_edit_operations: maxOps,
+      max_changed_bytes: maxBytes,
+      protected_policy_roots_digest: exactDigest(rawRevisionLimits.protected_policy_roots_digest, 'revision_protected_roots'),
+      editable_scope_digest: exactDigest(rawRevisionLimits.editable_scope_digest, 'revision_editable_scope'),
+      preserved_behavior_digest: exactDigest(rawRevisionLimits.preserved_behavior_digest, 'revision_preserved_behavior'),
+      negative_evidence_root_digest: exactDigest(rawRevisionLimits.negative_evidence_root_digest, 'revision_negative_evidence'),
+      regression_budget_digest: exactDigest(rawRevisionLimits.regression_budget_digest, 'revision_regression_budget'),
+      validation_plan_digest: exactDigest(rawRevisionLimits.validation_plan_digest, 'revision_validation_plan'),
+      parent_candidate_artifact_digest: exactDigest(rawRevisionLimits.parent_candidate_artifact_digest, 'revision_parent_candidate'),
+      implementation_manifest_digest: exactDigest(rawRevisionLimits.implementation_manifest_digest, 'implementation_manifest'),
+      harness_manifest_digest: exactDigest(rawRevisionLimits.harness_manifest_digest, 'harness_manifest'),
+      harness_signature_bundle_digest: exactDigest(rawRevisionLimits.harness_signature_bundle_digest, 'harness_signature_bundle'),
+      manifest_signer_root_digest: exactDigest(rawRevisionLimits.manifest_signer_root_digest, 'manifest_signer_root'),
+      toolchain_digest: exactDigest(rawRevisionLimits.toolchain_digest, 'toolchain'),
+      dependency_lock_digest: exactDigest(rawRevisionLimits.dependency_lock_digest, 'dependency_lock'),
+      dependency_closure_digest: exactDigest(rawRevisionLimits.dependency_closure_digest, 'dependency_closure'),
+      capability_profile_digest: exactDigest(rawRevisionLimits.capability_profile_digest, 'capability_profile'),
+      network_policy_digest: exactDigest(rawRevisionLimits.network_policy_digest, 'network_policy'),
+      build_recipe_digest: exactDigest(rawRevisionLimits.build_recipe_digest, 'build_recipe'),
+      expected_builder_identity_digest: exactDigest(rawRevisionLimits.expected_builder_identity_digest, 'expected_builder_identity'),
+    });
+  }
+  return Object.freeze({ source_sha: sourceSha, mutation_surface: mutationSurface, experiment_id: experimentId, target_branch: targetBranch, revision_limits: revisionLimits });
 }
 
 function normalizeSourceSnapshot(snapshot, expectedSha) {
@@ -266,9 +305,19 @@ function buildPlanCore({ experiment, source, sourceSnapshotDigest, mutations, se
       candidate_must_differ_from_parent: true,
       input_manifest_digest_required: true,
       output_manifest_digest_required: true,
-      max_mutated_files: MAX_MUTATED_FILES,
-      max_mutated_bytes: MAX_MUTATED_BYTES,
+      max_mutated_files: experiment.revision_limits?.max_mutated_files ?? MAX_MUTATED_FILES,
+      max_mutated_bytes: experiment.revision_limits?.max_changed_bytes ?? MAX_MUTATED_BYTES,
       arbitrary_command_field_allowed: false,
+      ...(experiment.revision_limits ? {
+        max_edit_operations: experiment.revision_limits.max_edit_operations,
+        revision_limits: experiment.revision_limits,
+        provenance_manifest_required: true,
+        exact_toolchain_required: true,
+        complete_dependency_closure_required: true,
+        capability_profile_required: true,
+        host_toolchain_forbidden: true,
+        undeclared_dependencies_forbidden: true,
+      } : {}),
     },
     verification_contract: {
       evaluator_root_immutable: true,
@@ -301,6 +350,9 @@ export function prepareRsiIsolatedCandidateBuild({
   const experiment = normalizeExperimentPlan(experiment_plan);
   const source = normalizeSourceSnapshot(source_snapshot, experiment.source_sha);
   const normalizedMutations = normalizeMutationManifest(mutations);
+  if (experiment.revision_limits && normalizedMutations.length > experiment.revision_limits.max_mutated_files) {
+    throw new Error('rsi_candidate_revision_mutation_file_budget_exceeded');
+  }
   const normalizedSequence = Number(sequence);
   if (!Number.isSafeInteger(normalizedSequence) || normalizedSequence < 1) throw new Error('rsi_candidate_sequence_invalid');
   const previousCandidateId = previous_candidate_id == null ? null : clip(previous_candidate_id, 96).toLowerCase();
@@ -321,8 +373,53 @@ export function verifyRsiIsolatedCandidateBuildPlan(plan) {
   delete core.plan_digest;
   const digest = sha256(core);
   if (plan.plan_digest !== digest || plan.plan_id !== `rsi_build_${digest.slice('sha256:'.length)}`) throw new Error('rsi_candidate_build_plan_digest_mismatch');
-  normalizeMutationManifest(plan.mutation_manifest);
+  const normalizedPlanMutations = normalizeMutationManifest(plan.mutation_manifest);
   exactSha(plan.source?.parent_sha, 'parent');
+  const revisionLimits = plan.materialization_contract?.revision_limits;
+  if (revisionLimits != null) {
+    const maxFiles = Number(revisionLimits.max_mutated_files);
+    const maxOps = Number(revisionLimits.max_edit_operations);
+    const maxBytes = Number(revisionLimits.max_changed_bytes);
+    if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > MAX_MUTATED_FILES) throw new Error('rsi_candidate_revision_max_files_invalid');
+    if (!Number.isSafeInteger(maxOps) || maxOps < 1 || maxOps > 1024) throw new Error('rsi_candidate_revision_max_ops_invalid');
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_MUTATED_BYTES) throw new Error('rsi_candidate_revision_max_bytes_invalid');
+    if (plan.materialization_contract.max_mutated_files !== maxFiles || plan.materialization_contract.max_mutated_bytes !== maxBytes || plan.materialization_contract.max_edit_operations !== maxOps) {
+      throw new Error('rsi_candidate_revision_materialization_contract_mismatch');
+    }
+    if (plan.materialization_contract.provenance_manifest_required !== true
+      || plan.materialization_contract.exact_toolchain_required !== true
+      || plan.materialization_contract.complete_dependency_closure_required !== true
+      || plan.materialization_contract.capability_profile_required !== true
+      || plan.materialization_contract.host_toolchain_forbidden !== true
+      || plan.materialization_contract.undeclared_dependencies_forbidden !== true) {
+      throw new Error('rsi_candidate_revision_provenance_contract_invalid');
+    }
+    if (normalizedPlanMutations.length > maxFiles) throw new Error('rsi_candidate_revision_mutation_file_budget_exceeded');
+    for (const [field, label] of [
+      ['envelope_digest', 'revision_envelope'],
+      ['proposal_digest', 'revision_proposal'],
+      ['approved_mutation_manifest_digest', 'revision_manifest'],
+      ['implementation_reviewer_root_digest', 'revision_reviewer'],
+      ['protected_policy_roots_digest', 'revision_protected_roots'],
+      ['editable_scope_digest', 'revision_editable_scope'],
+      ['preserved_behavior_digest', 'revision_preserved_behavior'],
+      ['negative_evidence_root_digest', 'revision_negative_evidence'],
+      ['regression_budget_digest', 'revision_regression_budget'],
+      ['validation_plan_digest', 'revision_validation_plan'],
+      ['parent_candidate_artifact_digest', 'revision_parent_candidate'],
+      ['implementation_manifest_digest', 'implementation_manifest'],
+      ['harness_manifest_digest', 'harness_manifest'],
+      ['harness_signature_bundle_digest', 'harness_signature_bundle'],
+      ['manifest_signer_root_digest', 'manifest_signer_root'],
+      ['toolchain_digest', 'toolchain'],
+      ['dependency_lock_digest', 'dependency_lock'],
+      ['dependency_closure_digest', 'dependency_closure'],
+      ['capability_profile_digest', 'capability_profile'],
+      ['network_policy_digest', 'network_policy'],
+      ['build_recipe_digest', 'build_recipe'],
+      ['expected_builder_identity_digest', 'expected_builder_identity'],
+    ]) exactDigest(revisionLimits[field], label);
+  }
   exactDigest(plan.source?.source_snapshot_digest, 'source_snapshot');
   if (
     plan.workspace_contract?.authority !== 'EXISTING_DEVOS_ONLY'
@@ -335,6 +432,7 @@ export function verifyRsiIsolatedCandidateBuildPlan(plan) {
     || plan.workspace_contract?.writable_layer_must_be_private !== true
   ) throw new Error('rsi_candidate_build_plan_workspace_contract_invalid');
   if (plan.materialization_contract?.arbitrary_command_field_allowed !== false || plan.verification_contract?.network_deny_by_default_required !== true) throw new Error('rsi_candidate_build_plan_policy_invalid');
+  if (revisionLimits != null && plan.verification_contract?.sandbox_prepare_required !== true) throw new Error('rsi_candidate_revision_sandbox_required');
   return Object.freeze({ schema: 'metaengine.rsi.isolated-candidate-build-plan-verify.v1', ok: true, plan_id: plan.plan_id, plan_digest: plan.plan_digest, execution_authorized: false, promotion_authorized: false, authority_effect: false });
 }
 
@@ -466,6 +564,14 @@ function normalizeMaterializationReceipt(receipt, plan) {
   const materializedBytes = Number(receipt.materialized_bytes);
   if (!Number.isSafeInteger(materializedBytes) || materializedBytes < 0 || materializedBytes > plan.materialization_contract.max_mutated_bytes) throw new Error('rsi_candidate_materialization_bytes_invalid');
   if (Number(receipt.materialized_file_count) !== components.length) throw new Error('rsi_candidate_materialization_file_count_mismatch');
+  const editLimit = plan.materialization_contract.max_edit_operations;
+  let materializedEditOperations = null;
+  if (editLimit != null) {
+    materializedEditOperations = Number(receipt.materialized_edit_operations);
+    if (!Number.isSafeInteger(materializedEditOperations) || materializedEditOperations < 1 || materializedEditOperations > editLimit) {
+      throw new Error('rsi_candidate_materialization_edit_operations_invalid');
+    }
+  }
   return Object.freeze({
     schema: RSI_ISOLATED_CANDIDATE_MATERIALIZATION_SCHEMA,
     plan_id: plan.plan_id,
@@ -480,6 +586,7 @@ function normalizeMaterializationReceipt(receipt, plan) {
     components,
     materialized_file_count: components.length,
     materialized_bytes: materializedBytes,
+    ...(materializedEditOperations == null ? {} : { materialized_edit_operations: materializedEditOperations }),
     materialized_by: 'EXISTING_DEVOS_AUTHORITY',
     execution_authority: false,
     production_mutation_authority: false,
