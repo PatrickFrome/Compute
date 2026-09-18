@@ -81,6 +81,8 @@ test('Pareto post-adoption evidence becomes one append-only SUCCESS case in the 
   assert.equal(a.experience_case.outcome,'SUCCESS');
   assert.equal(a.experience_case.candidate_id,CANDIDATE_ID);
   assert.equal(a.experience_case.candidate_sha,CANDIDATE);
+  assert.equal(a.graph_source_sha,PREVIOUS);
+  assert.equal(a.graph_id,'rsi.runtime.experience.'+PREVIOUS.slice(0,16));
   assert.equal(a.experience_case.raw_trajectory_present,false);
   assert.equal(a.candidate_can_write_graph,false);
   assert.equal(a.skill_library_write_performed,false);
@@ -159,6 +161,7 @@ test('post-adoption graph trust root reuses the existing graph without authority
   const root=rsiPostAdoptionExperienceAdmissionTrustRootSnapshot();
   assert.equal(root.existing_experience_graph_only,true);
   assert.equal(root.append_only_graph_admission,true);
+  assert.equal(root.graph_identity_uses_runtime_source_lineage,true);
   assert.equal(root.exact_candidate_id_from_promotion_review_required,true);
   assert.equal(root.only_pareto_or_verified_regression_measurements,true);
   assert.equal(root.pareto_maps_to_success_case,true);

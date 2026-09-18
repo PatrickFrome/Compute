@@ -77,7 +77,8 @@ export function createRsiPostAdoptionExperienceAdmission({
   });
   const core=zero({
     schema:RSI_POST_ADOPTION_EXPERIENCE_ADMISSION_SCHEMA,version:1,
-    graph_id:'rsi.runtime.experience.'+m.candidate_sha.slice(0,16),
+    graph_id:'rsi.runtime.experience.'+r.source_sha.slice(0,16),
+    graph_source_sha:r.source_sha,
     measurement_digest:m.measurement_digest,measurement_state:m.state,
     successor_verification_digest:m.successor_verification_digest,promotion_review_digest:r.review_digest,
     candidate_id:r.candidate_id,candidate_sha:m.candidate_sha,previous_authority_sha:m.previous_authority_sha,
@@ -104,9 +105,10 @@ export function verifyRsiPostAdoptionExperienceAdmission(row){
   const expected=row.measurement_state==='PARETO_IMPROVEMENT'?'SUCCESS':row.measurement_state==='REGRESSION'?'FAILURE':null;
   if(expected==null||row.outcome!==expected)throw new Error('rsi_postexp_outcome_invalid');
   exact(row.candidate_id,C,'candidate_id');exact(row.candidate_sha,S,'candidate_sha');exact(row.previous_authority_sha,S,'previous_sha');
+  const graphSource=exact(row.graph_source_sha,S,'graph_source_sha');
   for(const x of ['measurement_digest','successor_verification_digest','promotion_review_digest','workload_manifest_digest'])exact(row[x],D,x);
   exact(String(row.model_family||'').toUpperCase(),T,'model_family');refs(row.evidence_refs);
-  if(row.graph_id!=='rsi.runtime.experience.'+row.candidate_sha.slice(0,16))throw new Error('rsi_postexp_graph_id_invalid');
+  if(row.graph_id!=='rsi.runtime.experience.'+graphSource.slice(0,16))throw new Error('rsi_postexp_graph_id_invalid');
   const exp=verifyRsiExperienceCase(row.experience_case);
   if(exp.outcome!==expected||exp.candidate_id!==row.candidate_id||exp.candidate_sha!==row.candidate_sha
     ||exp.evidence_digest!==row.measurement_digest||exp.task_id!==row.task_anchor?.task_id
@@ -134,6 +136,7 @@ export function rsiPostAdoptionExperienceAdmissionTrustRootSnapshot(){
     adapter_path:'apps/metaengine-browser/src/rsi-post-adoption-experience-admission.mjs',
     experience_graph_path:'apps/metaengine-browser/src/rsi-experience-graph.mjs',
     existing_experience_graph_only:true,append_only_graph_admission:true,
+    graph_identity_uses_runtime_source_lineage:true,
     exact_candidate_id_from_promotion_review_required:true,only_pareto_or_verified_regression_measurements:true,
     pareto_maps_to_success_case:true,regression_maps_to_failure_case:true,contextual_measurement_not_global_truth:true,
     candidate_can_write_graph:false,candidate_can_edit_case:false,skill_library_write_performed_here:false,
