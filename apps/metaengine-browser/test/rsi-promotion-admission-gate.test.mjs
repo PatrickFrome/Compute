@@ -232,6 +232,7 @@ test('promotion admission can become review-ready but never gains promotion or s
 test('promotion gate independently rejects candidate mutation of promotion and self-update trust roots', () => {
   for (const path of [
     'apps/metaengine-browser/src/rsi-promotion-admission-gate.mjs',
+    'apps/metaengine-browser/src/rsi-external-promotion-review.mjs',
     'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
     'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
     'apps/metaengine-browser/src/self-update-runtime.mjs',

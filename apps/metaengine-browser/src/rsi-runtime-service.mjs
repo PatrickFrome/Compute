@@ -50,6 +50,7 @@ import { createRsiCandidateSynthesisRequest, createRsiCandidateMutationProposal,
 import { createRsiDevosMaterializationHandoff, admitRsiDevosMaterialization, rsiDevosMaterializationTrustRootSnapshot } from './rsi-devos-materialization-handoff.mjs';
 import { createRsiVerifiedCandidateMaterialization, rsiVerifiedCandidateMaterializationTrustRootSnapshot } from './rsi-verified-candidate-materialization.mjs';
 import { createRsiExternalEvaluationBundle, verifyRsiExternalEvaluationBundle, rsiExternalEvaluationTrustRootSnapshot } from './rsi-external-evaluation-evidence-adapter.mjs';
+import { createRsiExternalPromotionReviewRequest, finalizeRsiExternalPromotionReview, verifyRsiExternalPromotionReviewRequest, verifyRsiExternalPromotionReviewResult, rsiExternalPromotionReviewTrustRootSnapshot } from './rsi-external-promotion-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -124,6 +125,7 @@ function trustRoots() {
     devos_materialization: rsiDevosMaterializationTrustRootSnapshot(),
     verified_candidate_materialization: rsiVerifiedCandidateMaterializationTrustRootSnapshot(),
     external_evaluation: rsiExternalEvaluationTrustRootSnapshot(),
+    external_promotion_review: rsiExternalPromotionReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -171,6 +173,10 @@ export class RsiRuntimeService {
   #lastVerifiedCandidateMaterializationDigest = null;
   #externalEvaluationBundleCount = 0;
   #lastExternalEvaluationBundleDigest = null;
+  #externalPromotionReviewRequestCount = 0;
+  #externalPromotionReviewResultCount = 0;
+  #lastExternalPromotionReviewRequestDigest = null;
+  #lastExternalPromotionReviewResultDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -225,6 +231,41 @@ export class RsiRuntimeService {
         if (row?.payload?.candidate_synthesis?.context_candidate_build) {
           this.#candidateSynthesisPlanCount += 1;
           this.#lastContextAwareBuildDigest = row.payload.candidate_synthesis.context_candidate_build.context_aware_build_digest || null;
+        }
+        if (row?.payload?.materialization_handoff) {
+          this.#materializationHandoffCount += 1;
+          this.#lastMaterializationHandoffDigest = row.payload.materialization_handoff.handoff_digest || null;
+        }
+        if (row?.payload?.materialization_admission) {
+          this.#materializationAdmissionCount += 1;
+          this.#lastMaterializationAdmissionDigest = row.payload.materialization_admission.admission_digest || null;
+        }
+        if (row?.payload?.verified_candidate_materialization) {
+          this.#verifiedCandidateMaterializationCount += 1;
+          this.#lastVerifiedCandidateMaterializationDigest = row.payload.verified_candidate_materialization.verified_materialization_digest || null;
+        }
+        if (row?.payload?.external_evaluation_bundle) {
+          this.#externalEvaluationBundleCount += 1;
+          this.#lastExternalEvaluationBundleDigest = row.payload.external_evaluation_bundle.bundle_digest || null;
+        }
+        if (row?.payload?.external_promotion_review_request) {
+          this.#externalPromotionReviewRequestCount += 1;
+          this.#lastExternalPromotionReviewRequestDigest = row.payload.external_promotion_review_request.request_digest || null;
+        }
+        if (row?.payload?.external_promotion_review_result) {
+          const request = row.payload.external_promotion_review_request;
+          const admission = row.payload.verified_archive_admission;
+          if (!request || !admission) throw new Error('rsi_runtime_external_promotion_review_replay_evidence_missing');
+          const replayedAdmission = this.#verifiedArchive.admit({
+            plan: request.tournament_plan,
+            result: request.tournament_result,
+            receipts: request.tournament_receipts,
+          });
+          if (replayedAdmission.admission_digest !== admission.admission_digest) {
+            throw new Error('rsi_runtime_verified_archive_replay_mismatch');
+          }
+          this.#externalPromotionReviewResultCount += 1;
+          this.#lastExternalPromotionReviewResultDigest = row.payload.external_promotion_review_result.result_digest || null;
         }
       }
       replayCursor = page.at(-1).seq;
@@ -358,6 +399,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const bundle = row?.payload?.external_evaluation_bundle;
         if (bundle?.candidate_id === wanted) found = Object.freeze(structuredClone(bundle));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findExternalPromotionReviewRequest(requestDigest) {
+    const wanted = String(requestDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const request = row?.payload?.external_promotion_review_request;
+        if (request?.request_digest === wanted) found = Object.freeze(structuredClone(request));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findExternalPromotionReviewResultByRequest(requestDigest) {
+    const wanted = String(requestDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const result = row?.payload?.external_promotion_review_result;
+        if (result?.request_digest === wanted) found = Object.freeze(structuredClone(result));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -746,6 +821,104 @@ export class RsiRuntimeService {
     });
   }
 
+  async prepareExternalPromotionReview({
+    candidate_id,
+    tournament_plan,
+    tournament_result,
+    tournament_receipts,
+    qualification,
+  } = {}) {
+    this.#assertRunning();
+    const id = String(candidate_id || '').trim().toLowerCase();
+    const bundle = this.#findExternalEvaluationBundleByCandidate(id);
+    if (!bundle) throw new Error('rsi_runtime_external_evaluation_bundle_not_persisted');
+    verifyRsiExternalEvaluationBundle(bundle);
+    if (bundle.all_classes_pass !== true || bundle.any_class_ambiguous !== false) {
+      throw new Error('rsi_runtime_candidate_not_nomination_ready');
+    }
+    const evaluatorHandoff = this.externalEvaluatorHandoff(id);
+    const candidateHandoff = evaluatorHandoff?.candidate_handoff;
+    if (!candidateHandoff) throw new Error('rsi_runtime_candidate_handoff_not_persisted');
+    const request = createRsiExternalPromotionReviewRequest({
+      evaluation_bundle: bundle,
+      candidate_handoff: candidateHandoff,
+      tournament_plan,
+      tournament_result,
+      tournament_receipts,
+      qualification,
+    });
+    if (this.#findExternalPromotionReviewRequest(request.request_digest)) {
+      throw new Error('rsi_runtime_external_promotion_review_request_duplicate');
+    }
+    await this.#ledger.append('RSI_EXTERNAL_PROMOTION_REVIEW_PREPARED', {
+      external_promotion_review_request: request,
+      external_review_required: true,
+      direct_install_authorized: false,
+      self_update_invocation_authorized: false,
+      promotion_token: null,
+      authority_effect: false,
+    });
+    this.#externalPromotionReviewRequestCount += 1;
+    this.#lastExternalPromotionReviewRequestDigest = request.request_digest;
+    return request;
+  }
+
+  async finalizeExternalPromotionReview({ request_digest } = {}) {
+    this.#assertRunning();
+    const wanted = String(request_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(wanted)) throw new Error('rsi_runtime_external_promotion_review_request_digest_invalid');
+    if (this.#findExternalPromotionReviewResultByRequest(wanted)) {
+      throw new Error('rsi_runtime_external_promotion_review_already_finalized');
+    }
+    const request = this.#findExternalPromotionReviewRequest(wanted);
+    if (!request) throw new Error('rsi_runtime_external_promotion_review_request_not_persisted');
+    verifyRsiExternalPromotionReviewRequest(request);
+    const evaluatorHandoff = this.externalEvaluatorHandoff(request.candidate_id);
+    const candidateHandoff = evaluatorHandoff?.candidate_handoff;
+    if (!candidateHandoff) throw new Error('rsi_runtime_candidate_handoff_not_persisted');
+
+    const previewArchive = new RsiVerifiedEvolutionArchive({ clock: this.#clock });
+    const archiveAdmission = previewArchive.admit({
+      plan: request.tournament_plan,
+      result: request.tournament_result,
+      receipts: request.tournament_receipts,
+    });
+    const reviewResult = finalizeRsiExternalPromotionReview({
+      request,
+      candidate_handoff: candidateHandoff,
+      archive_admission: archiveAdmission,
+    });
+    verifyRsiExternalPromotionReviewResult(reviewResult, request);
+
+    await this.#ledger.append('RSI_EXTERNAL_PROMOTION_REVIEW_FINALIZED', {
+      external_promotion_review_request: request,
+      verified_archive_admission: archiveAdmission,
+      external_promotion_review_result: reviewResult,
+      durable_before_archive_apply: true,
+      existing_self_update_handoff_authorized: false,
+      direct_install_authorized: false,
+      self_update_invocation_authorized: false,
+      promotion_token: null,
+      authority_effect: false,
+    });
+
+    const appliedAdmission = this.#verifiedArchive.admit({
+      plan: request.tournament_plan,
+      result: request.tournament_result,
+      receipts: request.tournament_receipts,
+    });
+    if (appliedAdmission.admission_digest !== archiveAdmission.admission_digest) {
+      throw new Error('rsi_runtime_verified_archive_apply_mismatch');
+    }
+    this.#externalPromotionReviewResultCount += 1;
+    this.#lastExternalPromotionReviewResultDigest = reviewResult.result_digest;
+    return Object.freeze({
+      request,
+      archive_admission: appliedAdmission,
+      review_result: reviewResult,
+    });
+  }
+
   async openEpisode(input = {}) {
     this.#assertRunning();
     const event = this.#episodes.prepareOpen(input);
@@ -1043,6 +1216,27 @@ export class RsiRuntimeService {
       improvement_frontier: this.#improvementFrontier.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       command_attribution_registry: this.#commandAttributions.snapshot(),
+      external_promotion_review: Object.freeze({
+        request_count: this.#externalPromotionReviewRequestCount,
+        result_count: this.#externalPromotionReviewResultCount,
+        last_request_digest: this.#lastExternalPromotionReviewRequestDigest,
+        last_result_digest: this.#lastExternalPromotionReviewResultDigest,
+        nomination_ready_required: true,
+        verified_archive_admission_required: true,
+        signed_artifact_and_slsa_provenance_required: true,
+        exact_candidate_head_ci_required: true,
+        shadow_canary_required: true,
+        rollback_ready_required: true,
+        external_human_or_release_authority_still_required: true,
+        existing_self_update_handoff_authorized: false,
+        direct_install_authorized: false,
+        self_update_invocation_authorized: false,
+        promotion_token: null,
+        execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
       external_evaluation: Object.freeze({
         bundle_count: this.#externalEvaluationBundleCount,
         last_bundle_digest: this.#lastExternalEvaluationBundleDigest,
