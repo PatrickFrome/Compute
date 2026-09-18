@@ -40,6 +40,7 @@ import { rsiSearchModeRouterTrustRootSnapshot } from './rsi-search-mode-router.m
 import { rsiEvaluationIntegrityTrustRootSnapshot } from './rsi-evaluation-integrity-guard.mjs';
 import { RsiRuntimeLedger } from './rsi-runtime-ledger.mjs';
 import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './rsi-runtime-experience-gate.mjs';
+import { RsiEpisodeOrchestrator, rsiEpisodeOrchestratorTrustRootSnapshot } from './rsi-episode-orchestrator.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -103,6 +104,7 @@ function trustRoots() {
     fixed_skeleton_mutation: rsiFixedSkeletonTrustRootSnapshot(),
     search_mode_router: rsiSearchModeRouterTrustRootSnapshot(),
     evaluation_integrity: rsiEvaluationIntegrityTrustRootSnapshot(),
+    episode_orchestrator: rsiEpisodeOrchestratorTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -118,6 +120,7 @@ export class RsiRuntimeService {
   #clock;
   #ledger;
   #experienceGate;
+  #episodes;
   #archive;
   #observer;
   #verifiedArchive;
@@ -138,11 +141,25 @@ export class RsiRuntimeService {
     this.#observer = new RsiShadowObserver({ source_sha: this.#sourceSha, clock });
     this.#verifiedArchive = new RsiVerifiedEvolutionArchive({ clock });
     this.#roots = trustRoots();
+    this.#episodes = new RsiEpisodeOrchestrator({
+      source_sha: this.#sourceSha,
+      trust_root_set_digest: digest(this.#roots),
+    });
   }
 
   async start() {
     if (this.#running) return this.snapshot();
     await this.#ledger.init();
+    let replayCursor = 0;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: replayCursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        if (row?.payload?.episode_event) this.#episodes.apply(row.payload.episode_event);
+      }
+      replayCursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
     this.#startedAt = new Date(this.#clock()).toISOString();
     await this.#ledger.append('RUNTIME_BOUND', {
       runtime_schema: RSI_RUNTIME_SERVICE_SCHEMA,
@@ -151,6 +168,7 @@ export class RsiRuntimeService {
       trust_root_set_digest: digest(this.#roots),
       experience_gate_schema: RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
+      episode_orchestration_mode: 'DURABLE_EVENT_SOURCED_ZERO_AUTHORITY',
       candidate_effect_executor_exposed: false,
       direct_promotion_enabled: false,
       self_update_authority: false,
@@ -198,6 +216,32 @@ export class RsiRuntimeService {
     if (!admission) return false;
     await this.#persistObservationAdmission(admission);
     return true;
+  }
+
+  async openEpisode(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareOpen(input);
+    await this.#ledger.append('RSI_EPISODE_OPENED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  async registerEpisodeCandidate(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareCandidate(input);
+    await this.#ledger.append('RSI_EPISODE_CANDIDATE_REGISTERED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  async recordEpisodeEvidence(input = {}) {
+    this.#assertRunning();
+    const event = this.#episodes.prepareEvidence(input);
+    await this.#ledger.append('RSI_EPISODE_EVIDENCE_RECORDED', { episode_event: event });
+    return this.#episodes.apply(event);
+  }
+
+  episodeNominationReadiness(input = {}) {
+    this.#assertRunning();
+    return this.#episodes.nominationReadiness(input);
   }
 
   async proposeCandidate(input = {}) {
@@ -318,6 +362,7 @@ export class RsiRuntimeService {
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       experience_gate: this.#experienceGate.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
+      episodes: this.#episodes.snapshot(),
       ledger: this.#ledger.snapshot(),
       shadow_only: true,
       candidate_effect_executor_exposed: false,
