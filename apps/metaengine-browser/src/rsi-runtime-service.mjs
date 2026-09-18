@@ -58,6 +58,8 @@ import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntime
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
+import { rsiBoundedRevisionDevosBridgeTrustRootSnapshot } from './rsi-bounded-revision-devos-bridge.mjs';
+import { rsiImplementationEvaluationHandoffTrustRootSnapshot } from './rsi-implementation-evaluation-handoff.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -139,6 +141,8 @@ function trustRoots() {
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
     shadow_comparison_binding: rsiShadowComparisonBindingTrustRootSnapshot(),
+    bounded_revision_devos_bridge: rsiBoundedRevisionDevosBridgeTrustRootSnapshot(),
+    implementation_evaluation_handoff: rsiImplementationEvaluationHandoffTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
