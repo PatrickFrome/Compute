@@ -38,6 +38,17 @@ function dg(value){
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
 }
 function labelDigest(label){return dg({label});}
+function provenanceArgs(label){
+  return {
+    builder_identity_digest:labelDigest(`builder-${label}`),
+    toolchain_image_digest:labelDigest(`toolchain-${label}`),
+    dependency_material_manifest_digest:labelDigest(`materials-${label}`),
+    harness_manifest_digest:labelDigest(`harness-manifest-${label}`),
+    capability_manifest_digest:labelDigest(`capabilities-${label}`),
+    build_provenance_policy_digest:labelDigest(`provenance-policy-${label}`),
+    artifact_signature_policy_digest:labelDigest(`signature-policy-${label}`),
+  };
+}
 
 function revisionFixture(label='one'){
   const hypothesis=createRsiSharedExperienceHypothesis({
@@ -216,6 +227,7 @@ test('Phase27 proposal bridges into existing DevOS experiment plan without a sec
     approved_mutations:approved,
     approved_mutation_manifest_digest:dg(approved),
     implementation_reviewer_root_digest:labelDigest('implementation-reviewer'),
+    ...provenanceArgs('implementation-reviewer'),
     external_implementation_reviewer:true,
   });
   const checked=verifyRsiBoundedRevisionDevosBridge(bridge,{
@@ -234,6 +246,11 @@ test('Phase27 proposal bridges into existing DevOS experiment plan without a sec
   assert.equal(bridge.devos_experiment_plan.requires_existing_devos_scheduler,true);
   assert.equal(bridge.devos_experiment_plan.task_spec.rsi.shadow_only,true);
   assert.equal(bridge.devos_experiment_plan.task_spec.rsi.revision_limits.max_mutated_files,2);
+  assert.match(bridge.devos_experiment_plan.task_spec.rsi.revision_limits.implementation_provenance_contract_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(bridge.implementation_provenance_contract.external_build_attestation_required,true);
+  assert.equal(bridge.implementation_provenance_contract.artifact_signature_required,true);
+  assert.equal(bridge.implementation_provenance_contract.transparency_log_inclusion_required,true);
+  assert.equal(bridge.implementation_provenance_contract.candidate_can_sign_artifact,false);
   assert.equal(bridge.authority_effect,false);
 });
 
@@ -249,6 +266,7 @@ test('existing isolated candidate builder inherits stricter Phase27 edit budgets
     approved_mutations:approved,
     approved_mutation_manifest_digest:dg(approved),
     implementation_reviewer_root_digest:labelDigest('builder-reviewer'),
+    ...provenanceArgs('builder-reviewer'),
     external_implementation_reviewer:true,
   });
   const build=prepareRsiIsolatedCandidateBuild({
@@ -286,6 +304,7 @@ test('bridge refuses more files than Phase27 envelope and requires exact approve
     approved_mutations:tooMany,
     approved_mutation_manifest_digest:dg(tooMany),
     implementation_reviewer_root_digest:labelDigest('bounds-reviewer'),
+    ...provenanceArgs('bounds-reviewer'),
     external_implementation_reviewer:true,
   }),/mutations_invalid/);
 
@@ -299,6 +318,7 @@ test('bridge refuses more files than Phase27 envelope and requires exact approve
     approved_mutations:approved,
     approved_mutation_manifest_digest:labelDigest('wrong-manifest'),
     implementation_reviewer_root_digest:labelDigest('bounds-reviewer-2'),
+    ...provenanceArgs('bounds-reviewer-2'),
     external_implementation_reviewer:true,
   }),/mutation_manifest_digest_mismatch/);
 });
@@ -315,6 +335,7 @@ test('existing builder still rejects immutable trust-root mutation paths after b
     approved_mutations:approved,
     approved_mutation_manifest_digest:dg(approved),
     implementation_reviewer_root_digest:labelDigest('immutable-reviewer'),
+    ...provenanceArgs('immutable-reviewer'),
     external_implementation_reviewer:true,
   });
   assert.throws(()=>prepareRsiIsolatedCandidateBuild({
@@ -322,6 +343,64 @@ test('existing builder still rejects immutable trust-root mutation paths after b
     source_snapshot:sourceSnapshot(),
     mutations:approved,
   }),/immutable_path_forbidden/);
+});
+
+
+test('bridge fails closed when external provenance roots are missing or aliased',()=>{
+  const fx=revisionFixture('provenance-required');
+  const approved=[{path:'apps/metaengine-browser/src/rsi-shadow-observer.mjs',change:'MODIFY'}];
+  assert.throws(()=>createRsiBoundedRevisionDevosBridge({
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    mutation_surface:'RSI_IMPROVER',
+    approved_mutations:approved,
+    approved_mutation_manifest_digest:dg(approved),
+    implementation_reviewer_root_digest:labelDigest('provenance-required-reviewer'),
+    external_implementation_reviewer:true,
+  }),/builder_identity_digest_invalid/);
+
+  const roots=provenanceArgs('provenance-alias');
+  roots.toolchain_image_digest=roots.builder_identity_digest;
+  assert.throws(()=>createRsiBoundedRevisionDevosBridge({
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    mutation_surface:'RSI_IMPROVER',
+    approved_mutations:approved,
+    approved_mutation_manifest_digest:dg(approved),
+    implementation_reviewer_root_digest:labelDigest('provenance-alias-reviewer'),
+    ...roots,
+    external_implementation_reviewer:true,
+  }),/independent_provenance_roots_required/);
+});
+
+test('builder rejects provenance policy weakening before materialization',()=>{
+  const fx=revisionFixture('provenance-policy');
+  const approved=[{path:'apps/metaengine-browser/src/rsi-shadow-observer.mjs',change:'MODIFY'}];
+  const bridge=createRsiBoundedRevisionDevosBridge({
+    envelope:fx.envelope,
+    proposal:fx.proposal,
+    experiment_intent:fx.experimentIntent,
+    experiment_receipt:fx.experimentReceipt,
+    mutation_surface:'RSI_IMPROVER',
+    approved_mutations:approved,
+    approved_mutation_manifest_digest:dg(approved),
+    implementation_reviewer_root_digest:labelDigest('provenance-policy-reviewer'),
+    ...provenanceArgs('provenance-policy'),
+    external_implementation_reviewer:true,
+  });
+  const tampered=structuredClone(bridge.devos_experiment_plan);
+  tampered.task_spec.rsi.implementation_provenance_contract.candidate_can_sign_artifact=true;
+  tampered.task_spec.rsi.revision_limits.implementation_provenance_contract_digest=dg(tampered.task_spec.rsi.implementation_provenance_contract);
+  assert.throws(()=>prepareRsiIsolatedCandidateBuild({
+    experiment_plan:tampered,
+    source_snapshot:sourceSnapshot(),
+    mutations:approved,
+    requested_backend:'FIRECRACKER',
+  }),/provenance_contract_policy_invalid/);
 });
 
 test('legacy DevOS experiment plans without revision limits retain existing builder defaults',()=>{
