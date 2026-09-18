@@ -6,6 +6,7 @@ import {
   RSI_BOUNDED_REVISION_DEVOS_BRIDGE_SCHEMA,
   RSI_IMPLEMENTATION_ARTIFACT_RECEIPT_SCHEMA,
   verifyRsiBoundedRevisionArtifactReceipt,
+  verifyRsiBoundedRevisionDevosBridge,
 } from './rsi-bounded-revision-devos-bridge.mjs';
 import {
   RSI_CANDIDATE_EXPERIMENT_INTENT_SCHEMA,
@@ -54,21 +55,26 @@ function zero(extra={}){
   });
 }
 
-function verifyBridgeSnapshot(bridge){
+function verifyBridgeSnapshot(bridge,{revision_envelope,revision_proposal}={}){
   if(!bridge||bridge.schema!==RSI_BOUNDED_REVISION_DEVOS_BRIDGE_SCHEMA)throw new Error('rsi_impl_eval_bridge_invalid');
-  assertZero(bridge,'bridge');
-  if(bridge.external_implementation_reviewer!==true||bridge.uses_existing_devos_scheduler!==true
-    ||bridge.uses_existing_isolated_candidate_builder!==true||bridge.bridge_can_create_workspace!==false
-    ||bridge.bridge_can_materialize_candidate!==false||bridge.bridge_can_execute_commands!==false
-    ||bridge.bridge_can_promote!==false)throw new Error('rsi_impl_eval_bridge_policy_invalid');
-  exactDigest(bridge.bridge_digest,'bridge');
-  exactDigest(bridge.revision_limits?.parent_candidate_artifact_digest,'parent_candidate');
-  return Object.freeze(structuredClone(bridge));
+  const checked=verifyRsiBoundedRevisionDevosBridge(bridge,{
+    envelope:revision_envelope,
+    proposal:revision_proposal,
+  });
+  assertZero(checked,'bridge');
+  if(checked.external_implementation_reviewer!==true||checked.uses_existing_devos_scheduler!==true
+    ||checked.uses_existing_isolated_candidate_builder!==true||checked.bridge_can_create_workspace!==false
+    ||checked.bridge_can_materialize_candidate!==false||checked.bridge_can_execute_commands!==false
+    ||checked.bridge_can_promote!==false)throw new Error('rsi_impl_eval_bridge_policy_invalid');
+  exactDigest(checked.revision_limits?.parent_candidate_artifact_digest,'parent_candidate');
+  return checked;
 }
 
 export function createRsiImplementationEvaluationHandoff({
   handoff_id,
   bridge,
+  revision_envelope,
+  revision_proposal,
   artifact_receipt,
   candidate_handoff,
   request,
@@ -85,7 +91,7 @@ export function createRsiImplementationEvaluationHandoff({
   authored_by_candidate=true,
 }={}){
   if(external_evaluation_owner!==true||authored_by_candidate!==false)throw new Error('rsi_impl_eval_external_owner_required');
-  const checkedBridge=verifyBridgeSnapshot(bridge);
+  const checkedBridge=verifyBridgeSnapshot(bridge,{revision_envelope,revision_proposal});
   if(!artifact_receipt||artifact_receipt.schema!==RSI_IMPLEMENTATION_ARTIFACT_RECEIPT_SCHEMA)throw new Error('rsi_impl_eval_artifact_receipt_invalid');
   const artifact=verifyRsiBoundedRevisionArtifactReceipt(artifact_receipt,{bridge:checkedBridge,candidate_handoff});
   const baselineArtifact=exactDigest(checkedBridge.revision_limits.parent_candidate_artifact_digest,'baseline_artifact');
@@ -129,6 +135,8 @@ export function createRsiImplementationEvaluationHandoff({
     dependency_closure_digest:artifact.dependency_closure_digest,
     provenance_statement_digest:artifact.provenance_statement_digest,
     bridge_snapshot:checkedBridge,
+    revision_envelope_snapshot:Object.freeze(structuredClone(revision_envelope)),
+    revision_proposal_snapshot:Object.freeze(structuredClone(revision_proposal)),
     artifact_receipt_snapshot:artifact,
     candidate_handoff_snapshot:Object.freeze(structuredClone(candidate_handoff)),
     experiment_intent:intent,
@@ -175,6 +183,8 @@ export function verifyRsiImplementationEvaluationHandoff(handoff){
   const canonical=createRsiImplementationEvaluationHandoff({
     handoff_id:handoff.handoff_id,
     bridge:handoff.bridge_snapshot,
+    revision_envelope:handoff.revision_envelope_snapshot,
+    revision_proposal:handoff.revision_proposal_snapshot,
     artifact_receipt:handoff.artifact_receipt_snapshot,
     candidate_handoff:handoff.candidate_handoff_snapshot,
     request,
