@@ -35,6 +35,7 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-open-ended-search-policy.mjs',
   'apps/metaengine-browser/src/rsi-recursive-risk-budget.mjs',
   'apps/metaengine-browser/src/rsi-adversarial-challenge-producer.mjs',
+  'apps/metaengine-browser/src/rsi-component-attribution.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/trusted-dev-release-resolver.mjs',
   'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
