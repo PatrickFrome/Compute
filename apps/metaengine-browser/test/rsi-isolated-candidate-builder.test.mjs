@@ -198,6 +198,13 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/test/rsi-shadow-core.test.mjs',
     'apps/metaengine-browser/src/self-update-runtime.mjs',
     'apps/metaengine-browser/src/rsi-shadow-core.mjs',
+    'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
+    'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
+    'apps/metaengine-browser/src/rsi-episode-evaluation-ingest.mjs',
+    'apps/metaengine-browser/src/rsi-autonomous-episode-controller.mjs',
+    'apps/metaengine-browser/src/rsi-devos-admission-adapter.mjs',
+    'supabase/migrations/20260918171500_rsi_devos_prepared_request_admission_v1.sql',
+    'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
     'apps/metaengine-browser/supabase/rsi-shadow-archive-v1.sql',
   ]) {
     assert.throws(() => goodBuildPlan({ mutations: [{ path, change: 'MODIFY' }] }), /mutation_|immutable_/);
