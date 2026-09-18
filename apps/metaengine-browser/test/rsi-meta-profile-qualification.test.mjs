@@ -18,6 +18,7 @@ import {
 } from '../src/rsi-meta-skill-evolution.mjs';
 import { createRsiRuntimeMetaSkillRecord } from '../src/rsi-runtime-meta-skill-archive.mjs';
 import {
+  RSI_RISK_SPENDING_POLICIES,
   createRsiRecursiveRiskBudget,
   rsiRiskAllocationForConfirmation,
 } from '../src/rsi-recursive-risk-budget.mjs';
@@ -129,7 +130,7 @@ function shadowFixture(){
   }
   const shadow=evaluateRsiMetaProfileShadow({plan,meta_record:fx.record,receipts});
   const budget=createRsiRecursiveRiskBudget({
-    budget_id:'meta.profile.activation.risk.v1',global_alpha:0.05,spending_policy:'TELESCOPING_ANYTIME',
+    budget_id:'rsi.meta-profile.activation.risk.v1',global_alpha:0.05,spending_policy:RSI_RISK_SPENDING_POLICIES.TELESCOPING_ANYTIME,
     evidence_family:'RSI_META_PROFILE_ACTIVATION',
   });
   const alpha=rsiRiskAllocationForConfirmation(budget,1);
@@ -216,6 +217,9 @@ test('qualification ledger is source-fenced append-only and restart durable',asy
     assert.equal((await ledger.add(q)).state,'QUALIFIED_FOR_SHADOW_PROFILE_SELECTION');
     assert.equal((await ledger.add(q)).state,'IDEMPOTENT');
     assert.equal(ledger.snapshot().qualified_count,1);
+    assert.equal(ledger.snapshot().next_confirmation_index,2);
+    assert.ok(ledger.snapshot().cumulative_alpha_spent>0);
+    assert.ok(ledger.snapshot().cumulative_alpha_spent<=ledger.snapshot().global_alpha);
     assert.equal(ledger.snapshot().active_profile_digest,null);
     assert.equal(ledger.snapshot().shadow_profile_digest,null);
     assert.equal(ledger.qualified().length,1);
@@ -235,6 +239,9 @@ test('meta-profile qualification trust root is qualification-only and zero autho
   assert.equal(root.pair_count,7);
   assert.equal(root.early_stop_allowed,false);
   assert.equal(root.recursive_risk_budget_reused,true);
+  assert.equal(root.confirmation_index_ledger_owned,true);
+  assert.equal(root.cumulative_alpha_enforced,true);
+  assert.equal(root.global_alpha,0.05);
   assert.equal(root.tradeoff_is_not_activation_eligible,true);
   assert.equal(root.qualification_only_for_shadow_profile_selection,true);
   assert.equal(root.live_profile_activation_authorized,false);
