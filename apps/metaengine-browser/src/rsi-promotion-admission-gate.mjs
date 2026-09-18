@@ -29,6 +29,15 @@ const REQUIRED_WORKFLOWS = Object.freeze([
 
 const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-promotion-admission-gate.mjs',
+  'apps/metaengine-browser/src/rsi-episode-orchestrator.mjs',
+  'apps/metaengine-browser/src/rsi-episode-devos-bridge.mjs',
+  'apps/metaengine-browser/src/rsi-episode-evaluation-ingest.mjs',
+  'apps/metaengine-browser/src/rsi-autonomous-episode-controller.mjs',
+  'apps/metaengine-browser/src/rsi-devos-admission-adapter.mjs',
+  'supabase/migrations/20260918171500_rsi_devos_prepared_request_admission_v1.sql',
+  'apps/metaengine-browser/src/rsi-devos-experiment-plan.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-service.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
   'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
   'apps/metaengine-browser/src/rsi-evaluator-mesh.mjs',
