@@ -57,6 +57,8 @@ export function createRsiRuntimeSkillAdvisory({
     schema:RSI_RUNTIME_SKILL_ADVISORY_SCHEMA,
     version:1,
     lineage_skill_admission_digest:admission.admission_digest,
+    source_parent_sha:admission.source_parent_sha,
+    source_candidate_sha:admission.candidate_sha,
     library_id:admission.library_id,
     library_digest:admission.library_digest,
     governance_id:admission.governance_id,
