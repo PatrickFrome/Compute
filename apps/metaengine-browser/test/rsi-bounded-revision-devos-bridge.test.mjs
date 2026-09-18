@@ -2201,7 +2201,7 @@ test('Phase31 refuses consolidation across different fixed Phase30 evaluation co
 });
 
 
-function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null}={}){
+function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',consumerGeneration=null,consumerGenerationSeq=null,consumerGenerationAnchor=null,consumerEpochSeq=null,consumerEpochDigest=null}={}){
   const rows=phase31SourceRows(`${label}-source`,{state});
   const proposal=phase31Proposal(rows,`${label}-proposal`);
   const validations=[
@@ -2224,6 +2224,10 @@ function phase32Fixture(label='phase32',{state='SUPPORTED_FOR_BOUNDED_REVISION',
     consumer_harness_digest:labelDigest(`${label}-consumer-harness`),
     consumer_evaluator_root_digest:labelDigest(`${label}-consumer-evaluator-root`),
     consumer_evaluator_generation_digest:consumerGeneration||proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:consumerGenerationSeq||proposal.evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:consumerGenerationAnchor||proposal.evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:consumerEpochSeq||proposal.evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:consumerEpochDigest||proposal.evaluation_epoch_digest,
     consumer_holdout_digest:labelDigest(`${label}-consumer-holdout`),
     matched_reference_plan_digest:labelDigest(`${label}-matched-reference`),
     local_revalidation_protocol_digest:labelDigest(`${label}-local-revalidation`),
@@ -2427,6 +2431,17 @@ test('Phase32 trust root reuses existing consumer planes and keeps all effects e
   assert.equal(root.second_scheduler_allowed,false);
   assert.equal(root.consumer_local_paired_validation_required,true);
   assert.equal(root.matched_no_skill_or_reference_required_for_recipes,true);
+  assert.equal(root.consumer_evaluator_generation_sequence_binding_required,true);
+  assert.equal(root.consumer_evaluator_history_anchor_binding_required,true);
+  assert.equal(root.consumer_evaluation_epoch_binding_required,true);
+  assert.equal(root.consumer_evaluation_contract_binding_required,true);
+  assert.equal(root.source_evaluation_contract_preserved,true);
+  assert.equal(root.archive_consumer_identity_exact_lineage_bound,true);
+  assert.equal(root.phase31_context_reuse_forbidden,true);
+  assert.equal(root.phase31_harness_reuse_forbidden,true);
+  assert.equal(root.phase31_holdout_reuse_forbidden,true);
+  assert.equal(root.phase31_evaluator_root_reuse_forbidden,true);
+  assert.equal(root.phase31_transfer_plan_reuse_forbidden,true);
   assert.equal(root.cross_generation_revalidation_required,true);
   assert.equal(root.source_generation_verdict_inherited,false);
   assert.equal(root.negative_transfer_retained,true);
@@ -2695,4 +2710,43 @@ test('Phase32 exact consumer convergence freezes both generic revalidation and e
   assert.equal(skill.skill_activation_performed_here,false);
   assert.equal(skill.scheduler_action_performed_here,false);
   assert.equal(skill.authority_effect,false);
+});
+
+test('Phase32 consumer-local revalidation rejects Phase31 transfer-evidence replay',()=>{
+  const fx=phase32Fixture('fresh-consumer-evidence');
+  const build=(label,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:'phase32.consumer.freshness.'+label,
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    consumer_model_family:'METAENGINE_RSI',consumer_environment_family:'METAENGINE_BROWSER',
+    consumer_context_digest:labelDigest(label+'-context'),consumer_harness_digest:labelDigest(label+'-harness'),
+    consumer_evaluator_root_digest:labelDigest(label+'-evaluator'),
+    consumer_evaluator_generation_digest:fx.proposal.evaluator_generation_digest,
+    consumer_evaluator_generation_seq:fx.proposal.evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:fx.proposal.evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:fx.proposal.evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:fx.proposal.evaluation_epoch_digest,
+    consumer_holdout_digest:labelDigest(label+'-holdout'),matched_reference_plan_digest:labelDigest(label+'-reference'),
+    local_revalidation_protocol_digest:labelDigest(label+'-protocol'),external_consumer_router:true,authored_by_candidate:false,...overrides,
+  });
+  const source=fx.validations[0];
+  assert.throws(()=>build('reuse-context',{consumer_context_digest:source.heldout_context_digest}),/source_context_reuse_forbidden/);
+  assert.throws(()=>build('reuse-harness',{consumer_harness_digest:source.transfer_harness_digest}),/source_harness_reuse_forbidden/);
+  assert.throws(()=>build('reuse-evaluator',{consumer_evaluator_root_digest:source.external_evaluator_root_digest}),/source_evaluator_reuse_forbidden/);
+  assert.throws(()=>build('reuse-task-holdout',{consumer_holdout_digest:source.heldout_task_set_digest}),/source_holdout_reuse_forbidden/);
+  assert.throws(()=>build('reuse-hidden-holdout',{consumer_holdout_digest:source.hidden_holdout_root_digest}),/source_holdout_reuse_forbidden/);
+  assert.throws(()=>build('reuse-reference',{matched_reference_plan_digest:fx.proposal.transfer_validation_plan_digest}),/source_reference_plan_reuse_forbidden/);
+  assert.throws(()=>build('reuse-protocol',{local_revalidation_protocol_digest:fx.proposal.transfer_validation_plan_digest}),/source_revalidation_protocol_reuse_forbidden/);
+});
+
+test('Phase32 exact consumer contract preserves source fixed-contract lineage and rejects partial identity drift',()=>{
+  const fx=phase32Fixture('exact-consumer-contract'); const h=fx.handoff;
+  assert.equal(h.source_evaluator_generation_seq,fx.proposal.evaluator_generation_seq);
+  assert.equal(h.source_evaluator_generation_history_anchor_digest,fx.proposal.evaluator_generation_history_anchor_digest);
+  assert.equal(h.source_evaluation_epoch_seq,fx.proposal.evaluation_epoch_seq);
+  assert.equal(h.source_evaluation_contract_digest,fx.proposal.evaluation_contract_digest);
+  assert.deepEqual(h.phase31_transfer_evaluation_contract_digests,fx.admission.transfer_evaluation_contract_digests);
+  assert.match(h.consumer_evaluation_contract_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.throws(()=>phase32Fixture('generation-seq-drift',{consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1}),/evaluator_generation_identity_drift/);
+  assert.throws(()=>phase32Fixture('generation-anchor-drift',{consumerGenerationAnchor:labelDigest('other-generation-anchor')}),/evaluator_generation_identity_drift/);
+  assert.throws(()=>phase32Fixture('epoch-seq-drift',{consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1}),/evaluation_epoch_identity_drift/);
 });
