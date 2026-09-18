@@ -233,6 +233,7 @@ test('promotion gate independently rejects candidate mutation of promotion and s
   for (const path of [
     'apps/metaengine-browser/src/rsi-promotion-admission-gate.mjs',
     'apps/metaengine-browser/src/rsi-external-promotion-review.mjs',
+    'apps/metaengine-browser/src/rsi-release-authority-handoff.mjs',
     'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
     'apps/metaengine-browser/src/rsi-shadow-tournament.mjs',
     'apps/metaengine-browser/src/self-update-runtime.mjs',
