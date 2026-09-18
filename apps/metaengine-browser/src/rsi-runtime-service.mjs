@@ -63,6 +63,7 @@ import { RsiSealedCanaryReviewLedger, createRsiSealedCanaryReviewReceipt, create
 import { createRsiVerifierEvolutionAdmission, rsiVerifierEvolutionAdmissionTrustRootSnapshot } from './rsi-verifier-evolution-admission.mjs';
 import { createRsiVerifierShadowQualification, rsiVerifierShadowQualificationTrustRootSnapshot } from './rsi-verifier-shadow-qualification.mjs';
 import { createRsiVerifierRootChangeReview, rsiVerifierRootChangeReviewTrustRootSnapshot } from './rsi-verifier-root-change-review.mjs';
+import { createRsiVerifierRootStagingReview, rsiVerifierRootStagingTrustRootSnapshot } from './rsi-verifier-root-staging.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -149,6 +150,7 @@ function trustRoots() {
     verifier_evolution_admission: rsiVerifierEvolutionAdmissionTrustRootSnapshot(),
     verifier_shadow_qualification: rsiVerifierShadowQualificationTrustRootSnapshot(),
     verifier_root_change_review: rsiVerifierRootChangeReviewTrustRootSnapshot(),
+    verifier_root_staging: rsiVerifierRootStagingTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1427,6 +1429,49 @@ export class RsiRuntimeService {
       root_change_authorized: false,
       verifier_activation_authorized: false,
       trust_root_update_token: null,
+      second_scheduler_created: false,
+      authority_effect: false,
+    });
+    return review;
+  }
+
+  async recordVerifierRootStagingReview({
+    review_id,
+    manifest,
+    propagation_receipts,
+    external_review_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const review = createRsiVerifierRootStagingReview({
+      review_id,
+      manifest,
+      propagation_receipts,
+      external_review_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('VERIFIER_ROOT_STAGING_REVIEW_RECORDED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      manifest_digest: review.manifest_digest,
+      root_change_review_digest: review.root_change_review_digest,
+      current_root_generation: review.current_root_generation,
+      staging_bundle_generation: review.staging_bundle_generation,
+      predecessor_verifier_root_digest: review.predecessor_verifier_root_digest,
+      candidate_verifier_root_digest: review.candidate_verifier_root_digest,
+      staging_bundle_digest: review.staging_bundle_digest,
+      next_root_history_digest: review.next_root_history_digest,
+      validator_domains: review.validator_domains,
+      propagation_receipt_digests: review.propagation_receipt_digests,
+      all_validator_domains_propagated: review.all_validator_domains_propagated,
+      state: review.state,
+      ready_for_external_root_activation_review: review.ready_for_external_root_activation_review,
+      active_verifier_root_digest: review.active_verifier_root_digest,
+      candidate_root_staged_only: true,
+      predecessor_retirement_authorized: false,
+      root_change_authorized: false,
+      verifier_activation_authorized: false,
+      root_activation_token: null,
       second_scheduler_created: false,
       authority_effect: false,
     });
