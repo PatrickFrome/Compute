@@ -57,6 +57,7 @@ import { RsiSkillRelationStore, createRsiSkillRelationEdge, rsiSkillRelationGrap
 import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntimeMetaSkillArchiveTrustRootSnapshot } from './rsi-runtime-meta-skill-archive.mjs';
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
+import { RsiBoundedCanaryAdmissionLedger, createRsiBoundedCanaryShadowEvidence, createRsiBoundedCanaryAdmission, rsiBoundedCanaryAdmissionTrustRootSnapshot } from './rsi-bounded-canary-admission.mjs';
 import { RsiMetaProfileCanaryLedger, createRsiMetaProfileCanaryAdmission, createRsiMetaProfileCanaryOutcome, rsiMetaProfileCanaryTrustRootSnapshot } from './rsi-meta-profile-canary-admission.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
@@ -138,6 +139,7 @@ function trustRoots() {
     runtime_meta_skill_archive: rsiRuntimeMetaSkillArchiveTrustRootSnapshot(),
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
+    bounded_canary_admission: rsiBoundedCanaryAdmissionTrustRootSnapshot(),
     meta_profile_canary: rsiMetaProfileCanaryTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
@@ -168,6 +170,7 @@ export class RsiRuntimeService {
   #metaSkillArchive;
   #metaProfileQualification;
   #metaProfileShadowRegistry;
+  #boundedCanaryAdmissionLedger;
   #metaProfileCanaryLedger;
   #archive;
   #observer;
@@ -186,7 +189,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, metaProfileCanaryPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, boundedCanaryAdmissionPath = null, metaProfileCanaryPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -263,6 +266,8 @@ export class RsiRuntimeService {
       statePath: runtimeMetaProfileShadowPath,
       source_sha: this.#sourceSha,
     });
+    const runtimeBoundedCanaryAdmissionPath = boundedCanaryAdmissionPath || (ledgerPath ? `${ledgerPath}.bounded-canary-admission.json` : null);
+    this.#boundedCanaryAdmissionLedger = new RsiBoundedCanaryAdmissionLedger({ statePath: runtimeBoundedCanaryAdmissionPath, source_sha: this.#sourceSha });
     const runtimeMetaProfileCanaryPath = metaProfileCanaryPath || (ledgerPath ? `${ledgerPath}.meta-profile-canary.json` : null);
     this.#metaProfileCanaryLedger = new RsiMetaProfileCanaryLedger({
       statePath: runtimeMetaProfileCanaryPath,
@@ -291,6 +296,7 @@ export class RsiRuntimeService {
     await this.#metaSkillArchive.init();
     await this.#metaProfileQualification.init();
     await this.#metaProfileShadowRegistry.init();
+    await this.#boundedCanaryAdmissionLedger.init();
     await this.#metaProfileCanaryLedger.init();
     await this.#ledger.init();
     this.#startedAt = new Date(this.#clock()).toISOString();
@@ -314,6 +320,7 @@ export class RsiRuntimeService {
       runtime_meta_skill_archive_schema: this.#metaSkillArchive.snapshot().schema,
       meta_profile_qualification_schema: this.#metaProfileQualification.snapshot().schema,
       meta_profile_shadow_registry_schema: this.#metaProfileShadowRegistry.snapshot().schema,
+      bounded_canary_admission_ledger_schema: this.#boundedCanaryAdmissionLedger.snapshot().schema,
       meta_profile_canary_ledger_schema: this.#metaProfileCanaryLedger.snapshot().schema,
       observation_persistence_mode: 'BOUNDED_COALESCED_FSYNC',
       candidate_effect_executor_exposed: false,
@@ -1008,8 +1015,57 @@ export class RsiRuntimeService {
     return this.#metaProfileShadowRegistry.current();
   }
 
+  async recordBoundedCanaryShadowEvidence({
+    evidence_id, context_cohort_digest, shadow_observation_count, matched_count, divergence_count,
+    ambiguity_count=0, incident_count=0, hard_invariant_violation_count=0, identity_drift_count=0,
+    outcome_evidence_digest, safety_evidence_digest, security_evidence_digest, awareness_evidence_digest, utility_evidence_digest,
+    evidence_refs, external_observer=false, authored_by_candidate=true,
+  }={}) {
+    this.#assertRunning();
+    const selection=this.#metaProfileShadowRegistry.current();
+    if(!selection) throw new Error('rsi_runtime_shadow_profile_not_selected');
+    const evidence=createRsiBoundedCanaryShadowEvidence({
+      evidence_id, shadow_selection:selection, context_cohort_digest, shadow_observation_count, matched_count, divergence_count,
+      ambiguity_count, incident_count, hard_invariant_violation_count, identity_drift_count,
+      outcome_evidence_digest, safety_evidence_digest, security_evidence_digest, awareness_evidence_digest, utility_evidence_digest,
+      evidence_refs, external_observer, authored_by_candidate,
+    });
+    const stored=await this.#boundedCanaryAdmissionLedger.recordEvidence(evidence);
+    await this.#ledger.append('BOUNDED_CANARY_SHADOW_EVIDENCE_RECORDED',{
+      evidence_id:evidence.evidence_id,evidence_digest:evidence.evidence_digest,
+      shadow_selection_digest:evidence.shadow_selection_digest,context_cohort_digest:evidence.context_cohort_digest,
+      shadow_observation_count:evidence.shadow_observation_count,rollback_required_latched:evidence.rollback_required_latched,
+      eligible_for_bounded_canary_admission:evidence.eligible_for_bounded_canary_admission,authority_effect:false,
+    });
+    return Object.freeze({evidence,stored});
+  }
+
+  async qualifyBoundedCanaryHandoff({
+    admission_id, shadow_evidence_digest, fixed_cohort_digest,
+    external_admission_owner=false, authored_by_candidate=true,
+  }={}) {
+    this.#assertRunning();
+    const selection=this.#metaProfileShadowRegistry.current();
+    if(!selection) throw new Error('rsi_runtime_shadow_profile_not_selected');
+    const evidence=this.#boundedCanaryAdmissionLedger.evidenceByDigest(shadow_evidence_digest);
+    if(!evidence) throw new Error('rsi_runtime_bounded_canary_shadow_evidence_missing');
+    const admission=createRsiBoundedCanaryAdmission({
+      admission_id,shadow_selection:selection,shadow_evidence:evidence,fixed_cohort_digest,decision_budget:16,
+      external_admission_owner,authored_by_candidate,
+    });
+    const stored=await this.#boundedCanaryAdmissionLedger.add({admission,shadow_evidence:evidence});
+    await this.#ledger.append('BOUNDED_CANARY_HANDOFF_QUALIFIED',{
+      admission_id:admission.admission_id,admission_digest:admission.admission_digest,
+      shadow_evidence_digest:admission.shadow_evidence_digest,shadow_selection_digest:admission.shadow_selection_digest,
+      fixed_cohort_digest:admission.fixed_cohort_digest,decision_budget:admission.decision_budget,
+      canary_activation_authorized:false,authority_effect:false,
+    });
+    return Object.freeze({admission,stored});
+  }
+
   async admitBoundedCanaryMetaProfile({
     canary_id,
+    bounded_admission_digest,
     cohort_digest,
     external_canary_owner = false,
     authored_by_candidate = true,
@@ -1023,6 +1079,10 @@ export class RsiRuntimeService {
     }
     const record = this.#metaSkillArchive.recordByDigest(selection.meta_record_digest);
     if (!record || record.eligible_for_meta_archive !== true) throw new Error('rsi_runtime_canary_meta_record_required');
+    const boundedAdmission=this.#boundedCanaryAdmissionLedger.admissionByDigest(bounded_admission_digest);
+    if(!boundedAdmission||boundedAdmission.shadow_selection_digest!==selection.selection_digest) throw new Error('rsi_runtime_bounded_canary_handoff_required');
+    const boundedEvidence=this.#boundedCanaryAdmissionLedger.evidenceByDigest(boundedAdmission.shadow_evidence_digest);
+    if(!boundedEvidence) throw new Error('rsi_runtime_bounded_canary_shadow_evidence_missing');
     const library = this.#skillLifecycle.verifiedLibrarySnapshot();
     const governance = this.#skillLifecycle.governance();
     if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
@@ -1034,8 +1094,10 @@ export class RsiRuntimeService {
       meta_record: record,
       current_library: library,
       current_governance: governance,
+      bounded_canary_admission: boundedAdmission,
+      bounded_shadow_evidence: boundedEvidence,
       cohort_digest,
-      max_decisions: 32,
+      max_decisions: 16,
       action_surface: 'READ_ONLY_DECISION_SUPPORT',
       external_canary_owner,
       authored_by_candidate,
@@ -1050,6 +1112,8 @@ export class RsiRuntimeService {
       cohort_digest: admission.cohort_digest,
       action_surface: admission.action_surface,
       max_decisions: admission.max_decisions,
+      bounded_canary_admission_digest: admission.bounded_canary_admission_digest,
+      bounded_shadow_evidence_digest: admission.bounded_shadow_evidence_digest,
       canary_can_execute_browser_effect: false,
       authority_effect: false,
     });
@@ -1541,6 +1605,7 @@ export class RsiRuntimeService {
       runtime_meta_skill_archive: this.#metaSkillArchive.snapshot(),
       meta_profile_qualification: this.#metaProfileQualification.snapshot(),
       meta_profile_shadow_registry: this.#metaProfileShadowRegistry.snapshot(),
+      bounded_canary_admission_ledger: this.#boundedCanaryAdmissionLedger.snapshot(),
       meta_profile_canary_ledger: this.#metaProfileCanaryLedger.snapshot(),
       promotion_nomination_count: this.#promotionNominationCount,
       skill_revision_reliability: Object.freeze({
