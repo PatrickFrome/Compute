@@ -254,8 +254,9 @@ export function verifyRsiBenchmarkContaminationAssessment(row,policy,task){
 export function createRsiBenchmarkEvidenceAdmission({policy,assessments,tasks}={}){
   const checked=verifyRsiBenchmarkProvenancePolicy(policy);
   if(!Array.isArray(assessments)||!Array.isArray(tasks)||assessments.length<1||assessments.length!==tasks.length||tasks.length>MAX_TASKS)throw new Error('rsi_benchmark_admission_inputs_invalid');
-  const taskMap=new Map(tasks.map(task=>{const t=verifyRsiBenchmarkTaskProvenance(task,checked);return [t.task_id,t]}));
-  if(taskMap.size!==tasks.length)throw new Error('rsi_benchmark_task_duplicate');
+  const checkedTasks=tasks.map(task=>verifyRsiBenchmarkTaskProvenance(task,checked));
+  const taskMap=new Map(checkedTasks.map(t=>[t.task_id,t]));
+  if(taskMap.size!==checkedTasks.length)throw new Error('rsi_benchmark_task_duplicate');
   const rows=assessments.map(a=>{
     const task=taskMap.get(a.task_id);if(!task)throw new Error('rsi_benchmark_assessment_task_missing');
     return verifyRsiBenchmarkContaminationAssessment(a,checked,task);
@@ -265,8 +266,8 @@ export function createRsiBenchmarkEvidenceAdmission({policy,assessments,tasks}={
   const suspect=rows.filter(r=>r.risk_state==='SUSPECT');
   const unknown=rows.filter(r=>r.risk_state==='UNKNOWN');
   const resistantFamilies=new Set(resistant.map(r=>taskMap.get(r.task_id).source_family));
-  const publicStaticCount=tasks.filter(t=>t.source_kind==='PUBLIC_STATIC').length;
-  const publicFraction=publicStaticCount/tasks.length;
+  const publicStaticCount=checkedTasks.filter(t=>t.source_kind==='PUBLIC_STATIC').length;
+  const publicFraction=publicStaticCount/checkedTasks.length;
   const eligible=
     contaminated.length===0
     &&resistant.length>=checked.min_resistant_tasks
@@ -282,10 +283,10 @@ export function createRsiBenchmarkEvidenceAdmission({policy,assessments,tasks}={
   const core={
     schema:RSI_BENCHMARK_EVIDENCE_ADMISSION_SCHEMA,version:1,
     policy_id:checked.policy_id,policy_digest:checked.policy_digest,
-    task_count:tasks.length,resistant_task_count:resistant.length,suspect_task_count:suspect.length,
+    task_count:checkedTasks.length,resistant_task_count:resistant.length,suspect_task_count:suspect.length,
     contaminated_task_count:contaminated.length,unknown_task_count:unknown.length,
     resistant_source_family_count:resistantFamilies.size,public_static_fraction:publicFraction,
-    task_provenance_digests:tasks.map(t=>t.task_provenance_digest).sort(),
+    task_provenance_digests:checkedTasks.map(t=>t.task_provenance_digest).sort(),
     assessment_digests:rows.map(r=>r.assessment_digest).sort(),
     state:eligible?'ELIGIBLE_FOR_FULL_HOLDOUT_EVIDENCE':'HELD_FOR_BENCHMARK_REFRESH',
     blockers:blockers.sort(),
@@ -299,6 +300,19 @@ export function createRsiBenchmarkEvidenceAdmission({policy,assessments,tasks}={
     execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,admission_digest:digest(core)});
+}
+
+export function verifyRsiBenchmarkEvidenceAdmission(row,policy,assessments,tasks){
+  if(!plainObject(row)||row.schema!==RSI_BENCHMARK_EVIDENCE_ADMISSION_SCHEMA||row.version!==1)throw new Error('rsi_benchmark_admission_invalid');
+  assertZero(row,'admission');
+  if(
+    row.eligible_as_sole_promotion_evidence!==false||row.public_static_is_supplemental_only!==true
+    ||row.suspect_or_unknown_counts_toward_required_resistant_set!==false||row.contaminated_evidence_weight!==0
+    ||row.proven_uncontaminated!==false||row.existing_evaluator_and_promotion_gates_still_required!==true
+  )throw new Error('rsi_benchmark_admission_policy_invalid');
+  const canonical=createRsiBenchmarkEvidenceAdmission({policy,assessments,tasks});
+  if(canonical.admission_digest!==exactDigest(row.admission_digest,'admission'))throw new Error('rsi_benchmark_admission_digest_mismatch');
+  return canonical;
 }
 
 export function rsiBenchmarkProvenanceTrustRootSnapshot(){
