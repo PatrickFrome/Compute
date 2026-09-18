@@ -126,6 +126,9 @@ export function createRsiCandidateExperimentIntent({
       evaluation_epoch_digest:routed.request.evaluation_epoch_digest,
       threshold_policy_digest:routed.request.threshold_policy_digest,
       stopping_policy_digest:routed.request.stopping_policy_digest,
+      hidden_holdout_root_digest:routed.request.hidden_holdout_root_digest,
+      safety_suite_root_digest:routed.request.safety_suite_root_digest,
+      security_suite_root_digest:routed.request.security_suite_root_digest,
       acceptance_assets_frozen:true,
       fresh_budget_epoch_required:true,
     }:{}),
@@ -191,6 +194,9 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
       ||intent.evaluation_epoch_digest!==embeddedRequest.evaluation_epoch_digest
       ||intent.threshold_policy_digest!==embeddedRequest.threshold_policy_digest
       ||intent.stopping_policy_digest!==embeddedRequest.stopping_policy_digest
+      ||intent.hidden_holdout_root_digest!==embeddedRequest.hidden_holdout_root_digest
+      ||intent.safety_suite_root_digest!==embeddedRequest.safety_suite_root_digest
+      ||intent.security_suite_root_digest!==embeddedRequest.security_suite_root_digest
       ||intent.acceptance_assets_frozen!==true
       ||intent.fresh_budget_epoch_required!==true)throw new Error('rsi_experiment_artifact_request_binding_invalid');
   }
@@ -444,6 +450,9 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     task_order_binding_required:true,
     threshold_policy_binding_required:true,
     stopping_policy_binding_required:true,
+    hidden_holdout_binding_required:true,
+    safety_suite_binding_required:true,
+    security_suite_binding_required:true,
     paired_control_treatment_required:true,
     unchanged_baseline_artifact_required:true,
     same_sealed_tasks_required:true,
