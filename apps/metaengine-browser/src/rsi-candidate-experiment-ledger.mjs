@@ -123,7 +123,10 @@ export function createRsiCandidateExperimentIntent({
       phase28_artifact_receipt_digest:routed.request.phase28_artifact_receipt_digest,
       provenance_root_digest:routed.request.provenance_root_digest,
       evaluator_generation_digest:routed.request.evaluator_generation_digest,
+      evaluator_generation_seq:routed.request.evaluator_generation_seq,
+      evaluator_generation_history_anchor_digest:routed.request.evaluator_generation_history_anchor_digest,
       evaluation_epoch_digest:routed.request.evaluation_epoch_digest,
+      evaluation_epoch_seq:routed.request.evaluation_epoch_seq,
       threshold_policy_digest:routed.request.threshold_policy_digest,
       stopping_policy_digest:routed.request.stopping_policy_digest,
       hidden_holdout_root_digest:routed.request.hidden_holdout_root_digest,
@@ -191,7 +194,10 @@ export function verifyRsiCandidateExperimentIntent(intent,{request,plan,plan_req
       ||intent.phase28_artifact_receipt_digest!==embeddedRequest.phase28_artifact_receipt_digest
       ||intent.provenance_root_digest!==embeddedRequest.provenance_root_digest
       ||intent.evaluator_generation_digest!==embeddedRequest.evaluator_generation_digest
+      ||intent.evaluator_generation_seq!==embeddedRequest.evaluator_generation_seq
+      ||intent.evaluator_generation_history_anchor_digest!==embeddedRequest.evaluator_generation_history_anchor_digest
       ||intent.evaluation_epoch_digest!==embeddedRequest.evaluation_epoch_digest
+      ||intent.evaluation_epoch_seq!==embeddedRequest.evaluation_epoch_seq
       ||intent.threshold_policy_digest!==embeddedRequest.threshold_policy_digest
       ||intent.stopping_policy_digest!==embeddedRequest.stopping_policy_digest
       ||intent.hidden_holdout_root_digest!==embeddedRequest.hidden_holdout_root_digest
@@ -361,33 +367,42 @@ const MATERIALIZED_OUTCOME_STATES=Object.freeze([
 
 function deriveEvaluationGenerationHistory(rows){
   const history=[];
-  const seenGenerations=new Set();
+  const seenGenerationSeqs=new Set();
+  const generationBySeq=new Map();
   let current=null;
   let materializedOutcomeCount=0;
+
   for(const row of rows){
     const intent=row.intent;
     const receipt=row.receipt;
     if(intent?.evaluation_request_kind!=='MATERIALIZED_CANDIDATE')continue;
     materializedOutcomeCount+=1;
+
     const generation=exactDigest(intent.evaluator_generation_digest,'history_evaluator_generation');
     const evaluatorRoot=exactDigest(intent.evaluator_root_digest,'history_evaluator_root');
+    const generationSeq=boundedInt(intent.evaluator_generation_seq,'history_evaluator_generation_seq',Number.MAX_SAFE_INTEGER);
+    const generationHistoryAnchor=exactDigest(intent.evaluator_generation_history_anchor_digest,'history_generation_anchor');
     const epoch=exactDigest(intent.evaluation_epoch_digest,'history_evaluation_epoch');
+    const epochSeq=boundedInt(intent.evaluation_epoch_seq,'history_evaluation_epoch_seq',Number.MAX_SAFE_INTEGER);
     const artifactReceipt=exactDigest(intent.phase28_artifact_receipt_digest,'history_artifact_receipt');
     const provenance=exactDigest(intent.provenance_root_digest,'history_provenance_root');
     const hiddenHoldout=exactDigest(intent.hidden_holdout_root_digest,'history_hidden_holdout');
     const safetySuite=exactDigest(intent.safety_suite_root_digest,'history_safety_suite');
     const securitySuite=exactDigest(intent.security_suite_root_digest,'history_security_suite');
+
     if(intent.acceptance_assets_frozen!==true||intent.fresh_budget_epoch_required!==true)throw new Error('rsi_experiment_generation_history_phase29_policy_invalid');
     if(!MATERIALIZED_OUTCOME_STATES.includes(receipt.state))throw new Error('rsi_experiment_generation_history_outcome_state_invalid');
 
-    if(!current||current.evaluator_generation_digest!==generation){
-      if(seenGenerations.has(generation))throw new Error('rsi_experiment_generation_history_rollback_detected');
-      seenGenerations.add(generation);
+    if(!current){
+      if(generationSeq!==1||epochSeq!==1)throw new Error('rsi_experiment_generation_history_genesis_sequence_invalid');
       current={
-        generation_sequence:history.length+1,
+        generation_sequence:generationSeq,
+        evaluator_generation_seq:generationSeq,
         evaluator_generation_digest:generation,
         evaluator_root_digest:evaluatorRoot,
+        evaluator_generation_history_anchor_digest:generationHistoryAnchor,
         evaluation_epoch_digests:[],
+        evaluation_epoch_sequences:[],
         artifact_receipt_digests:[],
         provenance_root_digests:[],
         protected_suite_root_sets:[],
@@ -403,16 +418,69 @@ function deriveEvaluationGenerationHistory(rows){
         negative_outcomes_retained:true,
       };
       history.push(current);
-    }else if(current.evaluator_root_digest!==evaluatorRoot){
-      throw new Error('rsi_experiment_generation_history_evaluator_root_drift');
+      seenGenerationSeqs.add(generationSeq);
+      generationBySeq.set(generationSeq,{digest:generation,root:evaluatorRoot,anchor:generationHistoryAnchor});
+    }else if(generationSeq===current.evaluator_generation_seq){
+      if(generation!==current.evaluator_generation_digest
+        ||evaluatorRoot!==current.evaluator_root_digest
+        ||generationHistoryAnchor!==current.evaluator_generation_history_anchor_digest){
+        throw new Error('rsi_experiment_generation_history_generation_identity_drift');
+      }
+      const latestEpochSeq=current.evaluation_epoch_sequences.at(-1)??0;
+      const latestEpoch=current.evaluation_epoch_digests.at(-1)??null;
+      if(epochSeq<latestEpochSeq)throw new Error('rsi_experiment_generation_history_epoch_rollback_detected');
+      if(epochSeq>latestEpochSeq+1)throw new Error('rsi_experiment_generation_history_epoch_sequence_gap');
+      if(epochSeq===latestEpochSeq&&latestEpoch!==null&&epoch!==latestEpoch)throw new Error('rsi_experiment_generation_history_epoch_identity_drift');
+      if(epochSeq===latestEpochSeq+1&&latestEpoch!==null&&epoch===latestEpoch)throw new Error('rsi_experiment_generation_history_new_epoch_digest_required');
+    }else{
+      if(generationSeq<=current.evaluator_generation_seq||seenGenerationSeqs.has(generationSeq))throw new Error('rsi_experiment_generation_history_rollback_detected');
+      if(generationSeq!==current.evaluator_generation_seq+1)throw new Error('rsi_experiment_generation_history_generation_sequence_gap');
+      if(epochSeq!==1)throw new Error('rsi_experiment_generation_history_new_generation_epoch_must_start_at_one');
+      const known=generationBySeq.get(generationSeq);
+      if(known&&(known.digest!==generation||known.root!==evaluatorRoot||known.anchor!==generationHistoryAnchor)){
+        throw new Error('rsi_experiment_generation_history_generation_identity_drift');
+      }
+      current={
+        generation_sequence:generationSeq,
+        evaluator_generation_seq:generationSeq,
+        evaluator_generation_digest:generation,
+        evaluator_root_digest:evaluatorRoot,
+        evaluator_generation_history_anchor_digest:generationHistoryAnchor,
+        evaluation_epoch_digests:[],
+        evaluation_epoch_sequences:[],
+        artifact_receipt_digests:[],
+        provenance_root_digests:[],
+        protected_suite_root_sets:[],
+        receipt_digests:[],
+        state_counts:{
+          supported:0,
+          no_material_improvement:0,
+          rejected:0,
+          inconclusive_environment:0,
+          inconclusive_ambiguous:0,
+        },
+        evaluator_dependent_verdict_reuse_across_generation_allowed:false,
+        negative_outcomes_retained:true,
+      };
+      history.push(current);
+      seenGenerationSeqs.add(generationSeq);
+      generationBySeq.set(generationSeq,{digest:generation,root:evaluatorRoot,anchor:generationHistoryAnchor});
     }
 
-    if(!current.evaluation_epoch_digests.includes(epoch))current.evaluation_epoch_digests.push(epoch);
+    const currentLatestEpochSeq=current.evaluation_epoch_sequences.at(-1)??0;
+    if(epochSeq!==currentLatestEpochSeq){
+      current.evaluation_epoch_sequences.push(epochSeq);
+      current.evaluation_epoch_digests.push(epoch);
+    }else if(current.evaluation_epoch_digests.at(-1)!==epoch){
+      throw new Error('rsi_experiment_generation_history_epoch_identity_drift');
+    }
+
     if(!current.artifact_receipt_digests.includes(artifactReceipt))current.artifact_receipt_digests.push(artifactReceipt);
     if(!current.provenance_root_digests.includes(provenance))current.provenance_root_digests.push(provenance);
     const suiteSet=digest({hidden_holdout_root_digest:hiddenHoldout,safety_suite_root_digest:safetySuite,security_suite_root_digest:securitySuite});
     if(!current.protected_suite_root_sets.includes(suiteSet))current.protected_suite_root_sets.push(suiteSet);
     current.receipt_digests.push(receipt.receipt_digest);
+
     if(receipt.state==='SUPPORTED_FOR_BOUNDED_REVISION')current.state_counts.supported+=1;
     else if(receipt.state==='NO_MATERIAL_IMPROVEMENT')current.state_counts.no_material_improvement+=1;
     else if(receipt.state==='CANDIDATE_EXPERIMENT_REJECTED')current.state_counts.rejected+=1;
@@ -423,6 +491,7 @@ function deriveEvaluationGenerationHistory(rows){
   const frozen=history.map(entry=>Object.freeze({
     ...entry,
     evaluation_epoch_digests:Object.freeze([...entry.evaluation_epoch_digests]),
+    evaluation_epoch_sequences:Object.freeze([...entry.evaluation_epoch_sequences]),
     artifact_receipt_digests:Object.freeze([...entry.artifact_receipt_digests]),
     provenance_root_digests:Object.freeze([...entry.provenance_root_digests]),
     protected_suite_root_sets:Object.freeze([...entry.protected_suite_root_sets]),
@@ -430,6 +499,7 @@ function deriveEvaluationGenerationHistory(rows){
     state_counts:Object.freeze({...entry.state_counts}),
     outcome_count:entry.receipt_digests.length,
   }));
+
   return Object.freeze({
     generation_history:Object.freeze(frozen),
     generation_count:frozen.length,
@@ -559,6 +629,10 @@ export function rsiCandidateExperimentLedgerTrustRootSnapshot(){
     safety_suite_binding_required:true,
     security_suite_binding_required:true,
     evaluation_generation_history_append_only:true,
+    exact_external_generation_sequence_required:true,
+    exact_external_epoch_sequence_required:true,
+    generation_history_anchor_binding_required:true,
+    generation_and_epoch_gaps_forbidden:true,
     evaluator_generation_rollback_allowed:false,
     evaluator_dependent_verdict_reuse_across_generation_allowed:false,
     all_materialized_outcome_classes_retained:true,
