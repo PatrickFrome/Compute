@@ -1127,7 +1127,31 @@ export class RsiRuntimeService {
 
   async recordSkillExposureReleaseCertificate({ certificate, verification_args } = {}) {
     this.#assertRunning();
-    const result = await this.#skillExposureCertificateLedger.add({ certificate, verification_args });
+    if (!certificate?.skill_digest) throw new Error('rsi_runtime_exposure_certificate_skill_required');
+    const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(certificate.skill_digest);
+    const livePreview = createRsiSkillExposureReleasePreview({
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      skill_digest: statePreview.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    if (certificate.library_digest !== statePreview.library.library_digest
+      || certificate.current_governance_digest !== statePreview.current_governance.governance_digest
+      || certificate.next_governance_digest !== statePreview.next_governance.governance_digest
+      || certificate.release_preview_digest !== livePreview.preview_digest) {
+      throw new Error('rsi_runtime_exposure_certificate_current_state_drift');
+    }
+    const boundVerificationArgs = {
+      ...(verification_args || {}),
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      release_preview: livePreview,
+      skill_digest: statePreview.skill_digest,
+    };
+    const result = await this.#skillExposureCertificateLedger.add({ certificate, verification_args: boundVerificationArgs });
     const record = result.record;
     await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_RECORDED', {
       certificate_id: record.certificate_id,
@@ -1138,6 +1162,9 @@ export class RsiRuntimeService {
       library_digest: record.library_digest,
       current_governance_digest: record.current_governance_digest,
       next_governance_digest: record.next_governance_digest,
+      release_preview_digest: record.release_preview_digest,
+      admission_provenance_digest: statePreview.admission_provenance.provenance_digest,
+      exact_runtime_state_readback_required: true,
       release_effect_performed: false,
       retrieval_exposure_changed: false,
       skill_activation_performed: false,
