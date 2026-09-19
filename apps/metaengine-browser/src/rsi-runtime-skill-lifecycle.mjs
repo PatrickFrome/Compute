@@ -11,6 +11,7 @@ import {
 } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
 import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
+import { verifyRsiSkillExposureReleaseCertificate } from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA='metaengine.rsi.runtime-skill-lifecycle.v1';
 
@@ -21,8 +22,10 @@ const PRIORS=new Set(['VERIFIED_META_SKILL','VERIFIED_DIRECT_SKILL','LEGACY_IMPO
 const MAX_PENDING=4096;
 const MAX_EVIDENCE=16384;
 const MAX_ADMISSION_ATTEMPTS=1024;
+const MAX_EXPOSURE_RELEASE_ATTEMPTS=1024;
 const MAX_RECONCILIATION_READBACKS=16;
 const ADMISSION_TERMINAL_STATES=new Set(['CONFIRMED_APPLIED_STORAGE_ONLY','CONFIRMED_NOT_APPLIED_NEW_ATTEMPT_REQUIRED']);
+const EXPOSURE_RELEASE_TERMINAL_STATES=new Set(['CONFIRMED_EXPOSURE_RELEASED','CONFIRMED_NOT_RELEASED_NEW_ATTEMPT_REQUIRED']);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -164,7 +167,105 @@ function validateAdmissionAttemptRow(row){
   if(digest(core)!==exactDigest(row.attempt_digest,'admission_attempt'))throw new Error('rsi_runtime_skill_admission_attempt_digest_mismatch');
   return Object.freeze({...row,predecessor_library:exact.before,successor_library:exact.after});
 }
-function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill,admissionAttempts,exposureHolds}){
+function releasePrincipalDigests(certificate,args={}){
+  const review=args.dormant_retrieval_review||{};
+  const admissionAttempt=args.admission_attempt||{};
+  return [
+    certificate.external_governance_owner_identity_digest,
+    certificate.external_shadow_evaluator_identity_digest,
+    certificate.external_security_reviewer_identity_digest,
+    certificate.external_canary_evaluator_identity_digest,
+    review.retrieval_reviewer_identity_digest,
+    review.consumer_evaluator_identity_digest,
+    review.contamination_auditor_identity_digest,
+    review.coalition_auditor_identity_digest,
+    review.capacity_policy_owner_identity_digest,
+    admissionAttempt.effect_executor_identity_digest,
+  ].filter(Boolean).map((value,index)=>exactDigest(value,`exposure_release_principal_${index}`));
+}
+function releaseTransitionCore({seq,state,capturedAt,previousDigest=null,observationDigest=null}){
+  return {
+    seq,state,captured_at:capturedAt,previous_transition_digest:previousDigest,observation_digest:observationDigest,
+    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    automatic_retry_allowed:false,authority_effect:false,
+  };
+}
+function appendReleaseTransition(row,state,capturedAt,observationDigest=null){
+  const previous=row.transitions.at(-1)||null;
+  const core=releaseTransitionCore({
+    seq:(previous?.seq||0)+1,state,capturedAt,
+    previousDigest:previous?.transition_digest||null,observationDigest,
+  });
+  return Object.freeze({...core,transition_digest:digest(core)});
+}
+function validateReleaseTransitions(transitions){
+  if(!Array.isArray(transitions)||transitions.length<1)throw new Error('rsi_runtime_skill_exposure_release_transitions_invalid');
+  let previous=null,reconciliationCount=0;
+  for(let index=0;index<transitions.length;index+=1){
+    const row=transitions[index];
+    if(row.seq!==index+1||row.execution_authority!==false||row.production_mutation_authority!==false
+      ||row.promotion_authority!==false||row.self_update_authority!==false||row.automatic_retry_allowed!==false
+      ||row.authority_effect!==false)throw new Error('rsi_runtime_skill_exposure_release_transition_policy_invalid');
+    if(row.previous_transition_digest!==(previous?.transition_digest||null))throw new Error('rsi_runtime_skill_exposure_release_transition_chain_invalid');
+    const core=releaseTransitionCore({
+      seq:row.seq,state:row.state,capturedAt:row.captured_at,
+      previousDigest:row.previous_transition_digest,observationDigest:row.observation_digest??null,
+    });
+    if(digest(core)!==exactDigest(row.transition_digest,'exposure_release_transition'))throw new Error('rsi_runtime_skill_exposure_release_transition_digest_mismatch');
+    if(index===0&&row.state!=='PREPARED')throw new Error('rsi_runtime_skill_exposure_release_first_transition_invalid');
+    if(row.state==='RECONCILIATION_ONLY')reconciliationCount+=1;
+    previous=row;
+  }
+  if(reconciliationCount>MAX_RECONCILIATION_READBACKS)throw new Error('rsi_runtime_skill_exposure_release_reconciliation_capacity_exceeded');
+  const states=transitions.map(row=>row.state);
+  const attemptedIndex=states.indexOf('ATTEMPTED');
+  if(attemptedIndex>=0&&attemptedIndex!==1)throw new Error('rsi_runtime_skill_exposure_release_attempted_transition_order_invalid');
+  if(states.slice(1).some(state=>state==='PREPARED'))throw new Error('rsi_runtime_skill_exposure_release_reprepared_forbidden');
+  const terminalIndices=states.map((state,index)=>EXPOSURE_RELEASE_TERMINAL_STATES.has(state)?index:-1).filter(index=>index>=0);
+  if(terminalIndices.length>1||terminalIndices.some(index=>index!==states.length-1))throw new Error('rsi_runtime_skill_exposure_release_terminal_transition_invalid');
+  if(states.includes('RECONCILIATION_ONLY')&&attemptedIndex<0)throw new Error('rsi_runtime_skill_exposure_release_reconciliation_without_attempt');
+  return previous.state;
+}
+function validateExposureReleaseAttemptRow(row){
+  if(!row||row.schema!=='metaengine.rsi.runtime-skill-exposure-release-attempt.v1'||row.version!==1){
+    throw new Error('rsi_runtime_skill_exposure_release_attempt_invalid');
+  }
+  if(row.execution_authority!==false||row.production_mutation_authority!==false||row.promotion_authority!==false
+    ||row.self_update_authority!==false||row.automatic_retry_allowed!==false||row.authority_effect!==false
+    ||row.effect_attempt_limit!==1||row.blind_retry_forbidden!==true||row.ambiguous_outcome_requires_readback_only_reconciliation!==true
+    ||row.exploration_only_release!==true||row.full_activation_forbidden!==true){
+    throw new Error('rsi_runtime_skill_exposure_release_attempt_policy_invalid');
+  }
+  const certificate=verifyRsiSkillExposureReleaseCertificate(row.release_certificate,row.release_certificate_args||{});
+  if(certificate.state!=='ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE'||certificate.eligible_for_one_attempt_exposure_release!==true){
+    throw new Error('rsi_runtime_skill_exposure_release_certificate_not_eligible');
+  }
+  if(certificate.certificate_digest!==row.release_certificate_digest)throw new Error('rsi_runtime_skill_exposure_release_certificate_digest_mismatch');
+  if(certificate.library_digest!==row.expected_library_digest
+    ||certificate.current_governance_digest!==row.expected_current_governance_digest
+    ||certificate.next_governance_digest!==row.expected_next_governance_digest
+    ||certificate.skill_digest!==row.skill_digest){
+    throw new Error('rsi_runtime_skill_exposure_release_certificate_binding_mismatch');
+  }
+  const executor=exactDigest(row.effect_executor_identity_digest,'exposure_release_effect_executor');
+  if(releasePrincipalDigests(certificate,row.release_certificate_args||{}).includes(executor)){
+    throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
+  }
+  exactDigest(row.effect_id_digest,'exposure_release_effect_id');
+  exactDigest(row.idempotency_key_digest,'exposure_release_idempotency_key');
+  const currentState=validateReleaseTransitions(row.transitions);
+  if(currentState!==row.current_state)throw new Error('rsi_runtime_skill_exposure_release_current_state_mismatch');
+  if(!Number.isInteger(row.effect_attempt_count)||row.effect_attempt_count<0||row.effect_attempt_count>1)throw new Error('rsi_runtime_skill_exposure_release_effect_attempt_count_invalid');
+  const hasAttempted=row.transitions.some(transition=>transition.state==='ATTEMPTED');
+  if((hasAttempted&&row.effect_attempt_count!==1)||(!hasAttempted&&row.effect_attempt_count!==0)){
+    throw new Error('rsi_runtime_skill_exposure_release_effect_attempt_count_transition_mismatch');
+  }
+  const core=structuredClone(row);delete core.attempt_digest;
+  if(digest(core)!==exactDigest(row.attempt_digest,'exposure_release_attempt'))throw new Error('rsi_runtime_skill_exposure_release_attempt_digest_mismatch');
+  return Object.freeze(structuredClone(row));
+}
+
+function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill,admissionAttempts,exposureHolds,exposureReleaseAttempts}){
   const holds=Object.freeze([...exposureHolds].sort());
   const core={
     schema:RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA,version:1,source_sha:sourceSha,
@@ -174,10 +275,14 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     admission_exposure_hold_skill_digests:holds,
     admission_exposure_hold_count:holds.length,
     admission_attempts:admissionAttempts,
+    exposure_release_attempts:exposureReleaseAttempts,
+    exposure_release_attempt_count:exposureReleaseAttempts.length,
     window_seq_by_skill:Object.fromEntries([...windowSeqBySkill.entries()].sort(([a],[b])=>a.localeCompare(b))),
     evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,
     admission_attempts_append_only:true,max_admission_attempts:MAX_ADMISSION_ATTEMPTS,
+    exposure_release_attempts_append_only:true,max_exposure_release_attempts:MAX_EXPOSURE_RELEASE_ATTEMPTS,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
+    exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
     pre_effect_state_readback_after_attempt_persist_required:true,
     ambiguous_admission_effect_requires_readback_only_reconciliation:true,
     admission_exposure_holds_force_dormant:true,
@@ -192,7 +297,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
 }
 
 export class RsiRuntimeSkillLifecycle{
-  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#admissionAttempts=[];#seq=new Map();#exposureHolds=new Set();#initialized=false;
+  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#admissionAttempts=[];#exposureReleaseAttempts=[];#seq=new Map();#exposureHolds=new Set();#initialized=false;
   constructor({statePath,source_sha,clock=()=>Date.now()}={}){
     if(!statePath||typeof statePath!=='string')throw new Error('rsi_runtime_skill_state_path_required');
     if(typeof clock!=='function')throw new Error('rsi_runtime_skill_clock_required');
@@ -230,6 +335,23 @@ export class RsiRuntimeSkillLifecycle{
           ids.add(row.attempt_id);effects.add(row.effect_id_digest);keys.add(row.idempotency_key_digest);return row;
         });
       }else this.#admissionAttempts=[];
+      if(parsed.exposure_release_attempts!=null){
+        if(!Array.isArray(parsed.exposure_release_attempts)||parsed.exposure_release_attempts.length>MAX_EXPOSURE_RELEASE_ATTEMPTS){
+          throw new Error('rsi_runtime_skill_exposure_release_attempts_state_invalid');
+        }
+        if(parsed.exposure_release_attempts_append_only!==true||parsed.exposure_release_effect_attempt_limit!==1
+          ||parsed.blind_retry_for_exposure_release_effect!==false){
+          throw new Error('rsi_runtime_skill_exposure_release_state_policy_invalid');
+        }
+        const ids=new Set(),effects=new Set(),keys=new Set();
+        this.#exposureReleaseAttempts=parsed.exposure_release_attempts.map(raw=>{
+          const row=validateExposureReleaseAttemptRow(raw);
+          if(ids.has(row.attempt_id)||effects.has(row.effect_id_digest)||keys.has(row.idempotency_key_digest)){
+            throw new Error('rsi_runtime_skill_exposure_release_attempt_identity_duplicate');
+          }
+          ids.add(row.attempt_id);effects.add(row.effect_id_digest);keys.add(row.idempotency_key_digest);return row;
+        });
+      }else this.#exposureReleaseAttempts=[];
       this.#seq=new Map(Object.entries(parsed.window_seq_by_skill||{}).map(([k,v])=>[exactDigest(k,'skill_seq'),positiveInt(v,'window_seq')]));
       if(this.#library){
         for(const held of this.#exposureHolds)if(!this.#library.entries.some(e=>e.skill_digest===held))throw new Error('rsi_runtime_skill_exposure_hold_unknown_skill');
@@ -246,7 +368,7 @@ export class RsiRuntimeSkillLifecycle{
   #now(){const n=Number(this.#clock());if(!Number.isFinite(n))throw new Error('rsi_runtime_skill_clock_invalid');return new Date(n).toISOString()}
   #governanceId(){return `runtime.skill.governance.${this.#sourceSha.slice(0,16)}`}
   async #persist(){
-    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,admissionAttempts:this.#admissionAttempts,exposureHolds:this.#exposureHolds});
+    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,admissionAttempts:this.#admissionAttempts,exposureHolds:this.#exposureHolds,exposureReleaseAttempts:this.#exposureReleaseAttempts});
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
     await fs.rename(temp,this.#path);return state;
