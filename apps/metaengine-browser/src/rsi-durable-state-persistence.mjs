@@ -225,6 +225,7 @@ export async function reconcileRsiDurableJsonState({
   expected_state_digest,
   expected_file_digest,
   rename_may_have_completed=true,
+  missing_final_proves_no_effect=false,
   io=fs,
 }={}){
   if(typeof file_path!=='string'||file_path.trim()==='')throw new Error('rsi_durable_state_file_path_required');
@@ -239,20 +240,22 @@ export async function reconcileRsiDurableJsonState({
   }catch(error){
     if(error?.code==='ENOENT'){
       const renamePossible=rename_may_have_completed!==false;
+      const noEffectProven=renamePossible===false&&missing_final_proves_no_effect===true;
       return zero({
         schema:RSI_DURABLE_STATE_RECONCILIATION_SCHEMA,
         version:1,
         file_path:finalPath,
-        state:renamePossible?'AMBIGUOUS_MISSING_FINAL':'NO_EFFECT_PROVEN',
+        state:noEffectProven?'NO_EFFECT_PROVEN':'AMBIGUOUS_MISSING_FINAL',
         expected_state_digest:stateDigest,
         expected_file_digest:fileDigest,
         observed_file_digest:null,
         final_file_present:false,
         exact_readback_match:false,
         rename_may_have_completed:renamePossible,
-        no_effect_proven:!renamePossible,
-        new_attempt_allowed:!renamePossible,
-        reconciliation_required:renamePossible,
+        missing_final_proves_no_effect:missing_final_proves_no_effect===true,
+        no_effect_proven:noEffectProven,
+        new_attempt_allowed:noEffectProven,
+        reconciliation_required:!noEffectProven,
       });
     }
     throw error;
@@ -398,7 +401,8 @@ export function rsiDurableStatePersistenceTrustRootSnapshot(){
     post_rename_failure_is_ambiguous:true,
     post_rename_failure_reconciliation_only:true,
     missing_final_after_possible_rename_is_ambiguous:true,
-    no_effect_requires_pre_rename_proof:true,
+    missing_final_alone_never_proves_no_effect:true,
+    no_effect_requires_explicit_pre_rename_and_absence_semantics:true,
     durability_only_qualification_requires_exact_readback:true,
     durability_only_qualification_replays_rename:false,
     same_attempt_retry_allowed:false,
