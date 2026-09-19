@@ -14,6 +14,8 @@ import {
 import {
   RsiDurableRecursiveRiskLedger,
   verifyRsiDurableRecursiveRiskLedgerState,
+  createRsiDurableRiskConfirmationWitness,
+  verifyRsiDurableRiskConfirmationWitness,
   rsiDurableRecursiveRiskTrustRootSnapshot,
 } from '../src/rsi-durable-recursive-risk-ledger.mjs';
 import { RsiDurableStatePersistenceError } from '../src/rsi-durable-state-persistence.mjs';
@@ -232,6 +234,102 @@ test('durable state rejects tampered sequence cumulative history and candidate r
   }
 });
 
+test('durable risk confirmation witness survives restart and binds the exact durable row',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-durable-risk-witness-'));
+  try{
+    const statePath=path.join(root,'risk.json');
+    const b=budget();
+    const ledger=new RsiDurableRecursiveRiskLedger({statePath,source_sha:SOURCE,budget:b});
+    await ledger.init();
+    const confirmed=await ledger.confirm({certificate:certificateFor(b,1,'1'),...binding('1')});
+
+    const witness=ledger.confirmationWitness({
+      confirmation_digest:confirmed.confirmation_digest,
+      readback_owner_identity_digest:d('9'),
+      external_readback_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(witness.confirmation_digest,confirmed.confirmation_digest);
+    assert.equal(witness.durable_ledger_state_digest,ledger.state().state_digest);
+    assert.equal(witness.confirmation_index,1);
+    assert.equal(witness.restart_replay_verified,true);
+    assert.equal(witness.witness_is_effect_authority,false);
+    assert.equal(witness.authority_effect,false);
+
+    const restored=new RsiDurableRecursiveRiskLedger({statePath,source_sha:SOURCE,budget:b});
+    await restored.init();
+    const restoredWitness=restored.confirmationWitness({
+      confirmation_digest:confirmed.confirmation_digest,
+      readback_owner_identity_digest:d('9'),
+      external_readback_owner:true,
+      authored_by_candidate:false,
+    });
+    assert.equal(restoredWitness.witness_digest,witness.witness_digest);
+    assert.deepEqual(
+      verifyRsiDurableRiskConfirmationWitness(restoredWitness,{
+        durable_ledger_state:restored.state(),
+        source_sha:SOURCE,
+        recursive_risk_budget:b,
+      }),
+      restoredWitness,
+    );
+  }finally{
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
+
+test('durable risk witness rejects row absence, state tampering, and forged witness fields',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-durable-risk-witness-negative-'));
+  try{
+    const statePath=path.join(root,'risk.json');
+    const b=budget();
+    const ledger=new RsiDurableRecursiveRiskLedger({statePath,source_sha:SOURCE,budget:b});
+    await ledger.init();
+    const confirmed=await ledger.confirm({certificate:certificateFor(b,1,'1'),...binding('1')});
+    const witness=createRsiDurableRiskConfirmationWitness({
+      durable_ledger_state:ledger.state(),
+      source_sha:SOURCE,
+      recursive_risk_budget:b,
+      confirmation_digest:confirmed.confirmation_digest,
+      readback_owner_identity_digest:d('8'),
+      external_readback_owner:true,
+      authored_by_candidate:false,
+    });
+
+    assert.throws(
+      ()=>createRsiDurableRiskConfirmationWitness({
+        durable_ledger_state:{...ledger.state(),rows:[]},
+        source_sha:SOURCE,
+        recursive_risk_budget:b,
+        confirmation_digest:confirmed.confirmation_digest,
+        readback_owner_identity_digest:d('8'),
+        external_readback_owner:true,
+        authored_by_candidate:false,
+      }),
+      /state_digest_mismatch|confirmation_not_in_durable_state/,
+    );
+
+    assert.throws(
+      ()=>verifyRsiDurableRiskConfirmationWitness({...witness,confirmation_index:2},{
+        durable_ledger_state:ledger.state(),
+        source_sha:SOURCE,
+        recursive_risk_budget:b,
+      }),
+      /witness_digest_mismatch/,
+    );
+    assert.throws(
+      ()=>verifyRsiDurableRiskConfirmationWitness({...witness,authority_effect:true},{
+        durable_ledger_state:ledger.state(),
+        source_sha:SOURCE,
+        recursive_risk_budget:b,
+      }),
+      /witness_authority_effect_invalid/,
+    );
+  }finally{
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
+
 test('durable recursive risk trust root creates no second statistical authority and requires crash reconciliation',()=>{
   const root=rsiDurableRecursiveRiskTrustRootSnapshot();
   assert.equal(root.existing_recursive_risk_budget_reused,true);
@@ -242,6 +340,10 @@ test('durable recursive risk trust root creates no second statistical authority 
   assert.equal(root.durable_before_visible,true);
   assert.equal(root.post_rename_failure_requires_reconciliation,true);
   assert.equal(root.ambiguous_state_blocks_new_confirmation,true);
+  assert.equal(root.exact_confirmation_witness_supported,true);
+  assert.equal(root.witness_requires_external_durable_readback_owner,true);
+  assert.equal(root.witness_replays_durable_row_against_existing_recursive_risk_ledger,true);
+  assert.equal(root.witness_is_effect_authority,false);
   assert.equal(root.same_attempt_blind_retry_allowed,false);
   assert.equal(root.authority_effect,false);
 });
