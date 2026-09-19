@@ -44,6 +44,8 @@ jobs:
           assert 'work/chat-control-plane-browser-bridge' in target
           assert 'work/browser-final-2026-convergence-*' in target
           assert 'Governance field is empty or placeholder-only' in target
+          assert "flags=re.DOTALL" in target
+          assert 'Malformed HTML comment in governance fields' in target
           assert pin in target
           assert target_event not in preview
           assert '\n  pull_request:\n' in preview
@@ -71,7 +73,15 @@ jobs:
 
           python3 - <<'PY'
           import os, re, sys
-          body = os.environ.get('PR_BODY', '')
+
+          def without_html_comments(value):
+              stripped = re.sub(r'<!--.*?-->', '', value, flags=re.DOTALL)
+              if '<!--' in stripped or '-->' in stripped:
+                  print('Malformed HTML comment in governance fields', file=sys.stderr)
+                  raise SystemExit(1)
+              return stripped
+
+          body = without_html_comments(os.environ.get('PR_BODY', ''))
           labels = [
               'Canonical Level-1 milestone',
               'Level-2 milestone',
@@ -83,7 +93,7 @@ jobs:
               if not match:
                   print(f'Missing required governance field: {label}', file=sys.stderr)
                   raise SystemExit(1)
-              value = re.sub(r'<!--.*?-->', '', match.group(1)).strip()
+              value = match.group(1).strip()
               if not value:
                   print(f'Governance field is empty or placeholder-only: {label}', file=sys.stderr)
                   raise SystemExit(1)
