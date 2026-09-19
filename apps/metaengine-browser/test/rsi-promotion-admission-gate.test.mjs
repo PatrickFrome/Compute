@@ -291,5 +291,6 @@ test('promotion root is fixed, supply-chain aware and candidate-non-authoritativ
   assert.equal(root.candidate_can_invoke_self_update, false);
   assert.equal(root.scalar_winner_authoritative, false);
   assert.ok(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-promotion-admission-gate.mjs'));
+  assert.ok(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-skill-exposure-release-transition-proof.mjs'));
   assert.match(root.promotion_gate_root_digest, /^sha256:[0-9a-f]{64}$/);
 });
