@@ -4070,7 +4070,69 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
 
-  await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
+  const releaseEffectExecutor=labelDigest('phase36-release-effect-executor');
+  const releasePrepared=await runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    certificate,
+    release_review:freshExposureReview,
+    effect_id_digest:labelDigest('phase36-release-effect-id'),
+    idempotency_key_digest:labelDigest('phase36-release-idempotency'),
+    effect_executor_identity_digest:releaseEffectExecutor,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(releasePrepared.state,'PREPARED');
+  assert.equal(releasePrepared.release_effect_performed,false);
+  assert.equal(releasePrepared.retrieval_exposure_changed,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,1);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.equal(runtime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1').current_state,'PREPARED');
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  // PREPARED survives restart. The effect is still absent until the existing lifecycle
+  // persists ATTEMPTED and passes an exact post-fence readback.
+  const restoredRuntime=new RsiRuntimeService({
+    source_sha:SOURCE,
+    ledgerPath:path.join(dir,'runtime.jsonl'),
+    clock:()=>1_800_000_000_100,
+  });
+  await restoredRuntime.start();
+  assert.equal(restoredRuntime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1').current_state,'PREPARED');
+  assert.equal(restoredRuntime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+
+  const released=await restoredRuntime.executeSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    effect_executor_identity_digest:releaseEffectExecutor,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(released.state,'CONFIRMED_RELEASED_EXPLORATION_ONLY');
+  assert.equal(released.effect_attempt_count,1);
+  assert.equal(released.release_effect_performed,true);
+  assert.equal(released.retrieval_exposure_changed,true);
+  assert.equal(released.skill_activation_performed,false);
+  assert.equal(released.full_activation_authorized,false);
+  assert.equal(released.same_effect_id_retry_allowed,false);
+  assert.equal(released.pre_effect_readback_passed,true);
+  assert.equal(restoredRuntime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,0);
+  assert.equal(restoredRuntime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_state_counts.CONFIRMED_RELEASED_EXPLORATION_ONLY,1);
+  const releasedGovernance=restoredRuntime.verifiedSkillStateReadback().governance;
+  const releasedRow=releasedGovernance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(releasedRow.state,'EXPLORATION_ACTIVE');
+  assert.equal(releasedRow.active_for_composition,true);
+  assert.equal(releasedRow.admission_exposure_hold,false);
+  const explorationView=restoredRuntime.createSkillActivationView([fx.skill.skill_digest]);
+  assert.equal(explorationView.selected_count,1);
+  assert.equal(explorationView.selected[0].skill_digest,fx.skill.skill_digest);
+  assert.equal(restoredRuntime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_ATTEMPT_RESULT');
+  await assert.rejects(()=>restoredRuntime.executeSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    effect_executor_identity_digest:releaseEffectExecutor,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/attempt_not_prepared/);
+
+  await assert.rejects(()=>restoredRuntime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
     authored_by_candidate:false,
