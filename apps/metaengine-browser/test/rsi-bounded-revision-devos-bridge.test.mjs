@@ -4062,7 +4062,8 @@ test('Phase34B preparation fail-closes on stale predecessor and duplicate effect
   const other=phase34bLifecycleFixture('cas-guard-other');
   const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
   await store.init();
-  await store.adoptVerifiedLibrary({library:other.currentLibrary,external_library_owner:true,authored_by_candidate:false});
+  assert.notEqual(other.successorLibrary.library_digest,fx.currentLibrary.library_digest);
+  await store.adoptVerifiedLibrary({library:other.successorLibrary,external_library_owner:true,authored_by_candidate:false});
   await assert.rejects(()=>store.prepareLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.stale',
     admission_certificate:fx.certificate,admission_certificate_args:fx.fx.certificateArgs,
