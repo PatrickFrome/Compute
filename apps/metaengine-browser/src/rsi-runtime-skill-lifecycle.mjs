@@ -224,6 +224,7 @@ export class RsiRuntimeSkillLifecycle{
       if(this.#library){
         createRsiSkillLibraryGovernance({
           governance_id:this.#governanceId(),library:this.#library,lifecycle_evidence:this.#evidence,
+          historical_libraries:this.#governanceHistoricalLibraries(),
           external_library_owner:true,authored_by_candidate:false,
         });
       }else if(this.#evidence.length>0)throw new Error('rsi_runtime_skill_evidence_without_library');
@@ -249,6 +250,20 @@ export class RsiRuntimeSkillLifecycle{
       const candidate=incoming.get(skillDigest);
       if(!candidate||candidate.evidence_digest!==row.evidence_digest||candidate.skill_id!==row.skill_id||candidate.skill_version!==row.skill_version)throw new Error('rsi_runtime_skill_library_non_append_only_update');
     }
+  }
+  #governanceHistoricalLibraries(){
+    const lineage=new Map();
+    const add=(candidate)=>{
+      if(!candidate)return;
+      const checked=verifyRsiVerifiedSkillLibrary(candidate);
+      if(this.#library&&checked.library_digest===this.#library.library_digest)return;
+      lineage.set(checked.library_digest,checked);
+    };
+    for(const attempt of this.#admissionAttempts){
+      add(attempt.predecessor_library);
+      if(attempt.current_state==='CONFIRMED_APPLIED_STORAGE_ONLY')add(attempt.successor_library);
+    }
+    return [...lineage.values()];
   }
   async adoptVerifiedLibrary({library,expected_current_library_digest=null,external_library_owner=false,authored_by_candidate=true}={}){
     this.#assertInit();
@@ -598,6 +613,7 @@ export class RsiRuntimeSkillLifecycle{
     this.#assertInit();if(!this.#library)return null;
     return createRsiSkillLibraryGovernance({
       governance_id:this.#governanceId(),library:this.#library,lifecycle_evidence:this.#evidence,
+      historical_libraries:this.#governanceHistoricalLibraries(),
       external_library_owner:true,authored_by_candidate:false,
     });
   }
