@@ -11,7 +11,10 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillLifecycleEvidence,
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiSkillRelationEdge,
   createRsiSkillRelationGraph,
@@ -57,10 +60,32 @@ function fixture(){
     external_library_owner:true,
     authored_by_candidate:false,
   });
+  const lifecycle_evidence=[good,bad,explore].map((skill,index)=>createRsiSkillLifecycleEvidence({
+    library,
+    evidence_id:`router.fixture.window.${index+1}`,
+    skill_digest:skill.capsule.skill_digest,
+    window_seq:1,
+    generation_start:1,
+    generation_end:1,
+    invocation_count:1,
+    helpful_count:1,
+    harmful_count:0,
+    neutral_count:0,
+    insufficient_evidence_count:0,
+    router_engagement_count:1,
+    false_positive_injection_count:0,
+    hard_invariant_violation_count:0,
+    measured_net_delta:0.1,
+    authoring_prior:'VERIFIED_DIRECT_SKILL',
+    authoring_provenance_digest:d('7'),
+    evidence_refs:[`router:fixture:${index+1}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  }));
   const governance=createRsiSkillLibraryGovernance({
     governance_id:'runtime.skill.router.governance',
     library,
-    lifecycle_evidence:[],
+    lifecycle_evidence,
     max_active_skills:3,
     exploration_slots:3,
     external_library_owner:true,
@@ -406,6 +431,8 @@ test('skill-router trust root freezes thresholds, negative-transfer veto, and ze
   assert.equal(root.candidate_can_override_negative_transfer_veto,false);
   assert.equal(root.routing_is_execution_authority,false);
   assert.equal(root.execution_authority,false);
+  assert.equal(root.browser_authority,false);
+  assert.equal(root.task_authority,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.router_root_digest,/^sha256:[0-9a-f]{64}$/);
 });

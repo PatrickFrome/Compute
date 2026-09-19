@@ -138,7 +138,7 @@ function generationFixture(label='g1',{
     external_benchmark_curator:true,
     authored_by_candidate:false,
   });
-  const admission=createRsiBenchmarkCoevolutionAdmission({
+  const coevolutionAdmission=createRsiBenchmarkCoevolutionAdmission({
     admission_id:`coevolution.admission.${label}`,
     proposal,
     benchmark_provenance_policy:p.policy,
@@ -148,7 +148,7 @@ function generationFixture(label='g1',{
     external_admission_owner:true,
     authored_by_candidate:false,
   });
-  return {...p,proposal,admission};
+  return {...p,proposal,coevolutionAdmission};
 }
 
 test('mastery-throttled generation is only eligible for shadow benchmark trial',()=>{
@@ -167,7 +167,7 @@ test('mastery-throttled generation is only eligible for shadow benchmark trial',
   assert.equal(proposal.benchmark_activation_authority,false);
   assert.equal(proposal.verifier_replacement_authority,false);
 
-  const admission=verifyRsiBenchmarkCoevolutionAdmission(fx.admission,{
+  const admission=verifyRsiBenchmarkCoevolutionAdmission(fx.coevolutionAdmission,{
     proposal:fx.proposal,
     benchmark_provenance_policy:fx.policy,
     benchmark_provenance_admission:fx.admission,
@@ -195,8 +195,8 @@ test('mastery anchor or validation failure cannot become eligible',()=>{
     const fx=generationFixture(label,overrides);
     assert.equal(fx.proposal.clean_generation_evidence,false,label);
     assert.ok(fx.proposal.blockers.includes(blocker),blocker);
-    assert.equal(fx.admission.state,'BENCHMARK_GENERATION_REJECTED');
-    assert.equal(fx.admission.eligible_for_shadow_benchmark_trial,false);
+    assert.equal(fx.coevolutionAdmission.state,'BENCHMARK_GENERATION_REJECTED');
+    assert.equal(fx.coevolutionAdmission.eligible_for_shadow_benchmark_trial,false);
   }
 });
 
