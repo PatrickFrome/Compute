@@ -3837,6 +3837,49 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
+  const exposureReview=await runtime.createSkillExposureReleaseReview({
+    review_id:'phase36.runtime.exposure-review.1',
+    skill_digest:fx.skill.skill_digest,
+    consumer_model_family:'GPT_5_6_SOL',
+    environment_fingerprint:'env.phase36.runtime.matched-shadow',
+    task_signature_digest:labelDigest('phase36-task-signature'),
+    routing_context_manifest_digest:labelDigest('phase36-routing-context'),
+    retrieval_profile_digest:labelDigest('phase36-retrieval-profile'),
+    memory_context_digest:labelDigest('phase36-memory-context'),
+    harness_integrity_digest:labelDigest('phase36-harness-integrity'),
+    benchmark_provenance_digest:labelDigest('phase36-benchmark-provenance'),
+    matched_comparison_receipt_digest:labelDigest('phase36-matched-comparison'),
+    negative_transfer_receipt_digest:labelDigest('phase36-negative-transfer'),
+    cost_latency_receipt_digest:labelDigest('phase36-cost-latency'),
+    source_grounding_receipt_digest:labelDigest('phase36-source-grounding'),
+    external_policy_digest:labelDigest('phase36-policy'),
+    matched_pair_count:4,
+    skill_success_count:4,
+    reference_success_count:2,
+    repair_count:2,
+    regression_count:0,
+    hard_invariant_failure_count:0,
+    negative_transfer_count:0,
+    cost_budget_pass:true,
+    latency_budget_pass:true,
+    harness_integrity_pass:true,
+    benchmark_provenance_pass:true,
+    memory_safety_pass:true,
+    source_grounding_pass:true,
+    governance_reviewer_identity_digest:labelDigest('phase36-governance-reviewer'),
+    matched_evaluator_identity_digest:labelDigest('phase36-matched-evaluator'),
+    security_reviewer_identity_digest:labelDigest('phase36-security-reviewer'),
+    external_governance_reviewer:true,
+    external_matched_evaluator:true,
+    external_security_reviewer:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(exposureReview.state,'ELIGIBLE_FOR_EXTERNAL_EXPOSURE_RELEASE_REVIEW');
+  assert.equal(exposureReview.hold_release_effect_authorized,false);
+  assert.equal(exposureReview.retrieval_exposure_change_authorized,false);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_REVIEW_CREATED');
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
