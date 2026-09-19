@@ -148,14 +148,14 @@ function generationFixture(label='g1',{
     external_admission_owner:true,
     authored_by_candidate:false,
   });
-  return {...p,proposal,admission};
+  return {...p,provenanceAdmission:p.admission,proposal,admission};
 }
 
 test('mastery-throttled generation is only eligible for shadow benchmark trial',()=>{
   const fx=generationFixture();
   const proposal=verifyRsiBenchmarkCoevolutionProposal(fx.proposal,{
     benchmark_provenance_policy:fx.policy,
-    benchmark_provenance_admission:fx.admission,
+    benchmark_provenance_admission:fx.provenanceAdmission,
     benchmark_provenance_assessments:fx.assessments,
     benchmark_provenance_tasks:fx.tasks,
   });
@@ -170,7 +170,7 @@ test('mastery-throttled generation is only eligible for shadow benchmark trial',
   const admission=verifyRsiBenchmarkCoevolutionAdmission(fx.admission,{
     proposal:fx.proposal,
     benchmark_provenance_policy:fx.policy,
-    benchmark_provenance_admission:fx.admission,
+    benchmark_provenance_admission:fx.provenanceAdmission,
     benchmark_provenance_assessments:fx.assessments,
     benchmark_provenance_tasks:fx.tasks,
   });
