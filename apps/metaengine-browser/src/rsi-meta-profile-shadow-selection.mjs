@@ -64,7 +64,7 @@ export function createRsiMetaProfileShadowSelection({
     selection_can_grant_skill_activity:false,
     continuous_shadow_review_required:true,
     canary_gate_still_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,selection_digest:digest(core)});
@@ -76,6 +76,7 @@ export function verifyRsiMetaProfileShadowSelection(row,{qualification,meta_reco
   if(row.mode!=='SHADOW_ONLY'||row.external_selector!==true||row.authored_by_candidate!==false
     ||row.candidate_can_select_profile!==false||row.selection_can_change_execution!==false
     ||row.selection_can_replace_incumbent!==false||row.selection_can_grant_skill_activity!==false
+    ||row.browser_authority!==false||row.task_authority!==false
     ||row.continuous_shadow_review_required!==true||row.canary_gate_still_required!==true)throw new Error('rsi_shadow_profile_selection_policy_invalid');
   const c=createRsiMetaProfileShadowSelection({
     selection_id:row.selection_id,qualification,meta_record,current_library,
@@ -136,7 +137,7 @@ export function createRsiMetaProfileShadowProjection({
     projection_can_add_skill_to_execution:false,
     projection_can_override_governance:false,
     projection_is_execution_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,projection_digest:digest(core)});
@@ -151,7 +152,7 @@ function stateCore(sourceSha,selections){
     append_only:true,shadow_only:true,
     registry_can_activate_profile:false,registry_can_change_execution:false,
     candidate_can_delete_selections:false,candidate_can_rewrite_selections:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return {...core,state_digest:digest(core)};
@@ -170,13 +171,15 @@ export class RsiMetaProfileShadowRegistry{
       const p=JSON.parse(await fs.readFile(this.#path,'utf8'));assertZero(p,'registry');
       if(p.schema!==RSI_META_PROFILE_SHADOW_REGISTRY_SCHEMA||p.version!==1||p.source_sha!==this.#sourceSha
         ||p.append_only!==true||p.shadow_only!==true||p.registry_can_activate_profile!==false
-        ||p.registry_can_change_execution!==false||p.candidate_can_delete_selections!==false||p.candidate_can_rewrite_selections!==false)throw new Error('rsi_shadow_profile_registry_state_invalid');
+        ||p.registry_can_change_execution!==false||p.candidate_can_delete_selections!==false||p.candidate_can_rewrite_selections!==false
+        ||p.browser_authority!==false||p.task_authority!==false)throw new Error('rsi_shadow_profile_registry_state_invalid');
       const clone=structuredClone(p);delete clone.state_digest;
       if(digest(clone)!==exactDigest(p.state_digest,'registry'))throw new Error('rsi_shadow_profile_registry_digest_mismatch');
       if(!Array.isArray(p.selections)||p.selections.length>MAX_SELECTIONS)throw new Error('rsi_shadow_profile_registry_rows_invalid');
       for(const row of p.selections){
         if(row.source_sha!==this.#sourceSha||row.schema!==RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA)throw new Error('rsi_shadow_profile_registry_row_invalid');
         assertZero(row,'selection');
+        if(row.browser_authority!==false||row.task_authority!==false)throw new Error('rsi_shadow_profile_registry_row_authority_invalid');
         const rc=structuredClone(row);delete rc.selection_digest;
         if(digest(rc)!==exactDigest(row.selection_digest,'selection'))throw new Error('rsi_shadow_profile_registry_row_digest_mismatch');
       }
@@ -189,6 +192,7 @@ export class RsiMetaProfileShadowRegistry{
     if(!this.#initialized)throw new Error('rsi_shadow_profile_registry_not_initialized');
     if(!selection||selection.schema!==RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA)throw new Error('rsi_shadow_profile_selection_invalid');
     assertZero(selection,'selection');
+    if(selection.browser_authority!==false||selection.task_authority!==false)throw new Error('rsi_shadow_profile_selection_authority_invalid');
     if(selection.source_sha!==this.#sourceSha)throw new Error('rsi_shadow_profile_selection_source_mismatch');
     const existing=this.#selections.find(x=>x.selection_id===selection.selection_id||x.selection_digest===selection.selection_digest);
     if(existing){
@@ -204,7 +208,7 @@ export class RsiMetaProfileShadowRegistry{
     const row=this.#selections[this.#selections.length-1];
     return row?Object.freeze(structuredClone(row)):null;
   }
-  snapshot(){const s=stateCore(this.#sourceSha,this.#selections);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,selection_count:s.selection_count,current_selection_digest:s.current_selection_digest,current_challenger_profile_digest:s.current_challenger_profile_digest,shadow_only:true,registry_can_activate_profile:false,registry_can_change_execution:false,authority_effect:false})}
+  snapshot(){const s=stateCore(this.#sourceSha,this.#selections);return Object.freeze({schema:s.schema,version:s.version,source_sha:s.source_sha,initialized:this.#initialized,selection_count:s.selection_count,current_selection_digest:s.current_selection_digest,current_challenger_profile_digest:s.current_challenger_profile_digest,shadow_only:true,registry_can_activate_profile:false,registry_can_change_execution:false,browser_authority:false,task_authority:false,authority_effect:false})}
 }
 
 export function rsiMetaProfileShadowSelectionTrustRootSnapshot(){
@@ -217,7 +221,7 @@ export function rsiMetaProfileShadowSelectionTrustRootSnapshot(){
     projection_can_add_skill_to_execution:false,projection_can_override_governance:false,
     registry_can_activate_profile:false,canary_gate_still_required:true,
     continuous_shadow_review_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...root,shadow_selection_root_digest:digest(root)});
