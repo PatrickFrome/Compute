@@ -203,6 +203,8 @@ test('verified library updates are append-only and cannot silently remove or rew
     assert.equal(held.state,'DORMANT_CAP');
     assert.equal(held.active_for_composition,false);
     assert.equal(held.admission_exposure_held,true);
+    assert.equal(store.admissionExposureHoldProvenance(second.capsule.skill_digest),null);
+    assert.equal(store.snapshot().confirmed_admission_exposure_provenance_count,0);
 
     await assert.rejects(()=>store.adoptVerifiedLibrary({
       library:library([second],'runtime.skill.library.append'),
