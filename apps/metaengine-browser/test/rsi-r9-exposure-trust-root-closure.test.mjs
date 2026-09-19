@@ -14,6 +14,7 @@ const REQUIRED=[
   'rsi-lineage-structural-provenance.mjs',
   'rsi-github-attestation-verification-receipt.mjs',
   'rsi-lineage-provenance-acceptance.mjs',
+  'rsi-durable-state-persistence.mjs',
   'rsi-skill-lineage-contamination-review.mjs',
   'rsi-runtime-service.mjs',
   'rsi-runtime-skill-lifecycle.mjs',
@@ -37,6 +38,7 @@ test('R9 immutable roots keep verifier and effect-owner planes outside candidate
     assert.match(source,/rsi-lineage-structural-provenance\.mjs/);
     assert.match(source,/rsi-github-attestation-verification-receipt\.mjs/);
     assert.match(source,/rsi-lineage-provenance-acceptance\.mjs/);
+    assert.match(source,/rsi-durable-state-persistence\.mjs/);
     assert.match(source,/rsi-skill-lineage-contamination-review\.mjs/);
     assert.match(source,/rsi-skill-exposure-release-transition-proof\.mjs/);
     assert.match(source,/rsi-runtime-service\.mjs/);
