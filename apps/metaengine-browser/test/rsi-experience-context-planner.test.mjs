@@ -172,6 +172,10 @@ test('planner explicitly records absence of verified experience without inventin
   assert.equal(plan.bounded_memory_utility_state_digest,null);
   assert.equal(plan.bounded_memory_utility_mode,'NO_GRAPH');
   assert.equal(plan.utility_bounded_case_cap,0);
+  assert.equal(plan.memory_reliability_projection,null);
+  assert.equal(plan.memory_reliability_projection_digest,null);
+  assert.equal(plan.quarantined_case_count,0);
+  assert.deepEqual(plan.quarantined_cases,[]);
   assert.equal(plan.no_verified_experience_is_explicit,true);
   assert.equal(plan.retrieval_is_advisory_only,true);
   assert.match(plan.search_context_digest,/^[0-9a-f]{64}$/);
@@ -192,6 +196,10 @@ test('planner retrieves only verified graph summaries and never exposes raw traj
   assert.equal(plan.bounded_memory_utility_state.fixed_dimensional_state,true);
   assert.equal(plan.bounded_memory_utility_state.trajectory_joint_reward_assignment,false);
   assert.equal(plan.selected_cases[0].case_id,'rsi_case_historical_success');
+  assert.equal(plan.selected_cases[0].memory_reliability_tier,'WARM');
+  assert.equal(plan.selected_cases[0].memory_candidate_guidance_allowed,true);
+  assert.equal(plan.selected_cases[0].memory_remains_queryable,true);
+  assert.equal(plan.quarantined_case_count,0);
   assert.ok(plan.selected_cases[0].mechanism_tags.includes('AMBIGUOUS_COMMAND_OUTCOMES'));
   assert.equal(plan.selected_cases[0].source_context_truth_is_portable,false);
   assert.equal(plan.selected_cases[0].external_transfer_validation_required,true);
@@ -230,6 +238,12 @@ test('experience context trust root is retrieval-only and cannot become schedule
   assert.equal(root.evidence_sparse_case_cap,6);
   assert.equal(root.bounded_memory_utility_root.fixed_dimensional_state,true);
   assert.equal(root.bounded_memory_utility_root.trajectory_joint_reward_assignment,false);
+  assert.equal(root.memory_reliability_root.quarantined_memory_remains_queryable,true);
+  assert.equal(root.memory_reliability_root.candidate_can_set_tier,false);
+  assert.equal(root.quarantined_memory_remains_queryable,true);
+  assert.equal(root.quarantined_memory_is_candidate_guidance,false);
+  assert.equal(root.candidate_can_set_memory_tier,false);
+  assert.equal(root.candidate_can_set_memory_reliability_thresholds,false);
   assert.equal(root.second_scheduler,false);
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);
@@ -264,4 +278,62 @@ test('tampering with bounded utility state or its cap invalidates the context pl
 
   const badCap={...plan,utility_bounded_case_cap:12};
   assert.throws(()=>verifyRsiExperienceContextPlan(badCap),/state_mismatch|digest_mismatch/);
+});
+
+
+test('quarantined harmful memory remains in the projection but is excluded from candidate guidance',()=>{
+  const noGraph=createRsiExperienceContextPlan({frontier_entry:frontier()});
+  const base=harmfulGraph();
+  const exactHarm1=createRsiExperienceUtilityReceipt({
+    receipt_id:'utility.quarantine.exact.1',
+    case_id:'rsi_case_harmful_1',
+    target_context_digest:noGraph.target_context_digest,
+    outcome:'HARMFUL',
+    evidence_digest:d('a'),
+    evidence_refs:['external:quarantine:exact:1'],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+  const exactHarm2=createRsiExperienceUtilityReceipt({
+    receipt_id:'utility.quarantine.exact.2',
+    case_id:'rsi_case_harmful_1',
+    target_context_digest:noGraph.target_context_digest,
+    outcome:'HARMFUL',
+    evidence_digest:d('b'),
+    evidence_refs:['external:quarantine:exact:2'],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+  const snapshot=createRsiExperienceGraphSnapshot({
+    graph_id:'rsi.runtime.experience.quarantine',
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:base.task_anchors,
+    cases:base.cases,
+    similarity_edges:base.similarity_edges,
+    correction_edges:base.correction_edges,
+    utility_receipts:[...base.utility_receipts,exactHarm1,exactHarm2],
+  });
+  const plan=createRsiExperienceContextPlan({
+    frontier_entry:frontier(),
+    experience_graph_snapshot:snapshot,
+  });
+  verifyRsiExperienceContextPlan(plan);
+  assert.equal(plan.quarantined_case_count,1);
+  assert.equal(plan.quarantined_cases[0].case_id,'rsi_case_harmful_1');
+  assert.equal(plan.quarantined_cases[0].remains_queryable,true);
+  assert.equal(plan.quarantined_cases[0].candidate_guidance_allowed,false);
+  assert.ok(plan.memory_reliability_projection.quarantined_case_ids.includes('rsi_case_harmful_1'));
+  assert.ok(!plan.selected_cases.some(row=>row.case_id==='rsi_case_harmful_1'));
+  assert.ok(plan.selected_cases.every(row=>row.memory_reliability_tier!=='QUARANTINED'));
+});
+
+test('tampering a selected memory into QUARANTINED guidance is rejected',()=>{
+  const plan=createRsiExperienceContextPlan({
+    frontier_entry:frontier(),
+    experience_graph_snapshot:graph(),
+  });
+  const bad=structuredClone(plan);
+  bad.selected_cases[0].memory_reliability_tier='QUARANTINED';
+  assert.throws(()=>verifyRsiExperienceContextPlan(bad),/selected_case_reliability_mismatch|digest_mismatch/);
 });

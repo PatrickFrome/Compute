@@ -11,6 +11,11 @@ import {
   verifyRsiBoundedMemoryUtilityState,
   rsiBoundedMemoryUtilityTrustRootSnapshot,
 } from './rsi-bounded-memory-utility-state.mjs';
+import {
+  createRsiMemoryReliabilityProjection,
+  verifyRsiMemoryReliabilityProjection,
+  rsiMemoryReliabilityTrustRootSnapshot,
+} from './rsi-memory-reliability-tier.mjs';
 
 export const RSI_EXPERIENCE_CONTEXT_PLAN_SCHEMA = 'metaengine.rsi.experience-context-plan.v1';
 export const RSI_EXPERIENCE_CONTEXT_ROOT_SCHEMA = 'metaengine.rsi.experience-context-root.v1';
@@ -149,7 +154,7 @@ function verifyFrontierEntry(entry) {
   });
 }
 
-function selectedCaseSummary(item) {
+function selectedCaseSummary(item,reliabilityRow=null) {
   return Object.freeze({
     rank: item.rank,
     case_id: item.case_id,
@@ -166,6 +171,11 @@ function selectedCaseSummary(item) {
     graph_diffusion_score: item.graph_diffusion_score,
     contextual_utility: item.contextual_utility,
     ranking_score: item.ranking_score,
+    memory_reliability_tier: reliabilityRow?.tier || 'COLD',
+    memory_reliability_reason: reliabilityRow?.tier_reason || 'NO_RELIABILITY_PROJECTION',
+    memory_utility_conflicted: reliabilityRow?.utility_conflicted === true,
+    memory_candidate_guidance_allowed: reliabilityRow?.candidate_guidance_allowed !== false,
+    memory_remains_queryable: true,
     source_context_truth_is_portable: false,
     external_transfer_validation_required: true,
     authority_effect: false,
@@ -215,6 +225,8 @@ export function createRsiExperienceContextPlan({
   let retrievalDigest = null;
   let selectedCases = [];
   let boundedUtilityState = null;
+  let reliabilityProjection = null;
+  let quarantinedCases = [];
   if (experience_graph_snapshot != null) {
     const snapshot = verifyRsiExperienceGraphSnapshot(experience_graph_snapshot);
     const retrieval = retrieveRsiExperienceGraph({ snapshot, query });
@@ -229,11 +241,36 @@ export function createRsiExperienceContextPlan({
       query,
       retrieval,
     });
+    reliabilityProjection = createRsiMemoryReliabilityProjection({
+      experience_graph_snapshot: snapshot,
+      query,
+      retrieval,
+    });
+    verifyRsiMemoryReliabilityProjection(reliabilityProjection, {
+      experience_graph_snapshot: snapshot,
+      query,
+      retrieval,
+    });
     mode = retrieval.item_count > 0 ? 'VERIFIED_EXPERIENCE_RETRIEVAL' : 'VERIFIED_GRAPH_NO_MATCH';
     graphSnapshotDigest = snapshot.snapshot_digest;
     retrievalDigest = retrieval.retrieval_digest;
+    const reliabilityByCase = new Map(reliabilityProjection.rows.map(row => [row.case_id,row]));
     const boundedCaseCap = Math.min(MAX_SELECTED_CASES, boundedUtilityState.recommended_case_cap);
-    selectedCases = retrieval.items.slice(0, boundedCaseCap).map(selectedCaseSummary);
+    const guidanceIds = new Set(reliabilityProjection.candidate_guidance_case_ids);
+    selectedCases = retrieval.items
+      .filter(item => guidanceIds.has(item.case_id))
+      .slice(0, boundedCaseCap)
+      .map(item => selectedCaseSummary(item,reliabilityByCase.get(item.case_id)));
+    quarantinedCases = reliabilityProjection.rows
+      .filter(row => row.tier === 'QUARANTINED')
+      .map(row => Object.freeze({
+        case_id: row.case_id,
+        case_digest: row.case_digest,
+        tier: row.tier,
+        tier_reason: row.tier_reason,
+        remains_queryable: true,
+        candidate_guidance_allowed: false,
+      }));
   } else if (bridges.length > 0) {
     throw new Error('rsi_context_bridge_cases_require_experience_graph');
   }
@@ -259,6 +296,12 @@ export function createRsiExperienceContextPlan({
     bounded_memory_utility_state: boundedUtilityState,
     bounded_memory_utility_state_digest: boundedUtilityState?.state_digest || null,
     bounded_memory_utility_mode: boundedUtilityState?.mode || 'NO_GRAPH',
+    memory_reliability_projection: reliabilityProjection,
+    memory_reliability_projection_digest: reliabilityProjection?.projection_digest || null,
+    quarantined_cases: Object.freeze(quarantinedCases),
+    quarantined_case_count: quarantinedCases.length,
+    quarantined_memory_remains_queryable: true,
+    quarantined_memory_is_candidate_guidance: false,
     selected_cases: Object.freeze(selectedCases),
     selected_case_count: selectedCases.length,
     max_selected_cases: MAX_SELECTED_CASES,
@@ -302,6 +345,8 @@ export function verifyRsiExperienceContextPlan(plan) {
     || plan.candidate_can_mark_memory_portable !== false
     || plan.candidate_can_mutate_context_plan !== false
     || plan.utility_state_controls_case_cap !== true
+    || plan.quarantined_memory_remains_queryable !== true
+    || plan.quarantined_memory_is_candidate_guidance !== false
     || plan.no_verified_experience_is_explicit !== true
     || plan.raw_trajectory_exposed !== false
     || plan.raw_page_text_exposed !== false
@@ -321,6 +366,11 @@ export function verifyRsiExperienceContextPlan(plan) {
       || plan.bounded_memory_utility_state_digest !== null
       || plan.bounded_memory_utility_mode !== 'NO_GRAPH'
       || plan.utility_bounded_case_cap !== 0
+      || plan.memory_reliability_projection !== null
+      || plan.memory_reliability_projection_digest !== null
+      || plan.quarantined_case_count !== 0
+      || !Array.isArray(plan.quarantined_cases)
+      || plan.quarantined_cases.length !== 0
     ) throw new Error('rsi_context_bounded_utility_state_without_graph');
   } else {
     if (!plan.bounded_memory_utility_state) throw new Error('rsi_context_bounded_utility_state_missing');
@@ -335,6 +385,44 @@ export function verifyRsiExperienceContextPlan(plan) {
       || state.query_digest !== plan.query_digest
       || state.target_context_digest !== plan.target_context_digest
     ) throw new Error('rsi_context_bounded_utility_state_mismatch');
+    if (!plan.memory_reliability_projection) throw new Error('rsi_context_memory_reliability_projection_missing');
+    const reliability = verifyRsiMemoryReliabilityProjection(plan.memory_reliability_projection);
+    if (
+      reliability.projection_digest !== plan.memory_reliability_projection_digest
+      || reliability.graph_snapshot_digest !== plan.graph_snapshot_digest
+      || reliability.retrieval_digest !== plan.retrieval_digest
+      || reliability.query_digest !== plan.query_digest
+      || reliability.target_context_digest !== plan.target_context_digest
+      || plan.quarantined_case_count !== reliability.quarantine_count
+      || !Array.isArray(plan.quarantined_cases)
+      || plan.quarantined_cases.length !== reliability.quarantine_count
+    ) throw new Error('rsi_context_memory_reliability_projection_mismatch');
+    const reliabilityByCase = new Map(reliability.rows.map(row => [row.case_id,row]));
+    for (const selected of plan.selected_cases) {
+      const rel = reliabilityByCase.get(selected.case_id);
+      if (
+        !rel
+        || rel.tier === 'QUARANTINED'
+        || rel.candidate_guidance_allowed !== true
+        || selected.memory_reliability_tier !== rel.tier
+        || selected.memory_reliability_reason !== rel.tier_reason
+        || selected.memory_candidate_guidance_allowed !== true
+        || selected.memory_remains_queryable !== true
+      ) throw new Error('rsi_context_selected_case_reliability_mismatch');
+    }
+    const expectedQuarantined = reliability.rows
+      .filter(row => row.tier === 'QUARANTINED')
+      .map(row => ({
+        case_id: row.case_id,
+        case_digest: row.case_digest,
+        tier: row.tier,
+        tier_reason: row.tier_reason,
+        remains_queryable: true,
+        candidate_guidance_allowed: false,
+      }));
+    if (JSON.stringify(expectedQuarantined) !== JSON.stringify(plan.quarantined_cases)) {
+      throw new Error('rsi_context_quarantine_projection_mismatch');
+    }
   }
   const material = { ...plan };
   delete material.context_plan_digest;
@@ -362,7 +450,12 @@ export function rsiExperienceContextTrustRootSnapshot() {
     max_bridge_cases: MAX_BRIDGE_CASES,
     max_selected_cases: MAX_SELECTED_CASES,
     bounded_memory_utility_root: rsiBoundedMemoryUtilityTrustRootSnapshot(),
+    memory_reliability_root: rsiMemoryReliabilityTrustRootSnapshot(),
     utility_state_controls_case_cap: true,
+    quarantined_memory_remains_queryable: true,
+    quarantined_memory_is_candidate_guidance: false,
+    candidate_can_set_memory_tier: false,
+    candidate_can_set_memory_reliability_thresholds: false,
     harmful_dominant_case_cap: 4,
     evidence_sparse_case_cap: 6,
     raw_trajectory_exposed: false,

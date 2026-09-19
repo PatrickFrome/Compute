@@ -99,6 +99,10 @@ test('context-aware request contains bounded verified memory references but no r
   assert.equal(request.source_sha,SOURCE);
   assert.equal(request.experience_mode,'NO_VERIFIED_EXPERIENCE');
   assert.equal(request.selected_experience_count,0);
+  assert.equal(request.bounded_memory_utility_state_digest,null);
+  assert.equal(request.memory_reliability_projection_digest,null);
+  assert.equal(request.quarantined_case_count,0);
+  assert.equal(request.quarantined_memory_exposed_as_guidance,false);
   assert.equal(request.raw_patch_requested,false);
   assert.equal(request.raw_source_persisted_in_request,false);
   assert.equal(request.hidden_evaluation_manifest_exposed,false);
@@ -194,6 +198,10 @@ test('candidate synthesis trust root is only a planning boundary',()=>{
   assert.equal(root.existing_isolated_candidate_builder_required,true);
   assert.equal(root.devos_lease_required_before_materialization,true);
   assert.equal(root.candidate_materialized_by_this_module,false);
+  assert.equal(root.memory_reliability_bound_to_context_plan,true);
+  assert.equal(root.quarantined_memory_exposed_as_guidance,false);
+  assert.equal(root.candidate_can_set_memory_reliability,false);
+  assert.equal(root.selected_experience_must_be_candidate_guidance_allowed,true);
   assert.equal(root.no_second_scheduler,true);
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);
@@ -265,4 +273,33 @@ test('synthesis ledger envelope fails closed when a verified object is tampered 
     mutation_proposal:proposal,
     context_candidate_build:build,
   }),/digest_mismatch|sensitive_field_forbidden/);
+});
+
+
+test('synthesis verifier rejects quarantined experience guidance even with a recomputed outer object',()=>{
+  const {request}=fixture();
+  const forged={
+    ...request,
+    selected_experience:[{
+      case_id:'case.quarantined.injected',
+      case_digest:d('a'),
+      outcome:'SUCCESS',
+      lesson_digests:[],
+      exact_task_match:false,
+      corrective_trace_target:false,
+      memory_reliability_tier:'QUARANTINED',
+      memory_reliability_reason:'HARMFUL_EVIDENCE_DOMINANT',
+      memory_utility_conflicted:false,
+      memory_candidate_guidance_allowed:false,
+      memory_remains_queryable:true,
+      source_context_truth_is_portable:false,
+      external_transfer_validation_required:true,
+    }],
+    selected_experience_count:1,
+  };
+  // The production verifier must reject the policy even before digest acceptance.
+  assert.throws(()=>verifyRsiCandidateSynthesisRequest({
+    ...forged,
+    synthesis_request_digest:d('f'),
+  }),/quarantined_experience_guidance_forbidden|digest_mismatch/);
 });
