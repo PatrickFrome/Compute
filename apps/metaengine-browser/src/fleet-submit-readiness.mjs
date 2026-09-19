@@ -39,11 +39,21 @@ export function evaluateFleetSubmitReadiness({
   if (!phases.has(readinessPhase)) {
     return Object.freeze({ ready: false, reason: glmLane ? 'GLM_LANE_IS_SINGLE_PHASE_PRE_TYPE_ONLY' : 'READINESS_PHASE_INVALID', authority_effect: false });
   }
-  if (!expectedTab || !frameTab || frameTab !== expectedTab || observedTab !== expectedTab || selectedTab !== expectedTab) {
+  // D-C2 (2026-09-19): readiness is TAB-SCOPED on the GLM lane. The GLM lane
+  // never required foreground selection in effect (D-S2: the bootstrap types
+  // and Enter-submits on unselected, unrendered tabs — semantic addressing is
+  // geometry-independent), and the dispatch no longer grabs SELECT_TAB, so a
+  // foreground mismatch is reported as an observation instead of failing the
+  // submit gate. The legacy ChatGPT lane keeps its foreground gate untouched.
+  const foreground = selectedTab === expectedTab;
+  if (!glmLane && selectedTab && selectedTab !== expectedTab) {
     return Object.freeze({ ready: false, reason: 'TAB_NOT_FOREGROUND_EXACT', authority_effect: false });
   }
+  if (!expectedTab || !frameTab || frameTab !== expectedTab || observedTab !== expectedTab) {
+    return Object.freeze({ ready: false, reason: 'TAB_BINDING_NOT_EXACT', foreground, authority_effect: false });
+  }
   if (!expectedTarget || !frameTarget || frameTarget !== expectedTarget || observedTarget !== expectedTarget) {
-    return Object.freeze({ ready: false, reason: 'TARGET_INCARNATION_MISMATCH', authority_effect: false });
+    return Object.freeze({ ready: false, reason: 'TARGET_INCARNATION_MISMATCH', foreground, authority_effect: false });
   }
   const width = Number(frame?.viewport?.width || 0);
   const height = Number(frame?.viewport?.height || 0);

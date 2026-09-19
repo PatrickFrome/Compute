@@ -1083,6 +1083,20 @@ export class SupervisorLifecycleRuntime {
     return false;
   }
 
+  // D-C5 (live 2026-09-19): ROLLOVER_AMBIGUOUS with no reconciliation
+  // progress is a terminal dead state — wakes do not run in rollover states,
+  // admission close PRESERVES the ambiguity, and restart reconciliation only
+  // works with a positive readback. Live evidence: the rollover sat ambiguous
+  // for 14+ hours while its every-2s candidate scan ALSO starved the idle
+  // maintenance window (D-C6) so the devos task cycle never ran. After this
+  // many consecutive no-progress cycles, the lifecycle re-requests the
+  // rollover: requestRollover(autoRelease) clears the attempt and returns to
+  // ROLLOVER_REQUIRED, so #rollover() opens a FRESH tab (the account-level
+  // root draft was flushed by then) instead of eternally re-scanning the
+  // poisoned attempt tab.
+  #rolloverNoProgressCycles = 0;
+  #lastAmbiguousRolloverScanAt = 0;
+
   async cycle({ force = false } = {}) {
     if (!this.#keepalive) return this.snapshot();
     const now = Date.now();
@@ -1103,8 +1117,38 @@ export class SupervisorLifecycleRuntime {
       await this.#observeWorkers(state);
       if (admissionOpen) await this.#queueResearch();
       if (this.#keepalive.snapshot().state === 'ROLLOVER_AMBIGUOUS') {
-        const reconciled = await this.#reconcileAmbiguousRollover(state);
-        if (reconciled && this.#keepalive.snapshot().state !== 'ROLLOVER_AMBIGUOUS') state = await this.#getState();
+        // D-C6: throttle the candidate scan — it captures every non-fleet tab
+        // and held maintenance_in_flight busy on every cycle, starving the
+        // idle-window task cycle (live: idle last_error
+        // native_supervisor_idle_maintenance_wait_timeout with zero leases for
+        // hours while 4 tasks sat READY).
+        const scanBudgetElapsed = now - this.#lastAmbiguousRolloverScanAt >= 30000;
+        let reconciled = false;
+        if (scanBudgetElapsed) {
+          this.#lastAmbiguousRolloverScanAt = now;
+          reconciled = await this.#reconcileAmbiguousRollover(state);
+        }
+        if (reconciled && this.#keepalive.snapshot().state !== 'ROLLOVER_AMBIGUOUS') {
+          this.#rolloverNoProgressCycles = 0;
+          state = await this.#getState();
+        } else {
+          this.#rolloverNoProgressCycles += 1;
+          // D-C5: after bounded no-progress cycles, restart the rollover on a
+          // fresh tab instead of scanning the same poisoned tab forever.
+          if (this.#rolloverNoProgressCycles >= 8 && this.#canActuate() === true) {
+            await this.#keepalive.requestRollover('ROLLOVER_AMBIGUOUS_NO_PROGRESS_FRESH_TAB', { autoRelease: true }).catch(() => {});
+            this.#rolloverNoProgressCycles = 0;
+            this.#lastRecovery = {
+              action: 'ROLLOVER_AMBIGUOUS_NO_PROGRESS_REREQUEST',
+              rollover_attempt_id: null,
+              fresh_tab_rollover: true,
+              confirmed: false, ambiguous: false, automatic_retry_allowed: false,
+              at: new Date().toISOString(), authority_effect: false,
+            };
+          }
+        }
+      } else {
+        this.#rolloverNoProgressCycles = 0;
       }
       let keepalive = this.#keepalive.snapshot();
       if (keepalive.state === 'WAKE_AMBIGUOUS'

@@ -196,6 +196,60 @@ export class SupervisorDeviceIdentity {
     });
   }
 
+  // Agent context token proof (2026-09-19 operator directive: GLM agents have
+  // no shared context, so the browser issues each fleet agent a verifiable
+  // context token). Signs the canonical agent-context material with the same
+  // enrolled device key that signs heartbeats; the public JWK travels in the
+  // envelope so the edge/journal/operator can verify without key exchange.
+  async agentContextTokenProof({
+    client_id, agent_id, role, generation_epoch, mission_digest,
+    issued_at = new Date().toISOString(), ttl_seconds,
+  } = {}) {
+    const state = await this.ensure();
+    if (!state.device_id) throw new Error('supervisor_device_not_enrolled');
+    const { buildAgentContextTokenMaterial, issueAgentContextToken, AGENT_CONTEXT_TOKEN_DEFAULT_TTL_SECONDS } = await import('./agent-context-token.mjs');
+    // Canonical-material validation runs first so binding errors surface as
+    // agent_context_token_* vocabulary before any key operation.
+    const material = buildAgentContextTokenMaterial({
+      client_id: String(client_id || state.client_id || ''),
+      agent_id, role, generation_epoch, mission_digest,
+      issued_at,
+      expires_at: new Date(Date.parse(issued_at) + (Number.isSafeInteger(Number(ttl_seconds)) && Number(ttl_seconds) >= 60
+        ? Number(ttl_seconds) : AGENT_CONTEXT_TOKEN_DEFAULT_TTL_SECONDS) * 1000).toISOString(),
+    });
+    return issueAgentContextToken({
+      client_id: String(client_id || state.client_id || ''),
+      agent_id, role, generation_epoch, mission_digest,
+      issued_at,
+      ttl_seconds,
+      sign: (toSign) => this.#sign(toSign),
+      public_jwk: structuredClone(state.public_jwk),
+      key_fingerprint_sha256: state.key_fingerprint_sha256,
+    });
+  }
+
+  // Verification helper for token consumers inside the browser process
+  // (journal readback, observation plane). Uses the enrollment public key.
+  async verifyAgentContextTokenSignature(envelope) {
+    const state = await this.ensure();
+    const { buildAgentContextTokenMaterial } = await import('./agent-context-token.mjs');
+    const material = buildAgentContextTokenMaterial({
+      client_id: envelope?.client_id ?? state.client_id,
+      agent_id: envelope?.agent_id,
+      role: envelope?.role,
+      generation_epoch: envelope?.generation_epoch,
+      mission_digest: envelope?.mission_digest,
+      issued_at: envelope?.issued_at,
+      expires_at: envelope?.expires_at,
+    });
+    const jwk = { ...state.public_jwk, key_ops: ['verify'] };
+    const key = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+    const signature = Buffer.from(String(envelope?.signature || ''), 'base64url');
+    return crypto.verify('sha256', Buffer.from(material, 'utf8'), {
+      key, dsaEncoding: 'ieee-p1363',
+    }, signature);
+  }
+
   async guardianUpdateActuatorProof({
     operation,
     effect_id,

@@ -119,7 +119,7 @@ test('backlog capacity grows only on the existing heartbeat cycle and is burst b
   assert.deepEqual({ active: p.active, target_agents: p.target_agents, spawn_burst_limit: p.spawn_burst_limit }, { active: true, target_agents: 6, spawn_burst_limit: 4 });
 });
 
-test('cycle foregrounds worker, types without submit, clicks Send once, proves generation and restores prior tab', async () => {
+test('cycle dispatches tab-scoped without foreground grab, types with Enter submit, proves generation and never touches selection (D-C2)', async () => {
   const calls = [];
   let selected = supervisorTab;
   let captureCount = 0;
@@ -150,8 +150,10 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
   const first = await cycle.cycle();
   assert.equal(first.dispatch.state, 'RUNNING');
   assert.equal(first.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
-  assert.equal(first.dispatch.selected_tab_mutation, true);
+  assert.equal(first.dispatch.selected_tab_mutation, false, 'D-C2: dispatch is tab-scoped, never foreground-scoped');
   assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: GLM semantic submit is geometry-independent');
+  assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SELECT_TAB').length, 0, 'D-C2: no SELECT_TAB is issued anywhere in the dispatch');
+  assert.equal(selected, supervisorTab, 'D-C2: the user selection is never touched');
   assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
   assert.equal(first.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(selected, supervisorTab);
