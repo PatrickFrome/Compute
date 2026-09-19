@@ -224,6 +224,11 @@ function verifyRow(row){
     || utility.weighted_harmful!==expectedWeightedHarmful
     || utility.weighted_neutral!==expectedWeightedNeutral
   )throw new Error('rsi_memory_reliability_weight_mismatch');
+  const expectedPosterior=unit(
+    (1+expectedWeightedHelpful)/(2+expectedWeightedHelpful+expectedWeightedHarmful+0.25*expectedWeightedNeutral),
+    'expected_posterior_helpful',
+  );
+  if(utility.posterior_helpful!==expectedPosterior)throw new Error('rsi_memory_reliability_posterior_mismatch');
   const expected=deriveTier({item:row,utility});
   if(
     row.tier!==expected.tier
