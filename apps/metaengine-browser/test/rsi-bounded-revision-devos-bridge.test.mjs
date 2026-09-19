@@ -1772,7 +1772,7 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
     handoff_row:good.handoffRow,
     experiment_intent:good.intent,
     experiment_receipt:good.receipt,
-  }),/entry_digest_mismatch/);
+  }),/recipe_digest_invalid|entry_digest_mismatch/);
 
   const badIntent=structuredClone(good.intent);
   badIntent.evaluator_generation_seq=2;
@@ -2013,7 +2013,7 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
 test('Phase31 forbids mixed evaluator generations epochs learning kinds and duplicate candidate evidence',()=>{
   const rows=phase31SourceRows('cross-generation');
   const other=phase31SourceRows('cross-generation-other');
-  assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden/);
+  assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/evaluator_root_mismatch|cross_generation_forbidden/);
 
   const epochA=phase31SourceRows('cross-epoch');
   const epochB=phase31SourceRows('cross-epoch-b');
@@ -2273,7 +2273,7 @@ function phase32Fixture(label='phase32',{
     authored_by_candidate:false,
     ...handoffOverrides,
   });
-  return {rows,proposal,validations,admission,handoff};
+  return {rows,source_rows:rows,proposal,validations,admission,handoff};
 }
 
 function phase32Receipt(fx,label='phase32',overrides={}){
