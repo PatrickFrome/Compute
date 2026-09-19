@@ -64,6 +64,7 @@ import {
   createRsiSkillExposureReleaseCertificate,
   rsiSkillExposureReleaseTrustRootSnapshot,
 } from './rsi-skill-exposure-release.mjs';
+import { createRsiPostAppendConsumerCredit, rsiPostAppendConsumerCreditTrustRootSnapshot } from './rsi-post-append-consumer-credit.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -122,6 +123,7 @@ function trustRoots() {
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
     skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
     skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
+    post_append_consumer_credit: rsiPostAppendConsumerCreditTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
     memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
@@ -1245,6 +1247,57 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return review;
+  }
+
+  async recordPostAppendConsumerCredit(args = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_skill_library_unavailable');
+    const admissionProvenance = this.#skillLifecycle.admissionExposureHoldProvenance(args.skill_digest);
+    if (!admissionProvenance) throw new Error('rsi_runtime_post_append_credit_confirmed_admission_provenance_required');
+    const creditReceipt = createRsiPostAppendConsumerCredit({
+      ...args,
+      source_sha: this.#sourceSha,
+      admission_provenance: admissionProvenance,
+      current_library_digest: library.library_digest,
+      current_governance_digest: governance.governance_digest,
+    });
+    const lifecycle = await this.#skillLifecycle.recordPostAppendConsumerCredit({
+      credit_receipt: creditReceipt,
+      authoring_prior: 'VERIFIED_DIRECT_SKILL',
+    });
+    await this.#ledger.append('POST_APPEND_CONSUMER_CREDIT_RECORDED', {
+      credit_id: creditReceipt.credit_id,
+      credit_digest: creditReceipt.credit_digest,
+      credit_sign: creditReceipt.credit_sign,
+      skill_digest: creditReceipt.skill_digest,
+      admission_provenance_digest: creditReceipt.admission_provenance_digest,
+      current_library_digest: creditReceipt.current_library_digest,
+      pre_credit_governance_digest: creditReceipt.current_governance_digest,
+      post_credit_governance_digest: lifecycle.current_governance_digest || creditReceipt.current_governance_digest,
+      target_consumer_identity_digest: creditReceipt.target_consumer_identity_digest,
+      target_consumer_context_digest: creditReceipt.target_consumer_context_digest,
+      evaluation_contract_digest: creditReceipt.evaluation_contract_digest,
+      retention_evidence_digest: creditReceipt.retention_evidence_digest,
+      lifecycle_state: lifecycle.state,
+      lifecycle_evidence_digest: lifecycle.evidence_digest || null,
+      storage_admission_is_credit: false,
+      exposure_review_is_credit: false,
+      review_digest_used_as_credit: false,
+      admission_exposure_held: lifecycle.admission_exposure_held !== false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ credit_receipt: creditReceipt, skill_lifecycle: lifecycle });
   }
 
   async createSkillExposureReleasePreview({ skill_digest } = {}) {
