@@ -23,7 +23,7 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_shadow_profile_${l}_sha_invalid`);return x}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_shadow_profile_${l}_digest_invalid`);return x}
 function id(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_shadow_profile_${l}_invalid`);return x}
-function assertZero(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_shadow_profile_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_shadow_profile_${l}_retry_invalid`)}
+function assertZero(v,l){for(const f of ['execution_authority','browser_authority','task_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_shadow_profile_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_shadow_profile_${l}_retry_invalid`)}
 
 function verifyQualification(q){
   if(!q||q.schema!=='metaengine.rsi.meta-profile-qualification.v1'||q.version!==1)throw new Error('rsi_shadow_profile_qualification_invalid');
@@ -64,7 +64,7 @@ export function createRsiMetaProfileShadowSelection({
     selection_can_grant_skill_activity:false,
     continuous_shadow_review_required:true,
     canary_gate_still_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,selection_digest:digest(core)});
@@ -136,7 +136,7 @@ export function createRsiMetaProfileShadowProjection({
     projection_can_add_skill_to_execution:false,
     projection_can_override_governance:false,
     projection_is_execution_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,projection_digest:digest(core)});
@@ -151,7 +151,7 @@ function stateCore(sourceSha,selections){
     append_only:true,shadow_only:true,
     registry_can_activate_profile:false,registry_can_change_execution:false,
     candidate_can_delete_selections:false,candidate_can_rewrite_selections:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return {...core,state_digest:digest(core)};
@@ -217,7 +217,7 @@ export function rsiMetaProfileShadowSelectionTrustRootSnapshot(){
     projection_can_add_skill_to_execution:false,projection_can_override_governance:false,
     registry_can_activate_profile:false,canary_gate_still_required:true,
     continuous_shadow_review_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...root,shadow_selection_root_digest:digest(root)});
