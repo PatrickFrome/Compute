@@ -252,6 +252,7 @@ function validateExposureReleaseAttemptRow(row){
   if(releasePrincipalDigests(certificate,row.release_certificate_args||{}).includes(executor)){
     throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
   }
+  exactDigest(row.release_certificate_record_digest,'exposure_release_certificate_record');
   exactDigest(row.effect_id_digest,'exposure_release_effect_id');
   exactDigest(row.idempotency_key_digest,'exposure_release_idempotency_key');
   const currentState=validateReleaseTransitions(row.transitions);
@@ -287,6 +288,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     exposure_release_attempts_append_only:true,max_exposure_release_attempts:MAX_EXPOSURE_RELEASE_ATTEMPTS,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
     exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
+    durable_verified_release_certificate_record_required:true,
     pre_effect_state_readback_after_attempt_persist_required:true,
     ambiguous_admission_effect_requires_readback_only_reconciliation:true,
     admission_exposure_holds_force_dormant:true,
@@ -753,7 +755,7 @@ export class RsiRuntimeSkillLifecycle{
     return Object.freeze({...next,attempt_digest:digest(next)});
   }
   async prepareExposureReleaseAttempt({
-    attempt_id,release_certificate,release_certificate_args,
+    attempt_id,release_certificate,release_certificate_args,release_certificate_record_digest,
     effect_id_digest,idempotency_key_digest,effect_executor_identity_digest,
     external_governance_owner=false,external_effect_executor=false,authored_by_candidate=true,
   }={}){
@@ -788,6 +790,7 @@ export class RsiRuntimeSkillLifecycle{
       throw new Error('rsi_runtime_skill_exposure_release_preview_drift');
     }
     const attemptId=boundedId(attempt_id,'exposure_release_attempt_id');
+    const certificateRecordDigest=exactDigest(release_certificate_record_digest,'exposure_release_certificate_record');
     const effectId=exactDigest(effect_id_digest,'exposure_release_effect_id');
     const idempotency=exactDigest(idempotency_key_digest,'exposure_release_idempotency_key');
     const executor=exactDigest(effect_executor_identity_digest,'exposure_release_effect_executor');
@@ -797,6 +800,7 @@ export class RsiRuntimeSkillLifecycle{
     const existing=this.#findExposureReleaseAttempt(attemptId);
     if(existing){
       if(existing.release_certificate_digest===certificate.certificate_digest
+        &&existing.release_certificate_record_digest===certificateRecordDigest
         &&existing.effect_id_digest===effectId&&existing.idempotency_key_digest===idempotency
         &&existing.effect_executor_identity_digest===executor){
         return zero({state:'IDEMPOTENT',attempt_id:attemptId,attempt_digest:existing.attempt_digest,current_state:existing.current_state});
@@ -812,6 +816,7 @@ export class RsiRuntimeSkillLifecycle{
       release_certificate:structuredClone(certificate),
       release_certificate_args:structuredClone(release_certificate_args||{}),
       release_certificate_digest:certificate.certificate_digest,
+      release_certificate_record_digest:certificateRecordDigest,
       expected_library_digest:certificate.library_digest,
       expected_current_governance_digest:certificate.current_governance_digest,
       expected_next_governance_digest:certificate.next_governance_digest,
@@ -1173,6 +1178,7 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     exposure_release_requires_confirmed_admission_provenance:true,
     phase36_exposure_certificate_required:true,exposure_release_attempts_durable_before_effect:true,
     exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
+    durable_verified_release_certificate_record_required:true,
     exposure_release_pre_effect_readback_after_attempt_persist_required:true,
     ambiguous_exposure_release_readback_only_reconciliation:true,
     exposure_release_is_exploration_only:true,full_activation_via_exposure_release_forbidden:true,
