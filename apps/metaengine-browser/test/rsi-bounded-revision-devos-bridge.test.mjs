@@ -4070,6 +4070,34 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
 
+  const preparedRelease=await runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    certificate,
+    certificate_args:{release_review:freshExposureReview},
+    effect_id_digest:labelDigest('phase36-release-effect-id'),
+    idempotency_key_digest:labelDigest('phase36-release-idempotency-key'),
+    effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(preparedRelease.state,'PREPARED');
+  assert.equal(preparedRelease.effect_attempt_count,0);
+  assert.equal(preparedRelease.effect_started,false);
+  assert.equal(preparedRelease.effect_performed,false);
+  assert.equal(preparedRelease.retrieval_exposure_changed,false);
+  assert.equal(preparedRelease.full_activation_authorized,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,1);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_state_counts.PREPARED,1);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_ATTEMPT_PREPARED');
+
+  const preparedReadback=runtime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1');
+  assert.equal(preparedReadback.current_state,'PREPARED');
+  assert.equal(preparedReadback.release_certificate_digest,certificate.certificate_digest);
+  assert.equal(preparedReadback.effect_attempt_count,0);
+  assert.equal(preparedReadback.blind_retry_forbidden,true);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
