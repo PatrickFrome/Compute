@@ -3856,7 +3856,50 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(applied.pre_effect_readback_passed,true);
   assert.equal(applied.retrieval_exposure_changed,false);
   assert.equal(applied.skill_activation_performed,false);
-  assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
+  assert.equal(applied.admission_exposure_held,true);
+  assert.equal(applied.held_skill_digest,fx.skill.skill_digest);
+  const runtimeReadback=runtime.verifiedSkillStateReadback();
+  assert.equal(runtimeReadback.library_digest,fx.successorLibrary.library_digest);
+  const runtimeHeld=runtimeReadback.governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(runtimeHeld.admission_exposure_held,true);
+  assert.equal(runtimeHeld.admission_exposure_hold_external_release_required,true);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const review=await runtime.reviewDormantSkillForRetrieval({
+    review_id:'phase35.runtime.dormant-review.current-lineage.1',
+    attempt_id:'phase34b.runtime.attempt.1',
+    post_append_evaluation_epoch_digest:labelDigest('phase35-current-review-epoch'),
+    post_append_holdout_digest:labelDigest('phase35-current-review-holdout'),
+    post_append_evaluator_root_digest:labelDigest('phase35-current-review-evaluator'),
+    matched_control_receipt_digest:labelDigest('phase35-current-review-control'),
+    treatment_receipt_digest:labelDigest('phase35-current-review-treatment'),
+    post_append_evidence_digest:labelDigest('phase35-current-review-evidence'),
+    coalition_ablation_receipt_digest:labelDigest('phase35-current-review-coalition'),
+    marginal_contribution_receipt_digest:labelDigest('phase35-current-review-marginal'),
+    active_cap_policy_digest:labelDigest('phase35-current-review-cap-policy'),
+    retrieval_reviewer_identity_digest:labelDigest('phase35-current-review-reviewer'),
+    consumer_evaluator_identity_digest:labelDigest('phase35-current-review-consumer-evaluator'),
+    contamination_auditor_identity_digest:labelDigest('phase35-current-review-contamination-auditor'),
+    coalition_auditor_identity_digest:labelDigest('phase35-current-review-coalition-auditor'),
+    capacity_policy_owner_identity_digest:labelDigest('phase35-current-review-cap-owner'),
+    same_instances_pass:true,same_harness_pass:true,same_budget_pass:true,
+    evaluator_integrity_pass:true,consumer_state_integrity_pass:true,retrieval_profile_integrity_pass:true,
+    hidden_holdout_pass:true,contamination_clear:true,from_scratch_replay_pass:true,
+    task_non_regression:true,safety_non_regression:true,security_non_regression:true,
+    process_non_regression:true,outcome_non_regression:true,efficiency_non_regression:true,
+    strict_post_append_improvement:true,coalition_ablation_pass:true,marginal_contribution_pass:true,
+    active_cap_pass:true,external_retrieval_reviewer:true,external_consumer_evaluator:true,authored_by_candidate:false,
+  });
+  assert.equal(review.state,'ELIGIBLE_FOR_EXTERNAL_RETRIEVAL_EXPOSURE_ACTIVATION_REVIEW');
+  assert.equal(review.admission_exposure_hold_verified,true);
+  assert.equal(review.review_is_eligibility_evidence_only,true);
+  assert.equal(review.retrieval_exposure_changed,false);
+  assert.equal(review.skill_activation_performed,false);
+  assert.equal(review.browser_authority,false);
+  assert.equal(review.task_authority,false);
+  assert.equal(review.active_cap_capacity_available,true);
+  assert.equal(review.exploration_slot_capacity_available,true);
+  assert.equal(review.bounded_exploration_capacity_available,true);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
@@ -3915,6 +3958,8 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(result.reconciled_pending,0);
   assert.equal(result.retrieval_exposure_changed,false);
   assert.equal(result.skill_activation_performed,false);
+  assert.equal(result.admission_exposure_held,true);
+  assert.equal(result.held_skill_digest,fx.skill.skill_digest);
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
   assert.equal(restored.snapshot().active_count,0);
   const governance=restored.governance();
@@ -4023,6 +4068,9 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(reconciled.additional_effect_attempt_performed,false);
   assert.equal(reconciled.same_effect_id_retry_allowed,false);
   assert.equal(reconciled.storage_only_pending_governance,true);
+  assert.equal(reconciled.admission_exposure_held,true);
+  assert.equal(reconciled.held_skill_digest,fx.skill.skill_digest);
+  assert.equal(store.snapshot().admission_exposure_hold_count,1);
   assert.equal(store.snapshot().active_count,0);
 });
 
