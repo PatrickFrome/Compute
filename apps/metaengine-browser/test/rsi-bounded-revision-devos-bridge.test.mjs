@@ -2838,15 +2838,12 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
 test('Phase32 hardened consumer identity detects generation and epoch identity drift',()=>{
   const fx=phase32Fixture('identity-drift');
   assert.throws(()=>phase32Fixture('identity-drift-generation',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1,
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-anchor',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationAnchor:labelDigest('phase32-wrong-generation-anchor'),
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-epoch',{
-    consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
 });
