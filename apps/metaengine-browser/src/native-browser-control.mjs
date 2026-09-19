@@ -270,11 +270,22 @@ async function readBackendNodeValue(dbg, backendNodeId) {
 }
 
 async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}) {
-  const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+  // D-M1 consistency: the AX tree snapshot and the URL read must come from
+  // the same instant. A submit landing between the tree await and the URL
+  // read used to produce a mixed-epoch observation (pre-submit composer
+  // value + post-submit /c/ URL), misreporting the composer as uncleared.
+  // When the URL moved across the tree read, re-read the tree ONCE so both
+  // proofs describe the same post-navigation surface. Bounded: two reads max.
+  const urlBeforeTree = clip(webContents.getURL?.() || '', 1200);
+  let tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+  let url = clip(webContents.getURL?.() || '', 1200);
+  if (url !== urlBeforeTree) {
+    tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+    url = clip(webContents.getURL?.() || '', 1200);
+  }
   const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
   const node = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId || 0) === Number(backendNodeId));
   const value = node ? axRawValue(node, 'value') : null;
-  const url = clip(webContents.getURL?.() || '', 1200);
   const composerCleared = node != null && value === '';
   const rootToConversation = !isAgentPlatformConversationUrl(preUrl) && isAgentPlatformConversationUrl(url);
   if (composerCleared || rootToConversation) {
@@ -461,13 +472,41 @@ export async function captureSemanticFrame(webContents) {
   });
 }
 
-function assertCurrentSemanticRef(webContents, dbg, ref) {
-  if (!ref) throw new Error('native_semantic_ref_required');
+
+// D-M1 (live 2026-09-19): animated off-screen surfaces (suggestion carousels,
+// timers, skeleton loaders) mutate the DOM continuously, advancing only
+// semantic_generation and invalidating EVERY captured semantic ref on the tab
+// within milliseconds — observed live as three consecutive
+// CAPTURE -> SEMANTIC_TYPE native_semantic_ref_stale failures against a
+// stable, un-navigated composer, plus spurious D-K7 composer rollovers. A DOM
+// mutation anywhere does not change the identity of an unrelated node:
+// backend_node_id is stable for the node's lifetime and role/name evidence
+// re-read from a fresh AX tree proves the node is still exactly what the ref
+// captured. Re-anchoring is therefore permitted when the SOLE delta since the
+// binding observation is semantic_generation — same document, same runtime
+// binding, same URL, same frame, same execution context — and fails closed on
+// any document/binding/URL movement (navigations, re-attachments and
+// same-document navigations still kill refs outright).
+function isMutationOnlySemanticChurn(latestRevision, currentRevision) {
+  if (!latestRevision || !currentRevision) return false;
+  return latestRevision.process_incarnation_id === currentRevision.process_incarnation_id
+    && latestRevision.target_id === currentRevision.target_id
+    && latestRevision.web_contents_id === currentRevision.web_contents_id
+    && Number(latestRevision.renderer_pid) === Number(currentRevision.renderer_pid)
+    && latestRevision.runtime_target_id === currentRevision.runtime_target_id
+    && Number(latestRevision.attachment_generation) === Number(currentRevision.attachment_generation)
+    && Number(latestRevision.document_generation) === Number(currentRevision.document_generation)
+    && Number(latestRevision.binding_generation) === Number(currentRevision.binding_generation)
+    && latestRevision.document_url_sha256 === currentRevision.document_url_sha256
+    && Number(currentRevision.semantic_generation) > Number(latestRevision.semantic_generation);
+}
+
+function classifySemanticRefCurrency(webContents, dbg) {
   const identity = nativeBrowserTargetIdentity(webContents);
   const runtime = dbg.bindingIdentity?.() || null;
   const latest = latestNativeEffectRuntimeObservationForTarget({ target_id: identity.target_id });
   if (!runtime || !latest || !runtime.main_frame_id || !runtime.main_execution_context_unique_id) {
-    throw new Error('native_semantic_ref_stale');
+    return { identity, runtime: null, latest: null, currentRevision: null, currency: 'STALE' };
   }
   const currentRevision = projectNativeRuntimeStateRevision({
     process_incarnation_id: identity.process_incarnation_id,
@@ -483,21 +522,91 @@ function assertCurrentSemanticRef(webContents, dbg, ref) {
       semantic_generation: runtime.semantic_generation,
     },
   });
-  if (latest.state_revision_id !== currentRevision.revision_id) throw new Error('native_semantic_ref_stale');
-  return assertNativeSemanticRefCurrent({
-    ref,
-    stateRevisionId: currentRevision.revision_id,
-    targetId: identity.target_id,
-    runtimeTargetId: runtime.target_id,
-    frameId: runtime.main_frame_id,
-    backendNodeId: ref.backend_node_id,
-    executionContextUniqueId: runtime.main_execution_context_unique_id,
+  if (latest.state_revision_id === currentRevision.revision_id) {
+    return { identity, runtime, latest, currentRevision, currency: 'CURRENT' };
+  }
+  if (isMutationOnlySemanticChurn(latest.state_revision, currentRevision)) {
+    return { identity, runtime, latest, currentRevision, currency: 'MUTATION_CHURN' };
+  }
+  return { identity, runtime, latest, currentRevision, currency: 'STALE' };
+}
+
+// Re-anchor a mutation-churned ref to the current revision: re-resolve the
+// exact node by backend_node_id through the SAME capture-path projection
+// (uniqueSemanticTargets with a freshly recorded observation), then require
+// the re-read role/name evidence to still match what the ref captured. The
+// physical effect is never retried here — only the perception binding moves
+// forward, so the no-double-effect contract of every command lane is intact.
+async function reanchorSemanticRef(webContents, dbg, ref, { identity, runtime, currentRevision }) {
+  const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+  const runtimeObservation = recordNativeEffectRuntimeObservation({
+    process_incarnation_id: identity.process_incarnation_id,
+    target_id: identity.target_id,
+    observed_at: new Date().toISOString(),
+    document_url_sha256: currentRevision.document_url_sha256,
+    runtime_binding: {
+      web_contents_id: runtime.web_contents_id,
+      renderer_pid: runtime.os_pid,
+      runtime_target_id: runtime.target_id,
+      attachment_generation: runtime.attachment_generation,
+      document_generation: runtime.document_generation,
+      binding_generation: runtime.binding_generation,
+      semantic_generation: runtime.semantic_generation,
+    },
   });
+  const semanticRefContext = runtime.main_frame_id && runtime.main_execution_context_unique_id
+    ? {
+        stateRevisionId: runtimeObservation.state_revision_id,
+        targetId: identity.target_id,
+        runtimeTargetId: runtimeObservation.runtime_binding.runtime_target_id,
+        frameId: runtime.main_frame_id,
+        executionContextUniqueId: runtime.main_execution_context_unique_id,
+      }
+    : null;
+  const rows = uniqueSemanticTargets(tree?.nodes || [], { semanticRefContext });
+  const evidenceRole = ref?.evidence?.role ? String(ref.evidence.role).toLowerCase() : null;
+  const evidenceName = ref?.evidence?.name ? clip(String(ref.evidence.name), 240) : null;
+  const row = rows.find((candidate) => Number(candidate.backend_node_id) === Number(ref?.backend_node_id)) || null;
+  if (
+    !row
+    || !row.semantic_ref
+    || (evidenceRole && row.role !== evidenceRole)
+    || (row.name || null) !== (evidenceName || null)
+  ) {
+    throw new Error('native_semantic_ref_stale');
+  }
+  return row;
+}
+
+// Currency gate for every semantic-command checkpoint: returns a ref that is
+// proven current for THIS instant, re-anchoring across mutation-only churn
+// and failing closed on any document-level movement.
+async function requireCurrentSemanticRef(webContents, dbg, ref) {
+  if (!ref) throw new Error('native_semantic_ref_required');
+  const state = classifySemanticRefCurrency(webContents, dbg);
+  if (state.currency === 'CURRENT') {
+    return assertNativeSemanticRefCurrent({
+      ref,
+      stateRevisionId: state.currentRevision.revision_id,
+      targetId: state.identity.target_id,
+      runtimeTargetId: state.runtime.target_id,
+      frameId: state.runtime.main_frame_id,
+      backendNodeId: ref.backend_node_id,
+      executionContextUniqueId: state.runtime.main_execution_context_unique_id,
+    });
+  }
+  if (state.currency === 'MUTATION_CHURN') {
+    return (await reanchorSemanticRef(webContents, dbg, ref, state)).semantic_ref;
+  }
+  throw new Error('native_semantic_ref_stale');
 }
 
 async function exactTarget(webContents, dbg, roleRaw, nameRaw, semanticRef) {
   if (semanticRef) {
-    const ref = assertCurrentSemanticRef(webContents, dbg, semanticRef);
+    // D-M1: the gate re-anchors across mutation-only churn (carousel ticks),
+    // so resolution survives an animated surface without ever relaxing the
+    // document-level staleness fence.
+    const ref = await requireCurrentSemanticRef(webContents, dbg, semanticRef);
     return {
       role: String(ref?.evidence?.role || roleRaw || '').trim().toLowerCase(),
       name: String(ref?.evidence?.name || nameRaw || '').trim(),
@@ -523,7 +632,14 @@ async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null) {
   const ys = [quad[1],quad[3],quad[5],quad[7]].map(Number);
   const x = xs.reduce((a,b)=>a+b,0) / xs.length;
   const y = ys.reduce((a,b)=>a+b,0) / ys.length;
-  beforeDispatch?.();
+  // D-M2 guard: a zero-area or collapsed box can never receive a viewport
+  // click — hidden carousel slides and clipped strips fail closed here
+  // instead of dispatching an effect into empty space.
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  if (!(width > 0 && height > 0)) throw new Error('native_semantic_target_not_visible');
+  // D-M1: the pre-dispatch currency gate may re-anchor asynchronously.
+  await beforeDispatch?.();
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseMoved', x, y, button:'none' });
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mousePressed', x, y, button:'left', clickCount:1 });
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseReleased', x, y, button:'left', clickCount:1 });
@@ -645,7 +761,7 @@ export async function executeSemanticCommand(webContents, command) {
       let keyTarget = null;
       if (semanticRef) {
         keyTarget = await exactTarget(webContents, dbg, role, name, semanticRef);
-        assertCurrentSemanticRef(webContents, dbg, semanticRef);
+        await requireCurrentSemanticRef(webContents, dbg, keyTarget.semantic_ref || semanticRef);
         await dbg.sendCommand('DOM.focus', { backendNodeId: keyTarget.backend_node_id });
       }
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
@@ -662,17 +778,21 @@ export async function executeSemanticCommand(webContents, command) {
 
     if (!semanticRef) throw new Error('native_semantic_ref_required');
     const target = await exactTarget(webContents, dbg, role, name, semanticRef);
+    // D-M1: every checkpoint below works from the freshest re-anchored ref
+    // (exactTarget returns it) so mutation churn between checkpoints can be
+    // re-anchored instead of failing the already-resolved effect.
+    let liveRef = target.semantic_ref || semanticRef;
 
     if (action === 'SEMANTIC_FOCUS') {
-      assertCurrentSemanticRef(webContents, dbg, semanticRef);
+      liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       return { action, target, authority_effect: true };
     }
 
     if (action === 'TYPED_CLICK') {
-      const point = await clickBackendNode(dbg, target.backend_node_id, () => {
-        assertCurrentSemanticRef(webContents, dbg, semanticRef);
+      const point = await clickBackendNode(dbg, target.backend_node_id, async () => {
+        liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       });
       return { action, target, point, authority_effect: true };
@@ -691,7 +811,7 @@ export async function executeSemanticCommand(webContents, command) {
         throw new Error('native_semantic_submit_requires_exact_chatgpt_composer');
       }
       const preUrl = clip(webContents.getURL?.() || '', 1200);
-      assertCurrentSemanticRef(webContents, dbg, semanticRef);
+      liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
       // D-K2/D-K6 (live 2026-09-19): Ctrl+A + Input.insertText is NOT a
@@ -732,16 +852,16 @@ export async function executeSemanticCommand(webContents, command) {
           };
           replaceVerified = valueAfter === text;
         } else {
-          assertCurrentSemanticRef(webContents, dbg, semanticRef);
+          liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);
           await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
           await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
-          assertCurrentSemanticRef(webContents, dbg, semanticRef);
+          liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);
           await dbg.sendCommand('Input.insertText', { text });
         }
       } else {
-        assertCurrentSemanticRef(webContents, dbg, semanticRef);
+        liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.insertText', { text });
       }
@@ -772,7 +892,11 @@ export async function executeSemanticCommand(webContents, command) {
         // composer, which is exactly the session-auth signal the caller needs).
         const outcomeLatch = openGlmSubmitOutcomeLatch(dbg, webContents, { preUrl, backendNodeId: target.backend_node_id });
         try {
-          assertCurrentSemanticRef(webContents, dbg, semanticRef);
+          // D-M1: the site's own post-insert re-render mutates the DOM after
+          // insertText (controlled composer), which is exactly the
+          // mutation-only churn window this gate re-anchors across — the
+          // Enter submit no longer dies on the typing it just performed.
+          liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);
           await dbg.sendCommand('Input.dispatchKeyEvent', {
             type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
@@ -808,7 +932,7 @@ export async function executeSemanticCommand(webContents, command) {
       if (sendTargets.length !== 1) throw new Error(sendTargets.length ? `native_semantic_send_target_ambiguous:${sendTargets.length}` : 'native_semantic_send_target_not_found');
       const outcomeLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
       try {
-        assertCurrentSemanticRef(webContents, dbg, semanticRef);
+        liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
         await dbg.sendCommand('Input.dispatchKeyEvent', {
           type:'rawKeyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, nativeVirtualKeyCode:13,
@@ -834,10 +958,10 @@ export async function executeSemanticCommand(webContents, command) {
           if (fallbackSends.length !== 1) throw new Error(fallbackSends.length ? `native_semantic_send_target_ambiguous:${fallbackSends.length}` : 'native_semantic_send_target_not_found');
           const fallbackLatch = openChatGptSubmitOutcomeLatch(dbg, webContents, { preUrl });
           try {
-            assertCurrentSemanticRef(webContents, dbg, semanticRef);
+            liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
             assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-            await clickBackendNode(dbg, fallbackSends[0].backend_node_id, () => {
-              assertCurrentSemanticRef(webContents, dbg, semanticRef);
+            await clickBackendNode(dbg, fallbackSends[0].backend_node_id, async () => {
+              liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
               assertCurrentEffectRuntime(webContents, dbg, effectBinding);
             });
             const fallbackObserved = await fallbackLatch.wait();

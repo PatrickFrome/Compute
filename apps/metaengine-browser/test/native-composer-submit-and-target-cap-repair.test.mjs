@@ -100,7 +100,8 @@ test('D-P2: source contract — Enter first, bounded click fallback, fail-closed
 test('D-P2: source contract — fallback preserves every runtime fence', () => {
   const fallback = source.indexOf('D-P2 (2026-09-18)');
   const section = source.slice(fallback, source.indexOf('const { resolved: _resolved', fallback));
-  assert.match(section, /assertCurrentSemanticRef\(webContents, dbg, semanticRef\)/);
+  // D-M1: the fence is now the re-anchoring currency gate (liveRef).
+  assert.match(section, /requireCurrentSemanticRef\(webContents, dbg, liveRef\)/);
   assert.match(section, /assertCurrentEffectRuntime\(webContents, dbg, effectBinding\)/);
   assert.match(section, /fallbackLatch\.close\(\)/);
 });

@@ -271,6 +271,11 @@ function fakeZaiTyped({ appendMode = false, deleteClears = true, submitWorks = t
       if (method === 'Input.dispatchKeyEvent') {
         if (params.key === 'Delete' && params.type === 'rawKeyDown' && deleteClears) composerValue = '';
         if (params.key === 'Enter' && params.type === 'rawKeyDown' && submitWorks) composerValue = '';
+        if (params.key === 'Enter' && params.type === 'keyUp' && submitWorks) {
+          // A real surface re-renders after submit; the outcome latch is
+          // event-driven by contract, so the shim emits the same CDP signal.
+          this.emitMessage('Accessibility.nodesUpdated', { nodes: [] });
+        }
         return {};
       }
       if (method === 'DOM.getBoxModel') return { model: { content: [10, 10, 110, 10, 110, 60, 10, 60] } };
