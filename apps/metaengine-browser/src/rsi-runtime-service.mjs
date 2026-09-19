@@ -1020,6 +1020,7 @@ export class RsiRuntimeService {
   async adoptVerifiedSkillLibrary({
     library,
     expected_current_library_digest = null,
+    admission_exposure_hold_skill_digests = [],
     trusted_migration = false,
     external_library_owner = false,
     authored_by_candidate = true,
@@ -1035,6 +1036,7 @@ export class RsiRuntimeService {
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
       library,
       expected_current_library_digest: current ? expected_current_library_digest : null,
+      admission_exposure_hold_skill_digests,
       external_library_owner,
       authored_by_candidate,
     });
@@ -1045,6 +1047,8 @@ export class RsiRuntimeService {
       reconciled_pending: result.reconciled_pending,
       append_only_library_required: true,
       direct_adopt_scope: current ? 'TRUSTED_MIGRATION' : 'TRUSTED_BOOTSTRAP',
+      admission_exposure_hold_skill_digests: result.admission_exposure_hold_skill_digests || [],
+      retrieval_exposure_changed: false,
       phase34b_required_for_non_migration_updates: true,
       authority_effect: false,
     });
@@ -1137,6 +1141,8 @@ export class RsiRuntimeService {
         effect_performed: effectConfirmed,
         effect_started: effectConfirmed,
         storage_only: effectConfirmed && result.storage_only === true,
+        admission_exposure_held: effectConfirmed && result.admission_exposure_held === true,
+        held_skill_digest: result.held_skill_digest || null,
         reconciliation_required: result.reconciliation_required === true,
         pre_effect_readback_passed: result.pre_effect_readback_passed === true,
         retrieval_exposure_changed: false,
@@ -1168,6 +1174,8 @@ export class RsiRuntimeService {
       observed_library_digest: result.observed_library_digest,
       effect_attempt_count: result.effect_attempt_count,
       additional_effect_attempt_performed: false,
+      admission_exposure_held: result.admission_exposure_held === true,
+      held_skill_digest: result.held_skill_digest || null,
       same_effect_id_retry_allowed: false,
       authority_effect: false,
     });
