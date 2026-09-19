@@ -3875,14 +3875,31 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(result.reconciled_pending,0);
   assert.equal(result.retrieval_exposure_changed,false);
   assert.equal(result.skill_activation_performed,false);
+  assert.equal(result.admission_exposure_hold_applied,true);
+  assert.equal(result.admission_exposure_hold_count,1);
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
+  assert.equal(restored.snapshot().admission_exposure_hold_count,1);
+  assert.deepEqual(restored.snapshot().admission_exposure_hold_skill_digests,[fx.skill.skill_digest]);
   assert.equal(restored.snapshot().active_count,0);
   const governance=restored.governance();
   const added=governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
   assert.equal(added.evidence_window_count,0);
   assert.equal(added.state,'DORMANT_CAP');
   assert.equal(added.active_for_composition,false);
+  assert.equal(added.admission_exposure_held,true);
+  assert.equal(added.admission_exposure_hold_external_release_required,true);
   assert.throws(()=>restored.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const heldRestart=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+  await heldRestart.init();
+  assert.equal(heldRestart.snapshot().admission_exposure_hold_count,1);
+  assert.deepEqual(heldRestart.snapshot().admission_exposure_hold_skill_digests,[fx.skill.skill_digest]);
+  const restartedAdded=heldRestart.governance().entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(restartedAdded.admission_exposure_held,true);
+  assert.equal(restartedAdded.state,'DORMANT_CAP');
+  assert.equal(restartedAdded.active_for_composition,false);
+  assert.throws(()=>heldRestart.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
   await assert.rejects(()=>restored.executePreparedLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.prepare-execute',
     effect_executor_identity_digest:fx.executorIdentity,
@@ -3983,6 +4000,12 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(reconciled.additional_effect_attempt_performed,false);
   assert.equal(reconciled.same_effect_id_retry_allowed,false);
   assert.equal(reconciled.storage_only_pending_governance,true);
+  assert.equal(store.snapshot().admission_exposure_hold_count,1);
+  assert.deepEqual(store.snapshot().admission_exposure_hold_skill_digests,[fx.skill.skill_digest]);
+  const reconciledAdded=store.governance().entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(reconciledAdded.admission_exposure_held,true);
+  assert.equal(reconciledAdded.state,'DORMANT_CAP');
+  assert.equal(reconciledAdded.active_for_composition,false);
   assert.equal(store.snapshot().active_count,0);
 });
 
@@ -4034,5 +4057,8 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.storage_append_does_not_reconcile_pending_evidence,true);
   assert.equal(root.storage_append_does_not_activate_skill,true);
   assert.equal(root.zero_evidence_skill_activation_forbidden,true);
+  assert.equal(root.phase35_admission_exposure_hold_required,true);
+  assert.equal(root.admission_exposure_holds_force_dormant,true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
   assert.equal(root.authority_effect,false);
 });
