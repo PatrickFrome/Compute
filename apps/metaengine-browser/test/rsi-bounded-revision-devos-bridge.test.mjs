@@ -2273,7 +2273,7 @@ function phase32Fixture(label='phase32',{
     authored_by_candidate:false,
     ...handoffOverrides,
   });
-  return {rows,proposal,validations,admission,handoff};
+  return {rows,source_rows:rows,proposal,validations,admission,handoff};
 }
 
 function phase32Receipt(fx,label='phase32',overrides={}){
@@ -2837,15 +2837,18 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
 
 test('Phase32 hardened consumer identity detects generation and epoch identity drift',()=>{
   const fx=phase32Fixture('identity-drift');
-  assert.throws(()=>phase32Fixture('identity-drift-generation',{
+  // Rebuild the same deterministic source fixture and alter exactly one identity
+  // component. Using a different fixture label would create a legitimate new
+  // generation/epoch and would not test identity drift.
+  assert.throws(()=>phase32Fixture('identity-drift',{
     consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1,
   }),/evaluator_generation_identity_drift/);
-  assert.throws(()=>phase32Fixture('identity-drift-anchor',{
+  assert.throws(()=>phase32Fixture('identity-drift',{
     consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationAnchor:labelDigest('phase32-wrong-generation-anchor'),
   }),/evaluator_generation_identity_drift/);
-  assert.throws(()=>phase32Fixture('identity-drift-epoch',{
+  assert.throws(()=>phase32Fixture('identity-drift',{
     consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
