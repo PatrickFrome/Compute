@@ -3836,6 +3836,12 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(applied.skill_activation_performed,false);
   assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  const admissionProvenance=runtime.admissionExposureHoldProvenance(fx.skill.skill_digest);
+  assert.equal(admissionProvenance.admission_attempt_id,'phase34b.runtime.attempt.1');
+  assert.equal(admissionProvenance.admission_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+  assert.equal(admissionProvenance.current_library_digest,fx.successorLibrary.library_digest);
+  assert.equal(admissionProvenance.effect_executor_identity_digest,fx.executorIdentity);
+  assert.equal(admissionProvenance.release_authority,false);
 
   const exposureReview=await runtime.createSkillExposureReleaseReview({
     review_id:'phase36.runtime.exposure-review.1',
@@ -3875,6 +3881,10 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
     authored_by_candidate:false,
   });
   assert.equal(exposureReview.state,'ELIGIBLE_FOR_EXTERNAL_EXPOSURE_RELEASE_REVIEW');
+  assert.equal(exposureReview.admission_provenance_digest,admissionProvenance.provenance_digest);
+  assert.equal(exposureReview.admission_attempt_id,'phase34b.runtime.attempt.1');
+  assert.equal(exposureReview.admission_attempt_digest,admissionProvenance.admission_attempt_digest);
+  assert.equal(exposureReview.confirmed_storage_admission_provenance_required,true);
   assert.equal(exposureReview.hold_release_effect_authorized,false);
   assert.equal(exposureReview.retrieval_exposure_change_authorized,false);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_REVIEW_CREATED');
