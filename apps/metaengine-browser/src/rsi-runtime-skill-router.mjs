@@ -6,6 +6,7 @@ import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs'
 import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
 import { verifyRsiSkillRelationGraph } from './rsi-skill-relation-graph.mjs';
+import { assertRsiZeroAuthority, rsiZeroAuthorityVector } from './rsi-zero-authority-contract.mjs';
 
 export const RSI_SKILL_CONTEXT_EVIDENCE_SCHEMA='metaengine.rsi.skill-context-evidence.v1';
 export const RSI_SKILL_ROUTE_CONTEXT_SCHEMA='metaengine.rsi.skill-route-context.v1';
@@ -38,13 +39,8 @@ function capabilities(v){
   for(const raw of v){const t=token(raw,'required_capability');if(seen.has(t))throw new Error('rsi_skill_router_required_capability_duplicate');seen.add(t);out.push(t)}
   return Object.freeze(out.sort());
 }
-function assertZero(v,l){
-  for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect']){
-    if(v?.[f]!==false)throw new Error(`rsi_skill_router_${l}_${f}_invalid`);
-  }
-  if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_skill_router_${l}_automatic_retry_invalid`);
-}
-function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false})}
+function assertZero(v,l){return assertRsiZeroAuthority(v,{error_prefix:`rsi_skill_router_${l}`})}
+function zero(extra={}){return Object.freeze({...extra,...rsiZeroAuthorityVector()})}
 function assertEpisode(e){
   if(!e||typeof e!=='object'||Array.isArray(e)||e.schema!=='metaengine.rsi.browser-outcome-episode.v1')throw new Error('rsi_skill_router_episode_invalid');
   if(e.authority_effect!==false||e.execution_authority!==false||e.automatic_retry_allowed!==false||e.quarantined===true)throw new Error('rsi_skill_router_episode_not_eligible');
@@ -82,7 +78,7 @@ export function createRsiSkillContextEvidence({
     contextual_utility_not_global_truth:true,
     raw_trajectory_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
     candidate_can_edit_evidence:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,evidence_digest:digest(core)});
@@ -139,7 +135,7 @@ export function createRsiSkillRouteContext({
     output_schema_digest:output_schema_digest==null?null:exactDigest(output_schema_digest,'output_schema'),
     external_planner:true,authored_by_candidate:false,
     candidate_can_choose_router_thresholds:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,context_digest:digest(core)});
@@ -402,7 +398,7 @@ export function createRsiSkillRoutingPlan({
     candidate_can_choose_router_thresholds:false,
     routing_is_execution_authority:false,
     external_planner:true,authored_by_candidate:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,plan_digest:digest(core)});
@@ -416,7 +412,7 @@ function stateCore(sourceSha,evidence,routeCount,lastPlanDigest){
     contextual_utility_not_global_truth:true,exact_negative_transfer_veto:true,
     candidate_can_write_evidence:false,candidate_can_select_skills:false,
     raw_trajectory_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return {...core,state_digest:digest(core)};
@@ -490,7 +486,7 @@ export class RsiRuntimeSkillRouter{
       max_evidence:MAX_EVIDENCE,evidence_append_only:true,contextual_utility_not_global_truth:true,
       exact_negative_transfer_veto:true,candidate_can_write_evidence:false,candidate_can_select_skills:false,
       raw_trajectory_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
-      execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+      execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
       scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
     });
   }
@@ -516,7 +512,7 @@ export function rsiRuntimeSkillRouterTrustRootSnapshot(){
     candidate_can_override_negative_transfer_veto:false,candidate_can_choose_router_thresholds:false,
     raw_trajectory_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
     routing_is_execution_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...root,router_root_digest:digest(root)});
