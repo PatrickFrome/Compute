@@ -29,6 +29,7 @@ const MAX_ADMISSION_ATTEMPTS=1024;
 const MAX_RECONCILIATION_READBACKS=16;
 const MAX_EXPOSURE_RELEASE_ATTEMPTS=1024;
 const MAX_EXPOSURE_RELEASE_RECONCILIATION_READBACKS=16;
+const MAX_EXPOSURE_RELEASE_ATTEMPT_BYTES=64*1024;
 const EXPOSURE_RELEASE_TERMINAL_STATES=new Set(['CONFIRMED_RELEASED_EXPLORATION_ONLY','CONFIRMED_NOT_RELEASED_NEW_ATTEMPT_REQUIRED']);
 const EXPOSURE_RELEASE_STATES=new Set(['PREPARED','ATTEMPTED','RECONCILIATION_ONLY',...EXPOSURE_RELEASE_TERMINAL_STATES]);
 const ADMISSION_TERMINAL_STATES=new Set(['CONFIRMED_APPLIED_STORAGE_ONLY','CONFIRMED_NOT_APPLIED_NEW_ATTEMPT_REQUIRED']);
@@ -284,6 +285,9 @@ function validateExposureReleaseAttemptRow(row){
     throw new Error('rsi_runtime_skill_exposure_release_effect_attempt_count_transition_mismatch');
   }
   const core=structuredClone(row);delete core.attempt_digest;
+  if(Buffer.byteLength(JSON.stringify(stable(core)),'utf8')>MAX_EXPOSURE_RELEASE_ATTEMPT_BYTES){
+    throw new Error('rsi_runtime_skill_exposure_release_attempt_payload_budget_exceeded');
+  }
   if(digest(core)!==exactDigest(row.attempt_digest,'exposure_release_attempt'))throw new Error('rsi_runtime_skill_exposure_release_attempt_digest_mismatch');
   return Object.freeze(structuredClone(row));
 }
@@ -311,6 +315,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
     ambiguous_exposure_release_effect_requires_readback_only_reconciliation:true,
     max_exposure_release_reconciliation_readbacks:MAX_EXPOSURE_RELEASE_RECONCILIATION_READBACKS,
+    exposure_release_attempt_payload_max_bytes:MAX_EXPOSURE_RELEASE_ATTEMPT_BYTES,
     exposure_release_effect_atomic_with_terminal_state:true,
     exposure_release_full_activation_forbidden:true,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
@@ -1331,13 +1336,11 @@ export class RsiRuntimeSkillLifecycle{
       exposure_release_prepared_is_zero_effect:true,
       exposure_release_attempted_is_still_pre_effect:true,
       exposure_release_post_attempt_pre_effect_readback_required:true,
-    exposure_release_effect_atomic_with_terminal_state:true,
-    exposure_release_readback_only_reconciliation:true,
-    exposure_release_external_readback_owner_required:true,
-    exposure_release_full_activation_forbidden:true,
       exposure_release_effect_atomic_with_terminal_state:true,
       exposure_release_readback_only_reconciliation:true,
+      exposure_release_external_readback_owner_required:true,
       exposure_release_full_activation_forbidden:true,
+      exposure_release_attempt_payload_max_bytes:MAX_EXPOSURE_RELEASE_ATTEMPT_BYTES,
       pre_effect_state_readback_after_attempt_persist_required:true,
       ambiguous_admission_effect_requires_readback_only_reconciliation:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
@@ -1374,6 +1377,11 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     exposure_release_prepared_is_zero_effect:true,
     exposure_release_attempted_is_still_pre_effect:true,
     exposure_release_post_attempt_pre_effect_readback_required:true,
+    exposure_release_effect_atomic_with_terminal_state:true,
+    exposure_release_readback_only_reconciliation:true,
+    exposure_release_external_readback_owner_required:true,
+    exposure_release_full_activation_forbidden:true,
+    exposure_release_attempt_payload_max_bytes:MAX_EXPOSURE_RELEASE_ATTEMPT_BYTES,
     blind_retry_for_exposure_release_effect:false,
     ambiguous_exposure_release_effect_requires_readback_only_reconciliation:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
