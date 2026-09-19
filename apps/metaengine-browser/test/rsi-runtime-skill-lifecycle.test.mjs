@@ -186,12 +186,46 @@ test('verified library updates are append-only and cannot silently remove or rew
       external_library_owner:true,
       authored_by_candidate:false,
     });
+
+    const firstEpisode=episode({command:uuidFor(251),skillDigest:first.capsule.skill_digest});
+    await store.recordCreditedOutcome({
+      episode:firstEpisode,
+      credit_receipt:credit(firstEpisode,{sign:'POSITIVE',score:0.4,id:'credit.append.first.1'}),
+      generation:1,
+      authoring_prior:'VERIFIED_DIRECT_SKILL',
+      authoring_provenance_digest:d('e'),
+      external_evaluator:true,
+      authored_by_candidate:false,
+    });
+    const predecessorDigest=store.verifiedLibrarySnapshot().library_digest;
+    assert.equal(store.snapshot().lifecycle_evidence_count,1);
+
     await store.adoptVerifiedLibrary({
       library:library([first,second],'runtime.skill.library.append'),
+      expected_current_library_digest:predecessorDigest,
       external_library_owner:true,
       authored_by_candidate:false,
     });
-    assert.equal(store.snapshot().library_entry_count,2);
+    const afterAppend=store.snapshot();
+    assert.equal(afterAppend.library_entry_count,2);
+    assert.equal(afterAppend.lifecycle_evidence_count,1);
+    const governanceAfterAppend=store.governance();
+    assert.equal(
+      governanceAfterAppend.entries.find((row)=>row.skill_digest===first.capsule.skill_digest).evidence_window_count,
+      1,
+    );
+    assert.equal(
+      governanceAfterAppend.entries.find((row)=>row.skill_digest===second.capsule.skill_digest).evidence_window_count,
+      0,
+    );
+
+    const restored=new RsiRuntimeSkillLifecycle({
+      statePath:path.join(root,'skill-state.json'),
+      source_sha:SOURCE,
+    });
+    await restored.init();
+    assert.equal(restored.snapshot().library_entry_count,2);
+    assert.equal(restored.snapshot().lifecycle_evidence_count,1);
 
     await assert.rejects(()=>store.adoptVerifiedLibrary({
       library:library([second],'runtime.skill.library.append'),
