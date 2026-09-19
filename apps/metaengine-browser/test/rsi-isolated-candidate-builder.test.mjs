@@ -206,6 +206,8 @@ test('prepare rejects traversal, evaluator roots and update authority paths', ()
     'apps/metaengine-browser/src/rsi-validated-knowledge-consumer-handoff.mjs',
     'apps/metaengine-browser/src/rsi-slow-knowledge-consolidation.mjs',
     'apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs',
+    'apps/metaengine-browser/src/rsi-runtime-service.mjs',
+    'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
     'apps/metaengine-browser/src/rsi-skill-exposure-release-transition-proof.mjs',
     'apps/metaengine-browser/supabase/rsi-shadow-archive-v1.sql',
   ]) {
