@@ -9,6 +9,7 @@ import {
   verifyRsiRecursiveRiskBudget,
   rsiRiskAllocationForConfirmation,
 } from './rsi-recursive-risk-budget.mjs';
+import { assertRsiZeroAuthority, rsiZeroAuthorityVector } from './rsi-zero-authority-contract.mjs';
 
 export const RSI_META_PROFILE_SHADOW_PLAN_SCHEMA='metaengine.rsi.meta-profile-shadow-plan.v1';
 export const RSI_META_PROFILE_PAIR_RECEIPT_SCHEMA='metaengine.rsi.meta-profile-pair-receipt.v1';
@@ -36,8 +37,8 @@ function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.t
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_meta_profile_${l}_digest_invalid`);return x}
 function boundedId(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_meta_profile_${l}_invalid`);return x}
 function finite(v,l){const n=Number(v);if(!Number.isFinite(n))throw new Error(`rsi_meta_profile_${l}_invalid`);return n}
-function assertZero(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_meta_profile_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_meta_profile_${l}_retry_invalid`)}
-function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false})}
+function assertZero(v,l){return assertRsiZeroAuthority(v,{error_prefix:`rsi_meta_profile_${l}`})}
+function zero(extra={}){return Object.freeze({...extra,...rsiZeroAuthorityVector()})}
 
 function objectiveSpec(record){
   const spec=record?.evaluation?.objective_spec;
@@ -107,7 +108,7 @@ export function createRsiMetaProfileShadowPlan({
     direct_profile_activation_allowed:false,
     plan_is_execution_authority:false,
     external_plan_owner:true,authored_by_candidate:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,plan_digest:digest(core)});
@@ -153,7 +154,7 @@ export function createRsiMetaProfilePairReceipt({
     evidence_refs:Object.freeze(refs),
     external_evaluator:true,authored_by_candidate:false,
     receipt_is_profile_activation_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,receipt_digest:digest(core)});
@@ -201,7 +202,7 @@ export function evaluateRsiMetaProfileShadow({plan,meta_record,receipts}={}){
     tradeoff_is_not_activation_eligible:true,
     scalar_winner_authoritative:false,
     direct_profile_activation_allowed:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,result_digest:digest(core)});
@@ -245,7 +246,7 @@ export function createRsiMetaProfileStatisticalCertificate({
     evidence_refs:Object.freeze(refs),external_verifier:true,authored_by_candidate:false,
     paired_evaluation:true,independent_holdout:true,stopping_rule_precommitted:true,optional_stopping_used:false,
     screening_spent_alpha:false,certificate_is_profile_activation_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   if(!Number.isSafeInteger(core.sample_count)||core.sample_count<PAIR_COUNT)throw new Error('rsi_meta_profile_sample_count_invalid');
@@ -319,7 +320,7 @@ function ledgerState(sourceSha,rows){
     next_confirmation_index:nextIndex,next_confirmation_alpha_allocation:rsiRiskAllocationForConfirmation(META_PROFILE_RISK_BUDGET,nextIndex),
     append_only:true,active_profile_digest:null,shadow_profile_digest:null,ledger_can_activate_profile:false,
     candidate_can_delete_rows:false,candidate_can_rewrite_rows:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
   return {...core,state_digest:digest(core)};
 }

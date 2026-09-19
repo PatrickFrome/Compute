@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA } from './rsi-meta-profile-shadow-selection.mjs';
 import { RSI_SHADOW_COMPARISON_BINDING_SCHEMA } from './rsi-shadow-comparison-binding.mjs';
+import { assertRsiZeroAuthority, rsiZeroAuthorityVector } from './rsi-zero-authority-contract.mjs';
 
 export const RSI_META_PROFILE_CANARY_MANIFEST_SCHEMA = 'metaengine.rsi.meta-profile-canary-manifest.v1';
 export const RSI_META_PROFILE_CANARY_OBSERVATION_SCHEMA = 'metaengine.rsi.meta-profile-canary-observation.v1';
@@ -59,33 +60,10 @@ function boundedInt(value, label, max) {
   return out;
 }
 function assertZero(value, label) {
-  for (const field of [
-    'execution_authority',
-    'browser_authority',
-    'task_authority',
-    'production_mutation_authority',
-    'promotion_authority',
-    'self_update_authority',
-    'scheduler_authority',
-    'authority_effect',
-  ]) {
-    if (value?.[field] !== false) throw new Error(`rsi_canary_${label}_${field}_invalid`);
-  }
-  if (value?.automatic_retry_allowed !== false) throw new Error(`rsi_canary_${label}_retry_invalid`);
+  return assertRsiZeroAuthority(value, { error_prefix: `rsi_canary_${label}` });
 }
 function zero(extra = {}) {
-  return Object.freeze({
-    ...extra,
-    execution_authority: false,
-    browser_authority: false,
-    task_authority: false,
-    production_mutation_authority: false,
-    promotion_authority: false,
-    self_update_authority: false,
-    scheduler_authority: false,
-    automatic_retry_allowed: false,
-    authority_effect: false,
-  });
+  return Object.freeze({ ...extra, ...rsiZeroAuthorityVector() });
 }
 function verifyShadowSelection(selection) {
   if (!plain(selection) || selection.schema !== RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA || selection.version !== 1) {

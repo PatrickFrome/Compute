@@ -6,7 +6,7 @@ import { verifyRsiRuntimeMetaSkillRecord } from './rsi-runtime-meta-skill-archiv
 import {
   verifyRsiVerifiedSkillLibrary,
 } from './rsi-verified-skill-library.mjs';
-import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';
+import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';\nimport { assertRsiZeroAuthority } from './rsi-zero-authority-contract.mjs';
 
 export const RSI_META_PROFILE_SHADOW_SELECTION_SCHEMA='metaengine.rsi.meta-profile-shadow-selection.v1';
 export const RSI_META_PROFILE_SHADOW_PROJECTION_SCHEMA='metaengine.rsi.meta-profile-shadow-projection.v1';
@@ -23,7 +23,7 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_shadow_profile_${l}_sha_invalid`);return x}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_shadow_profile_${l}_digest_invalid`);return x}
 function id(v,l){const x=String(v||'').trim();if(!SAFE_ID_RE.test(x))throw new Error(`rsi_shadow_profile_${l}_invalid`);return x}
-function assertZero(v,l){for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect'])if(v?.[f]!==false)throw new Error(`rsi_shadow_profile_${l}_${f}_invalid`);if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_shadow_profile_${l}_retry_invalid`)}
+function assertZero(v,l){return assertRsiZeroAuthority(v,{error_prefix:`rsi_shadow_profile_${l}`})}
 
 function verifyQualification(q){
   if(!q||q.schema!=='metaengine.rsi.meta-profile-qualification.v1'||q.version!==1)throw new Error('rsi_shadow_profile_qualification_invalid');
