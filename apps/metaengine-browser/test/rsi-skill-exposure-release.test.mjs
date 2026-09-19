@@ -106,6 +106,7 @@ function fixture(){
     library,
     lifecycle_evidence:[lifecycle],
     admission_exposure_hold_skill_digests:[],
+    exploration_only_skill_digests:[skill.skill_digest],
     external_library_owner:true,
     authored_by_candidate:false,
   });
@@ -116,6 +117,7 @@ function fixture(){
   assert.equal(currentRow.active_for_composition,false);
   assert.equal(nextRow.state,'EXPLORATION_ACTIVE');
   assert.notEqual(nextRow.admission_exposure_hold,true);
+  assert.equal(nextRow.exploration_only_hold,true);
   assert.equal(nextRow.active_for_composition,true);
   return {skill,library,currentGovernance,nextGovernance};
 }
@@ -247,8 +249,12 @@ test('Phase36 exact preview changes only held target from dormant to exploration
   assert.equal(preview.next_state,'EXPLORATION_ACTIVE');
   assert.equal(preview.current_admission_exposure_hold,true);
   assert.equal(preview.next_admission_exposure_hold,false);
+  assert.equal(preview.current_exploration_only_hold,false);
+  assert.equal(preview.next_exploration_only_hold,true);
   assert.equal(preview.active_count_delta,1);
   assert.equal(preview.hold_count_delta,-1);
+  assert.equal(preview.exploration_only_hold_count_delta,1);
+  assert.equal(preview.full_activation_hold_applied,true);
   assert.equal(preview.only_target_state_changed,true);
   assert.equal(preview.release_authorized,false);
   assert.equal(preview.exposure_effect_performed,false);
@@ -279,6 +285,8 @@ test('Phase36 certificate consumes exact eligible zero-effect review and confirm
   assert.equal(cert.exact_zero_effect_release_review_required,true);
   assert.equal(cert.confirmed_storage_admission_provenance_required,true);
   assert.equal(cert.exact_next_governance_preview_required,true);
+  assert.equal(cert.exploration_only_hold_required_after_release,true);
+  assert.equal(cert.separate_external_graduation_required_for_active,true);
   assert.equal(cert.certificate_is_effect_authority,false);
   assert.equal(cert.release_effect_authorized,false);
   assert.equal(cert.release_effect_performed,false);
@@ -356,6 +364,8 @@ test('Phase36 reviewed-certificate trust root keeps effect authority outside cer
   assert.equal(root.release_review_must_be_eligible,true);
   assert.equal(root.held_dormant_skill_required,true);
   assert.equal(root.exploration_only_release,true);
+  assert.equal(root.exploration_only_hold_required_after_release,true);
+  assert.equal(root.separate_external_graduation_required_for_active,true);
   assert.equal(root.minimum_shadow_context_count,3);
   assert.equal(root.no_skill_ablation_required,true);
   assert.equal(root.coalition_ablation_required,true);

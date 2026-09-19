@@ -207,6 +207,71 @@ test('admission exposure hold keeps a statistically positive stored skill nonact
   assert.equal(root.admission_exposure_hold_release_requires_external_governance, true);
 });
 
+test('exploration-only hold prevents statistically proven skill from auto-promoting to ACTIVE', () => {
+  const { library, strong } = fixture();
+  const rows = [
+    lifecycle(library, strong, {
+      id: 'exploration-only.strong.1',
+      invocations: 8,
+      helpful: 7,
+      harmful: 0,
+      neutral: 1,
+      delta: 0.4,
+      prior: 'VERIFIED_DIRECT_SKILL',
+    }),
+  ];
+  const baseline = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exploration-only.baseline',
+    library,
+    lifecycle_evidence: rows,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  assert.equal(baseline.entries.find((row) => row.skill_digest === strong.skill_digest).state, 'ACTIVE');
+
+  const explorationOnly = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exploration-only.held',
+    library,
+    lifecycle_evidence: rows,
+    exploration_only_skill_digests: [strong.skill_digest],
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  verifyRsiSkillLibraryGovernance(explorationOnly, library);
+  const held = explorationOnly.entries.find((row) => row.skill_digest === strong.skill_digest);
+  assert.equal(held.proven_positive, true);
+  assert.equal(held.state, 'EXPLORATION_ACTIVE');
+  assert.equal(held.active_for_composition, true);
+  assert.equal(held.exploration_only_hold, true);
+  assert.deepEqual(explorationOnly.exploration_only_skill_digests, [strong.skill_digest]);
+  assert.equal(explorationOnly.exploration_only_prevents_full_active, true);
+  assert.equal(explorationOnly.exploration_only_release_requires_external_governance, true);
+
+  const view = createRsiSkillActivationView({
+    governance: explorationOnly,
+    library,
+    requested_skill_digests: [strong.skill_digest],
+    external_planner: true,
+    authored_by_candidate: false,
+  });
+  assert.equal(view.selected[0].governance_state, 'EXPLORATION_ACTIVE');
+
+  assert.throws(() => createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exploration-only.overlap',
+    library,
+    lifecycle_evidence: rows,
+    admission_exposure_hold_skill_digests: [strong.skill_digest],
+    exploration_only_skill_digests: [strong.skill_digest],
+    external_library_owner: true,
+    authored_by_candidate: false,
+  }), /hold_kind_overlap_forbidden/);
+
+  const root = rsiSkillLibraryGovernanceTrustRootSnapshot();
+  assert.equal(root.exploration_only_holds_supported, true);
+  assert.equal(root.exploration_only_prevents_full_active, true);
+  assert.equal(root.exploration_only_release_requires_external_governance, true);
+});
+
 test('candidate cannot author lifecycle evidence or mismatch outcome counts', () => {
   const { library, strong } = fixture();
   assert.throws(() => createRsiSkillLifecycleEvidence({
