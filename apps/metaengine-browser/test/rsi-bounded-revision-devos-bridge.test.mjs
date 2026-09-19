@@ -3972,27 +3972,31 @@ test('Phase34B rechecks governance after durable ATTEMPTED fence and never start
     if(governanceReads===1)return current;
     return Object.freeze({...current,governance_digest:labelDigest('phase34b-pre-effect-governance-drift')});
   };
-  await assert.rejects(()=>store.executePreparedLibraryAdmissionAttempt({
+  const drifted=await store.executePreparedLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.pre-effect-governance-drift',
     effect_executor_identity_digest:fx.executorIdentity,
     external_effect_executor:true,
     authored_by_candidate:false,
-  }),/pre_effect_governance_drift/);
+  });
   store.governance=originalGovernance;
 
+  assert.equal(drifted.state,'PRE_EFFECT_DRIFT_NO_EFFECT');
+  assert.equal(drifted.effect_started,false);
+  assert.equal(drifted.effect_not_started_proven,true);
+  assert.equal(drifted.new_attempt_required,true);
+  assert.equal(drifted.same_effect_id_retry_allowed,false);
+  assert.equal(drifted.automatic_retry_allowed,false);
   assert.equal(store.verifiedLibrarySnapshot().library_digest,fx.currentLibrary.library_digest);
   const attempted=store.admissionAttemptSnapshot('phase34b.attempt.pre-effect-governance-drift');
-  assert.equal(attempted.current_state,'ATTEMPTED');
+  assert.equal(attempted.current_state,'PRE_EFFECT_DRIFT_NO_EFFECT');
   assert.equal(attempted.effect_attempt_count,1);
-  const reconciled=await store.reconcileLibraryAdmissionAttempt({
+  assert.equal(attempted.transitions.at(-1).state,'PRE_EFFECT_DRIFT_NO_EFFECT');
+  await assert.rejects(()=>store.reconcileLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.pre-effect-governance-drift',
     readback_owner_identity_digest:fx.readbackIdentity,
     external_readback_owner:true,
     authored_by_candidate:false,
-  });
-  assert.equal(reconciled.state,'CONFIRMED_NOT_APPLIED_NEW_ATTEMPT_REQUIRED');
-  assert.equal(reconciled.additional_effect_attempt_performed,false);
-  assert.equal(reconciled.same_effect_id_retry_allowed,false);
+  }),/reconciliation_state_invalid/);
 });
 
 test('Phase34B ambiguous attempted admission can reconcile an externally observed successor without re-effect',async(t)=>{
