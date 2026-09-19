@@ -201,6 +201,58 @@ test('historical lifecycle evidence remains verifiable after append-only library
   }, successor), /lifecycle_evidence_digest_mismatch/);
 });
 
+test('admission exposure hold keeps a statistically positive stored skill nonactive until a separate external release exists', () => {
+  const { library, strong } = fixture();
+  const rows = [
+    lifecycle(library, strong, {
+      id: 'hold.strong.1',
+      invocations: 8,
+      helpful: 7,
+      harmful: 0,
+      neutral: 1,
+      delta: 0.4,
+      prior: 'VERIFIED_DIRECT_SKILL',
+    }),
+  ];
+  const baseline = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.hold.baseline',
+    library,
+    lifecycle_evidence: rows,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  assert.equal(baseline.entries.find((row) => row.skill_digest === strong.skill_digest).active_for_composition, true);
+
+  const held = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.hold.external-release-required',
+    library,
+    lifecycle_evidence: rows,
+    admission_exposure_hold_skill_digests: [strong.skill_digest],
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  verifyRsiSkillLibraryGovernance(held, library);
+  const heldStrong = held.entries.find((row) => row.skill_digest === strong.skill_digest);
+  assert.equal(heldStrong.state, 'DORMANT_CAP');
+  assert.equal(heldStrong.active_for_composition, false);
+  assert.equal(heldStrong.admission_exposure_hold, true);
+  assert.deepEqual(held.admission_exposure_hold_skill_digests, [strong.skill_digest]);
+  assert.equal(held.storage_admission_does_not_imply_retrieval_exposure, true);
+  assert.equal(held.admission_exposure_hold_release_requires_external_governance, true);
+  assert.throws(() => createRsiSkillActivationView({
+    governance: held,
+    library,
+    requested_skill_digests: [strong.skill_digest],
+    external_planner: true,
+    authored_by_candidate: false,
+  }), /requested_skill_not_active:DORMANT_CAP/);
+
+  const root = rsiSkillLibraryGovernanceTrustRootSnapshot();
+  assert.equal(root.admission_exposure_holds_supported, true);
+  assert.equal(root.storage_admission_does_not_imply_retrieval_exposure, true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance, true);
+});
+
 test('candidate cannot author lifecycle evidence or mismatch outcome counts', () => {
   const { library, strong } = fixture();
   assert.throws(() => createRsiSkillLifecycleEvidence({
