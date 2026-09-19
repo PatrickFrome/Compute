@@ -155,6 +155,52 @@ test('lifecycle evidence is external, exact-bound and records router false-posit
   assert.equal(row.authority_effect, false);
 });
 
+test('historical lifecycle evidence remains verifiable after append-only library growth without rebinding its observation snapshot', () => {
+  const { library, strong } = fixture();
+  const historical = lifecycle(library, strong, {
+    id: 'historical.before.append',
+    invocations: 6,
+    helpful: 5,
+    harmful: 0,
+    neutral: 1,
+    delta: 0.2,
+  });
+  const appended = capsule({ id: 'skill.appended.later', source: 'a', implementation: 'b' });
+  const successor = createRsiVerifiedSkillLibrary({
+    library_id: library.library_id,
+    entries: [
+      ...library.entries.map((entry) => ({ capsule: entry.capsule, evidence: entry.evidence })),
+      { capsule: appended, evidence: evidence(appended, 'b') },
+    ],
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  assert.notEqual(successor.library_digest, library.library_digest);
+
+  const checked = verifyRsiSkillLifecycleEvidence(historical, successor);
+  assert.equal(checked.evidence_digest, historical.evidence_digest);
+  assert.equal(checked.library_digest, library.library_digest);
+  assert.equal(checked.skill_digest, strong.skill_digest);
+
+  const governance = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.append.successor.history',
+    library: successor,
+    lifecycle_evidence: [historical],
+    max_active_skills: 4,
+    exploration_slots: 1,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  assert.equal(governance.lifecycle_evidence_count, 1);
+  assert.equal(governance.entries.find((row) => row.skill_digest === strong.skill_digest).evidence_window_count, 1);
+  assert.equal(governance.entries.find((row) => row.skill_digest === appended.skill_digest).evidence_window_count, 0);
+
+  assert.throws(() => verifyRsiSkillLifecycleEvidence({
+    ...historical,
+    library_digest: d('0'),
+  }, successor), /lifecycle_evidence_digest_mismatch/);
+});
+
 test('candidate cannot author lifecycle evidence or mismatch outcome counts', () => {
   const { library, strong } = fixture();
   assert.throws(() => createRsiSkillLifecycleEvidence({
@@ -451,6 +497,9 @@ test('skill governance trust root encodes library-drift defenses without widenin
   assert.equal(root.exploration_slots_required, true);
   assert.equal(root.premature_retirement_protected_by_minimum_evidence, true);
   assert.equal(root.router_false_positive_diagnostics_required, true);
+  assert.equal(root.historical_lifecycle_library_snapshot_digest_preserved, true);
+  assert.equal(root.append_only_successor_may_verify_prior_lifecycle_evidence, true);
+  assert.equal(root.current_skill_identity_binding_required_for_historical_evidence, true);
   assert.equal(root.zero_evidence_skill_activation_forbidden, true);
   assert.equal(root.meta_skill_authoring_prior_is_tiebreak_only, true);
   assert.equal(root.candidate_can_change_governance, false);
