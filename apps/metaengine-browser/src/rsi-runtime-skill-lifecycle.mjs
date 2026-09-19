@@ -135,6 +135,7 @@ function validateAdmissionAttemptRow(row){
   }
   if(row.execution_authority!==false||row.browser_authority!==false||row.task_authority!==false||row.production_mutation_authority!==false||row.promotion_authority!==false
     ||row.self_update_authority!==false||row.scheduler_authority!==false||row.automatic_retry_allowed!==false||row.authority_effect!==false
+    ||row.pre_effect_governance_readback_required!==true
     ||row.effect_attempt_limit!==1||row.blind_retry_forbidden!==true||row.ambiguous_outcome_requires_readback_only_reconciliation!==true
     ||row.storage_append_does_not_activate_skill!==true||row.storage_append_does_not_reconcile_pending_evidence!==true){
     throw new Error('rsi_runtime_skill_admission_attempt_policy_invalid');
@@ -176,6 +177,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,
     admission_attempts_append_only:true,max_admission_attempts:MAX_ADMISSION_ATTEMPTS,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
+    pre_effect_governance_readback_after_attempt_persist_required:true,
     ambiguous_admission_effect_requires_readback_only_reconciliation:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     credit_required_for_lifecycle_update:true,contextual_credit_not_global_truth:true,
@@ -356,6 +358,7 @@ export class RsiRuntimeSkillLifecycle{
       current_state:'PREPARED',
       transitions:[preparedTransition],
       blind_retry_forbidden:true,
+      pre_effect_governance_readback_required:true,
       ambiguous_outcome_requires_readback_only_reconciliation:true,
       storage_append_does_not_activate_skill:true,
       storage_append_does_not_reconcile_pending_evidence:true,
@@ -404,6 +407,10 @@ export class RsiRuntimeSkillLifecycle{
     });
     const row=this.#findAdmissionAttempt(attempted.attempt_id);
     if(row.current_state!=='ATTEMPTED'||row.effect_attempt_count!==1)throw new Error('rsi_runtime_skill_admission_attempt_state_invalid');
+    const preEffectGovernance=this.governance();
+    if(!preEffectGovernance||preEffectGovernance.governance_digest!==row.predecessor_governance_digest){
+      throw new Error('rsi_runtime_skill_admission_pre_effect_governance_drift');
+    }
     const prior=this.#library;
     try{
       const successor=verifyRsiVerifiedSkillLibrary(row.successor_library);
@@ -588,6 +595,7 @@ export class RsiRuntimeSkillLifecycle{
       retired_count:governance?.retired_count||0,dormant_count:governance?.dormant_count||0,
       evidence_append_only:true,pending_is_bounded:true,contextual_credit_not_global_truth:true,
       admission_attempts_append_only:true,admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
+      pre_effect_governance_readback_after_attempt_persist_required:true,
       ambiguous_admission_effect_requires_readback_only_reconciliation:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
       execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
@@ -603,6 +611,7 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     verified_library_required:true,library_updates_append_only:true,exact_library_digest_cas_supported:true,
     phase34_anytime_admission_certificate_required:true,admission_attempts_durable_before_effect:true,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
+    pre_effect_governance_readback_after_attempt_persist_required:true,
     ambiguous_attempt_readback_only_reconciliation:true,admission_attempt_state_is_append_only:true,
     storage_append_does_not_reconcile_pending_evidence:true,
     storage_append_does_not_activate_skill:true,zero_evidence_skill_activation_forbidden:true,
