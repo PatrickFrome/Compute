@@ -11,6 +11,7 @@ import {
 } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
 import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
+import { verifyRsiPostAppendConsumerCredit } from './rsi-post-append-consumer-credit.mjs';
 
 export const RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA='metaengine.rsi.runtime-skill-lifecycle.v1';
 
@@ -684,6 +685,81 @@ export class RsiRuntimeSkillLifecycle{
     const rows=this.#materializeOne(item);await this.#persist();
     return zero({state:'APPLIED',applied:true,credit_receipt_digest:credit.receipt_digest,evidence_digests:rows.map(r=>r.evidence_digest)});
   }
+  async recordPostAppendConsumerCredit({credit_receipt,authoring_prior='VERIFIED_DIRECT_SKILL'}={}){
+    this.#assertInit();
+    if(!this.#library)throw new Error('rsi_runtime_skill_post_append_credit_library_unavailable');
+    const skill=exactDigest(credit_receipt?.skill_digest,'post_append_credit_skill');
+    if(!this.#admissionExposureHolds.has(skill))throw new Error('rsi_runtime_skill_post_append_credit_exposure_hold_required');
+    const governance=this.governance();
+    if(!governance)throw new Error('rsi_runtime_skill_post_append_credit_governance_unavailable');
+    const admissionProvenance=this.admissionExposureHoldProvenance(skill);
+    if(!admissionProvenance)throw new Error('rsi_runtime_skill_post_append_credit_admission_provenance_required');
+    const credit=verifyRsiPostAppendConsumerCredit(credit_receipt,{
+      source_sha:this.#sourceSha,
+      skill_digest:skill,
+      admission_provenance:admissionProvenance,
+      current_library_digest:this.#library.library_digest,
+      current_governance_digest:governance.governance_digest,
+    });
+    const evidenceRef=`post_append_credit:${credit.credit_digest}`;
+    if(this.#evidence.some(row=>row.evidence_refs.includes(evidenceRef))){
+      return zero({state:'IDEMPOTENT',applied:false,credit_digest:credit.credit_digest,credit_sign:credit.credit_sign});
+    }
+    if(credit.credit_sign==='INSUFFICIENT'){
+      return zero({state:'HELD_INSUFFICIENT_POST_APPEND_CREDIT',applied:false,credit_digest:credit.credit_digest,credit_sign:credit.credit_sign});
+    }
+    const entry=this.#library.entries.find(row=>row.skill_digest===skill);
+    if(!entry)throw new Error('rsi_runtime_skill_post_append_credit_skill_not_in_library');
+    const seq=this.#nextSeq(skill);
+    const positive=credit.credit_sign==='POSITIVE';
+    const row=createRsiSkillLifecycleEvidence({
+      library:this.#library,
+      evidence_id:`runtime.skill.post-append.${skill.slice(-16)}.${seq}`,
+      skill_digest:skill,
+      window_seq:seq,
+      generation_start:credit.generation,
+      generation_end:credit.generation,
+      invocation_count:1,
+      helpful_count:positive?1:0,
+      harmful_count:positive?0:1,
+      neutral_count:0,
+      insufficient_evidence_count:0,
+      router_engagement_count:1,
+      false_positive_injection_count:0,
+      hard_invariant_violation_count:credit.hard_invariant_failure_count>0?1:0,
+      measured_net_delta:credit.measured_net_delta,
+      authoring_prior:prior(authoring_prior),
+      authoring_provenance_digest:credit.credit_digest,
+      evidence_refs:[
+        evidenceRef,
+        `admission_provenance:${credit.admission_provenance_digest}`,
+        `consumer_context:${credit.target_consumer_context_digest}`,
+        `evaluation_contract:${credit.evaluation_contract_digest}`,
+        `retention:${credit.retention_evidence_digest}`,
+      ],
+      external_evaluator:true,
+      authored_by_candidate:false,
+    });
+    if(this.#evidence.length+1>MAX_EVIDENCE)throw new Error('rsi_runtime_skill_evidence_capacity_exceeded');
+    this.#evidence.push(row);
+    try{
+      await this.#persist();
+    }catch(error){
+      this.#evidence.pop();
+      this.#seq.set(skill,seq-1);
+      throw error;
+    }
+    const after=this.governance();
+    const current=after.entries.find(candidate=>candidate.skill_digest===skill);
+    if(positive&&(!current||current.admission_exposure_hold!==true||current.state!=='DORMANT_CAP'||current.active_for_composition!==false)){
+      throw new Error('rsi_runtime_skill_post_append_credit_hold_dormancy_violation');
+    }
+    return zero({
+      state:'APPLIED',applied:true,credit_digest:credit.credit_digest,credit_sign:credit.credit_sign,
+      evidence_digest:row.evidence_digest,current_governance_digest:after.governance_digest,
+      admission_exposure_held:this.#admissionExposureHolds.has(skill),retrieval_exposure_changed:false,skill_activation_performed:false,
+    });
+  }
   verifiedLibrarySnapshot(){
     this.#assertInit();
     return this.#library ? structuredClone(this.#library) : null;
@@ -764,6 +840,11 @@ export class RsiRuntimeSkillLifecycle{
       admission_exposure_hold_release_requires_external_governance:true,
       exposure_release_governance_preview_is_zero_effect:true,
       exposure_release_preview_requires_exploration_active_next_state:true,
+    fresh_post_append_consumer_credit_required_before_positive_exposure_preview:true,
+    storage_admission_is_not_lifecycle_credit:true,
+    exposure_review_is_not_lifecycle_credit:true,
+    post_append_credit_preserves_exposure_hold:true,
+    insufficient_post_append_credit_cannot_open_exploration:true,
       governance_digest:governance?.governance_digest||null,
       active_count:governance?.active_count||0,quarantined_count:governance?.quarantined_count||0,
       retired_count:governance?.retired_count||0,dormant_count:governance?.dormant_count||0,
