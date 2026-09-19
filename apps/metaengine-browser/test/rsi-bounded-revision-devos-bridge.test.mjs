@@ -3395,7 +3395,7 @@ function phase34Fixture(label='phase34',{p33_override=null,current_governance_ov
     predecessor_source_qualification:sourceQualification,
     admission_epoch_digest:labelDigest(label+'-admission-epoch'),
     library_owner_identity_digest:labelDigest(label+'-library-owner-id'),
-    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-phase34-statistical-acceptor-id'),
     source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
     least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
     governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
