@@ -52,6 +52,7 @@ test('unified RSI runtime binds the full converged trust-root set with zero auth
       'held_skill_credit_admission',
       'durable_state_persistence',
       'exploration_graduation_certificate',
+      'durable_recursive_risk',
     ]) {
       assert.ok(snapshot.trust_roots[key], `missing converged RSI runtime trust root: ${key}`);
       assert.equal(snapshot.trust_roots[key].authority_effect, false);
