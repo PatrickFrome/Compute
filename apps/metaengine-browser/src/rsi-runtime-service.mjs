@@ -44,6 +44,7 @@ import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapsho
 import { RsiCommandAttributionRegistry, RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA, rsiCommandAttributionTrustRootSnapshot } from './rsi-command-attribution-registry.mjs';
 import { createRsiStepCreditReceipt, rsiStepCreditTrustRootSnapshot } from './rsi-runtime-credit-assignment.mjs';
 import { createRsiHeldSkillCreditAdmission, rsiHeldSkillCreditAdmissionTrustRootSnapshot } from './rsi-held-skill-credit-admission.mjs';
+import { createRsiSkillLineageContaminationReview, rsiSkillLineageContaminationReviewTrustRootSnapshot } from './rsi-skill-lineage-contamination-review.mjs';
 import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiRuntimeExperienceStoreTrustRootSnapshot } from './rsi-runtime-experience-store.mjs';
 import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } from './rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
@@ -134,6 +135,7 @@ function trustRoots() {
     command_attribution: rsiCommandAttributionTrustRootSnapshot(),
     step_credit: rsiStepCreditTrustRootSnapshot(),
     held_skill_credit_admission: rsiHeldSkillCreditAdmissionTrustRootSnapshot(),
+    skill_lineage_contamination_review: rsiSkillLineageContaminationReviewTrustRootSnapshot(),
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
@@ -1331,10 +1333,62 @@ export class RsiRuntimeService {
     return certificate;
   }
 
+  async createSkillLineageContaminationReview({
+    review_id,
+    skill_digest,
+    target_consumer_snapshot_digest,
+    effect_executor_identity_digest,
+    findings,
+    external_review_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_lineage_contamination_state_unavailable');
+    const review = createRsiSkillLineageContaminationReview({
+      review_id,
+      source_sha: this.#sourceSha,
+      library,
+      target_skill_digest: skill_digest,
+      current_governance_digest: governance.governance_digest,
+      target_consumer_snapshot_digest,
+      effect_executor_identity_digest,
+      findings,
+      external_review_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_LINEAGE_CONTAMINATION_REVIEW_CREATED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      library_digest: review.library_digest,
+      target_skill_digest: review.target_skill_digest,
+      current_governance_digest: review.current_governance_digest,
+      target_consumer_snapshot_digest: review.target_consumer_snapshot_digest,
+      closure_skill_digests: review.closure_skill_digests,
+      ancestor_skill_digests: review.ancestor_skill_digests,
+      descendant_skill_digests: review.descendant_skill_digests,
+      state: review.state,
+      blockers: review.blockers,
+      eligible_for_exposure_precommit: review.eligible_for_exposure_precommit,
+      review_is_effect_authority: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return review;
+  }
+
   async prepareSkillExposureReleaseAttempt({
     attempt_id,
     certificate,
     certificate_args = {},
+    lineage_contamination_review,
     effect_id_digest,
     idempotency_key_digest,
     effect_executor_identity_digest,
@@ -1346,6 +1400,7 @@ export class RsiRuntimeService {
       attempt_id,
       release_certificate: certificate,
       release_certificate_args: certificate_args,
+      lineage_contamination_review,
       effect_id_digest,
       idempotency_key_digest,
       effect_executor_identity_digest,
@@ -1360,6 +1415,7 @@ export class RsiRuntimeService {
       predecessor_library_digest: result.predecessor_library_digest,
       predecessor_governance_digest: result.predecessor_governance_digest,
       expected_next_governance_digest: result.expected_next_governance_digest,
+      lineage_contamination_review_digest: result.lineage_contamination_review_digest,
       effect_attempt_count: 0,
       effect_started: false,
       effect_performed: false,
