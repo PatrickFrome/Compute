@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   createRsiExperienceCase,
+  createRsiExperienceUtilityReceipt,
   createRsiExperienceGraphSnapshot,
 } from '../src/rsi-experience-graph.mjs';
 import {
@@ -60,6 +61,63 @@ function frontier(overrides={}) {
   };
 }
 
+function harmfulGraph() {
+  const taskAnchor={
+    task_id:'task.history.harmful',
+    task_signature_digest:'4'.repeat(64),
+    challenge_family:'BROWSER_RUNTIME',
+    hidden_manifest_digest:d('6'),
+    external_writer:true,
+    authored_by_candidate:false,
+  };
+  const cases=[];
+  const utility=[];
+  for(let i=1;i<=8;i+=1){
+    const ch=String(i);
+    cases.push(createRsiExperienceCase({
+      case_id:`rsi_case_harmful_${i}`,
+      task_id:'task.history.harmful',
+      task_signature_digest:'4'.repeat(64),
+      attempt_index:i,
+      candidate_id:cid(ch),
+      candidate_sha:ch.repeat(40),
+      outcome:'SUCCESS',
+      environment_fingerprint:'metaengine.browser.runtime',
+      model_family:'METAENGINE_RSI',
+      execution_signature_digest:d(ch),
+      failure_codes:[],
+      mechanism_tags:['AMBIGUOUS_COMMAND_OUTCOMES','BROWSER_RUNTIME'],
+      lesson_digests:[],
+      attribution_digests:[],
+      transfer_receipt_digests:[],
+      evidence_digest:d(ch),
+      evidence_refs:[`evidence:harmful:${i}`],
+      external_writer:true,
+      authored_by_candidate:false,
+    }));
+    utility.push(createRsiExperienceUtilityReceipt({
+      receipt_id:`utility.harmful.context.${i}`,
+      case_id:`rsi_case_harmful_${i}`,
+      target_context_digest:d('e'),
+      outcome:'HARMFUL',
+      evidence_digest:d(ch),
+      evidence_refs:[`external:harmful:${i}`],
+      external_evaluator:true,
+      authored_by_candidate:false,
+    }));
+  }
+  return createRsiExperienceGraphSnapshot({
+    graph_id:'rsi.runtime.experience.harmful',
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:[taskAnchor],
+    cases,
+    similarity_edges:[],
+    correction_edges:[],
+    utility_receipts:utility,
+  });
+}
+
 function graph() {
   const taskAnchor={
     task_id:'task.history.1',
@@ -110,6 +168,10 @@ test('planner explicitly records absence of verified experience without inventin
   assert.equal(plan.selected_case_count,0);
   assert.equal(plan.graph_snapshot_digest,null);
   assert.equal(plan.retrieval_digest,null);
+  assert.equal(plan.bounded_memory_utility_state,null);
+  assert.equal(plan.bounded_memory_utility_state_digest,null);
+  assert.equal(plan.bounded_memory_utility_mode,'NO_GRAPH');
+  assert.equal(plan.utility_bounded_case_cap,0);
   assert.equal(plan.no_verified_experience_is_explicit,true);
   assert.equal(plan.retrieval_is_advisory_only,true);
   assert.match(plan.search_context_digest,/^[0-9a-f]{64}$/);
@@ -125,6 +187,10 @@ test('planner retrieves only verified graph summaries and never exposes raw traj
   verifyRsiExperienceContextPlan(plan);
   assert.equal(plan.mode,'VERIFIED_EXPERIENCE_RETRIEVAL');
   assert.equal(plan.selected_case_count,1);
+  assert.equal(plan.bounded_memory_utility_mode,'EVIDENCE_SPARSE');
+  assert.equal(plan.utility_bounded_case_cap,6);
+  assert.equal(plan.bounded_memory_utility_state.fixed_dimensional_state,true);
+  assert.equal(plan.bounded_memory_utility_state.trajectory_joint_reward_assignment,false);
   assert.equal(plan.selected_cases[0].case_id,'rsi_case_historical_success');
   assert.ok(plan.selected_cases[0].mechanism_tags.includes('AMBIGUOUS_COMMAND_OUTCOMES'));
   assert.equal(plan.selected_cases[0].source_context_truth_is_portable,false);
@@ -159,8 +225,43 @@ test('experience context trust root is retrieval-only and cannot become schedule
   assert.equal(root.source_context_truth_is_portable,false);
   assert.equal(root.retrieval_is_advisory_only,true);
   assert.equal(root.candidate_can_write_graph,false);
+  assert.equal(root.utility_state_controls_case_cap,true);
+  assert.equal(root.harmful_dominant_case_cap,4);
+  assert.equal(root.evidence_sparse_case_cap,6);
+  assert.equal(root.bounded_memory_utility_root.fixed_dimensional_state,true);
+  assert.equal(root.bounded_memory_utility_root.trajectory_joint_reward_assignment,false);
   assert.equal(root.second_scheduler,false);
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);
   assert.equal(root.self_update_authority,false);
+});
+
+
+test('harmful-dominant bounded utility state contracts context breadth before candidate synthesis',()=>{
+  const plan=createRsiExperienceContextPlan({
+    frontier_entry:frontier(),
+    experience_graph_snapshot:harmfulGraph(),
+  });
+  verifyRsiExperienceContextPlan(plan);
+  assert.equal(plan.mode,'VERIFIED_EXPERIENCE_RETRIEVAL');
+  assert.equal(plan.bounded_memory_utility_mode,'HARMFUL_DOMINANT');
+  assert.equal(plan.utility_bounded_case_cap,4);
+  assert.equal(plan.selected_case_count,4);
+  assert.equal(plan.bounded_memory_utility_state.candidate_can_set_case_cap,false);
+  assert.equal(plan.bounded_memory_utility_state.co_retrieved_memory_credit_update,false);
+  assert.equal(plan.retrieval_is_advisory_only,true);
+  assert.equal(plan.execution_authority,false);
+});
+
+test('tampering with bounded utility state or its cap invalidates the context plan',()=>{
+  const plan=createRsiExperienceContextPlan({
+    frontier_entry:frontier(),
+    experience_graph_snapshot:graph(),
+  });
+  const badState=structuredClone(plan);
+  badState.bounded_memory_utility_state.recommended_case_cap=12;
+  assert.throws(()=>verifyRsiExperienceContextPlan(badState),/case_cap_invalid|digest_mismatch|state_mismatch/);
+
+  const badCap={...plan,utility_bounded_case_cap:12};
+  assert.throws(()=>verifyRsiExperienceContextPlan(badCap),/state_mismatch|digest_mismatch/);
 });
