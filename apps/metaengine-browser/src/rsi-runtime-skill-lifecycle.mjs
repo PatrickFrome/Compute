@@ -38,7 +38,7 @@ function assertEpisode(e){
   exactDigest(e.episode_digest,'episode');
   return e;
 }
-function zero(extra={}){return Object.freeze({...extra,execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,automatic_retry_allowed:false,authority_effect:false})}
+function zero(extra={}){return Object.freeze({...extra,execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false})}
 
 function admissionPrincipalDigests(certificate){
   return [
@@ -79,9 +79,12 @@ function transitionCore({seq,state,capturedAt,previousDigest=null,observationDig
     previous_transition_digest:previousDigest,
     observation_digest:observationDigest,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
+    scheduler_authority:false,
     automatic_retry_allowed:false,
     authority_effect:false,
   };
@@ -103,9 +106,9 @@ function validateAdmissionTransitions(transitions){
   let reconciliationCount=0;
   for(let index=0;index<transitions.length;index+=1){
     const row=transitions[index];
-    if(row.seq!==index+1||row.execution_authority!==false||row.production_mutation_authority!==false
-      ||row.promotion_authority!==false||row.self_update_authority!==false||row.automatic_retry_allowed!==false
-      ||row.authority_effect!==false)throw new Error('rsi_runtime_skill_admission_transition_policy_invalid');
+    if(row.seq!==index+1||row.execution_authority!==false||row.browser_authority!==false||row.task_authority!==false
+      ||row.production_mutation_authority!==false||row.promotion_authority!==false||row.self_update_authority!==false
+      ||row.scheduler_authority!==false||row.automatic_retry_allowed!==false||row.authority_effect!==false)throw new Error('rsi_runtime_skill_admission_transition_policy_invalid');
     if(row.previous_transition_digest!==(previous?.transition_digest||null))throw new Error('rsi_runtime_skill_admission_transition_chain_invalid');
     const core=transitionCore({
       seq:row.seq,state:row.state,capturedAt:row.captured_at,
@@ -130,8 +133,8 @@ function validateAdmissionAttemptRow(row){
   if(!row||row.schema!=='metaengine.rsi.runtime-skill-library-admission-attempt.v1'||row.version!==1){
     throw new Error('rsi_runtime_skill_admission_attempt_invalid');
   }
-  if(row.execution_authority!==false||row.production_mutation_authority!==false||row.promotion_authority!==false
-    ||row.self_update_authority!==false||row.automatic_retry_allowed!==false||row.authority_effect!==false
+  if(row.execution_authority!==false||row.browser_authority!==false||row.task_authority!==false||row.production_mutation_authority!==false||row.promotion_authority!==false
+    ||row.self_update_authority!==false||row.scheduler_authority!==false||row.automatic_retry_allowed!==false||row.authority_effect!==false
     ||row.effect_attempt_limit!==1||row.blind_retry_forbidden!==true||row.ambiguous_outcome_requires_readback_only_reconciliation!==true
     ||row.storage_append_does_not_activate_skill!==true||row.storage_append_does_not_reconcile_pending_evidence!==true){
     throw new Error('rsi_runtime_skill_admission_attempt_policy_invalid');
@@ -177,8 +180,8 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     credit_required_for_lifecycle_update:true,contextual_credit_not_global_truth:true,
     raw_model_transcript_stored:false,raw_page_text_stored:false,raw_user_input_stored:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
-    automatic_retry_allowed:false,authority_effect:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return {...core,state_digest:digest(core)};
 }
@@ -195,7 +198,11 @@ export class RsiRuntimeSkillLifecycle{
     await fs.mkdir(path.dirname(this.#path),{recursive:true});
     try{
       const parsed=JSON.parse(await fs.readFile(this.#path,'utf8'));
-      if(parsed.schema!==RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA||parsed.version!==1||parsed.source_sha!==this.#sourceSha||parsed.authority_effect!==false||parsed.candidate_can_write_lifecycle!==false)throw new Error('rsi_runtime_skill_state_invalid');
+      if(parsed.schema!==RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA||parsed.version!==1||parsed.source_sha!==this.#sourceSha
+        ||parsed.execution_authority!==false||parsed.browser_authority!==false||parsed.task_authority!==false
+        ||parsed.production_mutation_authority!==false||parsed.promotion_authority!==false||parsed.self_update_authority!==false
+        ||parsed.scheduler_authority!==false||parsed.automatic_retry_allowed!==false||parsed.authority_effect!==false
+        ||parsed.candidate_can_write_lifecycle!==false)throw new Error('rsi_runtime_skill_state_invalid');
       const clone=structuredClone(parsed);delete clone.state_digest;
       if(digest(clone)!==exactDigest(parsed.state_digest,'state'))throw new Error('rsi_runtime_skill_state_digest_mismatch');
       if(parsed.library){
@@ -353,9 +360,12 @@ export class RsiRuntimeSkillLifecycle{
       storage_append_does_not_activate_skill:true,
       storage_append_does_not_reconcile_pending_evidence:true,
       execution_authority:false,
+      browser_authority:false,
+      task_authority:false,
       production_mutation_authority:false,
       promotion_authority:false,
       self_update_authority:false,
+      scheduler_authority:false,
       automatic_retry_allowed:false,
       authority_effect:false,
     };
@@ -580,8 +590,8 @@ export class RsiRuntimeSkillLifecycle{
       admission_attempts_append_only:true,admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
       ambiguous_admission_effect_requires_readback_only_reconciliation:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
-      execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
-      automatic_retry_allowed:false,authority_effect:false,
+      execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+      scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
     });
   }
 }
@@ -600,8 +610,8 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     skill_activation_view_is_execution_authority:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
-    automatic_retry_allowed:false,authority_effect:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...root,skill_lifecycle_root_digest:digest(root)});
 }
