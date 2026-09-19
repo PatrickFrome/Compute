@@ -4237,6 +4237,11 @@ test('Phase36 ATTEMPTED no-effect restart reconciles readback-only and requires 
   const restored=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
   await restored.init();
   assert.equal(restored.exposureReleaseAttemptSnapshot('phase36.release.attempt.no-effect').current_state,'ATTEMPTED');
+  await assert.rejects(()=>restored.executePreparedExposureReleaseAttempt({
+    attempt_id:'phase36.release.attempt.no-effect',
+    effect_executor_identity_digest:fx.releaseExecutor,
+    external_effect_executor:true,authored_by_candidate:false,
+  }),/attempt_ambiguous_reconcile_required/);
   const reconciled=await restored.reconcileExposureReleaseAttempt({
     attempt_id:'phase36.release.attempt.no-effect',
     readback_owner_identity_digest:fx.releaseReadbackOwner,
