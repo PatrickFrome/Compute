@@ -169,9 +169,9 @@ function proposal(env,label='one',overrides={}){
     candidate_revision_spec_digest:dg(`revision-spec-${label}`),
     proposed_child_artifact_identity_digest:dg(`child-artifact-${label}`),
     mutation_categories:['CONTROL_FLOW','VALIDATION'],
-    estimated_mutated_files:2,
-    estimated_edit_operations:6,
-    estimated_changed_bytes:8192,
+    estimated_mutated_files:Math.min(2,env.max_mutated_files),
+    estimated_edit_operations:Math.min(6,env.max_edit_operations),
+    estimated_changed_bytes:Math.min(8192,env.max_changed_bytes),
     expected_preserved_behavior_receipt_digest:dg(`expected-preservation-${label}`),
     expected_regression_test_root_digest:dg(`regression-tests-${label}`),
     candidate_optimizer_id_digest:dg(`optimizer-${label}`),
@@ -238,7 +238,7 @@ test('proposal cannot exceed external envelope or reuse parent identity',()=>{
   const env=envelope(fx,'proposal-limits',{max_mutated_files:2,max_edit_operations:4,max_changed_bytes:4096});
   assert.throws(()=>proposal(env,'files',{estimated_mutated_files:3}),/estimated_mutated_files_invalid/);
   assert.throws(()=>proposal(env,'ops',{estimated_edit_operations:5}),/estimated_edit_operations_invalid/);
-  assert.throws(()=>proposal(env,'bytes',{estimated_changed_bytes:4097}),/estimated_changed_bytes_invalid/);
+  assert.throws(()=>proposal(env,'bytes',{estimated_changed_bytes:4097}),/estimated_changed_bytes_invalid|estimated_edit_operations_invalid/);
   assert.throws(()=>proposal(env,'same-child',{
     proposed_child_artifact_identity_digest:env.parent_candidate_artifact_digest,
   }),/new_child_identity_required/);

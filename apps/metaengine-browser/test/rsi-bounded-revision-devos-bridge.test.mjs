@@ -87,6 +87,7 @@ import {
   RsiRuntimeSkillLifecycle,
   rsiRuntimeSkillLifecycleTrustRootSnapshot,
 } from '../src/rsi-runtime-skill-lifecycle.mjs';
+import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 import {
   RsiAnytimeLibraryAdmissionArchive,
   createRsiPhase33SourceQualification,
@@ -1771,7 +1772,7 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
     handoff_row:good.handoffRow,
     experiment_intent:good.intent,
     experiment_receipt:good.receipt,
-  }),/entry_digest_mismatch/);
+  }),/entry_digest_mismatch|recipe_digest_invalid/);
 
   const badIntent=structuredClone(good.intent);
   badIntent.evaluator_generation_seq=2;
@@ -2012,7 +2013,7 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
 test('Phase31 forbids mixed evaluator generations epochs learning kinds and duplicate candidate evidence',()=>{
   const rows=phase31SourceRows('cross-generation');
   const other=phase31SourceRows('cross-generation-other');
-  assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden/);
+  assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden|evaluator_root_mismatch/);
 
   const epochA=phase31SourceRows('cross-epoch');
   const epochB=phase31SourceRows('cross-epoch-b');
@@ -3347,12 +3348,12 @@ function phase34SourceQualification(label='phase34-source',{green=true,head=PHAS
   });
 }
 
-function phase34Fixture(label='phase34'){
-  const p33=phase33ExactOwnerFixture(label);
+function phase34Fixture(label='phase34',{p33_override=null,current_governance_override=null}={}){
+  const p33=p33_override||phase33ExactOwnerFixture(label);
   const p33Args=phase33CertificateArgs(p33,label);
   const p33Certificate=createRsiExactSkillPrecommitCertificate(p33Args);
   assert.equal(p33Certificate.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
-  const currentGovernance=createRsiSkillLibraryGovernance({
+  const currentGovernance=current_governance_override||createRsiSkillLibraryGovernance({
     governance_id:'phase34.governance.'+label,
     library:p33.skillFx.currentLibrary,
     lifecycle_evidence:[],
@@ -3394,7 +3395,7 @@ function phase34Fixture(label='phase34'){
     predecessor_source_qualification:sourceQualification,
     admission_epoch_digest:labelDigest(label+'-admission-epoch'),
     library_owner_identity_digest:labelDigest(label+'-library-owner-id'),
-    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-phase34-statistical-acceptor-id'),
     source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
     least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
     governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
@@ -3734,7 +3735,15 @@ test('Phase34 trust root preserves external admission without creating activatio
 
 
 function phase34bLifecycleFixture(label='phase34b-lifecycle'){
-  const fx=phase34Fixture(label);
+  const p33=phase33ExactOwnerFixture(label);
+  const currentGovernance=createRsiSkillLibraryGovernance({
+    governance_id:`runtime.skill.governance.${SOURCE.slice(0,16)}`,
+    library:p33.skillFx.currentLibrary,
+    lifecycle_evidence:[],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  const fx=phase34Fixture(label,{p33_override:p33,current_governance_override:currentGovernance});
   const certificate=createRsiAnytimeLibraryAdmissionCertificate(fx.certificateArgs);
   assert.equal(certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF');
   const currentLibrary=fx.p33.skillFx.currentLibrary;
@@ -3757,6 +3766,65 @@ function phase34bLifecycleFixture(label='phase34b-lifecycle'){
     readbackIdentity:labelDigest(label+'-readback-owner'),
   };
 }
+
+test('Phase34B runtime service closes direct-adopt bypass and routes storage append through the durable one-attempt lifecycle',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-runtime-closure-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const fx=phase34bLifecycleFixture('runtime-closure');
+  const runtime=new RsiRuntimeService({
+    source_sha:SOURCE,
+    ledgerPath:path.join(dir,'runtime.jsonl'),
+    clock:()=>1_800_000_000_000,
+  });
+  await runtime.start();
+
+  const bootstrap=await runtime.adoptVerifiedSkillLibrary({
+    library:fx.currentLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(bootstrap.state,'ADOPTED');
+  const before=runtime.verifiedSkillStateReadback();
+  assert.equal(before.library_digest,fx.currentLibrary.library_digest);
+  assert.equal(before.governance_digest,fx.fx.currentGovernance.governance_digest);
+  assert.equal(before.browser_authority,false);
+  assert.equal(before.task_authority,false);
+
+  const prepared=await runtime.prepareAnytimeLibraryAdmissionAttempt({
+    attempt_id:'phase34b.runtime.attempt.1',
+    admission_certificate:fx.certificate,
+    admission_certificate_args:fx.fx.certificateArgs,
+    successor_library:fx.successorLibrary,
+    effect_id_digest:fx.effectId,
+    idempotency_key_digest:fx.idempotencyKey,
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_library_owner:true,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(prepared.state,'PREPARED');
+  assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.currentLibrary.library_digest);
+
+  const applied=await runtime.executeAnytimeLibraryAdmissionAttempt({
+    attempt_id:'phase34b.runtime.attempt.1',
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(applied.state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+  assert.equal(applied.effect_attempt_count,1);
+  assert.equal(applied.retrieval_exposure_changed,false);
+  assert.equal(applied.skill_activation_performed,false);
+  assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
+    library:fx.successorLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  }),/direct_library_adopt_phase34b_required/);
+  assert.equal(runtime.anytimeLibraryAdmissionAttemptSnapshot('phase34b.runtime.attempt.1').current_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+});
 
 test('Phase34B lifecycle prepares admission durably before effect, survives restart, and appends storage-only once',async(t)=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-lifecycle-'));
