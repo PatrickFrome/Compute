@@ -879,10 +879,15 @@ export async function executeSemanticCommand(webContents, command) {
                   await clickBackendNode(dbg, target.backend_node_id, null, { clickCount: 3 });
                 }
               } else {
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+                // D-U1 fix (2026-09-19): the Ctrl+A dispatch carried no
+                // windowsVirtualKeyCode — Chromium synthesizes keyCode 0 for
+                // it, and editors keying on keyCode treat the select-all as a
+                // non-event. Enter/Delete already carry theirs; Ctrl+A now
+                // does too so every editing key in the gesture is consistent.
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2, windowsVirtualKeyCode:65, nativeVirtualKeyCode:65 });
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2, windowsVirtualKeyCode:65, nativeVirtualKeyCode:65 });
                 await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete' });
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete', windowsVirtualKeyCode:46 });
               }
               await dbg.sendCommand('Input.insertText', { text });
               valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
@@ -903,8 +908,8 @@ export async function executeSemanticCommand(webContents, command) {
         } else {
           liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
-          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2, windowsVirtualKeyCode:65, nativeVirtualKeyCode:65 });
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2, windowsVirtualKeyCode:65, nativeVirtualKeyCode:65 });
           liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);
           await dbg.sendCommand('Input.insertText', { text });

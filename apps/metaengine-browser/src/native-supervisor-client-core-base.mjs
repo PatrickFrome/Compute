@@ -371,7 +371,10 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       });
     };
 
-    devosRef = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest });
+    // D-C1: the enrolled device identity flows into the devos task cycle so
+    // every dispatched prompt carries a per-agent signed context token
+    // (GLM agents have no shared context — each one is trained individually).
+    devosRef = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest, identity });
     this.#devosTaskCycle = devosRef;
   }
 

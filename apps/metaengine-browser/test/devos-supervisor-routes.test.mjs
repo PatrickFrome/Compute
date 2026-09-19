@@ -90,3 +90,59 @@ test('status readback proves terminal completion from durable event without a se
   const out=await bodyOf(await route({req:{method:'GET'},path:`/v1/devos/tasks/${taskId}/status`,body:{},clientId:'device'}));
   assert.equal(snapshotReads,1);assert.equal(out.state,'COMPLETED');assert.equal(out.result_sha256,'c'.repeat(64));assert.equal(out.automatic_retry_allowed,false);
 });
+// D-C2 (2026-09-19 operator directive: commands must work multiply and
+// simultaneously): a multi-task backlog pays one lease per idle agent — the
+// cycle returns the whole batch and the scan stops only when the backlog or
+// the candidate bound is exhausted.
+test('D-C2: multi-task backlog leases a batch — one per idle agent, backlog-paid',async()=>{
+  const impl1=fleetAgent('agent_impl-batch1','IMPLEMENTER',31);
+  const impl2=fleetAgent('agent_impl-batch2','IMPLEMENTER',32);
+  const critic=fleetAgent('agent_critic-batch1','CRITIC',33);
+  const leasedAgents=[];
+  const rpc=async(name,args)=>{
+    if(name==='devos_fleet_reconcile_v1')return{expired_tasks_fenced_ambiguous:0,automatic_retry_allowed:false};
+    if(name==='devos_fleet_snapshot_v1')return{
+      active_tasks:[
+        {task_id:taskId,state:'READY',role:'IMPLEMENTER',priority:100,created_at:'2026-08-30T14:00:00Z'},
+        {task_id:'31ae8653-a5b3-425e-9953-07e55d515292',state:'READY',role:'IMPLEMENTER',priority:90,created_at:'2026-08-30T14:05:00Z'},
+        {task_id:'47b6f1c0-8e2d-4a11-9c3f-62d1e7a5b904',state:'READY',role:'CRITIC',priority:80,created_at:'2026-08-30T14:10:00Z'},
+      ],active_claims:[],recent_events:[],
+    };
+    if(name==='devos_fleet_lease_v1'){
+      leasedAgents.push(args.p_agent);
+      return{leased:true,task_id:`task-${args.p_agent}`,agent_id:args.p_agent,role:args.p_role,tab_id:args.p_tab,target_id:args.p_target,agent_generation_epoch:args.p_epoch,lease_generation:1,base_sha:'724612235eb7ceb4534c13d126425b274d876394',automatic_retry_allowed:false,task_spec:{objective:'x'}};
+    }
+    throw new Error(`unexpected_rpc:${name}`);
+  };
+  const route=createDevosSupervisorRoutes({rpc,workspaceId});
+  const out=await bodyOf(await route({req:{method:'POST'},path:'/v1/devos/cycle',body:{fleet:{agents:[impl1,impl2,critic]}},clientId:'device'}));
+  assert.equal(out.leases.length,3,'every idle agent leases exactly one task');
+  assert.deepEqual(leasedAgents,[impl1.agent_id,critic.agent_id,impl2.agent_id],'fair interleave: IMPLEMENTER, CRITIC, IMPLEMENTER');
+  assert.equal(out.lease.agent_id,impl1.agent_id,'legacy single-lease field keeps the first entry');
+  assert.equal(out.lease_attempts,3);
+});
+
+// A role whose lease was atomically refused is exhausted for this heartbeat:
+// no further same-role candidate spends an RPC on it.
+test('D-C2: a refused role is not retried within the same heartbeat scan',async()=>{
+  const impl1=fleetAgent('agent_impl-refu1','IMPLEMENTER',41);
+  const impl2=fleetAgent('agent_impl-refu2','IMPLEMENTER',42);
+  const attemptAgents=[];
+  const rpc=async(name,args)=>{
+    if(name==='devos_fleet_reconcile_v1')return{expired_tasks_fenced_ambiguous:0,automatic_retry_allowed:false};
+    if(name==='devos_fleet_snapshot_v1')return{
+      active_tasks:[{task_id:taskId,state:'READY',role:'IMPLEMENTER',priority:100,created_at:'2026-08-30T14:00:00Z'}],
+      active_claims:[],recent_events:[],
+    };
+    if(name==='devos_fleet_lease_v1'){
+      attemptAgents.push(args.p_agent);
+      return{leased:false,agent_id:args.p_agent,role:args.p_role,authority_effect:false};
+    }
+    throw new Error(`unexpected_rpc:${name}`);
+  };
+  const route=createDevosSupervisorRoutes({rpc,workspaceId});
+  const out=await bodyOf(await route({req:{method:'POST'},path:'/v1/devos/cycle',body:{fleet:{agents:[impl1,impl2]}},clientId:'device'}));
+  assert.deepEqual(attemptAgents,[impl1.agent_id],'the second same-role candidate is skipped after the atomic refusal');
+  assert.equal(out.lease,null);
+  assert.equal(out.lease_attempts,1);
+});

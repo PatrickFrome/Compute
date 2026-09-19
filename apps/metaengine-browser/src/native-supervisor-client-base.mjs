@@ -1135,6 +1135,17 @@ export class NativeSupervisorClient {
     if (['ARM','SET_SUPERVISOR_MODE','SET_MODE'].includes(action)) return 'CONFIRMED';
     if (action === 'NEW_TAB' && result?.tab_id) return 'CONFIRMED';
     if (['FLEET_SET_PROFILE','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action) && result) return 'CONFIRMED';
+    // D-U1 (2026-09-19, live recon): TYPED_CLICK and PRESS_KEY receipts carry
+    // the effect-runtime-bound target they dispatched to (bounded click point
+    // / whitelisted key on an exact semantic target). That dispatch proof is
+    // the strongest available evidence for these operator-recon lanes —
+    // without a classifier they ALWAYS landed in the AMBIGUOUS quarantine
+    // (observed live: postcondition_not_confirmed:AMBIGUOUS on every recon
+    // click/keypress even when the effect ran), which made operator-driven UI
+    // exploration needlessly opaque. Confirmed = the bounded input reached the
+    // bound target; NO_EFFECT_PROVEN stays reserved for explicit no-ops.
+    if ((action === 'TYPED_CLICK' || action === 'PRESS_KEY')
+      && result?.target && (result?.point || result?.key)) return 'CONFIRMED';
 
     if (action === 'FLEET_RECONCILE') {
       const before = fleetSnapshotFrom(beforeState);
