@@ -58,6 +58,7 @@ import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntime
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
+import { createRsiSkillExposureReleaseReview, rsiSkillExposureReleaseReviewTrustRootSnapshot } from './rsi-skill-exposure-release-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -114,6 +115,7 @@ function trustRoots() {
     regression_replay: rsiRegressionReplayTrustRootSnapshot(),
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
+    skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
     memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
@@ -1182,6 +1184,48 @@ export class RsiRuntimeService {
   createSkillActivationView(requested_skill_digests) {
     this.#assertRunning();
     return this.#skillLifecycle.activationView(requested_skill_digests);
+  }
+
+  async createSkillExposureReleaseReview(args = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_skill_library_unavailable');
+    const review = createRsiSkillExposureReleaseReview({
+      ...args,
+      source_sha: this.#sourceSha,
+      library,
+      current_governance: governance,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_REVIEW_CREATED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      state: review.state,
+      skill_digest: review.skill_digest,
+      library_digest: review.library_digest,
+      current_governance_digest: review.current_governance_digest,
+      consumer_model_family: review.consumer_model_family,
+      environment_fingerprint: review.environment_fingerprint,
+      task_signature_digest: review.task_signature_digest,
+      matched_pair_count: review.matched_pair_count,
+      repair_count: review.repair_count,
+      regression_count: review.regression_count,
+      negative_transfer_count: review.negative_transfer_count,
+      blockers: review.blockers,
+      hold_release_effect_authorized: false,
+      hold_release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return review;
   }
 
   async recordBrowserStepCredit({
