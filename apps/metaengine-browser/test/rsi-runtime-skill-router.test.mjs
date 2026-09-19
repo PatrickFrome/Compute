@@ -11,7 +11,10 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillLifecycleEvidence,
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiSkillRelationEdge,
   createRsiSkillRelationGraph,
@@ -44,6 +47,31 @@ function verifiedSkill({id,source,impl,role='ANALYZER',capabilities=['READ_VERIF
   return {capsule,evidence};
 }
 
+function lifecycleWindow(library,skill,{id,seq,invocations,helpful,harmful,neutral,insufficient=0,engagements,delta}){
+  return createRsiSkillLifecycleEvidence({
+    library,
+    evidence_id:id,
+    skill_digest:skill.capsule.skill_digest,
+    window_seq:seq,
+    generation_start:seq,
+    generation_end:seq,
+    invocation_count:invocations,
+    helpful_count:helpful,
+    harmful_count:harmful,
+    neutral_count:neutral,
+    insufficient_evidence_count:insufficient,
+    router_engagement_count:engagements,
+    false_positive_injection_count:0,
+    hard_invariant_violation_count:0,
+    measured_net_delta:delta,
+    authoring_prior:'VERIFIED_DIRECT_SKILL',
+    authoring_provenance_digest:d(String(seq)),
+    evidence_refs:[`LIFECYCLE_${id}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+}
+
 function fixture(){
   const good=verifiedSkill({id:'skill.router.good',source:'b',impl:'b'});
   const bad=verifiedSkill({id:'skill.router.bad',source:'c',impl:'c'});
@@ -57,16 +85,21 @@ function fixture(){
     external_library_owner:true,
     authored_by_candidate:false,
   });
+  const lifecycleEvidence=[
+    lifecycleWindow(library,good,{id:'router.good.window',seq:1,invocations:6,helpful:5,harmful:0,neutral:1,engagements:6,delta:0.20}),
+    lifecycleWindow(library,bad,{id:'router.bad.window',seq:2,invocations:6,helpful:5,harmful:0,neutral:1,engagements:6,delta:0.15}),
+    lifecycleWindow(library,explore,{id:'router.explore.window',seq:3,invocations:0,helpful:0,harmful:0,neutral:0,engagements:0,delta:0}),
+  ];
   const governance=createRsiSkillLibraryGovernance({
     governance_id:'runtime.skill.router.governance',
     library,
-    lifecycle_evidence:[],
+    lifecycle_evidence:lifecycleEvidence,
     max_active_skills:3,
     exploration_slots:3,
     external_library_owner:true,
     authored_by_candidate:false,
   });
-  return {good,bad,explore,library,governance};
+  return {good,bad,explore,library,governance,lifecycleEvidence};
 }
 
 function episode({command,skillDigest,sign='POSITIVE',step=1}){
