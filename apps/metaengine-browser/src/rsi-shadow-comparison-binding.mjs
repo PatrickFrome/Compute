@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+import crypto from 'node:crypto';\n\nimport { assertRsiZeroAuthority } from './rsi-zero-authority-contract.mjs';
 
 export const RSI_SHADOW_COMPARISON_BINDING_SCHEMA='metaengine.rsi.shadow-comparison-binding.v1';
 
@@ -14,10 +14,7 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 function exactSha(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA40_RE.test(x))throw new Error(`rsi_shadow_comparison_${l}_sha_invalid`);return x}
 function exactDigest(v,l){const x=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(x))throw new Error(`rsi_shadow_comparison_${l}_digest_invalid`);return x}
 function assertZero(v,l){
-  for(const f of ['execution_authority','production_mutation_authority','promotion_authority','self_update_authority','scheduler_authority','authority_effect']){
-    if(v?.[f]!==false)throw new Error(`rsi_shadow_comparison_${l}_${f}_invalid`);
-  }
-  if(v?.automatic_retry_allowed!==false)throw new Error(`rsi_shadow_comparison_${l}_retry_invalid`);
+  return assertRsiZeroAuthority(v,{error_prefix:`rsi_shadow_comparison_${l}`});
 }
 function verifyDigestObject(row,digestField,label){
   const clone=structuredClone(row);delete clone[digestField];
