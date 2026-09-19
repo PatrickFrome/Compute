@@ -3833,6 +3833,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   });
   assert.equal(applied.state,'CONFIRMED_APPLIED_STORAGE_ONLY');
   assert.equal(applied.effect_attempt_count,1);
+  assert.equal(applied.pre_effect_readback_passed,true);
   assert.equal(applied.retrieval_exposure_changed,false);
   assert.equal(applied.skill_activation_performed,false);
   assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
@@ -3977,6 +3978,21 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(externalEffect.cas_checked,true);
   assert.equal(store.snapshot().active_count,0);
 
+  const fenced=await store.executePreparedLibraryAdmissionAttempt({
+    attempt_id:'phase34b.attempt.reconcile-applied',
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(fenced.state,'PRE_EFFECT_DRIFT_RECONCILIATION_REQUIRED');
+  assert.equal(fenced.pre_effect_readback_passed,false);
+  assert.equal(fenced.effect_started,false);
+  assert.equal(fenced.effect_performed,false);
+  assert.equal(fenced.additional_effect_attempt_performed,false);
+  assert.equal(fenced.same_effect_id_retry_allowed,false);
+  assert.equal(store.admissionAttemptSnapshot('phase34b.attempt.reconcile-applied').current_state,'RECONCILIATION_ONLY');
+  assert.equal(store.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
+
   const reconciled=await store.reconcileLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.reconcile-applied',
     readback_owner_identity_digest:fx.readbackIdentity,
@@ -4030,6 +4046,7 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.exact_library_digest_cas_supported,true);
   assert.equal(root.phase34_anytime_admission_certificate_required,true);
   assert.equal(root.admission_attempts_durable_before_effect,true);
+  assert.equal(root.pre_effect_state_readback_after_attempt_persist_required,true);
   assert.equal(root.admission_effect_attempt_limit,1);
   assert.equal(root.blind_retry_for_admission_effect,false);
   assert.equal(root.ambiguous_attempt_readback_only_reconciliation,true);
