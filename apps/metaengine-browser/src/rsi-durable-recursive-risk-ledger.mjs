@@ -16,6 +16,7 @@ import {
 } from './rsi-durable-state-persistence.mjs';
 
 export const RSI_DURABLE_RECURSIVE_RISK_LEDGER_SCHEMA='metaengine.rsi.durable-recursive-risk-ledger.v1';
+export const RSI_DURABLE_RISK_CONFIRMATION_WITNESS_SCHEMA='metaengine.rsi.durable-risk-confirmation-witness.v1';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
@@ -176,6 +177,110 @@ export function verifyRsiDurableRecursiveRiskLedgerState(state,{source_sha,budge
   const canonical=stateFor({sourceSha:source,budget:checkedBudget,rows:state.rows});
   if(canonical.state_digest!==exactDigest(state.state_digest,'state')){
     throw new Error('rsi_durable_risk_state_digest_mismatch');
+  }
+  return canonical;
+}
+
+
+export function reconstructRsiDurableRecursiveRiskLedgerState({source_sha,budget,rows}={}){
+  return stateFor({sourceSha:source_sha,budget,rows});
+}
+
+export function createRsiDurableRiskConfirmationWitness({
+  durable_ledger_state,
+  source_sha,
+  recursive_risk_budget,
+  confirmation_digest,
+  readback_owner_identity_digest,
+  external_readback_owner=false,
+  authored_by_candidate=true,
+}={}){
+  if(external_readback_owner!==true||authored_by_candidate!==false){
+    throw new Error('rsi_durable_risk_witness_external_readback_owner_required');
+  }
+  const state=verifyRsiDurableRecursiveRiskLedgerState(durable_ledger_state,{
+    source_sha,
+    budget:recursive_risk_budget,
+  });
+  const expected=exactDigest(confirmation_digest,'witness_confirmation');
+  const row=state.rows.find((candidate)=>candidate.confirmation.confirmation_digest===expected);
+  if(!row)throw new Error('rsi_durable_risk_witness_confirmation_not_in_durable_state');
+  const confirmation=verifyRsiRiskConfirmation(row.confirmation);
+  const certificate=verifyRsiExternalStatisticalCertificate(row.certificate,{
+    budget:state.budget,
+    expected_confirmation_index:confirmation.confirmation_index,
+    candidate_id:confirmation.candidate_id,
+    candidate_sha:confirmation.candidate_sha,
+    parent_sha:confirmation.parent_sha,
+    tournament_plan_digest:confirmation.tournament_plan_digest,
+    holdout_digest:confirmation.holdout_digest,
+    evaluator_root_digest:confirmation.evaluator_root_digest,
+  });
+  if(confirmation.certificate_digest!==certificate.certificate_digest){
+    throw new Error('rsi_durable_risk_witness_certificate_binding_mismatch');
+  }
+  const core=zero({
+    schema:RSI_DURABLE_RISK_CONFIRMATION_WITNESS_SCHEMA,
+    version:1,
+    source_sha:state.source_sha,
+    budget_digest:state.budget_digest,
+    durable_ledger_state_digest:state.state_digest,
+    durable_row_digest:row.row_digest,
+    confirmation_digest:confirmation.confirmation_digest,
+    external_statistical_certificate_digest:certificate.certificate_digest,
+    confirmation_index:confirmation.confirmation_index,
+    candidate_id:confirmation.candidate_id,
+    candidate_sha:confirmation.candidate_sha,
+    parent_sha:confirmation.parent_sha,
+    tournament_plan_digest:confirmation.tournament_plan_digest,
+    holdout_digest:confirmation.holdout_digest,
+    evaluator_root_digest:confirmation.evaluator_root_digest,
+    allocated_alpha:confirmation.allocated_alpha,
+    cumulative_alpha_spent:confirmation.cumulative_alpha_spent,
+    confirmation_count:state.confirmation_count,
+    readback_owner_identity_digest:exactDigest(readback_owner_identity_digest,'witness_readback_owner_identity'),
+    exact_durable_row_present:true,
+    restart_replay_verified:true,
+    durable_before_visible:true,
+    ambiguous_commit_requires_reconciliation:true,
+    same_attempt_blind_retry_allowed:false,
+    witness_is_effect_authority:false,
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  return Object.freeze({...core,witness_digest:digest(core)});
+}
+
+export function verifyRsiDurableRiskConfirmationWitness(witness,{
+  durable_ledger_state,
+  source_sha,
+  recursive_risk_budget,
+}={}){
+  if(!plain(witness)||witness.schema!==RSI_DURABLE_RISK_CONFIRMATION_WITNESS_SCHEMA||witness.version!==1){
+    throw new Error('rsi_durable_risk_witness_invalid');
+  }
+  assertZero(witness,'witness');
+  if(witness.exact_durable_row_present!==true
+    ||witness.restart_replay_verified!==true
+    ||witness.durable_before_visible!==true
+    ||witness.ambiguous_commit_requires_reconciliation!==true
+    ||witness.same_attempt_blind_retry_allowed!==false
+    ||witness.witness_is_effect_authority!==false
+    ||witness.external_readback_owner!==true
+    ||witness.authored_by_candidate!==false){
+    throw new Error('rsi_durable_risk_witness_policy_invalid');
+  }
+  const canonical=createRsiDurableRiskConfirmationWitness({
+    durable_ledger_state,
+    source_sha:source_sha??witness.source_sha,
+    recursive_risk_budget,
+    confirmation_digest:witness.confirmation_digest,
+    readback_owner_identity_digest:witness.readback_owner_identity_digest,
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  if(canonical.witness_digest!==exactDigest(witness.witness_digest,'witness')){
+    throw new Error('rsi_durable_risk_witness_digest_mismatch');
   }
   return canonical;
 }
@@ -357,6 +462,24 @@ export class RsiDurableRecursiveRiskLedger{
     return row?Object.freeze(structuredClone(row.confirmation)):null;
   }
 
+  confirmationWitness({
+    confirmation_digest,
+    readback_owner_identity_digest,
+    external_readback_owner=false,
+    authored_by_candidate=true,
+  }={}){
+    this.#assertReady();
+    return createRsiDurableRiskConfirmationWitness({
+      durable_ledger_state:this.#state(),
+      source_sha:this.#sourceSha,
+      recursive_risk_budget:this.#budget,
+      confirmation_digest,
+      readback_owner_identity_digest,
+      external_readback_owner,
+      authored_by_candidate,
+    });
+  }
+
   snapshot(){
     const state=this.#state();
     return Object.freeze({
@@ -408,6 +531,10 @@ export function rsiDurableRecursiveRiskTrustRootSnapshot(){
     post_rename_failure_requires_reconciliation:true,
     proposed_and_predecessor_exact_readback_supported:true,
     ambiguous_state_blocks_new_confirmation:true,
+    exact_confirmation_witness_supported:true,
+    witness_requires_external_durable_readback_owner:true,
+    witness_replays_durable_row_against_existing_recursive_risk_ledger:true,
+    witness_is_effect_authority:false,
     same_attempt_blind_retry_allowed:false,
   });
   return Object.freeze({...root,root_digest:digest(root)});
