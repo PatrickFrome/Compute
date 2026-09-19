@@ -151,7 +151,7 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
   assert.equal(first.dispatch.state, 'RUNNING');
   assert.equal(first.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
   assert.equal(first.dispatch.selected_tab_mutation, true);
-  assert.equal(first.dispatch.viewport_geometry_required, true);
+  assert.equal(first.dispatch.viewport_geometry_required, false, 'D-S2: GLM semantic submit is geometry-independent');
   assert.equal(first.fleet_transport_proof.state, 'PREEXISTING_ACTIVE_PROOF_REVALIDATED');
   assert.equal(first.fleet_transport_proof_before_physical_dispatch, true);
   assert.equal(selected, supervisorTab);
@@ -164,25 +164,36 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
   assert.equal(first.second_scheduler_loop, false);
 });
 
-test('zero viewport is rejected before type or Send click', async () => {
+test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independent submit)', async () => {
   let selected = supervisorTab;
   const commands = [];
+  let captureCount = 0;
   const signedRequest = async (path) => {
     if (path === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] });
+    if (path === '/v1/devos/mark-running') return response(200, { state: 'RUNNING' });
     throw new Error(`unexpected:${path}`);
   };
   const executeCommand = async (command) => {
     commands.push(command.action);
     if (command.action === 'FLEET_RECONCILE') return fleet;
     if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
-    if (command.action === 'CAPTURE') return frame({ viewport: { width: 0, height: 0 } });
+    if (command.action === 'CAPTURE') {
+      captureCount += 1;
+      // Unrendered fleet tab: 0x0 viewport, live composer ref, root surface.
+      if (captureCount < 2) return frame({ viewport: { width: 0, height: 0 }, sendVisible: false });
+      return frame({ viewport: { width: 0, height: 0 }, url: conversationUrl, stopActive: true, sendVisible: false });
+    }
+    if (command.action === 'SEMANTIC_TYPE') {
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
-  await assert.rejects(() => cycle.cycle(), /devos_submit_not_ready:PRE_TYPE:VIEWPORT_NOT_RENDERABLE/);
-  assert.equal(commands.includes('SEMANTIC_TYPE'), false);
+  const result = await cycle.cycle();
+  // The dispatch completes through the geometry-independent semantic lane.
+  assert.equal(result.dispatch.state, 'RUNNING');
+  assert.ok(commands.includes('SEMANTIC_TYPE'), 'the submit fired despite the 0x0 viewport');
   assert.equal(commands.includes('TYPED_CLICK'), false);
-  assert.equal(selected, supervisorTab);
 });
 
 test('existing conversation URL alone never proves no-op submit and the submit is not repeated', async () => {

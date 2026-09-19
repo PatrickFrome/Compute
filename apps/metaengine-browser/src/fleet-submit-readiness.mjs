@@ -47,15 +47,19 @@ export function evaluateFleetSubmitReadiness({
   }
   const width = Number(frame?.viewport?.width || 0);
   const height = Number(frame?.viewport?.height || 0);
-  if (!(width > 0 && height > 0)) {
-    return Object.freeze({ ready: false, reason: 'VIEWPORT_NOT_RENDERABLE', authority_effect: false });
-  }
 
   // GLM agent platform lane: chat.z.ai exposes no named STOP/SEND controls, so
-  // readiness is the exact foreground/incarnation/viewport plus a unique
-  // textbox composer addressable through its semantic_ref. Submit is the
-  // SEMANTIC_TYPE Enter path with composer-cleared / new-conversation readback
-  // inside the native control contract — there is no PRE_CLICK phase.
+  // readiness is the exact foreground/incarnation binding plus a unique textbox
+  // composer addressable through its semantic_ref. Submit is the SEMANTIC_TYPE
+  // Enter path with composer-cleared / new-conversation readback inside the
+  // native control contract — there is no PRE_CLICK phase.
+  //
+  // D-S2 (live-proven 2026-09-19): fleet agent tabs carry no DevOS surface pane
+  // until their first conversation exists, so their captured viewport is 0x0
+  // while the CDP semantic lane stays fully functional — the supervisor
+  // bootstrap already types and Enter-submits on unselected, unrendered tabs
+  // (semantic addressing is geometry-independent by design). The viewport is
+  // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
     const composer = resolveAgentPlatformComposer(frame);
     if (!composer) {
@@ -69,6 +73,7 @@ export function evaluateFleetSubmitReadiness({
       composer,
       send_control: null,
       viewport: Object.freeze({ width, height }),
+      viewport_rendered: width > 0 && height > 0,
       submit_strategy: 'TYPE_WITH_ENTER_SUBMIT_READBACK',
       send_required_before_type: false,
       send_required_before_click: false,
@@ -77,6 +82,9 @@ export function evaluateFleetSubmitReadiness({
       page_data_authority: false,
       authority_effect: false,
     });
+  }
+  if (!(width > 0 && height > 0)) {
+    return Object.freeze({ ready: false, reason: 'VIEWPORT_NOT_RENDERABLE', authority_effect: false });
   }
 
   if (chatGptControlCount(frame, 'STOP') > 0) {
