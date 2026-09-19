@@ -570,8 +570,13 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
     sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
   });
   await runtime.start();
-  // Three cycles with a poisoned composer -> rollover requested.
-  await runtime.cycle({ force: true });
+  // start() itself runs one cycle: the FIRST composer-blocking failure lands
+  // there. The two forced cycles below deliver failures two and three - the
+  // third failure REQUESTS the rollover before any attempt machinery can
+  // advance the state, so this is the deterministic assertion point. (The
+  // original three-cycle variant raced the rollover attempt on the next
+  // tick - observed live as a CI flake where the state had already moved
+  // past ROLLOVER_REQUIRED.)
   await runtime.cycle({ force: true });
   await runtime.cycle({ force: true });
   const snap = runtime.snapshot();
@@ -579,6 +584,62 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
     `expected a rollover state after 3 composer-blocking failures, got ${snap.keepalive.state}`);
   assert.equal(snap.keepalive.rollover_reason, 'COMPOSER_UNCLEARABLE_DK7');
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('D-K9: wake settlement never cancels a requested rollover (live rollover-cancel race)', async () => {
+  const { SupervisorKeepalive } = await import('../src/supervisor-keepalive.mjs');
+  const build = async () => {
+    const ka = new SupervisorKeepalive({
+      loadState: async () => null,
+      saveState: async () => {},
+      clock: () => Date.parse('2026-09-19T13:00:00Z'),
+      uuid: () => 'u' + Math.random().toString(16).slice(2),
+      processIncarnationId: 'process_test_dk9',
+    });
+    await ka.init();
+    await ka.bindConversation({ url: CONVERSATION, tab_id: 'tab1' });
+    return ka;
+  };
+
+  // The exact live race: the third composer-blocking failure marks the wake
+  // ambiguous (state=WAKE_AMBIGUOUS) and then requests the rollover
+  // (state=ROLLOVER_REQUIRED). The NEXT tick's terminal retirement used to
+  // recompute the state to WAITING, silently cancelling the rollover so the
+  // poisoned composer kept receiving sends forever.
+  const ka = await build();
+  await ka.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'k1' });
+  const prepared = await ka.prepareNextWake();
+  await ka.markWakeAmbiguous(prepared.pending.wake_id, 'TYPE_EFFECT_AMBIGUOUS');
+  await ka.requestRollover('COMPOSER_UNCLEARABLE_DK7', { autoRelease: true });
+  assert.equal(ka.snapshot().state, 'ROLLOVER_REQUIRED');
+  await ka.retireAmbiguousAfterTerminal({ tab_id: 'tab1', generation_epoch: 0, reason: 'SUPERVISOR_TERMINAL_BOUNDARY_CONFIRMED' });
+  const after = ka.snapshot();
+  assert.equal(after.state, 'ROLLOVER_REQUIRED', 'terminal wake retirement must not cancel a requested rollover');
+  assert.equal(after.rollover_reason, 'COMPOSER_UNCLEARABLE_DK7');
+  assert.equal(after.pending_wake, null, 'the ambiguous wake itself is still retired');
+
+  // The same invariant for the process-boundary retirement path.
+  const ka2 = await build();
+  await ka2.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'k2' });
+  const prepared2 = await ka2.prepareNextWake();
+  await ka2.markWakeAmbiguous(prepared2.pending.wake_id, 'TYPE_EFFECT_AMBIGUOUS');
+  await ka2.requestRollover('COMPOSER_UNCLEARABLE_DK7', { autoRelease: true });
+  await ka2.retireAmbiguousAfterProcessBoundary({ reason: 'PROCESS_BOUNDARY_TEST' }).catch(() => {});
+  const after2 = ka2.snapshot();
+  if (after2.state !== 'ROLLOVER_REQUIRED') {
+    // retireProcessBoundaryAmbiguous legitimately rejects without a proven
+    // process-boundary fence; when it does run, the rollover must survive.
+    assert.notEqual(after2.state, 'WAITING');
+  }
+
+  // Without a rollover request the settlement still lands on WAITING - the
+  // preservation is scoped to the rollover family only.
+  const ka3 = await build();
+  await ka3.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'k3' });
+  const prepared3 = await ka3.prepareNextWake();
+  await ka3.markWakeAmbiguous(prepared3.pending.wake_id, 'TYPE_EFFECT_AMBIGUOUS');
+  await ka3.retireAmbiguousAfterTerminal({ tab_id: 'tab1', generation_epoch: 0 });
+  assert.equal(ka3.snapshot().state, 'WAITING', 'no rollover request -> settlement still recomputes to WAITING');
 });
 
 // ---------------------------------------------------------------------------

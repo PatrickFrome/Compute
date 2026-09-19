@@ -521,6 +521,22 @@ export class SupervisorKeepalive {
     return clone(this.#state.queued_wakes.find((row) => row.process_incarnation_id === this.#processIncarnationId) || null);
   }
 
+  // D-K9 (live race, 2026-09-19): a requested or in-flight rollover is a
+  // DURABLE supervisor intent. Wake retirement and ambiguity resolution
+  // recomputed the state to WAITING/ACTIVE unconditionally - between the
+  // rollover request and the attempt tick, retireAmbiguousAfterTerminal
+  // silently cancelled the request, so a poisoned composer kept receiving
+  // sends forever (three failures -> request -> retirement cancels -> three
+  // more failures -> ...). Settlement paths must preserve the rollover
+  // family exactly like rebindTab / markCycleComplete already do.
+  #postWakeSettlementState(unboundState = 'WAITING') {
+    if (this.#state.paused) return 'PAUSED';
+    if (this.#state.admission_state === 'CLOSED') return 'PARKED';
+    if (['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return this.#state.state;
+    if (unboundState === 'RECOVERING' && !this.#state.conversation_url) return 'RECOVERING';
+    return this.#state.active_wake ? 'ACTIVE' : 'WAITING';
+  }
+
   async requestRollover(reason = 'CONVERSATION_LIMIT', { autoRelease = false } = {}) {
     const normalizedReason = String(reason || 'CONVERSATION_LIMIT').slice(0, 160);
     if (this.#state.admission_state === 'CLOSED') return this.snapshot();
@@ -798,11 +814,7 @@ export class SupervisorKeepalive {
     ].slice(-MAX_WAKE_HISTORY);
     this.#state.pending_wake = null;
     this.#state.last_completed_cycle_at = retiredAt;
-    this.#state.state = this.#state.paused
-      ? 'PAUSED'
-      : (this.#state.admission_state === 'CLOSED'
-        ? 'PARKED'
-        : (this.#state.conversation_url ? 'WAITING' : 'RECOVERING'));
+    this.#state.state = this.#postWakeSettlementState('RECOVERING');
     await this.#persist();
     return this.snapshot();
   }
@@ -828,9 +840,7 @@ export class SupervisorKeepalive {
     ].slice(-MAX_WAKE_HISTORY);
     this.#state.pending_wake = null;
     this.#state.last_completed_cycle_at = retiredAt;
-    this.#state.state = this.#state.paused
-      ? 'PAUSED'
-      : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING'));
+    this.#state.state = this.#postWakeSettlementState();
     await this.#persist();
     return this.snapshot();
   }
@@ -843,9 +853,7 @@ export class SupervisorKeepalive {
       // retry pays the wake-interval price instead of storming.
       this.#state.last_unsent_attempt_at = iso(this.#clock);
       this.#state.pending_wake = null;
-      this.#state.state = this.#state.paused
-        ? 'PAUSED'
-        : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING'));
+      this.#state.state = this.#postWakeSettlementState();
       await this.#persist();
       return this.snapshot();
     }
