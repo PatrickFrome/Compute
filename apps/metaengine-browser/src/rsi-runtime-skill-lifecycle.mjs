@@ -404,15 +404,58 @@ export class RsiRuntimeSkillLifecycle{
     attempt_id,effect_executor_identity_digest,external_effect_executor=false,authored_by_candidate=true,
   }={}){
     this.#assertInit();
-    const attempted=await this.recordLibraryAdmissionAttempted({
-      attempt_id,effect_executor_identity_digest,external_effect_executor,authored_by_candidate,
-    });
-    const row=this.#findAdmissionAttempt(attempted.attempt_id);
+    const attemptId=boundedId(attempt_id,'admission_attempt_id');
+    let row=this.#findAdmissionAttempt(attemptId);
+    if(!row)throw new Error('rsi_runtime_skill_admission_attempt_missing');
+    if(row.current_state==='PREPARED'){
+      await this.recordLibraryAdmissionAttempted({
+        attempt_id:attemptId,effect_executor_identity_digest,external_effect_executor,authored_by_candidate,
+      });
+      row=this.#findAdmissionAttempt(attemptId);
+    }else if(row.current_state==='ATTEMPTED'){
+      if(external_effect_executor!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_admission_external_executor_required');
+      if(exactDigest(effect_executor_identity_digest,'admission_effect_executor')!==row.effect_executor_identity_digest){
+        throw new Error('rsi_runtime_skill_admission_executor_identity_mismatch');
+      }
+    }else{
+      throw new Error('rsi_runtime_skill_admission_attempt_not_prepared');
+    }
     if(row.current_state!=='ATTEMPTED'||row.effect_attempt_count!==1)throw new Error('rsi_runtime_skill_admission_attempt_state_invalid');
+
+    // Durable ATTEMPTED is a one-attempt fence, not permission to trust stale state.
+    // Re-read both predecessor roots after that durable write and immediately before
+    // the first storage effect. Any drift becomes reconciliation-only; never replay.
+    const preEffectGovernance=this.governance();
+    const observedLibraryDigest=this.#library?.library_digest||null;
+    const observedGovernanceDigest=preEffectGovernance?.governance_digest||null;
+    if(observedLibraryDigest!==row.predecessor_library_digest||observedGovernanceDigest!==row.predecessor_governance_digest){
+      const observation=digest({
+        stage:'POST_ATTEMPT_PRE_EFFECT_READBACK',
+        observed_library_digest:observedLibraryDigest,
+        observed_governance_digest:observedGovernanceDigest,
+      });
+      const drifted=this.#appendAdmissionState(row,'RECONCILIATION_ONLY',observation);
+      this.#replaceAdmissionAttempt(drifted);
+      await this.#persist();
+      return zero({
+        state:'PRE_EFFECT_DRIFT_RECONCILIATION_REQUIRED',
+        attempt_id:row.attempt_id,
+        attempt_digest:drifted.attempt_digest,
+        observed_library_digest:observedLibraryDigest,
+        observed_governance_digest:observedGovernanceDigest,
+        effect_attempt_count:1,
+        effect_started:false,
+        effect_performed:false,
+        additional_effect_attempt_performed:false,
+        same_effect_id_retry_allowed:false,
+        reconciliation_required:true,
+        pre_effect_readback_passed:false,
+      });
+    }
+
     const prior=this.#library;
     try{
       const successor=verifyRsiVerifiedSkillLibrary(row.successor_library);
-      if(!this.#library||this.#library.library_digest!==row.predecessor_library_digest)throw new Error('rsi_runtime_skill_admission_effect_cas_mismatch');
       this.#assertAppendOnlyLibrary(successor);
       this.#library=successor;
       const governance=this.governance();
@@ -427,7 +470,7 @@ export class RsiRuntimeSkillLifecycle{
         state:'CONFIRMED_APPLIED_STORAGE_ONLY',attempt_id:row.attempt_id,attempt_digest:confirmed.attempt_digest,
         library_digest:this.#library.library_digest,entry_count:this.#library.entry_count,effect_attempt_count:1,
         reconciled_pending:0,storage_only:true,retrieval_exposure_changed:false,skill_activation_performed:false,
-        same_effect_id_retry_allowed:false,
+        same_effect_id_retry_allowed:false,pre_effect_readback_passed:true,
       });
     }catch(error){
       this.#library=prior;
@@ -608,6 +651,7 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     policy_path:'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
     verified_library_required:true,library_updates_append_only:true,exact_library_digest_cas_supported:true,
     phase34_anytime_admission_certificate_required:true,admission_attempts_durable_before_effect:true,
+    pre_effect_state_readback_after_attempt_persist_required:true,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
     ambiguous_attempt_readback_only_reconciliation:true,admission_attempt_state_is_append_only:true,
     storage_append_does_not_reconcile_pending_evidence:true,
