@@ -110,19 +110,46 @@ export function classifyAgentPlatformSurface(value) {
 // addressing key is the semantic_ref captured from a fresh perception.
 // A unique textbox (named or unnamed) on a platform surface resolves;
 // zero or multiple textboxes fail closed.
+//
+// D-K1 (live 2026-09-19): a signed-in chat.z.ai CONVERSATION surface renders
+// an auxiliary unnamed textbox alongside the real composer (live capture:
+// composer named "Send a Message" backend node 1770 + an unnamed secondary
+// textbox backend node 1864). Every exactly-one-textbox consumer — the
+// supervisor keepalive wake send, rollover, ambiguity continuation and the
+// fleet task dispatcher — went fail-closed on that surface and the primary
+// supervisor loop silently livelocked (WAKE_PENDING -> WAKE_AMBIGUOUS ->
+// WAITING every tick, no history, no wake consumed). Resolution policy:
+//   1. exactly one textbox with a semantic_ref resolves (unchanged);
+//   2. multiple textboxes -> the uniquely NAMED one is the composer
+//      (placeholders are localized but always present on the composer);
+//   3. anything else (zero, or zero/multiple named) fails closed.
+// Unnamed auxiliaries never win the composer role.
 export function resolveAgentPlatformComposer(frame) {
   const rows = Array.isArray(frame?.semantic_targets)
     ? frame.semantic_targets.filter((row) => String(row?.role || '').toLowerCase() === 'textbox')
     : [];
-  if (rows.length !== 1) return null;
-  const row = rows[0];
-  if (!row?.semantic_ref) return null;
+  const usable = rows.filter((row) => row?.semantic_ref);
+  if (usable.length === 0) return null;
+  let pick = null;
+  if (rows.length === 1 && usable.length === 1) {
+    pick = usable[0];
+  } else {
+    // Multi-textbox surface: the composer is the uniquely NAMED addressable
+    // row. A named-but-unaddressable row (no semantic_ref) means the real
+    // composer cannot be typed into — fail closed rather than diverting the
+    // effect to an unnamed auxiliary.
+    const named = usable.filter((row) => row.name);
+    if (named.length === 1) pick = named[0];
+  }
+  if (!pick) return null;
   return Object.freeze({
     role: 'textbox',
-    accessible_name: row.name || null,
-    semantic_ref: row.semantic_ref,
-    backend_node_id: Number(row.backend_node_id || 0) || null,
-    selector_mode: row.name ? 'ROLE_NAME_OR_BACKEND_NODE_ID' : 'BACKEND_NODE_ID_REQUIRED',
+    accessible_name: pick.name || null,
+    semantic_ref: pick.semantic_ref,
+    backend_node_id: Number(pick.backend_node_id || 0) || null,
+    selector_mode: pick.name ? 'ROLE_NAME_OR_BACKEND_NODE_ID' : 'BACKEND_NODE_ID_REQUIRED',
+    value_length: Number.isFinite(Number(pick.value_length)) ? Number(pick.value_length) : null,
+    value_sha256: pick.value_sha256 || null,
   });
 }
 

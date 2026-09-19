@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { AgentSessionMonitor } from './agent-session-monitor.mjs';
-import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
@@ -29,8 +29,25 @@ function unique(frame, role) {
   const rows = (frame?.semantic_targets || []).filter((x) => x?.role === role);
   return rows.length === 1 ? rows[0] : null;
 }
+// D-K1 (live 2026-09-19): the signed-in chat.z.ai conversation surface renders
+// an auxiliary unnamed textbox next to the real composer, so an exactly-one
+// textbox lookup can never resolve there. Every composer use in this runtime
+// goes through the platform resolver (named-preference, fail-closed) mapped
+// back onto the historical row shape (name/value_length/value_sha256).
+function composerTarget(frame) {
+  const resolved = resolveAgentPlatformComposer(frame);
+  if (!resolved) return null;
+  return {
+    role: 'textbox',
+    name: resolved.accessible_name,
+    semantic_ref: resolved.semantic_ref,
+    backend_node_id: resolved.backend_node_id,
+    value_length: resolved.value_length,
+    value_sha256: resolved.value_sha256,
+  };
+}
 function composerMatches(frame, message) {
-  const box = unique(frame, 'textbox');
+  const box = composerTarget(frame);
   return Boolean(box?.value_sha256 && box.value_sha256 === sha256(message));
 }
 function retryEnvelope(message, wakeId, retryAttempt) {
@@ -61,6 +78,13 @@ async function writeJson(file, value) {
 
 export class SupervisorLifecycleRuntime {
   #getState; #execute; #canActuate; #keepalive = null; #statePath; #lastRun = 0; #lastSupervisorGeneration = 'UNKNOWN'; #lastError = null;
+  // D-K3 (live 2026-09-19): a wake send that throws before any effect leaves
+  // ONLY the transient #lastError (cleared by the next successful tick), so a
+  // permanent pre-effect failure — e.g. the D-K1 composer-not-unique livelock —
+  // was invisible in every durable projection: no ambiguous_history growth, no
+  // consumed wake, no send diagnostics. These two fields make that class of
+  // silent retry loop observable from the state row / telemetry digest.
+  #lastSendError = null; #wakeSendFailureCount = 0;
   #lastWorkerSignals = []; #monitorMs; #researchMs; #sessionMonitor; #activeRequest = null; #lastRecovery = null;
   // P0 (2026-09-17): tabs created by failed bootstrap pre-effects (auth redirect
   // surfaces) and not yet provably closed. Retried before every new bootstrap
@@ -198,6 +222,8 @@ export class SupervisorLifecycleRuntime {
         effect_class: this.#activeRequest.effect_class,
       } : null,
       last_recovery: this.#lastRecovery ? structuredClone(this.#lastRecovery) : null,
+      last_send_error: this.#lastSendError ? structuredClone(this.#lastSendError) : null,
+      wake_send_failure_count: this.#wakeSendFailureCount,
       worker_signals: structuredClone(this.#lastWorkerSignals),
       quiescent: this.isQuiescent(),
       actuation_enabled: this.#canActuate() === true
@@ -290,7 +316,7 @@ export class SupervisorLifecycleRuntime {
       };
       return true;
     }
-    const composer = unique(frame, 'textbox');
+    const composer = composerTarget(frame);
     if (row.terminal_ready === true
       && composer?.value_sha256 === sha256(message)
       && this.#canActuate() === true) {
@@ -415,7 +441,7 @@ export class SupervisorLifecycleRuntime {
     let clicked = false;
     const before = await this.#capture(tabId);
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
-    const box = unique(before, 'textbox');
+    const box = composerTarget(before);
     if (!box) throw new Error('supervisor_composer_not_unique');
     // Persisted wake intent already fences this logical effect. Submit through the
     // semantic command's CDP event latch so type + send has one physical boundary
@@ -459,7 +485,7 @@ export class SupervisorLifecycleRuntime {
     // GLM platform: there is no named SEND control — the compatibility path
     // re-submits through the same Enter lane using the live composer ref.
     const compatFrame = await this.#capture(tabId);
-    const compatComposer = unique(compatFrame, 'textbox');
+    const compatComposer = composerTarget(compatFrame);
     if (!compatComposer?.semantic_ref) throw new Error('supervisor_composer_not_unique');
     await this.#execute({
       action: 'SEMANTIC_TYPE',
@@ -479,6 +505,9 @@ export class SupervisorLifecycleRuntime {
       if (sent.ok) {
         await this.#keepalive.confirmWakeSent(prepared.pending.wake_id);
         this.#activateRequest(prepared.pending, prepared.tab_id, false);
+        // D-K3: a confirmed send closes the failure streak; the last error
+        // stays for the projection (when it happened, how it presented).
+        this.#wakeSendFailureCount = 0;
         return true;
       }
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'SEND_WITHOUT_POSITIVE_READBACK');
@@ -486,6 +515,18 @@ export class SupervisorLifecycleRuntime {
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, clicked ? 'SEND_PATH_AMBIGUOUS' : 'NO_SEND_EFFECT').catch(() => {});
       if (!clicked) await this.#keepalive.resolveAmbiguous({ observed_sent: false }).catch(() => {});
       this.#lastError = String(e?.message || e).slice(0, 240);
+      // D-K3: durable pre-effect failure trace. The wake was provably not
+      // sent (resolveAmbiguous above) so the next tick re-prepares it —
+      // without this record a permanent failure looks like idle WAITING.
+      this.#wakeSendFailureCount += 1;
+      this.#lastSendError = {
+        at: new Date().toISOString(),
+        wake_id: prepared?.pending?.wake_id || null,
+        reason: String(e?.message || e).slice(0, 240),
+        clicked,
+        failure_count: this.#wakeSendFailureCount,
+        authority_effect: false,
+      };
     }
     return false;
   }
@@ -494,7 +535,7 @@ export class SupervisorLifecycleRuntime {
     for (let i = 0; i < attempts; i += 1) {
       if (i > 0) await sleep(500);
       const frame = await this.#capture(tabId);
-      if (CHAT_ROOT_RE.test(String(frame?.url || '')) && !generating(frame) && unique(frame, 'textbox')) {
+      if (CHAT_ROOT_RE.test(String(frame?.url || '')) && !generating(frame) && composerTarget(frame)) {
         return { ok: true, frame };
       }
       if (CHAT_RE.test(String(frame?.url || ''))) return { ok: false, reason: 'BOOTSTRAP_ROOT_UNEXPECTED_CONVERSATION', frame };
@@ -667,7 +708,7 @@ export class SupervisorLifecycleRuntime {
     ]);
     if (!DRAFT_HELD_REASONS.has(String(pending.ambiguous_reason || ''))) return false;
     if (String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''))) return false;
-    const composer = unique(frame, 'textbox');
+    const composer = composerTarget(frame);
     if (!composer) return false;
     const draftSha = sha256(buildSupervisorWakeMessage({
       supervisorEpoch: pending.supervisor_epoch,
@@ -746,7 +787,7 @@ export class SupervisorLifecycleRuntime {
     try { frame = await this.#capture(root.tab_id); } catch { return false; }
     if (!CHAT_ROOT_RE.test(String(frame?.url || root?.url || '')) || generating(frame)) return false;
     if (String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''))) return false;
-    const composer = unique(frame, 'textbox');
+    const composer = composerTarget(frame);
     if (!composer || Number(composer.value_length) !== 0) return false;
     const live = tabLiveness(state, root.tab_id);
     const row = this.#sessionMonitor.observe({ tab_id: root.tab_id, frame, ...live });
@@ -949,7 +990,7 @@ export class SupervisorLifecycleRuntime {
     if (!attempt.tab_id) await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
     // GLM platform: composer sha256 match proves the typed rollover message
     // never submitted; re-submit through the Enter lane (no named SEND).
-    const rolloverComposer = unique(frame, 'textbox');
+    const rolloverComposer = composerTarget(frame);
     if (!rolloverComposer?.semantic_ref) return false;
     await this.#execute({
       action: 'SEMANTIC_TYPE',

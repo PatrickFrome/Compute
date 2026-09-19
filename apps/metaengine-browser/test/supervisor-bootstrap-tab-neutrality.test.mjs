@@ -37,7 +37,10 @@ function rootFrame() {
     url: ROOT_URL,
     title: 'ChatGPT',
     text_excerpt: '',
-    semantic_targets: [{ role: 'textbox', name: 'Message ChatGPT' }],
+    // D-K1: bootstrap root readiness now routes through the platform composer
+    // resolver, which requires an addressable (semantic_ref-carrying) textbox —
+    // real captures always attach refs on the main frame.
+    semantic_targets: [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'r'.repeat(64) }, backend_node_id: 11 }],
   };
 }
 function convFrame() {

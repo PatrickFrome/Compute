@@ -260,6 +260,15 @@ function isExactGlmComposer(webContents, target, command) {
 // site consumed the typed prompt; a root -> /c/<id> transition proves a new
 // conversation was created. Both are URL/metadata-class proofs — no named
 // control exists on chat.z.ai to hang a GENERATING observation on.
+// D-K2: also the in-command composer value reader for verified replaces.
+// Returns null when the node is absent (unproven), '' when provably empty.
+async function readBackendNodeValue(dbg, backendNodeId) {
+  const tree = await dbg.sendCommand('Accessibility.getFullAXTree').catch(() => null);
+  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  const node = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId || 0) === Number(backendNodeId));
+  return node ? axRawValue(node, 'value') : null;
+}
+
 async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}) {
   const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
   const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
@@ -685,17 +694,79 @@ export async function executeSemanticCommand(webContents, command) {
       assertCurrentSemanticRef(webContents, dbg, semanticRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
-      if (command?.payload?.replace_existing !== false) {
+      // D-K2 (live 2026-09-19): Ctrl+A + Input.insertText is NOT a reliable
+      // replace on a React-controlled composer — live probes on chat.z.ai
+      // showed the selection silently dropped between the two dispatches, so
+      // each "replace" APPENDED to the stale draft (the fleet composer had
+      // accumulated FOUR unsent task prompts, ~10k chars, which a later page
+      // reload then submitted as one garbage message). Replace on the GLM
+      // lane is now readback-verified through the AX value (equality against
+      // the typed text, hash-only in receipts) with one bounded
+      // Delete-escalation retry; a submit-path replace that still cannot be
+      // proven fails closed BEFORE Enter so no corrupted multi-prompt text
+      // can ever be sent. The legacy ChatGPT operator lane keeps its
+      // historical unverified replace (deprecated lane, unchanged contract).
+      const replaceRequested = command?.payload?.replace_existing !== false;
+      const verifyReplace = replaceRequested && semanticPlatform === 'GLM_ZAI';
+      let typeReadback = null;
+      let replaceVerified = !verifyReplace;
+      if (replaceRequested) {
+        if (verifyReplace) {
+          const valueBefore = await readBackendNodeValue(dbg, target.backend_node_id);
+          for (let attempt = 0; attempt < 2 && !replaceVerified; attempt += 1) {
+            assertCurrentSemanticRef(webContents, dbg, semanticRef);
+            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+            await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
+            await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+            if (attempt > 0) {
+              // Escalation: some surfaces drop the Ctrl+A selection before the
+              // insert; an explicit Delete of the (re-made) selection empties
+              // the composer so the retry inserts into a provably blank field.
+              assertCurrentSemanticRef(webContents, dbg, semanticRef);
+              assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+              await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
+              await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete' });
+            }
+            assertCurrentSemanticRef(webContents, dbg, semanticRef);
+            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+            await dbg.sendCommand('Input.insertText', { text });
+            const valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
+            typeReadback = {
+              value_length_before: valueBefore == null ? null : valueBefore.length,
+              value_length_after: valueAfter == null ? null : valueAfter.length,
+              value_sha256_after: valueAfter == null || valueAfter === '' ? null : sha256(valueAfter),
+            };
+            replaceVerified = valueAfter === text;
+          }
+        } else {
+          assertCurrentSemanticRef(webContents, dbg, semanticRef);
+          assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+          assertCurrentSemanticRef(webContents, dbg, semanticRef);
+          assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+          await dbg.sendCommand('Input.insertText', { text });
+        }
+      } else {
         assertCurrentSemanticRef(webContents, dbg, semanticRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-        await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
-        await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+        await dbg.sendCommand('Input.insertText', { text });
       }
-      assertCurrentSemanticRef(webContents, dbg, semanticRef);
-      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-      await dbg.sendCommand('Input.insertText', { text });
+      if (submitAfterType && verifyReplace && !replaceVerified) {
+        throw new Error('native_semantic_type_replace_unverified');
+      }
       if (!submitAfterType) {
-        return { action, target, inserted_chars: text.length, replace_existing: command?.payload?.replace_existing !== false, prompt_sha256: sha256(text), prompt_included: false, authority_effect: true };
+        return {
+          action,
+          target,
+          inserted_chars: text.length,
+          replace_existing: replaceRequested,
+          replace_verified: verifyReplace ? replaceVerified : null,
+          ...(typeReadback || {}),
+          prompt_sha256: sha256(text),
+          prompt_included: false,
+          authority_effect: true,
+        };
       }
 
       if (semanticPlatform === 'GLM_ZAI') {
@@ -722,7 +793,9 @@ export async function executeSemanticCommand(webContents, command) {
             action,
             target,
             inserted_chars: text.length,
-            replace_existing: command?.payload?.replace_existing !== false,
+            replace_existing: replaceRequested,
+            replace_verified: verifyReplace ? replaceVerified : null,
+            ...(typeReadback || {}),
             submit_after_type: true,
             prompt_sha256: sha256(text),
             prompt_included: false,
@@ -785,7 +858,9 @@ export async function executeSemanticCommand(webContents, command) {
           action,
           target,
           inserted_chars: text.length,
-          replace_existing: command?.payload?.replace_existing !== false,
+          replace_existing: replaceRequested,
+          replace_verified: verifyReplace ? replaceVerified : null,
+          ...(typeReadback || {}),
           submit_after_type: true,
           prompt_sha256: sha256(text),
           prompt_included: false,

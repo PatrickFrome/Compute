@@ -3,6 +3,7 @@ import path from 'node:path';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { createSupervisorSendBoundaryExecutor } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMesh } from './supervisor-mesh.mjs';
+import { resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import {
   fenceReservedCoordination,
   assertFencedReservationCurrent,
@@ -29,7 +30,21 @@ function generating(frame) {
   return Boolean(frame?.semantic_targets?.some((row) => row?.role === 'button' && chatGptControlMatches('STOP', row?.name)));
 }
 
+// D-K1 (2026-09-19): route through the platform composer resolver so a
+// surface with an auxiliary unnamed textbox still resolves the real composer
+// (named-preference, fail-closed). The legacy ChatGPT mesh lane keeps its
+// historical exactly-one-textbox fallback for ref-less frames so its
+// behavior is unchanged; multi-textbox surfaces gain the resolver only.
 function uniqueTextbox(frame) {
+  const resolved = resolveAgentPlatformComposer(frame);
+  if (resolved) {
+    return {
+      role: 'textbox',
+      name: resolved.accessible_name,
+      semantic_ref: resolved.semantic_ref,
+      backend_node_id: resolved.backend_node_id,
+    };
+  }
   const rows = (frame?.semantic_targets || []).filter((row) => row?.role === 'textbox');
   return rows.length === 1 ? rows[0] : null;
 }

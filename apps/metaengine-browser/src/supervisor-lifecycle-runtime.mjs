@@ -226,6 +226,12 @@ export function buildSupervisorLifecycleStatusSnapshot(snapshot = {}) {
     'confirmed', 'ambiguous', 'automatic_retry_allowed', 'at', 'observed_stopped_at',
     'terminal_confirmed_at', 'authority_effect',
   ]);
+  // D-K3: durable wake-send failure diagnostics — a silent pre-effect retry
+  // loop (composer not unique, replace unverified, ...) must be visible in
+  // the state row instead of presenting as idle WAITING.
+  const lastSendError = scalarProjection(snapshot?.last_send_error, [
+    'at', 'wake_id', 'reason', 'clicked', 'failure_count', 'authority_effect',
+  ]);
   const workerPrefetch = scalarProjection(snapshot?.worker_observation_prefetch, [
     'captured_count', 'failed_count', 'concurrency', 'elapsed_ms', 'error', 'read_only', 'authority_effect',
   ]);
@@ -312,6 +318,8 @@ export function buildSupervisorLifecycleStatusSnapshot(snapshot = {}) {
     continuous_service: continuousService ? { ...continuousService, runtime_control: runtimeControl } : null,
     active_request: activeRequest,
     last_recovery: lastRecovery,
+    last_send_error: lastSendError,
+    wake_send_failure_count: Math.max(0, Number(snapshot?.wake_send_failure_count) || 0),
     worker_observation_prefetch: workerPrefetch,
     service_throttle: serviceThrottle,
     quiescent: snapshot?.quiescent === true,
