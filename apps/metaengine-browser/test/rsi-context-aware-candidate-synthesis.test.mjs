@@ -201,6 +201,7 @@ test('candidate synthesis trust root is only a planning boundary',()=>{
   assert.equal(root.memory_reliability_bound_to_context_plan,true);
   assert.equal(root.quarantined_memory_exposed_as_guidance,false);
   assert.equal(root.candidate_can_set_memory_reliability,false);
+  assert.equal(root.candidate_cannot_self_rehabilitate_memory,true);
   assert.equal(root.selected_experience_must_be_candidate_guidance_allowed,true);
   assert.equal(root.no_second_scheduler,true);
   assert.equal(root.execution_authority,false);
