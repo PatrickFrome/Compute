@@ -1761,11 +1761,9 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
   const entry=phase30Entry(good,'tamper-good');
 
   const forgedEntry=structuredClone(entry);
-  forgedEntry.outcome_class='NO_MATERIAL_IMPROVEMENT';
-  forgedEntry.learning_kind='LOW_YIELD_CONSTRAINT';
-  forgedEntry.low_yield_constraint_digest=labelDigest('forged-low-yield');
-  forgedEntry.recipe_digest=null;
-  forgedEntry.watch_out_digest=null;
+  // Vary exactly one derived identity dimension while keeping the presented artifact structurally valid.
+  // Rehashing the forged row must not let it redefine the generation bound by the source evidence.
+  forgedEntry.evaluator_generation_seq=entry.evaluator_generation_seq+1;
   const core=structuredClone(forgedEntry);delete core.entry_digest;
   forgedEntry.entry_digest=dg(core);
   assert.throws(()=>verifyRsiGenerationScopedOutcomeEntry(forgedEntry,{
@@ -1898,7 +1896,7 @@ test('Phase30 rejected and no-material evidence remain counterevidence and canno
   assert.equal(archive.snapshot().archive_can_change_budget,false);
 });
 
-function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION'} = {}) {
+function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION',sharedOverride={}} = {}) {
   const shared={
     evaluator_root_digest:labelDigest(`${prefix}-evaluator-root`),
     evaluator_generation_digest:labelDigest(`${prefix}-generation`),
@@ -1914,6 +1912,7 @@ function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVIS
     hidden_holdout_root_digest:labelDigest(`${prefix}-holdout`),
     safety_suite_root_digest:labelDigest(`${prefix}-safety`),
     security_suite_root_digest:labelDigest(`${prefix}-security`),
+    ...sharedOverride,
   };
   const a=phase30OutcomeEvidence(`${prefix}-a`,{state,sharedEvaluation:shared});
   const b=phase30OutcomeEvidence(`${prefix}-b`,{state,sharedEvaluation:shared});
@@ -2012,25 +2011,24 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
 
 test('Phase31 forbids mixed evaluator generations epochs learning kinds and duplicate candidate evidence',()=>{
   const rows=phase31SourceRows('cross-generation');
-  const other=phase31SourceRows('cross-generation-other');
-  assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/evaluator_root_mismatch|cross_generation_forbidden/);
+  const other=phase31SourceRows('cross-generation-other',{
+    sharedOverride:{evaluator_root_digest:rows[0].entry.evaluator_root_digest},
+  });
+  assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden/);
 
   const epochA=phase31SourceRows('cross-epoch');
-  const epochB=phase31SourceRows('cross-epoch-b');
-  const cloned=structuredClone(epochB[1]);
-  cloned.entry.evaluator_generation_digest=epochA[0].entry.evaluator_generation_digest;
-  const entryCore=structuredClone(cloned.entry);delete entryCore.entry_digest;
-  cloned.entry.entry_digest=dg(entryCore);
-  assert.throws(()=>phase31Proposal([epochA[0],cloned],'cross-epoch'),/entry_digest_mismatch|cross_epoch_forbidden/);
+  const epochB=phase31SourceRows('cross-epoch-b',{
+    sharedOverride:{
+      evaluator_root_digest:epochA[0].entry.evaluator_root_digest,
+      evaluator_generation_digest:epochA[0].entry.evaluator_generation_digest,
+      evaluator_generation_history_anchor_digest:epochA[0].entry.evaluator_generation_history_anchor_digest,
+    },
+  });
+  assert.throws(()=>phase31Proposal([epochA[0],epochB[1]],'cross-epoch'),/cross_epoch_forbidden/);
 
   const supported=phase31SourceRows('mixed-kind');
-  const rejected=phase31SourceRows('mixed-kind-rejected',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
-  const rebased=structuredClone(rejected[1]);
-  rebased.entry.evaluator_generation_digest=supported[0].entry.evaluator_generation_digest;
-  rebased.entry.evaluation_epoch_digest=supported[0].entry.evaluation_epoch_digest;
-  const reCore=structuredClone(rebased.entry);delete reCore.entry_digest;
-  rebased.entry.entry_digest=dg(reCore);
-  assert.throws(()=>phase31Proposal([supported[0],rebased],'mixed-kind'),/entry_digest_mismatch|mixed_learning_kind_forbidden/);
+  const rejected=phase31SourceRows('mixed-kind',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.throws(()=>phase31Proposal([supported[0],rejected[1]],'mixed-kind'),/mixed_learning_kind_forbidden/);
 
   const duplicate=[rows[0],structuredClone(rows[0])];
   assert.throws(()=>phase31Proposal(duplicate,'duplicate'),/duplicate_source_evidence|source_diversity_required/);
