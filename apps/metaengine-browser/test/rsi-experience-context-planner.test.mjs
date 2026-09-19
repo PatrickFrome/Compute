@@ -244,6 +244,8 @@ test('experience context trust root is retrieval-only and cannot become schedule
   assert.equal(root.quarantined_memory_is_candidate_guidance,false);
   assert.equal(root.candidate_can_set_memory_tier,false);
   assert.equal(root.candidate_can_set_memory_reliability_thresholds,false);
+  assert.equal(root.rehabilitation_margin_required_for_harmful_history,true);
+  assert.equal(root.candidate_cannot_self_rehabilitate_memory,true);
   assert.equal(root.second_scheduler,false);
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);
@@ -336,4 +338,59 @@ test('tampering a selected memory into QUARANTINED guidance is rejected',()=>{
   const bad=structuredClone(plan);
   bad.selected_cases[0].memory_reliability_tier='QUARANTINED';
   assert.throws(()=>verifyRsiExperienceContextPlan(bad),/selected_case_reliability_mismatch|digest_mismatch/);
+});
+
+
+test('externally rehabilitated harmful memory re-enters candidate guidance only after margin',()=>{
+  const noGraph=createRsiExperienceContextPlan({frontier_entry:frontier()});
+  const base=harmfulGraph();
+  const receipts=[...base.utility_receipts];
+  for(let i=0;i<2;i+=1){
+    receipts.push(createRsiExperienceUtilityReceipt({
+      receipt_id:`utility.rehab.exact.harmful.${i+1}`,
+      case_id:'rsi_case_harmful_1',
+      target_context_digest:noGraph.target_context_digest,
+      outcome:'HARMFUL',
+      evidence_digest:d(String(i+1)),
+      evidence_refs:[`external:rehab:harmful:${i+1}`],
+      external_evaluator:true,
+      authored_by_candidate:false,
+    }));
+  }
+  for(let i=0;i<4;i+=1){
+    receipts.push(createRsiExperienceUtilityReceipt({
+      receipt_id:`utility.rehab.exact.helpful.${i+1}`,
+      case_id:'rsi_case_harmful_1',
+      target_context_digest:noGraph.target_context_digest,
+      outcome:'HELPFUL',
+      evidence_digest:d(String(i+3)),
+      evidence_refs:[`external:rehab:helpful:${i+1}`],
+      external_evaluator:true,
+      authored_by_candidate:false,
+    }));
+  }
+  const snapshot=createRsiExperienceGraphSnapshot({
+    graph_id:'rsi.runtime.experience.rehabilitated',
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:base.task_anchors,
+    cases:base.cases,
+    similarity_edges:base.similarity_edges,
+    correction_edges:base.correction_edges,
+    utility_receipts:receipts,
+  });
+  const plan=createRsiExperienceContextPlan({
+    frontier_entry:frontier(),
+    experience_graph_snapshot:snapshot,
+  });
+  verifyRsiExperienceContextPlan(plan);
+  const recovered=plan.selected_cases.find(row=>row.case_id==='rsi_case_harmful_1');
+  assert.ok(recovered);
+  assert.equal(recovered.memory_reliability_tier,'COLD');
+  assert.equal(recovered.memory_reliability_reason,'EXTERNALLY_REHABILITATED_HARMFUL_HISTORY');
+  assert.equal(recovered.memory_severe_harm_history,true);
+  assert.equal(recovered.memory_rehabilitation_evidence_satisfied,true);
+  assert.equal(recovered.memory_candidate_guidance_allowed,true);
+  assert.equal(recovered.memory_remains_queryable,true);
+  assert.ok(!plan.quarantined_cases.some(row=>row.case_id==='rsi_case_harmful_1'));
 });
