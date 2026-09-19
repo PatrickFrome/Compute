@@ -213,6 +213,21 @@ test('release owner must be external and distinct from all review principals',()
   );
 });
 
+test('transition proof rejects source drift and cross-stage evidence aliasing',()=>{
+  const fx=fixture();
+  const review=createRsiSkillExposureReleaseReview(reviewArgs(fx));
+  assert.throws(
+    ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{source_sha:sha('b')})),
+    /eligible_review_required/,
+  );
+  assert.throws(
+    ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{
+      read_only_shadow_canary_digest:review.matched_comparison_receipt_digest,
+    })),
+    /cross_stage_evidence_alias_forbidden/,
+  );
+});
+
 test('transition proof requires read-only canary, coalition ablation and poisoning scan',()=>{
   const fx=fixture();
   const review=createRsiSkillExposureReleaseReview(reviewArgs(fx));
