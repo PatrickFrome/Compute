@@ -208,7 +208,12 @@ test('durable curation queue is idempotent, single-assignment and remembers reje
     assert.deepEqual(restored.snapshot().rejected_revision_buffer,[successor.skill_digest]);
 
     const raw=await fs.readFile(statePath,'utf8');
-    assert.doesNotMatch(raw,/raw_page_text|raw_user_input/);
+    const durableState=JSON.parse(raw);
+    const durableSuccessor=durableState.records[0].evaluation.successor_skill;
+    assert.equal(durableSuccessor.raw_page_text_stored,false);
+    assert.equal(durableSuccessor.raw_user_input_stored,false);
+    assert.doesNotMatch(raw,/"raw_page_text":/);
+    assert.doesNotMatch(raw,/"raw_user_input":/);
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
