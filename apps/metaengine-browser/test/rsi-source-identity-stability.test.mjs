@@ -124,7 +124,7 @@ test('two strictly newer fresh rounds prove stable source identity without autho
   assert.equal(certificate.stable_source_identity_converged,true);
   assert.equal(certificate.eligible_for_external_admission_review,true);
   assert.deepEqual(certificate.blockers,[]);
-  assert.equal(certificate.stable_window_ms,4_000);
+  assert.equal(certificate.stable_window_ms,5_000);
   assert.equal(certificate.stability_policy.caller_configurable,false);
   assert.equal(certificate.execution_authority,false);
   assert.equal(certificate.browser_authority,false);
