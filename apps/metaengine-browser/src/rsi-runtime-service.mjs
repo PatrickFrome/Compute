@@ -59,6 +59,9 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
+import { rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
+import { rsiSourceIdentityConvergenceTrustRootSnapshot } from './rsi-source-identity-convergence.mjs';
+import { rsiSourceIdentityFreshnessTrustRootSnapshot } from './rsi-source-identity-freshness.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -128,6 +131,9 @@ function trustRoots() {
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
     dormant_skill_retrieval_review: rsiDormantSkillRetrievalReviewTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
+    source_identity_convergence: rsiSourceIdentityConvergenceTrustRootSnapshot(),
+    source_identity_freshness: rsiSourceIdentityFreshnessTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
