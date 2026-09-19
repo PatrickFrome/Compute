@@ -102,3 +102,31 @@ test('opening the same experience context twice is fenced by deterministic episo
     await fs.rm(root,{recursive:true,force:true});
   }
 });
+
+
+test('direct bridge_case_ids are rejected even when a caller knows a case id',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-context-raw-bridge-'));
+  const ledgerPath=path.join(root,'rsi.jsonl');
+  try {
+    const runtime=new RsiRuntimeService({source_sha:SOURCE,ledgerPath});
+    await runtime.start();
+    await runtime.observeBrainSnapshot(ambiguousBrain());
+    const [entry]=runtime.improvementFrontier({limit:32});
+    assert.throws(
+      ()=>runtime.experienceContextForOpportunity({
+        opportunity_id:entry.opportunity_id,
+        bridge_case_ids:['case.caller.injected'],
+      }),
+      /rsi_runtime_external_bridge_selection_required/,
+    );
+    await assert.rejects(
+      runtime.openLearningEpisodeFromOpportunity({
+        opportunity_id:entry.opportunity_id,
+        bridge_case_ids:['case.caller.injected'],
+      }),
+      /rsi_runtime_external_bridge_selection_required/,
+    );
+  } finally {
+    await fs.rm(root,{recursive:true,force:true});
+  }
+});
