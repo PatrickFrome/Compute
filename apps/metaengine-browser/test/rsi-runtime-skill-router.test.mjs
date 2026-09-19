@@ -431,6 +431,8 @@ test('skill-router trust root freezes thresholds, negative-transfer veto, and ze
   assert.equal(root.candidate_can_override_negative_transfer_veto,false);
   assert.equal(root.routing_is_execution_authority,false);
   assert.equal(root.execution_authority,false);
+  assert.equal(root.browser_authority,false);
+  assert.equal(root.task_authority,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.router_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
