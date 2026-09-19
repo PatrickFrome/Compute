@@ -1191,11 +1191,15 @@ export class RsiRuntimeService {
     const library = this.#skillLifecycle.verifiedLibrarySnapshot();
     const governance = this.#skillLifecycle.governance();
     if (!library || !governance) throw new Error('rsi_runtime_skill_library_unavailable');
+    const skillDigest=String(args.skill_digest||'').trim().toLowerCase();
+    const admissionProvenance=this.#skillLifecycle.admissionExposureHoldProvenance(skillDigest);
+    if(!admissionProvenance)throw new Error('rsi_runtime_skill_exposure_review_confirmed_admission_provenance_required');
     const review = createRsiSkillExposureReleaseReview({
       ...args,
       source_sha: this.#sourceSha,
       library,
       current_governance: governance,
+      admission_provenance: admissionProvenance,
     });
     await this.#ledger.append('SKILL_EXPOSURE_RELEASE_REVIEW_CREATED', {
       review_id: review.review_id,
@@ -1204,6 +1208,10 @@ export class RsiRuntimeService {
       skill_digest: review.skill_digest,
       library_digest: review.library_digest,
       current_governance_digest: review.current_governance_digest,
+      admission_provenance_digest: review.admission_provenance_digest,
+      admission_attempt_id: review.admission_attempt_id,
+      admission_certificate_digest: review.admission_certificate_digest,
+      confirmed_admission_transition_digest: review.confirmed_admission_transition_digest,
       consumer_model_family: review.consumer_model_family,
       environment_fingerprint: review.environment_fingerprint,
       task_signature_digest: review.task_signature_digest,
