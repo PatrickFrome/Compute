@@ -77,6 +77,34 @@ function assertZero(value, label) {
   }
 }
 
+function assertAdmissionAttemptZero(value) {
+  for (const field of [
+    'execution_authority',
+    'production_mutation_authority',
+    'promotion_authority',
+    'self_update_authority',
+    'authority_effect',
+  ]) {
+    if (value?.[field] !== false) {
+      throw new Error('rsi_dormant_review_admission_attempt_' + field + '_invalid');
+    }
+  }
+  for (const optionalField of [
+    'browser_authority',
+    'task_authority',
+    'scheduler_authority',
+    'signing_authority',
+    'direct_tool_execution_authority',
+  ]) {
+    if (value?.[optionalField] != null && value[optionalField] !== false) {
+      throw new Error('rsi_dormant_review_admission_attempt_' + optionalField + '_invalid');
+    }
+  }
+  if (value?.automatic_retry_allowed !== false) {
+    throw new Error('rsi_dormant_review_admission_attempt_retry_invalid');
+  }
+}
+
 function verifyAdmissionReadback({ admission_attempt, successor_library, current_governance } = {}) {
   if (
     !admission_attempt
@@ -85,7 +113,7 @@ function verifyAdmissionReadback({ admission_attempt, successor_library, current
   ) {
     throw new Error('rsi_dormant_review_admission_attempt_invalid');
   }
-  assertZero(admission_attempt, 'admission_attempt');
+  assertAdmissionAttemptZero(admission_attempt);
   exactSha(admission_attempt.source_sha, 'source');
   exactDigest(admission_attempt.attempt_digest, 'attempt');
   exactDigest(admission_attempt.successor_library_digest, 'successor_library');
