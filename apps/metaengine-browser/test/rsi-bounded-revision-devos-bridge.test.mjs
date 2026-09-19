@@ -4070,6 +4070,100 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
 
+  // Prove the hardest boundary: a state drift observed only after durable ATTEMPTED
+  // cannot consume a second effect attempt. Inject drift into the first post-fence
+  // governance read while keeping both pre-fence reads exact.
+  const driftEffectExecutor=labelDigest('phase36-release-drift-effect-executor');
+  const driftPrepared=await runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.drift.1',
+    certificate,
+    release_review:freshExposureReview,
+    effect_id_digest:labelDigest('phase36-release-drift-effect-id'),
+    idempotency_key_digest:labelDigest('phase36-release-drift-idempotency'),
+    effect_executor_identity_digest:driftEffectExecutor,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(driftPrepared.state,'PREPARED');
+  const driftStore=new RsiRuntimeSkillLifecycle({
+    statePath:path.join(dir,'runtime.jsonl.skill-lifecycle.json'),
+    source_sha:SOURCE,
+    clock:()=>1_800_000_000_050,
+  });
+  await driftStore.init();
+  const exactGovernance=driftStore.governance.bind(driftStore);
+  let governanceReadCount=0;
+  driftStore.governance=()=>{
+    const current=exactGovernance();
+    governanceReadCount+=1;
+    if(governanceReadCount===4){
+      return Object.freeze({...current,governance_digest:labelDigest('phase36-post-fence-governance-drift')});
+    }
+    return current;
+  };
+  const drifted=await driftStore.executePreparedExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.drift.1',
+    effect_executor_identity_digest:driftEffectExecutor,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(drifted.state,'PRE_EFFECT_DRIFT_RECONCILIATION_REQUIRED');
+  assert.equal(drifted.effect_attempt_count,1);
+  assert.equal(drifted.effect_started,false);
+  assert.equal(drifted.release_effect_performed,false);
+  assert.equal(drifted.retrieval_exposure_changed,false);
+  assert.equal(drifted.same_effect_id_retry_allowed,false);
+  assert.equal(driftStore.exposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.drift.1').current_state,'RECONCILIATION_ONLY');
+  assert.equal(driftStore.snapshot().admission_exposure_hold_count,1);
+  driftStore.governance=exactGovernance;
+  const driftReconciled=await driftStore.reconcileExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.drift.1',
+    readback_owner_identity_digest:labelDigest('phase36-release-drift-readback-owner'),
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(driftReconciled.state,'CONFIRMED_NOT_RELEASED_NEW_ATTEMPT_REQUIRED');
+  assert.equal(driftReconciled.additional_effect_attempt_performed,false);
+  assert.equal(driftReconciled.same_effect_id_retry_allowed,false);
+  assert.equal(driftReconciled.new_attempt_required,true);
+  assert.equal(driftStore.snapshot().admission_exposure_hold_count,1);
+
+  // Reload the runtime after reconciliation. A new effect attempt requires a new
+  // externally created certificate/effect/idempotency identity; the old effect cannot retry.
+  const recoveredRuntime=new RsiRuntimeService({
+    source_sha:SOURCE,
+    ledgerPath:path.join(dir,'runtime.jsonl'),
+    clock:()=>1_800_000_000_075,
+  });
+  await recoveredRuntime.start();
+  assert.equal(recoveredRuntime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.drift.1').current_state,'CONFIRMED_NOT_RELEASED_NEW_ATTEMPT_REQUIRED');
+  assert.equal(recoveredRuntime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  const releaseCertificate2=await recoveredRuntime.createSkillExposureReleaseCertificate({
+    certificate_id:'phase36.runtime.reviewed-certificate.2',
+    skill_digest:certificate.skill_digest,
+    release_review:freshExposureReview,
+    shadow_routing_manifest_digest:certificate.shadow_routing_manifest_digest,
+    no_skill_ablation_receipt_digest:certificate.no_skill_ablation_receipt_digest,
+    coalition_ablation_receipt_digest:certificate.coalition_ablation_receipt_digest,
+    bounded_canary_policy_digest:certificate.bounded_canary_policy_digest,
+    bounded_canary_result_digest:certificate.bounded_canary_result_digest,
+    shadow_context_count:certificate.shadow_context_count,
+    shadow_success_count:certificate.shadow_success_count,
+    shadow_hard_invariants_pass:certificate.shadow_hard_invariants_pass,
+    no_skill_ablation_pass:certificate.no_skill_ablation_pass,
+    coalition_ablation_pass:certificate.coalition_ablation_pass,
+    bounded_canary_pass:certificate.bounded_canary_pass,
+    canary_effect_mode:certificate.canary_effect_mode,
+    external_release_certifier_identity_digest:certificate.external_release_certifier_identity_digest,
+    external_shadow_evaluator_identity_digest:certificate.external_shadow_evaluator_identity_digest,
+    external_canary_evaluator_identity_digest:certificate.external_canary_evaluator_identity_digest,
+    external_release_certifier:true,
+    external_shadow_evaluator:true,
+    external_canary_evaluator:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(releaseCertificate2.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE');
+
   const releaseEffectExecutor=labelDigest('phase36-release-effect-executor');
   const releasePrepared=await runtime.prepareSkillExposureReleaseAttempt({
     attempt_id:'phase36.runtime.release-attempt.1',
