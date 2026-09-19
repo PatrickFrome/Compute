@@ -8,6 +8,7 @@ import {
   verifyRsiExternalStatisticalCertificate,
   verifyRsiRiskConfirmation,
 } from './rsi-recursive-risk-budget.mjs';
+import { verifyRsiDurableRiskConfirmationWitness } from './rsi-durable-recursive-risk-ledger.mjs';
 
 export const RSI_EXPLORATION_GRADUATION_PREVIEW_SCHEMA='metaengine.rsi.exploration-graduation-preview.v1';
 export const RSI_EXPLORATION_GRADUATION_VERIFIER_RECEIPT_SCHEMA='metaengine.rsi.exploration-graduation-verifier-receipt.v1';
@@ -503,6 +504,8 @@ export function createRsiExplorationGraduationCertificate({
   process_verifier_receipt,
   outcome_verifier_receipt,
   statistical_receipt,
+  durable_risk_confirmation_witness,
+  durable_risk_ledger_state,
   lineage_review,
   future_effect_executor_identity_digest,
   certificate_owner_identity_digest,
@@ -556,6 +559,26 @@ export function createRsiExplorationGraduationCertificate({
     ||statistical.candidate_sha!==expectedStatisticalCandidateSha){
     throw new Error('rsi_graduation_certificate_statistical_target_skill_identity_mismatch');
   }
+  const durableWitness=verifyRsiDurableRiskConfirmationWitness(durable_risk_confirmation_witness,{
+    durable_ledger_state:durable_risk_ledger_state,
+    source_sha:source,
+    recursive_risk_budget:statistical.recursive_risk_budget,
+  });
+  if(durableWitness.source_sha!==source
+    ||durableWitness.budget_digest!==statistical.recursive_risk_budget_digest
+    ||durableWitness.confirmation_digest!==statistical.risk_confirmation_digest
+    ||durableWitness.external_statistical_certificate_digest!==statistical.external_statistical_certificate_digest
+    ||durableWitness.confirmation_index!==statistical.confirmation_index
+    ||durableWitness.candidate_id!==statistical.candidate_id
+    ||durableWitness.candidate_sha!==statistical.candidate_sha
+    ||durableWitness.parent_sha!==statistical.parent_sha
+    ||durableWitness.tournament_plan_digest!==statistical.paired_instance_manifest_digest
+    ||durableWitness.holdout_digest!==statistical.statistical_holdout_digest
+    ||durableWitness.evaluator_root_digest!==statistical.statistical_evaluator_root_digest
+    ||durableWitness.allocated_alpha!==statistical.allocated_alpha
+    ||durableWitness.cumulative_alpha_spent!==statistical.cumulative_alpha_spent){
+    throw new Error('rsi_graduation_certificate_durable_risk_witness_binding_mismatch');
+  }
   const lineage=verifyRsiSkillLineageContaminationReview(lineage_review,{
     source_sha:source,
     library:checkedLibrary,
@@ -596,6 +619,7 @@ export function createRsiExplorationGraduationCertificate({
     processReceipt.verifier_identity_digest,
     outcomeReceipt.verifier_identity_digest,
     statistical.statistical_acceptor_identity_digest,
+    durableWitness.readback_owner_identity_digest,
     futureExecutor,
   ];
   if(new Set(identities).size!==identities.length){
@@ -626,6 +650,7 @@ export function createRsiExplorationGraduationCertificate({
     exactDigest(no_skill_ablation_receipt_digest,'no_skill_ablation_receipt'),
     exactDigest(source_grounding_receipt_digest,'source_grounding_receipt'),
     exactDigest(memory_poisoning_scan_digest,'memory_poisoning_scan'),
+    durableWitness.witness_digest,
   ];
   if(new Set(evidenceRoots).size!==evidenceRoots.length){
     throw new Error('rsi_graduation_certificate_independent_evidence_roots_required');
@@ -681,6 +706,12 @@ export function createRsiExplorationGraduationCertificate({
     statistical_candidate_sha:statistical.candidate_sha,
     target_skill_source_candidate_sha:expectedStatisticalCandidateSha,
     deterministic_skill_statistical_candidate_binding:true,
+    durable_risk_confirmation_witness_digest:durableWitness.witness_digest,
+    durable_risk_ledger_state_digest:durableWitness.durable_ledger_state_digest,
+    durable_risk_readback_owner_identity_digest:durableWitness.readback_owner_identity_digest,
+    durable_risk_confirmation_index:durableWitness.confirmation_index,
+    durable_risk_confirmation_count:durableWitness.confirmation_count,
+    restart_durable_statistical_confirmation_bound:true,
     lineage_review_digest:lineage.review_digest,
     future_effect_executor_identity_digest:futureExecutor,
     certificate_owner_identity_digest:owner,
@@ -712,6 +743,8 @@ export function createRsiExplorationGraduationCertificate({
     controllable_and_uncontrollable_failures_separate:true,
     numerical_anytime_valid_threshold_required:true,
     fixed_false_admission_budget_required:true,
+    durable_recursive_risk_witness_required:true,
+    restart_durable_statistical_confirmation_required:true,
     exact_consumer_retrieval_source_binding_required:true,
     deterministic_skill_statistical_candidate_binding_required:true,
     retention_cost_latency_negative_transfer_required:true,
@@ -739,6 +772,9 @@ export function verifyRsiExplorationGraduationCertificate(certificate,args={}){
     ||certificate.controllable_and_uncontrollable_failures_separate!==true
     ||certificate.numerical_anytime_valid_threshold_required!==true
     ||certificate.fixed_false_admission_budget_required!==true
+    ||certificate.durable_recursive_risk_witness_required!==true
+    ||certificate.restart_durable_statistical_confirmation_required!==true
+    ||certificate.restart_durable_statistical_confirmation_bound!==true
     ||certificate.exact_consumer_retrieval_source_binding_required!==true
     ||certificate.deterministic_skill_statistical_candidate_binding_required!==true
     ||certificate.deterministic_skill_statistical_candidate_binding!==true
@@ -804,6 +840,9 @@ export function rsiExplorationGraduationCertificateTrustRootSnapshot(){
     e_value_external_contract_required:true,
     existing_recursive_risk_budget_required:true,
     existing_recursive_risk_confirmation_required:true,
+    durable_recursive_risk_witness_required:true,
+    restart_durable_statistical_confirmation_required:true,
+    external_durable_readback_owner_separate_from_acceptor_and_effect_required:true,
     second_statistical_risk_ledger_created:false,
     numerical_anytime_valid_threshold_required:true,
     insufficient_evidence_abstains:true,
