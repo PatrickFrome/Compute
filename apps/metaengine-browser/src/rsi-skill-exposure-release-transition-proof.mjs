@@ -45,6 +45,10 @@ function holdSet(governance){
   const rows=governance?.admission_exposure_hold_skill_digests;
   return new Set(Array.isArray(rows)?rows:[]);
 }
+function explorationOnlySet(governance){
+  const rows=governance?.exploration_only_skill_digests;
+  return new Set(Array.isArray(rows)?rows:[]);
+}
 function entryByDigest(governance,skillDigest,label){
   const entry=governance.entries.find(row=>row.skill_digest===skillDigest);
   if(!entry)throw new Error(`rsi_exposure_transition_${label}_entry_missing`);
@@ -55,6 +59,7 @@ function stripTargetTransitionFields(entry){
   delete out.state;
   delete out.active_for_composition;
   delete out.admission_exposure_hold;
+  delete out.exploration_only_hold;
   return out;
 }
 function same(valueA,valueB){return JSON.stringify(stable(valueA))===JSON.stringify(stable(valueB));}
@@ -101,7 +106,8 @@ export function createRsiSkillExposureReleaseTransitionProof({
 
   const currentEntry=entryByDigest(current,skillDigest,'current');
   const nextEntry=entryByDigest(next,skillDigest,'next');
-  if(currentEntry.state!=='DORMANT_CAP'||currentEntry.active_for_composition!==false||currentEntry.admission_exposure_hold!==true){
+  if(currentEntry.state!=='DORMANT_CAP'||currentEntry.active_for_composition!==false
+    ||currentEntry.admission_exposure_hold!==true||currentEntry.exploration_only_hold===true){
     throw new Error('rsi_exposure_transition_current_hold_invalid');
   }
 
@@ -120,7 +126,23 @@ export function createRsiSkillExposureReleaseTransitionProof({
     if(!currentHolds.has(held))throw new Error('rsi_exposure_transition_hold_added');
   }
 
-  if(nextEntry.state!=='EXPLORATION_ACTIVE'||nextEntry.active_for_composition!==true||nextEntry.admission_exposure_hold===true){
+  const currentExplorationOnly=explorationOnlySet(current);
+  const nextExplorationOnly=explorationOnlySet(next);
+  if(currentExplorationOnly.has(skillDigest)||!nextExplorationOnly.has(skillDigest)){
+    throw new Error('rsi_exposure_transition_exploration_hold_delta_invalid');
+  }
+  if(nextExplorationOnly.size-currentExplorationOnly.size!==1){
+    throw new Error('rsi_exposure_transition_exploration_hold_count_delta_invalid');
+  }
+  for(const held of currentExplorationOnly){
+    if(!nextExplorationOnly.has(held))throw new Error('rsi_exposure_transition_non_target_exploration_hold_changed');
+  }
+  for(const held of nextExplorationOnly){
+    if(held!==skillDigest&&!currentExplorationOnly.has(held))throw new Error('rsi_exposure_transition_non_target_exploration_hold_added');
+  }
+
+  if(nextEntry.state!=='EXPLORATION_ACTIVE'||nextEntry.active_for_composition!==true
+    ||nextEntry.admission_exposure_hold===true||nextEntry.exploration_only_hold!==true){
     throw new Error('rsi_exposure_transition_exploration_only_required');
   }
   if(current.governance_id!==next.governance_id||!same(current.config,next.config)){
@@ -205,6 +227,11 @@ export function createRsiSkillExposureReleaseTransitionProof({
     active_count_delta:1,
     dormant_count_delta:-1,
     hold_count_delta:-1,
+    current_exploration_only_hold:false,
+    next_exploration_only_hold:true,
+    exploration_only_hold_count_delta:1,
+    full_activation_hold_applied:true,
+    separate_external_graduation_required:true,
     only_target_governance_state_changed:true,
     exact_current_and_next_governance_bound:true,
     external_release_owner_identity_digest:releaseOwner,
@@ -245,6 +272,9 @@ export function verifyRsiSkillExposureReleaseTransitionProof(proof,args={}){
   assertZero(proof,'proof');
   if(proof.current_state!=='DORMANT_CAP'||proof.next_state!=='EXPLORATION_ACTIVE'
     ||proof.active_count_delta!==1||proof.dormant_count_delta!==-1||proof.hold_count_delta!==-1
+    ||proof.current_exploration_only_hold!==false||proof.next_exploration_only_hold!==true
+    ||proof.exploration_only_hold_count_delta!==1||proof.full_activation_hold_applied!==true
+    ||proof.separate_external_graduation_required!==true
     ||proof.only_target_governance_state_changed!==true||proof.exact_current_and_next_governance_bound!==true
     ||proof.read_only_shadow_canary_pass!==true||proof.coalition_ablation_pass!==true||proof.memory_poisoning_scan_pass!==true
     ||proof.canary_effect_mode!=='READ_ONLY_SHADOW'||proof.external_release_owner!==true
@@ -290,6 +320,9 @@ export function rsiSkillExposureReleaseTransitionProofTrustRootSnapshot(){
     exact_next_governance_required:true,
     held_dormant_skill_required:true,
     exploration_only_transition:true,
+    exploration_only_hold_must_be_applied:true,
+    exploration_only_hold_count_delta_required:1,
+    separate_external_graduation_required_for_active:true,
     only_target_governance_state_may_change:true,
     active_count_delta_required:1,
     hold_count_delta_required:-1,
