@@ -243,28 +243,80 @@ export function verifyRsiSkillLifecycleEvidence(evidence, library) {
     || evidence.lifecycle_evidence_is_activation_authority !== false
   ) throw new Error('rsi_skill_governance_lifecycle_evidence_policy_invalid');
 
-  const canonical = createRsiSkillLifecycleEvidence({
-    library,
-    evidence_id: evidence.evidence_id,
-    skill_digest: evidence.skill_digest,
-    window_seq: evidence.window_seq,
-    generation_start: evidence.generation_start,
-    generation_end: evidence.generation_end,
-    invocation_count: evidence.invocation_count,
-    helpful_count: evidence.helpful_count,
-    harmful_count: evidence.harmful_count,
-    neutral_count: evidence.neutral_count,
-    insufficient_evidence_count: evidence.insufficient_evidence_count,
-    router_engagement_count: evidence.router_engagement_count,
-    false_positive_injection_count: evidence.false_positive_injection_count,
-    hard_invariant_violation_count: evidence.hard_invariant_violation_count,
-    measured_net_delta: evidence.measured_net_delta,
-    authoring_prior: evidence.authoring_prior,
-    authoring_provenance_digest: evidence.authoring_provenance_digest,
-    evidence_refs: evidence.evidence_refs,
+  // Lifecycle windows are immutable historical evidence. An append-only successor
+  // library has a different library_digest, but the old window must remain valid
+  // as long as the exact skill and library identity are still present unchanged.
+  const checkedLibrary = verifyRsiVerifiedSkillLibrary(library);
+  const entry = findEntry(checkedLibrary, evidence.skill_digest);
+  if (evidence.library_id !== checkedLibrary.library_id) {
+    throw new Error('rsi_skill_governance_lifecycle_library_identity_mismatch');
+  }
+  if (
+    evidence.skill_id !== entry.skill_id
+    || evidence.skill_version !== entry.skill_version
+    || evidence.skill_digest !== entry.skill_digest
+  ) throw new Error('rsi_skill_governance_lifecycle_skill_identity_mismatch');
+
+  const sequence = positiveInt(evidence.window_seq, 'window_seq', 1_000_000);
+  const start = positiveInt(evidence.generation_start, 'generation_start', 1_000_000);
+  const end = positiveInt(evidence.generation_end, 'generation_end', 1_000_000);
+  if (end < start) throw new Error('rsi_skill_governance_generation_window_invalid');
+  const invocations = nonNegativeInt(evidence.invocation_count, 'invocation_count', 1_000_000);
+  const helpful = nonNegativeInt(evidence.helpful_count, 'helpful_count', invocations);
+  const harmful = nonNegativeInt(evidence.harmful_count, 'harmful_count', invocations);
+  const neutral = nonNegativeInt(evidence.neutral_count, 'neutral_count', invocations);
+  const insufficient = nonNegativeInt(evidence.insufficient_evidence_count, 'insufficient_evidence_count', invocations);
+  if (helpful + harmful + neutral + insufficient !== invocations) {
+    throw new Error('rsi_skill_governance_outcome_count_mismatch');
+  }
+  const engagements = nonNegativeInt(evidence.router_engagement_count, 'router_engagement_count', 1_000_000);
+  if (engagements < invocations) throw new Error('rsi_skill_governance_router_engagement_underflow');
+  const falsePositive = nonNegativeInt(evidence.false_positive_injection_count, 'false_positive_injection_count', engagements);
+  const hardViolations = nonNegativeInt(evidence.hard_invariant_violation_count, 'hard_invariant_violation_count', invocations);
+
+  const core = {
+    schema: RSI_SKILL_LIFECYCLE_EVIDENCE_SCHEMA,
+    version: 1,
+    evidence_id: boundedId(evidence.evidence_id, 'evidence_id'),
+    library_id: checkedLibrary.library_id,
+    library_digest: exactDigest(evidence.library_digest, 'evidence_library'),
+    skill_id: entry.skill_id,
+    skill_version: entry.skill_version,
+    skill_digest: entry.skill_digest,
+    window_seq: sequence,
+    generation_start: start,
+    generation_end: end,
+    invocation_count: invocations,
+    helpful_count: helpful,
+    harmful_count: harmful,
+    neutral_count: neutral,
+    insufficient_evidence_count: insufficient,
+    router_engagement_count: engagements,
+    false_positive_injection_count: falsePositive,
+    hard_invariant_violation_count: hardViolations,
+    measured_net_delta: finiteNumber(evidence.measured_net_delta, 'measured_net_delta'),
+    authoring_prior: authoringPrior(evidence.authoring_prior),
+    authoring_provenance_digest: exactDigest(evidence.authoring_provenance_digest, 'authoring_provenance'),
+    evidence_refs: normalizeRefs(evidence.evidence_refs),
     external_evaluator: true,
     authored_by_candidate: false,
-  });
+    raw_model_transcript_stored: false,
+    raw_page_text_stored: false,
+    raw_user_input_stored: false,
+    secret_material_stored: false,
+    candidate_can_change_lifecycle_evidence: false,
+    lifecycle_evidence_is_activation_authority: false,
+    execution_authority: false,
+    production_mutation_authority: false,
+    promotion_authority: false,
+    self_update_authority: false,
+    scheduler_authority: false,
+    signing_authority: false,
+    direct_tool_execution_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+  const canonical = Object.freeze({ ...core, evidence_digest: digest(core) });
   if (canonical.evidence_digest !== exactDigest(evidence.evidence_digest, 'lifecycle_evidence')) {
     throw new Error('rsi_skill_governance_lifecycle_evidence_digest_mismatch');
   }
