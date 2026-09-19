@@ -522,6 +522,11 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     throw new Error('rsi_skill_governance_invalid');
   }
   assertZeroAuthority(governance, 'governance');
+  const exposureHoldContractPresent = governance.admission_exposure_hold_skill_digests != null
+    || governance.admission_exposure_hold_count != null
+    || governance.admission_exposure_holds_force_inactive != null
+    || governance.admission_exposure_hold_release_requires_external_governance != null
+    || governance.terminal_safety_states_override_exposure_hold != null;
   if (
     governance.library_evidence_remains_append_only !== true
     || governance.active_view_is_bounded !== true
@@ -534,10 +539,12 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     || governance.candidate_can_bypass_active_cap !== false
     || governance.retired_skills_remain_auditable !== true
     || governance.active_view_is_promotion_authority !== false
-    || governance.admission_exposure_holds_force_inactive !== true
+  ) throw new Error('rsi_skill_governance_policy_invalid');
+  if (exposureHoldContractPresent && (
+    governance.admission_exposure_holds_force_inactive !== true
     || governance.admission_exposure_hold_release_requires_external_governance !== true
     || governance.terminal_safety_states_override_exposure_hold !== true
-  ) throw new Error('rsi_skill_governance_policy_invalid');
+  )) throw new Error('rsi_skill_governance_exposure_hold_policy_invalid');
 
   const checkedLibrary = verifyRsiVerifiedSkillLibrary(library);
   if (governance.library_digest !== checkedLibrary.library_digest || governance.library_id !== checkedLibrary.library_id) {
@@ -546,12 +553,13 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
   if (!Array.isArray(governance.entries) || governance.entries.length !== checkedLibrary.entries.length) {
     throw new Error('rsi_skill_governance_entries_invalid');
   }
-  if (!Array.isArray(governance.admission_exposure_hold_skill_digests)
-    || governance.admission_exposure_hold_count !== governance.admission_exposure_hold_skill_digests.length) {
+  const holdDigests = exposureHoldContractPresent ? governance.admission_exposure_hold_skill_digests : [];
+  if (!Array.isArray(holdDigests)
+    || (exposureHoldContractPresent && governance.admission_exposure_hold_count !== holdDigests.length)) {
     throw new Error('rsi_skill_governance_exposure_hold_set_invalid');
   }
-  const holdSet = new Set(governance.admission_exposure_hold_skill_digests.map((raw) => exactDigest(raw, 'verified_exposure_hold_skill')));
-  if (holdSet.size !== governance.admission_exposure_hold_skill_digests.length) {
+  const holdSet = new Set(holdDigests.map((raw) => exactDigest(raw, 'verified_exposure_hold_skill')));
+  if (holdSet.size !== holdDigests.length) {
     throw new Error('rsi_skill_governance_exposure_hold_duplicate');
   }
   for (const held of holdSet) findEntry(checkedLibrary, held);
@@ -562,8 +570,8 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     findEntry(checkedLibrary, row.skill_digest);
     const shouldActive = row.state === 'ACTIVE' || row.state === 'EXPLORATION_ACTIVE';
     const shouldHeld = holdSet.has(row.skill_digest);
-    if (row.admission_exposure_held !== shouldHeld
-      || row.admission_exposure_hold_external_release_required !== shouldHeld
+    if ((exposureHoldContractPresent && row.admission_exposure_held !== shouldHeld)
+      || (exposureHoldContractPresent && row.admission_exposure_hold_external_release_required !== shouldHeld)
       || (shouldHeld && (row.state === 'ACTIVE' || row.state === 'EXPLORATION_ACTIVE' || row.active_for_composition !== false))
       || row.active_for_composition !== shouldActive
       || row.retained_in_evidence_archive !== true
