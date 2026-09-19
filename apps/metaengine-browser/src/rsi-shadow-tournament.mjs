@@ -93,6 +93,7 @@ const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs',
   'apps/metaengine-browser/src/rsi-skill-exposure-release-transition-proof.mjs',
   'apps/metaengine-browser/src/rsi-skill-lineage-contamination-review.mjs',
+  'apps/metaengine-browser/src/rsi-held-skill-credit-admission.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
   'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
   'apps/metaengine-browser/src/candidate-capsule.cjs',
