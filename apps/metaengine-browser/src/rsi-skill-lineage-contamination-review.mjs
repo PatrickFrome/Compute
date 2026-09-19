@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs';
-import { verifyRsiLineageStructuralProvenance } from './rsi-lineage-structural-provenance.mjs';
+import { verifyRsiLineageProvenanceAcceptance } from './rsi-lineage-provenance-acceptance.mjs';
 
 export const RSI_SKILL_LINEAGE_CONTAMINATION_REVIEW_SCHEMA='metaengine.rsi.skill-lineage-contamination-review.v3';
 
@@ -98,15 +98,15 @@ function normalizeFinding(row,expectedSkills,effectExecutor,library){
   const skill=exactDigest(row.skill_digest,'finding_skill');
   if(!expectedSkills.has(skill))throw new Error('rsi_lineage_contamination_finding_outside_closure');
 
-  const provenance=verifyRsiLineageStructuralProvenance(row.provenance_attestation,{
+  const provenance=verifyRsiLineageProvenanceAcceptance(row.provenance_acceptance,{
     library,
     skill_digest:skill,
   });
-  if(provenance.effect_executor_identity_digest!==effectExecutor){
+  if(provenance.structural_attestation.effect_executor_identity_digest!==effectExecutor){
     throw new Error('rsi_lineage_contamination_provenance_effect_executor_mismatch');
   }
 
-  const provenanceReviewer=provenance.provenance_reviewer_identity_digest;
+  const provenanceReviewer=provenance.structural_attestation.provenance_reviewer_identity_digest;
   const securityReviewer=exactDigest(row.security_reviewer_identity_digest,'security_reviewer');
   const semanticReviewer=exactDigest(row.semantic_reviewer_identity_digest,'semantic_reviewer');
   if(new Set([provenanceReviewer,securityReviewer,semanticReviewer]).size!==3){
@@ -121,7 +121,7 @@ function normalizeFinding(row,expectedSkills,effectExecutor,library){
   const semanticConsistencyState=predicateState(row.semantic_consistency_state,'semantic_consistency');
 
   const evidenceDigests=[
-    exactDigest(provenance.attestation_digest,'structural_provenance'),
+    exactDigest(provenance.acceptance_digest,'provenance_acceptance'),
     exactDigest(row.negative_transfer_receipt_digest,'negative_transfer_receipt'),
     exactDigest(row.semantic_consistency_digest,'semantic_consistency'),
   ];
@@ -142,15 +142,17 @@ function normalizeFinding(row,expectedSkills,effectExecutor,library){
     semantic_consistency_state:semanticConsistencyState,
     status,
     status_derived_from_predicates:true,
-    provenance_attestation:structuredClone(provenance),
-    provenance_attestation_digest:evidenceDigests[0],
+    provenance_acceptance:structuredClone(provenance),
+    provenance_acceptance_digest:evidenceDigests[0],
+    structural_provenance_attestation_digest:provenance.structural_attestation_digest,
+    github_verification_receipt_digest:provenance.github_verification_receipt_digest,
     causal_provenance_digest:evidenceDigests[0],
     negative_transfer_receipt_digest:evidenceDigests[1],
     semantic_consistency_digest:evidenceDigests[2],
     provenance_reviewer_identity_digest:provenanceReviewer,
     security_reviewer_identity_digest:securityReviewer,
     semantic_reviewer_identity_digest:semanticReviewer,
-    provenance_state_derived_from_structural_attestation:true,
+    provenance_state_derived_from_structural_and_cryptographic_acceptance:true,
     external_provenance_reviewer:true,
     external_security_reviewer:true,
     external_semantic_reviewer:true,
@@ -236,7 +238,8 @@ export function createRsiSkillLineageContaminationReview({
     three_heterogeneous_reviewers_per_skill_required:true,
     structural_behavioral_semantic_critic_separation_required:true,
     deterministic_predicate_status_derivation_required:true,
-    structural_provenance_attestation_required:true,
+    structural_and_cryptographic_provenance_acceptance_required:true,
+    missing_cryptographic_provenance_blocks_clean:true,
     candidate_supplied_provenance_state_allowed:false,
     candidate_supplied_status_allowed:false,
     reviewer_votes_are_not_authority:true,
@@ -277,7 +280,8 @@ export function verifyRsiSkillLineageContaminationReview(row,{
     assertFalse(row[field],field);
   }
   if(row.deterministic_predicate_status_derivation_required!==true
-    ||row.structural_provenance_attestation_required!==true
+    ||row.structural_and_cryptographic_provenance_acceptance_required!==true
+    ||row.missing_cryptographic_provenance_blocks_clean!==true
     ||row.candidate_supplied_provenance_state_allowed!==false
     ||row.candidate_supplied_status_allowed!==false
     ||row.reviewer_votes_are_not_authority!==true
@@ -295,7 +299,7 @@ export function verifyRsiSkillLineageContaminationReview(row,{
     effect_executor_identity_digest,
     findings:row.findings.map((finding)=>({
       skill_digest:finding.skill_digest,
-      provenance_attestation:finding.provenance_attestation,
+      provenance_acceptance:finding.provenance_acceptance,
       security_negative_transfer_state:finding.security_negative_transfer_state,
       semantic_consistency_state:finding.semantic_consistency_state,
       negative_transfer_receipt_digest:finding.negative_transfer_receipt_digest,
@@ -331,7 +335,8 @@ export function rsiSkillLineageContaminationReviewTrustRootSnapshot(){
     structural_behavioral_semantic_critic_separation_required:true,
     reviewer_effect_executor_separation_required:true,
     deterministic_predicate_status_derivation_required:true,
-    structural_provenance_attestation_required:true,
+    structural_and_cryptographic_provenance_acceptance_required:true,
+    missing_cryptographic_provenance_blocks_clean:true,
     candidate_supplied_provenance_state_allowed:false,
     candidate_supplied_status_allowed:false,
     reviewer_votes_are_not_authority:true,
