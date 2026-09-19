@@ -11,6 +11,7 @@ import {
 } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
 import { verifyRsiHeldSkillCreditAdmission } from './rsi-held-skill-credit-admission.mjs';
+import { verifyRsiSkillLineageContaminationReview } from './rsi-skill-lineage-contamination-review.mjs';
 import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
 import {
   createRsiSkillExposureReleasePreview,
@@ -273,6 +274,18 @@ function validateExposureReleaseAttemptRow(row){
   const executor=exactDigest(row.effect_executor_identity_digest,'exposure_release_effect_executor');
   if(releasePrincipalDigests(certificate,row.release_certificate_args).includes(executor)){
     throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
+  }
+  const lineageReview=verifyRsiSkillLineageContaminationReview(row.lineage_contamination_review,{
+    source_sha:row.source_sha,
+    library:row.release_certificate_args?.library,
+    target_skill_digest:row.skill_digest,
+    current_governance_digest:row.predecessor_governance_digest,
+    effect_executor_identity_digest:executor,
+  });
+  if(lineageReview.review_digest!==row.lineage_contamination_review_digest
+    ||lineageReview.state!=='CLEAR_FOR_ZERO_EFFECT_EXPOSURE_PRECOMMIT'
+    ||lineageReview.eligible_for_exposure_precommit!==true){
+    throw new Error('rsi_runtime_skill_exposure_release_lineage_contamination_review_invalid');
   }
   const currentState=validateReleaseTransitions(row.transitions);
   if(currentState!==row.current_state)throw new Error('rsi_runtime_skill_exposure_release_current_state_mismatch');
@@ -951,7 +964,7 @@ export class RsiRuntimeSkillLifecycle{
   }
   #findExposureReleaseAttempt(attemptId){return this.#exposureReleaseAttempts.find(row=>row.attempt_id===attemptId)||null}
   async prepareExposureReleaseAttempt({
-    attempt_id,release_certificate,release_certificate_args,
+    attempt_id,release_certificate,release_certificate_args,lineage_contamination_review,
     effect_id_digest,idempotency_key_digest,effect_executor_identity_digest,
     external_effect_executor=false,authored_by_candidate=true,
   }={}){
@@ -1006,6 +1019,16 @@ export class RsiRuntimeSkillLifecycle{
     if(releasePrincipalDigests(certificate,canonicalCertificateArgs).includes(executor)){
       throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
     }
+    const lineageReview=verifyRsiSkillLineageContaminationReview(lineage_contamination_review,{
+      source_sha:this.#sourceSha,
+      library:this.#library,
+      target_skill_digest:certificate.skill_digest,
+      current_governance_digest:governance.governance_digest,
+      effect_executor_identity_digest:executor,
+    });
+    if(lineageReview.state!=='CLEAR_FOR_ZERO_EFFECT_EXPOSURE_PRECOMMIT'||lineageReview.eligible_for_exposure_precommit!==true){
+      throw new Error('rsi_runtime_skill_exposure_release_lineage_contamination_blocked');
+    }
     const existing=this.#findExposureReleaseAttempt(attemptId);
     if(existing){
       if(existing.release_certificate_digest===certificate.certificate_digest
@@ -1038,6 +1061,8 @@ export class RsiRuntimeSkillLifecycle{
       predecessor_library_digest:certificate.library_digest,
       predecessor_governance_digest:certificate.current_governance_digest,
       expected_next_governance_digest:certificate.next_governance_digest,
+      lineage_contamination_review:structuredClone(lineageReview),
+      lineage_contamination_review_digest:lineageReview.review_digest,
       effect_id_digest:effectId,idempotency_key_digest:idempotency,effect_executor_identity_digest:executor,
       effect_attempt_limit:1,effect_attempt_count:0,current_state:'PREPARED',transitions:[transition],
       blind_retry_forbidden:true,ambiguous_outcome_requires_readback_only_reconciliation:true,
@@ -1057,6 +1082,7 @@ export class RsiRuntimeSkillLifecycle{
       predecessor_library_digest:row.predecessor_library_digest,
       predecessor_governance_digest:row.predecessor_governance_digest,
       expected_next_governance_digest:row.expected_next_governance_digest,
+      lineage_contamination_review_digest:row.lineage_contamination_review_digest,
       effect_attempt_count:0,effect_started:false,effect_performed:false,
       retrieval_exposure_changed:false,full_activation_authorized:false,
       browser_authority:false,task_authority:false,scheduler_authority:false,
@@ -1331,13 +1357,13 @@ export class RsiRuntimeSkillLifecycle{
       exposure_release_prepared_is_zero_effect:true,
       exposure_release_attempted_is_still_pre_effect:true,
       exposure_release_post_attempt_pre_effect_readback_required:true,
-    exposure_release_effect_atomic_with_terminal_state:true,
-    exposure_release_readback_only_reconciliation:true,
-    exposure_release_external_readback_owner_required:true,
-    exposure_release_full_activation_forbidden:true,
       exposure_release_effect_atomic_with_terminal_state:true,
       exposure_release_readback_only_reconciliation:true,
+      exposure_release_external_readback_owner_required:true,
       exposure_release_full_activation_forbidden:true,
+      exposure_release_lineage_contamination_review_required:true,
+      exposure_release_lineage_review_uses_existing_parent_skill_digest:true,
+      exposure_release_lineage_review_is_effect_authority:false,
       pre_effect_state_readback_after_attempt_persist_required:true,
       ambiguous_admission_effect_requires_readback_only_reconciliation:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
@@ -1376,6 +1402,13 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     exposure_release_post_attempt_pre_effect_readback_required:true,
     blind_retry_for_exposure_release_effect:false,
     ambiguous_exposure_release_effect_requires_readback_only_reconciliation:true,
+    exposure_release_effect_atomic_with_terminal_state:true,
+    exposure_release_readback_only_reconciliation:true,
+    exposure_release_external_readback_owner_required:true,
+    exposure_release_full_activation_forbidden:true,
+    exposure_release_lineage_contamination_review_required:true,
+    exposure_release_lineage_review_uses_existing_parent_skill_digest:true,
+    exposure_release_lineage_review_is_effect_authority:false,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     held_skill_credit_requires_post_admission_gate:true,held_skill_positive_credit_requires_retention_non_regression:true,
     held_skill_neutral_credit_cannot_open_exploration:true,held_skill_credit_exact_single_skill_required:true,
