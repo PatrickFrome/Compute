@@ -279,7 +279,8 @@ export function verifyRsiDurableRiskConfirmationWitness(witness,{
     external_readback_owner:true,
     authored_by_candidate:false,
   });
-  if(canonical.witness_digest!==exactDigest(witness.witness_digest,'witness')){
+  if(canonical.witness_digest!==exactDigest(witness.witness_digest,'witness')
+    ||JSON.stringify(stable(canonical))!==JSON.stringify(stable(witness))){
     throw new Error('rsi_durable_risk_witness_digest_mismatch');
   }
   return canonical;
