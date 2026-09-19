@@ -233,14 +233,27 @@ test('R9 reconciliation distinguishes missing, exact and divergent final state w
   assert.equal(ambiguousMissing.reconciliation_required,true);
   assert.equal(ambiguousMissing.new_attempt_allowed,false);
 
-  const none=await reconcileRsiDurableJsonState({
+  const preRenameButUnknownAbsence=await reconcileRsiDurableJsonState({
     file_path:file,
     expected_state_digest:expectedState,
     expected_file_digest:expectedFile,
     rename_may_have_completed:false,
     io:missing,
   });
+  assert.equal(preRenameButUnknownAbsence.state,'AMBIGUOUS_MISSING_FINAL');
+  assert.equal(preRenameButUnknownAbsence.no_effect_proven,false);
+  assert.equal(preRenameButUnknownAbsence.new_attempt_allowed,false);
+
+  const none=await reconcileRsiDurableJsonState({
+    file_path:file,
+    expected_state_digest:expectedState,
+    expected_file_digest:expectedFile,
+    rename_may_have_completed:false,
+    missing_final_proves_no_effect:true,
+    io:missing,
+  });
   assert.equal(none.state,'NO_EFFECT_PROVEN');
+  assert.equal(none.missing_final_proves_no_effect,true);
   assert.equal(none.no_effect_proven,true);
   assert.equal(none.new_attempt_allowed,true);
 
@@ -347,7 +360,8 @@ test('R9 durable persistence trust root encodes crash ambiguity and refuses unsu
   assert.equal(root.post_rename_failure_is_ambiguous,true);
   assert.equal(root.post_rename_failure_reconciliation_only,true);
   assert.equal(root.missing_final_after_possible_rename_is_ambiguous,true);
-  assert.equal(root.no_effect_requires_pre_rename_proof,true);
+  assert.equal(root.missing_final_alone_never_proves_no_effect,true);
+  assert.equal(root.no_effect_requires_explicit_pre_rename_and_absence_semantics,true);
   assert.equal(root.durability_only_qualification_requires_exact_readback,true);
   assert.equal(root.durability_only_qualification_replays_rename,false);
   assert.equal(root.same_attempt_retry_allowed,false);
