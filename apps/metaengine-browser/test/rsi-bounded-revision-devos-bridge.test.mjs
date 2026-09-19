@@ -88,6 +88,8 @@ import {
   rsiRuntimeSkillLifecycleTrustRootSnapshot,
 } from '../src/rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
+import { createRsiBrowserOutcomeEpisode } from '../src/rsi-browser-outcome-ingest.mjs';
+
 import {
   RsiAnytimeLibraryAdmissionArchive,
   createRsiPhase33SourceQualification,
@@ -3888,6 +3890,124 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(exposureReview.hold_release_effect_authorized,false);
   assert.equal(exposureReview.retrieval_exposure_change_authorized,false);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_REVIEW_CREATED');
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const shadowEpisode=createRsiBrowserOutcomeEpisode({
+    source_sha:SOURCE,
+    readback:{
+      schema:'metaengine.rsi.result-receipt-readback.v1',
+      command_id:'88888888-8888-4888-8888-888888888888',
+      found:true,
+      terminal:true,
+      status:'COMPLETED',
+      receipt:{
+        schema:'metaengine.native-supervisor.command-receipt.v2',
+        command_id:'88888888-8888-4888-8888-888888888888',
+        action:'SCROLL',
+        platform:'CHATGPT',
+        result:{moved:true},
+        effect_outcome:'CONFIRMED',
+        lane:'MUTATION',
+        effect_key:'effect-phase36-shadow-credit',
+        execution_ms:4.5,
+        recorded_at:'2026-09-19T16:00:00.000Z',
+        authority_effect:false,
+      },
+      error:null,
+      execution_authority:false,
+      production_mutation_authority:false,
+      promotion_authority:false,
+      self_update_authority:false,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    },
+    attribution:{
+      task_id:'task.phase36.runtime.shadow-credit',
+      task_signature_digest:labelDigest('phase36-shadow-task-signature'),
+      environment_fingerprint:'env.phase36.runtime.shadow-credit',
+      model_family:'GPT_5_6_SOL',
+      candidate_id:`candidate_sha256_${'9'.repeat(64)}`,
+      candidate_sha:'e'.repeat(40),
+      proposal_digest:labelDigest('phase36-shadow-proposal'),
+      skill_digests:[fx.skill.skill_digest],
+      trajectory_id:'trajectory.phase36.runtime.shadow-credit',
+      step_index:1,
+      step_count:1,
+      predecessor_episode_digest:null,
+      external_attribution:true,
+      authored_by_candidate:false,
+    },
+  });
+  const credited=await runtime.recordBrowserStepCredit({
+    episode:shadowEpisode,
+    task_anchor:{
+      task_id:'task.phase36.runtime.shadow-credit',
+      task_signature_digest:labelDigest('phase36-shadow-task-signature'),
+      challenge_family:'BROWSER_INTERACTION',
+      hidden_manifest_digest:labelDigest('phase36-shadow-hidden-manifest'),
+      external_writer:true,
+      authored_by_candidate:false,
+    },
+    credit_id:'credit.phase36.runtime.shadow-credit.1',
+    credit_sign:'POSITIVE',
+    credit_score:0.5,
+    method:'EXTERNAL_STEP_EVALUATOR',
+    evaluator_digest:labelDigest('phase36-shadow-credit-evaluator'),
+    evaluation_digest:labelDigest('phase36-shadow-credit-evaluation'),
+    lesson_digests:[labelDigest('phase36-shadow-credit-lesson')],
+    evidence_refs:['evidence:phase36:runtime:shadow-credit'],
+    skill_generation:1,
+    skill_authoring_prior:'VERIFIED_DIRECT_SKILL',
+    skill_authoring_provenance_digest:labelDigest('phase36-shadow-credit-provenance'),
+    external_credit_assigner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(credited.skill_lifecycle.state,'APPLIED');
+  const heldAfterCredit=runtime.verifiedSkillStateReadback().governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(heldAfterCredit.state,'DORMANT_CAP');
+  assert.equal(heldAfterCredit.active_for_composition,false);
+
+  const releasePreview=await runtime.createSkillExposureReleasePreview({skill_digest:fx.skill.skill_digest});
+  assert.equal(releasePreview.preview.current_state,'DORMANT_CAP');
+  assert.equal(releasePreview.preview.next_state,'EXPLORATION_ACTIVE');
+  assert.equal(releasePreview.preview.active_count_delta,1);
+  assert.equal(releasePreview.preview.hold_count_delta,-1);
+  assert.equal(releasePreview.preview.release_authorized,false);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED');
+
+  const releaseCertificate=await runtime.createSkillExposureReleaseCertificate({
+    release_review:exposureReview,
+    certificate_id:'phase36.runtime.release-certificate.1',
+    skill_digest:fx.skill.skill_digest,
+    shadow_routing_manifest_digest:labelDigest('phase36-shadow-routing-manifest'),
+    no_skill_ablation_receipt_digest:labelDigest('phase36-no-skill-ablation'),
+    coalition_ablation_receipt_digest:labelDigest('phase36-coalition-ablation'),
+    bounded_canary_policy_digest:labelDigest('phase36-bounded-canary-policy'),
+    bounded_canary_result_digest:labelDigest('phase36-bounded-canary-result'),
+    shadow_context_count:4,
+    shadow_success_count:4,
+    shadow_hard_invariants_pass:true,
+    no_skill_ablation_pass:true,
+    coalition_ablation_pass:true,
+    bounded_canary_pass:true,
+    canary_effect_mode:'READ_ONLY_SHADOW',
+    external_release_certifier_identity_digest:labelDigest('phase36-release-certifier'),
+    external_shadow_evaluator_identity_digest:labelDigest('phase36-release-shadow-evaluator'),
+    external_canary_evaluator_identity_digest:labelDigest('phase36-release-canary-evaluator'),
+    external_release_certifier:true,
+    external_shadow_evaluator:true,
+    external_canary_evaluator:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(releaseCertificate.certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE');
+  assert.equal(releaseCertificate.certificate.eligible_for_one_attempt_exposure_release,true);
+  assert.equal(releaseCertificate.certificate.release_effect_authorized,false);
+  assert.equal(releaseCertificate.certificate.release_effect_performed,false);
+  assert.equal(releaseCertificate.preview.preview_digest,releasePreview.preview.preview_digest);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
+  const stillHeld=runtime.verifiedSkillStateReadback().governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(stillHeld.state,'DORMANT_CAP');
+  assert.equal(stillHeld.active_for_composition,false);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
