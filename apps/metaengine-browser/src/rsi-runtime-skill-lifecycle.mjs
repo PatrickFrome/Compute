@@ -463,6 +463,22 @@ export class RsiRuntimeSkillLifecycle{
     delete next.attempt_digest;
     return Object.freeze({...next,attempt_digest:digest(next)});
   }
+  #findExposureReleaseAttempt(attemptId){return this.#exposureReleaseAttempts.find(row=>row.attempt_id===attemptId)||null}
+  #replaceExposureReleaseAttempt(nextRow){
+    const index=this.#exposureReleaseAttempts.findIndex(row=>row.attempt_id===nextRow.attempt_id);
+    if(index<0)throw new Error('rsi_runtime_skill_exposure_release_attempt_missing');
+    this.#exposureReleaseAttempts=[
+      ...this.#exposureReleaseAttempts.slice(0,index),
+      validateExposureReleaseAttemptRow(nextRow),
+      ...this.#exposureReleaseAttempts.slice(index+1),
+    ];
+  }
+  #appendExposureReleaseState(row,state,observationDigest=null){
+    const transition=appendExposureReleaseTransition(row,state,this.#now(),observationDigest);
+    const next={...structuredClone(row),current_state:state,transitions:[...row.transitions,transition]};
+    delete next.attempt_digest;
+    return Object.freeze({...next,attempt_digest:digest(next)});
+  }
   async prepareLibraryAdmissionAttempt({
     attempt_id,admission_certificate,admission_certificate_args,successor_library,
     effect_id_digest,idempotency_key_digest,effect_executor_identity_digest,
