@@ -3957,6 +3957,87 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
     authored_by_candidate:false,
   }),/separation_of_duties_invalid/);
 
+  const exposureCertificate=await runtime.createSkillExposureReleaseCertificate({
+    retrieval_review:review,
+    certificate_id:'phase36.runtime.exposure.certificate.1',
+    routing_context_manifest_digest:labelDigest('phase36-routing-context'),
+    shadow_routing_manifest_digest:labelDigest('phase36-shadow-routing'),
+    no_skill_ablation_receipt_digest:labelDigest('phase36-no-skill-ablation'),
+    coalition_ablation_receipt_digest:labelDigest('phase36-coalition-ablation'),
+    memory_poisoning_scan_digest:labelDigest('phase36-memory-poisoning'),
+    source_grounding_receipt_digest:labelDigest('phase36-source-grounding'),
+    bounded_canary_policy_digest:labelDigest('phase36-canary-policy'),
+    bounded_canary_result_digest:labelDigest('phase36-canary-result'),
+    negative_transfer_memory_digest:labelDigest('phase36-negative-transfer-memory'),
+    shadow_context_count:3,
+    shadow_success_count:3,
+    shadow_hard_invariants_pass:true,
+    no_skill_ablation_pass:true,
+    coalition_ablation_pass:true,
+    negative_transfer_clear:true,
+    memory_poisoning_scan_pass:true,
+    source_grounding_pass:true,
+    bounded_canary_pass:true,
+    canary_effect_mode:'READ_ONLY_SHADOW',
+    external_governance_owner_identity_digest:labelDigest('phase36-governance-owner'),
+    external_shadow_evaluator_identity_digest:labelDigest('phase36-shadow-evaluator'),
+    external_security_reviewer_identity_digest:labelDigest('phase36-security-reviewer'),
+    external_canary_evaluator_identity_digest:labelDigest('phase36-canary-evaluator'),
+    external_governance_owner:true,
+    external_shadow_evaluator:true,
+    external_security_reviewer:true,
+    external_canary_evaluator:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(exposureCertificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE');
+  assert.equal(exposureCertificate.release_mode,'EXPLORATION_ACTIVE_ONLY');
+  assert.equal(exposureCertificate.r7_retrieval_review_digest,review.retrieval_review_digest);
+  assert.equal(exposureCertificate.recent_durable_r7_review_required,true);
+  assert.equal(exposureCertificate.automatic_full_activation_allowed,false);
+  assert.equal(exposureCertificate.browser_authority,false);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  await assert.rejects(()=>runtime.applySkillExposureRelease({
+    attempt_id:'phase36.runtime.exposure.attempt.role-collapse',
+    certificate:exposureCertificate,
+    retrieval_review:review,
+    effect_executor_identity_digest:exposureCertificate.external_governance_owner_identity_digest,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/effect_executor_separation_invalid/);
+
+  const released=await runtime.applySkillExposureRelease({
+    attempt_id:'phase36.runtime.exposure.attempt.1',
+    certificate:exposureCertificate,
+    retrieval_review:review,
+    effect_executor_identity_digest:labelDigest('phase36-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(released.state,'CONFIRMED');
+  assert.equal(released.retrieval_exposure_changed,true);
+  assert.equal(released.release_mode,'EXPLORATION_ACTIVE_ONLY');
+  assert.equal(released.full_activation_authorized,false);
+  assert.equal(released.effect_attempt_count,1);
+  assert.equal(released.pre_effect_readback_passed,true);
+  const activation=runtime.createSkillActivationView([fx.skill.skill_digest]);
+  assert.equal(activation.selected_count,1);
+  assert.equal(activation.selected[0].skill_digest,fx.skill.skill_digest);
+  assert.equal(activation.activation_view_is_execution_authority,false);
+
+  const duplicateRelease=await runtime.applySkillExposureRelease({
+    attempt_id:'phase36.runtime.exposure.attempt.1',
+    certificate:exposureCertificate,
+    retrieval_review:review,
+    effect_executor_identity_digest:labelDigest('phase36-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(duplicateRelease.state,'ALREADY_RECORDED');
+  assert.equal(duplicateRelease.attempt_state,'CONFIRMED');
+  assert.equal(duplicateRelease.retrieval_exposure_changed,true);
+  assert.equal(duplicateRelease.full_activation_authorized,false);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
