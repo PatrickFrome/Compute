@@ -4092,6 +4092,22 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_payload_max_bytes,64*1024);
+
+  // The release journal is a privacy/durability envelope, not an unbounded carrier for
+  // evaluator context. Oversized otherwise-valid certificate args must fail before an
+  // attempt becomes visible or consumes effect/idempotency identity.
+  await assert.rejects(()=>runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.oversized',
+    certificate,
+    certificate_args:{release_review:freshExposureReview,padding:'x'.repeat(70*1024)},
+    effect_id_digest:labelDigest('phase36-release-oversized-effect-id'),
+    idempotency_key_digest:labelDigest('phase36-release-oversized-idempotency-key'),
+    effect_executor_identity_digest:labelDigest('phase36-release-oversized-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/attempt_payload_budget_exceeded/);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,0);
 
   const preparedRelease=await runtime.prepareSkillExposureReleaseAttempt({
     attempt_id:'phase36.runtime.release-attempt.1',
