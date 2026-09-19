@@ -11,6 +11,7 @@ import {
   createRsiSkillLifecycleEvidence,
   createRsiSkillLibraryGovernance,
 } from '../src/rsi-skill-library-governance.mjs';
+import { createRsiDormantSkillRetrievalReview } from '../src/rsi-dormant-skill-retrieval-review.mjs';
 import {
   createRsiSkillExposureReleasePreview,
   verifyRsiSkillExposureReleasePreview,
@@ -221,20 +222,88 @@ function fixture(){
     library,current_governance:currentGovernance,next_governance:nextGovernance,
     skill_digest:capsule.skill_digest,
   }).preview_digest,preview.preview_digest);
-  const reviewCore={
-    schema:'metaengine.rsi.dormant-skill-retrieval-review.v1',version:1,
-    state:'ELIGIBLE_FOR_EXTERNAL_RETRIEVAL_EXPOSURE_ACTIVATION_REVIEW',
-    library_digest:library.library_digest,governance_digest:currentGovernance.governance_digest,
-    skill_digest:capsule.skill_digest,review_is_eligibility_evidence_only:true,
-    admission_exposure_hold_verified:true,bounded_exploration_capacity_available:true,
-    retrieval_exposure_changed:false,skill_activation_performed:false,
-    lifecycle_mutation_performed:false,governance_mutation_performed:false,
-    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,
-    promotion_authority:false,self_update_authority:false,scheduler_authority:false,signing_authority:false,
-    direct_tool_execution_authority:false,automatic_retry_allowed:false,authority_effect:false,
-  };
-  const dormantRetrievalReview=Object.freeze({...reviewCore,retrieval_review_digest:digest(reviewCore)});
-  return {capsule,library,currentGovernance,nextGovernance,preview,dormantRetrievalReview};
+  const admissionAttempt=Object.freeze({
+    schema:'metaengine.rsi.runtime-skill-library-admission-attempt.v1',
+    version:1,
+    source_sha:'a'.repeat(40),
+    attempt_id:'phase34b.admission.phase36.certificate',
+    attempt_digest:d('f'),
+    successor_library_digest:library.library_digest,
+    proposed_skill_digest:capsule.skill_digest,
+    proposed_skill_evidence_digest:evidence.evidence_digest,
+    effect_executor_identity_digest:d('e'),
+    admission_certificate:Object.freeze({
+      consumer_task_set_digest:d('9'),
+      consumer_retrieval_profile_digest:d('a'),
+      current_consumer_plane_digest:d('b'),
+      consumer_evaluation_contract_digest:d('c'),
+      proposed_skill_digest:capsule.skill_digest,
+      proposed_skill_evidence_digest:evidence.evidence_digest,
+      proposed_successor_library_digest:library.library_digest,
+    }),
+    current_state:'CONFIRMED_APPLIED_STORAGE_ONLY',
+    effect_attempt_limit:1,
+    effect_attempt_count:1,
+    blind_retry_forbidden:true,
+    ambiguous_outcome_requires_readback_only_reconciliation:true,
+    storage_append_does_not_activate_skill:true,
+    storage_append_does_not_reconcile_pending_evidence:true,
+    transitions:Object.freeze([
+      Object.freeze({state:'PREPARED'}),
+      Object.freeze({state:'ATTEMPTED'}),
+      Object.freeze({state:'CONFIRMED_APPLIED_STORAGE_ONLY'}),
+    ]),
+    execution_authority:false,
+    production_mutation_authority:false,
+    promotion_authority:false,
+    self_update_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  });
+  const dormantRetrievalReview=createRsiDormantSkillRetrievalReview({
+    review_id:'phase35.dormant.review.for.phase36',
+    admission_attempt:admissionAttempt,
+    successor_library:library,
+    current_governance:currentGovernance,
+    post_append_evaluation_epoch_digest:d('0'),
+    post_append_holdout_digest:d('1'),
+    post_append_evaluator_root_digest:d('2'),
+    matched_control_receipt_digest:d('3'),
+    treatment_receipt_digest:d('4'),
+    post_append_evidence_digest:d('5'),
+    coalition_ablation_receipt_digest:d('6'),
+    marginal_contribution_receipt_digest:d('7'),
+    active_cap_policy_digest:d('8'),
+    retrieval_reviewer_identity_digest:d('9'),
+    consumer_evaluator_identity_digest:d('a'),
+    contamination_auditor_identity_digest:d('b'),
+    coalition_auditor_identity_digest:d('c'),
+    capacity_policy_owner_identity_digest:d('d'),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    consumer_state_integrity_pass:true,
+    retrieval_profile_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    process_non_regression:true,
+    outcome_non_regression:true,
+    efficiency_non_regression:true,
+    strict_post_append_improvement:true,
+    coalition_ablation_pass:true,
+    marginal_contribution_pass:true,
+    active_cap_pass:true,
+    external_runtime_readback:true,
+    external_retrieval_reviewer:true,
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  });
+  return {capsule,library,currentGovernance,nextGovernance,preview,admissionAttempt,dormantRetrievalReview};
 }
 
 function args(fx,overrides={}){
@@ -245,6 +314,7 @@ function args(fx,overrides={}){
     next_governance:fx.nextGovernance,
     release_preview:fx.preview,
     dormant_retrieval_review:fx.dormantRetrievalReview,
+    admission_attempt:fx.admissionAttempt,
     stable_source_identity_certificate:stableSourceIdentity(),
     skill_digest:fx.capsule.skill_digest,
     routing_context_manifest_digest:d('a'),
@@ -289,6 +359,10 @@ test('Phase36 certificate keeps release zero-authority and requires multi-contex
   assert.equal(cert.release_mode,'EXPLORATION_ACTIVE_ONLY');
   assert.equal(cert.dormant_retrieval_review_digest,fx.dormantRetrievalReview.retrieval_review_digest);
   assert.equal(cert.fresh_dormant_retrieval_review_required,true);
+  assert.equal(cert.dormant_retrieval_review_reverification_required,true);
+  assert.equal(cert.cross_stage_reviewer_separation_required,true);
+  assert.equal(cert.admission_effect_executor_separation_required,true);
+  assert.equal(cert.admission_attempt_digest,fx.dormantRetrievalReview.admission_attempt_digest);
   assert.equal(cert.stable_source_identity_convergence_required,true);
   assert.equal(cert.double_read_source_identity_required,true);
   assert.equal(cert.source_identity_sha,sourceSha);
@@ -329,6 +403,13 @@ test('Phase36 certificate rejects reviewer identity collapse and forged release 
     external_security_reviewer_identity_digest:d('4'),
   })),/separation_of_duties_required/);
 
+  assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
+    external_governance_owner_identity_digest:fx.dormantRetrievalReview.retrieval_reviewer_identity_digest,
+  })),/cross_stage_separation_of_duties_required/);
+  assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
+    external_canary_evaluator_identity_digest:fx.admissionAttempt.effect_executor_identity_digest,
+  })),/cross_stage_separation_of_duties_required/);
+
   const forged={...fx.preview,next_state:'ACTIVE'};
   delete forged.preview_digest;
   forged.preview_digest=digest(forged);
@@ -358,10 +439,10 @@ test('Phase36 certificate rejects stale or non-eligible dormant retrieval review
   const fx=fixture();
   assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
     dormant_retrieval_review:{...fx.dormantRetrievalReview,state:'KEEP_DORMANT_NEGATIVE_TRANSFER'},
-  })),/dormant_retrieval_review_not_eligible/);
+  })),/retrieval_review_digest_mismatch|dormant_retrieval_review_not_eligible/);
   assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
     dormant_retrieval_review:{...fx.dormantRetrievalReview,governance_digest:d('f')},
-  })),/dormant_retrieval_review_binding_mismatch/);
+  })),/retrieval_review_digest_mismatch|dormant_retrieval_review_binding_mismatch/);
 });
 
 test('Phase36 certificate fails closed unless source identity is stable across two fresh rounds',()=>{
@@ -396,6 +477,9 @@ test('Phase36 exposure-release trust root requires external, bounded, exploratio
   assert.equal(root.exact_next_governance_preview_required,true);
   assert.equal(root.held_dormant_skill_required,true);
   assert.equal(root.fresh_dormant_retrieval_review_required,true);
+  assert.equal(root.dormant_retrieval_review_reverification_required,true);
+  assert.equal(root.cross_stage_reviewer_separation_required,true);
+  assert.equal(root.admission_effect_executor_separation_required,true);
   assert.equal(root.retrieval_review_can_authorize_release,false);
   assert.equal(root.stable_source_identity_convergence_required,true);
   assert.equal(root.double_read_source_identity_required,true);
