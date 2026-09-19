@@ -1307,6 +1307,120 @@ export class RsiRuntimeService {
     return review;
   }
 
+  previewSkillExposureRelease({skill_digest} = {}) {
+    this.#assertRunning();
+    return this.#skillLifecycle.previewAdmissionExposureRelease({ skill_digest });
+  }
+
+  async prepareSkillExposureReleaseAttempt({
+    attempt_id,
+    release_certificate,
+    release_certificate_args,
+    effect_id_digest,
+    idempotency_key_digest,
+    effect_executor_identity_digest,
+    external_governance_owner = false,
+    external_effect_executor = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.prepareExposureReleaseAttempt({
+      attempt_id,
+      release_certificate,
+      release_certificate_args,
+      effect_id_digest,
+      idempotency_key_digest,
+      effect_executor_identity_digest,
+      external_governance_owner,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_PREPARED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest,
+      expected_current_governance_digest: result.expected_current_governance_digest,
+      expected_next_governance_digest: result.expected_next_governance_digest,
+      effect_attempt_count: 0,
+      effect_performed: false,
+      retrieval_exposure_changed: false,
+      full_activation_authorized: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  async executeSkillExposureReleaseAttempt({
+    attempt_id,
+    effect_executor_identity_digest,
+    external_effect_executor = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.executePreparedExposureReleaseAttempt({
+      attempt_id,
+      effect_executor_identity_digest,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    const confirmed = result.state === 'CONFIRMED_EXPOSURE_RELEASED';
+    await this.#ledger.append(
+      confirmed ? 'SKILL_EXPOSURE_RELEASE_EFFECT_CONFIRMED' : 'SKILL_EXPOSURE_RELEASE_PRE_EFFECT_DRIFT',
+      {
+        attempt_id: result.attempt_id,
+        attempt_digest: result.attempt_digest,
+        state: result.state,
+        effect_attempt_count: result.effect_attempt_count,
+        effect_performed: confirmed,
+        effect_started: confirmed,
+        retrieval_exposure_changed: confirmed,
+        release_mode: confirmed ? 'EXPLORATION_ACTIVE_ONLY' : null,
+        full_activation_authorized: false,
+        reconciliation_required: result.reconciliation_required === true,
+        pre_effect_readback_passed: result.pre_effect_readback_passed === true,
+        same_effect_id_retry_allowed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    );
+    return result;
+  }
+
+  async reconcileSkillExposureReleaseAttempt({
+    attempt_id,
+    readback_owner_identity_digest,
+    external_readback_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.reconcileExposureReleaseAttempt({
+      attempt_id,
+      readback_owner_identity_digest,
+      external_readback_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_RECONCILED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest,
+      state: result.state,
+      observed_library_digest: result.observed_library_digest,
+      observed_governance_digest: result.observed_governance_digest,
+      effect_attempt_count: result.effect_attempt_count,
+      additional_effect_attempt_performed: false,
+      retrieval_exposure_changed: result.retrieval_exposure_changed === true,
+      same_effect_id_retry_allowed: false,
+      new_attempt_required: result.new_attempt_required === true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  skillExposureReleaseAttemptSnapshot(attempt_id) {
+    this.#assertRunning();
+    return this.#skillLifecycle.exposureReleaseAttemptSnapshot(attempt_id);
+  }
+
   createSkillActivationView(requested_skill_digests) {
     this.#assertRunning();
     return this.#skillLifecycle.activationView(requested_skill_digests);
