@@ -1770,7 +1770,7 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
     handoff_row:good.handoffRow,
     experiment_intent:good.intent,
     experiment_receipt:good.receipt,
-  }),/recipe_digest_invalid|entry_digest_mismatch/);
+  }),/entry_digest_mismatch/);
 
   const badIntent=structuredClone(good.intent);
   badIntent.evaluator_generation_seq=2;
