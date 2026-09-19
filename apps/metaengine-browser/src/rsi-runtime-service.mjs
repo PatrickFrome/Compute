@@ -58,6 +58,7 @@ import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntime
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
+import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -139,6 +140,7 @@ function trustRoots() {
     meta_profile_qualification: rsiMetaProfileQualificationTrustRootSnapshot(),
     meta_profile_shadow_selection: rsiMetaProfileShadowSelectionTrustRootSnapshot(),
     shadow_comparison_binding: rsiShadowComparisonBindingTrustRootSnapshot(),
+    dormant_skill_retrieval_review: rsiDormantSkillRetrievalReviewTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -1185,6 +1187,50 @@ export class RsiRuntimeService {
   anytimeLibraryAdmissionAttemptSnapshot(attempt_id) {
     this.#assertRunning();
     return this.#skillLifecycle.admissionAttemptSnapshot(attempt_id);
+  }
+
+  async createDormantSkillRetrievalReview(args = {}) {
+    this.#assertRunning();
+    const skillDigest = args?.skill_digest;
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    const admissionProvenance = this.#skillLifecycle.admissionExposureHoldProvenance(skillDigest);
+    if (!admissionProvenance) throw new Error('rsi_runtime_dormant_review_confirmed_admission_provenance_required');
+    const review = createRsiDormantSkillRetrievalReview({
+      ...args,
+      source_sha: this.#sourceSha,
+      library,
+      current_governance: governance,
+      admission_provenance: admissionProvenance,
+    });
+    await this.#ledger.append('DORMANT_SKILL_RETRIEVAL_REVIEW_CREATED', {
+      review_id: review.review_id,
+      retrieval_review_digest: review.retrieval_review_digest,
+      state: review.state,
+      eligible_for_external_retrieval_exposure_review: review.eligible_for_external_retrieval_exposure_review,
+      skill_digest: review.skill_digest,
+      library_digest: review.library_digest,
+      governance_digest: review.current_governance_digest,
+      admission_provenance_digest: review.admission_provenance_digest,
+      matched_pair_count: review.matched_pair_count,
+      repair_count: review.repair_count,
+      regression_count: review.regression_count,
+      negative_transfer_count: review.negative_transfer_count,
+      active_cap_capacity_available: review.active_cap_capacity_available,
+      exploration_slot_capacity_available: review.exploration_slot_capacity_available,
+      hold_release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return review;
   }
 
   createSkillActivationView(requested_skill_digests) {
