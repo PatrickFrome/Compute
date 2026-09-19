@@ -588,6 +588,7 @@ export class RsiRuntimeSkillLifecycle{
       admission_attempt_id:attempt.attempt_id,
       admission_certificate_digest:attempt.admission_certificate_digest,
       effect_id_digest:attempt.effect_id_digest,
+      effect_executor_identity_digest:attempt.effect_executor_identity_digest,
       admitted_successor_library_digest:attempt.successor_library_digest,
       confirmed_transition_digest:confirmed.transition_digest,
       current_library_digest:this.#library.library_digest,
