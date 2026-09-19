@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   evaluateRsiPhysicalMergeGate,
   rsiPhysicalMergeGateTrustRootSnapshot,
-} from '../../coordination/devos/compute-governance-physical-merge-gate.mjs';
+} from '../../../coordination/devos/compute-governance-physical-merge-gate.mjs';
 
 function branch(contexts=[]){
   return {
