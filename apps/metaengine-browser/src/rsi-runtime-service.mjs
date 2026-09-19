@@ -59,6 +59,7 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiSkillExposureReleaseReview, rsiSkillExposureReleaseReviewTrustRootSnapshot } from './rsi-skill-exposure-release-review.mjs';
+import { createRsiSkillExposureReleasePreview, createRsiSkillExposureReleaseCertificate, rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -116,6 +117,7 @@ function trustRoots() {
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
     skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
     memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
@@ -1239,6 +1241,145 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return review;
+  }
+
+  async createSkillExposureReleasePreview({ skill_digest } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const currentGovernance = this.#skillLifecycle.governance();
+    if (!library || !currentGovernance) throw new Error('rsi_runtime_skill_library_unavailable');
+    const next = this.#skillLifecycle.previewExposureHoldReleaseGovernance(skill_digest);
+    const preview = createRsiSkillExposureReleasePreview({
+      library,
+      current_governance: currentGovernance,
+      next_governance: next.governance,
+      skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED', {
+      preview_digest: preview.preview_digest,
+      skill_digest: preview.skill_digest,
+      library_digest: preview.library_digest,
+      current_governance_digest: preview.current_governance_digest,
+      next_governance_digest: preview.next_governance_digest,
+      current_state: preview.current_state,
+      next_state: preview.next_state,
+      active_count_delta: preview.active_count_delta,
+      hold_count_delta: preview.hold_count_delta,
+      release_mode: preview.release_mode,
+      hold_release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ preview, next_governance: next.governance });
+  }
+
+  async createSkillExposureReleaseCertificate({
+    release_review,
+    certificate_id,
+    skill_digest,
+    shadow_routing_manifest_digest,
+    no_skill_ablation_receipt_digest,
+    coalition_ablation_receipt_digest,
+    bounded_canary_policy_digest,
+    bounded_canary_result_digest,
+    shadow_context_count,
+    shadow_success_count,
+    shadow_hard_invariants_pass = false,
+    no_skill_ablation_pass = false,
+    coalition_ablation_pass = false,
+    bounded_canary_pass = false,
+    canary_effect_mode = '',
+    external_release_certifier_identity_digest,
+    external_shadow_evaluator_identity_digest,
+    external_canary_evaluator_identity_digest,
+    external_release_certifier = false,
+    external_shadow_evaluator = false,
+    external_canary_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const currentGovernance = this.#skillLifecycle.governance();
+    if (!library || !currentGovernance) throw new Error('rsi_runtime_skill_library_unavailable');
+    const admissionProvenance = this.#skillLifecycle.admissionExposureHoldProvenance(skill_digest);
+    if (!admissionProvenance) throw new Error('rsi_runtime_skill_exposure_certificate_confirmed_admission_provenance_required');
+    const next = this.#skillLifecycle.previewExposureHoldReleaseGovernance(skill_digest);
+    const preview = createRsiSkillExposureReleasePreview({
+      library,
+      current_governance: currentGovernance,
+      next_governance: next.governance,
+      skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    const certificate = createRsiSkillExposureReleaseCertificate({
+      certificate_id,
+      library,
+      current_governance: currentGovernance,
+      next_governance: next.governance,
+      release_preview: preview,
+      release_review,
+      admission_provenance: admissionProvenance,
+      skill_digest,
+      shadow_routing_manifest_digest,
+      no_skill_ablation_receipt_digest,
+      coalition_ablation_receipt_digest,
+      bounded_canary_policy_digest,
+      bounded_canary_result_digest,
+      shadow_context_count,
+      shadow_success_count,
+      shadow_hard_invariants_pass,
+      no_skill_ablation_pass,
+      coalition_ablation_pass,
+      bounded_canary_pass,
+      canary_effect_mode,
+      external_release_certifier_identity_digest,
+      external_shadow_evaluator_identity_digest,
+      external_canary_evaluator_identity_digest,
+      external_release_certifier,
+      external_shadow_evaluator,
+      external_canary_evaluator,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED', {
+      certificate_id: certificate.certificate_id,
+      certificate_digest: certificate.certificate_digest,
+      state: certificate.state,
+      eligible_for_one_attempt_exposure_release: certificate.eligible_for_one_attempt_exposure_release,
+      skill_digest: certificate.skill_digest,
+      library_digest: certificate.library_digest,
+      current_governance_digest: certificate.current_governance_digest,
+      next_governance_digest: certificate.next_governance_digest,
+      release_preview_digest: certificate.release_preview_digest,
+      release_review_digest: certificate.release_review_digest,
+      admission_provenance_digest: certificate.admission_provenance_digest,
+      shadow_context_count: certificate.shadow_context_count,
+      shadow_success_count: certificate.shadow_success_count,
+      blockers: certificate.blockers,
+      release_effect_authorized: false,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ preview, certificate, next_governance: next.governance });
   }
 
   async recordBrowserStepCredit({
