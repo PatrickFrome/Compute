@@ -65,17 +65,24 @@ function targetEvidenceCore(row){
   delete clone.state;
   delete clone.active_for_composition;
   delete clone.admission_exposure_hold;
+  delete clone.exploration_only_hold;
   return clone;
 }
 function peerInvariantCore(row){
   const clone=structuredClone(row);
   delete clone.admission_exposure_hold;
+  delete clone.exploration_only_hold;
   return clone;
 }
 function exactHoldSet(governance){
   const raw=governance.admission_exposure_hold_skill_digests??[];
   if(!Array.isArray(raw))throw new Error('rsi_exposure_release_governance_holds_invalid');
   return raw.map(value=>exactDigest(value,'governance_hold')).sort();
+}
+function exactExplorationOnlySet(governance){
+  const raw=governance.exploration_only_skill_digests??[];
+  if(!Array.isArray(raw))throw new Error('rsi_exposure_release_governance_exploration_only_invalid');
+  return raw.map(value=>exactDigest(value,'governance_exploration_only')).sort();
 }
 
 export function createRsiSkillExposureReleasePreview({
@@ -98,20 +105,29 @@ export function createRsiSkillExposureReleasePreview({
   const skillDigest=exactDigest(skill_digest,'skill');
   const currentHolds=exactHoldSet(current);
   const nextHolds=exactHoldSet(next);
+  const currentExplorationOnly=exactExplorationOnlySet(current);
+  const nextExplorationOnly=exactExplorationOnlySet(next);
   if(!currentHolds.includes(skillDigest))throw new Error('rsi_exposure_release_preview_current_hold_required');
   if(nextHolds.includes(skillDigest))throw new Error('rsi_exposure_release_preview_target_hold_not_released');
   const expectedNextHolds=currentHolds.filter(value=>value!==skillDigest);
   if(JSON.stringify(nextHolds)!==JSON.stringify(expectedNextHolds)){
     throw new Error('rsi_exposure_release_preview_unrelated_hold_drift');
   }
+  if(currentExplorationOnly.includes(skillDigest))throw new Error('rsi_exposure_release_preview_current_exploration_hold_forbidden');
+  const expectedNextExplorationOnly=[...new Set([...currentExplorationOnly,skillDigest])].sort();
+  if(JSON.stringify(nextExplorationOnly)!==JSON.stringify(expectedNextExplorationOnly)){
+    throw new Error('rsi_exposure_release_preview_exploration_hold_drift');
+  }
 
   const currentRow=current.entries.find(row=>row.skill_digest===skillDigest);
   const nextRow=next.entries.find(row=>row.skill_digest===skillDigest);
   if(!currentRow||!nextRow)throw new Error('rsi_exposure_release_preview_skill_missing');
-  if(currentRow.state!=='DORMANT_CAP'||currentRow.active_for_composition!==false||currentRow.admission_exposure_hold!==true){
+  if(currentRow.state!=='DORMANT_CAP'||currentRow.active_for_composition!==false||currentRow.admission_exposure_hold!==true
+    ||currentRow.exploration_only_hold===true){
     throw new Error('rsi_exposure_release_preview_current_hold_invalid');
   }
-  if(nextRow.state!=='EXPLORATION_ACTIVE'||nextRow.active_for_composition!==true||nextRow.admission_exposure_hold===true){
+  if(nextRow.state!=='EXPLORATION_ACTIVE'||nextRow.active_for_composition!==true||nextRow.admission_exposure_hold===true
+    ||nextRow.exploration_only_hold!==true){
     throw new Error('rsi_exposure_release_preview_exploration_only_required');
   }
   if(JSON.stringify(stable(targetEvidenceCore(currentRow)))!==JSON.stringify(stable(targetEvidenceCore(nextRow)))){
@@ -141,13 +157,16 @@ export function createRsiSkillExposureReleasePreview({
     current_state:currentRow.state,
     current_active_for_composition:currentRow.active_for_composition,
     current_admission_exposure_hold:true,
+    current_exploration_only_hold:false,
     next_state:nextRow.state,
     next_active_for_composition:nextRow.active_for_composition,
     next_admission_exposure_hold:false,
+    next_exploration_only_hold:true,
     changed_skill_digests:Object.freeze([skillDigest]),
     only_target_state_changed:true,
     active_count_delta:1,
     hold_count_delta:-1,
+    exploration_only_hold_count_delta:1,
     release_mode:RELEASE_MODE,
     preview_is_effect_authority:false,
     exposure_effect_performed:false,
@@ -415,6 +434,8 @@ export function rsiSkillExposureReleaseTrustRootSnapshot(){
     release_review_must_be_eligible:true,
     held_dormant_skill_required:true,
     exploration_only_release:true,
+    release_adds_exploration_only_hold:true,
+    unrelated_exploration_only_holds_are_immutable:true,
     only_target_governance_state_may_change:true,
     minimum_shadow_context_count:3,
     all_shadow_contexts_must_pass:true,

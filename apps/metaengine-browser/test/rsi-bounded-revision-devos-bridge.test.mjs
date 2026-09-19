@@ -3942,7 +3942,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
       task_signature_digest:labelDigest('phase36-post-append-task'),
       environment_fingerprint:'env.phase36.post-append.consumer',
       model_family:'GPT_5_6_SOL',
-      candidate_id:'candidate.phase36.post-append.consumer',
+      candidate_id:`candidate_sha256_${'e'.repeat(64)}`,
       candidate_sha:'e'.repeat(40),
       proposal_digest:labelDigest('phase36-post-append-proposal'),
       skill_digests:[fx.skill.skill_digest],
@@ -4094,9 +4094,6 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_payload_max_bytes,64*1024);
 
-  // The release journal is a privacy/durability envelope, not an unbounded carrier for
-  // evaluator context. Oversized otherwise-valid certificate args must fail before an
-  // attempt becomes visible or consumes effect/idempotency identity.
   await assert.rejects(()=>runtime.prepareSkillExposureReleaseAttempt({
     attempt_id:'phase36.runtime.release-attempt.oversized',
     certificate,
@@ -4180,11 +4177,67 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,0);
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_state_counts.CONFIRMED_RELEASED_EXPLORATION_ONLY,1);
 
-  const activated=runtime.createSkillActivationView([fx.skill.skill_digest]);
+  let activated=runtime.createSkillActivationView([fx.skill.skill_digest]);
   assert.equal(activated.selected_count,1);
   assert.equal(activated.selected[0].skill_digest,fx.skill.skill_digest);
   assert.equal(activated.selected[0].governance_state,'EXPLORATION_ACTIVE');
   assert.equal(activated.activation_view_is_execution_authority,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exploration_only_skill_count,1);
+  assert.deepEqual(runtime.snapshot().runtime_skill_lifecycle.exploration_only_skill_digests,[fx.skill.skill_digest]);
+
+  // Three more independently credited positive observations would normally cross
+  // min_positive_observations=4. The exploration-only graduation hold must prevent
+  // automatic EXPLORATION_ACTIVE -> ACTIVE promotion.
+  for(const offset of [2,3,4]){
+    const suffix=String(offset).padStart(12,'0');
+    const commandId=`99999999-9999-4999-8999-${suffix}`;
+    const taskId=`task.phase36.exploration.extra.${offset}`;
+    const taskDigest=labelDigest(`phase36-exploration-task-${offset}`);
+    const episode=createRsiBrowserOutcomeEpisode({
+      source_sha:SOURCE,
+      readback:{
+        schema:'metaengine.rsi.result-receipt-readback.v1',
+        command_id:commandId,
+        found:true,terminal:true,status:'COMPLETED',
+        receipt:{
+          schema:'metaengine.native-supervisor.command-receipt.v2',
+          command_id:commandId,action:'SCROLL',platform:'CHATGPT',result:{moved:true},
+          effect_outcome:'CONFIRMED',lane:'MUTATION',effect_key:`effect-phase36-exploration-${offset}`,
+          execution_ms:4+offset,recorded_at:new Date(1_800_000_001_000+offset*1000).toISOString(),authority_effect:false,
+        },
+        error:null,execution_authority:false,production_mutation_authority:false,promotion_authority:false,
+        self_update_authority:false,automatic_retry_allowed:false,authority_effect:false,
+      },
+      attribution:{
+        task_id:taskId,task_signature_digest:taskDigest,environment_fingerprint:'env.phase36.post-append.consumer',
+        model_family:'GPT_5_6_SOL',candidate_id:`candidate_sha256_${'e'.repeat(64)}`,candidate_sha:'e'.repeat(40),
+        proposal_digest:labelDigest('phase36-post-append-proposal'),skill_digests:[fx.skill.skill_digest],
+        trajectory_id:`trajectory.phase36.exploration.extra.${offset}`,step_index:1,step_count:1,
+        external_attribution:true,authored_by_candidate:false,
+      },
+    });
+    const extra=await runtime.recordBrowserStepCredit({
+      episode,
+      task_anchor:{
+        task_id:taskId,task_signature_digest:taskDigest,challenge_family:'BROWSER_INTERACTION',
+        hidden_manifest_digest:labelDigest(`phase36-exploration-hidden-${offset}`),external_writer:true,authored_by_candidate:false,
+      },
+      credit_id:`credit.phase36.exploration.extra.${offset}`,
+      credit_sign:'POSITIVE',credit_score:0.5,method:'EXTERNAL_STEP_EVALUATOR',
+      evaluator_digest:labelDigest(`phase36-exploration-evaluator-${offset}`),
+      evaluation_digest:labelDigest(`phase36-exploration-evaluation-${offset}`),
+      lesson_digests:[labelDigest(`phase36-exploration-lesson-${offset}`)],
+      evidence_refs:[`evidence:phase36:exploration:${offset}`],
+      skill_generation:offset,skill_authoring_prior:'VERIFIED_DIRECT_SKILL',
+      skill_authoring_provenance_digest:labelDigest(`phase36-exploration-provenance-${offset}`),
+      external_credit_assigner:true,authored_by_candidate:false,
+    });
+    assert.equal(extra.skill_lifecycle.state,'APPLIED');
+  }
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count,4);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exploration_only_skill_count,1);
+  activated=runtime.createSkillActivationView([fx.skill.skill_digest]);
+  assert.equal(activated.selected[0].governance_state,'EXPLORATION_ACTIVE');
 
   const terminalReadback=runtime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1');
   assert.equal(terminalReadback.current_state,'CONFIRMED_RELEASED_EXPLORATION_ONLY');
@@ -4449,5 +4502,8 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.exposure_release_readback_only_reconciliation,true);
   assert.equal(root.exposure_release_external_readback_owner_required,true);
   assert.equal(root.exposure_release_full_activation_forbidden,true);
+  assert.equal(root.exploration_only_holds_supported,true);
+  assert.equal(root.exploration_only_prevents_full_active,true);
+  assert.equal(root.exploration_only_release_requires_external_governance,true);
   assert.equal(root.authority_effect,false);
 });
