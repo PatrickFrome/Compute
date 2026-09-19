@@ -300,7 +300,7 @@ export class RsiRuntimeSkillLifecycle{
     this.#assertAppendOnlyLibrary(checked);
     const holds=this.#normalizeHoldDigests(admission_exposure_hold_skill_digests);
     const newDigests=this.#newSkillDigests(checked);
-    if(this.#library&&newDigests.length>0&&JSON.stringify(holds)!==JSON.stringify(newDigests))throw new Error('rsi_runtime_skill_append_exposure_hold_required');
+    if(this.#library&&JSON.stringify(holds)!==JSON.stringify(newDigests))throw new Error('rsi_runtime_skill_append_exposure_hold_required');
     for(const held of holds)if(!checked.entries.some(e=>e.skill_digest===held))throw new Error('rsi_runtime_skill_exposure_hold_unknown_skill');
     const changed=this.#library?.library_digest!==checked.library_digest;
     const previousLibrary=this.#library,previousEvidence=this.#evidence,previousPending=this.#pending,previousSeq=this.#seq,previousHolds=this.#exposureHolds;
