@@ -80,6 +80,8 @@ const IMMUTABLE_EXACT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
   'apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs',
   'apps/metaengine-browser/src/rsi-skill-exposure-release-transition-proof.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-service.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/trusted-dev-release-resolver.mjs',
   'apps/metaengine-browser/src/verification-sandbox-backend-binding.cjs',
