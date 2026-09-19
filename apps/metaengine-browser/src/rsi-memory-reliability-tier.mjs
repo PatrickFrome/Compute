@@ -22,6 +22,8 @@ const POLICY=Object.freeze({
   hot_posterior_min:0.70,
   warm_posterior_min:0.50,
   cross_context_weight:0.25,
+  rehabilitation_exact_helpful_min:2,
+  rehabilitation_helpful_margin:1,
 });
 
 function stable(value){
@@ -121,23 +123,57 @@ function deriveTier({item,utility}){
   const hasHelpful=(utility.exact_helpful+utility.cross_context_helpful)>0;
   const hasHarmful=(utility.exact_harmful+utility.cross_context_harmful)>0;
   const conflicted=hasHelpful&&hasHarmful;
-  const harmfulDominant=utility.weighted_harmful>utility.weighted_helpful;
-  const severeExactHarm=utility.exact_harmful>=POLICY.quarantine_exact_harmful_min;
-  const severeWeightedHarm=utility.weighted_harmful>=POLICY.quarantine_weighted_harmful_min
-    && utility.posterior_helpful<=POLICY.quarantine_posterior_max;
+  const severeHarmHistory=
+    utility.exact_harmful>=POLICY.quarantine_exact_harmful_min
+    || utility.weighted_harmful>=POLICY.quarantine_weighted_harmful_min;
+  const rehabilitationSatisfied=
+    severeHarmHistory
+    && utility.exact_helpful>=POLICY.rehabilitation_exact_helpful_min
+    && utility.weighted_helpful>=utility.weighted_harmful+POLICY.rehabilitation_helpful_margin;
 
-  if(harmfulDominant&&(severeExactHarm||severeWeightedHarm)){
-    return Object.freeze({tier:'QUARANTINED',reason:'HARMFUL_EVIDENCE_DOMINANT',conflicted});
+  // Once a case has accumulated enough harmful evidence to qualify for
+  // quarantine, contradictory or merely balancing feedback does not
+  // automatically restore it to candidate guidance. Exit requires multiple
+  // fresh exact-context helpful receipts and a positive evidence margin.
+  if(severeHarmHistory&&!rehabilitationSatisfied){
+    return Object.freeze({
+      tier:'QUARANTINED',
+      reason:'HARMFUL_HISTORY_REQUIRES_REHABILITATION_MARGIN',
+      conflicted,
+      severe_harm_history:true,
+      rehabilitation_evidence_satisfied:false,
+    });
+  }
+  if(severeHarmHistory&&rehabilitationSatisfied){
+    return Object.freeze({
+      tier:'COLD',
+      reason:'EXTERNALLY_REHABILITATED_HARMFUL_HISTORY',
+      conflicted,
+      severe_harm_history:true,
+      rehabilitation_evidence_satisfied:true,
+    });
   }
   if(conflicted){
-    return Object.freeze({tier:'COLD',reason:'UTILITY_CONFLICT',conflicted:true});
+    return Object.freeze({
+      tier:'COLD',
+      reason:'UTILITY_CONFLICT',
+      conflicted:true,
+      severe_harm_history:false,
+      rehabilitation_evidence_satisfied:false,
+    });
   }
   if(
     item.outcome==='SUCCESS'
     && utility.total_evidence_count>=POLICY.hot_evidence_min
     && utility.posterior_helpful>=POLICY.hot_posterior_min
   ){
-    return Object.freeze({tier:'HOT',reason:'REPEATED_HELPFUL_EVIDENCE',conflicted:false});
+    return Object.freeze({
+      tier:'HOT',
+      reason:'REPEATED_HELPFUL_EVIDENCE',
+      conflicted:false,
+      severe_harm_history:false,
+      rehabilitation_evidence_satisfied:false,
+    });
   }
   if(
     item.outcome==='SUCCESS'
@@ -150,12 +186,16 @@ function deriveTier({item,utility}){
       tier:'WARM',
       reason:item.corrective_trace_target===true?'VERIFIED_CORRECTION_TARGET':'NON_HARMFUL_SUCCESS',
       conflicted:false,
+      severe_harm_history:false,
+      rehabilitation_evidence_satisfied:false,
     });
   }
   return Object.freeze({
     tier:'COLD',
     reason:item.outcome==='FAILURE'?'FAILURE_CASE_REQUIRES_CONTEXT':'EVIDENCE_SPARSE_OR_UNCERTAIN',
     conflicted:false,
+    severe_harm_history:false,
+    rehabilitation_evidence_satisfied:false,
   });
 }
 
@@ -173,6 +213,8 @@ function rowFromItem(item){
     tier:derived.tier,
     tier_reason:derived.reason,
     utility_conflicted:derived.conflicted,
+    severe_harm_history:derived.severe_harm_history===true,
+    rehabilitation_evidence_satisfied:derived.rehabilitation_evidence_satisfied===true,
     candidate_guidance_allowed:derived.tier!=='QUARANTINED',
     remains_queryable:true,
     history_deleted:false,
@@ -194,6 +236,8 @@ function verifyRow(row){
     || row.history_deleted!==false
     || row.candidate_can_set_tier!==false
     || row.candidate_can_set_thresholds!==false
+    || typeof row.severe_harm_history!=='boolean'
+    || typeof row.rehabilitation_evidence_satisfied!=='boolean'
     || row.tier_is_execution_authority!==false
     || row.tier_is_promotion_authority!==false
   )throw new Error('rsi_memory_reliability_row_policy_invalid');
@@ -234,6 +278,8 @@ function verifyRow(row){
     row.tier!==expected.tier
     || row.tier_reason!==expected.reason
     || row.utility_conflicted!==expected.conflicted
+    || row.severe_harm_history!==(expected.severe_harm_history===true)
+    || row.rehabilitation_evidence_satisfied!==(expected.rehabilitation_evidence_satisfied===true)
     || row.candidate_guidance_allowed!==(expected.tier!=='QUARANTINED')
   )throw new Error('rsi_memory_reliability_tier_derivation_mismatch');
   return row;
@@ -359,6 +405,12 @@ export function rsiMemoryReliabilityTrustRootSnapshot(){
     correction_target_is_positive_reliability_signal:true,
     conflicted_utility_never_hot:true,
     repeated_harmful_evidence_can_quarantine:true,
+    quarantine_exit_requires_exact_helpful_evidence:true,
+    rehabilitation_exact_helpful_min:POLICY.rehabilitation_exact_helpful_min,
+    rehabilitation_helpful_margin:POLICY.rehabilitation_helpful_margin,
+    balancing_conflicting_feedback_is_not_rehabilitation:true,
+    cross_context_helpful_evidence_alone_cannot_rehabilitate:true,
+    rehabilitated_memory_returns_cold_not_hot:true,
     quarantined_memory_remains_queryable:true,
     quarantine_deletes_history:false,
     quarantine_is_retrieval_filter_not_authority:true,
