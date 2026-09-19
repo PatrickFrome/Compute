@@ -319,6 +319,15 @@ test('Phase36 zero-effect certificate ledger is durable-before-visible, restart-
   await restored.init();
   assert.equal(restored.snapshot().record_count,1);
   assert.equal((await restored.add({certificate:cert,verification_args:input})).state,'IDEMPOTENT');
+
+  const duplicateInput=args(fx,{certificate_id:'phase36.exposure.certificate.duplicate-transition'});
+  const duplicateCertificate=createRsiSkillExposureReleaseCertificate(duplicateInput);
+  await assert.rejects(
+    ()=>restored.add({certificate:duplicateCertificate,verification_args:duplicateInput}),
+    /transition_already_certified/,
+  );
+  assert.equal(restored.snapshot().record_count,1);
+  assert.equal(restored.snapshot().unique_eligible_transition_required,true);
 });
 
 test('Phase36 zero-effect certificate ledger retains rejected evidence and rejects self-rehashed authority widening',async(t)=>{
@@ -375,6 +384,7 @@ test('Phase36 certificate-ledger trust root keeps persistence separate from rele
   const root=rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot();
   assert.equal(root.verified_phase36_certificate_required,true);
   assert.equal(root.durable_before_visible,true);
+  assert.equal(root.unique_eligible_transition_required,true);
   assert.equal(root.certificate_is_evidence_not_effect_authority,true);
   assert.equal(root.one_attempt_release_execution_implemented_here,false);
   assert.equal(root.ledger_can_release_hold,false);
