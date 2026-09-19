@@ -134,6 +134,9 @@ export function verifyRsiHeldSkillCreditAdmission(row,args={}){
   const canonical=createRsiHeldSkillCreditAdmission({
     ...args,
     admission_id:row.admission_id,
+    target_consumer_snapshot_digest:row.target_consumer_snapshot_digest,
+    evaluation_contract_digest:row.evaluation_contract_digest,
+    retention_evidence_digest:row.retention_evidence_digest,
     retention_non_regression_pass:row.retention_non_regression_pass,
     negative_transfer_clear:row.negative_transfer_clear,
     same_consumer_context_pass:row.same_consumer_context_pass,
