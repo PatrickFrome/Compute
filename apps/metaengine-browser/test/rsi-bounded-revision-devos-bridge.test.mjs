@@ -4098,6 +4098,29 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(preparedReadback.effect_attempt_count,0);
   assert.equal(preparedReadback.blind_retry_forbidden,true);
 
+  const attemptedRelease=await runtime.recordSkillExposureReleaseAttempted({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(attemptedRelease.state,'ATTEMPTED');
+  assert.equal(attemptedRelease.effect_attempt_count,1);
+  assert.equal(attemptedRelease.durable_attempt_fence_persisted,true);
+  assert.equal(attemptedRelease.post_attempt_pre_effect_readback_required,true);
+  assert.equal(attemptedRelease.effect_started,false);
+  assert.equal(attemptedRelease.effect_performed,false);
+  assert.equal(attemptedRelease.retrieval_exposure_changed,false);
+  assert.equal(attemptedRelease.same_effect_id_retry_allowed,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_state_counts.ATTEMPTED,1);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_ATTEMPTED');
+  const attemptedReadback=runtime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1');
+  assert.equal(attemptedReadback.current_state,'ATTEMPTED');
+  assert.equal(attemptedReadback.effect_attempt_count,1);
+  assert.equal(attemptedReadback.post_attempt_pre_effect_readback_required,true);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
