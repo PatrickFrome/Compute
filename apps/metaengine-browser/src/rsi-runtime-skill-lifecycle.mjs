@@ -12,6 +12,7 @@ import {
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
 import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
 import { verifyRsiSkillExposureReleaseCertificate } from './rsi-skill-exposure-release.mjs';
+import { verifyRsiSkillLineageContaminationReview } from './rsi-skill-lineage-contamination-review.mjs';
 
 export const RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA='metaengine.rsi.runtime-skill-lifecycle.v1';
 
@@ -251,6 +252,18 @@ function validateExposureReleaseAttemptRow(row){
   const executor=exactDigest(row.effect_executor_identity_digest,'exposure_release_effect_executor');
   if(releasePrincipalDigests(certificate,row.release_certificate_args||{}).includes(executor)){
     throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
+  }
+  const lineageReview=verifyRsiSkillLineageContaminationReview(row.lineage_contamination_review,{
+    source_sha:row.source_sha,
+    library:row.release_certificate_args?.library,
+    target_skill_digest:row.skill_digest,
+    current_governance_digest:row.expected_current_governance_digest,
+    effect_executor_identity_digest:executor,
+  });
+  if(lineageReview.review_digest!==exactDigest(row.lineage_contamination_review_digest,'exposure_release_lineage_contamination_review')
+    ||lineageReview.state!=='CLEAR_FOR_ZERO_EFFECT_EXPOSURE_PRECOMMIT'
+    ||lineageReview.eligible_for_exposure_precommit!==true){
+    throw new Error('rsi_runtime_skill_exposure_release_lineage_contamination_review_invalid');
   }
   exactDigest(row.release_certificate_record_digest,'exposure_release_certificate_record');
   exactDigest(row.effect_id_digest,'exposure_release_effect_id');
@@ -756,7 +769,7 @@ export class RsiRuntimeSkillLifecycle{
     return Object.freeze({...next,attempt_digest:digest(next)});
   }
   async prepareExposureReleaseAttempt({
-    attempt_id,release_certificate,release_certificate_args,release_certificate_record_digest,
+    attempt_id,release_certificate,release_certificate_args,release_certificate_record_digest,lineage_contamination_review,
     effect_id_digest,idempotency_key_digest,effect_executor_identity_digest,
     external_governance_owner=false,external_effect_executor=false,authored_by_candidate=true,
   }={}){
@@ -798,6 +811,16 @@ export class RsiRuntimeSkillLifecycle{
     if(releasePrincipalDigests(certificate,release_certificate_args||{}).includes(executor)){
       throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
     }
+    const lineageReview=verifyRsiSkillLineageContaminationReview(lineage_contamination_review,{
+      source_sha:this.#sourceSha,
+      library:this.#library,
+      target_skill_digest:certificate.skill_digest,
+      current_governance_digest:current.governance_digest,
+      effect_executor_identity_digest:executor,
+    });
+    if(lineageReview.state!=='CLEAR_FOR_ZERO_EFFECT_EXPOSURE_PRECOMMIT'||lineageReview.eligible_for_exposure_precommit!==true){
+      throw new Error('rsi_runtime_skill_exposure_release_lineage_contamination_blocked');
+    }
     const existing=this.#findExposureReleaseAttempt(attemptId);
     if(existing){
       if(existing.release_certificate_digest===certificate.certificate_digest
@@ -823,6 +846,8 @@ export class RsiRuntimeSkillLifecycle{
       expected_next_governance_digest:certificate.next_governance_digest,
       skill_digest:certificate.skill_digest,
       upstream_admission_attempt_digest:storedAdmission.attempt_digest,
+      lineage_contamination_review:structuredClone(lineageReview),
+      lineage_contamination_review_digest:lineageReview.review_digest,
       effect_id_digest:effectId,idempotency_key_digest:idempotency,effect_executor_identity_digest:executor,
       effect_attempt_limit:1,effect_attempt_count:0,current_state:'PREPARED',transitions:[prepared],
       blind_retry_forbidden:true,ambiguous_outcome_requires_readback_only_reconciliation:true,
@@ -837,6 +862,7 @@ export class RsiRuntimeSkillLifecycle{
       state:'PREPARED',attempt_id:attemptId,attempt_digest:row.attempt_digest,
       expected_current_governance_digest:row.expected_current_governance_digest,
       expected_next_governance_digest:row.expected_next_governance_digest,
+      lineage_contamination_review_digest:row.lineage_contamination_review_digest,
       effect_attempt_count:0,retrieval_exposure_changed:false,
     });
   }
@@ -1183,6 +1209,10 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     exposure_release_attempt_payload_max_bytes:MAX_EXPOSURE_RELEASE_ATTEMPT_BYTES,
     exposure_release_pre_effect_readback_after_attempt_persist_required:true,
     ambiguous_exposure_release_readback_only_reconciliation:true,
+    exposure_release_lineage_contamination_review_required:true,
+    exposure_release_lineage_review_uses_existing_parent_skill_digest:true,
+    exposure_release_lineage_review_three_heterogeneous_critics_required:true,
+    exposure_release_lineage_review_is_effect_authority:false,
     exposure_release_is_exploration_only:true,full_activation_via_exposure_release_forbidden:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
