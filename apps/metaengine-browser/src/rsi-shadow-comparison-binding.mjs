@@ -151,6 +151,8 @@ export function rsiShadowComparisonBindingTrustRootSnapshot(){
     existing_runtime_ledger_is_only_comparison_receipt_plane:true,
     second_shadow_binding_ledger_allowed:false,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
