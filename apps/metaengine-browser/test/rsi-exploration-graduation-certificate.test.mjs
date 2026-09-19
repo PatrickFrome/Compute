@@ -20,6 +20,12 @@ import { createRsiGithubAttestationVerificationReceipt } from '../src/rsi-github
 import { createRsiLineageProvenanceAcceptance } from '../src/rsi-lineage-provenance-acceptance.mjs';
 import { createRsiSkillLineageContaminationReview } from '../src/rsi-skill-lineage-contamination-review.mjs';
 import {
+  createRsiRecursiveRiskBudget,
+  createRsiExternalStatisticalCertificate,
+  RsiRecursiveRiskLedger,
+  RSI_RISK_SPENDING_POLICIES,
+} from '../src/rsi-recursive-risk-budget.mjs';
+import {
   createRsiExplorationGraduationPreview,
   verifyRsiExplorationGraduationPreview,
   createRsiExplorationGraduationVerifierReceipt,
@@ -244,6 +250,61 @@ function verifier(fx,kind,verdict='PASS',overrides={}){
 }
 
 function statistical(fx,overrides={}){
+  const alphaPpm=overrides.false_admission_alpha_ppm??10000;
+  const pairs=overrides.paired_sample_count??32;
+  const minimumPairs=overrides.minimum_paired_sample_count??16;
+  const eValueMicro=overrides.anytime_valid_e_value_microunits??100_000_000;
+  const candidateId='phase37a.skill.candidate';
+  const candidateSha=SOURCE;
+  const parentSha='b'.repeat(40);
+  const holdout=d('statistical-holdout');
+  const evaluatorRoot=d('statistical-evaluator-root');
+  const budget=createRsiRecursiveRiskBudget({
+    budget_id:'phase37a.recursive.risk',
+    global_alpha:0.05,
+    spending_policy:RSI_RISK_SPENDING_POLICIES.TELESCOPING_ANYTIME,
+    evidence_family:'RSI_PHASE37A_GRADUATION',
+  });
+  const externalCertificate=createRsiExternalStatisticalCertificate({
+    certificate_id:'phase37a.external.statistical.certificate',
+    budget,
+    confirmation_index:1,
+    candidate_id:candidateId,
+    candidate_sha:candidateSha,
+    parent_sha:parentSha,
+    tournament_plan_digest:PAIRED,
+    holdout_digest:holdout,
+    evaluator_root_digest:evaluatorRoot,
+    method:'E_VALUE_EXTERNAL_V1',
+    alpha_used:alphaPpm/1_000_000,
+    superiority_certified:true,
+    paired_evaluation:true,
+    independent_holdout:true,
+    stopping_rule_precommitted:true,
+    optional_stopping_used:false,
+    familywise_valid:true,
+    screening_spent_alpha:false,
+    confirmation_triggered:true,
+    sample_count:pairs,
+    evidence_refs:['PHASE37A_EXTERNAL_E_VALUE'],
+    external_verifier:true,
+    authored_by_candidate:false,
+  });
+  const ledger=new RsiRecursiveRiskLedger({budget});
+  const confirmation=ledger.confirm({
+    certificate:externalCertificate,
+    candidate_id:candidateId,
+    candidate_sha:candidateSha,
+    parent_sha:parentSha,
+    tournament_plan_digest:PAIRED,
+    holdout_digest:holdout,
+    evaluator_root_digest:evaluatorRoot,
+  });
+  const extra={...overrides};
+  delete extra.false_admission_alpha_ppm;
+  delete extra.paired_sample_count;
+  delete extra.minimum_paired_sample_count;
+  delete extra.anytime_valid_e_value_microunits;
   return createRsiExplorationGraduationStatisticalReceipt({
     receipt_id:'phase37a.statistical.receipt',
     source_sha:SOURCE,
@@ -255,17 +316,22 @@ function statistical(fx,overrides={}){
     evaluation_contract_digest:EVALUATION,
     paired_instance_manifest_digest:PAIRED,
     exploration_evidence_manifest_digest:EXPLORATION_EVIDENCE,
-    stopping_policy_digest:d('stopping-policy'),
-    false_admission_error_budget_policy_digest:d('false-admission-policy'),
-    anytime_valid_certificate_digest:d('external-anytime-valid-certificate'),
+    statistical_holdout_digest:holdout,
+    statistical_evaluator_root_digest:evaluatorRoot,
+    recursive_risk_budget:budget,
+    external_statistical_certificate:externalCertificate,
+    risk_confirmation:confirmation,
+    candidate_id:candidateId,
+    candidate_sha:candidateSha,
+    parent_sha:parentSha,
     statistical_acceptor_identity_digest:d('statistical-acceptor-identity'),
-    false_admission_alpha_ppm:10000,
-    anytime_valid_e_value_microunits:100_000_000,
-    paired_sample_count:32,
-    minimum_paired_sample_count:16,
+    false_admission_alpha_ppm:alphaPpm,
+    anytime_valid_e_value_microunits:eValueMicro,
+    paired_sample_count:pairs,
+    minimum_paired_sample_count:minimumPairs,
     external_statistical_acceptor:true,
     authored_by_candidate:false,
-    ...overrides,
+    ...extra,
   });
 }
 
@@ -457,6 +523,9 @@ test('Phase37A trust root keeps graduation certificate outside activation and ef
   assert.equal(root.target_proven_positive_required,true);
   assert.equal(root.paired_same_instances_required,true);
   assert.equal(root.e_value_external_contract_required,true);
+  assert.equal(root.existing_recursive_risk_budget_required,true);
+  assert.equal(root.existing_recursive_risk_confirmation_required,true);
+  assert.equal(root.second_statistical_risk_ledger_created,false);
   assert.equal(root.process_and_outcome_verifiers_separate,true);
   assert.equal(root.controllable_and_uncontrollable_failures_separate,true);
   assert.equal(root.current_lineage_contamination_clear_required,true);
