@@ -373,6 +373,9 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   assert.equal(root.candidate_can_retire_skill,false);
   assert.equal(root.skill_activation_view_is_execution_authority,false);
   assert.equal(root.execution_authority,false);
+  assert.equal(root.browser_authority,false);
+  assert.equal(root.task_authority,false);
+  assert.equal(root.scheduler_authority,false);
   assert.equal(root.promotion_authority,false);
   assert.equal(root.self_update_authority,false);
   assert.equal(root.authority_effect,false);
