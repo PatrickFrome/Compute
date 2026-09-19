@@ -3873,6 +3873,15 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(result.state,'CONFIRMED_APPLIED_STORAGE_ONLY');
   assert.equal(result.effect_attempt_count,1);
   assert.equal(result.reconciled_pending,0);
+  assert.equal(result.admission_exposure_hold_created,true);
+  assert.match(result.admission_exposure_hold_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(restored.snapshot().admission_exposure_hold_count,1);
+  const hold=restored.admissionExposureHold(fx.skill.skill_digest);
+  assert.equal(hold.state,'HELD_DORMANT_CAP');
+  assert.equal(hold.retrieval_exposure_allowed,false);
+  assert.equal(hold.activation_allowed,false);
+  assert.equal(hold.release_authority,false);
+  assert.equal(hold.authority_effect,false);
   assert.equal(result.retrieval_exposure_changed,false);
   assert.equal(result.skill_activation_performed,false);
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
@@ -3883,6 +3892,11 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(added.state,'DORMANT_CAP');
   assert.equal(added.active_for_composition,false);
   assert.throws(()=>restored.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  const durableRestored=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+  await durableRestored.init();
+  assert.equal(durableRestored.snapshot().admission_exposure_hold_count,1);
+  assert.equal(durableRestored.admissionExposureHold(fx.skill.skill_digest).hold_digest,result.admission_exposure_hold_digest);
+  assert.throws(()=>durableRestored.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   await assert.rejects(()=>restored.executePreparedLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.prepare-execute',
     effect_executor_identity_digest:fx.executorIdentity,
@@ -3983,6 +3997,13 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(reconciled.additional_effect_attempt_performed,false);
   assert.equal(reconciled.same_effect_id_retry_allowed,false);
   assert.equal(reconciled.storage_only_pending_governance,true);
+  assert.equal(reconciled.admission_exposure_hold_present,true);
+  assert.match(reconciled.admission_exposure_hold_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.equal(store.snapshot().admission_exposure_hold_count,1);
+  const reconciledHold=store.admissionExposureHold(fx.skill.skill_digest);
+  assert.equal(reconciledHold.state,'HELD_DORMANT_CAP');
+  assert.equal(reconciledHold.retrieval_exposure_allowed,false);
+  assert.equal(reconciledHold.activation_allowed,false);
   assert.equal(store.snapshot().active_count,0);
 });
 
