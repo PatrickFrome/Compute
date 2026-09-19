@@ -4003,6 +4003,81 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED');
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
+  // The earlier review was bound to the pre-credit governance digest, so a
+  // certificate must use a fresh review of the exact post-credit state.
+  const freshReview=await runtime.reviewDormantSkillForRetrieval({
+    review_id:'phase35.runtime.dormant-review.current-lineage.fresh-credit.1',
+    attempt_id:'phase34b.runtime.attempt.1',
+    post_append_evaluation_epoch_digest:labelDigest('phase35-fresh-review-epoch'),
+    post_append_holdout_digest:labelDigest('phase35-fresh-review-holdout'),
+    post_append_evaluator_root_digest:labelDigest('phase35-fresh-review-evaluator'),
+    matched_control_receipt_digest:labelDigest('phase35-fresh-review-control'),
+    treatment_receipt_digest:labelDigest('phase35-fresh-review-treatment'),
+    post_append_evidence_digest:labelDigest('phase35-fresh-review-evidence'),
+    coalition_ablation_receipt_digest:labelDigest('phase35-fresh-review-coalition'),
+    marginal_contribution_receipt_digest:labelDigest('phase35-fresh-review-marginal'),
+    active_cap_policy_digest:labelDigest('phase35-fresh-review-cap-policy'),
+    retrieval_reviewer_identity_digest:labelDigest('phase35-fresh-review-reviewer'),
+    consumer_evaluator_identity_digest:labelDigest('phase35-fresh-review-consumer-evaluator'),
+    contamination_auditor_identity_digest:labelDigest('phase35-fresh-review-contamination-auditor'),
+    coalition_auditor_identity_digest:labelDigest('phase35-fresh-review-coalition-auditor'),
+    capacity_policy_owner_identity_digest:labelDigest('phase35-fresh-review-cap-owner'),
+    same_instances_pass:true,same_harness_pass:true,same_budget_pass:true,
+    evaluator_integrity_pass:true,consumer_state_integrity_pass:true,retrieval_profile_integrity_pass:true,
+    hidden_holdout_pass:true,contamination_clear:true,from_scratch_replay_pass:true,
+    task_non_regression:true,safety_non_regression:true,security_non_regression:true,
+    process_non_regression:true,outcome_non_regression:true,efficiency_non_regression:true,
+    strict_post_append_improvement:true,coalition_ablation_pass:true,marginal_contribution_pass:true,
+    active_cap_pass:true,external_retrieval_reviewer:true,external_consumer_evaluator:true,authored_by_candidate:false,
+  });
+  assert.equal(freshReview.state,'ELIGIBLE_FOR_EXTERNAL_RETRIEVAL_EXPOSURE_ACTIVATION_REVIEW');
+  assert.equal(freshReview.governance_digest,freshProvenance.current_governance_digest);
+  assert.notEqual(freshReview.retrieval_review_digest,review.retrieval_review_digest);
+
+  const preparedCertificate=await runtime.createSkillExposureReleaseCertificate({
+    certificate_id:'phase36.runtime.exposure.certificate.current-lineage.1',
+    skill_digest:fx.skill.skill_digest,
+    dormant_retrieval_review:freshReview,
+    routing_context_manifest_digest:labelDigest('phase36-current-routing-context'),
+    retrieval_profile_digest:labelDigest('phase36-current-retrieval-profile'),
+    shadow_routing_manifest_digest:labelDigest('phase36-current-shadow-routing'),
+    no_skill_ablation_receipt_digest:labelDigest('phase36-current-no-skill'),
+    coalition_ablation_receipt_digest:labelDigest('phase36-current-coalition'),
+    memory_poisoning_scan_digest:labelDigest('phase36-current-memory-poisoning'),
+    source_grounding_receipt_digest:labelDigest('phase36-current-source-grounding'),
+    bounded_canary_policy_digest:labelDigest('phase36-current-canary-policy'),
+    bounded_canary_result_digest:labelDigest('phase36-current-canary-result'),
+    negative_transfer_memory_digest:labelDigest('phase36-current-negative-transfer-memory'),
+    shadow_context_count:4,shadow_success_count:4,
+    shadow_hard_invariants_pass:true,no_skill_ablation_pass:true,coalition_ablation_pass:true,
+    negative_transfer_clear:true,memory_poisoning_scan_pass:true,source_grounding_pass:true,
+    bounded_canary_pass:true,canary_effect_mode:'READ_ONLY_SHADOW',
+    external_governance_owner_identity_digest:labelDigest('phase36-current-governance-owner'),
+    external_shadow_evaluator_identity_digest:labelDigest('phase36-current-shadow-evaluator'),
+    external_security_reviewer_identity_digest:labelDigest('phase36-current-security-reviewer'),
+    external_canary_evaluator_identity_digest:labelDigest('phase36-current-canary-evaluator'),
+    external_governance_owner:true,external_shadow_evaluator:true,
+    external_security_reviewer:true,external_canary_evaluator:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(preparedCertificate.certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE');
+  assert.equal(preparedCertificate.certificate.release_effect_performed,undefined);
+  assert.equal(preparedCertificate.certificate.release_token,null);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
+
+  const recordedCertificate=await runtime.recordSkillExposureReleaseCertificate({
+    certificate:preparedCertificate.certificate,
+    dormant_retrieval_review:freshReview,
+    verification_args:preparedCertificate.verification_args,
+  });
+  assert.equal(recordedCertificate.state,'RECORDED_ZERO_EFFECT');
+  assert.equal(runtime.skillExposureReleaseCertificateLedgerSnapshot().record_count,1);
+  assert.equal(runtime.skillExposureReleaseCertificateLedgerSnapshot().ledger_can_release_hold,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_RECORDED');
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
