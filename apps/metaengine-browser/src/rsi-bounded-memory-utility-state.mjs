@@ -247,12 +247,50 @@ export function verifyRsiBoundedMemoryUtilityState(row,{
     throw new Error('rsi_bounded_utility_coordinate_schema_invalid');
   }
   if(row.coordinate_count!==COORDINATE_SCHEMA.length)throw new Error('rsi_bounded_utility_coordinate_count_invalid');
-  for(const key of COORDINATE_SCHEMA)nonNegativeInt(row.coordinates?.[key],`coordinate_${key.toLowerCase()}`);
-  nonNegativeInt(row.retrieval_item_count,'retrieval_item_count',MAX_RETRIEVAL_ITEMS);
-  nonNegativeInt(row.exact_utility_evidence_count,'exact_utility_evidence_count');
-  nonNegativeInt(row.cross_context_utility_evidence_count,'cross_context_utility_evidence_count');
-  nonNegativeInt(row.total_utility_evidence_count,'total_utility_evidence_count');
-  unit(row.posterior_helpful,'posterior_helpful');
+  if(
+    !row.coordinates
+    || typeof row.coordinates!=='object'
+    || Array.isArray(row.coordinates)
+    || JSON.stringify(Object.keys(row.coordinates).sort())!==JSON.stringify([...COORDINATE_SCHEMA].sort())
+  )throw new Error('rsi_bounded_utility_coordinates_invalid');
+  for(const key of COORDINATE_SCHEMA)nonNegativeInt(row.coordinates[key],`coordinate_${key.toLowerCase()}`);
+  const retrievalItemCount=nonNegativeInt(row.retrieval_item_count,'retrieval_item_count',MAX_RETRIEVAL_ITEMS);
+  const exactEvidence=nonNegativeInt(row.exact_utility_evidence_count,'exact_utility_evidence_count');
+  const crossEvidence=nonNegativeInt(row.cross_context_utility_evidence_count,'cross_context_utility_evidence_count');
+  const totalEvidence=nonNegativeInt(row.total_utility_evidence_count,'total_utility_evidence_count');
+  const expectedExact=row.coordinates.EXACT_HELPFUL+row.coordinates.EXACT_HARMFUL+row.coordinates.EXACT_NEUTRAL;
+  const expectedCross=row.coordinates.CROSS_CONTEXT_HELPFUL+row.coordinates.CROSS_CONTEXT_HARMFUL+row.coordinates.CROSS_CONTEXT_NEUTRAL;
+  if(exactEvidence!==expectedExact||crossEvidence!==expectedCross||totalEvidence!==expectedExact+expectedCross){
+    throw new Error('rsi_bounded_utility_evidence_count_mismatch');
+  }
+  if(
+    row.coordinates.SUCCESS_CASES+row.coordinates.FAILURE_CASES!==retrievalItemCount
+    || row.coordinates.UTILITY_SPARSE_CASES>retrievalItemCount
+    || row.coordinates.CORRECTION_TARGET_CASES>retrievalItemCount
+  )throw new Error('rsi_bounded_utility_case_coordinate_mismatch');
+  const expectedWeightedHelpful=row.coordinates.EXACT_HELPFUL+0.25*row.coordinates.CROSS_CONTEXT_HELPFUL;
+  const expectedWeightedHarmful=row.coordinates.EXACT_HARMFUL+0.25*row.coordinates.CROSS_CONTEXT_HARMFUL;
+  const expectedWeightedNeutral=row.coordinates.EXACT_NEUTRAL+0.25*row.coordinates.CROSS_CONTEXT_NEUTRAL;
+  if(
+    Number(row.weighted_helpful)!==expectedWeightedHelpful
+    || Number(row.weighted_harmful)!==expectedWeightedHarmful
+    || Number(row.weighted_neutral)!==expectedWeightedNeutral
+  )throw new Error('rsi_bounded_utility_weighted_coordinate_mismatch');
+  const expectedPosterior=unit(
+    (1+expectedWeightedHelpful)/(2+expectedWeightedHelpful+expectedWeightedHarmful+0.25*expectedWeightedNeutral),
+    'expected_posterior_helpful',
+  );
+  if(unit(row.posterior_helpful,'posterior_helpful')!==expectedPosterior){
+    throw new Error('rsi_bounded_utility_posterior_mismatch');
+  }
+  const expectedMode=decideMode({
+    itemCount:retrievalItemCount,
+    weightedHelpful:expectedWeightedHelpful,
+    weightedHarmful:expectedWeightedHarmful,
+    utilityEvidenceCount:totalEvidence,
+    correctionTargetCount:row.coordinates.CORRECTION_TARGET_CASES,
+  });
+  if(row.mode!==expectedMode)throw new Error('rsi_bounded_utility_mode_mismatch');
   if(row.recommended_case_cap!==CAPS[row.mode]||row.max_recommended_case_cap!==Math.max(...Object.values(CAPS))){
     throw new Error('rsi_bounded_utility_case_cap_invalid');
   }
