@@ -463,6 +463,7 @@ export function createRsiSkillLibraryGovernance({
       ...row,
       state,
       admission_exposure_held: admissionExposureHeld,
+      admission_exposure_hold_external_release_required: admissionExposureHeld,
       active_for_composition: state === 'ACTIVE' || state === 'EXPLORATION_ACTIVE',
       retained_in_evidence_archive: true,
       hard_deleted: false,
@@ -491,6 +492,7 @@ export function createRsiSkillLibraryGovernance({
     admission_exposure_hold_count: exposureHolds.length,
     admission_exposure_holds_force_inactive: true,
     admission_exposure_hold_release_requires_external_governance: true,
+    terminal_safety_states_override_exposure_hold: true,
     library_evidence_remains_append_only: true,
     active_view_is_bounded: true,
     outcome_driven_retirement: true,
@@ -534,6 +536,7 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     || governance.active_view_is_promotion_authority !== false
     || governance.admission_exposure_holds_force_inactive !== true
     || governance.admission_exposure_hold_release_requires_external_governance !== true
+    || governance.terminal_safety_states_override_exposure_hold !== true
   ) throw new Error('rsi_skill_governance_policy_invalid');
 
   const checkedLibrary = verifyRsiVerifiedSkillLibrary(library);
@@ -560,7 +563,8 @@ export function verifyRsiSkillLibraryGovernance(governance, library) {
     const shouldActive = row.state === 'ACTIVE' || row.state === 'EXPLORATION_ACTIVE';
     const shouldHeld = holdSet.has(row.skill_digest);
     if (row.admission_exposure_held !== shouldHeld
-      || (shouldHeld && (row.state !== 'DORMANT_CAP' || row.active_for_composition !== false))
+      || row.admission_exposure_hold_external_release_required !== shouldHeld
+      || (shouldHeld && (row.state === 'ACTIVE' || row.state === 'EXPLORATION_ACTIVE' || row.active_for_composition !== false))
       || row.active_for_composition !== shouldActive
       || row.retained_in_evidence_archive !== true
       || row.hard_deleted !== false
@@ -688,6 +692,7 @@ export function rsiSkillLibraryGovernanceTrustRootSnapshot() {
     zero_evidence_skill_activation_forbidden: true,
     admission_exposure_holds_force_inactive: true,
     admission_exposure_hold_release_requires_external_governance: true,
+    terminal_safety_states_override_exposure_hold: true,
     meta_skill_authoring_prior_is_tiebreak_only: true,
     candidate_can_change_governance: false,
     candidate_can_reactivate_skill: false,
