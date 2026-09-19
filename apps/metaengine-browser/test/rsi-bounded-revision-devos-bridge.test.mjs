@@ -3890,6 +3890,21 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_REVIEW_CREATED');
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
+  // A statistically eligible zero-effect review is evidence for a later release decision,
+  // not lifecycle credit and not activation authority. Without fresh credited post-append
+  // lifecycle evidence, removing the hold would still leave the skill dormant, so the
+  // runtime preview must fail closed without mutating the durable hold.
+  await assert.rejects(
+    ()=>runtime.createSkillExposureReleasePreview({skill_digest:fx.skill.skill_digest}),
+    /next_state_not_exploration_active/,
+  );
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.deepEqual(
+    runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_skill_digests,
+    [fx.skill.skill_digest],
+  );
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
