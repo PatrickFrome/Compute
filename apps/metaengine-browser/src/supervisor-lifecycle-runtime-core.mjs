@@ -85,6 +85,9 @@ export class SupervisorLifecycleRuntime {
   // consumed wake, no send diagnostics. These two fields make that class of
   // silent retry loop observable from the state row / telemetry digest.
   #lastSendError = null; #wakeSendFailureCount = 0;
+  // D-K7: consecutive composer-blocking send failures — drives the bounded
+  // rollover when the bound conversation's composer is provably unusable.
+  #composerBlockingFailureCount = 0;
   #lastWorkerSignals = []; #monitorMs; #researchMs; #sessionMonitor; #activeRequest = null; #lastRecovery = null;
   // P0 (2026-09-17): tabs created by failed bootstrap pre-effects (auth redirect
   // surfaces) and not yet provably closed. Retried before every new bootstrap
@@ -496,6 +499,17 @@ export class SupervisorLifecycleRuntime {
     return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
   }
 
+  // D-K7: pre-effect wake-send failure reasons that mean the composer itself
+  // is unusable (cannot be typed into provably). After a bounded streak the
+  // keepalive rolls the supervisor over to a FRESH conversation — a new
+  // surface has an empty composer, where a verified replace is trivial —
+  // instead of retrying into the same poisoned draft forever.
+  static #COMPOSER_BLOCKING_REASONS = new Set([
+    'TYPE_EFFECT_AMBIGUOUS',
+    'SEMANTIC_REF_REOBSERVE_REQUIRED',
+    'SEMANTIC_SUBMIT_SUPPRESSED',
+  ]);
+
   async #sendWake(prepared) {
     if (this.#canActuate() !== true) return false;
     let clicked = false;
@@ -508,9 +522,11 @@ export class SupervisorLifecycleRuntime {
         // D-K3: a confirmed send closes the failure streak; the last error
         // stays for the projection (when it happened, how it presented).
         this.#wakeSendFailureCount = 0;
+        this.#composerBlockingFailureCount = 0;
         return true;
       }
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'SEND_WITHOUT_POSITIVE_READBACK');
+      this.#recordComposerBlockingFailure(String(sent.reason || ''));
     } catch (e) {
       await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, clicked ? 'SEND_PATH_AMBIGUOUS' : 'NO_SEND_EFFECT').catch(() => {});
       if (!clicked) await this.#keepalive.resolveAmbiguous({ observed_sent: false }).catch(() => {});
@@ -527,8 +543,26 @@ export class SupervisorLifecycleRuntime {
         failure_count: this.#wakeSendFailureCount,
         authority_effect: false,
       };
+      this.#recordComposerBlockingFailure(String(e?.message || e));
     }
     return false;
+  }
+
+  #recordComposerBlockingFailure(reason) {
+    const blocked = SupervisorLifecycleRuntime.#COMPOSER_BLOCKING_REASONS.has(reason)
+      || reason.includes('native_semantic_type_replace_unverified')
+      || reason.includes('native_semantic_ref_stale')
+      || reason.includes('supervisor_composer_not_unique');
+    if (!blocked) return;
+    this.#composerBlockingFailureCount += 1;
+    if (this.#composerBlockingFailureCount >= 3) {
+      // D-K7: three consecutive composer-blocking failures — the bound
+      // conversation's composer is provably unusable (poisoned draft that
+      // re-restores after every clear attempt). Roll over to a fresh
+      // conversation instead of looping forever.
+      this.#composerBlockingFailureCount = 0;
+      this.#keepalive.requestRollover('COMPOSER_UNCLEARABLE_DK7').catch(() => {});
+    }
   }
 
   async #waitForBootstrapRoot(tabId, attempts = 8) {

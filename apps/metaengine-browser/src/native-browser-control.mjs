@@ -694,18 +694,22 @@ export async function executeSemanticCommand(webContents, command) {
       assertCurrentSemanticRef(webContents, dbg, semanticRef);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
-      // D-K2 (live 2026-09-19): Ctrl+A + Input.insertText is NOT a reliable
-      // replace on a React-controlled composer — live probes on chat.z.ai
-      // showed the selection silently dropped between the two dispatches, so
-      // each "replace" APPENDED to the stale draft (the fleet composer had
-      // accumulated FOUR unsent task prompts, ~10k chars, which a later page
-      // reload then submitted as one garbage message). Replace on the GLM
-      // lane is now readback-verified through the AX value (equality against
-      // the typed text, hash-only in receipts) with one bounded
-      // Delete-escalation retry; a submit-path replace that still cannot be
-      // proven fails closed BEFORE Enter so no corrupted multi-prompt text
-      // can ever be sent. The legacy ChatGPT operator lane keeps its
-      // historical unverified replace (deprecated lane, unchanged contract).
+      // D-K2/D-K6 (live 2026-09-19): Ctrl+A + Input.insertText is NOT a
+      // reliable replace on the chat.z.ai composer — live probes proved the
+      // insert APPENDS (Chromium's IME-style insertText does not reliably
+      // replace the selection), so each "replace" grew a stale draft (the
+      // live fleet composer accumulated four unsent task prompts, ~10k chars,
+      // later submitted as one garbage message). The replace on the GLM lane
+      // is now ONE ATOMIC clear-and-type gesture: Ctrl+A, Delete (honors the
+      // selection; no-op if the site prevents selection), insertText —
+      // followed by an AX-value readback verification (equality against the
+      // typed text, hash-only in receipts). A submit-path replace that cannot
+      // be proven fails closed BEFORE Enter so no corrupted multi-prompt
+      // text can ever be sent. There is deliberately NO second attempt: the
+      // insert's own DOM mutation invalidates the semantic ref mid-effect
+      // (native_semantic_ref_stale), and re-typing would append a second
+      // copy of the prompt — exactly the ambiguity this lane prevents. The
+      // legacy ChatGPT operator lane keeps its historical unverified replace.
       const replaceRequested = command?.payload?.replace_existing !== false;
       const verifyReplace = replaceRequested && semanticPlatform === 'GLM_ZAI';
       let typeReadback = null;
@@ -713,31 +717,20 @@ export async function executeSemanticCommand(webContents, command) {
       if (replaceRequested) {
         if (verifyReplace) {
           const valueBefore = await readBackendNodeValue(dbg, target.backend_node_id);
-          for (let attempt = 0; attempt < 2 && !replaceVerified; attempt += 1) {
-            assertCurrentSemanticRef(webContents, dbg, semanticRef);
-            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-            await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
-            await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
-            if (attempt > 0) {
-              // Escalation: some surfaces drop the Ctrl+A selection before the
-              // insert; an explicit Delete of the (re-made) selection empties
-              // the composer so the retry inserts into a provably blank field.
-              assertCurrentSemanticRef(webContents, dbg, semanticRef);
-              assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-              await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
-              await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete' });
-            }
-            assertCurrentSemanticRef(webContents, dbg, semanticRef);
-            assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-            await dbg.sendCommand('Input.insertText', { text });
-            const valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
-            typeReadback = {
-              value_length_before: valueBefore == null ? null : valueBefore.length,
-              value_length_after: valueAfter == null ? null : valueAfter.length,
-              value_sha256_after: valueAfter == null || valueAfter === '' ? null : sha256(valueAfter),
-            };
-            replaceVerified = valueAfter === text;
-          }
+          // Atomic gesture: key events carry no DOM mutation of their own, so
+          // the whole sequence stays bound to the exact captured node.
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
+          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete' });
+          await dbg.sendCommand('Input.insertText', { text });
+          const valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
+          typeReadback = {
+            value_length_before: valueBefore == null ? null : valueBefore.length,
+            value_length_after: valueAfter == null ? null : valueAfter.length,
+            value_sha256_after: valueAfter == null || valueAfter === '' ? null : sha256(valueAfter),
+          };
+          replaceVerified = valueAfter === text;
         } else {
           assertCurrentSemanticRef(webContents, dbg, semanticRef);
           assertCurrentEffectRuntime(webContents, dbg, effectBinding);

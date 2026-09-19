@@ -118,6 +118,10 @@ test('lifecycle automatically sends the next supervisor development cycle after 
     },
     snapshot() { return { schema: 'test.session', tabs: [] }; },
     markRecovery() {},
+    // D-K5 exposed a latent fake gap: #typeAndSend calls markGenerationStarted
+    // AFTER the proven submit; a fake without it made every "successful" send
+    // throw post-effect, which the old always-retry canWake silently masked.
+    markGenerationStarted() {},
   };
   const getState = async () => ({
     tabs: [{ tab_id: 'tab1', url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', selected: true }],
@@ -155,7 +159,10 @@ test('lifecycle automatically sends the next supervisor development cycle after 
   // both CONTINUE_DEVELOPMENT and RESEARCH_ACCELERATOR_DUE are legitimate
   // automatic next-cycle wakes with identical zero-user-input contracts.
   assert.match(typed, /reason=(CONTINUE_DEVELOPMENT|RESEARCH_ACCELERATOR_DUE)/);
-  assert.match(typed, /continue coordinating the Development OS from durable state/i);
+  // D-K5 made the first send confirm properly (the fake previously threw
+  // post-effect via the missing markGenerationStarted), so EITHER automatic
+  // wake variant may dequeue first — both carry the zero-user-input contract.
+  assert.match(typed, /continue coordinating the Development OS from durable state|Continue METAENGINE Development OS work immediately/i);
   assert.equal(runtime.snapshot().continuous_service.enabled, true);
   assert.equal(runtime.snapshot().continuous_service.terminal_requires_user_message, false);
 

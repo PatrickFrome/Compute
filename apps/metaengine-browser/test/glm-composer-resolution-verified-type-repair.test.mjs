@@ -319,10 +319,10 @@ test('D-K2: healthy replace verifies on the first attempt and submits', async ()
   assert.equal(result.value_length_before, 'STALE DRAFT: previous unsent task prompt'.length);
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter' && p.type === 'rawKeyDown'));
-  assert.ok(!h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Delete'), 'no escalation needed on a healthy surface');
+  assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 1, 'exactly one insertText in the atomic gesture');
 });
 
-test('D-K2: selection-drop append is repaired by the Delete escalation and then submits', async () => {
+test('D-K2/D-K6: selection-drop append is cleared by the atomic Ctrl+A+Delete gesture and submits', async () => {
   const h = fakeZaiTyped({ appendMode: true, deleteClears: true });
   const composer = await composerRefOf(h);
   const result = await executeSemanticCommand(h.webContents, {
@@ -337,13 +337,13 @@ test('D-K2: selection-drop append is repaired by the Delete escalation and then 
       submit_after_type: true,
     },
   });
-  assert.equal(result.replace_verified, true, 'attempt 2 (Ctrl+A + Delete + insert) must verify');
-  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Delete' && p.type === 'rawKeyDown'));
+  assert.equal(result.replace_verified, true, 'the atomic clear-and-type must verify');
+  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Delete' && p.type === 'rawKeyDown'), 'Delete is dispatched inside the single gesture');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter' && p.type === 'rawKeyDown'));
 });
 
-test('D-K2: an unprovable replace fails closed BEFORE Enter — no corrupted submit is possible', async () => {
+test('D-K2/D-K6: an unprovable replace fails closed BEFORE Enter — no corrupted submit, no second append', async () => {
   const h = fakeZaiTyped({ appendMode: true, deleteClears: false });
   const composer = await composerRefOf(h);
   await assert.rejects(() => executeSemanticCommand(h.webContents, {
@@ -359,10 +359,12 @@ test('D-K2: an unprovable replace fails closed BEFORE Enter — no corrupted sub
     },
   }), /native_semantic_type_replace_unverified/);
   assert.ok(!h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Enter'), 'Enter must never dispatch when the replace is unproven');
-  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchKeyEvent' && p.key === 'Delete'), 'the escalation retry must have run');
+  // exactly ONE insertText — the D-K6 rule: no re-type after a mutated attempt
+  const inserts = h.calls.filter(([m]) => m === 'Input.insertText');
+  assert.equal(inserts.length, 1, 'a failed replace must not re-type (double-append hazard)');
 });
 
-test('D-K2: non-submit type reports replace_verified instead of failing', async () => {
+test('D-K2/D-K6: non-submit type reports replace_verified instead of failing', async () => {
   const h = fakeZaiTyped({ appendMode: true, deleteClears: false });
   const composer = await composerRefOf(h);
   const result = await executeSemanticCommand(h.webContents, {
@@ -378,10 +380,11 @@ test('D-K2: non-submit type reports replace_verified instead of failing', async 
     },
   });
   assert.equal(result.replace_verified, false);
-  // Both attempts appended (deleteClears: false): base + probe + probe.
-  const expectedValue = 'STALE DRAFT: previous unsent task prompt' + 'probe' + 'probe';
+  // Single append (no retry): base + probe.
+  const expectedValue = 'STALE DRAFT: previous unsent task prompt' + 'probe';
   assert.equal(result.value_length_after, expectedValue.length);
   assert.equal(result.value_sha256_after, sha256(expectedValue));
+  assert.equal(h.calls.filter(([m]) => m === 'Input.insertText').length, 1, 'exactly one insertText — no re-type');
 });
 
 test('D-K2: replace_existing=false keeps append semantics with replace_verified null', async () => {
@@ -469,4 +472,103 @@ test('D-K2: legacy ChatGPT submit lane keeps its historical unverified replace c
   assert.equal(result.replace_verified, null, 'legacy lane is not readback-verified');
   assert.equal(result.effect_state, 'PROVEN_GENERATING');
   assert.ok(!('value_length_after' in result));
+});
+
+// ---------------------------------------------------------------------------
+// D-K5: unsent-wake retry throttle (keepalive unit contract)
+// ---------------------------------------------------------------------------
+
+test('D-K5: an unsent wake attempt costs the wake interval before retry', async () => {
+  const { SupervisorKeepalive } = await import('../src/supervisor-keepalive.mjs');
+  let now = Date.parse('2026-09-19T12:00:00Z');
+  const persisted = [];
+  const ka = new SupervisorKeepalive({
+    loadState: async () => null,
+    saveState: async (v) => persisted.push(structuredClone(v)),
+    clock: () => now,
+    uuid: () => 'u' + Math.random().toString(16).slice(2),
+    processIncarnationId: 'process_test_dk5',
+    minWakeIntervalMs: 60000,
+  });
+  await ka.init();
+  await ka.bindConversation({ url: CONVERSATION, tab_id: 'tab1' });
+  await ka.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'k1' });
+  assert.equal(ka.canWake(), true, 'first attempt allowed');
+
+  const prepared = await ka.prepareNextWake();
+  assert.equal(prepared.ok, true);
+  // pre-effect failure path: ambiguous -> resolved as provably not sent
+  await ka.markWakeAmbiguous(prepared.pending.wake_id, 'NO_SEND_EFFECT');
+  await ka.resolveAmbiguous({ observed_sent: false });
+
+  now += 5_000;
+  assert.equal(ka.canWake(), false, 'retry within the interval is suppressed (even for CONTINUE_DEVELOPMENT)');
+  const suppressed = await ka.prepareNextWake();
+  assert.equal(suppressed.ok, false);
+
+  now += 60_000;
+  assert.equal(ka.canWake(), true, 'after the interval the retry is allowed');
+  const retry = await ka.prepareNextWake();
+  assert.equal(retry.ok, true);
+
+  // a confirmed send clears the throttle entirely
+  await ka.markWakeAmbiguous(retry.pending.wake_id, 'NO_SEND_EFFECT');
+  await ka.resolveAmbiguous({ observed_sent: false });
+  now += 60_000;
+  const third = await ka.prepareNextWake();
+  assert.equal(third.ok, true);
+  await ka.confirmWakeSent(third.pending.wake_id);
+  // confirmWakeSent leaves the wake ACTIVE (cycle running) — complete it.
+  await ka.markCycleComplete();
+  await ka.enqueueWake('CONTINUE_DEVELOPMENT', { key: 'k2' });
+  assert.equal(ka.canWake(), true, 'a confirmed send resets the unsent-attempt throttle (no interval penalty after completion)');
+});
+
+// ---------------------------------------------------------------------------
+// D-K7: bounded rollover when the bound composer is provably unusable
+// ---------------------------------------------------------------------------
+
+test('D-K7: three consecutive composer-blocking failures request a rollover', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'metaengine-dk7-'));
+  const statePath = path.join(dir, 'keepalive.json');
+  const getState = async () => ({
+    tabs: [{ tab_id: 'tab1', url: CONVERSATION, selected: true }],
+    fleet: { agents: [] },
+  });
+  const executeCommand = async (command) => {
+    if (command.action === 'CAPTURE') {
+      return {
+        url: CONVERSATION, title: 'Z.ai', text_excerpt: '',
+        semantic_targets: [
+          { role: 'textbox', name: 'Send a Message', semantic_ref: COMPOSER_REF, backend_node_id: 1770, value_length: 999, value_sha256: sha256('poisoned draft') },
+          { role: 'textbox', name: null, semantic_ref: AUX_REF, backend_node_id: 1864, value_length: 436, value_sha256: sha256('aux') },
+        ],
+      };
+    }
+    if (command.action === 'SEMANTIC_TYPE') {
+      // The suppressed pre-effect path: the send-boundary executor converts
+      // the underlying throw into {suppressed, reason: TYPE_EFFECT_AMBIGUOUS}.
+      return { suppressed: true, reason: 'TYPE_EFFECT_AMBIGUOUS' };
+    }
+    throw new Error(`unexpected_action:${command.action}`);
+  };
+  const runtime = new SupervisorLifecycleRuntime({
+    getState,
+    executeCommand,
+    canActuate: () => true,
+    statePath,
+    monitorMs: 1,
+    researchMs: 5 * 60 * 1000,
+    sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
+  });
+  await runtime.start();
+  // Three cycles with a poisoned composer -> rollover requested.
+  await runtime.cycle({ force: true });
+  await runtime.cycle({ force: true });
+  await runtime.cycle({ force: true });
+  const snap = runtime.snapshot();
+  assert.equal(['ROLLOVER_REQUIRED', 'ROLLOVER_DEFERRED', 'ROLLOVER_PENDING'].includes(snap.keepalive.state), true,
+    `expected a rollover state after 3 composer-blocking failures, got ${snap.keepalive.state}`);
+  assert.equal(snap.keepalive.rollover_reason, 'COMPOSER_UNCLEARABLE_DK7');
+  await fs.rm(dir, { recursive: true, force: true });
 });

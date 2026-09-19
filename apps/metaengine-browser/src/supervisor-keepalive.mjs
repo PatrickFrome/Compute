@@ -97,6 +97,10 @@ function freshState() {
     ambiguous_history: [],
     last_wake_at: null,
     last_wake_reason: null,
+    // D-K5: timestamp of the last wake that was prepared but provably not
+    // sent (pre-effect failure). Rate-limits the retry storm; cleared on a
+    // confirmed send.
+    last_unsent_attempt_at: null,
     last_completed_cycle_at: null,
     last_research_wake_at: null,
     previous_worker_generation: {},
@@ -163,6 +167,7 @@ function sanitize(input) {
     ambiguous_history: ambiguousHistory,
     last_wake_at: input.last_wake_at || null,
     last_wake_reason: input.last_wake_reason || null,
+    last_unsent_attempt_at: input.last_unsent_attempt_at || null,
     last_completed_cycle_at: input.last_completed_cycle_at || null,
     last_research_wake_at: input.last_research_wake_at || null,
     previous_worker_generation: sanitizeWorkerGenerationMap(input.previous_worker_generation),
@@ -637,6 +642,17 @@ export class SupervisorKeepalive {
       || ['PARKED','WAKE_AMBIGUOUS','ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) return false;
     const actionable = this.#state.queued_wakes.filter((row) => row.process_incarnation_id === this.#processIncarnationId);
     if (!this.#state.conversation_url || this.#state.pending_wake || this.#state.active_wake || actionable.length === 0) return false;
+    // D-K5 (live 2026-09-19): a wake that was prepared but provably NOT sent
+    // (pre-effect throw: composer resolution, replace unverified, stale ref)
+    // used to be re-prepared on the very next monitor tick — and the
+    // CONTINUE_DEVELOPMENT reason bypasses the wake interval entirely, so a
+    // permanent pre-effect failure became a ~2s retry storm that raced the
+    // page's draft-sync and appended ~3k chars of wake text per MINUTE to the
+    // composer. One unsent attempt must cost at least the wake interval.
+    if (this.#state.last_unsent_attempt_at) {
+      const since = this.#clock() - new Date(this.#state.last_unsent_attempt_at).getTime();
+      if (Number.isFinite(since) && since < this.#minWakeIntervalMs) return false;
+    }
     if (!this.#state.last_wake_at) return true;
     if (String(actionable[0]?.reason || '') === 'CONTINUE_DEVELOPMENT') return true;
     return this.#clock() - new Date(this.#state.last_wake_at).getTime() >= this.#minWakeIntervalMs;
@@ -680,6 +696,7 @@ export class SupervisorKeepalive {
     this.#state.cycle_seq = pending.cycle_seq;
     this.#state.last_wake_at = iso(this.#clock);
     this.#state.last_wake_reason = pending.reason;
+    this.#state.last_unsent_attempt_at = null;
     this.#state.queued_wakes = this.#state.queued_wakes.filter((row) => row.key !== pending.queue_key);
     this.#state.pending_wake = null;
     this.#state.active_wake = {
@@ -817,6 +834,9 @@ export class SupervisorKeepalive {
     if (this.#state.state !== 'WAKE_AMBIGUOUS' || !this.#state.pending_wake) throw new Error('keepalive_no_ambiguous_wake');
     if (observed_sent === true) return this.confirmWakeSent(this.#state.pending_wake.wake_id);
     if (observed_sent === false) {
+      // D-K5: the wake was provably not sent — record the attempt so the
+      // retry pays the wake-interval price instead of storming.
+      this.#state.last_unsent_attempt_at = iso(this.#clock);
       this.#state.pending_wake = null;
       this.#state.state = this.#state.paused
         ? 'PAUSED'
