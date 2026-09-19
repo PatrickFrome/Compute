@@ -1,0 +1,60 @@
+name: RSI R13 Durable Graduation Witness Preflight
+
+on:
+  push:
+    branches:
+      - 'work/browser-final-2026-convergence-rsi-r13-durable-graduation-witness-v1'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/rsi-durable-recursive-risk-ledger.mjs'
+      - 'apps/metaengine-browser/src/rsi-exploration-graduation-certificate.mjs'
+      - 'apps/metaengine-browser/test/rsi-durable-recursive-risk-ledger.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-exploration-graduation-certificate.test.mjs'
+      - 'apps/metaengine-browser/src/rsi-runtime-service.mjs'
+      - 'apps/metaengine-browser/src/rsi-isolated-candidate-builder.mjs'
+      - 'apps/metaengine-browser/src/rsi-shadow-tournament.mjs'
+      - 'apps/metaengine-browser/src/rsi-promotion-admission-gate.mjs'
+      - '.github/workflows/rsi-r13-durable-graduation-witness-preflight.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsi-r13-durable-graduation-witness-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  durable-graduation-witness-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Run durable witness focused tests
+        working-directory: apps/metaengine-browser
+        run: >
+          node --test
+          test/rsi-recursive-risk-budget.test.mjs
+          test/rsi-durable-state-persistence.test.mjs
+          test/rsi-durable-recursive-risk-ledger.test.mjs
+          test/rsi-exploration-graduation-certificate.test.mjs
+          test/rsi-r9-exposure-trust-root-closure.test.mjs
+          test/rsi-runtime-service.test.mjs
