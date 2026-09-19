@@ -22,7 +22,7 @@ const MAX_PENDING=4096;
 const MAX_EVIDENCE=16384;
 const MAX_ADMISSION_ATTEMPTS=1024;
 const MAX_RECONCILIATION_READBACKS=16;
-const ADMISSION_TERMINAL_STATES=new Set(['CONFIRMED_APPLIED_STORAGE_ONLY','CONFIRMED_NOT_APPLIED_NEW_ATTEMPT_REQUIRED']);
+const ADMISSION_TERMINAL_STATES=new Set(['CONFIRMED_APPLIED_STORAGE_ONLY','CONFIRMED_NOT_APPLIED_NEW_ATTEMPT_REQUIRED','PRE_EFFECT_DRIFT_NO_EFFECT']);
 
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]))}
 function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(v)),'utf8').digest('hex')}`}
@@ -407,9 +407,32 @@ export class RsiRuntimeSkillLifecycle{
     });
     const row=this.#findAdmissionAttempt(attempted.attempt_id);
     if(row.current_state!=='ATTEMPTED'||row.effect_attempt_count!==1)throw new Error('rsi_runtime_skill_admission_attempt_state_invalid');
+    const preEffectLibraryDigest=this.#library?.library_digest||null;
     const preEffectGovernance=this.governance();
-    if(!preEffectGovernance||preEffectGovernance.governance_digest!==row.predecessor_governance_digest){
-      throw new Error('rsi_runtime_skill_admission_pre_effect_governance_drift');
+    const preEffectGovernanceDigest=preEffectGovernance?.governance_digest||null;
+    if(preEffectLibraryDigest!==row.predecessor_library_digest||preEffectGovernanceDigest!==row.predecessor_governance_digest){
+      const observationDigest=digest({
+        observed_library_digest:preEffectLibraryDigest,
+        observed_governance_digest:preEffectGovernanceDigest,
+        expected_library_digest:row.predecessor_library_digest,
+        expected_governance_digest:row.predecessor_governance_digest,
+        effect_started:false,
+      });
+      const drifted=this.#appendAdmissionState(row,'PRE_EFFECT_DRIFT_NO_EFFECT',observationDigest);
+      this.#replaceAdmissionAttempt(drifted);
+      await this.#persist();
+      return zero({
+        state:'PRE_EFFECT_DRIFT_NO_EFFECT',
+        attempt_id:row.attempt_id,
+        attempt_digest:drifted.attempt_digest,
+        observed_library_digest:preEffectLibraryDigest,
+        observed_governance_digest:preEffectGovernanceDigest,
+        effect_attempt_count:1,
+        effect_started:false,
+        effect_not_started_proven:true,
+        new_attempt_required:true,
+        same_effect_id_retry_allowed:false,
+      });
     }
     const prior=this.#library;
     try{
