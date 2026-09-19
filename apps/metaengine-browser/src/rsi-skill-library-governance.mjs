@@ -134,6 +134,33 @@ function findEntry(library, skillDigest) {
   return entry;
 }
 
+function verifyAppendOnlyLibraryAncestor(ancestor, current) {
+  const older = verifyRsiVerifiedSkillLibrary(ancestor);
+  const newer = verifyRsiVerifiedSkillLibrary(current);
+  if (older.library_id !== newer.library_id) throw new Error('rsi_skill_governance_library_lineage_identity_drift');
+  const currentByDigest = new Map(newer.entries.map((entry) => [entry.skill_digest, entry]));
+  for (const entry of older.entries) {
+    const currentEntry = currentByDigest.get(entry.skill_digest);
+    if (
+      !currentEntry
+      || currentEntry.skill_id !== entry.skill_id
+      || currentEntry.skill_version !== entry.skill_version
+      || currentEntry.evidence_digest !== entry.evidence_digest
+    ) {
+      throw new Error('rsi_skill_governance_library_lineage_non_append_only');
+    }
+  }
+  return older;
+}
+
+function lifecycleEvidenceLibrary(evidence, currentLibrary, lineageByDigest) {
+  const boundDigest = exactDigest(evidence?.library_digest, 'lifecycle_evidence_library');
+  const boundLibrary = lineageByDigest.get(boundDigest);
+  if (!boundLibrary) throw new Error('rsi_skill_governance_lifecycle_evidence_library_lineage_missing');
+  if (boundLibrary.library_digest !== currentLibrary.library_digest) verifyAppendOnlyLibraryAncestor(boundLibrary, currentLibrary);
+  return boundLibrary;
+}
+
 export function createRsiSkillLifecycleEvidence({
   library,
   evidence_id,
@@ -416,6 +443,7 @@ export function createRsiSkillLibraryGovernance({
   governance_id,
   library,
   lifecycle_evidence,
+  historical_libraries = [],
   max_active_skills = 64,
   exploration_slots = 8,
   min_positive_observations = 4,
@@ -430,6 +458,12 @@ export function createRsiSkillLibraryGovernance({
   authored_by_candidate = true,
 } = {}) {
   const checkedLibrary = verifyRsiVerifiedSkillLibrary(library);
+  if (!Array.isArray(historical_libraries) || historical_libraries.length > 1024) throw new Error('rsi_skill_governance_library_lineage_invalid');
+  const lineageByDigest = new Map([[checkedLibrary.library_digest, checkedLibrary]]);
+  for (const candidate of historical_libraries) {
+    const historical = verifyAppendOnlyLibraryAncestor(candidate, checkedLibrary);
+    lineageByDigest.set(historical.library_digest, historical);
+  }
   if (external_library_owner !== true || authored_by_candidate !== false) {
     throw new Error('rsi_skill_governance_external_origin_required');
   }
@@ -459,7 +493,9 @@ export function createRsiSkillLibraryGovernance({
   const seenEvidence = new Set();
   const seenWindow = new Set();
   for (const row of lifecycle_evidence) {
-    const checked = verifyRsiSkillLifecycleEvidence(row, checkedLibrary);
+    const evidenceLibrary = lifecycleEvidenceLibrary(row, checkedLibrary, lineageByDigest);
+    const checked = verifyRsiSkillLifecycleEvidence(row, evidenceLibrary);
+    if (!bySkill.has(checked.skill_digest)) throw new Error('rsi_skill_governance_lifecycle_evidence_skill_not_in_current_library');
     if (seenEvidence.has(checked.evidence_digest)) throw new Error('rsi_skill_governance_lifecycle_evidence_duplicate');
     seenEvidence.add(checked.evidence_digest);
     const key = `${checked.skill_digest}:${checked.window_seq}`;
