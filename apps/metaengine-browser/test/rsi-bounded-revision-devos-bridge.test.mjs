@@ -3819,6 +3819,55 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
+  const review=await runtime.reviewDormantSkillForRetrieval({
+    review_id:'phase35.runtime.dormant-review.1',
+    attempt_id:'phase34b.runtime.attempt.1',
+    post_append_evaluation_epoch_digest:labelDigest('phase35-review-epoch'),
+    post_append_holdout_digest:labelDigest('phase35-review-holdout'),
+    post_append_evaluator_root_digest:labelDigest('phase35-review-evaluator'),
+    matched_control_receipt_digest:labelDigest('phase35-review-control'),
+    treatment_receipt_digest:labelDigest('phase35-review-treatment'),
+    post_append_evidence_digest:labelDigest('phase35-review-evidence'),
+    coalition_ablation_receipt_digest:labelDigest('phase35-review-coalition'),
+    marginal_contribution_receipt_digest:labelDigest('phase35-review-marginal'),
+    active_cap_policy_digest:labelDigest('phase35-review-cap-policy'),
+    retrieval_reviewer_identity_digest:labelDigest('phase35-review-reviewer'),
+    consumer_evaluator_identity_digest:labelDigest('phase35-review-consumer-evaluator'),
+    contamination_auditor_identity_digest:labelDigest('phase35-review-contamination-auditor'),
+    coalition_auditor_identity_digest:labelDigest('phase35-review-coalition-auditor'),
+    capacity_policy_owner_identity_digest:labelDigest('phase35-review-cap-owner'),
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    evaluator_integrity_pass:true,
+    consumer_state_integrity_pass:true,
+    retrieval_profile_integrity_pass:true,
+    hidden_holdout_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    task_non_regression:true,
+    safety_non_regression:true,
+    security_non_regression:true,
+    process_non_regression:true,
+    outcome_non_regression:true,
+    efficiency_non_regression:true,
+    strict_post_append_improvement:true,
+    coalition_ablation_pass:true,
+    marginal_contribution_pass:true,
+    active_cap_pass:true,
+    external_retrieval_reviewer:true,
+    external_consumer_evaluator:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(review.state,'ELIGIBLE_FOR_EXTERNAL_RETRIEVAL_EXPOSURE_ACTIVATION_REVIEW');
+  assert.equal(review.admission_exposure_hold_verified,true);
+  assert.equal(review.review_is_eligibility_evidence_only,true);
+  assert.equal(review.retrieval_exposure_changed,false);
+  assert.equal(review.skill_activation_performed,false);
+  assert.equal(review.browser_authority,false);
+  assert.equal(review.task_authority,false);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
