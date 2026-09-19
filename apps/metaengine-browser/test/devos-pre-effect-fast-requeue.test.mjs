@@ -67,14 +67,14 @@ function browserState(selected = supervisorTab) {
   };
 }
 
-function frame({ targetId = lease.target_id, viewport = { width: 1200, height: 640 } } = {}) {
+function frame({ targetId = lease.target_id, viewport = { width: 1200, height: 640 }, composerMissing = false } = {}) {
   return {
     schema: 'metaengine.native-browser.perception.v1',
     tab_id: lease.tab_id,
     target_id: targetId,
     url: 'https://chatgpt.com/',
     viewport,
-    semantic_targets: [composer, send],
+    semantic_targets: composerMissing ? [send] : [composer, send],
     authority_effect: false,
   };
 }
@@ -134,8 +134,12 @@ function harness({ captureFrame }) {
   return { cycle, commands, requests, recovery: () => recoveryPayload, selected: () => selected };
 }
 
-test('zero viewport is requeued immediately as proven pre-effect absence instead of waiting lease TTL', async () => {
-  const h = harness({ captureFrame: () => frame({ viewport: { width: 0, height: 0 } }) });
+test('missing composer is requeued immediately as proven pre-effect absence instead of waiting lease TTL', async () => {
+  // D-S2 (2026-09-19): a 0x0 viewport is no longer a GLM submit gate (the
+  // semantic lane is geometry-independent), so the fast pre-effect requeue is
+  // pinned with a still-valid pre-effect cause: no unique composer on the
+  // captured surface.
+  const h = harness({ captureFrame: () => frame({ composerMissing: true }) });
   const out = await h.cycle.cycle();
   assert.equal(out.pre_effect_lease_stall_fast_requeue, true);
   assert.equal(out.pre_effect_reconciliation.state, 'PRE_EFFECT_REQUEUED');
