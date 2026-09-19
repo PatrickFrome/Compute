@@ -3042,7 +3042,7 @@ function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
     benchmark_provenance_attestor_identity_digest:labelDigest(label+'-benchmark-attestor-id'),
     evaluator_provenance_attestor_identity_digest:labelDigest(label+'-evaluator-attestor-id'),
     contamination_attestor_identity_digest:labelDigest(label+'-contamination-attestor-id'),
-    statistical_acceptor_identity_digest:labelDigest(label+'-phase34-statistical-acceptor-id'),
+    statistical_acceptor_identity_digest:labelDigest(label+'-phase33-statistical-acceptor-id'),
     false_admission_alpha_ppm:50000,
     anytime_valid_e_value_microunits:25000000,
     paired_sample_count:64,
