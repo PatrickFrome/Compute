@@ -1382,6 +1382,90 @@ export class RsiRuntimeService {
     return this.#skillLifecycle.exposureReleaseAttemptSnapshot(attempt_id);
   }
 
+  async executeSkillExposureReleaseAttempt({
+    attempt_id,
+    effect_executor_identity_digest,
+    external_effect_executor = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.executeAttemptedExposureRelease({
+      attempt_id,
+      effect_executor_identity_digest,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_EXECUTED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest,
+      release_certificate_digest: result.release_certificate_digest || null,
+      skill_digest: result.skill_digest || null,
+      state: result.state,
+      effect_attempt_count: result.effect_attempt_count,
+      effect_started: result.effect_started === true,
+      effect_performed: result.effect_performed === true,
+      post_attempt_pre_effect_readback_passed: result.post_attempt_pre_effect_readback_passed === true,
+      post_effect_readback_passed: result.post_effect_readback_passed === true,
+      no_effect_proven: result.no_effect_proven === true,
+      new_attempt_required: result.new_attempt_required === true,
+      reconciliation_required: result.reconciliation_required === true,
+      same_effect_id_retry_allowed: false,
+      retrieval_exposure_changed: result.retrieval_exposure_changed === true,
+      exploration_exposure_released: result.exploration_exposure_released === true,
+      resulting_state: result.resulting_state || null,
+      full_activation_authorized: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  async reconcileSkillExposureReleaseAttempt({
+    attempt_id,
+    readback_owner_identity_digest,
+    external_readback_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.reconcileExposureReleaseAttempt({
+      attempt_id,
+      readback_owner_identity_digest,
+      external_readback_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_RECONCILED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest || null,
+      state: result.state,
+      current_state: result.current_state || null,
+      effect_attempt_count: result.effect_attempt_count ?? 1,
+      additional_effect_attempt_performed: false,
+      same_effect_id_retry_allowed: false,
+      effect_performed: result.effect_performed === true,
+      retrieval_exposure_changed: result.retrieval_exposure_changed === true,
+      exploration_exposure_released: result.exploration_exposure_released === true,
+      no_effect_proven: result.no_effect_proven === true,
+      new_attempt_required: result.new_attempt_required === true,
+      reconciliation_complete: result.reconciliation_complete === true || result.state === 'IDEMPOTENT_TERMINAL',
+      full_activation_authorized: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
   async recordSkillExposureReleaseAttempted({
     attempt_id,
     effect_executor_identity_digest,
