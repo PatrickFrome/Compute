@@ -12,6 +12,7 @@ import { verifyRsiExternalEvaluationBundle } from './rsi-external-evaluation-evi
 export const RSI_RETRIEVAL_INFLUENCE_ADMISSION_SCHEMA='metaengine.rsi.retrieval-influence-admission.v1';
 export const RSI_RETRIEVAL_INFLUENCE_ROOT_SCHEMA='metaengine.rsi.retrieval-influence-root.v1';
 
+const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const SAFE_TOKEN_RE=/^[A-Z0-9][A-Z0-9_.:-]{0,95}$/;
@@ -56,6 +57,11 @@ function assertZeroAuthority(value,label){
   if(Object.hasOwn(value||{},'automatic_retry_allowed')&&value.automatic_retry_allowed!==false){
     throw new Error(`rsi_retrieval_influence_${label}_retry_invalid`);
   }
+}
+function sha(value,label){
+  const out=String(value||'').trim().toLowerCase();
+  if(!SHA40_RE.test(out))throw new Error(`rsi_retrieval_influence_${label}_sha_invalid`);
+  return out;
 }
 function sha256(value,label){
   const out=String(value||'').trim().toLowerCase();
@@ -213,7 +219,7 @@ export function createRsiRetrievalInfluenceAdmission({
     current_graph_snapshot_digest:sha256(graph.snapshot_digest,'current_graph_snapshot'),
     external_evaluation_bundle_digest:sha256(bundle.bundle_digest,'evaluation_bundle'),
     evaluated_candidate_id:safeId(bundle.candidate_id,'evaluated_candidate_id'),
-    evaluated_candidate_sha:String(bundle.candidate_sha||'').toLowerCase(),
+    evaluated_candidate_sha:sha(bundle.candidate_sha,'evaluated_candidate'),
     target_context_digest:sha256(plan.target_context_digest,'target_context'),
     selected_case_count:plan.selected_case_count,
     assessed_case_count:rows.length,
@@ -275,6 +281,7 @@ export function verifyRsiRetrievalInfluenceAdmission(row,{
   safeId(row.assessment_id,'assessment_id');
   safeId(row.evaluator_id,'evaluator_id');
   safeId(row.evaluated_candidate_id,'evaluated_candidate_id');
+  sha(row.evaluated_candidate_sha,'evaluated_candidate');
   for(const [value,label] of [
     [row.context_plan_digest,'context_plan'],
     [row.search_context_digest,'search_context'],
