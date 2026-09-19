@@ -23,7 +23,7 @@ import {
 } from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
-import { isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-agent-platform.mjs';
+import { classifyAgentPlatformSurface, isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-agent-platform.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -624,7 +624,7 @@ async function exactTarget(webContents, dbg, roleRaw, nameRaw, semanticRef) {
   return matches[0];
 }
 
-async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null) {
+async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null, { clickCount = 1 } = {}) {
   const model = await dbg.sendCommand('DOM.getBoxModel', { backendNodeId });
   const quad = model?.model?.content || model?.model?.border;
   if (!Array.isArray(quad) || quad.length < 8) throw new Error('native_semantic_box_unavailable');
@@ -640,10 +640,11 @@ async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null) {
   if (!(width > 0 && height > 0)) throw new Error('native_semantic_target_not_visible');
   // D-M1: the pre-dispatch currency gate may re-anchor asynchronously.
   await beforeDispatch?.();
+  const count = Number.isSafeInteger(clickCount) && clickCount >= 1 && clickCount <= 3 ? Math.trunc(clickCount) : 1;
   await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseMoved', x, y, button:'none' });
-  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mousePressed', x, y, button:'left', clickCount:1 });
-  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseReleased', x, y, button:'left', clickCount:1 });
-  return { x, y };
+  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mousePressed', x, y, button:'left', clickCount: count });
+  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseReleased', x, y, button:'left', clickCount: count });
+  return { x, y, click_count: count };
 }
 
 function assertCurrentEffectRuntime(webContents, dbg, binding) {
@@ -834,17 +835,65 @@ export async function executeSemanticCommand(webContents, command) {
       const verifyReplace = replaceRequested && semanticPlatform === 'GLM_ZAI';
       let typeReadback = null;
       let replaceVerified = !verifyReplace;
+      let replaceGesture = null;
       if (replaceRequested) {
         if (verifyReplace) {
           const valueBefore = await readBackendNodeValue(dbg, target.backend_node_id);
-          // Atomic gesture: key events carry no DOM mutation of their own, so
-          // the whole sequence stays bound to the exact captured node.
-          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
-          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
-          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
-          await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete' });
-          await dbg.sendCommand('Input.insertText', { text });
-          const valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
+          // D-M3 (live 2026-09-19): the agent-task composer on the
+          // PRECONVERSATION_ROOT surface IGNORES synthetic key events entirely
+          // (live-proven: a targeted Backspace was a no-op, Ctrl+A+Delete never
+          // cleared a 26.7k-char account-synced draft, insertText appended).
+          // Two replace gestures, ordered by surface:
+          //   KEY_ATOMIC      - Ctrl+A, Delete, insertText. Proven on
+          //                     conversation composers where keys are honored.
+          //   CLICK_SELECT    - triple-click the composer (native select-all),
+          //                     then a single insertText that replaces the
+          //                     selection. For key-ignoring editors; also
+          //                     self-healing - it replaces a poisoned draft
+          //                     wholesale instead of appending to it.
+          // Fail-fast rule: a gesture whose readback is neither the text
+          // (verified) nor the untouched before-value (provable no-op) has
+          // already mutated the draft - the second gesture is NOT attempted
+          // so no double-append can occur. A preexisting exact match needs no
+          // gesture at all (resume path: a previous type succeeded but the
+          // submit did not dispatch).
+          const surfaceStage = classifyAgentPlatformSurface(preUrl)?.stage || null;
+          const gestureOrder = surfaceStage === 'PRECONVERSATION_ROOT'
+            ? ['CLICK_SELECT', 'KEY_ATOMIC']
+            : ['KEY_ATOMIC', 'CLICK_SELECT'];
+          let valueAfter = valueBefore;
+          if (valueBefore === text) {
+            replaceVerified = true;
+            replaceGesture = 'PREEXISTING_MATCH';
+          } else {
+            for (const gesture of gestureOrder) {
+              liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
+              assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+              if (gesture === 'CLICK_SELECT') {
+                // A provably empty composer needs no selection: the insert
+                // alone produces the exact text and the zero-geometry
+                // contract of the fresh-dispatch path is preserved. The
+                // triple-click (and its box geometry) is reserved for
+                // clearing a non-empty or unreadable draft.
+                if (valueBefore !== '') {
+                  await clickBackendNode(dbg, target.backend_node_id, null, { clickCount: 3 });
+                }
+              } else {
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2 });
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2 });
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
+                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete' });
+              }
+              await dbg.sendCommand('Input.insertText', { text });
+              valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
+              replaceGesture = gesture;
+              if (valueAfter === text) {
+                replaceVerified = true;
+                break;
+              }
+              if (valueAfter !== valueBefore) break; // mutated (append/partial) - fail fast, no second gesture
+            }
+          }
           typeReadback = {
             value_length_before: valueBefore == null ? null : valueBefore.length,
             value_length_after: valueAfter == null ? null : valueAfter.length,
@@ -875,6 +924,7 @@ export async function executeSemanticCommand(webContents, command) {
           inserted_chars: text.length,
           replace_existing: replaceRequested,
           replace_verified: verifyReplace ? replaceVerified : null,
+          replace_gesture: verifyReplace ? replaceGesture : null,
           ...(typeReadback || {}),
           prompt_sha256: sha256(text),
           prompt_included: false,
@@ -912,6 +962,7 @@ export async function executeSemanticCommand(webContents, command) {
             inserted_chars: text.length,
             replace_existing: replaceRequested,
             replace_verified: verifyReplace ? replaceVerified : null,
+            replace_gesture: verifyReplace ? replaceGesture : null,
             ...(typeReadback || {}),
             submit_after_type: true,
             prompt_sha256: sha256(text),
@@ -977,6 +1028,7 @@ export async function executeSemanticCommand(webContents, command) {
           inserted_chars: text.length,
           replace_existing: replaceRequested,
           replace_verified: verifyReplace ? replaceVerified : null,
+          replace_gesture: verifyReplace ? replaceGesture : null,
           ...(typeReadback || {}),
           submit_after_type: true,
           prompt_sha256: sha256(text),
