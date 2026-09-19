@@ -28,17 +28,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
-      - name: Checkout exact head
+      - name: Checkout exact branch head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Prove exact head
+      - name: Prove exact branch head
         shell: bash
         env:
-          EXPECTED_HEAD: ${{ github.sha }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
