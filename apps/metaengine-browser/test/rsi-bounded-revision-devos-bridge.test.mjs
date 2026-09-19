@@ -3877,11 +3877,14 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(result.skill_activation_performed,false);
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
   assert.equal(restored.snapshot().active_count,0);
+  assert.equal(restored.snapshot().admission_exposure_hold_count,1);
   const governance=restored.governance();
   const added=governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
   assert.equal(added.evidence_window_count,0);
   assert.equal(added.state,'DORMANT_CAP');
   assert.equal(added.active_for_composition,false);
+  assert.equal(added.admission_exposure_held,true);
+  assert.equal(added.admission_exposure_hold_external_release_required,true);
   assert.throws(()=>restored.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   await assert.rejects(()=>restored.executePreparedLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.prepare-execute',
@@ -3951,6 +3954,7 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   const externalEffect=await store.adoptVerifiedLibrary({
     library:fx.successorLibrary,
     expected_current_library_digest:fx.currentLibrary.library_digest,
+    admission_exposure_hold_skill_digests:[fx.skill.skill_digest],
     external_library_owner:true,
     authored_by_candidate:false,
   });
@@ -4034,5 +4038,8 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.storage_append_does_not_reconcile_pending_evidence,true);
   assert.equal(root.storage_append_does_not_activate_skill,true);
   assert.equal(root.zero_evidence_skill_activation_forbidden,true);
+  assert.equal(root.append_new_skills_require_exposure_hold,true);
+  assert.equal(root.admission_exposure_holds_force_dormant,true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
   assert.equal(root.authority_effect,false);
 });
