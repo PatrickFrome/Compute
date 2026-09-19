@@ -112,6 +112,21 @@ function freshState() {
   };
 }
 
+// D-K8 (live 2026-09-19): every "settle back to WAITING" transition must be
+// rollover-aware. A requested rollover (rollover_reason set) used to be
+// silently dropped when a pending wake was resolved/retired right after the
+// request — the state machine fell back to WAITING, prepared a fresh wake and
+// the rollover was lost until the next trigger (observed as the Windows E2E
+// interleaving: rollover requested inside #sendWake, then the ambiguity
+// recovery resolved the same wake and overwrote ROLLOVER_REQUIRED).
+function settleState(state) {
+  if (state.paused) return 'PAUSED';
+  if (state.admission_state === 'CLOSED') return 'PARKED';
+  if (state.active_wake) return 'ACTIVE';
+  if (state.rollover_reason) return state.rollover_release_at ? 'ROLLOVER_REQUIRED' : 'ROLLOVER_DEFERRED';
+  return state.conversation_url ? 'WAITING' : 'RECOVERING';
+}
+
 function sanitize(input) {
   const base = freshState();
   if (!input || input.schema !== base.schema || input.supervisor_id !== SUPERVISOR_ID) return base;
@@ -702,6 +717,13 @@ export class SupervisorKeepalive {
     this.#state.last_wake_at = iso(this.#clock);
     this.#state.last_wake_reason = pending.reason;
     this.#state.last_unsent_attempt_at = null;
+    // D-K8: a confirmed send proves the bound composer works — any pending
+    // composer-uncleanable rollover request is obsolete.
+    if (['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED'].includes(this.#state.state)) {
+      this.#state.rollover_reason = null;
+      this.#state.rollover_release_at = null;
+      this.#state.rollover_attempt = null;
+    }
     this.#state.queued_wakes = this.#state.queued_wakes.filter((row) => row.key !== pending.queue_key);
     this.#state.pending_wake = null;
     this.#state.active_wake = {
@@ -720,7 +742,7 @@ export class SupervisorKeepalive {
     this.#state.last_completed_cycle_at = iso(this.#clock);
     this.#state.active_wake = null;
     if (!this.#state.paused && !['ROLLOVER_DEFERRED','ROLLOVER_REQUIRED','ROLLOVER_PENDING','ROLLOVER_AMBIGUOUS'].includes(this.#state.state)) {
-      this.#state.state = this.#state.admission_state === 'CLOSED' ? 'PARKED' : 'WAITING';
+      this.#state.state = settleState(this.#state);
     }
     await this.#persist();
     return this.snapshot();
@@ -798,11 +820,7 @@ export class SupervisorKeepalive {
     ].slice(-MAX_WAKE_HISTORY);
     this.#state.pending_wake = null;
     this.#state.last_completed_cycle_at = retiredAt;
-    this.#state.state = this.#state.paused
-      ? 'PAUSED'
-      : (this.#state.admission_state === 'CLOSED'
-        ? 'PARKED'
-        : (this.#state.conversation_url ? 'WAITING' : 'RECOVERING'));
+    this.#state.state = settleState(this.#state);
     await this.#persist();
     return this.snapshot();
   }
@@ -843,9 +861,7 @@ export class SupervisorKeepalive {
       // retry pays the wake-interval price instead of storming.
       this.#state.last_unsent_attempt_at = iso(this.#clock);
       this.#state.pending_wake = null;
-      this.#state.state = this.#state.paused
-        ? 'PAUSED'
-        : (this.#state.admission_state === 'CLOSED' ? 'PARKED' : (this.#state.active_wake ? 'ACTIVE' : 'WAITING'));
+      this.#state.state = settleState(this.#state);
       await this.#persist();
       return this.snapshot();
     }
