@@ -59,6 +59,13 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiSkillExposureReleaseReview, rsiSkillExposureReleaseReviewTrustRootSnapshot } from './rsi-skill-exposure-release-review.mjs';
+import { rsiDurableStatePersistenceTrustRootSnapshot } from './rsi-durable-state-persistence.mjs';
+import { rsiHeldSkillCreditAdmissionTrustRootSnapshot } from './rsi-held-skill-credit-admission.mjs';
+import { rsiLineageProvenanceAcceptanceTrustRootSnapshot } from './rsi-lineage-provenance-acceptance.mjs';
+import { rsiGithubAttestationVerificationReceiptTrustRootSnapshot } from './rsi-github-attestation-verification-receipt.mjs';
+import { rsiLineageStructuralProvenanceTrustRootSnapshot } from './rsi-lineage-structural-provenance.mjs';
+import { rsiSkillLineageContaminationReviewTrustRootSnapshot } from './rsi-skill-lineage-contamination-review.mjs';
+import { rsiSkillExposureReleaseTransitionProofTrustRootSnapshot } from './rsi-skill-exposure-release-transition-proof.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -116,6 +123,13 @@ function trustRoots() {
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
     skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
+    durable_state_persistence: rsiDurableStatePersistenceTrustRootSnapshot(),
+    held_skill_credit_admission: rsiHeldSkillCreditAdmissionTrustRootSnapshot(),
+    lineage_provenance_acceptance: rsiLineageProvenanceAcceptanceTrustRootSnapshot(),
+    github_attestation_verification_receipt: rsiGithubAttestationVerificationReceiptTrustRootSnapshot(),
+    lineage_structural_provenance: rsiLineageStructuralProvenanceTrustRootSnapshot(),
+    skill_lineage_contamination_review: rsiSkillLineageContaminationReviewTrustRootSnapshot(),
+    skill_exposure_release_transition_proof: rsiSkillExposureReleaseTransitionProofTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
     memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
