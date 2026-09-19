@@ -3394,13 +3394,16 @@ function phase34Fixture(label='phase34',{p33_override=null,current_governance_ov
     admission_proposal_args:proposalArgs,
     predecessor_source_qualification:sourceQualification,
     admission_epoch_digest:labelDigest(label+'-admission-epoch'),
-    library_owner_identity_digest:labelDigest(label+'-library-owner-id'),
-    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
-    source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
-    least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
-    governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
-    benchmark_security_attestor_identity_digest:labelDigest(label+'-benchmark-security-attestor-id'),
-    harness_security_attestor_identity_digest:labelDigest(label+'-harness-security-attestor-id'),
+    // Phase34 principals are a fresh reviewer set. Reusing the Phase33 label
+    // would alias the statistical acceptor (and can alias future reviewers)
+    // across stages, defeating the cross-stage separation contract.
+    library_owner_identity_digest:labelDigest('phase34-'+label+'-library-owner-id'),
+    statistical_acceptor_identity_digest:labelDigest('phase34-'+label+'-statistical-acceptor-id'),
+    source_qualification_owner_identity_digest:labelDigest('phase34-'+label+'-source-qualification-owner-id'),
+    least_privilege_reviewer_identity_digest:labelDigest('phase34-'+label+'-least-privilege-reviewer-id'),
+    governance_reviewer_identity_digest:labelDigest('phase34-'+label+'-governance-reviewer-id'),
+    benchmark_security_attestor_identity_digest:labelDigest('phase34-'+label+'-benchmark-security-attestor-id'),
+    harness_security_attestor_identity_digest:labelDigest('phase34-'+label+'-harness-security-attestor-id'),
     benchmark_ancestry_attestation_digest:labelDigest(label+'-benchmark-ancestry-attestation'),
     clean_room_requalification_digest:labelDigest(label+'-clean-room-requalification'),
     harness_integrity_attestation_digest:labelDigest(label+'-harness-integrity-attestation'),
