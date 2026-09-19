@@ -43,6 +43,7 @@ import { RsiRuntimeExperienceGate, RSI_RUNTIME_EXPERIENCE_GATE_SCHEMA } from './
 import { createRsiBrowserOutcomeEpisode, rsiBrowserOutcomeIngestTrustRootSnapshot } from './rsi-browser-outcome-ingest.mjs';
 import { RsiCommandAttributionRegistry, RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA, rsiCommandAttributionTrustRootSnapshot } from './rsi-command-attribution-registry.mjs';
 import { createRsiStepCreditReceipt, rsiStepCreditTrustRootSnapshot } from './rsi-runtime-credit-assignment.mjs';
+import { createRsiHeldSkillCreditAdmission, rsiHeldSkillCreditAdmissionTrustRootSnapshot } from './rsi-held-skill-credit-admission.mjs';
 import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiRuntimeExperienceStoreTrustRootSnapshot } from './rsi-runtime-experience-store.mjs';
 import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } from './rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
@@ -132,6 +133,7 @@ function trustRoots() {
     browser_outcome_ingest: rsiBrowserOutcomeIngestTrustRootSnapshot(),
     command_attribution: rsiCommandAttributionTrustRootSnapshot(),
     step_credit: rsiStepCreditTrustRootSnapshot(),
+    held_skill_credit_admission: rsiHeldSkillCreditAdmissionTrustRootSnapshot(),
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
@@ -1436,6 +1438,7 @@ export class RsiRuntimeService {
     skill_authoring_provenance_digest = null,
     skill_false_positive_injection = false,
     skill_hard_invariant_violation = false,
+    held_skill_credit_context = null,
     external_credit_assigner = false,
     authored_by_candidate = true,
   } = {}) {
@@ -1454,6 +1457,32 @@ export class RsiRuntimeService {
       external_credit_assigner,
       authored_by_candidate,
     });
+    let heldSkillCreditAdmission = null;
+    if (Array.isArray(episode.skill_digests) && episode.skill_digests.length > 0) {
+      const held = episode.skill_digests
+        .map((skillDigest) => ({ skillDigest, provenance: this.#skillLifecycle.admissionExposureHoldProvenance(skillDigest) }))
+        .filter((row) => row.provenance != null);
+      if (held.length > 0) {
+        if (held.length !== 1 || episode.skill_digests.length !== 1) {
+          throw new Error('rsi_runtime_held_skill_credit_exact_single_skill_required');
+        }
+        if (!held_skill_credit_context || typeof held_skill_credit_context !== 'object') {
+          throw new Error('rsi_runtime_held_skill_credit_admission_required');
+        }
+        const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+        const governance = this.#skillLifecycle.governance();
+        if (!library || !governance) throw new Error('rsi_runtime_held_skill_credit_state_unavailable');
+        heldSkillCreditAdmission = createRsiHeldSkillCreditAdmission({
+          ...held_skill_credit_context,
+          source_sha: this.#sourceSha,
+          episode,
+          credit_receipt: creditReceipt,
+          admission_provenance: held[0].provenance,
+          current_library_digest: library.library_digest,
+          current_governance_digest: governance.governance_digest,
+        });
+      }
+    }
     const materialization = materializeRsiExperienceCaseFromCredit({
       episode,
       credit_receipt: creditReceipt,
@@ -1472,6 +1501,7 @@ export class RsiRuntimeService {
         hard_invariant_violation: skill_hard_invariant_violation === true,
         authoring_prior: skill_authoring_prior,
         authoring_provenance_digest: skill_authoring_provenance_digest || creditReceipt.evaluator_digest,
+        held_skill_credit_admission: heldSkillCreditAdmission,
         external_evaluator: true,
         authored_by_candidate: false,
       });
@@ -1495,12 +1525,16 @@ export class RsiRuntimeService {
       materialization_state: materialization.state,
       skill_lifecycle_state: skillLifecycle?.state || null,
       skill_lifecycle_credit_digest: skillLifecycle?.credit_receipt_digest || null,
+      held_skill_credit_admission_digest: heldSkillCreditAdmission?.admission_digest || null,
+      held_skill_credit_admission_state: heldSkillCreditAdmission?.state || null,
+      held_skill_credit_measurement_after_admission: heldSkillCreditAdmission?.measurement_after_admission ?? null,
+      held_skill_credit_retention_non_regression_pass: heldSkillCreditAdmission?.retention_non_regression_pass ?? null,
       skill_router_evidence_state: skillRouterEvidence?.state || null,
       skill_router_evidence_digests: skillRouterEvidence?.evidence_digests || [],
       final_task_reward_broadcast_to_all_steps: false,
       authority_effect: false,
     });
-    return Object.freeze({ credit_receipt: creditReceipt, materialization, stored, skill_lifecycle: skillLifecycle, skill_router_evidence: skillRouterEvidence });
+    return Object.freeze({ credit_receipt: creditReceipt, held_skill_credit_admission: heldSkillCreditAdmission, materialization, stored, skill_lifecycle: skillLifecycle, skill_router_evidence: skillRouterEvidence });
   }
 
   skillRevisionFrontier({ parent_skill_digest = null, max_candidates = 8 } = {}) {

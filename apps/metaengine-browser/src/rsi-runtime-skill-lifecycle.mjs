@@ -10,6 +10,7 @@ import {
   verifyRsiSkillLibraryGovernance,
 } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
+import { verifyRsiHeldSkillCreditAdmission } from './rsi-held-skill-credit-admission.mjs';
 import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
 import {
   createRsiSkillExposureReleasePreview,
@@ -735,7 +736,7 @@ export class RsiRuntimeSkillLifecycle{
       automatic_retry_allowed:false,
       authority_effect:false,
     };
-    return Object.freeze({...core,provenance_digest:digest(core)});
+    return Object.freeze({...core,provenance_digest:digest(core),confirmed_at:confirmed.captured_at});
   }
   admissionAttemptSnapshot(attemptId){
     this.#assertInit();
@@ -743,7 +744,7 @@ export class RsiRuntimeSkillLifecycle{
     return row?Object.freeze(structuredClone(row)):null;
   }
   #nextSeq(skillDigest){const next=(this.#seq.get(skillDigest)||0)+1;this.#seq.set(skillDigest,next);return next}
-  #materializeOne({episode,credit_receipt,generation,router_engaged,false_positive_injection,hard_invariant_violation,authoring_prior,authoring_provenance_digest}){
+  #materializeOne({episode,credit_receipt,generation,router_engaged,false_positive_injection,hard_invariant_violation,authoring_prior,authoring_provenance_digest,held_skill_credit_admission=null}){
     const e=assertEpisode(episode);
     const credit=verifyRsiStepCreditReceipt(credit_receipt,e);
     const gen=positiveInt(generation,'generation');
@@ -772,7 +773,7 @@ export class RsiRuntimeSkillLifecycle{
         measured_net_delta:credit.credit_score,
         authoring_prior:p,
         authoring_provenance_digest:provenance,
-        evidence_refs:[`episode:${e.episode_digest}`,`credit:${credit.receipt_digest}`],
+        evidence_refs:[`episode:${e.episode_digest}`,`credit:${credit.receipt_digest}`,...(held_skill_credit_admission?[`held_credit_admission:${held_skill_credit_admission.admission_digest}`]:[])],
         external_evaluator:true,authored_by_candidate:false,
       }));
     }
@@ -793,18 +794,50 @@ export class RsiRuntimeSkillLifecycle{
     episode,credit_receipt,generation,
     router_engaged=true,false_positive_injection=false,hard_invariant_violation=false,
     authoring_prior='LEGACY_IMPORTED',authoring_provenance_digest,
+    held_skill_credit_admission=null,
     external_evaluator=false,authored_by_candidate=true,
   }={}){
     this.#assertInit();
     if(external_evaluator!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_external_evidence_required');
     const e=assertEpisode(episode);const credit=verifyRsiStepCreditReceipt(credit_receipt,e);
     if(router_engaged!==true)throw new Error('rsi_runtime_skill_router_engagement_required_for_attributed_invocation');
+    const heldSkills=e.skill_digests.filter(skillDigest=>this.#admissionExposureHolds.has(skillDigest));
+    let heldAdmission=null;
+    if(heldSkills.length>0){
+      if(heldSkills.length!==1||e.skill_digests.length!==1)throw new Error('rsi_runtime_skill_held_credit_exact_single_skill_required');
+      const heldSkill=heldSkills[0];
+      const governance=this.governance();
+      const provenance=this.admissionExposureHoldProvenance(heldSkill);
+      if(!governance||!provenance)throw new Error('rsi_runtime_skill_held_credit_current_provenance_required');
+      heldAdmission=verifyRsiHeldSkillCreditAdmission(held_skill_credit_admission,{
+        source_sha:this.#sourceSha,
+        episode:e,
+        credit_receipt:credit,
+        admission_provenance:provenance,
+        current_library_digest:this.#library.library_digest,
+        current_governance_digest:governance.governance_digest,
+      });
+      if(heldAdmission.state==='INSUFFICIENT_HELD_SKILL_CREDIT'){
+        return zero({
+          state:'HELD_INSUFFICIENT_POST_APPEND_CREDIT',applied:false,
+          credit_receipt_digest:credit.receipt_digest,
+          held_skill_credit_admission_digest:heldAdmission.admission_digest,
+        });
+      }
+      if(credit.credit_sign==='POSITIVE'&&heldAdmission.state!=='ADMISSIBLE_POSITIVE_EXPLORATION_CREDIT'){
+        throw new Error('rsi_runtime_skill_held_positive_credit_not_admitted');
+      }
+      if(credit.credit_sign==='NEGATIVE'&&heldAdmission.state!=='ADMISSIBLE_NEGATIVE_SAFETY_CREDIT'){
+        throw new Error('rsi_runtime_skill_held_negative_credit_not_admitted');
+      }
+    }
     const item={
       episode:e,credit_receipt:credit,generation:positiveInt(generation,'generation'),
       router_engaged:true,false_positive_injection:false_positive_injection===true,
       hard_invariant_violation:hard_invariant_violation===true,
       authoring_prior:prior(authoring_prior),
       authoring_provenance_digest:exactDigest(authoring_provenance_digest,'authoring_provenance'),
+      held_skill_credit_admission:heldAdmission,
       captured_at:this.#now(),
     };
     if(this.#evidence.some(row=>row.evidence_refs.includes(`credit:${credit.receipt_digest}`))){
@@ -819,7 +852,7 @@ export class RsiRuntimeSkillLifecycle{
       return zero({state:'HELD_NO_LIBRARY',applied:false,credit_receipt_digest:credit.receipt_digest});
     }
     const rows=this.#materializeOne(item);await this.#persist();
-    return zero({state:'APPLIED',applied:true,credit_receipt_digest:credit.receipt_digest,evidence_digests:rows.map(r=>r.evidence_digest)});
+    return zero({state:'APPLIED',applied:true,credit_receipt_digest:credit.receipt_digest,evidence_digests:rows.map(r=>r.evidence_digest),held_skill_credit_admission_digest:heldAdmission?.admission_digest||null});
   }
   verifiedLibrarySnapshot(){
     this.#assertInit();
@@ -1118,6 +1151,8 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     blind_retry_for_exposure_release_effect:false,
     ambiguous_exposure_release_effect_requires_readback_only_reconciliation:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
+    held_skill_credit_requires_post_admission_gate:true,held_skill_positive_credit_requires_retention_non_regression:true,
+    held_skill_neutral_credit_cannot_open_exploration:true,held_skill_credit_exact_single_skill_required:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
     skill_activation_view_is_execution_authority:false,
