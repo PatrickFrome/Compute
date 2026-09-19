@@ -157,6 +157,8 @@ test('meta-profile qualification requires independent paired shadow Pareto advan
   assert.equal(q.qualified_for_shadow_profile_selection,true);
   assert.equal(q.live_profile_activation_authorized,false);
   assert.equal(q.canary_activation_authorized,false);
+  assert.equal(q.browser_authority,false);
+  assert.equal(q.task_authority,false);
   assert.equal(q.authority_effect,false);
 });
 
@@ -245,6 +247,8 @@ test('meta-profile qualification trust root is qualification-only and zero autho
   assert.equal(root.tradeoff_is_not_activation_eligible,true);
   assert.equal(root.qualification_only_for_shadow_profile_selection,true);
   assert.equal(root.live_profile_activation_authorized,false);
+  assert.equal(root.browser_authority,false);
+  assert.equal(root.task_authority,false);
   assert.equal(root.authority_effect,false);
   assert.match(root.qualification_root_digest,/^sha256:[0-9a-f]{64}$/);
 });
