@@ -1761,11 +1761,9 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
   const entry=phase30Entry(good,'tamper-good');
 
   const forgedEntry=structuredClone(entry);
-  forgedEntry.outcome_class='NO_MATERIAL_IMPROVEMENT';
-  forgedEntry.learning_kind='LOW_YIELD_CONSTRAINT';
-  forgedEntry.low_yield_constraint_digest=labelDigest('forged-low-yield');
-  forgedEntry.recipe_digest=null;
-  forgedEntry.watch_out_digest=null;
+  // Vary exactly one derived identity dimension while keeping the presented artifact structurally valid.
+  // Rehashing the forged row must not let it redefine the generation bound by the source evidence.
+  forgedEntry.evaluator_generation_seq=entry.evaluator_generation_seq+1;
   const core=structuredClone(forgedEntry);delete core.entry_digest;
   forgedEntry.entry_digest=dg(core);
   assert.throws(()=>verifyRsiGenerationScopedOutcomeEntry(forgedEntry,{
@@ -1898,7 +1896,7 @@ test('Phase30 rejected and no-material evidence remain counterevidence and canno
   assert.equal(archive.snapshot().archive_can_change_budget,false);
 });
 
-function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION'} = {}) {
+function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION',sharedOverride={}} = {}) {
   const shared={
     evaluator_root_digest:labelDigest(`${prefix}-evaluator-root`),
     evaluator_generation_digest:labelDigest(`${prefix}-generation`),
@@ -1914,6 +1912,7 @@ function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVIS
     hidden_holdout_root_digest:labelDigest(`${prefix}-holdout`),
     safety_suite_root_digest:labelDigest(`${prefix}-safety`),
     security_suite_root_digest:labelDigest(`${prefix}-security`),
+    ...sharedOverride,
   };
   const a=phase30OutcomeEvidence(`${prefix}-a`,{state,sharedEvaluation:shared});
   const b=phase30OutcomeEvidence(`${prefix}-b`,{state,sharedEvaluation:shared});
@@ -2012,25 +2011,24 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
 
 test('Phase31 forbids mixed evaluator generations epochs learning kinds and duplicate candidate evidence',()=>{
   const rows=phase31SourceRows('cross-generation');
-  const other=phase31SourceRows('cross-generation-other');
+  const other=phase31SourceRows('cross-generation-other',{
+    sharedOverride:{evaluator_root_digest:rows[0].entry.evaluator_root_digest},
+  });
   assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden/);
 
   const epochA=phase31SourceRows('cross-epoch');
-  const epochB=phase31SourceRows('cross-epoch-b');
-  const cloned=structuredClone(epochB[1]);
-  cloned.entry.evaluator_generation_digest=epochA[0].entry.evaluator_generation_digest;
-  const entryCore=structuredClone(cloned.entry);delete entryCore.entry_digest;
-  cloned.entry.entry_digest=dg(entryCore);
-  assert.throws(()=>phase31Proposal([epochA[0],cloned],'cross-epoch'),/entry_digest_mismatch|cross_epoch_forbidden/);
+  const epochB=phase31SourceRows('cross-epoch-b',{
+    sharedOverride:{
+      evaluator_root_digest:epochA[0].entry.evaluator_root_digest,
+      evaluator_generation_digest:epochA[0].entry.evaluator_generation_digest,
+      evaluator_generation_history_anchor_digest:epochA[0].entry.evaluator_generation_history_anchor_digest,
+    },
+  });
+  assert.throws(()=>phase31Proposal([epochA[0],epochB[1]],'cross-epoch'),/cross_epoch_forbidden/);
 
   const supported=phase31SourceRows('mixed-kind');
-  const rejected=phase31SourceRows('mixed-kind-rejected',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
-  const rebased=structuredClone(rejected[1]);
-  rebased.entry.evaluator_generation_digest=supported[0].entry.evaluator_generation_digest;
-  rebased.entry.evaluation_epoch_digest=supported[0].entry.evaluation_epoch_digest;
-  const reCore=structuredClone(rebased.entry);delete reCore.entry_digest;
-  rebased.entry.entry_digest=dg(reCore);
-  assert.throws(()=>phase31Proposal([supported[0],rebased],'mixed-kind'),/entry_digest_mismatch|mixed_learning_kind_forbidden/);
+  const rejected=phase31SourceRows('mixed-kind',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.throws(()=>phase31Proposal([supported[0],rejected[1]],'mixed-kind'),/mixed_learning_kind_forbidden/);
 
   const duplicate=[rows[0],structuredClone(rows[0])];
   assert.throws(()=>phase31Proposal(duplicate,'duplicate'),/duplicate_source_evidence|source_diversity_required/);
@@ -2273,7 +2271,7 @@ function phase32Fixture(label='phase32',{
     authored_by_candidate:false,
     ...handoffOverrides,
   });
-  return {rows,proposal,validations,admission,handoff};
+  return {rows,source_rows:rows,proposal,validations,admission,handoff};
 }
 
 function phase32Receipt(fx,label='phase32',overrides={}){
@@ -2838,19 +2836,61 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
 test('Phase32 hardened consumer identity detects generation and epoch identity drift',()=>{
   const fx=phase32Fixture('identity-drift');
   assert.throws(()=>phase32Fixture('identity-drift-generation',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1,
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-anchor',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationAnchor:labelDigest('phase32-wrong-generation-anchor'),
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-epoch',{
-    consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
 });
 
+
+test('Phase32 metamorphic identity boundary separates legitimate cross-generation revalidation from same-generation corruption',()=>{
+  const fx=phase32Fixture('identity-metamorphic');
+  const rebuild=(suffix,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.identity.metamorphic.${suffix}`,
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    consumer_model_family:fx.handoff.consumer_model_family,
+    consumer_environment_family:fx.handoff.consumer_environment_family,
+    consumer_context_digest:fx.handoff.consumer_context_digest,
+    consumer_task_set_digest:fx.handoff.consumer_task_set_digest,
+    consumer_harness_digest:fx.handoff.consumer_harness_digest,
+    consumer_retrieval_profile_digest:fx.handoff.consumer_retrieval_profile_digest,
+    consumer_evaluator_root_digest:fx.handoff.consumer_evaluator_root_digest,
+    consumer_evaluator_generation_digest:fx.handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:fx.handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:fx.handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:fx.handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:fx.handoff.consumer_evaluation_epoch_digest,
+    consumer_holdout_digest:fx.handoff.consumer_holdout_digest,
+    matched_reference_plan_digest:fx.handoff.matched_reference_plan_digest,
+    local_revalidation_protocol_digest:fx.handoff.local_revalidation_protocol_digest,
+    current_consumer_plane_digest:fx.handoff.current_consumer_plane_digest,
+    current_verified_library_digest:fx.handoff.current_verified_library_digest,
+    external_consumer_router:true,authored_by_candidate:false,
+    ...overrides,
+  });
+
+  const crossGeneration=rebuild('cross-generation',{
+    consumer_evaluator_generation_digest:labelDigest('phase32-metamorphic-new-generation'),
+  });
+  assert.notEqual(crossGeneration.consumer_evaluator_generation_digest,fx.handoff.consumer_evaluator_generation_digest);
+  assert.equal(crossGeneration.cross_generation_revalidation_required,true);
+  assert.equal(crossGeneration.source_generation_verdict_inherited,false);
+  assert.equal(crossGeneration.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+
+  assert.throws(()=>rebuild('same-generation-seq-drift',{
+    consumer_evaluator_generation_seq:fx.handoff.consumer_evaluator_generation_seq+1,
+  }),/evaluator_generation_identity_drift/);
+  assert.throws(()=>rebuild('same-generation-anchor-drift',{
+    consumer_evaluator_generation_history_anchor_digest:labelDigest('phase32-metamorphic-wrong-anchor'),
+  }),/evaluator_generation_identity_drift/);
+  assert.throws(()=>rebuild('same-epoch-seq-drift',{
+    consumer_evaluation_epoch_seq:fx.handoff.consumer_evaluation_epoch_seq+1,
+  }),/evaluation_epoch_identity_drift/);
+});
 
 test('Phase32 consumer state, retrieval profile and library drift change the exact local evaluation contract',()=>{
   const fx=phase32Fixture('consumer-state-contract');
