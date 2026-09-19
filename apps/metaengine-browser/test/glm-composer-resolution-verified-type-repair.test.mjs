@@ -154,7 +154,7 @@ test('D-K1 e2e: supervisor wake send resolves the named composer on the two-text
   await runtime.start();
   assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
   assert.ok(typedRefs.every((ref) => ref === COMPOSER_REF), 'every typed command must target the composer ref');
-  await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
 });
 
 test('D-K3: a pre-effect send failure is durably visible instead of presenting as idle WAITING', async () => {
@@ -210,7 +210,7 @@ test('D-K3: a pre-effect send failure is durably visible instead of presenting a
   // The queued wake is NOT consumed by the silent retry loop (raw keepalive
   // snapshot exposes the array; queued_wake_count is a state-row projection).
   assert.ok((snap.keepalive.queued_wakes || []).length >= 1, `queued wakes must survive the failed sends (got ${(snap.keepalive.queued_wakes || []).length})`);
-  await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
 });
 
 // ---------------------------------------------------------------------------
@@ -583,7 +583,7 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
   assert.equal(['ROLLOVER_REQUIRED', 'ROLLOVER_DEFERRED', 'ROLLOVER_PENDING'].includes(snap.keepalive.state), true,
     `expected a rollover state after 3 composer-blocking failures, got ${snap.keepalive.state}`);
   assert.equal(snap.keepalive.rollover_reason, 'COMPOSER_UNCLEARABLE_DK7');
-  await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
 });
 
 test('D-K9: wake settlement never cancels a requested rollover (live rollover-cancel race)', async () => {
