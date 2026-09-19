@@ -59,6 +59,8 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiSkillExposureReleaseReview, rsiSkillExposureReleaseReviewTrustRootSnapshot } from './rsi-skill-exposure-release-review.mjs';
+import { rsiSourceIdentityConvergenceTrustRootSnapshot } from './rsi-source-identity-convergence.mjs';
+import { rsiSourceIdentityFreshnessTrustRootSnapshot } from './rsi-source-identity-freshness.mjs';
 import {
   createRsiSkillExposureReleasePreview,
   createRsiSkillExposureReleaseCertificate,
@@ -121,6 +123,8 @@ function trustRoots() {
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
     skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
+    source_identity_convergence: rsiSourceIdentityConvergenceTrustRootSnapshot(),
+    source_identity_freshness: rsiSourceIdentityFreshnessTrustRootSnapshot(),
     skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
@@ -1313,6 +1317,11 @@ export class RsiRuntimeService {
       admission_provenance_digest: certificate.admission_provenance_digest,
       admission_attempt_id: certificate.admission_attempt_id,
       admission_attempt_digest: certificate.admission_attempt_digest,
+      source_identity_certificate_digest: certificate.source_identity_certificate_digest,
+      source_sha: certificate.source_sha,
+      source_identity_runtime_process_incarnation_id: certificate.source_identity_runtime_process_incarnation_id,
+      source_identity_db_alignment_epoch: certificate.source_identity_db_alignment_epoch,
+      fresh_source_identity_converged: certificate.fresh_source_identity_converged,
       blockers: certificate.blockers,
       certificate_is_effect_authority: false,
       release_effect_authorized: false,

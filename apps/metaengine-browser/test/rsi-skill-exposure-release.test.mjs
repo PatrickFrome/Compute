@@ -15,6 +15,12 @@ import {
   createRsiSkillExposureReleaseReview,
 } from '../src/rsi-skill-exposure-release-review.mjs';
 import {
+  createRsiSourceIdentityConvergenceEvidence,
+} from '../src/rsi-source-identity-convergence.mjs';
+import {
+  createRsiFreshSourceIdentityConvergenceCertificate,
+} from '../src/rsi-source-identity-freshness.mjs';
+import {
   createRsiSkillExposureReleasePreview,
   verifyRsiSkillExposureReleasePreview,
   createRsiSkillExposureReleaseCertificate,
@@ -31,6 +37,22 @@ function stable(value){
 }
 function dg(value){
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
+}
+
+function sourceIdentityCertificate({source=sha('a'),stale=false}={}){
+  const convergence=createRsiSourceIdentityConvergenceEvidence({
+    evidence_id:'phase36.source.identity.1',github_source_sha:source,db_authority_baseline_sha:source,runtime_target_git_sha:source,
+    github_ref:'refs/heads/main',db_authority_key:'METAENGINE_DEVOS',runtime_client_id:'phase36-runtime-client-1',db_alignment_epoch:87,
+    github_readback_digest:d('c'),db_authority_readback_digest:d('d'),runtime_readback_digest:d('e'),observed_at:'2026-09-19T16:00:00Z',
+    external_github_reader:true,external_db_reader:true,external_runtime_reader:true,authored_by_candidate:false,
+  });
+  return createRsiFreshSourceIdentityConvergenceCertificate({
+    certificate_id:'phase36.source.identity.freshness.1',convergence_evidence:convergence,
+    github_readback:{source_kind:'GITHUB_API_MAIN_REF',repository:'PatrickFrome/Compute',ref:'refs/heads/main',head_sha:source,readback_digest:d('c'),read_at:'2026-09-19T16:00:10Z',authored_by_candidate:false},
+    db_authority_readback:{source_kind:'SUPABASE_ROADMAP_AUTHORITY_ROW',project_ref:'xpeibufgzjknrhbhpffp',authority_key:'METAENGINE_DEVOS',baseline_sha:source,alignment_epoch:87,readback_digest:d('d'),read_at:'2026-09-19T16:00:15Z',authored_by_candidate:false},
+    runtime_readback:{source_kind:'DURABLE_RUNTIME_STATE_ROW',project_ref:'xpeibufgzjknrhbhpffp',client_id:'phase36-runtime-client-1',process_incarnation_id:'phase36-process-incarnation-1',target_git_sha:source,last_seen_at:'2026-09-19T16:00:18Z',readback_digest:d('e'),read_at:'2026-09-19T16:00:20Z',authored_by_candidate:false},
+    evaluated_at:stale?'2026-09-19T16:02:00Z':'2026-09-19T16:00:25Z',authored_by_candidate:false,
+  });
 }
 
 function fixture(){
@@ -209,6 +231,7 @@ function certificateArgs(fx,provenance,review,preview,overrides={}){
     release_preview:preview,
     release_review:review,
     admission_provenance:provenance,
+    fresh_source_identity_certificate:sourceIdentityCertificate(),
     skill_digest:fx.skill.skill_digest,
     shadow_routing_manifest_digest:d('1'),
     no_skill_ablation_receipt_digest:d('2'),
@@ -278,6 +301,12 @@ test('Phase36 certificate consumes exact eligible zero-effect review and confirm
   assert.equal(cert.admission_attempt_digest,provenance.admission_attempt_digest);
   assert.equal(cert.exact_zero_effect_release_review_required,true);
   assert.equal(cert.confirmed_storage_admission_provenance_required,true);
+  assert.equal(cert.fresh_source_identity_certificate_required,true);
+  assert.equal(cert.fresh_source_identity_required_for_eligibility,true);
+  assert.equal(cert.release_review_source_sha_must_match_fresh_identity,true);
+  assert.equal(cert.fresh_source_identity_converged,true);
+  assert.equal(cert.source_sha,sha('a'));
+  assert.equal(cert.source_identity_certificate_digest,sourceIdentityCertificate().certificate_digest);
   assert.equal(cert.exact_next_governance_preview_required,true);
   assert.equal(cert.certificate_is_effect_authority,false);
   assert.equal(cert.release_effect_authorized,false);
@@ -346,6 +375,14 @@ test('Phase36 certificate remains rejected when extra shadow and canary evidence
   }
 });
 
+test('Phase36 certificate rejects stale or cross-source identity evidence before any release effect',()=>{
+  const fx=fixture();const provenance=admissionProvenance(fx);const review=createRsiSkillExposureReleaseReview(reviewArgs(fx,provenance));
+  const preview=createRsiSkillExposureReleasePreview({library:fx.library,current_governance:fx.currentGovernance,next_governance:fx.nextGovernance,skill_digest:fx.skill.skill_digest,external_governance_owner:true,authored_by_candidate:false});
+  const blocked=createRsiSkillExposureReleaseCertificate(certificateArgs(fx,provenance,review,preview,{certificate_id:'phase36.reviewed.source-stale',fresh_source_identity_certificate:sourceIdentityCertificate({stale:true})}));
+  assert.equal(blocked.state,'REJECTED_EXPOSURE_RELEASE');assert.equal(blocked.eligible_for_one_attempt_exposure_release,false);assert.ok(blocked.blockers.includes('SOURCE_IDENTITY_FRESHNESS_BLOCKED'));assert.equal(blocked.release_effect_authorized,false);
+  assert.throws(()=>createRsiSkillExposureReleaseCertificate(certificateArgs(fx,provenance,review,preview,{certificate_id:'phase36.reviewed.source-mismatch',fresh_source_identity_certificate:sourceIdentityCertificate({source:sha('b')})})),/source_identity_review_source_mismatch/);
+});
+
 test('Phase36 reviewed-certificate trust root keeps effect authority outside certificate',()=>{
   const root=rsiSkillExposureReleaseTrustRootSnapshot();
   assert.equal(root.exact_current_library_required,true);
@@ -353,6 +390,9 @@ test('Phase36 reviewed-certificate trust root keeps effect authority outside cer
   assert.equal(root.exact_next_governance_preview_required,true);
   assert.equal(root.exact_zero_effect_release_review_required,true);
   assert.equal(root.confirmed_storage_admission_provenance_required,true);
+  assert.equal(root.fresh_source_identity_certificate_required,true);
+  assert.equal(root.fresh_source_identity_required_for_eligibility,true);
+  assert.equal(root.release_review_source_sha_must_match_fresh_identity,true);
   assert.equal(root.release_review_must_be_eligible,true);
   assert.equal(root.held_dormant_skill_required,true);
   assert.equal(root.exploration_only_release,true);
