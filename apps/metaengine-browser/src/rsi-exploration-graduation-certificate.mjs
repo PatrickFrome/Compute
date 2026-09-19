@@ -532,6 +532,10 @@ export function createRsiExplorationGraduationCertificate({
   const current=verifyRsiSkillLibraryGovernance(current_governance,checkedLibrary);
   const next=verifyRsiSkillLibraryGovernance(next_governance,checkedLibrary);
   const skill=exactDigest(skill_digest,'certificate_skill');
+  const targetLibraryEntry=checkedLibrary.entries.find((entry)=>entry.skill_digest===skill);
+  if(!targetLibraryEntry)throw new Error('rsi_graduation_certificate_target_skill_missing');
+  const expectedStatisticalCandidateId=`skill:${skill}`;
+  const expectedStatisticalCandidateSha=exactSha(targetLibraryEntry.capsule.source_candidate_sha,'target_skill_source_candidate');
   const checkedPreview=verifyRsiExplorationGraduationPreview(preview,{
     library:checkedLibrary,
     current_governance:current,
@@ -548,6 +552,10 @@ export function createRsiExplorationGraduationCertificate({
   const processReceipt=verifyRsiExplorationGraduationVerifierReceipt(process_verifier_receipt,{kind:'PROCESS'});
   const outcomeReceipt=verifyRsiExplorationGraduationVerifierReceipt(outcome_verifier_receipt,{kind:'OUTCOME'});
   const statistical=verifyRsiExplorationGraduationStatisticalReceipt(statistical_receipt);
+  if(statistical.candidate_id!==expectedStatisticalCandidateId
+    ||statistical.candidate_sha!==expectedStatisticalCandidateSha){
+    throw new Error('rsi_graduation_certificate_statistical_target_skill_identity_mismatch');
+  }
   const lineage=verifyRsiSkillLineageContaminationReview(lineage_review,{
     source_sha:source,
     library:checkedLibrary,
@@ -593,16 +601,17 @@ export function createRsiExplorationGraduationCertificate({
   if(new Set(identities).size!==identities.length){
     throw new Error('rsi_graduation_certificate_cross_stage_identity_separation_required');
   }
-  const lineageReviewerIds=[];
+  const lineagePrincipalIds=[];
   for(const finding of lineage.findings){
-    lineageReviewerIds.push(
+    lineagePrincipalIds.push(
+      finding.provenance_acceptance.structural_attestation.expected_builder_identity_digest,
       finding.provenance_reviewer_identity_digest,
       finding.security_reviewer_identity_digest,
       finding.semantic_reviewer_identity_digest,
     );
   }
-  if(lineageReviewerIds.some((identity)=>identities.includes(identity))){
-    throw new Error('rsi_graduation_certificate_lineage_reviewer_identity_alias_forbidden');
+  if(lineagePrincipalIds.some((identity)=>identities.includes(identity))){
+    throw new Error('rsi_graduation_certificate_lineage_principal_identity_alias_forbidden');
   }
 
   const evidenceRoots=[
@@ -668,6 +677,10 @@ export function createRsiExplorationGraduationCertificate({
     process_verifier_receipt_digest:processReceipt.receipt_digest,
     outcome_verifier_receipt_digest:outcomeReceipt.receipt_digest,
     statistical_receipt_digest:statistical.receipt_digest,
+    statistical_candidate_id:statistical.candidate_id,
+    statistical_candidate_sha:statistical.candidate_sha,
+    target_skill_source_candidate_sha:expectedStatisticalCandidateSha,
+    deterministic_skill_statistical_candidate_binding:true,
     lineage_review_digest:lineage.review_digest,
     future_effect_executor_identity_digest:futureExecutor,
     certificate_owner_identity_digest:owner,
@@ -700,6 +713,7 @@ export function createRsiExplorationGraduationCertificate({
     numerical_anytime_valid_threshold_required:true,
     fixed_false_admission_budget_required:true,
     exact_consumer_retrieval_source_binding_required:true,
+    deterministic_skill_statistical_candidate_binding_required:true,
     retention_cost_latency_negative_transfer_required:true,
     contamination_and_ablation_checks_required:true,
     certificate_only:true,
@@ -726,6 +740,8 @@ export function verifyRsiExplorationGraduationCertificate(certificate,args={}){
     ||certificate.numerical_anytime_valid_threshold_required!==true
     ||certificate.fixed_false_admission_budget_required!==true
     ||certificate.exact_consumer_retrieval_source_binding_required!==true
+    ||certificate.deterministic_skill_statistical_candidate_binding_required!==true
+    ||certificate.deterministic_skill_statistical_candidate_binding!==true
     ||certificate.retention_cost_latency_negative_transfer_required!==true
     ||certificate.contamination_and_ablation_checks_required!==true
     ||certificate.certificate_only!==true
@@ -795,6 +811,8 @@ export function rsiExplorationGraduationCertificateTrustRootSnapshot(){
     controllable_and_uncontrollable_failures_separate:true,
     environment_grounded_readback_preferred:true,
     exact_consumer_retrieval_source_binding_required:true,
+    deterministic_skill_statistical_candidate_binding_required:true,
+    lineage_builder_reviewer_certificate_effect_separation_required:true,
     retention_non_regression_required:true,
     cost_and_latency_budgets_required:true,
     negative_transfer_clear_required:true,
