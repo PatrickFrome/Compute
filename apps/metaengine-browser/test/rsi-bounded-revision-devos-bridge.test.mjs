@@ -4116,8 +4116,10 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
       status:'CONTAMINATED',
       causal_provenance_digest:labelDigest('phase36-lineage-causal-provenance.contaminated'),
       negative_transfer_receipt_digest:labelDigest('phase36-lineage-negative-transfer.contaminated'),
+      semantic_consistency_digest:labelDigest('phase36-lineage-semantic-consistency.contaminated'),
       provenance_reviewer_identity_digest:labelDigest('phase36-lineage-provenance-reviewer.contaminated'),
       security_reviewer_identity_digest:labelDigest('phase36-lineage-security-reviewer.contaminated'),
+      semantic_reviewer_identity_digest:labelDigest('phase36-lineage-semantic-reviewer.contaminated'),
     }],
     external_review_owner:true,
     authored_by_candidate:false,
@@ -4148,8 +4150,10 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
       status:'CLEAN',
       causal_provenance_digest:labelDigest('phase36-lineage-causal-provenance.clean'),
       negative_transfer_receipt_digest:labelDigest('phase36-lineage-negative-transfer.clean'),
+      semantic_consistency_digest:labelDigest('phase36-lineage-semantic-consistency.clean'),
       provenance_reviewer_identity_digest:labelDigest('phase36-lineage-provenance-reviewer.clean'),
       security_reviewer_identity_digest:labelDigest('phase36-lineage-security-reviewer.clean'),
+      semantic_reviewer_identity_digest:labelDigest('phase36-lineage-semantic-reviewer.clean'),
     }],
     external_review_owner:true,
     authored_by_candidate:false,
@@ -4158,6 +4162,8 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(lineageReview.eligible_for_exposure_precommit,true);
   assert.deepEqual(lineageReview.closure_skill_digests,[fx.skill.skill_digest]);
   assert.equal(lineageReview.review_is_effect_authority,false);
+  assert.equal(lineageReview.three_heterogeneous_reviewers_per_skill_required,true);
+  assert.equal(lineageReview.structural_behavioral_semantic_critic_separation_required,true);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_LINEAGE_CONTAMINATION_REVIEW_CREATED');
 
   const preparedRelease=await runtime.prepareSkillExposureReleaseAttempt({
