@@ -1146,8 +1146,14 @@ export class RsiRuntimeSkillLifecycle{
         const transition=appendReleaseTransition(row,'CONFIRMED_NOT_RELEASED_NEW_ATTEMPT_REQUIRED',this.#now(),observation);
         const next={...structuredClone(row),current_state:'CONFIRMED_NOT_RELEASED_NEW_ATTEMPT_REQUIRED',transitions:[...row.transitions,transition]};
         delete next.attempt_digest;
+        const priorAttempts=this.#exposureReleaseAttempts;
         const terminal=this.#replaceExposureReleaseAttempt({...next,attempt_digest:digest(next)});
-        await this.#persist();
+        try{
+          await this.#persist();
+        }catch(error){
+          this.#exposureReleaseAttempts=priorAttempts;
+          throw error;
+        }
         return zero({
           state:terminal.current_state,attempt_id:attemptId,attempt_digest:terminal.attempt_digest,
           effect_attempt_count:1,effect_started:false,effect_performed:false,
@@ -1158,8 +1164,14 @@ export class RsiRuntimeSkillLifecycle{
       const transition=appendReleaseTransition(row,'RECONCILIATION_ONLY',this.#now(),observation);
       const next={...structuredClone(row),current_state:'RECONCILIATION_ONLY',transitions:[...row.transitions,transition]};
       delete next.attempt_digest;
+      const priorAttempts=this.#exposureReleaseAttempts;
       const ambiguous=this.#replaceExposureReleaseAttempt({...next,attempt_digest:digest(next)});
-      await this.#persist();
+      try{
+        await this.#persist();
+      }catch(error){
+        this.#exposureReleaseAttempts=priorAttempts;
+        throw error;
+      }
       return zero({
         state:'RECONCILIATION_ONLY',attempt_id:attemptId,attempt_digest:ambiguous.attempt_digest,
         effect_attempt_count:1,effect_started:false,effect_performed:false,
@@ -1236,8 +1248,14 @@ export class RsiRuntimeSkillLifecycle{
     const transition=appendReleaseTransition(row,state,this.#now(),observation);
     const next={...structuredClone(row),current_state:state,transitions:[...row.transitions,transition]};
     delete next.attempt_digest;
+    const priorAttempts=this.#exposureReleaseAttempts;
     const checked=this.#replaceExposureReleaseAttempt({...next,attempt_digest:digest(next)});
-    await this.#persist();
+    try{
+      await this.#persist();
+    }catch(error){
+      this.#exposureReleaseAttempts=priorAttempts;
+      throw error;
+    }
     return zero({
       state:checked.current_state,attempt_id:attemptId,attempt_digest:checked.attempt_digest,
       effect_attempt_count:1,additional_effect_attempt_performed:false,same_effect_id_retry_allowed:false,
