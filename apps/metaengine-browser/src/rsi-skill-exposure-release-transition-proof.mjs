@@ -68,6 +68,8 @@ export function createRsiSkillExposureReleaseTransitionProof({
   review,
   skill_digest,
   external_release_owner_identity_digest,
+  external_canary_evaluator_identity_digest,
+  external_security_auditor_identity_digest,
   read_only_shadow_canary_digest,
   coalition_ablation_receipt_digest,
   memory_poisoning_scan_digest,
@@ -155,12 +157,17 @@ export function createRsiSkillExposureReleaseTransitionProof({
   }
 
   const releaseOwner=exactDigest(external_release_owner_identity_digest,'release_owner_identity');
+  const canaryEvaluator=exactDigest(external_canary_evaluator_identity_digest,'canary_evaluator_identity');
+  const securityAuditor=exactDigest(external_security_auditor_identity_digest,'security_auditor_identity');
   const reviewIdentities=[
     checkedReview.governance_reviewer_identity_digest,
     checkedReview.matched_evaluator_identity_digest,
     checkedReview.security_reviewer_identity_digest,
   ];
-  if(reviewIdentities.includes(releaseOwner))throw new Error('rsi_exposure_transition_release_owner_separation_required');
+  const transitionIdentities=[releaseOwner,canaryEvaluator,securityAuditor];
+  if(new Set([...reviewIdentities,...transitionIdentities]).size!==reviewIdentities.length+transitionIdentities.length){
+    throw new Error('rsi_exposure_transition_cross_stage_separation_required');
+  }
 
   const evidenceDigests=[
     exactDigest(read_only_shadow_canary_digest,'read_only_shadow_canary'),
@@ -201,6 +208,8 @@ export function createRsiSkillExposureReleaseTransitionProof({
     only_target_governance_state_changed:true,
     exact_current_and_next_governance_bound:true,
     external_release_owner_identity_digest:releaseOwner,
+    external_canary_evaluator_identity_digest:canaryEvaluator,
+    external_security_auditor_identity_digest:securityAuditor,
     read_only_shadow_canary_digest:evidenceDigests[0],
     coalition_ablation_receipt_digest:evidenceDigests[1],
     memory_poisoning_scan_digest:evidenceDigests[2],
@@ -211,6 +220,7 @@ export function createRsiSkillExposureReleaseTransitionProof({
     external_release_owner:true,
     authored_by_candidate:false,
     release_owner_separate_from_reviewers:true,
+    cross_stage_identity_separation_required:true,
     review_must_be_eligible:true,
     exploration_only_transition:true,
     one_attempt_release_required:true,
@@ -239,6 +249,7 @@ export function verifyRsiSkillExposureReleaseTransitionProof(proof,args={}){
     ||proof.read_only_shadow_canary_pass!==true||proof.coalition_ablation_pass!==true||proof.memory_poisoning_scan_pass!==true
     ||proof.canary_effect_mode!=='READ_ONLY_SHADOW'||proof.external_release_owner!==true
     ||proof.authored_by_candidate!==false||proof.release_owner_separate_from_reviewers!==true
+    ||proof.cross_stage_identity_separation_required!==true
     ||proof.review_must_be_eligible!==true||proof.exploration_only_transition!==true
     ||proof.one_attempt_release_required!==true||proof.ambiguous_release_retry_allowed!==false
     ||proof.eligible_for_external_release_attempt_review!==true
@@ -253,6 +264,8 @@ export function verifyRsiSkillExposureReleaseTransitionProof(proof,args={}){
     source_sha:proof.source_sha,
     skill_digest:proof.skill_digest,
     external_release_owner_identity_digest:proof.external_release_owner_identity_digest,
+    external_canary_evaluator_identity_digest:proof.external_canary_evaluator_identity_digest,
+    external_security_auditor_identity_digest:proof.external_security_auditor_identity_digest,
     read_only_shadow_canary_digest:proof.read_only_shadow_canary_digest,
     coalition_ablation_receipt_digest:proof.coalition_ablation_receipt_digest,
     memory_poisoning_scan_digest:proof.memory_poisoning_scan_digest,
@@ -284,6 +297,9 @@ export function rsiSkillExposureReleaseTransitionProofTrustRootSnapshot(){
     coalition_ablation_required:true,
     memory_poisoning_scan_required:true,
     release_owner_separation_of_duties_required:true,
+    cross_stage_identity_separation_required:true,
+    independent_canary_evaluator_required:true,
+    independent_security_auditor_required:true,
     proof_is_zero_effect:true,
     one_attempt_release_required:true,
     ambiguous_release_retry_allowed:false,
