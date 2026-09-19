@@ -20,6 +20,7 @@ import {
 } from '../src/rsi-skill-exposure-release.mjs';
 import { createRsiSourceIdentityConvergenceEvidence } from '../src/rsi-source-identity-convergence.mjs';
 import { createRsiFreshSourceIdentityConvergenceCertificate } from '../src/rsi-source-identity-freshness.mjs';
+import { createRsiStableSourceIdentityConvergenceCertificate } from '../src/rsi-source-identity-stability.mjs';
 
 const d=(c)=>`sha256:${c.repeat(64)}`;
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map((k)=>[k,stable(v[k])]))}
@@ -27,52 +28,101 @@ function digest(v){return `sha256:${crypto.createHash('sha256').update(JSON.stri
 
 const sourceSha='a'.repeat(40);
 function freshSourceIdentity({
+  certificateId='phase36.source.identity.fresh.1',
+  evidenceId='phase36.source.identity.1',
   githubSha=sourceSha,
   dbSha=sourceSha,
   runtimeSha=sourceSha,
-  githubReadAt='2026-09-19T16:00:10Z',
-  dbReadAt='2026-09-19T16:00:15Z',
-  runtimeReadAt='2026-09-19T16:00:20Z',
-  runtimeLastSeenAt='2026-09-19T16:00:18Z',
-  evaluatedAt='2026-09-19T16:00:25Z',
+  processIncarnation='phase36-process-incarnation-1',
+  dbAlignmentEpoch=87,
+  observedAt='2026-09-19T16:00:00Z',
+  githubReadAt='2026-09-19T16:00:01Z',
+  dbReadAt='2026-09-19T16:00:02Z',
+  runtimeReadAt='2026-09-19T16:00:04Z',
+  runtimeLastSeenAt='2026-09-19T16:00:03Z',
+  evaluatedAt='2026-09-19T16:00:05Z',
+  digestChars=['8','9','a'],
 }={}){
+  const [g,dv,r]=digestChars;
   const convergence=createRsiSourceIdentityConvergenceEvidence({
-    evidence_id:'phase36.source.identity.1',
+    evidence_id:evidenceId,
     github_source_sha:githubSha,
     db_authority_baseline_sha:dbSha,
     runtime_target_git_sha:runtimeSha,
     github_ref:'refs/heads/main',
     db_authority_key:'METAENGINE_DEVOS',
     runtime_client_id:'runtime-client-phase36',
-    db_alignment_epoch:87,
-    github_readback_digest:d('8'),
-    db_authority_readback_digest:d('9'),
-    runtime_readback_digest:d('a'),
-    observed_at:'2026-09-19T16:00:00Z',
+    db_alignment_epoch:dbAlignmentEpoch,
+    github_readback_digest:d(g),
+    db_authority_readback_digest:d(dv),
+    runtime_readback_digest:d(r),
+    observed_at:observedAt,
     external_github_reader:true,
     external_db_reader:true,
     external_runtime_reader:true,
     authored_by_candidate:false,
   });
   return createRsiFreshSourceIdentityConvergenceCertificate({
-    certificate_id:'phase36.source.identity.fresh.1',
+    certificate_id:certificateId,
     convergence_evidence:convergence,
     github_readback:{
       source_kind:'GITHUB_API_MAIN_REF',repository:'PatrickFrome/Compute',ref:'refs/heads/main',
-      head_sha:githubSha,readback_digest:d('8'),read_at:githubReadAt,authored_by_candidate:false,
+      head_sha:githubSha,readback_digest:d(g),read_at:githubReadAt,authored_by_candidate:false,
     },
     db_authority_readback:{
       source_kind:'SUPABASE_ROADMAP_AUTHORITY_ROW',project_ref:'xpeibufgzjknrhbhpffp',
-      authority_key:'METAENGINE_DEVOS',baseline_sha:dbSha,alignment_epoch:87,
-      readback_digest:d('9'),read_at:dbReadAt,authored_by_candidate:false,
+      authority_key:'METAENGINE_DEVOS',baseline_sha:dbSha,alignment_epoch:dbAlignmentEpoch,
+      readback_digest:d(dv),read_at:dbReadAt,authored_by_candidate:false,
     },
     runtime_readback:{
       source_kind:'DURABLE_RUNTIME_STATE_ROW',project_ref:'xpeibufgzjknrhbhpffp',
-      client_id:'runtime-client-phase36',process_incarnation_id:'phase36-process-incarnation-1',
-      target_git_sha:runtimeSha,last_seen_at:runtimeLastSeenAt,readback_digest:d('a'),
+      client_id:'runtime-client-phase36',process_incarnation_id:processIncarnation,
+      target_git_sha:runtimeSha,last_seen_at:runtimeLastSeenAt,readback_digest:d(r),
       read_at:runtimeReadAt,authored_by_candidate:false,
     },
     evaluated_at:evaluatedAt,
+    authored_by_candidate:false,
+  });
+}
+
+function stableSourceIdentity({
+  secondRuntimeSha=sourceSha,
+  secondDbEpoch=87,
+  secondProcess='phase36-process-incarnation-1',
+  staleSecond=false,
+}={}){
+  const first=freshSourceIdentity({
+    certificateId:'phase36.source.identity.fresh.1',
+    evidenceId:'phase36.source.identity.round.1',
+    observedAt:'2026-09-19T16:00:00Z',
+    githubReadAt:'2026-09-19T16:00:01Z',
+    dbReadAt:'2026-09-19T16:00:02Z',
+    runtimeLastSeenAt:'2026-09-19T16:00:03Z',
+    runtimeReadAt:'2026-09-19T16:00:04Z',
+    evaluatedAt:'2026-09-19T16:00:05Z',
+    digestChars:['8','9','a'],
+  });
+  const second=freshSourceIdentity({
+    certificateId:'phase36.source.identity.fresh.2',
+    evidenceId:'phase36.source.identity.round.2',
+    githubSha:secondRuntimeSha,
+    dbSha:secondRuntimeSha,
+    runtimeSha:secondRuntimeSha,
+    processIncarnation:secondProcess,
+    dbAlignmentEpoch:secondDbEpoch,
+    observedAt:'2026-09-19T16:00:08Z',
+    githubReadAt:staleSecond?'2026-09-19T15:58:00Z':'2026-09-19T16:00:09Z',
+    dbReadAt:'2026-09-19T16:00:10Z',
+    runtimeLastSeenAt:'2026-09-19T16:00:11Z',
+    runtimeReadAt:'2026-09-19T16:00:12Z',
+    evaluatedAt:'2026-09-19T16:00:13Z',
+    digestChars:['b','c','d'],
+  });
+  return createRsiStableSourceIdentityConvergenceCertificate({
+    certificate_id:'phase36.source.identity.stable.1',
+    first_round:first,
+    second_round:second,
+    evaluated_at:'2026-09-19T16:00:14Z',
     authored_by_candidate:false,
   });
 }
@@ -195,7 +245,7 @@ function args(fx,overrides={}){
     next_governance:fx.nextGovernance,
     release_preview:fx.preview,
     dormant_retrieval_review:fx.dormantRetrievalReview,
-    fresh_source_identity_certificate:freshSourceIdentity(),
+    stable_source_identity_certificate:stableSourceIdentity(),
     skill_digest:fx.capsule.skill_digest,
     routing_context_manifest_digest:d('a'),
     retrieval_profile_digest:d('b'),
@@ -239,11 +289,12 @@ test('Phase36 certificate keeps release zero-authority and requires multi-contex
   assert.equal(cert.release_mode,'EXPLORATION_ACTIVE_ONLY');
   assert.equal(cert.dormant_retrieval_review_digest,fx.dormantRetrievalReview.retrieval_review_digest);
   assert.equal(cert.fresh_dormant_retrieval_review_required,true);
-  assert.equal(cert.fresh_source_identity_convergence_required,true);
+  assert.equal(cert.stable_source_identity_convergence_required,true);
+  assert.equal(cert.double_read_source_identity_required,true);
   assert.equal(cert.source_identity_sha,sourceSha);
   assert.equal(cert.source_identity_runtime_process_incarnation_id,'phase36-process-incarnation-1');
   assert.equal(cert.source_identity_db_alignment_epoch,87);
-  assert.match(cert.source_identity_certificate_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.match(cert.source_identity_stability_certificate_digest,/^sha256:[0-9a-f]{64}$/);
   assert.deepEqual(cert.blockers,[]);
   assert.equal(cert.release_token,null);
   assert.equal(cert.browser_authority,false);
@@ -313,21 +364,28 @@ test('Phase36 certificate rejects stale or non-eligible dormant retrieval review
   })),/dormant_retrieval_review_binding_mismatch/);
 });
 
-test('Phase36 certificate fails closed on stale or drifted GitHub-DB-runtime identity',()=>{
+test('Phase36 certificate fails closed unless source identity is stable across two fresh rounds',()=>{
   const fx=fixture();
-  const drift=freshSourceIdentity({runtimeSha:'b'.repeat(40)});
-  assert.equal(drift.fresh_source_identity_converged,false);
-  assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
-    fresh_source_identity_certificate:drift,
-  })),/fresh_source_identity_required/);
 
-  const stale=freshSourceIdentity({
-    githubReadAt:'2026-09-19T15:58:00Z',
-  });
-  assert.equal(stale.fresh_source_identity_converged,false);
+  const drift=stableSourceIdentity({secondRuntimeSha:'b'.repeat(40)});
+  assert.equal(drift.stable_source_identity_converged,false);
+  assert.ok(drift.blockers.includes('SOURCE_IDENTITY_CHANGED_BETWEEN_ROUNDS'));
   assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
-    fresh_source_identity_certificate:stale,
-  })),/fresh_source_identity_required/);
+    stable_source_identity_certificate:drift,
+  })),/stable_source_identity_required/);
+
+  const restart=stableSourceIdentity({secondProcess:'phase36-process-incarnation-2'});
+  assert.equal(restart.stable_source_identity_converged,false);
+  assert.ok(restart.blockers.includes('RUNTIME_PROCESS_INCARNATION_CHANGED_BETWEEN_ROUNDS'));
+  assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
+    stable_source_identity_certificate:restart,
+  })),/stable_source_identity_required/);
+
+  const stale=stableSourceIdentity({staleSecond:true});
+  assert.equal(stale.stable_source_identity_converged,false);
+  assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
+    stable_source_identity_certificate:stale,
+  })),/stable_source_identity_required/);
 });
 
 test('Phase36 exposure-release trust root requires external, bounded, exploration-only evidence and grants no effect authority',()=>{
@@ -339,10 +397,12 @@ test('Phase36 exposure-release trust root requires external, bounded, exploratio
   assert.equal(root.held_dormant_skill_required,true);
   assert.equal(root.fresh_dormant_retrieval_review_required,true);
   assert.equal(root.retrieval_review_can_authorize_release,false);
-  assert.equal(root.fresh_source_identity_convergence_required,true);
+  assert.equal(root.stable_source_identity_convergence_required,true);
+  assert.equal(root.double_read_source_identity_required,true);
   assert.equal(root.exact_three_way_source_sha_required,true);
   assert.equal(root.source_identity_drift_blocks_certificate,true);
   assert.equal(root.source_identity_freshness_policy_external,true);
+  assert.equal(root.source_identity_stability_policy_external,true);
   assert.equal(root.exploration_only_release,true);
   assert.equal(root.minimum_shadow_context_count,3);
   assert.equal(root.all_shadow_contexts_must_pass,true);
