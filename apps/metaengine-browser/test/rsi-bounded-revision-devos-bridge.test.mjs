@@ -3866,6 +3866,10 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(review.skill_activation_performed,false);
   assert.equal(review.browser_authority,false);
   assert.equal(review.task_authority,false);
+  assert.equal(review.active_cap_capacity_available,true);
+  assert.equal(review.exploration_slot_capacity_available,true);
+  assert.equal(review.bounded_exploration_capacity_available,true);
+  assert.ok(review.exploration_active_count < review.exploration_slot_limit);
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
   const negativeReview=await runtime.reviewDormantSkillForRetrieval({
