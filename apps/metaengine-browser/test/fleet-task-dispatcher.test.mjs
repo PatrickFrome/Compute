@@ -179,3 +179,145 @@ test('target replacement between capture and effect persistently fences and abor
     reason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_EFFECT',
   });
 });
+
+// ---------------------------------------------------------------------------
+// D-M4: dispatch prefers the agent's proven task conversation
+// ---------------------------------------------------------------------------
+
+const CONVERSATION = 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+function conversationHarness({
+  currentUrl = 'https://chat.z.ai/',
+  loadRejects = false,
+  proofUrl = CONVERSATION,
+} = {}) {
+  const calls = [];
+  let marked = null;
+  const loadUrls = [];
+  let url = currentUrl;
+  const fleet = {
+    snapshot: () => ({
+      agents: [{
+        agent_id: AGENT_ID,
+        role: 'IMPLEMENTER',
+        lifecycle_state: 'ACTIVE',
+        generation_epoch: 4,
+        tab_id: TAB_ID,
+        target_id: TARGET_ID,
+        transport_proof: proofUrl ? {
+          schema: 'metaengine.browser.fleet-transport-proof.v1',
+          conversation_url: proofUrl,
+          conversation_url_sha256: crypto.createHash('sha256').update(proofUrl, 'utf8').digest('hex'),
+        } : null,
+      }],
+    }),
+    onTabClosed: async () => ({ ok: true }),
+    markTransportProven: async (value) => {
+      marked = structuredClone(value);
+      return { ok: true };
+    },
+  };
+  let captureCount = 0;
+  const webContents = {
+    id: 77,
+    isDestroyed: () => false,
+    getURL: () => url,
+    on: () => {},
+    removeListener: () => {},
+    stop: () => true,
+    loadURL: async (target) => {
+      loadUrls.push(String(target));
+      if (loadRejects) throw new Error('load rejected');
+      url = String(target);
+      return undefined;
+    },
+  };
+  return {
+    calls,
+    loadUrls,
+    getMarked: () => marked,
+    deps: {
+      fleet,
+      getView: () => ({ webContents }),
+      publishSnapshot: async () => {},
+      captureSemanticFrame: async () => {
+        captureCount += 1;
+        // busy probe + pre-effect stay quiet on the conversation surface
+        return captureCount <= 3
+          ? frame({ url: CONVERSATION })
+          : frame({ url: CONVERSATION, stop: true });
+      },
+      executeSemanticCommand: async (_wc, command) => {
+        calls.push(['execute', structuredClone(command)]);
+        return {
+          action: 'SEMANTIC_TYPE',
+          submit_after_type: true,
+          effect_state: 'PROVEN_GENERATING',
+          stop_observed: true,
+          new_conversation_observed: false,
+          post_url_sha256: crypto.createHash('sha256').update(CONVERSATION).digest('hex'),
+          prompt_included: false,
+          automatic_retry_allowed: false,
+          authority_effect: true,
+        };
+      },
+    },
+  };
+}
+
+test('D-M4: a drifted tab is navigated back to its proven conversation before typing', async () => {
+  const h = conversationHarness({ currentUrl: 'https://chat.z.ai/' });
+  const result = await dispatchFleetTask({ payload: payload(), ...h.deps });
+  assert.deepEqual(h.loadUrls, [CONVERSATION]);
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 1);
+  assert.equal(result.effect_state, 'PROVEN_GENERATING');
+  assert.deepEqual(h.getMarked(), {
+    agent_id: AGENT_ID,
+    tab_id: TAB_ID,
+    target_id: TARGET_ID,
+    generation_epoch: 4,
+    conversation_url: CONVERSATION,
+  });
+});
+
+test('D-M4: a tab already on its proven conversation dispatches without navigation', async () => {
+  const h = conversationHarness({ currentUrl: CONVERSATION });
+  await dispatchFleetTask({ payload: payload(), ...h.deps });
+  assert.deepEqual(h.loadUrls, []);
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 1);
+});
+
+test('D-M4: a failed conversation navigation fails the dispatch before any typing', async () => {
+  const h = conversationHarness({ currentUrl: 'https://chat.z.ai/', loadRejects: true });
+  await assert.rejects(
+    () => dispatchFleetTask({ payload: payload(), ...h.deps }),
+    /fleet_task_conversation_navigation_failed/,
+  );
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 0);
+  assert.equal(h.getMarked(), null);
+});
+
+test('D-M4: an unproven agent keeps the root flow (no navigation, no proof URL)', async () => {
+  const h = conversationHarness({ currentUrl: 'https://chat.z.ai/', proofUrl: null });
+  h.deps.fleet.snapshot = () => ({
+    agents: [{
+      agent_id: AGENT_ID,
+      role: 'IMPLEMENTER',
+      lifecycle_state: 'BOUND_UNVERIFIED',
+      generation_epoch: 4,
+      tab_id: TAB_ID,
+      target_id: TARGET_ID,
+      transport_proof: null,
+    }],
+  });
+  let captureCount = 0;
+  h.deps.captureSemanticFrame = async () => {
+    captureCount += 1;
+    return captureCount <= 3
+      ? frame({ url: 'https://chat.z.ai/' })
+      : frame({ url: CONVERSATION, stop: true });
+  };
+  await dispatchFleetTask({ payload: payload(), ...h.deps });
+  assert.deepEqual(h.loadUrls, []);
+  assert.equal(h.calls.filter(([kind]) => kind === 'execute').length, 1);
+});
