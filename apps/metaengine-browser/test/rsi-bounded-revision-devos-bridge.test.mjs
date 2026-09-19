@@ -4121,6 +4121,86 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(attemptedReadback.effect_attempt_count,1);
   assert.equal(attemptedReadback.post_attempt_pre_effect_readback_required,true);
 
+  // ATTEMPTED is a durable ambiguity fence: the runtime must not replay the effect.
+  await assert.rejects(()=>runtime.executeSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/ambiguous_reconcile_required/);
+  const noEffectReconciled=await runtime.reconcileSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    readback_owner_identity_digest:labelDigest('phase36-release-readback-owner'),
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(noEffectReconciled.state,'CONFIRMED_NO_EFFECT_NEW_ATTEMPT_REQUIRED');
+  assert.equal(noEffectReconciled.effect_attempt_count,1);
+  assert.equal(noEffectReconciled.additional_effect_attempt_performed,false);
+  assert.equal(noEffectReconciled.same_effect_id_retry_allowed,false);
+  assert.equal(noEffectReconciled.new_attempt_required,true);
+  assert.equal(noEffectReconciled.retrieval_exposure_changed,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_RECONCILED');
+
+  const certificate2=await runtime.createSkillExposureReleaseCertificate({
+    certificate_id:'phase36.runtime.reviewed-certificate.2',
+    skill_digest:fx.skill.skill_digest,
+    release_review:freshExposureReview,
+    shadow_routing_manifest_digest:labelDigest('phase36-certificate2-shadow-routing'),
+    no_skill_ablation_receipt_digest:labelDigest('phase36-certificate2-no-skill'),
+    coalition_ablation_receipt_digest:labelDigest('phase36-certificate2-coalition'),
+    bounded_canary_policy_digest:labelDigest('phase36-certificate2-canary-policy'),
+    bounded_canary_result_digest:labelDigest('phase36-certificate2-canary-result'),
+    shadow_context_count:3,
+    shadow_success_count:3,
+    shadow_hard_invariants_pass:true,
+    no_skill_ablation_pass:true,
+    coalition_ablation_pass:true,
+    bounded_canary_pass:true,
+    canary_effect_mode:'READ_ONLY_SHADOW',
+    external_release_certifier_identity_digest:labelDigest('phase36-release2-certifier'),
+    external_shadow_evaluator_identity_digest:labelDigest('phase36-release2-shadow-evaluator'),
+    external_canary_evaluator_identity_digest:labelDigest('phase36-release2-canary-evaluator'),
+    external_release_certifier:true,
+    external_shadow_evaluator:true,
+    external_canary_evaluator:true,
+    authored_by_candidate:false,
+  });
+  const preparedRelease2=await runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.2',
+    certificate:certificate2,
+    certificate_args:{release_review:freshExposureReview},
+    effect_id_digest:labelDigest('phase36-release2-effect-id'),
+    idempotency_key_digest:labelDigest('phase36-release2-idempotency-key'),
+    effect_executor_identity_digest:labelDigest('phase36-release2-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(preparedRelease2.state,'PREPARED');
+  const released=await runtime.executeSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.2',
+    effect_executor_identity_digest:labelDigest('phase36-release2-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(released.state,'CONFIRMED_EXPLORATION_EXPOSURE');
+  assert.equal(released.effect_attempt_count,1);
+  assert.equal(released.effect_performed,true);
+  assert.equal(released.pre_effect_readback_passed,true);
+  assert.equal(released.retrieval_exposure_changed,true);
+  assert.equal(released.release_mode,'EXPLORATION_ACTIVE_ONLY');
+  assert.equal(released.full_activation_authorized,false);
+  assert.equal(released.same_effect_id_retry_allowed,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,0);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_state_counts.CONFIRMED_EXPLORATION_EXPOSURE,1);
+  const releasedReadback=runtime.verifiedSkillStateReadback();
+  const releasedEntry=releasedReadback.governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(releasedEntry.state,'EXPLORATION_ACTIVE');
+  assert.equal(releasedEntry.active_for_composition,true);
+  assert.notEqual(releasedEntry.admission_exposure_hold,true);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_EFFECT_CONFIRMED');
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
