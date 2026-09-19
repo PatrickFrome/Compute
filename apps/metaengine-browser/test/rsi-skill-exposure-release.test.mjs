@@ -348,7 +348,7 @@ test('Phase36 zero-effect certificate ledger retains rejected evidence and rejec
   await assert.rejects(()=>restored.init(),/certificate_execution_authority_invalid/);
 });
 
-test('Phase36 runtime records verified certificate evidence without releasing hold or gaining effect authority',async(t)=>{
+test('Phase36 runtime refuses certificate persistence without exact live library/governance readback',async(t)=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase36-runtime-cert-'));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const runtime=new RsiRuntimeService({
@@ -360,14 +360,14 @@ test('Phase36 runtime records verified certificate evidence without releasing ho
   const fx=fixture();
   const input=args(fx);
   const cert=createRsiSkillExposureReleaseCertificate(input);
-  const recorded=await runtime.recordSkillExposureReleaseCertificate({certificate:cert,verification_args:input});
-  assert.equal(recorded.state,'RECORDED_ZERO_EFFECT');
+  await assert.rejects(
+    ()=>runtime.recordSkillExposureReleaseCertificate({certificate:cert,verification_args:input}),
+    /verified_skill_library_unavailable|skill_library_unavailable/,
+  );
   const snap=runtime.skillExposureReleaseCertificateLedgerSnapshot();
-  assert.equal(snap.record_count,1);
-  assert.equal(snap.eligible_record_count,1);
+  assert.equal(snap.record_count,0);
   assert.equal(snap.ledger_can_release_hold,false);
   assert.equal(snap.execution_authority,false);
-  assert.equal(runtime.snapshot().runtime_skill_exposure_certificate_ledger.record_count,1);
   assert.equal(runtime.snapshot().candidate_effect_executor_exposed,false);
 });
 
