@@ -896,7 +896,7 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
       external_evaluator: true,
       authored_by_candidate: false,
     });
-    const libraryAdmission = await runtime.admitScopeQualifiedSkillRevisionToLibrary({
+    await assert.rejects(() => runtime.admitScopeQualifiedSkillRevisionToLibrary({
       scope_admission_digest: scopeAdmission.admission.admission_digest,
       admission_id: 'runtime.library.admission.1',
       successor_skill: successorSkill,
@@ -904,10 +904,8 @@ test('runtime adopts verified skills, reconciles credited pending evidence, and 
       sealed_library_holdout: true,
       external_library_owner: true,
       authored_by_candidate: false,
-    });
-    assert.equal(libraryAdmission.admission.append_only_library_update, true);
-    assert.equal(libraryAdmission.adoption.entry_count, 2);
-    assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 2);
+    }), /scope_revision_phase34_certificate_required/);
+    assert.equal(runtime.snapshot().runtime_skill_lifecycle.library_entry_count, 1);
     assert.equal(runtime.snapshot().execution_authority, false);
     assert.equal(runtime.snapshot().authority_effect, false);
     assert.equal(runtime.snapshot().execution_authority, false);
