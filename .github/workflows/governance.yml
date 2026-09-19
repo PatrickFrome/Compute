@@ -92,7 +92,15 @@ jobs:
 
           python3 - <<'PY'
           import os, re, sys
-          body = os.environ.get('PR_BODY', '')
+
+          def without_html_comments(value):
+              stripped = re.sub(r'<!--.*?-->', '', value, flags=re.DOTALL)
+              if '<!--' in stripped or '-->' in stripped:
+                  print('Malformed HTML comment in governance fields', file=sys.stderr)
+                  raise SystemExit(1)
+              return stripped
+
+          body = without_html_comments(os.environ.get('PR_BODY', ''))
           labels = [
               'Canonical Level-1 milestone',
               'Level-2 milestone',
@@ -104,7 +112,7 @@ jobs:
               if not match:
                   print(f'Missing required governance field: {label}', file=sys.stderr)
                   raise SystemExit(1)
-              value = re.sub(r'<!--.*?-->', '', match.group(1)).strip()
+              value = match.group(1).strip()
               if not value:
                   print(f'Governance field is empty or placeholder-only: {label}', file=sys.stderr)
                   raise SystemExit(1)
