@@ -3926,7 +3926,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
         lane:'MUTATION',
         effect_key:'effect-phase36-post-append-credit',
         execution_ms:4,
-        recorded_at:'2026-09-19T16:00:00.000Z',
+        recorded_at:new Date(1_800_000_001_000).toISOString(),
         authority_effect:false,
       },
       error:null,
@@ -3953,7 +3953,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
       authored_by_candidate:false,
     },
   });
-  const credited=await runtime.recordBrowserStepCredit({
+  const postAppendCreditArgs={
     episode:postAppendEpisode,
     task_anchor:{
       task_id:'task.phase36.post-append.consumer',
@@ -3976,11 +3976,34 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
     skill_authoring_provenance_digest:labelDigest('phase36-post-append-skill-provenance'),
     external_credit_assigner:true,
     authored_by_candidate:false,
+  };
+  await assert.rejects(
+    ()=>runtime.recordBrowserStepCredit(postAppendCreditArgs),
+    /held_skill_credit_admission_required/,
+  );
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count,0);
+  const credited=await runtime.recordBrowserStepCredit({
+    ...postAppendCreditArgs,
+    held_skill_credit_context:{
+      admission_id:'phase36.held-credit.admission.1',
+      target_consumer_snapshot_digest:labelDigest('phase36-post-append-consumer-snapshot'),
+      evaluation_contract_digest:labelDigest('phase36-post-append-evaluation-contract'),
+      retention_evidence_digest:labelDigest('phase36-post-append-retention-evidence'),
+      retention_non_regression_pass:true,
+      negative_transfer_clear:true,
+      same_consumer_context_pass:true,
+      external_admission_owner:true,
+      authored_by_candidate:false,
+    },
   });
+  assert.equal(credited.held_skill_credit_admission.state,'ADMISSIBLE_POSITIVE_EXPLORATION_CREDIT');
+  assert.equal(credited.held_skill_credit_admission.measurement_after_admission,true);
+  assert.equal(credited.held_skill_credit_admission.retention_non_regression_pass,true);
   assert.equal(credited.skill_lifecycle.state,'APPLIED');
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count,1);
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
 
+  assert.equal(new Date(admissionProvenance.confirmed_at).getTime(),1_800_000_000_000);
   const freshProvenance=runtime.admissionExposureHoldProvenance(fx.skill.skill_digest);
   assert.equal(freshProvenance.admission_attempt_digest,admissionProvenance.admission_attempt_digest);
   assert.notEqual(freshProvenance.current_governance_digest,admissionProvenance.current_governance_digest);
