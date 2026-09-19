@@ -93,6 +93,11 @@ function experienceRefs(contextPlan){
     lesson_digests:Object.freeze((Array.isArray(row.lesson_digests)?row.lesson_digests:[]).map(x=>exactDigest(x,'experience_lesson')).sort()),
     exact_task_match:row.exact_task_match===true,
     corrective_trace_target:row.corrective_trace_target===true,
+    memory_reliability_tier:token(row.memory_reliability_tier||'COLD','experience_memory_reliability_tier'),
+    memory_reliability_reason:token(row.memory_reliability_reason||'EVIDENCE_SPARSE_OR_UNCERTAIN','experience_memory_reliability_reason'),
+    memory_utility_conflicted:row.memory_utility_conflicted===true,
+    memory_candidate_guidance_allowed:row.memory_candidate_guidance_allowed===true,
+    memory_remains_queryable:row.memory_remains_queryable===true,
     source_context_truth_is_portable:false,
     external_transfer_validation_required:true,
   })));
@@ -133,6 +138,10 @@ export function createRsiCandidateSynthesisRequest({
     experience_mode:context.mode,
     experience_graph_snapshot_digest:context.graph_snapshot_digest,
     experience_retrieval_digest:context.retrieval_digest,
+    bounded_memory_utility_state_digest:context.bounded_memory_utility_state_digest,
+    memory_reliability_projection_digest:context.memory_reliability_projection_digest,
+    quarantined_case_count:context.quarantined_case_count,
+    quarantined_memory_exposed_as_guidance:false,
     selected_experience:refs,
     selected_experience_count:refs.length,
     requested_mutation_change_types:Object.freeze([...GENERIC_CHANGE_TYPES].sort()),
@@ -166,6 +175,7 @@ export function verifyRsiCandidateSynthesisRequest(request){
     || request.candidate_can_modify_hypothesis!==false
     || request.candidate_can_modify_acceptance_contract!==false
     || request.candidate_can_mark_memory_portable!==false
+    || request.quarantined_memory_exposed_as_guidance!==false
     || request.model_or_page_output_is_authority!==false
     || request.source_snapshot_required_before_build!==true
     || request.existing_devos_scheduler_required!==true
@@ -181,6 +191,17 @@ export function verifyRsiCandidateSynthesisRequest(request){
   exactDigest(request.context_plan_digest,'request_context');
   if(request.experience_graph_snapshot_digest!=null)exactDigest(request.experience_graph_snapshot_digest,'request_graph');
   if(request.experience_retrieval_digest!=null)exactDigest(request.experience_retrieval_digest,'request_retrieval');
+  if(request.bounded_memory_utility_state_digest!=null)exactDigest(request.bounded_memory_utility_state_digest,'request_bounded_utility');
+  if(request.memory_reliability_projection_digest!=null)exactDigest(request.memory_reliability_projection_digest,'request_memory_reliability');
+  const quarantinedCount=Number(request.quarantined_case_count);
+  if(!Number.isSafeInteger(quarantinedCount)||quarantinedCount<0||quarantinedCount>MAX_SELECTED_EXPERIENCE)throw new Error('rsi_synthesis_quarantined_case_count_invalid');
+  for(const row of request.selected_experience||[]){
+    if(
+      row.memory_reliability_tier==='QUARANTINED'
+      || row.memory_candidate_guidance_allowed!==true
+      || row.memory_remains_queryable!==true
+    )throw new Error('rsi_synthesis_quarantined_experience_guidance_forbidden');
+  }
   const material={...structuredClone(request)};delete material.synthesis_request_digest;
   if(digest(material)!==exactDigest(request.synthesis_request_digest,'request'))throw new Error('rsi_synthesis_request_digest_mismatch');
   return request;
