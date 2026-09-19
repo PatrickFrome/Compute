@@ -267,7 +267,7 @@ test('bounded revision proposal limits are orthogonal under metamorphic boundary
     ['bytes',{estimated_mutated_files:1,estimated_edit_operations:1,estimated_changed_bytes:4096}],
   ];
   for(const [label,limits] of within){
-    const checked=verifyRsiBoundedRevisionProposal(proposal(env,`metamorphic-within-\${label}`,limits),{envelope:env});
+    const checked=verifyRsiBoundedRevisionProposal(proposal(env,`metamorphic-within-${label}`,limits),{envelope:env});
     assert.equal(checked.estimated_mutated_files,limits.estimated_mutated_files);
     assert.equal(checked.estimated_edit_operations,limits.estimated_edit_operations);
     assert.equal(checked.estimated_changed_bytes,limits.estimated_changed_bytes);
@@ -282,7 +282,7 @@ test('bounded revision proposal limits are orthogonal under metamorphic boundary
     ['bytes',{estimated_mutated_files:1,estimated_edit_operations:1,estimated_changed_bytes:4097},/estimated_changed_bytes_invalid/],
   ];
   for(const [label,limits,error] of outside){
-    assert.throws(()=>proposal(env,`metamorphic-outside-\${label}`,limits),error);
+    assert.throws(()=>proposal(env,`metamorphic-outside-${label}`,limits),error);
   }
 });
 
