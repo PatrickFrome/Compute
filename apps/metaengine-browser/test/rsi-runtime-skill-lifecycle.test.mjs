@@ -313,6 +313,10 @@ test('R10 runtime exposure preview is zero-effect and converts the hold only in 
     assert.equal(after.governance_digest,before.governance_digest);
     assert.deepEqual(after.admission_exposure_hold_skill_digests,before.admission_exposure_hold_skill_digests);
     assert.deepEqual(after.exploration_only_skill_digests,before.exploration_only_skill_digests);
+    const diskAfter=JSON.parse(await fs.readFile(statePath,'utf8'));
+    assert.equal(diskAfter.state_digest,persisted.state_digest);
+    assert.deepEqual(diskAfter.admission_exposure_hold_skill_digests,persisted.admission_exposure_hold_skill_digests);
+    assert.deepEqual(diskAfter.exploration_only_skill_digests,persisted.exploration_only_skill_digests);
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
