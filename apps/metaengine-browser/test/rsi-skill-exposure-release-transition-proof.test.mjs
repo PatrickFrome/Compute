@@ -151,6 +151,8 @@ function proofArgs(fx,review,overrides={}){
     review,
     skill_digest:fx.skill.skill_digest,
     external_release_owner_identity_digest:d('9'),
+    external_canary_evaluator_identity_digest:d('d'),
+    external_security_auditor_identity_digest:d('e'),
     read_only_shadow_canary_digest:d('a'),
     coalition_ablation_receipt_digest:d('b'),
     memory_poisoning_scan_digest:d('c'),
@@ -202,7 +204,19 @@ test('release owner must be external and distinct from all review principals',()
     ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{
       external_release_owner_identity_digest:d('6'),
     })),
-    /release_owner_separation_required/,
+    /cross_stage_separation_required/,
+  );
+  assert.throws(
+    ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{
+      external_canary_evaluator_identity_digest:d('9'),
+    })),
+    /cross_stage_separation_required/,
+  );
+  assert.throws(
+    ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{
+      external_security_auditor_identity_digest:d('8'),
+    })),
+    /cross_stage_separation_required/,
   );
   assert.throws(
     ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{
@@ -254,6 +268,9 @@ test('transition proof trust root keeps release review non-authoritative',()=>{
   assert.equal(root.only_target_governance_state_may_change,true);
   assert.equal(root.read_only_shadow_canary_required,true);
   assert.equal(root.release_owner_separation_of_duties_required,true);
+  assert.equal(root.cross_stage_identity_separation_required,true);
+  assert.equal(root.independent_canary_evaluator_required,true);
+  assert.equal(root.independent_security_auditor_required,true);
   assert.equal(root.proof_is_zero_effect,true);
   assert.equal(root.hold_release_effect_authorized,false);
   assert.equal(root.retrieval_exposure_change_authorized,false);
