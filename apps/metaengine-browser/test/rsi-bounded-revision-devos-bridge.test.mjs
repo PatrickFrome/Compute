@@ -3947,6 +3947,54 @@ test('Phase34B attempted-but-unapplied admission reconciles from exact predecess
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.currentLibrary.library_digest);
 });
 
+test('Phase34B rechecks governance after durable ATTEMPTED fence and never starts the effect on drift',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-pre-effect-governance-drift-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'skill-lifecycle.json');
+  const fx=phase34bLifecycleFixture('pre-effect-governance-drift');
+  const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+  await store.init();
+  await store.adoptVerifiedLibrary({library:fx.currentLibrary,external_library_owner:true,authored_by_candidate:false});
+  await store.prepareLibraryAdmissionAttempt({
+    attempt_id:'phase34b.attempt.pre-effect-governance-drift',
+    admission_certificate:fx.certificate,admission_certificate_args:fx.fx.certificateArgs,
+    successor_library:fx.successorLibrary,effect_id_digest:fx.effectId,idempotency_key_digest:fx.idempotencyKey,
+    effect_executor_identity_digest:fx.executorIdentity,external_library_owner:true,external_effect_executor:true,authored_by_candidate:false,
+  });
+  const prepared=store.admissionAttemptSnapshot('phase34b.attempt.pre-effect-governance-drift');
+  assert.equal(prepared.pre_effect_governance_readback_required,true);
+
+  const originalGovernance=store.governance.bind(store);
+  let governanceReads=0;
+  store.governance=()=>{
+    const current=originalGovernance();
+    governanceReads+=1;
+    if(governanceReads===1)return current;
+    return Object.freeze({...current,governance_digest:labelDigest('phase34b-pre-effect-governance-drift')});
+  };
+  await assert.rejects(()=>store.executePreparedLibraryAdmissionAttempt({
+    attempt_id:'phase34b.attempt.pre-effect-governance-drift',
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/pre_effect_governance_drift/);
+  store.governance=originalGovernance;
+
+  assert.equal(store.verifiedLibrarySnapshot().library_digest,fx.currentLibrary.library_digest);
+  const attempted=store.admissionAttemptSnapshot('phase34b.attempt.pre-effect-governance-drift');
+  assert.equal(attempted.current_state,'ATTEMPTED');
+  assert.equal(attempted.effect_attempt_count,1);
+  const reconciled=await store.reconcileLibraryAdmissionAttempt({
+    attempt_id:'phase34b.attempt.pre-effect-governance-drift',
+    readback_owner_identity_digest:fx.readbackIdentity,
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(reconciled.state,'CONFIRMED_NOT_APPLIED_NEW_ATTEMPT_REQUIRED');
+  assert.equal(reconciled.additional_effect_attempt_performed,false);
+  assert.equal(reconciled.same_effect_id_retry_allowed,false);
+});
+
 test('Phase34B ambiguous attempted admission can reconcile an externally observed successor without re-effect',async(t)=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-reconcile-applied-'));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
