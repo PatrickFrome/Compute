@@ -81,6 +81,8 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-skill-library-governance.mjs',
   'apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs',
   'apps/metaengine-browser/src/rsi-skill-exposure-release-transition-proof.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-service.mjs',
+  'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
   'apps/metaengine-browser/src/rsi-shadow-core.mjs',
   'apps/metaengine-browser/src/candidate-capsule.cjs',
   'apps/metaengine-browser/src/verification-sandbox-plan.cjs',
