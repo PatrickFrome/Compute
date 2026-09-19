@@ -236,7 +236,10 @@ let nextWebContentsId = 7300;
 // whether the Delete-key escalation empties the field.
 function fakeZaiTyped({ appendMode = false, deleteClears = true, submitWorks = true } = {}) {
   let attached = false;
-  let url = 'https://chat.z.ai/';
+  // D-K2's 'Send a Message' composer is the CONVERSATION-surface composer
+  // (live recon: root carries 'How can I help you today?'); the surface
+  // split (D-M3) therefore orders the proven KEY_ATOMIC gesture first here.
+  let url = CONVERSATION;
   let composerValue = 'STALE DRAFT: previous unsent task prompt';
   const calls = [];
   const listeners = new Map();
@@ -271,6 +274,11 @@ function fakeZaiTyped({ appendMode = false, deleteClears = true, submitWorks = t
       if (method === 'Input.dispatchKeyEvent') {
         if (params.key === 'Delete' && params.type === 'rawKeyDown' && deleteClears) composerValue = '';
         if (params.key === 'Enter' && params.type === 'rawKeyDown' && submitWorks) composerValue = '';
+        if (params.key === 'Enter' && params.type === 'keyUp' && submitWorks) {
+          // A real surface re-renders after submit; the outcome latch is
+          // event-driven by contract, so the shim emits the same CDP signal.
+          this.emitMessage('Accessibility.nodesUpdated', { nodes: [] });
+        }
         return {};
       }
       if (method === 'DOM.getBoxModel') return { model: { content: [10, 10, 110, 10, 110, 60, 10, 60] } };

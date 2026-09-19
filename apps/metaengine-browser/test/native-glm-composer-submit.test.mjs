@@ -57,6 +57,11 @@ function fakeZai({ submitWorks = true, navigateOnSubmit = false } = {}) {
           composerValue = '';
           if (navigateOnSubmit) url = 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db';
         }
+        if (params.key === 'Enter' && params.type === 'keyUp' && submitWorks) {
+          // A real surface re-renders after submit; the outcome latch is
+          // event-driven by contract, so the shim emits the same CDP signal.
+          this.emitMessage('Accessibility.nodesUpdated', { nodes: [] });
+        }
         return {};
       }
       if (method === 'DOM.getBoxModel') {
