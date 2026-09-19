@@ -251,6 +251,48 @@ test('active cap preserves one bounded exploration slot and ranks proven positiv
   assert.equal(governance.candidate_can_bypass_active_cap, false);
 });
 
+test('admission exposure hold dominates positive lifecycle evidence until external governance release', () => {
+  const { library, strong } = fixture();
+  const rows = [
+    lifecycle(library, strong, {
+      id: 'held.strong.1',
+      invocations: 8,
+      helpful: 8,
+      harmful: 0,
+      neutral: 0,
+      delta: 0.4,
+      prior: 'VERIFIED_DIRECT_SKILL',
+    }),
+  ];
+  const held = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exposure-hold.1',
+    library,
+    lifecycle_evidence: rows,
+    admission_exposure_hold_skill_digests: [strong.skill_digest],
+    max_active_skills: 2,
+    exploration_slots: 1,
+    min_positive_observations: 4,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  verifyRsiSkillLibraryGovernance(held, library);
+  const row = held.entries.find((entry) => entry.skill_digest === strong.skill_digest);
+  assert.equal(row.state, 'DORMANT_CAP');
+  assert.equal(row.active_for_composition, false);
+  assert.equal(row.admission_exposure_hold, true);
+  assert.deepEqual(held.admission_exposure_hold_skill_digests, [strong.skill_digest]);
+  assert.equal(held.admission_exposure_holds_force_nonactive, true);
+  assert.equal(held.storage_admission_does_not_imply_retrieval_exposure, true);
+  assert.equal(held.admission_exposure_hold_release_requires_external_governance, true);
+  assert.throws(() => createRsiSkillActivationView({
+    governance: held,
+    library,
+    requested_skill_digests: [strong.skill_digest],
+    external_planner: true,
+    authored_by_candidate: false,
+  }), /requested_skill_not_active:DORMANT_CAP/);
+});
+
 test('newly appended verified skill with zero lifecycle windows stays dormant until shadow evidence exists', () => {
   const { library, explore } = fixture();
   const governance = createRsiSkillLibraryGovernance({
