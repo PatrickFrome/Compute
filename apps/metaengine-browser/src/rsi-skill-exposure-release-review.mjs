@@ -57,12 +57,40 @@ function heldEntry(governance,skillDigest){
   }
   return entry;
 }
+function verifyAdmissionProvenance(provenance,{library,governance,skillDigest}){
+  if(!provenance||provenance.schema!=='metaengine.rsi.admission-exposure-hold-provenance.v1'||provenance.version!==1){
+    throw new Error('rsi_exposure_review_confirmed_admission_provenance_required');
+  }
+  assertZero(provenance,'admission_provenance');
+  if(provenance.release_authority!==false||provenance.retrieval_exposure_allowed!==false
+    ||provenance.exposure_hold_observed!==true||provenance.dormant_cap_observed!==true
+    ||provenance.active_for_composition!==false||provenance.admission_state!=='CONFIRMED_APPLIED_STORAGE_ONLY'){
+    throw new Error('rsi_exposure_review_admission_provenance_policy_invalid');
+  }
+  if(exactDigest(provenance.skill_digest,'admission_provenance_skill')!==skillDigest
+    ||exactDigest(provenance.current_library_digest,'admission_provenance_library')!==library.library_digest
+    ||exactDigest(provenance.current_governance_digest,'admission_provenance_governance')!==governance.governance_digest){
+    throw new Error('rsi_exposure_review_admission_provenance_binding_mismatch');
+  }
+  exactDigest(provenance.admission_certificate_digest,'admission_provenance_certificate');
+  exactDigest(provenance.effect_id_digest,'admission_provenance_effect_id');
+  exactDigest(provenance.admitted_successor_library_digest,'admission_provenance_successor_library');
+  exactDigest(provenance.confirmed_transition_digest,'admission_provenance_transition');
+  boundedId(provenance.admission_attempt_id,'admission_provenance_attempt');
+  const clone=structuredClone(provenance);delete clone.provenance_digest;
+  if(digest(clone)!==exactDigest(provenance.provenance_digest,'admission_provenance')){
+    throw new Error('rsi_exposure_review_admission_provenance_digest_mismatch');
+  }
+  return provenance;
+}
+
 
 export function createRsiSkillExposureReleaseReview({
   review_id,
   source_sha,
   library,
   current_governance,
+  admission_provenance,
   skill_digest,
   consumer_model_family,
   environment_fingerprint,
@@ -103,6 +131,7 @@ export function createRsiSkillExposureReleaseReview({
   const checkedGovernance=verifyRsiSkillLibraryGovernance(current_governance,checkedLibrary);
   const skillDigest=exactDigest(skill_digest,'skill');
   heldEntry(checkedGovernance,skillDigest);
+  const confirmedAdmission=verifyAdmissionProvenance(admission_provenance,{library:checkedLibrary,governance:checkedGovernance,skillDigest});
 
   if(external_governance_reviewer!==true||external_matched_evaluator!==true||external_security_reviewer!==true||authored_by_candidate!==false){
     throw new Error('rsi_exposure_review_external_ownership_required');
@@ -146,6 +175,10 @@ export function createRsiSkillExposureReleaseReview({
     library_id:checkedLibrary.library_id,
     library_digest:checkedLibrary.library_digest,
     current_governance_digest:checkedGovernance.governance_digest,
+    admission_provenance_digest:confirmedAdmission.provenance_digest,
+    admission_attempt_id:confirmedAdmission.admission_attempt_id,
+    admission_certificate_digest:confirmedAdmission.admission_certificate_digest,
+    confirmed_admission_transition_digest:confirmedAdmission.confirmed_transition_digest,
     skill_digest:skillDigest,
     consumer_model_family:token(consumer_model_family,'consumer_model_family'),
     environment_fingerprint:boundedId(environment_fingerprint,'environment_fingerprint'),
@@ -189,6 +222,7 @@ export function createRsiSkillExposureReleaseReview({
     negative_transfer_veto_required:true,
     cost_and_latency_veto_required:true,
     exposure_hold_required:true,
+    confirmed_admission_provenance_required:true,
     storage_admission_is_not_exposure_authority:true,
     hold_release_effect_authorized:false,
     hold_release_effect_performed:false,
@@ -208,6 +242,7 @@ export function verifyRsiSkillExposureReleaseReview(review,args={}){
     ||review.authored_by_candidate!==false||review.exact_consumer_scope_required!==true||review.matched_same_instances_required!==true
     ||review.no_skill_or_matched_reference_required!==true||review.negative_transfer_veto_required!==true
     ||review.cost_and_latency_veto_required!==true||review.exposure_hold_required!==true
+    ||review.confirmed_admission_provenance_required!==true
     ||review.storage_admission_is_not_exposure_authority!==true||review.hold_release_effect_authorized!==false
     ||review.hold_release_effect_performed!==false||review.retrieval_exposure_change_authorized!==false
     ||review.skill_activation_authorized!==false||review.release_token!==null){
@@ -263,6 +298,7 @@ export function rsiSkillExposureReleaseReviewTrustRootSnapshot(){
     policy_path:'apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs',
     exact_held_skill_required:true,
     exact_library_governance_binding_required:true,
+    confirmed_admission_provenance_required:true,
     exact_consumer_scope_required:true,
     matched_same_instances_required:true,
     no_skill_or_matched_reference_required:true,
