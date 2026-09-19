@@ -86,6 +86,7 @@ export function createRsiSkillExposureReleaseTransitionProof({
   const skillDigest=exactDigest(skill_digest,'skill');
 
   if(checkedReview.skill_digest!==skillDigest
+    ||checkedReview.source_sha!==sourceSha
     ||checkedReview.current_governance_digest!==current.governance_digest
     ||checkedReview.library_digest!==checkedLibrary.library_digest
     ||checkedReview.eligible_for_external_exposure_release_review!==true
@@ -167,6 +168,19 @@ export function createRsiSkillExposureReleaseTransitionProof({
     exactDigest(memory_poisoning_scan_digest,'memory_poisoning_scan'),
   ];
   if(new Set(evidenceDigests).size!==evidenceDigests.length)throw new Error('rsi_exposure_transition_independent_evidence_roots_required');
+  const reviewEvidenceRoots=new Set([
+    checkedReview.matched_comparison_receipt_digest,
+    checkedReview.negative_transfer_receipt_digest,
+    checkedReview.cost_latency_receipt_digest,
+    checkedReview.source_grounding_receipt_digest,
+    checkedReview.harness_integrity_digest,
+    checkedReview.benchmark_provenance_digest,
+    checkedReview.memory_context_digest,
+    checkedReview.external_policy_digest,
+  ]);
+  if(evidenceDigests.some(value=>reviewEvidenceRoots.has(value))){
+    throw new Error('rsi_exposure_transition_cross_stage_evidence_alias_forbidden');
+  }
 
   const core=zero({
     schema:RSI_SKILL_EXPOSURE_RELEASE_TRANSITION_PROOF_SCHEMA,
