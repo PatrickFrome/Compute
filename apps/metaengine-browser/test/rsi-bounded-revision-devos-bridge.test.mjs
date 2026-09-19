@@ -3894,11 +3894,16 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(result.reconciled_pending,0);
   assert.equal(result.retrieval_exposure_changed,false);
   assert.equal(result.skill_activation_performed,false);
+  assert.equal(result.admission_exposure_held,true);
+  assert.equal(result.held_skill_digest,fx.skill.skill_digest);
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
   assert.equal(restored.snapshot().active_count,0);
+  assert.equal(restored.snapshot().admission_exposure_hold_count,1);
+  assert.deepEqual(restored.snapshot().admission_exposure_hold_skill_digests,[fx.skill.skill_digest]);
   const governance=restored.governance();
   const added=governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
   assert.equal(added.evidence_window_count,0);
+  assert.equal(added.admission_exposure_held,true);
   assert.equal(added.state,'DORMANT_CAP');
   assert.equal(added.active_for_composition,false);
   assert.throws(()=>restored.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
@@ -4039,7 +4044,14 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(reconciled.additional_effect_attempt_performed,false);
   assert.equal(reconciled.same_effect_id_retry_allowed,false);
   assert.equal(reconciled.storage_only_pending_governance,true);
+  assert.equal(reconciled.admission_exposure_held,true);
+  assert.equal(reconciled.held_skill_digest,fx.skill.skill_digest);
   assert.equal(store.snapshot().active_count,0);
+  assert.equal(store.snapshot().admission_exposure_hold_count,1);
+  const reconciledRow=store.governance().entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(reconciledRow.admission_exposure_held,true);
+  assert.equal(reconciledRow.state,'DORMANT_CAP');
+  assert.equal(reconciledRow.active_for_composition,false);
 });
 
 test('Phase34B preparation fail-closes on stale predecessor and duplicate effect identities before mutation',async(t)=>{
@@ -4089,5 +4101,8 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.storage_append_does_not_reconcile_pending_evidence,true);
   assert.equal(root.storage_append_does_not_activate_skill,true);
   assert.equal(root.zero_evidence_skill_activation_forbidden,true);
+  assert.equal(root.storage_append_requires_explicit_exposure_hold,true);
+  assert.equal(root.admission_exposure_holds_force_dormant,true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
   assert.equal(root.authority_effect,false);
 });
