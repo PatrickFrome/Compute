@@ -186,12 +186,23 @@ test('verified library updates are append-only and cannot silently remove or rew
       external_library_owner:true,
       authored_by_candidate:false,
     });
+    await assert.rejects(()=>store.adoptVerifiedLibrary({
+      library:library([first,second],'runtime.skill.library.append'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    }),/append_exposure_hold_required/);
     await store.adoptVerifiedLibrary({
       library:library([first,second],'runtime.skill.library.append'),
+      admission_exposure_hold_skill_digests:[second.capsule.skill_digest],
       external_library_owner:true,
       authored_by_candidate:false,
     });
     assert.equal(store.snapshot().library_entry_count,2);
+    assert.equal(store.snapshot().admission_exposure_hold_count,1);
+    const held=store.governance().entries.find(row=>row.skill_digest===second.capsule.skill_digest);
+    assert.equal(held.admission_exposure_held,true);
+    assert.equal(held.state,'DORMANT_CAP');
+    assert.equal(held.active_for_composition,false);
 
     await assert.rejects(()=>store.adoptVerifiedLibrary({
       library:library([second],'runtime.skill.library.append'),
@@ -201,7 +212,7 @@ test('verified library updates are append-only and cannot silently remove or rew
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
-test('library append does not imply activation and one external shadow evidence window unlocks bounded exploration',async()=>{
+test('admission exposure hold keeps appended skill dormant even after positive shadow evidence until external release',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-shadow-admission-'));
   try{
     const first=verifiedSkill({id:'skill.runtime.shadow.first',source:'b',impl:'c'});
@@ -219,6 +230,7 @@ test('library append does not imply activation and one external shadow evidence 
 
     await store.adoptVerifiedLibrary({
       library:library([first,second],'runtime.skill.library.shadow'),
+      admission_exposure_hold_skill_digests:[second.capsule.skill_digest],
       external_library_owner:true,
       authored_by_candidate:false,
     });
@@ -240,9 +252,11 @@ test('library append does not imply activation and one external shadow evidence 
     const governance=store.governance();
     const secondRow=governance.entries.find((row)=>row.skill_digest===second.capsule.skill_digest);
     assert.equal(secondRow.evidence_window_count,1);
-    assert.equal(secondRow.state,'EXPLORATION_ACTIVE');
-    assert.equal(secondRow.active_for_composition,true);
-    assert.equal(store.activationView([second.capsule.skill_digest]).selected_count,1);
+    assert.equal(secondRow.admission_exposure_held,true);
+    assert.equal(secondRow.admission_exposure_hold_external_release_required,true);
+    assert.equal(secondRow.state,'DORMANT_CAP');
+    assert.equal(secondRow.active_for_composition,false);
+    assert.throws(()=>store.activationView([second.capsule.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
@@ -366,6 +380,9 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   const root=rsiRuntimeSkillLifecycleTrustRootSnapshot();
   assert.equal(root.verified_library_required,true);
   assert.equal(root.library_updates_append_only,true);
+  assert.equal(root.append_new_skills_require_exposure_hold,true);
+  assert.equal(root.admission_exposure_holds_force_dormant,true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
   assert.equal(root.independently_credited_outcomes_only,true);
   assert.equal(root.contextual_credit_not_global_truth,true);
   assert.equal(root.candidate_can_write_lifecycle,false);
