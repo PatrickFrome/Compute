@@ -1380,6 +1380,45 @@ export class RsiRuntimeService {
     return this.#skillLifecycle.exposureReleaseAttemptSnapshot(attempt_id);
   }
 
+  async recordSkillExposureReleaseAttempted({
+    attempt_id,
+    effect_executor_identity_digest,
+    external_effect_executor = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.recordExposureReleaseAttempted({
+      attempt_id,
+      effect_executor_identity_digest,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_ATTEMPTED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest,
+      release_certificate_digest: result.release_certificate_digest,
+      skill_digest: result.skill_digest,
+      effect_attempt_count: 1,
+      durable_attempt_fence_persisted: true,
+      post_attempt_pre_effect_readback_required: true,
+      effect_started: false,
+      effect_performed: false,
+      retrieval_exposure_changed: false,
+      full_activation_authorized: false,
+      same_effect_id_retry_allowed: false,
+      reconciliation_required: true,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
   async recordBrowserStepCredit({
     episode,
     task_anchor,
