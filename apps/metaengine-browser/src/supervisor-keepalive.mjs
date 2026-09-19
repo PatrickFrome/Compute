@@ -704,12 +704,21 @@ export class SupervisorKeepalive {
     return this.snapshot();
   }
 
-  async markWakeAmbiguous(wakeId, reason = 'SEND_EFFECT_UNKNOWN') {
+  async markWakeAmbiguous(wakeId, reason = 'SEND_EFFECT_UNKNOWN', { continuation_tab_id = null } = {}) {
     const pending = this.#state.pending_wake;
     if (!pending || pending.wake_id !== String(wakeId)) throw new Error('keepalive_wake_binding_mismatch');
     pending.ambiguous_at = iso(this.#clock);
     pending.ambiguous_reason = String(reason).slice(0, 200);
     pending.automatic_retry_allowed = false;
+    // D-S1 (live deadlock 2026-09-19): a bootstrap ambiguity must durably
+    // remember the tab it typed into. Without it the recovery scoping falls
+    // back to keepalive.tab_id, which still points at a tab from a previous
+    // process incarnation whenever bindConversation never ran — the wake then
+    // has no observable surface and can never be continued or retired.
+    const continuationTabId = String(continuation_tab_id || '');
+    if (continuationTabId && !pending.ambiguity_continuation_tab_id) {
+      pending.ambiguity_continuation_tab_id = continuationTabId;
+    }
     this.#state.state = 'WAKE_AMBIGUOUS';
     await this.#persist();
     return this.snapshot();

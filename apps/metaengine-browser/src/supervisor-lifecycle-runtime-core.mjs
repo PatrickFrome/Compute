@@ -68,14 +68,19 @@ export class SupervisorLifecycleRuntime {
   #bootstrapLeakedTabIds = new Set();
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
   #requireAuthoritativeAdmission = false;
+  #processIncarnationId = null;
 
-  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null, requireAuthoritativeAdmission = false } = {}) {
+  constructor({ getState, executeCommand, canActuate = () => true, statePath = null, monitorMs = 2000, researchMs = 30 * 60 * 1000, sessionMonitor = null, requireAuthoritativeAdmission = false, processIncarnationId = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof canActuate !== 'function') throw new Error('supervisor_lifecycle_dependencies_required');
     this.#getState = getState; this.#execute = executeCommand; this.#canActuate = canActuate; this.#statePath = statePath;
     this.#monitorMs = Math.max(1000, Number(monitorMs) || 2000);
     this.#researchMs = Math.max(5 * 60 * 1000, Number(researchMs) || 30 * 60 * 1000);
     this.#sessionMonitor = sessionMonitor || new AgentSessionMonitor();
     this.#requireAuthoritativeAdmission = requireAuthoritativeAdmission === true;
+    // Test seam only: production leaves this null so the keepalive derives its
+    // own process incarnation. Tests inject a fixed id to model a wake that
+    // went ambiguous earlier in the SAME process (the D-S1 live deadlock).
+    this.#processIncarnationId = processIncarnationId ? String(processIncarnationId) : null;
   }
 
   async start() {
@@ -86,6 +91,7 @@ export class SupervisorLifecycleRuntime {
     this.#keepalive = new SupervisorBootstrapKeepalive({
       loadState: () => readJson(this.#statePath),
       saveState: (v) => writeJson(this.#statePath, v),
+      ...(this.#processIncarnationId ? { processIncarnationId: this.#processIncarnationId } : {}),
     });
     await this.#keepalive.init();
     if (this.#requireAuthoritativeAdmission || this.#runtimeControl.authoritative === true) {
@@ -552,14 +558,14 @@ export class SupervisorLifecycleRuntime {
       const sent = await this.#typeAndSend(tab.tab_id, prepared.message, prepared.pending.wake_id);
       if (!sent.ok) {
         if (sent.clicked === true) {
-          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN');
+          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', { continuation_tab_id: tab.tab_id });
           this.#lastRecovery = {
             action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
             reason: sent.reason || 'BOOTSTRAP_SEND_EFFECT_UNKNOWN', confirmed: false, ambiguous: true,
             automatic_retry_allowed: false, at: new Date().toISOString(), authority_effect: false,
           };
         } else {
-          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_PRE_EFFECT_ABORT');
+          await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, sent.reason || 'BOOTSTRAP_PRE_EFFECT_ABORT', { continuation_tab_id: tab.tab_id });
           await this.#keepalive.resolveAmbiguous({ observed_sent: false });
           await this.#keepalive.resume();
         }
@@ -571,7 +577,7 @@ export class SupervisorLifecycleRuntime {
       const url = String(observed?.url || '');
       const markerObserved = String(observed?.text_excerpt || '').includes(String(prepared.pending.wake_id));
       if (!CHAT_RE.test(url) || !(generating(observed) || markerObserved || sent.event_driven_readback === true)) {
-        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING');
+        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', { continuation_tab_id: tab.tab_id });
         this.#lastRecovery = {
           action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: String(tab.tab_id),
           reason: 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING', confirmed: false, ambiguous: true,
@@ -595,7 +601,7 @@ export class SupervisorLifecycleRuntime {
       return true;
     } catch (e) {
       if (prepared?.pending?.wake_id) {
-        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_SEND_PATH_AMBIGUOUS').catch(() => {});
+        await this.#keepalive.markWakeAmbiguous(prepared.pending.wake_id, 'BOOTSTRAP_SEND_PATH_AMBIGUOUS', { continuation_tab_id: tab?.tab_id || null }).catch(() => {});
         this.#lastRecovery = {
           action: 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS', wake_id: prepared.pending.wake_id, tab_id: null,
           reason: 'BOOTSTRAP_SEND_PATH_AMBIGUOUS', confirmed: false, ambiguous: true,
@@ -636,6 +642,69 @@ export class SupervisorLifecycleRuntime {
     } catch {
       this.#bootstrapLeakedTabIds.add(id);
     }
+  }
+
+  // D-S1 bounded retirement for a bootstrap-ambiguous wake whose surface is
+  // observed terminal at the preconversation root with no wake marker in the
+  // transcript and a composer that is either empty or still holding the exact
+  // wake draft. A submitted first message always navigates the root to the
+  // conversation URL, so under those observations the send provably never
+  // landed on this tab: the unresolved wake is retired with zero effect
+  // authority, the runtime resumes RECOVERING with a fresh continuous wake
+  // queued, and a tab still holding the exact dead draft is closed by proof so
+  // the next bootstrap cannot amplify tab cardinality (the historical 7 -> 32
+  // incident vector). Retirement is refused for ambiguity reasons that may
+  // indicate a latch-proven send; those keep the conservative deadlock posture.
+  async #retireAmbiguousBootstrapWakeWithoutEffect(bootstrapTab, frame, row, keepalive) {
+    const pending = keepalive?.pending_wake;
+    if (!pending?.ambiguous_at || this.#canActuate() !== true) return false;
+    const DRAFT_HELD_REASONS = new Set([
+      'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING',
+      'BOOTSTRAP_SEND_EFFECT_UNKNOWN',
+      'BOOTSTRAP_SEND_PATH_AMBIGUOUS',
+      'SEND_WITHOUT_POSITIVE_READBACK',
+      'TYPE_EFFECT_AMBIGUOUS',
+    ]);
+    if (!DRAFT_HELD_REASONS.has(String(pending.ambiguous_reason || ''))) return false;
+    if (String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''))) return false;
+    const composer = unique(frame, 'textbox');
+    if (!composer) return false;
+    const draftSha = sha256(buildSupervisorWakeMessage({
+      supervisorEpoch: pending.supervisor_epoch,
+      cycleSeq: pending.cycle_seq,
+      wakeId: pending.wake_id,
+      reason: pending.reason,
+    }));
+    const composerEmpty = composer.value_length === 0;
+    const composerHoldsDraft = Boolean(composer.value_sha256) && composer.value_sha256 === draftSha;
+    if (!composerEmpty && !composerHoldsDraft) return false;
+    // A missing value_length is an unproven composer, not an empty one: only a
+    // captured zero (or the exact draft hash) proves the send never landed.
+    const recordedContinuationTab = String(pending.ambiguity_continuation_tab_id || '');
+    const retiredTabId = String(bootstrapTab.tab_id || '');
+    const tabOwnedByThisWake = composerHoldsDraft
+      || (recordedContinuationTab === retiredTabId && composerEmpty);
+    await this.#keepalive.retireAmbiguousAfterTerminal({
+      tab_id: null,
+      generation_epoch: row.generation_epoch,
+      reason: 'AMBIGUOUS_BOOTSTRAP_EFFECT_PROVABLY_ABSENT',
+    });
+    await this.#keepalive.resume();
+    const resumed = this.#keepalive.snapshot();
+    if (!resumed.paused && !resumed.pending_wake && !resumed.active_wake) {
+      await this.#keepalive.enqueueWake(CONTINUOUS_WAKE_REASON, {
+        key: `epoch-${resumed.supervisor_epoch}-cycle-${resumed.cycle_seq}`,
+      });
+    }
+    this.#lastRecovery = {
+      action: 'AMBIGUOUS_BOOTSTRAP_WAKE_RETIRED', wake_id: String(pending.wake_id || ''),
+      tab_id: retiredTabId,
+      proof: 'TERMINAL_ROOT_NO_MARKER_COMPOSER_EMPTY_OR_EXACT_DRAFT',
+      confirmed: true, ambiguous: false, automatic_retry_allowed: false,
+      at: new Date().toISOString(), authority_effect: false,
+    };
+    if (tabOwnedByThisWake) await this.#closeFailedBootstrapTab(retiredTabId);
+    return true;
   }
 
   async #sweepLeakedBootstrapTabs() {
@@ -980,9 +1049,25 @@ export class SupervisorLifecycleRuntime {
         const scopedCandidates = durableTabId
           ? bootstrapCandidates.filter((tab) => String(tab?.tab_id || '') === durableTabId)
           : bootstrapCandidates;
+        // D-S1 (live deadlock 2026-09-19): the durable tab id can point at a tab
+        // from a previous process incarnation (bindConversation never ran, so
+        // keepalive.tab_id was never refreshed). Scoping to that dead id observes
+        // nothing and the wake deadlocks forever. A unique non-fleet chat candidate
+        // is still unambiguous surface evidence: the continuation path requires the
+        // exact composer draft and the retirement path below requires the
+        // provably-absent-effect proof, so the fallback can never turn an
+        // unrelated user tab into send authority. The fallback and the proof-based
+        // retirement are SAME-PROCESS repairs only: a cross-process ambiguous wake
+        // keeps the strictly stronger process-boundary contract (predecessor
+        // fences, unique-root reuse) further below.
+        const sameProcessAmbiguity = String(keepalive.pending_wake?.process_incarnation_id || '')
+          === String(keepalive.process_incarnation_id || '');
+        const observedCandidates = scopedCandidates.length === 1
+          ? scopedCandidates
+          : (durableTabId && sameProcessAmbiguity && bootstrapCandidates.length === 1 ? bootstrapCandidates : []);
 
-        if (scopedCandidates.length === 1) {
-          const bootstrapTab = scopedCandidates[0];
+        if (observedCandidates.length === 1) {
+          const bootstrapTab = observedCandidates[0];
           try {
             const frame = await this.#capture(bootstrapTab.tab_id);
             const frameUrl = String(frame?.url || bootstrapTab?.url || '');
@@ -990,8 +1075,20 @@ export class SupervisorLifecycleRuntime {
               const live = tabLiveness(state, bootstrapTab.tab_id);
               const row = this.#sessionMonitor.observe({ tab_id: bootstrapTab.tab_id, frame, ...live });
               this.#lastSupervisorGeneration = row.state;
-              await this.#recoverAmbiguousWakeFromFrame(bootstrapTab, frame, row, keepalive);
+              const recovered = await this.#recoverAmbiguousWakeFromFrame(bootstrapTab, frame, row, keepalive);
               keepalive = this.#keepalive.snapshot();
+              if (!recovered
+                && sameProcessAmbiguity
+                && keepalive.state === 'WAKE_AMBIGUOUS'
+                && row.terminal_ready === true
+                && CHAT_ROOT_RE.test(frameUrl)) {
+                const retiredNow = await this.#retireAmbiguousBootstrapWakeWithoutEffect(bootstrapTab, frame, row, keepalive);
+                keepalive = this.#keepalive.snapshot();
+                // Bounded superstep: the retirement (with its fresh continuous
+                // wake already queued) ends this tick; the next monitor tick
+                // performs the fresh bootstrap from a clean RECOVERING state.
+                if (retiredNow) return this.snapshot();
+              }
               if (keepalive.state !== 'WAKE_AMBIGUOUS' && keepalive.active_wake) {
                 let reboundFrame = frame;
                 if (!CHAT_RE.test(String(reboundFrame?.url || ''))) {

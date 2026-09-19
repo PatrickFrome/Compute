@@ -8,6 +8,9 @@ import { SupervisorLifecycleRuntime } from '../src/supervisor-lifecycle-runtime-
 import { buildSupervisorWakeMessage } from '../src/supervisor-keepalive.mjs';
 
 const WAKE_ID = 'wake_bootstrap-r4';
+// The r4 scenarios are same-process continuations: the pending wake carries
+// this id and the runtime is constructed with the matching incarnation.
+const PROCESS_ID = 'process_r4_same_process_0001';
 
 function seedState() {
   return {
@@ -30,7 +33,7 @@ function seedState() {
       prepared_at: '2026-09-16T00:00:00.000Z',
       supervisor_epoch: 1,
       cycle_seq: 1,
-      process_incarnation_id: null,
+      process_incarnation_id: PROCESS_ID,
       ambiguous_at: '2026-09-16T00:00:01.000Z',
       ambiguous_reason: 'TYPE_EFFECT_AMBIGUOUS',
       automatic_retry_allowed: false,
@@ -54,7 +57,7 @@ function composerFrame({ marker = false, composerSha = null } = {}) {
     title: 'ChatGPT',
     text_excerpt: marker ? `message ${WAKE_ID}` : '',
     semantic_targets: [
-      ...(composerSha ? [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'composer', value_sha256: composerSha }] : []),
+      ...(composerSha ? [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'composer', value_sha256: composerSha, value_length: 512 }] : [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: 'composer', value_length: 0 }]),
       { role: 'button', name: 'Send prompt', semantic_ref: 'send' },
     ],
   };
@@ -65,6 +68,7 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
   const statePath = path.join(dir, 'keepalive.json');
   await fs.writeFile(statePath, `${JSON.stringify(seedState(), null, 2)}\n`);
   const actions = [];
+  const closedTabs = [];
   const executeCommand = async ({ action, payload }) => {
     actions.push(action);
     if (action === 'CAPTURE') return typeof frame === 'function' ? frame() : structuredClone(frame);
@@ -76,6 +80,11 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
       if (onClick) return onClick({ action, payload });
       return { ok: true };
     }
+    if (action === 'CLOSE_TAB') {
+      closedTabs.push(String(payload?.tab_id || ''));
+      return { ok: true };
+    }
+    if (action === 'NEW_TAB') return { tab_id: 'bootstrap_new', url: 'https://chat.z.ai/' };
     throw new Error(`unexpected_effect:${action}`);
   };
   const runtime = new SupervisorLifecycleRuntime({
@@ -84,8 +93,9 @@ async function makeRuntime({ tabs, frame, onClick = null, onSubmit = null }) {
     canActuate: () => true,
     statePath,
     researchMs: 24 * 60 * 60 * 1000,
+    processIncarnationId: PROCESS_ID,
   });
-  return { runtime, actions, statePath };
+  return { runtime, actions, statePath, closedTabs };
 }
 
 test('bare bootstrap root transcript marker resolves ambiguity without a write effect', async () => {
@@ -105,7 +115,7 @@ test('bare bootstrap root transcript marker resolves ambiguity without a write e
 test('exact composer continuation is durably fenced before click and never repeated', async () => {
   const composerSha = crypto.createHash('sha256').update(wakeMessage(), 'utf8').digest('hex');
   let submits = 0;
-  const { runtime, actions, statePath } = await makeRuntime({
+  const { runtime, actions, statePath, closedTabs } = await makeRuntime({
     tabs: [{ tab_id: 'root-1', url: 'https://chat.z.ai/', selected: false }],
     frame: composerFrame({ composerSha }),
     onSubmit: () => {
@@ -121,11 +131,23 @@ test('exact composer continuation is durably fenced before click and never repea
   assert.equal(durable.pending_wake.ambiguity_continuation_composer_sha256, composerSha);
   assert.ok(durable.pending_wake.ambiguity_continuation_attempted_at);
 
+  // D-S1 contract update (2026-09-19): the continuation stays single-shot —
+  // never repeated — but the now provably-absent wake (terminal root, no
+  // marker, composer still holding the exact dead draft) is retired on the
+  // next bounded superstep instead of deadlocking the keepalive forever, and
+  // the dead draft tab is closed by proof so the next bootstrap cannot
+  // amplify tab cardinality. The fresh bootstrap happens on a later tick with
+  // a NEW wake; the spent wake is never blindly retried.
   snap = await runtime.cycle({ force: true });
-  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
-  assert.equal(submits, 1);
+  assert.equal(submits, 1, 'the spent wake is never resubmitted');
   assert.equal(actions.filter((row) => row === 'SEMANTIC_TYPE').length, 1);
-  assert.equal(actions.includes('NEW_TAB'), false);
+  const afterCycle = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  const retired = (afterCycle.ambiguous_history || []).find((row) => row.wake_id === WAKE_ID);
+  assert.ok(retired, 'the wake was retired after the spent continuation');
+  assert.equal(retired.retired_reason, 'AMBIGUOUS_BOOTSTRAP_EFFECT_PROVABLY_ABSENT');
+  assert.ok(closedTabs.includes('root-1'), 'the dead draft tab was closed by proof');
+  assert.equal(afterCycle.pending_wake, null, 'retirement is a bounded superstep: no bootstrap in the same tick');
+  assert.ok((afterCycle.queued_wakes || []).length >= 1, 'a fresh continuous wake is queued for the next tick');
 });
 
 test('duplicate bootstrap candidates fail closed with zero effect continuation', async () => {
