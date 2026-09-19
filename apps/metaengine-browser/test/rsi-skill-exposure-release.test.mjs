@@ -12,6 +12,8 @@ import {
   createRsiSkillLibraryGovernance,
 } from '../src/rsi-skill-library-governance.mjs';
 import {
+  createRsiSkillExposureReleasePreview,
+  verifyRsiSkillExposureReleasePreview,
   createRsiSkillExposureReleaseCertificate,
   verifyRsiSkillExposureReleaseCertificate,
   rsiSkillExposureReleaseTrustRootSnapshot,
@@ -103,37 +105,18 @@ function fixture(){
   assert.equal(currentRow.admission_exposure_held,true);
   assert.equal(nextRow.state,'EXPLORATION_ACTIVE');
   assert.equal(nextRow.admission_exposure_held,false);
-  const previewCore={
-    schema:'metaengine.rsi.skill-exposure-release-preview.v1',
-    version:1,
-    library_digest:library.library_digest,
-    current_governance_digest:currentGovernance.governance_digest,
-    next_governance_digest:nextGovernance.governance_digest,
+  const preview=createRsiSkillExposureReleasePreview({
+    library,
+    current_governance:currentGovernance,
+    next_governance:nextGovernance,
     skill_digest:capsule.skill_digest,
-    current_state:currentRow.state,
-    current_active_for_composition:currentRow.active_for_composition,
-    current_admission_exposure_held:currentRow.admission_exposure_held,
-    next_state:nextRow.state,
-    next_active_for_composition:nextRow.active_for_composition,
-    next_admission_exposure_held:nextRow.admission_exposure_held,
-    changed_skill_digests:[capsule.skill_digest],
-    only_target_state_changed:true,
-    active_count_delta:nextGovernance.active_count-currentGovernance.active_count,
-    hold_count_delta:nextGovernance.admission_exposure_hold_count-currentGovernance.admission_exposure_hold_count,
-    preview_is_effect_authority:false,
-    execution_authority:false,
-    browser_authority:false,
-    task_authority:false,
-    production_mutation_authority:false,
-    promotion_authority:false,
-    self_update_authority:false,
-    scheduler_authority:false,
-    signing_authority:false,
-    direct_tool_execution_authority:false,
-    automatic_retry_allowed:false,
-    authority_effect:false,
-  };
-  const preview=Object.freeze({...previewCore,preview_digest:digest(previewCore)});
+    external_governance_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(verifyRsiSkillExposureReleasePreview(preview,{
+    library,current_governance:currentGovernance,next_governance:nextGovernance,
+    skill_digest:capsule.skill_digest,
+  }).preview_digest,preview.preview_digest);
   return {capsule,library,currentGovernance,nextGovernance,preview};
 }
 
@@ -142,6 +125,7 @@ function args(fx,overrides={}){
     certificate_id:'phase36.exposure.certificate.1',
     library:fx.library,
     current_governance:fx.currentGovernance,
+    next_governance:fx.nextGovernance,
     release_preview:fx.preview,
     skill_digest:fx.capsule.skill_digest,
     routing_context_manifest_digest:d('a'),
@@ -226,10 +210,28 @@ test('Phase36 certificate rejects reviewer identity collapse and forged release 
   })),/exploration_only_required/);
 });
 
+test('Phase36 preview is bound to the exact next governance, not an opaque next digest',()=>{
+  const fx=fixture();
+  const forgedNext={...fx.nextGovernance,governance_digest:d('a')};
+  assert.throws(()=>createRsiSkillExposureReleasePreview({
+    library:fx.library,
+    current_governance:fx.currentGovernance,
+    next_governance:forgedNext,
+    skill_digest:fx.capsule.skill_digest,
+    external_governance_owner:true,
+    authored_by_candidate:false,
+  }),/governance_digest_mismatch/);
+
+  assert.throws(()=>createRsiSkillExposureReleaseCertificate(args(fx,{
+    next_governance:fx.currentGovernance,
+  })),/target_hold_not_released|exploration_only_required|preview_digest_mismatch/);
+});
+
 test('Phase36 exposure-release trust root requires external, bounded, exploration-only evidence and grants no effect authority',()=>{
   const root=rsiSkillExposureReleaseTrustRootSnapshot();
   assert.equal(root.exact_current_library_required,true);
   assert.equal(root.exact_current_governance_required,true);
+  assert.equal(root.exact_next_governance_required,true);
   assert.equal(root.exact_next_governance_preview_required,true);
   assert.equal(root.held_dormant_skill_required,true);
   assert.equal(root.exploration_only_release,true);
