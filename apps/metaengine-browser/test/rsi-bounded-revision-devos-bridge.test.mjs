@@ -4425,5 +4425,13 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.exposure_release_requires_confirmed_admission_provenance,true);
   assert.equal(root.confirmed_admission_provenance_binds_attempt_digest,true);
   assert.equal(root.confirmed_admission_provenance_binds_effect_executor_identity,true);
+  assert.equal(root.persistence_temp_file_fsync_required,true);
+  assert.equal(root.persistence_atomic_rename_required,true);
+  assert.equal(root.persistence_post_rename_file_fsync_required,true);
+  assert.equal(root.persistence_parent_directory_fsync_required_on_posix,true);
+  assert.equal(root.exposure_release_effect_atomic_with_terminal_state,true);
+  assert.equal(root.exposure_release_readback_only_reconciliation,true);
+  assert.equal(root.exposure_release_external_readback_owner_required,true);
+  assert.equal(root.exposure_release_full_activation_forbidden,true);
   assert.equal(root.authority_effect,false);
 });
