@@ -184,6 +184,7 @@ export function createRsiLineageStructuralProvenance({
     implementation_digest:entry.capsule.implementation_digest,
     component_root_digest:expectedComponentRoot,
     parent_material_skill_digest:expectedParent,
+    build_receipt:structuredClone(receipt),
     build_receipt_digest:receipt.receipt_digest,
     expected_builder_identity_digest:expectedBuilder,
     expected_build_recipe_digest:expectedRecipe,
@@ -233,6 +234,10 @@ export function verifyRsiLineageStructuralProvenance(attestation,args={}){
   const canonical=createRsiLineageStructuralProvenance({
     ...args,
     attestation_id:attestation.attestation_id,
+    build_receipt:args.build_receipt??attestation.build_receipt,
+    expected_builder_identity_digest:args.expected_builder_identity_digest??attestation.expected_builder_identity_digest,
+    expected_build_recipe_digest:args.expected_build_recipe_digest??attestation.expected_build_recipe_digest,
+    expected_material_manifest_digest:args.expected_material_manifest_digest??attestation.expected_material_manifest_digest,
     provenance_reviewer_identity_digest:attestation.provenance_reviewer_identity_digest,
     effect_executor_identity_digest:attestation.effect_executor_identity_digest,
     external_provenance_owner:true,
