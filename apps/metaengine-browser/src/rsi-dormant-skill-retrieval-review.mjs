@@ -306,7 +306,10 @@ export function createRsiDormantSkillRetrievalReview({
   if (contamination_clear !== true) evidenceBlockers.push('CONTAMINATION_DETECTED');
   if (from_scratch_replay_pass !== true) evidenceBlockers.push('FROM_SCRATCH_REPLAY_FAILURE');
 
-  const capacityAvailable = storage.governance.active_count < storage.governance.config.max_active_skills;
+  const explorationActiveCount = storage.governance.entries.filter((row) => row.state === 'EXPLORATION_ACTIVE').length;
+  const activeCapCapacityAvailable = storage.governance.active_count < storage.governance.config.max_active_skills;
+  const explorationSlotCapacityAvailable = explorationActiveCount < storage.governance.config.exploration_slots;
+  const capacityAvailable = activeCapCapacityAvailable && explorationSlotCapacityAvailable;
   const state = classify({
     evidence_blockers: evidenceBlockers,
     task_non_regression,
@@ -370,7 +373,11 @@ export function createRsiDormantSkillRetrievalReview({
     coalition_ablation_pass: coalition_ablation_pass === true,
     marginal_contribution_pass: marginal_contribution_pass === true,
     active_cap_pass: active_cap_pass === true,
-    active_cap_capacity_available: capacityAvailable,
+    active_cap_capacity_available: activeCapCapacityAvailable,
+    exploration_active_count: explorationActiveCount,
+    exploration_slot_limit: storage.governance.config.exploration_slots,
+    exploration_slot_capacity_available: explorationSlotCapacityAvailable,
+    bounded_exploration_capacity_available: capacityAvailable,
     evidence_blockers: Object.freeze(evidenceBlockers.sort()),
     state,
     appended_skill_initial_governance_state: 'DORMANT_CAP',
@@ -490,6 +497,7 @@ export function rsiDormantSkillRetrievalReviewTrustRootSnapshot() {
     coalition_ablation_required: true,
     marginal_contribution_required: true,
     active_cap_required: true,
+    exploration_slot_capacity_required: true,
     separation_of_duties_required: true,
     review_is_eligibility_evidence_only: true,
     storage_does_not_imply_exposure: true,
