@@ -9,7 +9,10 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillLifecycleEvidence,
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiMetaSkillProfile,
   createRsiMetaSkillFastLoopSummary,
@@ -173,10 +176,10 @@ test('library drift invalidates shadow selection until explicit requalification'
   }),/library_drift_requires_requalification/);
 });
 
-test('shadow projection reports divergence without modifying baseline execution selection',()=>{
+test('shadow projection blocks a dormant challenger without modifying baseline execution selection',()=>{
   const fx=qualifiedFixture();
   const selection=createRsiMetaProfileShadowSelection({
-    selection_id:'shadow.selection.projection',qualification:fx.qualification,meta_record:fx.record,current_library:fx.library,
+    selection_id:'shadow.selection.projection.dormant',qualification:fx.qualification,meta_record:fx.record,current_library:fx.library,
     external_selector:true,authored_by_candidate:false,
   });
   const baseline=[fx.analyzerA.capsule.skill_digest];
@@ -184,8 +187,61 @@ test('shadow projection reports divergence without modifying baseline execution 
     selection,qualification:fx.qualification,meta_record:fx.record,current_library:fx.library,governance:fx.governance,
     context_digest:d('c'),required_role:'ANALYZER',baseline_plan_digest:d('d'),baseline_selected_skill_digests:baseline,
   });
+  assert.equal(projection.status,'BLOCKED_BY_GOVERNANCE');
+  assert.equal(projection.challenger_skill_digest,fx.analyzerB.capsule.skill_digest);
+  assert.equal(projection.challenger_skill_governance_state,'DORMANT_CAP');
+  assert.deepEqual(projection.baseline_selected_skill_digests,baseline);
+  assert.equal(projection.baseline_execution_path_unchanged,true);
+  assert.equal(projection.projection_can_add_skill_to_execution,false);
+  assert.equal(projection.projection_can_override_governance,false);
+  assert.equal(projection.authority_effect,false);
+});
+
+test('shadow projection reports divergence for an explicitly governance-active challenger without modifying baseline execution selection',()=>{
+  const fx=qualifiedFixture();
+  const lifecycle=createRsiSkillLifecycleEvidence({
+    library:fx.library,
+    evidence_id:'shadow.lifecycle.analyzer-b.1',
+    skill_digest:fx.analyzerB.capsule.skill_digest,
+    window_seq:1,
+    generation_start:1,
+    generation_end:1,
+    invocation_count:1,
+    helpful_count:1,
+    harmful_count:0,
+    neutral_count:0,
+    insufficient_evidence_count:0,
+    router_engagement_count:1,
+    false_positive_injection_count:0,
+    hard_invariant_violation_count:0,
+    measured_net_delta:0.5,
+    authoring_prior:'VERIFIED_DIRECT_SKILL',
+    authoring_provenance_digest:d('e'),
+    evidence_refs:['shadow:lifecycle:analyzer-b:1'],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  });
+  const activeGovernance=createRsiSkillLibraryGovernance({
+    governance_id:'shadow.profile.governance.active-analyzer-b',
+    library:fx.library,
+    lifecycle_evidence:[lifecycle],
+    max_active_skills:8,
+    exploration_slots:8,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  const selection=createRsiMetaProfileShadowSelection({
+    selection_id:'shadow.selection.projection.active',qualification:fx.qualification,meta_record:fx.record,current_library:fx.library,
+    external_selector:true,authored_by_candidate:false,
+  });
+  const baseline=[fx.analyzerA.capsule.skill_digest];
+  const projection=createRsiMetaProfileShadowProjection({
+    selection,qualification:fx.qualification,meta_record:fx.record,current_library:fx.library,governance:activeGovernance,
+    context_digest:d('c'),required_role:'ANALYZER',baseline_plan_digest:d('d'),baseline_selected_skill_digests:baseline,
+  });
   assert.equal(projection.status,'SHADOW_DIVERGENCE');
   assert.equal(projection.challenger_skill_digest,fx.analyzerB.capsule.skill_digest);
+  assert.equal(projection.challenger_skill_governance_state,'EXPLORATION_ACTIVE');
   assert.deepEqual(projection.baseline_selected_skill_digests,baseline);
   assert.equal(projection.baseline_execution_path_unchanged,true);
   assert.equal(projection.projection_can_add_skill_to_execution,false);

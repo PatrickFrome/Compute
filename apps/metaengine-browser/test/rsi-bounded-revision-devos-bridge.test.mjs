@@ -87,6 +87,7 @@ import {
   RsiRuntimeSkillLifecycle,
   rsiRuntimeSkillLifecycleTrustRootSnapshot,
 } from '../src/rsi-runtime-skill-lifecycle.mjs';
+import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 import {
   RsiAnytimeLibraryAdmissionArchive,
   createRsiPhase33SourceQualification,
@@ -1760,11 +1761,9 @@ test('Phase30 rejects self-rehashed outcome forgery and exact-sequence mismatch'
   const entry=phase30Entry(good,'tamper-good');
 
   const forgedEntry=structuredClone(entry);
-  forgedEntry.outcome_class='NO_MATERIAL_IMPROVEMENT';
-  forgedEntry.learning_kind='LOW_YIELD_CONSTRAINT';
-  forgedEntry.low_yield_constraint_digest=labelDigest('forged-low-yield');
-  forgedEntry.recipe_digest=null;
-  forgedEntry.watch_out_digest=null;
+  // Vary exactly one derived identity dimension while keeping the presented artifact structurally valid.
+  // Rehashing the forged row must not let it redefine the generation bound by the source evidence.
+  forgedEntry.evaluator_generation_seq=entry.evaluator_generation_seq+1;
   const core=structuredClone(forgedEntry);delete core.entry_digest;
   forgedEntry.entry_digest=dg(core);
   assert.throws(()=>verifyRsiGenerationScopedOutcomeEntry(forgedEntry,{
@@ -1897,7 +1896,7 @@ test('Phase30 rejected and no-material evidence remain counterevidence and canno
   assert.equal(archive.snapshot().archive_can_change_budget,false);
 });
 
-function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION'} = {}) {
+function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVISION',sharedOverride={}} = {}) {
   const shared={
     evaluator_root_digest:labelDigest(`${prefix}-evaluator-root`),
     evaluator_generation_digest:labelDigest(`${prefix}-generation`),
@@ -1913,6 +1912,7 @@ function phase31SourceRows(prefix='phase31', {state='SUPPORTED_FOR_BOUNDED_REVIS
     hidden_holdout_root_digest:labelDigest(`${prefix}-holdout`),
     safety_suite_root_digest:labelDigest(`${prefix}-safety`),
     security_suite_root_digest:labelDigest(`${prefix}-security`),
+    ...sharedOverride,
   };
   const a=phase30OutcomeEvidence(`${prefix}-a`,{state,sharedEvaluation:shared});
   const b=phase30OutcomeEvidence(`${prefix}-b`,{state,sharedEvaluation:shared});
@@ -2011,25 +2011,24 @@ test('Phase31 consolidates only diverse same-generation same-kind Phase30 eviden
 
 test('Phase31 forbids mixed evaluator generations epochs learning kinds and duplicate candidate evidence',()=>{
   const rows=phase31SourceRows('cross-generation');
-  const other=phase31SourceRows('cross-generation-other');
+  const other=phase31SourceRows('cross-generation-other',{
+    sharedOverride:{evaluator_root_digest:rows[0].entry.evaluator_root_digest},
+  });
   assert.throws(()=>phase31Proposal([rows[0],other[1]],'cross-generation'),/cross_generation_forbidden/);
 
   const epochA=phase31SourceRows('cross-epoch');
-  const epochB=phase31SourceRows('cross-epoch-b');
-  const cloned=structuredClone(epochB[1]);
-  cloned.entry.evaluator_generation_digest=epochA[0].entry.evaluator_generation_digest;
-  const entryCore=structuredClone(cloned.entry);delete entryCore.entry_digest;
-  cloned.entry.entry_digest=dg(entryCore);
-  assert.throws(()=>phase31Proposal([epochA[0],cloned],'cross-epoch'),/entry_digest_mismatch|cross_epoch_forbidden/);
+  const epochB=phase31SourceRows('cross-epoch-b',{
+    sharedOverride:{
+      evaluator_root_digest:epochA[0].entry.evaluator_root_digest,
+      evaluator_generation_digest:epochA[0].entry.evaluator_generation_digest,
+      evaluator_generation_history_anchor_digest:epochA[0].entry.evaluator_generation_history_anchor_digest,
+    },
+  });
+  assert.throws(()=>phase31Proposal([epochA[0],epochB[1]],'cross-epoch'),/cross_epoch_forbidden/);
 
   const supported=phase31SourceRows('mixed-kind');
-  const rejected=phase31SourceRows('mixed-kind-rejected',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
-  const rebased=structuredClone(rejected[1]);
-  rebased.entry.evaluator_generation_digest=supported[0].entry.evaluator_generation_digest;
-  rebased.entry.evaluation_epoch_digest=supported[0].entry.evaluation_epoch_digest;
-  const reCore=structuredClone(rebased.entry);delete reCore.entry_digest;
-  rebased.entry.entry_digest=dg(reCore);
-  assert.throws(()=>phase31Proposal([supported[0],rebased],'mixed-kind'),/entry_digest_mismatch|mixed_learning_kind_forbidden/);
+  const rejected=phase31SourceRows('mixed-kind',{state:'CANDIDATE_EXPERIMENT_REJECTED'});
+  assert.throws(()=>phase31Proposal([supported[0],rejected[1]],'mixed-kind'),/mixed_learning_kind_forbidden/);
 
   const duplicate=[rows[0],structuredClone(rows[0])];
   assert.throws(()=>phase31Proposal(duplicate,'duplicate'),/duplicate_source_evidence|source_diversity_required/);
@@ -2272,7 +2271,7 @@ function phase32Fixture(label='phase32',{
     authored_by_candidate:false,
     ...handoffOverrides,
   });
-  return {rows,proposal,validations,admission,handoff};
+  return {rows,source_rows:rows,proposal,validations,admission,handoff};
 }
 
 function phase32Receipt(fx,label='phase32',overrides={}){
@@ -2837,19 +2836,61 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
 test('Phase32 hardened consumer identity detects generation and epoch identity drift',()=>{
   const fx=phase32Fixture('identity-drift');
   assert.throws(()=>phase32Fixture('identity-drift-generation',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1,
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-anchor',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationAnchor:labelDigest('phase32-wrong-generation-anchor'),
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-epoch',{
-    consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
 });
 
+
+test('Phase32 metamorphic identity boundary separates legitimate cross-generation revalidation from same-generation corruption',()=>{
+  const fx=phase32Fixture('identity-metamorphic');
+  const rebuild=(suffix,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.identity.metamorphic.${suffix}`,
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    consumer_model_family:fx.handoff.consumer_model_family,
+    consumer_environment_family:fx.handoff.consumer_environment_family,
+    consumer_context_digest:fx.handoff.consumer_context_digest,
+    consumer_task_set_digest:fx.handoff.consumer_task_set_digest,
+    consumer_harness_digest:fx.handoff.consumer_harness_digest,
+    consumer_retrieval_profile_digest:fx.handoff.consumer_retrieval_profile_digest,
+    consumer_evaluator_root_digest:fx.handoff.consumer_evaluator_root_digest,
+    consumer_evaluator_generation_digest:fx.handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:fx.handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:fx.handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:fx.handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:fx.handoff.consumer_evaluation_epoch_digest,
+    consumer_holdout_digest:fx.handoff.consumer_holdout_digest,
+    matched_reference_plan_digest:fx.handoff.matched_reference_plan_digest,
+    local_revalidation_protocol_digest:fx.handoff.local_revalidation_protocol_digest,
+    current_consumer_plane_digest:fx.handoff.current_consumer_plane_digest,
+    current_verified_library_digest:fx.handoff.current_verified_library_digest,
+    external_consumer_router:true,authored_by_candidate:false,
+    ...overrides,
+  });
+
+  const crossGeneration=rebuild('cross-generation',{
+    consumer_evaluator_generation_digest:labelDigest('phase32-metamorphic-new-generation'),
+  });
+  assert.notEqual(crossGeneration.consumer_evaluator_generation_digest,fx.handoff.consumer_evaluator_generation_digest);
+  assert.equal(crossGeneration.cross_generation_revalidation_required,true);
+  assert.equal(crossGeneration.source_generation_verdict_inherited,false);
+  assert.equal(crossGeneration.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+
+  assert.throws(()=>rebuild('same-generation-seq-drift',{
+    consumer_evaluator_generation_seq:fx.handoff.consumer_evaluator_generation_seq+1,
+  }),/evaluator_generation_identity_drift/);
+  assert.throws(()=>rebuild('same-generation-anchor-drift',{
+    consumer_evaluator_generation_history_anchor_digest:labelDigest('phase32-metamorphic-wrong-anchor'),
+  }),/evaluator_generation_identity_drift/);
+  assert.throws(()=>rebuild('same-epoch-seq-drift',{
+    consumer_evaluation_epoch_seq:fx.handoff.consumer_evaluation_epoch_seq+1,
+  }),/evaluation_epoch_identity_drift/);
+});
 
 test('Phase32 consumer state, retrieval profile and library drift change the exact local evaluation contract',()=>{
   const fx=phase32Fixture('consumer-state-contract');
@@ -3041,7 +3082,7 @@ function phase33CertificateArgs(fx,label='phase33-certificate',overrides={}){
     benchmark_provenance_attestor_identity_digest:labelDigest(label+'-benchmark-attestor-id'),
     evaluator_provenance_attestor_identity_digest:labelDigest(label+'-evaluator-attestor-id'),
     contamination_attestor_identity_digest:labelDigest(label+'-contamination-attestor-id'),
-    statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
+    statistical_acceptor_identity_digest:labelDigest('phase34-'+label+'-statistical-acceptor-id'),
     false_admission_alpha_ppm:50000,
     anytime_valid_e_value_microunits:25000000,
     paired_sample_count:64,
@@ -3347,12 +3388,12 @@ function phase34SourceQualification(label='phase34-source',{green=true,head=PHAS
   });
 }
 
-function phase34Fixture(label='phase34'){
-  const p33=phase33ExactOwnerFixture(label);
+function phase34Fixture(label='phase34',{p33_override=null,current_governance_override=null}={}){
+  const p33=p33_override||phase33ExactOwnerFixture(label);
   const p33Args=phase33CertificateArgs(p33,label);
   const p33Certificate=createRsiExactSkillPrecommitCertificate(p33Args);
   assert.equal(p33Certificate.state,'ELIGIBLE_FOR_EXISTING_LIBRARY_OWNER_ADMISSION_REVIEW');
-  const currentGovernance=createRsiSkillLibraryGovernance({
+  const currentGovernance=current_governance_override||createRsiSkillLibraryGovernance({
     governance_id:'phase34.governance.'+label,
     library:p33.skillFx.currentLibrary,
     lifecycle_evidence:[],
@@ -3393,13 +3434,13 @@ function phase34Fixture(label='phase34'){
     admission_proposal_args:proposalArgs,
     predecessor_source_qualification:sourceQualification,
     admission_epoch_digest:labelDigest(label+'-admission-epoch'),
-    library_owner_identity_digest:labelDigest(label+'-library-owner-id'),
+    library_owner_identity_digest:labelDigest('phase34-'+label+'-library-owner-id'),
     statistical_acceptor_identity_digest:labelDigest(label+'-statistical-acceptor-id'),
-    source_qualification_owner_identity_digest:labelDigest(label+'-source-qualification-owner-id'),
-    least_privilege_reviewer_identity_digest:labelDigest(label+'-least-privilege-reviewer-id'),
-    governance_reviewer_identity_digest:labelDigest(label+'-governance-reviewer-id'),
-    benchmark_security_attestor_identity_digest:labelDigest(label+'-benchmark-security-attestor-id'),
-    harness_security_attestor_identity_digest:labelDigest(label+'-harness-security-attestor-id'),
+    source_qualification_owner_identity_digest:labelDigest('phase34-'+label+'-source-qualification-owner-id'),
+    least_privilege_reviewer_identity_digest:labelDigest('phase34-'+label+'-least-privilege-reviewer-id'),
+    governance_reviewer_identity_digest:labelDigest('phase34-'+label+'-governance-reviewer-id'),
+    benchmark_security_attestor_identity_digest:labelDigest('phase34-'+label+'-benchmark-security-attestor-id'),
+    harness_security_attestor_identity_digest:labelDigest('phase34-'+label+'-harness-security-attestor-id'),
     benchmark_ancestry_attestation_digest:labelDigest(label+'-benchmark-ancestry-attestation'),
     clean_room_requalification_digest:labelDigest(label+'-clean-room-requalification'),
     harness_integrity_attestation_digest:labelDigest(label+'-harness-integrity-attestation'),
@@ -3734,7 +3775,15 @@ test('Phase34 trust root preserves external admission without creating activatio
 
 
 function phase34bLifecycleFixture(label='phase34b-lifecycle'){
-  const fx=phase34Fixture(label);
+  const p33=phase33ExactOwnerFixture(label);
+  const currentGovernance=createRsiSkillLibraryGovernance({
+    governance_id:`runtime.skill.governance.${SOURCE.slice(0,16)}`,
+    library:p33.skillFx.currentLibrary,
+    lifecycle_evidence:[],
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  const fx=phase34Fixture(label,{p33_override:p33,current_governance_override:currentGovernance});
   const certificate=createRsiAnytimeLibraryAdmissionCertificate(fx.certificateArgs);
   assert.equal(certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXISTING_LIBRARY_APPEND_HANDOFF');
   const currentLibrary=fx.p33.skillFx.currentLibrary;
@@ -3757,6 +3806,66 @@ function phase34bLifecycleFixture(label='phase34b-lifecycle'){
     readbackIdentity:labelDigest(label+'-readback-owner'),
   };
 }
+
+test('Phase34B runtime service closes direct-adopt bypass and routes storage append through the durable one-attempt lifecycle',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-runtime-closure-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const fx=phase34bLifecycleFixture('runtime-closure');
+  const runtime=new RsiRuntimeService({
+    source_sha:SOURCE,
+    ledgerPath:path.join(dir,'runtime.jsonl'),
+    clock:()=>1_800_000_000_000,
+  });
+  await runtime.start();
+
+  const bootstrap=await runtime.adoptVerifiedSkillLibrary({
+    library:fx.currentLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(bootstrap.state,'ADOPTED');
+  const before=runtime.verifiedSkillStateReadback();
+  assert.equal(before.library_digest,fx.currentLibrary.library_digest);
+  assert.equal(before.governance_digest,fx.fx.currentGovernance.governance_digest);
+  assert.equal(before.browser_authority,false);
+  assert.equal(before.task_authority,false);
+
+  const prepared=await runtime.prepareAnytimeLibraryAdmissionAttempt({
+    attempt_id:'phase34b.runtime.attempt.1',
+    admission_certificate:fx.certificate,
+    admission_certificate_args:fx.fx.certificateArgs,
+    successor_library:fx.successorLibrary,
+    effect_id_digest:fx.effectId,
+    idempotency_key_digest:fx.idempotencyKey,
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_library_owner:true,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(prepared.state,'PREPARED');
+  assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.currentLibrary.library_digest);
+
+  const applied=await runtime.executeAnytimeLibraryAdmissionAttempt({
+    attempt_id:'phase34b.runtime.attempt.1',
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(applied.state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+  assert.equal(applied.effect_attempt_count,1);
+  assert.equal(applied.pre_effect_readback_passed,true);
+  assert.equal(applied.retrieval_exposure_changed,false);
+  assert.equal(applied.skill_activation_performed,false);
+  assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
+    library:fx.successorLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  }),/direct_library_adopt_phase34b_required/);
+  assert.equal(runtime.anytimeLibraryAdmissionAttemptSnapshot('phase34b.runtime.attempt.1').current_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+});
 
 test('Phase34B lifecycle prepares admission durably before effect, survives restart, and appends storage-only once',async(t)=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-lifecycle-'));
@@ -3889,6 +3998,21 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(externalEffect.cas_checked,true);
   assert.equal(store.snapshot().active_count,0);
 
+  const fenced=await store.executePreparedLibraryAdmissionAttempt({
+    attempt_id:'phase34b.attempt.reconcile-applied',
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(fenced.state,'PRE_EFFECT_DRIFT_RECONCILIATION_REQUIRED');
+  assert.equal(fenced.pre_effect_readback_passed,false);
+  assert.equal(fenced.effect_started,false);
+  assert.equal(fenced.effect_performed,false);
+  assert.equal(fenced.additional_effect_attempt_performed,false);
+  assert.equal(fenced.same_effect_id_retry_allowed,false);
+  assert.equal(store.admissionAttemptSnapshot('phase34b.attempt.reconcile-applied').current_state,'RECONCILIATION_ONLY');
+  assert.equal(store.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
+
   const reconciled=await store.reconcileLibraryAdmissionAttempt({
     attempt_id:'phase34b.attempt.reconcile-applied',
     readback_owner_identity_digest:fx.readbackIdentity,
@@ -3942,6 +4066,7 @@ test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect stat
   assert.equal(root.exact_library_digest_cas_supported,true);
   assert.equal(root.phase34_anytime_admission_certificate_required,true);
   assert.equal(root.admission_attempts_durable_before_effect,true);
+  assert.equal(root.pre_effect_state_readback_after_attempt_persist_required,true);
   assert.equal(root.admission_effect_attempt_limit,1);
   assert.equal(root.blind_retry_for_admission_effect,false);
   assert.equal(root.ambiguous_attempt_readback_only_reconciliation,true);
