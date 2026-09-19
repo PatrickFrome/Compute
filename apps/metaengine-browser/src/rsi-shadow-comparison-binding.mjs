@@ -38,6 +38,7 @@ function verifySelection(s){
   if(s.mode!=='SHADOW_ONLY'||s.external_selector!==true||s.authored_by_candidate!==false
     ||s.candidate_can_select_profile!==false||s.selection_can_change_execution!==false
     ||s.selection_can_replace_incumbent!==false||s.selection_can_grant_skill_activity!==false
+    ||s.browser_authority!==false||s.task_authority!==false
     ||s.canary_gate_still_required!==true)throw new Error('rsi_shadow_comparison_selection_policy_invalid');
   verifyDigestObject(s,'selection_digest','selection');
   return s;
@@ -88,6 +89,8 @@ export function createRsiShadowComparisonBinding({
     comparison_can_authorize_canary:false,
     external_canary_gate_still_required:true,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
@@ -109,7 +112,9 @@ export function verifyRsiShadowComparisonBinding(binding,{selection,qualificatio
     ||binding.browser_effects_allowed!==false||binding.plan_execution_allowed!==false
     ||binding.baseline_execution_path_unchanged!==true||binding.comparison_can_change_execution!==false
     ||binding.comparison_can_activate_profile!==false||binding.comparison_can_authorize_canary!==false
+    ||binding.browser_authority!==false||binding.task_authority!==false
     ||binding.external_canary_gate_still_required!==true)throw new Error('rsi_shadow_comparison_binding_policy_invalid');
+  verifyDigestObject(binding,'binding_digest','binding');
   const canonical=createRsiShadowComparisonBinding({
     selection,qualification,
     context_digest:binding.verified_context_digest,
