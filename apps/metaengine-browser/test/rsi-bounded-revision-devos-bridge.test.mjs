@@ -3816,7 +3816,14 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(applied.pre_effect_readback_passed,true);
   assert.equal(applied.retrieval_exposure_changed,false);
   assert.equal(applied.skill_activation_performed,false);
-  assert.equal(runtime.verifiedSkillStateReadback().library_digest,fx.successorLibrary.library_digest);
+  assert.equal(applied.admission_exposure_held,true);
+  assert.equal(applied.held_skill_digest,fx.skill.skill_digest);
+  const runtimeReadback=runtime.verifiedSkillStateReadback();
+  assert.equal(runtimeReadback.library_digest,fx.successorLibrary.library_digest);
+  const runtimeHeld=runtimeReadback.governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(runtimeHeld.admission_exposure_held,true);
+  assert.equal(runtimeHeld.admission_exposure_hold_external_release_required,true);
+  assert.equal(runtimeHeld.state,'DORMANT_CAP');
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
@@ -3875,11 +3882,16 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(result.reconciled_pending,0);
   assert.equal(result.retrieval_exposure_changed,false);
   assert.equal(result.skill_activation_performed,false);
+  assert.equal(result.admission_exposure_held,true);
+  assert.equal(result.held_skill_digest,fx.skill.skill_digest);
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
   assert.equal(restored.snapshot().active_count,0);
+  assert.equal(restored.snapshot().admission_exposure_hold_count,1);
   const governance=restored.governance();
   const added=governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
   assert.equal(added.evidence_window_count,0);
+  assert.equal(added.admission_exposure_held,true);
+  assert.equal(added.admission_exposure_hold_external_release_required,true);
   assert.equal(added.state,'DORMANT_CAP');
   assert.equal(added.active_for_composition,false);
   assert.throws(()=>restored.activationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
@@ -3951,6 +3963,7 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   const externalEffect=await store.adoptVerifiedLibrary({
     library:fx.successorLibrary,
     expected_current_library_digest:fx.currentLibrary.library_digest,
+    admission_exposure_hold_skill_digests:[fx.skill.skill_digest],
     external_library_owner:true,
     authored_by_candidate:false,
   });
@@ -3983,6 +3996,9 @@ test('Phase34B ambiguous attempted admission can reconcile an externally observe
   assert.equal(reconciled.additional_effect_attempt_performed,false);
   assert.equal(reconciled.same_effect_id_retry_allowed,false);
   assert.equal(reconciled.storage_only_pending_governance,true);
+  assert.equal(reconciled.admission_exposure_held,true);
+  assert.equal(reconciled.held_skill_digest,fx.skill.skill_digest);
+  assert.equal(store.snapshot().admission_exposure_hold_count,1);
   assert.equal(store.snapshot().active_count,0);
 });
 
@@ -4024,6 +4040,9 @@ test('Phase34B preparation fail-closes on stale predecessor and duplicate effect
 test('Phase34B runtime lifecycle trust root freezes CAS, durable pre-effect state and readback-only recovery',()=>{
   const root=rsiRuntimeSkillLifecycleTrustRootSnapshot();
   assert.equal(root.exact_library_digest_cas_supported,true);
+  assert.equal(root.append_new_skills_require_exposure_hold,true);
+  assert.equal(root.admission_exposure_holds_force_dormant,true);
+  assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
   assert.equal(root.phase34_anytime_admission_certificate_required,true);
   assert.equal(root.admission_attempts_durable_before_effect,true);
   assert.equal(root.pre_effect_state_readback_after_attempt_persist_required,true);
