@@ -27,6 +27,97 @@ function promotionProjection(value) {
   });
 }
 
+function boundedRoleCounts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return Object.freeze({});
+  const out = {};
+  for (const [key, count] of Object.entries(value).slice(0, 16)) {
+    const role = clip(key, 48);
+    const n = intOrNull(count);
+    if (role && n != null && n >= 0) out[role] = n;
+  }
+  return Object.freeze(out);
+}
+
+function backlogProjection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.freeze({
+    ready: intOrNull(value.ready),
+    running: intOrNull(value.running),
+    by_role: boundedRoleCounts(value.by_role),
+    authority_effect: false,
+  });
+}
+
+function cycleOutcomeProjection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.freeze({
+    state: clip(value.state, 72),
+    reason: clip(value.reason ?? value.original_error, 240),
+    task_id: clip(value.task_id, 64),
+    lease_generation: intOrNull(value.lease_generation),
+    tab_id: clip(value.tab_id, 96),
+    target_id: clip(value.target_id, 96),
+    agent_generation_epoch: intOrNull(value.agent_generation_epoch),
+    db_state: clip(value.db_state, 48),
+    readback: clip(value.readback, 96),
+    delivery_journal_state: clip(value.delivery_journal_state, 64),
+    retry_via_scheduler: boolOrNull(value.retry_via_scheduler),
+    physical_effect_attempted: boolOrNull(value.physical_effect_attempted),
+    physical_effect_replayed: boolOrNull(value.physical_effect_replayed),
+    click_issued: boolOrNull(value.click_issued),
+    submit_path: clip(value.submit_path, 96),
+    automatic_retry_allowed: false,
+    authority_effect: value.authority_effect === true,
+  });
+}
+
+function taskCycleProjection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return Object.freeze({ state: 'UNOBSERVED', authority_effect: false });
+  }
+  const batch = value.result_ready_batch && typeof value.result_ready_batch === 'object'
+    ? value.result_ready_batch
+    : null;
+  return Object.freeze({
+    state: clip(value.state, 72) || 'UNKNOWN',
+    backlog: backlogProjection(value.backlog),
+    dispatch: cycleOutcomeProjection(value.dispatch),
+    result_ready: cycleOutcomeProjection(value.result_ready),
+    ambiguity_recovery: cycleOutcomeProjection(value.ambiguity_recovery),
+    pre_effect_reconciliation: cycleOutcomeProjection(value.pre_effect_reconciliation),
+    attempted_lease_count: intOrNull(value.attempted_lease_count),
+    elastic_idle_cycles: intOrNull(value.elastic_idle_cycles),
+    running_observation_fanout_per_cycle: intOrNull(value.running_observation_fanout_per_cycle),
+    running_observation_batch: batch ? Object.freeze({
+      budget: intOrNull(batch.budget),
+      observed: intOrNull(batch.observed),
+      failed: intOrNull(batch.failed),
+      authority_effect: false,
+    }) : null,
+    durable_effect_delivery_journal: boolOrNull(value.durable_effect_delivery_journal),
+    write_ahead_effect_barrier: clip(value.write_ahead_effect_barrier, 96),
+    pre_effect_lease_stall_fast_requeue: boolOrNull(value.pre_effect_lease_stall_fast_requeue),
+    second_scheduler_loop: false,
+    raw_effect_proof_exposed: false,
+    task_spec_exposed: false,
+    prompt_plaintext_exposed: false,
+    page_text_exposed: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+function lastFailureProjection(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.freeze({
+    at: clip(value.at, 64),
+    reason: clip(value.reason, 240),
+    task_cycle: taskCycleProjection(value.task_cycle),
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
 export function buildDevosRuntimeObservability(snapshot = {}) {
   const idle = snapshot?.idle_background_work && typeof snapshot.idle_background_work === 'object'
     ? snapshot.idle_background_work
@@ -49,6 +140,7 @@ export function buildDevosRuntimeObservability(snapshot = {}) {
     scheduler_source: clip(snapshot?.devos_scheduler_source, 96),
     execution_mode: clip(snapshot?.devos_execution_mode, 64),
     last_error: clip(snapshot?.devos_last_error, 240),
+    last_failure: lastFailureProjection(snapshot?.devos_last_failure),
     identity_enrolled: Boolean(snapshot?.identity?.device_id),
     idle: Object.freeze({
       in_flight: idle.in_flight === true,
@@ -77,6 +169,7 @@ export function buildDevosRuntimeObservability(snapshot = {}) {
       authority_effect: false,
     }),
     transport_promotion: promotionProjection(taskCycle.fleet_transport_promotion),
+    task_cycle: taskCycleProjection(taskCycle),
     page_text_exposed: false,
     prompt_plaintext_exposed: false,
     raw_payload_exposed: false,
