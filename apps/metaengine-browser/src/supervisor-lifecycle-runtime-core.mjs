@@ -93,6 +93,16 @@ export class SupervisorLifecycleRuntime {
   // surfaces) and not yet provably closed. Retried before every new bootstrap
   // attempt so a wedged CLOSE_TAB can never turn into unbounded tab growth.
   #bootstrapLeakedTabIds = new Set();
+  // D-C7 (live 2026-09-19): rollover tabs leaked by failed attempts. Every
+  // #rollover() failure used to leave its NEW_TAB at the preconversation root
+  // forever; combined with the D-C5 fresh-tab re-request the registry hit the
+  // 32-tab wall (live: total_at_wall=true, capacity_backpressure
+  // TAB_CAPACITY_EXCEEDED_PRE_EFFECT, keepalive frozen at a fixed cycle_seq).
+  // Same in-memory ledger discipline as the bootstrap leaks, with one extra
+  // proof obligation: a leaked rollover tab must still be at the ROOT — a tab
+  // that drifted to a conversation URL is never ours to close (the ambiguous
+  // send may have landed; reconciliation owns that surface).
+  #rolloverLeakedTabIds = new Set();
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
   #requireAuthoritativeAdmission = false;
   #processIncarnationId = null;
@@ -442,7 +452,17 @@ export class SupervisorLifecycleRuntime {
 
   async #typeAndSend(tabId, message, positiveMarker) {
     let clicked = false;
-    const before = await this.#capture(tabId);
+    // D-C7: a freshly opened root tab hydrates asynchronously — the first
+    // CAPTURE can transiently show zero or several textboxes, which used to
+    // throw supervisor_composer_not_unique and leak the whole rollover
+    // attempt. Bounded recapture: give the surface a few seconds to settle
+    // before declaring the composer unresolvable. Healthy conversation tabs
+    // resolve on the first capture and never pay the wait.
+    let before = await this.#capture(tabId);
+    for (let attempt = 0; attempt < 4 && !generating(before) && !composerTarget(before); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      before = await this.#capture(tabId);
+    }
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
     const box = composerTarget(before);
     if (!box) throw new Error('supervisor_composer_not_unique');
@@ -788,6 +808,68 @@ export class SupervisorLifecycleRuntime {
     }
   }
 
+  // D-C7: record a failed rollover attempt's tab for close-by-proof reclaim.
+  // The extra proof vs the bootstrap ledger: the tab must still be at the
+  // preconversation ROOT. A rollover tab that drifted to a conversation URL
+  // may hold a landed send — reconciliation owns it and it is never closed.
+  async #markRolloverTabLeaked(tabId) {
+    const id = String(tabId || '');
+    if (!id) return;
+    try {
+      const frame = await this.#capture(id);
+      const url = String(frame?.url || '');
+      if (CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url)) this.#rolloverLeakedTabIds.add(id);
+    } catch {
+      // Unobservable tab: record optimistically; #closeFailedRolloverTab
+      // re-proves against the live registry before any CLOSE_TAB.
+      this.#rolloverLeakedTabIds.add(id);
+    }
+  }
+
+  // D-C7 close-by-proof for a leaked rollover tab. Obligations: (1) still in
+  // the registry; (2) not selected, not fleet-bound, not the keepalive's
+  // current tab — a tab the user took over is never ours to close; (3) still
+  // at the preconversation root (a drifted conversation tab is skipped, not
+  // closed). CLOSE_TAB is best-effort: failures keep the id in the ledger for
+  // the next drain.
+  async #closeFailedRolloverTab(tabId) {
+    const id = String(tabId || '');
+    if (!id) return;
+    try {
+      const state = await this.#getState();
+      const fleetTabs = new Set((state?.fleet?.agents || []).map((a) => String(a?.tab_id || '')).filter(Boolean));
+      const keepaliveTab = String(this.#keepalive?.snapshot()?.tab_id || '');
+      const row = (state?.tabs || []).find((t) => String(t?.tab_id || '') === id);
+      if (!row) {
+        this.#rolloverLeakedTabIds.delete(id);
+        return;
+      }
+      if (row.selected === true || fleetTabs.has(id) || id === keepaliveTab) {
+        this.#rolloverLeakedTabIds.delete(id);
+        return;
+      }
+      const frame = await this.#capture(id);
+      const url = String(frame?.url || '');
+      if (!(CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url))) {
+        // Conversation or foreign surface: not ours to close.
+        this.#rolloverLeakedTabIds.delete(id);
+        return;
+      }
+      await this.#execute({ action: 'CLOSE_TAB', payload: { tab_id: id }, platform: null });
+      this.#rolloverLeakedTabIds.delete(id);
+    } catch {
+      this.#rolloverLeakedTabIds.add(id);
+    }
+  }
+
+  // D-C7: bounded drain so a long-lived leak ledger cannot burst CLOSE_TAB
+  // storms into the command plane; the remainder is retried on later cycles.
+  async #drainRolloverLeaks() {
+    for (const tabId of Array.from(this.#rolloverLeakedTabIds).slice(0, 3)) {
+      await this.#closeFailedRolloverTab(tabId);
+    }
+  }
+
   async #recoverProcessBoundaryBootstrapAmbiguity(state, keepalive) {
     const pending = keepalive?.pending_wake;
     if (keepalive?.state !== 'WAKE_AMBIGUOUS' || !pending?.ambiguous_at || keepalive?.conversation_url) return false;
@@ -1048,6 +1130,10 @@ export class SupervisorLifecycleRuntime {
     let tab = null;
     let attempt = null;
     try {
+      // D-C7: reclaim tabs leaked by earlier failed attempts BEFORE creating
+      // anything new — the retry loop is tab-neutral even when the site keeps
+      // refusing the rollover send.
+      if (this.#rolloverLeakedTabIds.size > 0) await this.#drainRolloverLeaks();
       attempt = await this.#keepalive.beginRolloverAttempt();
       const message = buildSupervisorRolloverMessage({
         previousUrl: before.conversation_url,
@@ -1060,6 +1146,7 @@ export class SupervisorLifecycleRuntime {
       const sent = await this.#typeAndSend(tab.tab_id, message, attempt.attempt_id);
       if (!sent.ok) {
         await this.#keepalive.markRolloverAmbiguous(sent.reason || 'ROLLOVER_WITHOUT_POSITIVE_READBACK');
+        await this.#markRolloverTabLeaked(tab.tab_id);
         return false;
       }
       const observed = sent.observed || await this.#capture(tab.tab_id);
@@ -1076,8 +1163,10 @@ export class SupervisorLifecycleRuntime {
         return true;
       }
       await this.#keepalive.markRolloverAmbiguous('ROLLOVER_WITHOUT_POSITIVE_READBACK');
+      await this.#markRolloverTabLeaked(tab.tab_id);
     } catch (e) {
       if (attempt) await this.#keepalive.markRolloverAmbiguous(`ROLLOVER_ERROR:${String(e?.message || e)}`).catch(() => {});
+      if (tab?.tab_id) await this.#markRolloverTabLeaked(tab.tab_id);
       this.#lastError = String(e?.message || e).slice(0, 240);
     }
     return false;
@@ -1133,15 +1222,24 @@ export class SupervisorLifecycleRuntime {
           state = await this.#getState();
         } else {
           this.#rolloverNoProgressCycles += 1;
+          // D-C7: opportunistic reclaim — the throttled scan already observed
+          // these surfaces; drain any leaked rollover tabs so capacity returns
+          // even while the ambiguity persists.
+          if (this.#rolloverLeakedTabIds.size > 0) await this.#drainRolloverLeaks();
           // D-C5: after bounded no-progress cycles, restart the rollover on a
-          // fresh tab instead of scanning the same poisoned tab forever.
+          // fresh tab instead of scanning the same poisoned tab forever. The
+          // superseded attempt tab is reclaimed by proof (root-only) so the
+          // re-request cannot pile fresh leaks on old ones.
           if (this.#rolloverNoProgressCycles >= 8 && this.#canActuate() === true) {
+            const supersededAttemptTabId = String(this.#keepalive.snapshot()?.rollover_attempt?.tab_id || '');
             await this.#keepalive.requestRollover('ROLLOVER_AMBIGUOUS_NO_PROGRESS_FRESH_TAB', { autoRelease: true }).catch(() => {});
             this.#rolloverNoProgressCycles = 0;
+            if (supersededAttemptTabId) await this.#markRolloverTabLeaked(supersededAttemptTabId);
             this.#lastRecovery = {
               action: 'ROLLOVER_AMBIGUOUS_NO_PROGRESS_REREQUEST',
               rollover_attempt_id: null,
               fresh_tab_rollover: true,
+              reclaimed_tab_id: supersededAttemptTabId || null,
               confirmed: false, ambiguous: false, automatic_retry_allowed: false,
               at: new Date().toISOString(), authority_effect: false,
             };
