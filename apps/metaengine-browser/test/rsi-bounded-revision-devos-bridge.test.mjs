@@ -2273,7 +2273,7 @@ function phase32Fixture(label='phase32',{
     authored_by_candidate:false,
     ...handoffOverrides,
   });
-  return {rows,proposal,validations,admission,handoff};
+  return {rows,source_rows:rows,proposal,validations,admission,handoff};
 }
 
 function phase32Receipt(fx,label='phase32',overrides={}){
