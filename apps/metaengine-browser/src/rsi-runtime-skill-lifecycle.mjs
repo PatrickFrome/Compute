@@ -553,6 +553,53 @@ export class RsiRuntimeSkillLifecycle{
       reconciliation_complete:ADMISSION_TERMINAL_STATES.has(nextState),
     });
   }
+  admissionExposureHoldProvenance(skillDigest){
+    this.#assertInit();
+    const skill=exactDigest(skillDigest,'exposure_hold_provenance_skill');
+    if(!this.#admissionExposureHolds.has(skill))return null;
+    const matches=this.#admissionAttempts.filter(row=>row.current_state==='CONFIRMED_APPLIED_STORAGE_ONLY'&&row.proposed_skill_digest===skill);
+    if(matches.length===0)return null;
+    if(matches.length!==1)throw new Error('rsi_runtime_skill_exposure_hold_provenance_ambiguous');
+    const attempt=matches[0];
+    const confirmed=attempt.transitions.find(row=>row.state==='CONFIRMED_APPLIED_STORAGE_ONLY');
+    if(!confirmed)throw new Error('rsi_runtime_skill_exposure_hold_provenance_transition_missing');
+    const governance=this.governance();
+    if(!governance)throw new Error('rsi_runtime_skill_exposure_hold_provenance_governance_missing');
+    const entry=governance.entries.find(row=>row.skill_digest===skill);
+    if(!entry||entry.admission_exposure_hold!==true||entry.state!=='DORMANT_CAP'||entry.active_for_composition!==false){
+      throw new Error('rsi_runtime_skill_exposure_hold_provenance_current_hold_invalid');
+    }
+    const core={
+      schema:'metaengine.rsi.admission-exposure-hold-provenance.v1',version:1,
+      skill_digest:skill,
+      admission_attempt_id:attempt.attempt_id,
+      admission_attempt_digest:attempt.attempt_digest,
+      admission_certificate_digest:attempt.admission_certificate_digest,
+      effect_id_digest:attempt.effect_id_digest,
+      effect_executor_identity_digest:attempt.effect_executor_identity_digest,
+      idempotency_key_digest:attempt.idempotency_key_digest,
+      admitted_successor_library_digest:attempt.successor_library_digest,
+      confirmed_transition_digest:confirmed.transition_digest,
+      current_library_digest:this.#library.library_digest,
+      current_governance_digest:governance.governance_digest,
+      admission_state:'CONFIRMED_APPLIED_STORAGE_ONLY',
+      exposure_hold_observed:true,
+      dormant_cap_observed:true,
+      active_for_composition:false,
+      retrieval_exposure_allowed:false,
+      release_authority:false,
+      execution_authority:false,
+      browser_authority:false,
+      task_authority:false,
+      scheduler_authority:false,
+      production_mutation_authority:false,
+      promotion_authority:false,
+      self_update_authority:false,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    };
+    return Object.freeze({...core,provenance_digest:digest(core)});
+  }
   admissionAttemptSnapshot(attemptId){
     this.#assertInit();
     const row=this.#findAdmissionAttempt(boundedId(attemptId,'admission_attempt_id'));
@@ -668,6 +715,7 @@ export class RsiRuntimeSkillLifecycle{
       admission_attempt_state_counts:Object.freeze(this.#admissionAttempts.reduce((acc,row)=>{acc[row.current_state]=(acc[row.current_state]||0)+1;return acc},{})),
       admission_exposure_hold_skill_digests:Object.freeze([...this.#admissionExposureHolds].sort()),
       admission_exposure_hold_count:this.#admissionExposureHolds.size,
+      confirmed_admission_exposure_provenance_count:this.#admissionAttempts.filter(row=>row.current_state==='CONFIRMED_APPLIED_STORAGE_ONLY'&&this.#admissionExposureHolds.has(row.proposed_skill_digest)).length,
       admission_exposure_holds_force_nonactive:true,
       storage_admission_does_not_imply_retrieval_exposure:true,
       admission_exposure_hold_release_requires_external_governance:true,
@@ -699,6 +747,9 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     admission_exposure_holds_force_nonactive:true,
     storage_admission_does_not_imply_retrieval_exposure:true,
     admission_exposure_hold_release_requires_external_governance:true,
+    exposure_release_requires_confirmed_admission_provenance:true,
+    confirmed_admission_provenance_binds_attempt_digest:true,
+    confirmed_admission_provenance_binds_effect_executor_identity:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,

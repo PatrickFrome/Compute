@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -18,6 +19,33 @@ import {
 
 const sha=(char)=>char.repeat(40);
 const d=(char)=>`sha256:${char.repeat(64)}`;
+function stable(value){if(Array.isArray(value))return value.map(stable);if(!value||typeof value!=='object')return value;return Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])]));}
+function dg(value){return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;}
+
+function admissionProvenance(fx,overrides={}){
+  const core={
+    schema:'metaengine.rsi.admission-exposure-hold-provenance.v1',version:1,
+    skill_digest:fx.skill.skill_digest,
+    admission_attempt_id:'phase34b.attempt.exposure.review.fixture',
+    admission_attempt_digest:d('a'),
+    admission_certificate_digest:d('b'),
+    effect_id_digest:d('c'),
+    effect_executor_identity_digest:d('d'),
+    idempotency_key_digest:d('e'),
+    admitted_successor_library_digest:fx.library.library_digest,
+    confirmed_transition_digest:d('f'),
+    current_library_digest:fx.library.library_digest,
+    current_governance_digest:fx.governance.governance_digest,
+    admission_state:'CONFIRMED_APPLIED_STORAGE_ONLY',
+    exposure_hold_observed:true,dormant_cap_observed:true,active_for_composition:false,
+    retrieval_exposure_allowed:false,release_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,scheduler_authority:false,
+    production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    automatic_retry_allowed:false,authority_effect:false,
+    ...overrides,
+  };
+  return Object.freeze({...core,provenance_digest:dg(core)});
+}
 
 function fixture({held=true}={}){
   const skill=createRsiSkillCapsule({
@@ -97,6 +125,7 @@ function args(fx,overrides={}){
     library:fx.library,
     current_governance:fx.governance,
     skill_digest:fx.skill.skill_digest,
+    admission_provenance:admissionProvenance(fx),
     consumer_model_family:'GPT_5_6_SOL',
     environment_fingerprint:'env.exposure.review.windows.chromium',
     task_signature_digest:d('a'),
@@ -139,6 +168,10 @@ test('matched external review can make a held skill review-eligible without auth
   const review=createRsiSkillExposureReleaseReview(args(fx));
   assert.equal(review.state,'ELIGIBLE_FOR_EXTERNAL_EXPOSURE_RELEASE_REVIEW');
   assert.equal(review.eligible_for_external_exposure_release_review,true);
+  assert.equal(review.confirmed_storage_admission_provenance_required,true);
+  assert.equal(review.admission_attempt_id,'phase34b.attempt.exposure.review.fixture');
+  assert.equal(review.admission_attempt_digest,d('a'));
+  assert.equal(review.admission_effect_executor_identity_digest,d('d'));
   assert.equal(review.matched_same_instances_required,true);
   assert.equal(review.repair_count,2);
   assert.equal(review.regression_count,0);
@@ -189,6 +222,17 @@ test('review requires an exact held dormant skill and distinct external reviewer
     })),
     /separation_of_duties_required/,
   );
+  assert.throws(
+    ()=>createRsiSkillExposureReleaseReview(args(held,{
+      governance_reviewer_identity_digest:d('d'),
+    })),
+    /admission_executor_reviewer_separation_required/,
+  );
+  const forged=admissionProvenance(held,{current_governance_digest:d('0')});
+  assert.throws(
+    ()=>createRsiSkillExposureReleaseReview(args(held,{admission_provenance:forged})),
+    /admission_provenance_binding_invalid/,
+  );
 });
 
 test('paired metrics are internally consistent and candidate cannot self-certify',()=>{
@@ -214,6 +258,9 @@ test('paired metrics are internally consistent and candidate cannot self-certify
 test('trust root freezes zero-effect matched differential review semantics',()=>{
   const root=rsiSkillExposureReleaseReviewTrustRootSnapshot();
   assert.equal(root.exact_held_skill_required,true);
+  assert.equal(root.confirmed_storage_admission_provenance_required,true);
+  assert.equal(root.admission_attempt_digest_binding_required,true);
+  assert.equal(root.admission_effect_executor_reviewer_separation_required,true);
   assert.equal(root.matched_same_instances_required,true);
   assert.equal(root.no_skill_or_matched_reference_required,true);
   assert.equal(root.positive_matched_gain_required,true);
