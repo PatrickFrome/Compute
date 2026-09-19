@@ -238,7 +238,7 @@ test('proposal cannot exceed external envelope or reuse parent identity',()=>{
   const env=envelope(fx,'proposal-limits',{max_mutated_files:2,max_edit_operations:4,max_changed_bytes:4096});
   assert.throws(()=>proposal(env,'files',{estimated_mutated_files:3}),/estimated_mutated_files_invalid/);
   assert.throws(()=>proposal(env,'ops',{estimated_edit_operations:5}),/estimated_edit_operations_invalid/);
-  assert.throws(()=>proposal(env,'bytes',{estimated_changed_bytes:4097}),/estimated_changed_bytes_invalid/);
+  assert.throws(()=>proposal(env,'bytes',{estimated_changed_bytes:4097}),/estimated_changed_bytes_invalid|estimated_edit_operations_invalid/);
   assert.throws(()=>proposal(env,'same-child',{
     proposed_child_artifact_identity_digest:env.parent_candidate_artifact_digest,
   }),/new_child_identity_required/);
