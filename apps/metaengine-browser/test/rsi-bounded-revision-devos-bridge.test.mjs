@@ -4093,17 +4093,86 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
   assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED');
 
+  const releaseExecutorDigest=labelDigest('phase36-release-effect-executor');
+  await assert.rejects(()=>runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.missing-lineage-review',
+    certificate,
+    certificate_args:{release_review:freshExposureReview},
+    effect_id_digest:labelDigest('phase36-release-effect-id.missing-lineage-review'),
+    idempotency_key_digest:labelDigest('phase36-release-idempotency-key.missing-lineage-review'),
+    effect_executor_identity_digest:releaseExecutorDigest,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/lineage_contamination_review_required/);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,0);
+
+  const contaminatedLineageReview=await runtime.createSkillLineageContaminationReview({
+    review_id:'phase36.runtime.lineage-review.contaminated.1',
+    skill_digest:fx.skill.skill_digest,
+    target_consumer_snapshot_digest:labelDigest('phase36-lineage-consumer-snapshot'),
+    effect_executor_identity_digest:releaseExecutorDigest,
+    findings:[{
+      skill_digest:fx.skill.skill_digest,
+      status:'CONTAMINATED',
+      causal_provenance_digest:labelDigest('phase36-lineage-causal-provenance.contaminated'),
+      negative_transfer_receipt_digest:labelDigest('phase36-lineage-negative-transfer.contaminated'),
+      provenance_reviewer_identity_digest:labelDigest('phase36-lineage-provenance-reviewer.contaminated'),
+      security_reviewer_identity_digest:labelDigest('phase36-lineage-security-reviewer.contaminated'),
+    }],
+    external_review_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(contaminatedLineageReview.state,'BLOCKED_LINEAGE_CONTAMINATION_OR_INCOMPLETE');
+  assert.equal(contaminatedLineageReview.eligible_for_exposure_precommit,false);
+  assert.ok(contaminatedLineageReview.blockers.includes('LINEAGE_CONTAMINATION_DETECTED'));
+  await assert.rejects(()=>runtime.prepareSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.contaminated-lineage',
+    certificate,
+    certificate_args:{release_review:freshExposureReview},
+    lineage_contamination_review:contaminatedLineageReview,
+    effect_id_digest:labelDigest('phase36-release-effect-id.contaminated-lineage'),
+    idempotency_key_digest:labelDigest('phase36-release-idempotency-key.contaminated-lineage'),
+    effect_executor_identity_digest:releaseExecutorDigest,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/lineage_contamination_blocked/);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,0);
+
+  const lineageReview=await runtime.createSkillLineageContaminationReview({
+    review_id:'phase36.runtime.lineage-review.clean.1',
+    skill_digest:fx.skill.skill_digest,
+    target_consumer_snapshot_digest:labelDigest('phase36-lineage-consumer-snapshot'),
+    effect_executor_identity_digest:releaseExecutorDigest,
+    findings:[{
+      skill_digest:fx.skill.skill_digest,
+      status:'CLEAN',
+      causal_provenance_digest:labelDigest('phase36-lineage-causal-provenance.clean'),
+      negative_transfer_receipt_digest:labelDigest('phase36-lineage-negative-transfer.clean'),
+      provenance_reviewer_identity_digest:labelDigest('phase36-lineage-provenance-reviewer.clean'),
+      security_reviewer_identity_digest:labelDigest('phase36-lineage-security-reviewer.clean'),
+    }],
+    external_review_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(lineageReview.state,'CLEAR_FOR_ZERO_EFFECT_EXPOSURE_PRECOMMIT');
+  assert.equal(lineageReview.eligible_for_exposure_precommit,true);
+  assert.deepEqual(lineageReview.closure_skill_digests,[fx.skill.skill_digest]);
+  assert.equal(lineageReview.review_is_effect_authority,false);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_LINEAGE_CONTAMINATION_REVIEW_CREATED');
+
   const preparedRelease=await runtime.prepareSkillExposureReleaseAttempt({
     attempt_id:'phase36.runtime.release-attempt.1',
     certificate,
     certificate_args:{release_review:freshExposureReview},
+    lineage_contamination_review:lineageReview,
     effect_id_digest:labelDigest('phase36-release-effect-id'),
     idempotency_key_digest:labelDigest('phase36-release-idempotency-key'),
-    effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
+    effect_executor_identity_digest:releaseExecutorDigest,
     external_effect_executor:true,
     authored_by_candidate:false,
   });
   assert.equal(preparedRelease.state,'PREPARED');
+  assert.equal(preparedRelease.lineage_contamination_review_digest,lineageReview.review_digest);
   assert.equal(preparedRelease.effect_attempt_count,0);
   assert.equal(preparedRelease.effect_started,false);
   assert.equal(preparedRelease.effect_performed,false);
