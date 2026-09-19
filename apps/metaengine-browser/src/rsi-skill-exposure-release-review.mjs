@@ -58,12 +58,67 @@ function heldEntry(governance,skillDigest){
   return entry;
 }
 
+function verifyAdmissionProvenance(row,library,governance,skillDigest){
+  if(!row||typeof row!=='object'||Array.isArray(row)
+    ||row.schema!=='metaengine.rsi.admission-exposure-hold-provenance.v1'||row.version!==1){
+    throw new Error('rsi_exposure_review_admission_provenance_invalid');
+  }
+  for(const field of ['execution_authority','browser_authority','task_authority','scheduler_authority','production_mutation_authority','promotion_authority','self_update_authority','authority_effect']){
+    if(row[field]!==false)throw new Error(`rsi_exposure_review_admission_provenance_${field}_invalid`);
+  }
+  if(row.release_authority!==false||row.automatic_retry_allowed!==false){
+    throw new Error('rsi_exposure_review_admission_provenance_policy_invalid');
+  }
+  const core={
+    schema:row.schema,
+    version:row.version,
+    skill_digest:exactDigest(row.skill_digest,'admission_provenance_skill'),
+    admission_attempt_id:boundedId(row.admission_attempt_id,'admission_provenance_attempt_id'),
+    admission_certificate_digest:exactDigest(row.admission_certificate_digest,'admission_provenance_certificate'),
+    effect_id_digest:exactDigest(row.effect_id_digest,'admission_provenance_effect'),
+    admitted_successor_library_digest:exactDigest(row.admitted_successor_library_digest,'admission_provenance_successor_library'),
+    confirmed_transition_digest:exactDigest(row.confirmed_transition_digest,'admission_provenance_transition'),
+    current_library_digest:exactDigest(row.current_library_digest,'admission_provenance_current_library'),
+    current_governance_digest:exactDigest(row.current_governance_digest,'admission_provenance_current_governance'),
+    admission_state:row.admission_state,
+    exposure_hold_observed:row.exposure_hold_observed,
+    dormant_cap_observed:row.dormant_cap_observed,
+    active_for_composition:row.active_for_composition,
+    retrieval_exposure_allowed:row.retrieval_exposure_allowed,
+    release_authority:row.release_authority,
+    execution_authority:row.execution_authority,
+    browser_authority:row.browser_authority,
+    task_authority:row.task_authority,
+    scheduler_authority:row.scheduler_authority,
+    production_mutation_authority:row.production_mutation_authority,
+    promotion_authority:row.promotion_authority,
+    self_update_authority:row.self_update_authority,
+    automatic_retry_allowed:row.automatic_retry_allowed,
+    authority_effect:row.authority_effect,
+  };
+  if(core.skill_digest!==skillDigest
+    ||core.current_library_digest!==library.library_digest
+    ||core.current_governance_digest!==governance.governance_digest
+    ||core.admission_state!=='CONFIRMED_APPLIED_STORAGE_ONLY'
+    ||core.exposure_hold_observed!==true
+    ||core.dormant_cap_observed!==true
+    ||core.active_for_composition!==false
+    ||core.retrieval_exposure_allowed!==false){
+    throw new Error('rsi_exposure_review_admission_provenance_binding_invalid');
+  }
+  if(digest(core)!==exactDigest(row.provenance_digest,'admission_provenance')){
+    throw new Error('rsi_exposure_review_admission_provenance_digest_mismatch');
+  }
+  return Object.freeze({...core,provenance_digest:row.provenance_digest});
+}
+
 export function createRsiSkillExposureReleaseReview({
   review_id,
   source_sha,
   library,
   current_governance,
   skill_digest,
+  admission_provenance,
   consumer_model_family,
   environment_fingerprint,
   task_signature_digest,
@@ -103,6 +158,7 @@ export function createRsiSkillExposureReleaseReview({
   const checkedGovernance=verifyRsiSkillLibraryGovernance(current_governance,checkedLibrary);
   const skillDigest=exactDigest(skill_digest,'skill');
   heldEntry(checkedGovernance,skillDigest);
+  const admissionProvenance=verifyAdmissionProvenance(admission_provenance,checkedLibrary,checkedGovernance,skillDigest);
 
   if(external_governance_reviewer!==true||external_matched_evaluator!==true||external_security_reviewer!==true||authored_by_candidate!==false){
     throw new Error('rsi_exposure_review_external_ownership_required');
@@ -147,6 +203,12 @@ export function createRsiSkillExposureReleaseReview({
     library_digest:checkedLibrary.library_digest,
     current_governance_digest:checkedGovernance.governance_digest,
     skill_digest:skillDigest,
+    admission_provenance_digest:admissionProvenance.provenance_digest,
+    admission_attempt_id:admissionProvenance.admission_attempt_id,
+    admission_certificate_digest:admissionProvenance.admission_certificate_digest,
+    admission_effect_id_digest:admissionProvenance.effect_id_digest,
+    admitted_successor_library_digest:admissionProvenance.admitted_successor_library_digest,
+    confirmed_admission_transition_digest:admissionProvenance.confirmed_transition_digest,
     consumer_model_family:token(consumer_model_family,'consumer_model_family'),
     environment_fingerprint:boundedId(environment_fingerprint,'environment_fingerprint'),
     task_signature_digest:exactDigest(task_signature_digest,'task_signature'),
@@ -189,6 +251,7 @@ export function createRsiSkillExposureReleaseReview({
     negative_transfer_veto_required:true,
     cost_and_latency_veto_required:true,
     exposure_hold_required:true,
+    confirmed_storage_admission_provenance_required:true,
     storage_admission_is_not_exposure_authority:true,
     hold_release_effect_authorized:false,
     hold_release_effect_performed:false,
@@ -208,6 +271,7 @@ export function verifyRsiSkillExposureReleaseReview(review,args={}){
     ||review.authored_by_candidate!==false||review.exact_consumer_scope_required!==true||review.matched_same_instances_required!==true
     ||review.no_skill_or_matched_reference_required!==true||review.negative_transfer_veto_required!==true
     ||review.cost_and_latency_veto_required!==true||review.exposure_hold_required!==true
+    ||review.confirmed_storage_admission_provenance_required!==true
     ||review.storage_admission_is_not_exposure_authority!==true||review.hold_release_effect_authorized!==false
     ||review.hold_release_effect_performed!==false||review.retrieval_exposure_change_authorized!==false
     ||review.skill_activation_authorized!==false||review.release_token!==null){
@@ -218,6 +282,7 @@ export function verifyRsiSkillExposureReleaseReview(review,args={}){
     review_id:review.review_id,
     source_sha:review.source_sha,
     skill_digest:review.skill_digest,
+    admission_provenance:args.admission_provenance,
     consumer_model_family:review.consumer_model_family,
     environment_fingerprint:review.environment_fingerprint,
     task_signature_digest:review.task_signature_digest,
@@ -263,6 +328,7 @@ export function rsiSkillExposureReleaseReviewTrustRootSnapshot(){
     policy_path:'apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs',
     exact_held_skill_required:true,
     exact_library_governance_binding_required:true,
+    confirmed_storage_admission_provenance_required:true,
     exact_consumer_scope_required:true,
     matched_same_instances_required:true,
     no_skill_or_matched_reference_required:true,
