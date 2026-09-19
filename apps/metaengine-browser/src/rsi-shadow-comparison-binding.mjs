@@ -88,6 +88,8 @@ export function createRsiShadowComparisonBinding({
     comparison_can_authorize_canary:false,
     external_canary_gate_still_required:true,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,
@@ -101,6 +103,8 @@ export function createRsiShadowComparisonBinding({
 export function verifyRsiShadowComparisonBinding(binding,{selection,qualification}={}){
   if(!binding||binding.schema!==RSI_SHADOW_COMPARISON_BINDING_SCHEMA||binding.version!==1)throw new Error('rsi_shadow_comparison_binding_invalid');
   assertZero(binding,'binding');
+  if(binding.browser_authority!==false||binding.task_authority!==false)throw new Error('rsi_shadow_comparison_binding_runtime_authority_invalid');
+  verifyDigestObject(binding,'binding_digest','binding');
   if(binding.comparison_mode!=='READ_ONLY_DUAL_PLAN'||binding.context_source!=='BASELINE_PLAN'
     ||binding.champion_challenger_roles_fixed!==true||binding.same_verified_context_required!==true
     ||binding.external_comparator_owner!==true||binding.authored_by_candidate!==false
@@ -146,6 +150,8 @@ export function rsiShadowComparisonBindingTrustRootSnapshot(){
     existing_runtime_ledger_is_only_comparison_receipt_plane:true,
     second_shadow_binding_ledger_allowed:false,
     execution_authority:false,
+    browser_authority:false,
+    task_authority:false,
     production_mutation_authority:false,
     promotion_authority:false,
     self_update_authority:false,

@@ -169,9 +169,9 @@ function proposal(env,label='one',overrides={}){
     candidate_revision_spec_digest:dg(`revision-spec-${label}`),
     proposed_child_artifact_identity_digest:dg(`child-artifact-${label}`),
     mutation_categories:['CONTROL_FLOW','VALIDATION'],
-    estimated_mutated_files:2,
-    estimated_edit_operations:6,
-    estimated_changed_bytes:8192,
+    estimated_mutated_files:Math.min(2,env.max_mutated_files),
+    estimated_edit_operations:Math.min(6,env.max_edit_operations),
+    estimated_changed_bytes:Math.min(8192,env.max_changed_bytes),
     expected_preserved_behavior_receipt_digest:dg(`expected-preservation-${label}`),
     expected_regression_test_root_digest:dg(`regression-tests-${label}`),
     candidate_optimizer_id_digest:dg(`optimizer-${label}`),
@@ -242,6 +242,48 @@ test('proposal cannot exceed external envelope or reuse parent identity',()=>{
   assert.throws(()=>proposal(env,'same-child',{
     proposed_child_artifact_identity_digest:env.parent_candidate_artifact_digest,
   }),/new_child_identity_required/);
+});
+
+test('bounded revision proposal limits are orthogonal under metamorphic boundary changes',()=>{
+  const fx=experimentFixture('metamorphic-limits');
+  const env=envelope(fx,'metamorphic-limits',{max_mutated_files:2,max_edit_operations:4,max_changed_bytes:4096});
+
+  const baseline=proposal(env,'metamorphic-baseline',{
+    estimated_mutated_files:1,
+    estimated_edit_operations:1,
+    estimated_changed_bytes:1,
+  });
+  const baselineChecked=verifyRsiBoundedRevisionProposal(baseline,{envelope:env});
+  assert.equal(baselineChecked.estimated_mutated_files,1);
+  assert.equal(baselineChecked.estimated_edit_operations,1);
+  assert.equal(baselineChecked.estimated_changed_bytes,1);
+  assert.equal(baselineChecked.proposal_can_write_repository,false);
+  assert.equal(baselineChecked.proposal_can_schedule_implementation,false);
+  assert.equal(baselineChecked.proposal_is_execution_authority,false);
+
+  const within=[
+    ['files',{estimated_mutated_files:2,estimated_edit_operations:1,estimated_changed_bytes:1}],
+    ['operations',{estimated_mutated_files:1,estimated_edit_operations:4,estimated_changed_bytes:1}],
+    ['bytes',{estimated_mutated_files:1,estimated_edit_operations:1,estimated_changed_bytes:4096}],
+  ];
+  for(const [label,limits] of within){
+    const checked=verifyRsiBoundedRevisionProposal(proposal(env,`metamorphic-within-\${label}`,limits),{envelope:env});
+    assert.equal(checked.estimated_mutated_files,limits.estimated_mutated_files);
+    assert.equal(checked.estimated_edit_operations,limits.estimated_edit_operations);
+    assert.equal(checked.estimated_changed_bytes,limits.estimated_changed_bytes);
+    assert.equal(checked.proposal_can_write_repository,false);
+    assert.equal(checked.proposal_can_schedule_implementation,false);
+    assert.equal(checked.proposal_is_execution_authority,false);
+  }
+
+  const outside=[
+    ['files',{estimated_mutated_files:3,estimated_edit_operations:1,estimated_changed_bytes:1},/estimated_mutated_files_invalid/],
+    ['operations',{estimated_mutated_files:1,estimated_edit_operations:5,estimated_changed_bytes:1},/estimated_edit_operations_invalid/],
+    ['bytes',{estimated_mutated_files:1,estimated_edit_operations:1,estimated_changed_bytes:4097},/estimated_changed_bytes_invalid/],
+  ];
+  for(const [label,limits,error] of outside){
+    assert.throws(()=>proposal(env,`metamorphic-outside-\${label}`,limits),error);
+  }
 });
 
 test('proposal must be optimizer-authored inside external envelope',()=>{
