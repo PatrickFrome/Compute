@@ -61,6 +61,7 @@ import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSn
 import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
 import { rsiSourceIdentityConvergenceTrustRootSnapshot } from './rsi-source-identity-convergence.mjs';
 import { rsiSourceIdentityFreshnessTrustRootSnapshot } from './rsi-source-identity-freshness.mjs';
+import { rsiSourceIdentityStabilityTrustRootSnapshot } from './rsi-source-identity-stability.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -145,6 +146,7 @@ function trustRoots() {
     shadow_comparison_binding: rsiShadowComparisonBindingTrustRootSnapshot(),
     source_identity_convergence: rsiSourceIdentityConvergenceTrustRootSnapshot(),
     source_identity_freshness: rsiSourceIdentityFreshnessTrustRootSnapshot(),
+    source_identity_stability: rsiSourceIdentityStabilityTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
