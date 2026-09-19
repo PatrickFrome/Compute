@@ -366,5 +366,7 @@ test('tournament trust root exposes fixed evaluator linkage and no candidate cho
   assert.equal(root.required_objectives.includes('p95_latency_ms'), true);
   assert.equal(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-shadow-tournament.mjs'), true);
   assert.equal(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-skill-exposure-release-review.mjs'), true);
+  assert.equal(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-runtime-service.mjs'), true);
+  assert.equal(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs'), true);
   assert.equal(root.immutable_component_paths.includes('apps/metaengine-browser/src/rsi-skill-exposure-release-transition-proof.mjs'), true);
 });
