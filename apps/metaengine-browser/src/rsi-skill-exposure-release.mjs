@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 
 import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs';
 import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';
-import { verifyRsiFreshSourceIdentityConvergenceCertificate } from './rsi-source-identity-freshness.mjs';
+import { verifyRsiStableSourceIdentityConvergenceCertificate } from './rsi-source-identity-stability.mjs';
 
 export const RSI_SKILL_EXPOSURE_RELEASE_PREVIEW_SCHEMA='metaengine.rsi.skill-exposure-release-preview.v1';
 export const RSI_SKILL_EXPOSURE_RELEASE_CERTIFICATE_SCHEMA='metaengine.rsi.skill-exposure-release-certificate.v1';
@@ -127,7 +127,7 @@ export function createRsiSkillExposureReleaseCertificate({
   next_governance,
   release_preview,
   dormant_retrieval_review,
-  fresh_source_identity_certificate,
+  stable_source_identity_certificate,
   skill_digest,
   routing_context_manifest_digest,
   retrieval_profile_digest,
@@ -167,21 +167,23 @@ export function createRsiSkillExposureReleaseCertificate({
   const dormantRetrievalReviewDigest=verifyDormantRetrievalReview(dormant_retrieval_review,{
     library:checkedLibrary,currentGovernance:checkedGovernance,skillDigest,
   });
-  const sourceIdentity=verifyRsiFreshSourceIdentityConvergenceCertificate(fresh_source_identity_certificate);
-  if(sourceIdentity.fresh_source_identity_converged!==true
+  const sourceIdentity=verifyRsiStableSourceIdentityConvergenceCertificate(stable_source_identity_certificate);
+  if(sourceIdentity.stable_source_identity_converged!==true
     ||sourceIdentity.eligible_for_external_admission_review!==true
-    ||sourceIdentity.state!=='FRESH_SOURCE_IDENTITY_CONVERGED'){
-    throw new Error('rsi_exposure_release_fresh_source_identity_required');
+    ||sourceIdentity.state!=='STABLE_SOURCE_IDENTITY_CONVERGED'){
+    throw new Error('rsi_exposure_release_stable_source_identity_required');
   }
-  const sourceIdentityCertificateDigest=exactDigest(sourceIdentity.certificate_digest,'fresh_source_identity_certificate');
-  const sourceIdentitySha=String(sourceIdentity.convergence_evidence?.github_source_sha||'').trim().toLowerCase();
+  const sourceIdentityCertificateDigest=exactDigest(sourceIdentity.certificate_digest,'stable_source_identity_certificate');
+  const latestSourceRound=sourceIdentity.second_round;
+  const latestSourceEvidence=latestSourceRound.convergence_evidence;
+  const sourceIdentitySha=String(latestSourceEvidence?.github_source_sha||'').trim().toLowerCase();
   if(!/^[0-9a-f]{40}$/.test(sourceIdentitySha)
-    ||sourceIdentitySha!==sourceIdentity.convergence_evidence?.db_authority_baseline_sha
-    ||sourceIdentitySha!==sourceIdentity.convergence_evidence?.runtime_target_git_sha){
-    throw new Error('rsi_exposure_release_fresh_source_identity_mismatch');
+    ||sourceIdentitySha!==latestSourceEvidence?.db_authority_baseline_sha
+    ||sourceIdentitySha!==latestSourceEvidence?.runtime_target_git_sha){
+    throw new Error('rsi_exposure_release_stable_source_identity_mismatch');
   }
-  const sourceIdentityRuntimeIncarnation=id(sourceIdentity.readbacks?.runtime?.process_incarnation_id,'source_runtime_process_incarnation');
-  const sourceIdentityDbAlignmentEpoch=positiveInt(sourceIdentity.convergence_evidence?.db_alignment_epoch,'source_db_alignment_epoch');
+  const sourceIdentityRuntimeIncarnation=id(latestSourceRound.readbacks?.runtime?.process_incarnation_id,'source_runtime_process_incarnation');
+  const sourceIdentityDbAlignmentEpoch=positiveInt(latestSourceEvidence?.db_alignment_epoch,'source_db_alignment_epoch');
   if(external_governance_owner!==true||external_shadow_evaluator!==true||external_security_reviewer!==true||external_canary_evaluator!==true||authored_by_candidate!==false)throw new Error('rsi_exposure_release_external_ownership_required');
 
   const identities=[
@@ -227,7 +229,7 @@ export function createRsiSkillExposureReleaseCertificate({
     library_id:checkedLibrary.library_id,library_digest:checkedLibrary.library_digest,
     current_governance_digest:checkedGovernance.governance_digest,next_governance_digest:checkedNextGovernance.governance_digest,
     release_preview_digest:preview.preview_digest,dormant_retrieval_review_digest:dormantRetrievalReviewDigest,skill_digest:skillDigest,
-    source_identity_certificate_digest:sourceIdentityCertificateDigest,
+    source_identity_stability_certificate_digest:sourceIdentityCertificateDigest,
     source_identity_sha:sourceIdentitySha,
     source_identity_runtime_process_incarnation_id:sourceIdentityRuntimeIncarnation,
     source_identity_db_alignment_epoch:sourceIdentityDbAlignmentEpoch,
@@ -252,8 +254,8 @@ export function createRsiSkillExposureReleaseCertificate({
     authored_by_candidate:false,
     held_skill_required:true,current_state_must_be_dormant:true,next_state_must_be_exploration_active:true,
     fresh_dormant_retrieval_review_required:true,retrieval_review_can_authorize_release:false,
-    fresh_source_identity_convergence_required:true,source_identity_drift_blocks_certificate:true,
-    source_identity_candidate_authorship_allowed:false,
+    stable_source_identity_convergence_required:true,double_read_source_identity_required:true,
+    source_identity_drift_blocks_certificate:true,source_identity_candidate_authorship_allowed:false,
     only_target_governance_state_may_change:true,automatic_full_activation_allowed:false,
     release_does_not_grant_browser_authority:true,release_does_not_grant_tool_authority:true,
     one_attempt_release_required:true,ambiguous_release_retry_allowed:false,
@@ -267,8 +269,9 @@ export function verifyRsiSkillExposureReleaseCertificate(certificate,args={}){
   assertZero(certificate,'certificate');
   if(certificate.release_mode!==RELEASE_MODE||certificate.held_skill_required!==true||certificate.current_state_must_be_dormant!==true
     ||certificate.next_state_must_be_exploration_active!==true||certificate.fresh_dormant_retrieval_review_required!==true
-    ||certificate.retrieval_review_can_authorize_release!==false||certificate.fresh_source_identity_convergence_required!==true
-    ||certificate.source_identity_drift_blocks_certificate!==true||certificate.source_identity_candidate_authorship_allowed!==false
+    ||certificate.retrieval_review_can_authorize_release!==false||certificate.stable_source_identity_convergence_required!==true
+    ||certificate.double_read_source_identity_required!==true||certificate.source_identity_drift_blocks_certificate!==true
+    ||certificate.source_identity_candidate_authorship_allowed!==false
     ||certificate.only_target_governance_state_may_change!==true
     ||certificate.automatic_full_activation_allowed!==false||certificate.release_does_not_grant_browser_authority!==true
     ||certificate.release_does_not_grant_tool_authority!==true||certificate.one_attempt_release_required!==true
@@ -313,9 +316,10 @@ export function rsiSkillExposureReleaseTrustRootSnapshot(){
     policy_path:'apps/metaengine-browser/src/rsi-skill-exposure-release.mjs',
     exact_current_library_required:true,exact_current_governance_required:true,exact_next_governance_required:true,exact_next_governance_preview_required:true,
     held_dormant_skill_required:true,fresh_dormant_retrieval_review_required:true,
-    retrieval_review_can_authorize_release:false,fresh_source_identity_convergence_required:true,
-    exact_three_way_source_sha_required:true,source_identity_drift_blocks_certificate:true,
-    source_identity_freshness_policy_external:true,exploration_only_release:true,only_target_governance_state_may_change:true,
+    retrieval_review_can_authorize_release:false,stable_source_identity_convergence_required:true,
+    double_read_source_identity_required:true,exact_three_way_source_sha_required:true,
+    source_identity_drift_blocks_certificate:true,source_identity_freshness_policy_external:true,
+    source_identity_stability_policy_external:true,exploration_only_release:true,only_target_governance_state_may_change:true,
     minimum_shadow_context_count:3,all_shadow_contexts_must_pass:true,shadow_hard_invariants_required:true,
     no_skill_ablation_required:true,coalition_ablation_required:true,negative_transfer_clear_required:true,
     memory_poisoning_scan_required:true,source_grounding_required:true,read_only_shadow_canary_required:true,
