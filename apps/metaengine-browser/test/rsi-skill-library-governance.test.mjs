@@ -375,7 +375,7 @@ test('append-only successor governance preserves exact predecessor-bound lifecyc
   assert.equal(added.active_for_composition, false);
 
   const tamperedAncestor = structuredClone(library);
-  tamperedAncestor.entries[0].evidence_digest = d('0');
+  tamperedAncestor.entries[0].evidence.hidden_holdout_digest = d('0');
   assert.throws(() => createRsiSkillLibraryGovernance({
     governance_id: 'governance.lineage.tampered',
     library: successorLibrary,
