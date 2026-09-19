@@ -88,6 +88,8 @@ import {
   rsiRuntimeSkillLifecycleTrustRootSnapshot,
 } from '../src/rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
+import { createRsiSourceIdentityConvergenceEvidence } from '../src/rsi-source-identity-convergence.mjs';
+import { createRsiFreshSourceIdentityConvergenceCertificate } from '../src/rsi-source-identity-freshness.mjs';
 import { createRsiBrowserOutcomeEpisode } from '../src/rsi-browser-outcome-ingest.mjs';
 import {
   RsiAnytimeLibraryAdmissionArchive,
@@ -125,6 +127,10 @@ function dg(value){
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stable(value)),'utf8').digest('hex')}`;
 }
 function labelDigest(label){return dg({label});}
+function freshSourceIdentityCertificate(source=SOURCE){
+  const convergence=createRsiSourceIdentityConvergenceEvidence({evidence_id:'phase36.runtime.source.identity.1',github_source_sha:source,db_authority_baseline_sha:source,runtime_target_git_sha:source,github_ref:'refs/heads/main',db_authority_key:'METAENGINE_DEVOS',runtime_client_id:'phase36-runtime-client-1',db_alignment_epoch:87,github_readback_digest:labelDigest('phase36-github-readback'),db_authority_readback_digest:labelDigest('phase36-db-readback'),runtime_readback_digest:labelDigest('phase36-runtime-readback'),observed_at:'2026-09-19T16:00:00Z',external_github_reader:true,external_db_reader:true,external_runtime_reader:true,authored_by_candidate:false});
+  return createRsiFreshSourceIdentityConvergenceCertificate({certificate_id:'phase36.runtime.source.identity.freshness.1',convergence_evidence:convergence,github_readback:{source_kind:'GITHUB_API_MAIN_REF',repository:'PatrickFrome/Compute',ref:'refs/heads/main',head_sha:source,readback_digest:convergence.github_readback_digest,read_at:'2026-09-19T16:00:10Z',authored_by_candidate:false},db_authority_readback:{source_kind:'SUPABASE_ROADMAP_AUTHORITY_ROW',project_ref:'xpeibufgzjknrhbhpffp',authority_key:'METAENGINE_DEVOS',baseline_sha:source,alignment_epoch:87,readback_digest:convergence.db_authority_readback_digest,read_at:'2026-09-19T16:00:15Z',authored_by_candidate:false},runtime_readback:{source_kind:'DURABLE_RUNTIME_STATE_ROW',project_ref:'xpeibufgzjknrhbhpffp',client_id:'phase36-runtime-client-1',process_incarnation_id:'phase36-runtime-process-incarnation-1',target_git_sha:source,last_seen_at:'2026-09-19T16:00:18Z',readback_digest:convergence.runtime_readback_digest,read_at:'2026-09-19T16:00:20Z',authored_by_candidate:false},evaluated_at:'2026-09-19T16:00:25Z',authored_by_candidate:false});
+}
 const PROVENANCE=Object.freeze({
   builder_identity_digest:labelDigest('builder-identity'),
   worker_image_digest:labelDigest('worker-image'),
@@ -4036,10 +4042,12 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(freshExposureReview.state,'ELIGIBLE_FOR_EXTERNAL_EXPOSURE_RELEASE_REVIEW');
   assert.equal(freshExposureReview.admission_provenance_digest,freshProvenance.provenance_digest);
 
+  const freshSourceIdentity=freshSourceIdentityCertificate();
   const certificate=await runtime.createSkillExposureReleaseCertificate({
     certificate_id:'phase36.runtime.reviewed-certificate.1',
     skill_digest:fx.skill.skill_digest,
     release_review:freshExposureReview,
+    fresh_source_identity_certificate:freshSourceIdentity,
     shadow_routing_manifest_digest:labelDigest('phase36-certificate-shadow-routing'),
     no_skill_ablation_receipt_digest:labelDigest('phase36-certificate-no-skill'),
     coalition_ablation_receipt_digest:labelDigest('phase36-certificate-coalition'),
@@ -4063,6 +4071,9 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(certificate.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE');
   assert.equal(certificate.release_review_digest,freshExposureReview.review_digest);
   assert.equal(certificate.admission_provenance_digest,freshProvenance.provenance_digest);
+  assert.equal(certificate.fresh_source_identity_converged,true);
+  assert.equal(certificate.source_sha,SOURCE);
+  assert.equal(certificate.source_identity_certificate_digest,freshSourceIdentity.certificate_digest);
   assert.equal(certificate.certificate_is_effect_authority,false);
   assert.equal(certificate.release_effect_authorized,false);
   assert.equal(certificate.release_effect_performed,false);
@@ -4073,7 +4084,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   const preparedRelease=await runtime.prepareSkillExposureReleaseAttempt({
     attempt_id:'phase36.runtime.release-attempt.1',
     certificate,
-    certificate_args:{release_review:freshExposureReview},
+    certificate_args:{release_review:freshExposureReview,fresh_source_identity_certificate:freshSourceIdentity},
     effect_id_digest:labelDigest('phase36-release-effect-id'),
     idempotency_key_digest:labelDigest('phase36-release-idempotency-key'),
     effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
