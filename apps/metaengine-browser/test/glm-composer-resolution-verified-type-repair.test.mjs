@@ -572,3 +572,46 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
   assert.equal(snap.keepalive.rollover_reason, 'COMPOSER_UNCLEARABLE_DK7');
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// D-K8: system-detected rollovers self-release (approveRollover has no caller)
+// ---------------------------------------------------------------------------
+
+test('D-K8: requestRollover with autoRelease goes straight to ROLLOVER_REQUIRED', async () => {
+  const { SupervisorKeepalive } = await import('../src/supervisor-keepalive.mjs');
+  let now = Date.parse('2026-09-19T13:00:00Z');
+  const ka = new SupervisorKeepalive({
+    loadState: async () => null,
+    saveState: async () => {},
+    clock: () => now,
+    uuid: () => 'u' + Math.random().toString(16).slice(2),
+    processIncarnationId: 'process_test_dk8',
+  });
+  await ka.init();
+  await ka.bindConversation({ url: CONVERSATION, tab_id: 'tab1' });
+
+  await ka.requestRollover('COMPOSER_UNCLEARABLE_DK7', { autoRelease: true });
+  let snap = ka.snapshot();
+  assert.equal(snap.state, 'ROLLOVER_REQUIRED', 'a system-detected rollover must self-release');
+  assert.ok(snap.rollover_release_at, 'the release timestamp must be recorded');
+  // beginRolloverAttempt must now be executable (the historical deadlock:
+  // approveRollover has no caller, DEFERRED was a terminal parking state).
+  const attempt = await ka.beginRolloverAttempt();
+  assert.match(attempt.attempt_id, /^rollover_/);
+
+  // operator-class rollovers keep the deferred posture (a fresh keepalive
+  // instance models the post-restart reconciliation of the same state)
+  const ka2 = new SupervisorKeepalive({
+    loadState: async () => structuredClone(ka.snapshot()),
+    saveState: async () => {},
+    clock: () => now,
+    uuid: () => 'u' + Math.random().toString(16).slice(2),
+    processIncarnationId: 'process_test_dk8',
+  });
+  await ka2.init();
+  await ka2.markRolloverAmbiguous('ROLLOVER_TEST').catch(() => {});
+  await ka2.requestRollover('OPERATOR_REQUESTED');
+  snap = ka2.snapshot();
+  assert.equal(snap.state, 'ROLLOVER_DEFERRED', 'non-auto rollovers stay deferred for explicit approval');
+  assert.equal(snap.rollover_release_at, null);
+});

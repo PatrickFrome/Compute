@@ -521,7 +521,7 @@ export class SupervisorKeepalive {
     return clone(this.#state.queued_wakes.find((row) => row.process_incarnation_id === this.#processIncarnationId) || null);
   }
 
-  async requestRollover(reason = 'CONVERSATION_LIMIT') {
+  async requestRollover(reason = 'CONVERSATION_LIMIT', { autoRelease = false } = {}) {
     const normalizedReason = String(reason || 'CONVERSATION_LIMIT').slice(0, 160);
     if (this.#state.admission_state === 'CLOSED') return this.snapshot();
     if (!this.#state.conversation_url) {
@@ -531,9 +531,14 @@ export class SupervisorKeepalive {
       await this.#persist();
       return this.snapshot();
     }
-    this.#state.state = 'ROLLOVER_DEFERRED';
+    // D-K8 (live 2026-09-19): approveRollover has NO caller anywhere in the
+    // codebase — every requestRollover parked in ROLLOVER_DEFERRED forever
+    // (live: the D-K7 COMPOSER_UNCLEARABLE rollover sat deferred with zero
+    // progress). System-detected reasons pass autoRelease and go straight to
+    // ROLLOVER_REQUIRED; operator-class rollovers keep the deferred posture.
+    this.#state.state = autoRelease === true ? 'ROLLOVER_REQUIRED' : 'ROLLOVER_DEFERRED';
     this.#state.rollover_reason = normalizedReason;
-    this.#state.rollover_release_at = null;
+    this.#state.rollover_release_at = autoRelease === true ? iso(this.#clock) : null;
     this.#state.rollover_attempt = null;
     await this.#persist();
     return this.snapshot();
