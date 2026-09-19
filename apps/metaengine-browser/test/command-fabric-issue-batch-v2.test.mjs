@@ -35,7 +35,9 @@ test('batch issuer v2 is cryptographically fenced to the canonical manifest revi
 test('batch issuer v2 exposes exactly the existing generic issuer surface, no hidden expansion', () => {
   const sqlActions = parseIssuerAllowlist(sql).sort();
   const manifestActions = genericIssueV1ControlActions().map((row) => row.action).sort();
-  assert.equal(sqlActions.length, 32);
+  // 2026-09-19 observation/action plane: +TAB_TELEMETRY/SYSTEM_TELEMETRY/
+  // READ_TRANSCRIPT/PRESS_KEY on the generic issue surface.
+  assert.equal(sqlActions.length, 36);
   assert.deepEqual(sqlActions, manifestActions);
   assert.equal(sqlActions.includes('RESOLVE_PROMPT'), false);
   assert.equal(sqlActions.includes('CONTROL_CAPABILITIES'), false);

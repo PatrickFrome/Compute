@@ -1,5 +1,6 @@
 import postgres from 'npm:postgres@3.4.7';
 import { createDevosSupervisorRoutes, readDevosRuntimeControl, unavailableDevosRuntimeControl } from './devos-routes.mjs';
+import { createDbInspectRoutes } from './db-inspect-routes.mjs';
 import { createDevosPromotionRoutes } from './devos-promotion-routes.mjs';
 import { createMetaSupervisorRoutes } from './meta-routes.mjs';
 import { createCognitiveDeltaRoutes } from './cognitive-delta-routes.mjs';
@@ -198,6 +199,7 @@ const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,read
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
 const metaRoutes=createMetaSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID});
 const cognitiveRoutes=createCognitiveDeltaRoutes({rpc,workspaceId:WORKSPACE_ID,json});
+const dbInspectRoutes=createDbInspectRoutes({sql,json});
 
 Deno.serve(async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
@@ -215,6 +217,7 @@ Deno.serve(async(req:Request)=>{
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
+    const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
     const promotion=await devosPromotionRoutes({req,path,body,clientId:identity.id});if(promotion)return promotion;
     const meta=await metaRoutes({req,path,body,clientId:identity.id});if(meta)return meta;
     const devos=await devosRoutes({req,path,body,clientId:identity.id});if(devos)return devos;

@@ -1,5 +1,6 @@
 import {
   captureSemanticFrame,
+  captureTranscript,
   captureViewThumbnail as captureViewThumbnailBase,
   executeSemanticCommand,
   nativeBrowserTargetIdentity,
@@ -9,6 +10,7 @@ import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-
 
 export {
   captureSemanticFrame,
+  captureTranscript,
   executeSemanticCommand,
   nativeBrowserTargetIdentity,
 };
