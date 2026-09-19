@@ -164,6 +164,42 @@ test('cycle foregrounds worker, types without submit, clicks Send once, proves g
   assert.equal(first.second_scheduler_loop, false);
 });
 
+test('proven submit with delayed SPA navigation completes via the bounded conversation readback (D-S3)', async () => {
+  let selected = supervisorTab;
+  let captureCount = 0;
+  const commands = [];
+  const signedRequest = async (path) => {
+    if (path === '/v1/devos/cycle') return response(200, { schema: 'metaengine.devos.browser-cycle.v1', backlog: { ready: 1, running: 0 }, lease, running: [] });
+    if (path === '/v1/devos/mark-running') return response(200, { state: 'RUNNING' });
+    throw new Error(`unexpected:${path}`);
+  };
+  const executeCommand = async (command) => {
+    commands.push(command.action);
+    if (command.action === 'FLEET_RECONCILE') return fleet;
+    if (command.action === 'SELECT_TAB') { selected = command.payload.tab_id; return { ok: true }; }
+    if (command.action === 'CAPTURE') {
+      captureCount += 1;
+      // Busy probe (2 samples) + pre-capture + the FIRST post-submit capture
+      // still show the root URL (the SPA has not navigated yet); the next
+      // post-submit capture shows the conversation. The dispatcher must wait
+      // and re-capture instead of declaring the proven effect ambiguous.
+      if (captureCount <= 4) return frame({ sendVisible: true });
+      return frame({ url: conversationUrl, stopActive: true, sendVisible: false });
+    }
+    if (command.action === 'SEMANTIC_TYPE') {
+      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: false, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+    }
+    throw new Error(`unexpected_action:${command.action}`);
+  };
+  const cycle = new DevOsNativeTaskCycle({ getState: async () => state(selected), executeCommand, signedRequest });
+  const result = await cycle.cycle();
+  assert.equal(result.dispatch.state, 'RUNNING');
+  assert.equal(result.dispatch.proof.effect_state, 'PROVEN_NEW_CONVERSATION');
+  const semanticTypes = commands.filter((row) => row === 'SEMANTIC_TYPE').length;
+  assert.equal(semanticTypes, 1, 'exactly one submit — the readback never re-submits');
+  assert.ok(captureCount >= 5, 'the bounded readback re-captured until the conversation URL appeared');
+});
+
 test('zero viewport proceeds on the GLM semantic lane (D-S2: geometry-independent submit)', async () => {
   let selected = supervisorTab;
   const commands = [];
