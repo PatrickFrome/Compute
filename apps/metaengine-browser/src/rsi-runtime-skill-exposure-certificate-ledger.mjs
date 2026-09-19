@@ -74,6 +74,18 @@ function validateStoredCertificate(certificate){
   }
   return cloneFrozen(certificate);
 }
+function transitionKey(certificate){
+  return digest({
+    schema:'metaengine.rsi.runtime-skill-exposure-transition-key.v1',
+    skill_digest:certificate.skill_digest,
+    library_digest:certificate.library_digest,
+    current_governance_digest:certificate.current_governance_digest,
+    next_governance_digest:certificate.next_governance_digest,
+    release_preview_digest:certificate.release_preview_digest,
+    dormant_retrieval_review_digest:certificate.dormant_retrieval_review_digest,
+    release_mode:certificate.release_mode,
+  });
+}
 function recordCore({sourceSha,certificate,recordedAt}){
   return {
     schema:'metaengine.rsi.runtime-skill-exposure-certificate-record.v1',
@@ -81,6 +93,7 @@ function recordCore({sourceSha,certificate,recordedAt}){
     source_sha:sourceSha,
     certificate_id:certificate.certificate_id,
     certificate_digest:certificate.certificate_digest,
+    transition_key_digest:transitionKey(certificate),
     certificate,
     recorded_at:recordedAt,
     state:certificate.state,
@@ -124,6 +137,7 @@ function validateRecord(row,sourceSha){
   const certificate=validateStoredCertificate(row.certificate);
   for(const [field,value] of [
     ['certificate_digest',certificate.certificate_digest],
+    ['transition_key_digest',transitionKey(certificate)],
     ['skill_digest',certificate.skill_digest],
     ['library_digest',certificate.library_digest],
     ['current_governance_digest',certificate.current_governance_digest],
@@ -155,6 +169,7 @@ function stateCore({sourceSha,rows}){
     append_only:true,
     durable_before_visible:true,
     exact_external_certificate_verification_required:true,
+    unique_eligible_transition_required:true,
     certificate_is_evidence_not_effect_authority:true,
     ledger_can_release_hold:false,
     ledger_can_change_retrieval_exposure:false,
@@ -228,6 +243,11 @@ export class RsiRuntimeSkillExposureCertificateLedger{
     }
     const existingByDigest=this.#rows.find(row=>row.certificate_digest===canonical.certificate_digest);
     if(existingByDigest)throw new Error('rsi_runtime_exposure_certificate_digest_reuse');
+    const key=transitionKey(canonical);
+    if(canonical.eligible_for_one_attempt_exposure_release===true
+      &&this.#rows.some(row=>row.eligible_for_one_attempt_exposure_release===true&&row.transition_key_digest===key)){
+      throw new Error('rsi_runtime_exposure_certificate_transition_already_certified');
+    }
     if(this.#rows.length>=MAX_RECORDS)throw new Error('rsi_runtime_exposure_certificate_capacity_exceeded');
     const core=recordCore({sourceSha:this.#sourceSha,certificate:canonical,recordedAt:this.#now()});
     const record=Object.freeze({...core,record_digest:digest(core)});
@@ -255,6 +275,7 @@ export class RsiRuntimeSkillExposureCertificateLedger{
       latest_certificate_digest:this.#rows.at(-1)?.certificate_digest||null,
       append_only:true,
       durable_before_visible:true,
+      unique_eligible_transition_required:true,
       certificate_is_evidence_not_effect_authority:true,
       ledger_can_release_hold:false,
       ledger_can_change_retrieval_exposure:false,
@@ -285,6 +306,7 @@ export function rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot(){
     durable_before_visible:true,
     rejected_certificate_evidence_retained:true,
     certificate_id_reuse_forbidden:true,
+    unique_eligible_transition_required:true,
     certificate_digest_reuse_forbidden:true,
     certificate_is_evidence_not_effect_authority:true,
     one_attempt_release_execution_implemented_here:false,
