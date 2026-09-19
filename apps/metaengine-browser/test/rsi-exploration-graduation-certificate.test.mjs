@@ -254,9 +254,9 @@ function statistical(fx,overrides={}){
   const pairs=overrides.paired_sample_count??32;
   const minimumPairs=overrides.minimum_paired_sample_count??16;
   const eValueMicro=overrides.anytime_valid_e_value_microunits??100_000_000;
-  const candidateId='phase37a.skill.candidate';
-  const candidateSha=SOURCE;
-  const parentSha='b'.repeat(40);
+  const candidateId=overrides.candidate_id??`skill:${fx.capsule.skill_digest}`;
+  const candidateSha=overrides.candidate_sha??fx.capsule.source_candidate_sha;
+  const parentSha=overrides.parent_sha??'b'.repeat(40);
   const holdout=d('statistical-holdout');
   const evaluatorRoot=d('statistical-evaluator-root');
   const budget=createRsiRecursiveRiskBudget({
@@ -305,6 +305,9 @@ function statistical(fx,overrides={}){
   delete extra.paired_sample_count;
   delete extra.minimum_paired_sample_count;
   delete extra.anytime_valid_e_value_microunits;
+  delete extra.candidate_id;
+  delete extra.candidate_sha;
+  delete extra.parent_sha;
   return createRsiExplorationGraduationStatisticalReceipt({
     receipt_id:'phase37a.statistical.receipt',
     source_sha:SOURCE,
@@ -404,6 +407,9 @@ test('Phase37A certificate is eligible only with exact paired anytime-valid proc
   assert.equal(cert.process_verifier_pass,true);
   assert.equal(cert.outcome_verifier_pass,true);
   assert.equal(cert.anytime_valid_acceptance_pass,true);
+  assert.equal(cert.deterministic_skill_statistical_candidate_binding,true);
+  assert.equal(cert.statistical_candidate_id,`skill:${fx.capsule.skill_digest}`);
+  assert.equal(cert.statistical_candidate_sha,fx.capsule.source_candidate_sha);
   assert.equal(cert.lineage_contamination_clear,true);
   assert.equal(cert.certificate_only,true);
   assert.equal(cert.full_activation_authorized,false);
@@ -470,6 +476,26 @@ test('Phase37A blocks lineage contamination and every retention cost latency tra
   }
 });
 
+test('Phase37A rejects a valid statistical confirmation for a different skill candidate',()=>{
+  const fx=fixture();
+  const unrelated=statistical(fx,{candidate_id:'skill:unrelated',candidate_sha:'c'.repeat(40)});
+  assert.equal(unrelated.state,'PASS');
+  assert.throws(
+    ()=>createRsiExplorationGraduationCertificate(certificateArgs(fx,{statistical_receipt:unrelated})),
+    /statistical_target_skill_identity_mismatch/,
+  );
+});
+
+test('Phase37A separates certificate/process/outcome/statistical/effect identities from lineage builder and reviewers',()=>{
+  const fx=fixture();
+  assert.throws(
+    ()=>createRsiExplorationGraduationCertificate(certificateArgs(fx,{
+      certificate_owner_identity_digest:d('trusted-builder'),
+    })),
+    /lineage_principal_identity_alias_forbidden/,
+  );
+});
+
 test('Phase37A fails closed on cross-receipt scope drift and cross-stage identity collapse',()=>{
   const fx=fixture();
   const driftedProcess=verifier(fx,'PROCESS','PASS',{
@@ -529,6 +555,8 @@ test('Phase37A trust root keeps graduation certificate outside activation and ef
   assert.equal(root.process_and_outcome_verifiers_separate,true);
   assert.equal(root.controllable_and_uncontrollable_failures_separate,true);
   assert.equal(root.current_lineage_contamination_clear_required,true);
+  assert.equal(root.deterministic_skill_statistical_candidate_binding_required,true);
+  assert.equal(root.lineage_builder_reviewer_certificate_effect_separation_required,true);
   assert.equal(root.second_statistical_estimator_created,false);
   assert.equal(root.certificate_is_activation_authority,false);
   assert.equal(root.certificate_is_effect_authority,false);
