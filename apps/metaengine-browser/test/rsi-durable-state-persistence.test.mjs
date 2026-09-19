@@ -8,6 +8,7 @@ import test from 'node:test';
 import {
   persistRsiDurableJsonState,
   reconcileRsiDurableJsonState,
+  qualifyRsiDurableJsonState,
   RsiDurableStatePersistenceError,
   rsiDurableStatePersistenceTrustRootSnapshot,
 } from '../src/rsi-durable-state-persistence.mjs';
@@ -220,13 +221,27 @@ test('R9 reconciliation distinguishes missing, exact and divergent final state w
   const expectedFile=sha256Bytes(bytes);
 
   const missing=fakeIo();
-  const none=await reconcileRsiDurableJsonState({
+  const ambiguousMissing=await reconcileRsiDurableJsonState({
     file_path:file,
     expected_state_digest:expectedState,
     expected_file_digest:expectedFile,
     io:missing,
   });
+  assert.equal(ambiguousMissing.state,'AMBIGUOUS_MISSING_FINAL');
+  assert.equal(ambiguousMissing.rename_may_have_completed,true);
+  assert.equal(ambiguousMissing.no_effect_proven,false);
+  assert.equal(ambiguousMissing.reconciliation_required,true);
+  assert.equal(ambiguousMissing.new_attempt_allowed,false);
+
+  const none=await reconcileRsiDurableJsonState({
+    file_path:file,
+    expected_state_digest:expectedState,
+    expected_file_digest:expectedFile,
+    rename_may_have_completed:false,
+    io:missing,
+  });
   assert.equal(none.state,'NO_EFFECT_PROVEN');
+  assert.equal(none.no_effect_proven,true);
   assert.equal(none.new_attempt_allowed,true);
 
   const exact=fakeIo();
@@ -251,6 +266,56 @@ test('R9 reconciliation distinguishes missing, exact and divergent final state w
   assert.equal(ambiguous.state,'AMBIGUOUS_READBACK');
   assert.equal(ambiguous.reconciliation_required,true);
   assert.equal(ambiguous.new_attempt_allowed,false);
+});
+
+test('R9 durability-only qualification never replays the rename or logical write',async()=>{
+  const file='/tmp/rsi-qualify-existing.json';
+  const state={schema:'fixture.v1',value:'qualify'};
+  const bytes=Buffer.from(`${JSON.stringify(state)}\n`,'utf8');
+  const io=fakeIo();
+  io.files.set(path.resolve(file),bytes);
+
+  const receipt=await qualifyRsiDurableJsonState({
+    file_path:file,
+    expected_state_digest:stateDigest(state),
+    expected_file_digest:sha256Bytes(bytes),
+    io,
+    platform:'linux',
+  });
+
+  assert.equal(receipt.state,'DURABILITY_QUALIFIED_EXISTING_FINAL');
+  assert.equal(receipt.exact_readback_match,true);
+  assert.equal(receipt.logical_write_performed,false);
+  assert.equal(receipt.rename_replayed,false);
+  assert.equal(receipt.final_file_sync_completed,true);
+  assert.equal(receipt.parent_directory_sync_completed,true);
+  assert.equal(receipt.power_loss_durability_claimed,false);
+  assert.ok(!io.operations.includes('rename'));
+  assert.ok(!io.operations.includes('open:temp'));
+  assert.ok(!io.operations.includes('write:temp'));
+});
+
+test('R9 durability-only qualification blocks without exact predecessor readback',async()=>{
+  const file='/tmp/rsi-qualify-drift.json';
+  const expected={schema:'fixture.v1',value:'expected'};
+  const io=fakeIo();
+  io.files.set(path.resolve(file),Buffer.from('{"schema":"fixture.v1","value":"drift"}\n','utf8'));
+
+  const receipt=await qualifyRsiDurableJsonState({
+    file_path:file,
+    expected_state_digest:stateDigest(expected),
+    expected_file_digest:sha256Bytes(Buffer.from(`${JSON.stringify(expected)}\n`,'utf8')),
+    io,
+    platform:'linux',
+  });
+
+  assert.equal(receipt.state,'DURABILITY_QUALIFICATION_BLOCKED');
+  assert.equal(receipt.prerequisite_state,'AMBIGUOUS_READBACK');
+  assert.equal(receipt.logical_write_performed,false);
+  assert.equal(receipt.rename_replayed,false);
+  assert.equal(receipt.new_attempt_allowed,false);
+  assert.equal(receipt.reconciliation_required,true);
+  assert.ok(!io.operations.includes('rename'));
 });
 
 test('R9 actual filesystem persistence survives close and reload while keeping power-loss claims conservative',async()=>{
@@ -281,6 +346,10 @@ test('R9 durable persistence trust root encodes crash ambiguity and refuses unsu
   assert.equal(root.exact_final_readback_required,true);
   assert.equal(root.post_rename_failure_is_ambiguous,true);
   assert.equal(root.post_rename_failure_reconciliation_only,true);
+  assert.equal(root.missing_final_after_possible_rename_is_ambiguous,true);
+  assert.equal(root.no_effect_requires_pre_rename_proof,true);
+  assert.equal(root.durability_only_qualification_requires_exact_readback,true);
+  assert.equal(root.durability_only_qualification_replays_rename,false);
   assert.equal(root.same_attempt_retry_allowed,false);
   assert.equal(root.windows_write_through_rename_claimed,false);
   assert.equal(root.windows_rename_metadata_durability_claimed,false);
