@@ -297,8 +297,6 @@ test('synthesis verifier rejects quarantined experience guidance even with a rec
     }],
     selected_experience_count:1,
   };
-  const material={...forged};
-  delete material.synthesis_request_digest;
   // The production verifier must reject the policy even before digest acceptance.
   assert.throws(()=>verifyRsiCandidateSynthesisRequest({
     ...forged,
