@@ -275,6 +275,44 @@ test('newly appended verified skill with zero lifecycle windows stays dormant un
   }), /requested_skill_not_active:DORMANT_CAP/);
 });
 
+test('explicit admission exposure hold overrides positive evidence and keeps skill non-routable', () => {
+  const { library, strong } = fixture();
+  const positive = lifecycle(library, strong, {
+    id: 'strong.exposure-held.window',
+    invocations: 8,
+    helpful: 8,
+    harmful: 0,
+    neutral: 0,
+    delta: 0.4,
+  });
+  const governance = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exposure-held.positive',
+    library,
+    lifecycle_evidence: [positive],
+    admission_exposure_hold_skill_digests: [strong.skill_digest],
+    max_active_skills: 4,
+    exploration_slots: 1,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  verifyRsiSkillLibraryGovernance(governance, library);
+  const row = governance.entries.find((entry) => entry.skill_digest === strong.skill_digest);
+  assert.equal(row.evidence_window_count, 1);
+  assert.equal(row.proven_positive, true);
+  assert.equal(row.admission_exposure_held, true);
+  assert.equal(row.admission_exposure_hold_external_release_required, true);
+  assert.equal(row.state, 'DORMANT_CAP');
+  assert.equal(row.active_for_composition, false);
+  assert.equal(governance.admission_exposure_hold_count, 1);
+  assert.throws(() => createRsiSkillActivationView({
+    governance,
+    library,
+    requested_skill_digests: [strong.skill_digest],
+    external_planner: true,
+    authored_by_candidate: false,
+  }), /requested_skill_not_active:DORMANT_CAP/);
+});
+
 test('append-only successor governance preserves exact predecessor-bound lifecycle evidence only through explicit lineage', () => {
   const { library, strong } = fixture();
   const historicalWindow = lifecycle(library, strong, {
@@ -508,6 +546,8 @@ test('skill governance trust root encodes library-drift defenses without widenin
   assert.equal(root.outcome_driven_retirement, true);
   assert.equal(root.active_cap_required, true);
   assert.equal(root.exploration_slots_required, true);
+  assert.equal(root.admission_exposure_holds_force_dormant, true);
+  assert.equal(root.admission_exposure_hold_release_is_external_governance_action, true);
   assert.equal(root.premature_retirement_protected_by_minimum_evidence, true);
   assert.equal(root.router_false_positive_diagnostics_required, true);
   assert.equal(root.zero_evidence_skill_activation_forbidden, true);
