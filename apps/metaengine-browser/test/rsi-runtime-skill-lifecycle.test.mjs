@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,16 @@ import {
 
 const SOURCE='a'.repeat(40);
 const d=(char)=>`sha256:${char.repeat(64)}`;
+function stableState(value){
+  if(Array.isArray(value))return value.map(stableState);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stableState(value[key])]));
+}
+function lifecycleStateDigest(value){
+  const clone=structuredClone(value);
+  delete clone.state_digest;
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableState(clone)),'utf8').digest('hex')}`;
+}
 
 function verifiedSkill({id='skill.runtime.credit',source='b',impl='c'}={}){
   const capsule=createRsiSkillCapsule({
