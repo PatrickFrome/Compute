@@ -68,7 +68,7 @@ jobs:
             work/a1-agent-workspace)
               EXPECTED_L1='C2'
               ;;
-            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge)
+            work/aop1-autonomous-orchestration|work/same-point-duel-v4-*|work/chat-control-plane-browser-bridge|work/browser-final-2026-convergence-*)
               EXPECTED_L1='CROSS-CUTTING'
               ;;
             analysis/integration)
@@ -89,6 +89,26 @@ jobs:
             echo "PR must state its Level-2 milestone (or N/A for analysis-only work)" >&2
             exit 1
           fi
+
+          python3 - <<'PY'
+          import os, re, sys
+          body = os.environ.get('PR_BODY', '')
+          labels = [
+              'Canonical Level-1 milestone',
+              'Level-2 milestone',
+              'Canonical acceptance criterion advanced',
+              'Why this moves the project toward real compute rather than control-plane-only complexity',
+          ]
+          for label in labels:
+              match = re.search(rf'(?mi)^\s*-\s*{re.escape(label)}:\s*(.*?)\s*$', body)
+              if not match:
+                  print(f'Missing required governance field: {label}', file=sys.stderr)
+                  raise SystemExit(1)
+              value = re.sub(r'<!--.*?-->', '', match.group(1)).strip()
+              if not value:
+                  print(f'Governance field is empty or placeholder-only: {label}', file=sys.stderr)
+                  raise SystemExit(1)
+          PY
 
       - name: Prevent governance self-authorization
         shell: bash

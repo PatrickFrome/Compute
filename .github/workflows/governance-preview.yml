@@ -42,6 +42,8 @@ jobs:
           assert 'Fetch PR head object without checkout' in target
           assert 'git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA"' in target
           assert 'work/chat-control-plane-browser-bridge' in target
+          assert 'work/browser-final-2026-convergence-*' in target
+          assert 'Governance field is empty or placeholder-only' in target
           assert pin in target
           assert target_event not in preview
           assert '\n  pull_request:\n' in preview
@@ -66,6 +68,26 @@ jobs:
           esac
           grep -Fq "Canonical Level-1 milestone: $EXPECTED_L1" <<<"${PR_BODY:-}"
           grep -Fq "Level-2 milestone:" <<<"${PR_BODY:-}"
+
+          python3 - <<'PY'
+          import os, re, sys
+          body = os.environ.get('PR_BODY', '')
+          labels = [
+              'Canonical Level-1 milestone',
+              'Level-2 milestone',
+              'Canonical acceptance criterion advanced',
+              'Why this moves the project toward real compute rather than control-plane-only complexity',
+          ]
+          for label in labels:
+              match = re.search(rf'(?mi)^\s*-\s*{re.escape(label)}:\s*(.*?)\s*$', body)
+              if not match:
+                  print(f'Missing required governance field: {label}', file=sys.stderr)
+                  raise SystemExit(1)
+              value = re.sub(r'<!--.*?-->', '', match.group(1)).strip()
+              if not value:
+                  print(f'Governance field is empty or placeholder-only: {label}', file=sys.stderr)
+                  raise SystemExit(1)
+          PY
 
           if git diff --no-ext-diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -Fxq '.github/workflows/governance.yml'; then
             case "$HEAD_REF" in
