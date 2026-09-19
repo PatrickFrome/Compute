@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 
 import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs';
 
-export const RSI_SKILL_LINEAGE_CONTAMINATION_REVIEW_SCHEMA='metaengine.rsi.skill-lineage-contamination-review.v1';
+export const RSI_SKILL_LINEAGE_CONTAMINATION_REVIEW_SCHEMA='metaengine.rsi.skill-lineage-contamination-review.v2';
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
@@ -86,8 +86,11 @@ function normalizeFinding(row,expectedSkills,effectExecutor){
   if(!FINDING_STATES.has(status))throw new Error('rsi_lineage_contamination_finding_status_invalid');
   const provenanceReviewer=exactDigest(row.provenance_reviewer_identity_digest,'provenance_reviewer');
   const securityReviewer=exactDigest(row.security_reviewer_identity_digest,'security_reviewer');
-  if(provenanceReviewer===securityReviewer)throw new Error('rsi_lineage_contamination_reviewer_separation_required');
-  if(provenanceReviewer===effectExecutor||securityReviewer===effectExecutor){
+  const semanticReviewer=exactDigest(row.semantic_reviewer_identity_digest,'semantic_reviewer');
+  if(new Set([provenanceReviewer,securityReviewer,semanticReviewer]).size!==3){
+    throw new Error('rsi_lineage_contamination_three_reviewer_separation_required');
+  }
+  if([provenanceReviewer,securityReviewer,semanticReviewer].includes(effectExecutor)){
     throw new Error('rsi_lineage_contamination_reviewer_effect_executor_separation_required');
   }
   const core={
@@ -95,10 +98,13 @@ function normalizeFinding(row,expectedSkills,effectExecutor){
     status,
     causal_provenance_digest:exactDigest(row.causal_provenance_digest,'causal_provenance'),
     negative_transfer_receipt_digest:exactDigest(row.negative_transfer_receipt_digest,'negative_transfer_receipt'),
+    semantic_consistency_digest:exactDigest(row.semantic_consistency_digest,'semantic_consistency'),
     provenance_reviewer_identity_digest:provenanceReviewer,
     security_reviewer_identity_digest:securityReviewer,
+    semantic_reviewer_identity_digest:semanticReviewer,
     external_provenance_reviewer:true,
     external_security_reviewer:true,
+    external_semantic_reviewer:true,
     authored_by_candidate:false,
     execution_authority:false,
     browser_authority:false,
@@ -157,7 +163,7 @@ export function createRsiSkillLineageContaminationReview({
   const eligible=blockers.length===0;
   const core={
     schema:RSI_SKILL_LINEAGE_CONTAMINATION_REVIEW_SCHEMA,
-    version:1,
+    version:2,
     review_id:boundedId(review_id,'review_id'),
     source_sha:source,
     library_digest:lineage.library.library_digest,
@@ -173,7 +179,8 @@ export function createRsiSkillLineageContaminationReview({
     finding_count:normalized.length,
     all_current_lineage_nodes_reviewed:true,
     ancestor_and_descendant_scan_required:true,
-    dual_independent_reviewers_per_skill_required:true,
+    three_heterogeneous_reviewers_per_skill_required:true,
+    structural_behavioral_semantic_critic_separation_required:true,
     state:eligible?'CLEAR_FOR_ZERO_EFFECT_EXPOSURE_PRECOMMIT':'BLOCKED_LINEAGE_CONTAMINATION_OR_INCOMPLETE',
     blockers:Object.freeze(blockers),
     eligible_for_exposure_precommit:eligible,
@@ -203,7 +210,7 @@ export function verifyRsiSkillLineageContaminationReview(row,{
   current_governance_digest,
   effect_executor_identity_digest,
 }={}){
-  if(!row||row.schema!==RSI_SKILL_LINEAGE_CONTAMINATION_REVIEW_SCHEMA||row.version!==1){
+  if(!row||row.schema!==RSI_SKILL_LINEAGE_CONTAMINATION_REVIEW_SCHEMA||row.version!==2){
     throw new Error('rsi_lineage_contamination_review_required');
   }
   for(const field of ['execution_authority','browser_authority','task_authority','scheduler_authority','production_mutation_authority','promotion_authority','self_update_authority','automatic_retry_allowed','authority_effect']){
@@ -227,8 +234,8 @@ export function verifyRsiSkillLineageContaminationReview(row,{
 
 export function rsiSkillLineageContaminationReviewTrustRootSnapshot(){
   const root={
-    schema:'metaengine.rsi.skill-lineage-contamination-review-root.v1',
-    version:1,
+    schema:'metaengine.rsi.skill-lineage-contamination-review-root.v2',
+    version:2,
     policy_path:'apps/metaengine-browser/src/rsi-skill-lineage-contamination-review.mjs',
     existing_verified_library_reused:true,
     second_lineage_graph_allowed:false,
@@ -240,7 +247,8 @@ export function rsiSkillLineageContaminationReviewTrustRootSnapshot(){
     missing_parent_blocks_exposure_precommit:true,
     exact_lineage_closure_finding_coverage_required:true,
     contaminated_or_unknown_lineage_blocks_exposure_precommit:true,
-    dual_independent_reviewers_per_skill_required:true,
+    three_heterogeneous_reviewers_per_skill_required:true,
+    structural_behavioral_semantic_critic_separation_required:true,
     reviewer_effect_executor_separation_required:true,
     candidate_can_author_review:false,
     review_is_effect_authority:false,
