@@ -272,7 +272,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
 }
 
 export class RsiRuntimeSkillLifecycle{
-  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#admissionAttempts=[];#admissionExposureHolds=new Set();#exposureReleaseAttempts=[];#seq=new Map();#initialized=false;
+  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#admissionAttempts=[];#admissionExposureHolds=new Set();#exposureReleaseAttempts=[];#exposureReleaseDurabilityAmbiguous=false;#seq=new Map();#initialized=false;
   constructor({statePath,source_sha,clock=()=>Date.now()}={}){
     if(!statePath||typeof statePath!=='string')throw new Error('rsi_runtime_skill_state_path_required');
     if(typeof clock!=='function')throw new Error('rsi_runtime_skill_clock_required');
@@ -360,6 +360,31 @@ export class RsiRuntimeSkillLifecycle{
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
     await fs.rename(temp,this.#path);return state;
+  }
+  async #readPersistedExposureReleaseObservation(skillDigest){
+    const parsed=JSON.parse(await fs.readFile(this.#path,'utf8'));
+    if(parsed.schema!==RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA||parsed.version!==1||parsed.source_sha!==this.#sourceSha){
+      throw new Error('rsi_runtime_skill_exposure_release_persisted_state_invalid');
+    }
+    const clone=structuredClone(parsed);delete clone.state_digest;
+    if(digest(clone)!==exactDigest(parsed.state_digest,'exposure_release_persisted_state')){
+      throw new Error('rsi_runtime_skill_exposure_release_persisted_state_digest_mismatch');
+    }
+    const library=verifyRsiVerifiedSkillLibrary(parsed.library);
+    const holds=new Set((parsed.admission_exposure_hold_skill_digests||[]).map((value)=>exactDigest(value,'exposure_release_persisted_hold')));
+    const governance=createRsiSkillLibraryGovernance({
+      governance_id:this.#governanceId(),
+      library,
+      lifecycle_evidence:parsed.lifecycle_evidence||[],
+      admission_exposure_hold_skill_digests:[...holds],
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    return Object.freeze({
+      library_digest:library.library_digest,
+      governance_digest:governance.governance_digest,
+      hold_present:holds.has(skillDigest),
+    });
   }
   #assertInit(){if(!this.#initialized)throw new Error('rsi_runtime_skill_not_initialized')}
   #libraryContainsAll(skillDigests){return !!this.#library&&skillDigests.every(d=>this.#library.entries.some(e=>e.skill_digest===d))}
@@ -753,6 +778,7 @@ export class RsiRuntimeSkillLifecycle{
     authored_by_candidate=true,
   }={}){
     this.#assertInit();
+    if(this.#exposureReleaseDurabilityAmbiguous)throw new Error('rsi_runtime_skill_exposure_release_durability_ambiguous_restart_required');
     if(external_governance_owner!==true||external_effect_executor!==true||authored_by_candidate!==false){
       throw new Error('rsi_runtime_skill_exposure_release_external_owners_required');
     }
@@ -887,8 +913,46 @@ export class RsiRuntimeSkillLifecycle{
     try{
       await this.#persist();
     }catch(error){
-      this.#admissionExposureHolds=priorHolds;
-      throw error;
+      let persisted=null;
+      try{
+        persisted=await this.#readPersistedExposureReleaseObservation(skillDigest);
+      }catch{
+        this.#exposureReleaseDurabilityAmbiguous=true;
+        throw new Error('rsi_runtime_skill_exposure_release_effect_persist_ambiguous_restart_required',{cause:error});
+      }
+      if(persisted.library_digest===expectedLibrary&&persisted.governance_digest===expectedNextGovernance&&persisted.hold_present===false){
+        this.#admissionExposureHolds.delete(skillDigest);
+      }else if(persisted.library_digest===expectedLibrary&&persisted.governance_digest===expectedGovernance&&persisted.hold_present===true){
+        this.#admissionExposureHolds=priorHolds;
+        const noEffectObservation=digest({
+          stage:'EFFECT_PERSIST_ERROR_READBACK',
+          observed_library_digest:persisted.library_digest,
+          observed_governance_digest:persisted.governance_digest,
+          hold_present:persisted.hold_present,
+        });
+        const noEffect=this.#appendExposureReleaseState(started,'NO_EFFECT_CONFIRMED',noEffectObservation);
+        this.#replaceExposureReleaseAttempt(noEffect);
+        try{await this.#persist()}catch{
+          this.#exposureReleaseDurabilityAmbiguous=true;
+          throw new Error('rsi_runtime_skill_exposure_release_no_effect_terminal_persist_ambiguous_restart_required',{cause:error});
+        }
+        return zero({
+          state:'NO_EFFECT_CONFIRMED',
+          attempt_id:attemptId,
+          attempt_digest:noEffect.attempt_digest,
+          effect_attempt_count:1,
+          effect_started:true,
+          effect_performed:false,
+          retrieval_exposure_changed:false,
+          retry_performed:false,
+          same_effect_id_retry_allowed:false,
+          new_attempt_requires_fresh_r7_review:true,
+          pre_effect_readback_passed:true,
+        });
+      }else{
+        this.#exposureReleaseDurabilityAmbiguous=true;
+        throw new Error('rsi_runtime_skill_exposure_release_effect_persist_diverged_restart_required',{cause:error});
+      }
     }
 
     const afterGovernance=this.governance();
@@ -903,7 +967,12 @@ export class RsiRuntimeSkillLifecycle{
     });
     const confirmed=this.#appendExposureReleaseState(started,'CONFIRMED',confirmedObservation);
     this.#replaceExposureReleaseAttempt(confirmed);
-    await this.#persist();
+    try{
+      await this.#persist();
+    }catch(error){
+      this.#replaceExposureReleaseAttempt(started);
+      throw new Error('rsi_runtime_skill_exposure_release_confirmation_persist_failed_reconcile_required',{cause:error});
+    }
     return zero({
       state:'CONFIRMED',
       attempt_id:attemptId,
@@ -927,6 +996,7 @@ export class RsiRuntimeSkillLifecycle{
     authored_by_candidate=true,
   }={}){
     this.#assertInit();
+    if(this.#exposureReleaseDurabilityAmbiguous)throw new Error('rsi_runtime_skill_exposure_release_durability_ambiguous_restart_required');
     if(external_readback_owner!==true||authored_by_candidate!==false){
       throw new Error('rsi_runtime_skill_exposure_release_external_readback_owner_required');
     }
@@ -1089,6 +1159,7 @@ export class RsiRuntimeSkillLifecycle{
       admission_attempt_state_counts:Object.freeze(this.#admissionAttempts.reduce((acc,row)=>{acc[row.current_state]=(acc[row.current_state]||0)+1;return acc},{})),
       exposure_release_attempt_count:this.#exposureReleaseAttempts.length,
       exposure_release_attempt_state_counts:Object.freeze(this.#exposureReleaseAttempts.reduce((acc,row)=>{acc[row.current_state]=(acc[row.current_state]||0)+1;return acc},{})),
+      exposure_release_durability_ambiguous:this.#exposureReleaseDurabilityAmbiguous,
       admission_exposure_hold_skill_digests:Object.freeze([...this.#admissionExposureHolds].sort()),
       admission_exposure_hold_count:this.#admissionExposureHolds.size,
       admission_exposure_holds_force_nonactive:true,
