@@ -26,7 +26,7 @@ function idleFrame(url, text = '') {
     title: 'ChatGPT',
     text_excerpt: text,
     semantic_targets: [
-      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
+      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3, value_length: 0 },
       { role: 'button', name: 'Send' },
     ],
   };
@@ -168,14 +168,31 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
   await runtime.start();
   await runtime.cycle({ force: true });
 
+  // First cycle after start(): the suppressed TYPE_EFFECT_AMBIGUOUS submit
+  // left the bootstrap composer provably empty (captured zero, root URL, no
+  // marker), so the D-S1 repair retires the unresolved wake instead of
+  // deadlocking the keepalive forever (2026-09-19 contract update). The
+  // retirement is a bounded superstep: state RECOVERING, no pending wake.
   const snap = runtime.snapshot();
   assert.equal(bootstrapCreated, 1);
   assert.equal(semanticSubmit, 1);
-  assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
-  assert.equal(snap.keepalive.cycle_seq, 0);
-  assert.equal(snap.keepalive.pending_wake?.automatic_retry_allowed, false);
-  assert.equal(snap.last_recovery?.action, 'SUPERVISOR_BOOTSTRAP_AMBIGUOUS');
+  assert.equal(snap.keepalive.state, 'RECOVERING');
+  assert.equal(snap.keepalive.pending_wake, null, 'the fenced wake was retired by proof');
   assert.equal(snap.keepalive.conversation_url, null);
+  assert.ok((snap.keepalive.queued_wakes || []).length >= 1, 'a fresh continuous wake is queued');
+  const retiredWakeId = ((JSON.parse(await fs.readFile(statePath, 'utf8')).ambiguous_history || []).slice(-1)[0] || {}).wake_id;
+  assert.ok(retiredWakeId, 'the retired wake is in durable history');
+
+  // Second cycle: the fresh bootstrap runs from clean RECOVERING state with a
+  // NEW wake — one new root, one NEW submit; the old wake is never retried.
+  await runtime.cycle({ force: true });
+  const snap2 = runtime.snapshot();
+  assert.equal(bootstrapCreated, 2, 'one fresh root after proof-based retirement');
+  assert.equal(semanticSubmit, 2, 'one submit per wake, no blind retry');
+  assert.notEqual(snap2.keepalive.pending_wake?.wake_id, retiredWakeId,
+    'a fresh wake replaced the retired one');
+  assert.equal(snap2.keepalive.pending_wake?.automatic_retry_allowed, false);
+  assert.equal(snap2.keepalive.conversation_url, null);
 
   await fs.rm(dir, { recursive: true, force: true });
 });
