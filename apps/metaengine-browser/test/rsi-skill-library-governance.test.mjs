@@ -314,6 +314,36 @@ test('admission exposure hold keeps positively evidenced skill dormant and non-a
   }), /requested_skill_not_active:DORMANT_CAP/);
 });
 
+test('terminal safety state overrides exposure hold while remaining non-activatable', () => {
+  const { library, harmful } = fixture();
+  const bad = lifecycle(library, harmful, {
+    id: 'held.harmful.1',
+    invocations: 2,
+    helpful: 0,
+    harmful: 2,
+    neutral: 0,
+    hardViolations: 1,
+    delta: -0.5,
+  });
+  const governance = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exposure-hold.terminal-safety',
+    library,
+    lifecycle_evidence: [bad],
+    admission_exposure_hold_skill_digests: [harmful.skill_digest],
+    max_active_skills: 4,
+    exploration_slots: 4,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  verifyRsiSkillLibraryGovernance(governance, library);
+  const row = governance.entries.find((entry) => entry.skill_digest === harmful.skill_digest);
+  assert.equal(row.admission_exposure_held, true);
+  assert.equal(row.admission_exposure_hold_external_release_required, true);
+  assert.equal(row.state, 'QUARANTINED');
+  assert.equal(row.active_for_composition, false);
+  assert.equal(governance.terminal_safety_states_override_exposure_hold, true);
+});
+
 test('retirement requires repeated negative evidence and never hard-deletes the skill', () => {
   const { library, harmful } = fixture();
   const oneWindow = lifecycle(library, harmful, {
@@ -493,6 +523,7 @@ test('skill governance trust root encodes library-drift defenses without widenin
   assert.equal(root.zero_evidence_skill_activation_forbidden, true);
   assert.equal(root.admission_exposure_holds_force_inactive, true);
   assert.equal(root.admission_exposure_hold_release_requires_external_governance, true);
+  assert.equal(root.terminal_safety_states_override_exposure_hold, true);
   assert.equal(root.meta_skill_authoring_prior_is_tiebreak_only, true);
   assert.equal(root.candidate_can_change_governance, false);
   assert.equal(root.candidate_can_reactivate_skill, false);
