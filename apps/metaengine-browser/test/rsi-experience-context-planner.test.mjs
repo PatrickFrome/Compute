@@ -64,7 +64,7 @@ function frontier(overrides={}) {
 function harmfulGraph() {
   const taskAnchor={
     task_id:'task.history.harmful',
-    task_signature_digest:'4'.repeat(64),
+    task_signature_digest:d('4'),
     challenge_family:'BROWSER_RUNTIME',
     hidden_manifest_digest:d('6'),
     external_writer:true,
@@ -77,7 +77,7 @@ function harmfulGraph() {
     cases.push(createRsiExperienceCase({
       case_id:`rsi_case_harmful_${i}`,
       task_id:'task.history.harmful',
-      task_signature_digest:'4'.repeat(64),
+      task_signature_digest:d('4'),
       attempt_index:i,
       candidate_id:cid(ch),
       candidate_sha:ch.repeat(40),
