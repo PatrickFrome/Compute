@@ -93,8 +93,11 @@ function fixture({invocations=2}={}){
     ...base,
     admission_exposure_hold_skill_digests:[skill.skill_digest],
   });
-  const nextGovernance=createRsiSkillLibraryGovernance(base);
-  return {skill,library,lifecycle,currentGovernance,nextGovernance};
+  const nextGovernance=createRsiSkillLibraryGovernance({
+    ...base,
+    exploration_only_skill_digests:[skill.skill_digest],
+  });
+  return {skill,library,lifecycle,currentGovernance,nextGovernance,base};
 }
 
 function reviewArgs(fx,overrides={}){
@@ -177,6 +180,11 @@ test('eligible held skill can produce a zero-effect exploration-only transition 
   assert.equal(proof.next_state,'EXPLORATION_ACTIVE');
   assert.equal(proof.active_count_delta,1);
   assert.equal(proof.hold_count_delta,-1);
+  assert.equal(proof.current_exploration_only_hold,false);
+  assert.equal(proof.next_exploration_only_hold,true);
+  assert.equal(proof.exploration_only_hold_count_delta,1);
+  assert.equal(proof.full_activation_hold_applied,true);
+  assert.equal(proof.separate_external_graduation_required,true);
   assert.equal(proof.hold_release_effect_authorized,false);
   assert.equal(proof.hold_release_effect_performed,false);
   assert.equal(proof.retrieval_exposure_changed,false);
@@ -186,14 +194,16 @@ test('eligible held skill can produce a zero-effect exploration-only transition 
   verifyRsiSkillExposureReleaseTransitionProof(proof,proofArgs(fx,review));
 });
 
-test('transition proof rejects a direct held-to-full-active jump',()=>{
+test('transition proof rejects a direct held-to-full-active jump without a graduation hold',()=>{
   const fx=fixture({invocations:8});
   assert.equal(fx.currentGovernance.entries[0].state,'DORMANT_CAP');
-  assert.equal(fx.nextGovernance.entries[0].state,'ACTIVE');
+  assert.equal(fx.nextGovernance.entries[0].state,'EXPLORATION_ACTIVE');
+  const fullActiveGovernance=createRsiSkillLibraryGovernance(fx.base);
+  assert.equal(fullActiveGovernance.entries[0].state,'ACTIVE');
   const review=createRsiSkillExposureReleaseReview(reviewArgs(fx));
   assert.throws(
-    ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review)),
-    /exploration_only_required/,
+    ()=>createRsiSkillExposureReleaseTransitionProof(proofArgs(fx,review,{next_governance:fullActiveGovernance})),
+    /exploration_hold_delta_invalid|exploration_only_required/,
   );
 });
 
@@ -265,6 +275,9 @@ test('transition proof trust root keeps release review non-authoritative',()=>{
   assert.equal(root.exact_current_governance_required,true);
   assert.equal(root.exact_next_governance_required,true);
   assert.equal(root.exploration_only_transition,true);
+  assert.equal(root.exploration_only_hold_must_be_applied,true);
+  assert.equal(root.exploration_only_hold_count_delta_required,1);
+  assert.equal(root.separate_external_graduation_required_for_active,true);
   assert.equal(root.only_target_governance_state_may_change,true);
   assert.equal(root.read_only_shadow_canary_required,true);
   assert.equal(root.release_owner_separation_of_duties_required,true);
