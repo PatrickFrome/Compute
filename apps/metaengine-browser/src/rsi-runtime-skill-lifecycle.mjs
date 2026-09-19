@@ -282,13 +282,15 @@ function validateExposureReleaseAttemptRow(row){
   if(digest(core)!==exactDigest(row.attempt_digest,'exposure_release_attempt'))throw new Error('rsi_runtime_skill_exposure_release_attempt_digest_mismatch');
   return Object.freeze(structuredClone(row));
 }
-function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill,admissionAttempts,admissionExposureHolds}){
+function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill,admissionAttempts,admissionExposureHolds,exposureReleaseAttempts}){
   const core={
     schema:RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA,version:1,source_sha:sourceSha,
     library:library||null,library_digest:library?.library_digest||null,
     lifecycle_evidence:lifecycleEvidence,
     pending,
     admission_attempts:admissionAttempts,
+    exposure_release_attempts:exposureReleaseAttempts,
+    exposure_release_attempt_count:exposureReleaseAttempts.length,
     admission_exposure_hold_skill_digests:[...admissionExposureHolds].sort(),
     admission_exposure_hold_count:admissionExposureHolds.size,
     admission_exposure_holds_force_nonactive:true,
@@ -297,6 +299,10 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     window_seq_by_skill:Object.fromEntries([...windowSeqBySkill.entries()].sort(([a],[b])=>a.localeCompare(b))),
     evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,
     admission_attempts_append_only:true,max_admission_attempts:MAX_ADMISSION_ATTEMPTS,
+    exposure_release_attempts_append_only:true,max_exposure_release_attempts:MAX_EXPOSURE_RELEASE_ATTEMPTS,
+    exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
+    ambiguous_exposure_release_effect_requires_readback_only_reconciliation:true,
+    exposure_release_pre_effect_exact_readback_required:true,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
     pre_effect_state_readback_after_attempt_persist_required:true,
     ambiguous_admission_effect_requires_readback_only_reconciliation:true,
@@ -310,7 +316,7 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
 }
 
 export class RsiRuntimeSkillLifecycle{
-  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#admissionAttempts=[];#admissionExposureHolds=new Set();#seq=new Map();#initialized=false;
+  #path;#sourceSha;#clock;#library=null;#evidence=[];#pending=[];#admissionAttempts=[];#exposureReleaseAttempts=[];#admissionExposureHolds=new Set();#seq=new Map();#initialized=false;
   constructor({statePath,source_sha,clock=()=>Date.now()}={}){
     if(!statePath||typeof statePath!=='string')throw new Error('rsi_runtime_skill_state_path_required');
     if(typeof clock!=='function')throw new Error('rsi_runtime_skill_clock_required');
@@ -361,6 +367,27 @@ export class RsiRuntimeSkillLifecycle{
           ids.add(row.attempt_id);effects.add(row.effect_id_digest);keys.add(row.idempotency_key_digest);return row;
         });
       }else this.#admissionAttempts=[];
+      if(parsed.exposure_release_attempts!=null){
+        if(!Array.isArray(parsed.exposure_release_attempts)||parsed.exposure_release_attempts.length>MAX_EXPOSURE_RELEASE_ATTEMPTS
+          ||parsed.exposure_release_attempt_count!==parsed.exposure_release_attempts.length){
+          throw new Error('rsi_runtime_skill_exposure_release_attempts_state_invalid');
+        }
+        if(parsed.exposure_release_attempts_append_only!==true||parsed.exposure_release_effect_attempt_limit!==1
+          ||parsed.blind_retry_for_exposure_release_effect!==false
+          ||parsed.ambiguous_exposure_release_effect_requires_readback_only_reconciliation!==true
+          ||parsed.exposure_release_pre_effect_exact_readback_required!==true){
+          throw new Error('rsi_runtime_skill_exposure_release_state_policy_invalid');
+        }
+        const ids=new Set(),certificates=new Set(),effects=new Set(),keys=new Set();
+        this.#exposureReleaseAttempts=parsed.exposure_release_attempts.map(raw=>{
+          const row=validateExposureReleaseAttemptRow(raw);
+          if(ids.has(row.attempt_id)||certificates.has(row.release_certificate_digest)||effects.has(row.effect_id_digest)||keys.has(row.idempotency_key_digest)){
+            throw new Error('rsi_runtime_skill_exposure_release_attempt_identity_duplicate');
+          }
+          ids.add(row.attempt_id);certificates.add(row.release_certificate_digest);effects.add(row.effect_id_digest);keys.add(row.idempotency_key_digest);
+          return row;
+        });
+      }else this.#exposureReleaseAttempts=[];
       this.#seq=new Map(Object.entries(parsed.window_seq_by_skill||{}).map(([k,v])=>[exactDigest(k,'skill_seq'),positiveInt(v,'window_seq')]));
       if(this.#library){
         createRsiSkillLibraryGovernance({
@@ -376,7 +403,7 @@ export class RsiRuntimeSkillLifecycle{
   #now(){const n=Number(this.#clock());if(!Number.isFinite(n))throw new Error('rsi_runtime_skill_clock_invalid');return new Date(n).toISOString()}
   #governanceId(){return `runtime.skill.governance.${this.#sourceSha.slice(0,16)}`}
   async #persist(){
-    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,admissionAttempts:this.#admissionAttempts,admissionExposureHolds:this.#admissionExposureHolds});
+    const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,admissionAttempts:this.#admissionAttempts,admissionExposureHolds:this.#admissionExposureHolds,exposureReleaseAttempts:this.#exposureReleaseAttempts});
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
     await fs.rename(temp,this.#path);return state;
