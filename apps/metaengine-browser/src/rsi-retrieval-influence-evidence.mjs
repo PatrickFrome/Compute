@@ -14,6 +14,7 @@ export const RSI_RETRIEVAL_INFLUENCE_ROOT_SCHEMA='metaengine.rsi.retrieval-influ
 
 const SHA40_RE=/^[0-9a-f]{40}$/;
 const SHA256_RE=/^sha256:[0-9a-f]{64}$/;
+const CANDIDATE_ID_RE=/^candidate_sha256_[0-9a-f]{64}$/;
 const SAFE_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:/#@+-]{2,255}$/;
 const SAFE_TOKEN_RE=/^[A-Z0-9][A-Z0-9_.:-]{0,95}$/;
 const METHODS=new Set(['LEAVE_ONE_OUT','PAIRED_ABLATION']);
@@ -71,6 +72,11 @@ function sha256(value,label){
 function safeId(value,label){
   const out=String(value||'').trim();
   if(!SAFE_ID_RE.test(out))throw new Error(`rsi_retrieval_influence_${label}_invalid`);
+  return out;
+}
+function candidateId(value,label='candidate'){
+  const out=String(value||'').trim().toLowerCase();
+  if(!CANDIDATE_ID_RE.test(out))throw new Error(`rsi_retrieval_influence_${label}_id_invalid`);
   return out;
 }
 function token(value,label){
@@ -280,7 +286,7 @@ export function verifyRsiRetrievalInfluenceAdmission(row,{
   safeId(row.episode_id,'episode_id');
   safeId(row.assessment_id,'assessment_id');
   safeId(row.evaluator_id,'evaluator_id');
-  safeId(row.evaluated_candidate_id,'evaluated_candidate_id');
+  candidateId(row.evaluated_candidate_id,'evaluated_candidate');
   sha(row.evaluated_candidate_sha,'evaluated_candidate');
   for(const [value,label] of [
     [row.context_plan_digest,'context_plan'],
@@ -299,6 +305,10 @@ export function verifyRsiRetrievalInfluenceAdmission(row,{
   if(!Array.isArray(row.unassessed_case_ids)||new Set(row.unassessed_case_ids).size!==row.unassessed_case_ids.length){
     throw new Error('rsi_retrieval_influence_unassessed_cases_invalid');
   }
+  const normalizedUnassessed=row.unassessed_case_ids.map(v=>safeId(v,'unassessed_case_id')).sort();
+  if(JSON.stringify(normalizedUnassessed)!==JSON.stringify(row.unassessed_case_ids)){
+    throw new Error('rsi_retrieval_influence_unassessed_cases_not_canonical');
+  }
   if(row.assessed_case_count+row.unassessed_case_ids.length!==row.selected_case_count){
     throw new Error('rsi_retrieval_influence_selected_partition_mismatch');
   }
@@ -312,7 +322,8 @@ export function verifyRsiRetrievalInfluenceAdmission(row,{
     if(rowCaseIds.has(caseId))throw new Error('rsi_retrieval_influence_case_duplicate');
     rowCaseIds.add(caseId);
     sha256(item.case_digest,'row_case');
-    safeId(item.candidate_id,'row_candidate_id');
+    candidateId(item.candidate_id,'row_candidate');
+    sha(item.candidate_sha,'row_candidate');
     method(item.attribution_method);
     outcome(item.outcome);
     sha256(item.baseline_without_case_digest,'row_baseline');
@@ -336,14 +347,22 @@ export function verifyRsiRetrievalInfluenceAdmission(row,{
     )throw new Error('rsi_retrieval_influence_receipt_binding_mismatch');
     receiptDigests.push(receipt.receipt_digest);
   }
+  const assessedCaseIds=[...rowCaseIds].sort();
+  if(normalizedUnassessed.some(id=>rowCaseIds.has(id)))throw new Error('rsi_retrieval_influence_selected_partition_overlap');
   if(JSON.stringify([...receiptDigests].sort())!==JSON.stringify(row.utility_receipt_digests)){
     throw new Error('rsi_retrieval_influence_receipt_digest_set_mismatch');
   }
-  if(
-    !Array.isArray(row.utility_receipts)
-    || row.utility_receipts.length!==row.assessment_rows.length
-    || JSON.stringify(row.utility_receipts.map(r=>r.receipt_digest).sort())!==JSON.stringify(row.utility_receipt_digests)
-  )throw new Error('rsi_retrieval_influence_receipt_set_mismatch');
+  if(!Array.isArray(row.utility_receipts)||row.utility_receipts.length!==row.assessment_rows.length){
+    throw new Error('rsi_retrieval_influence_receipt_set_mismatch');
+  }
+  const receiptSet=row.utility_receipts.map(receipt=>verifyRsiExperienceUtilityReceipt(receipt));
+  if(JSON.stringify(receiptSet.map(r=>r.receipt_digest).sort())!==JSON.stringify(row.utility_receipt_digests)){
+    throw new Error('rsi_retrieval_influence_receipt_set_mismatch');
+  }
+  const receiptCaseIds=receiptSet.map(r=>r.case_id).sort();
+  if(JSON.stringify(receiptCaseIds)!==JSON.stringify(assessedCaseIds)){
+    throw new Error('rsi_retrieval_influence_receipt_case_set_mismatch');
+  }
   const core={...structuredClone(row)};
   delete core.payload_bytes;
   delete core.max_payload_bytes;
@@ -374,9 +393,17 @@ export function verifyRsiRetrievalInfluenceAdmission(row,{
       || bundle.any_class_ambiguous!==false
     )throw new Error('rsi_retrieval_influence_lineage_mismatch');
     const selected=selectedCaseMap(plan,graph);
+    const selectedIds=[...selected.keys()].sort();
+    const partitionIds=[...assessedCaseIds,...normalizedUnassessed].sort();
+    if(JSON.stringify(selectedIds)!==JSON.stringify(partitionIds))throw new Error('rsi_retrieval_influence_selected_partition_lineage_mismatch');
     for(const item of row.assessment_rows){
       const selectedCase=selected.get(item.case_id);
-      if(!selectedCase||selectedCase.case_digest!==item.case_digest)throw new Error('rsi_retrieval_influence_case_lineage_mismatch');
+      if(
+        !selectedCase
+        || selectedCase.case_digest!==item.case_digest
+        || selectedCase.candidate_id!==item.candidate_id
+        || selectedCase.candidate_sha!==item.candidate_sha
+      )throw new Error('rsi_retrieval_influence_case_lineage_mismatch');
     }
   }
   return row;
