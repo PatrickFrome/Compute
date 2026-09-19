@@ -59,6 +59,7 @@ import { createRsiPostDeploymentLearningReceipt, createRsiPostDeploymentExperien
 import { createRsiPostDeploymentUtilityAdmission, verifyRsiPostDeploymentUtilityAdmission, applyRsiPostDeploymentUtilityAdmission, rsiPostDeploymentUtilityTrustRootSnapshot } from './rsi-post-deployment-utility.mjs';
 import { createRsiPostDeploymentCorrectionAdmission, verifyRsiPostDeploymentCorrectionAdmission, applyRsiPostDeploymentCorrectionAdmission, rsiPostDeploymentCorrectionTrustRootSnapshot } from './rsi-post-deployment-correction.mjs';
 import { createRsiCorrectionRetrievalBridge, verifyRsiCorrectionRetrievalBridge, rsiCorrectionRetrievalBridgeTrustRootSnapshot } from './rsi-correction-retrieval-bridge.mjs';
+import { createRsiRetrievalInfluenceAdmission, verifyRsiRetrievalInfluenceAdmission, applyRsiRetrievalInfluenceAdmission, rsiRetrievalInfluenceTrustRootSnapshot } from './rsi-retrieval-influence-evidence.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -142,6 +143,7 @@ function trustRoots() {
     post_deployment_utility: rsiPostDeploymentUtilityTrustRootSnapshot(),
     post_deployment_correction: rsiPostDeploymentCorrectionTrustRootSnapshot(),
     correction_retrieval_bridge: rsiCorrectionRetrievalBridgeTrustRootSnapshot(),
+    retrieval_influence: rsiRetrievalInfluenceTrustRootSnapshot(),
   };
   return Object.freeze(Object.fromEntries(
     Object.entries(roots).map(([name, root]) => [name, Object.freeze({
@@ -219,6 +221,10 @@ export class RsiRuntimeService {
   #correctionRetrievalBridgeCount = 0;
   #lastCorrectionRetrievalBridgeDigest = null;
   #lastCorrectionRetrievalSelectionId = null;
+  #retrievalInfluenceCount = 0;
+  #lastRetrievalInfluenceAdmissionDigest = null;
+  #lastRetrievalInfluenceAssessmentId = null;
+  #lastRetrievalInfluenceEvaluationBundleDigest = null;
 
   constructor({ source_sha, ledgerPath, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
@@ -463,6 +469,40 @@ export class RsiRuntimeService {
       for (const row of page) {
         const verified = row?.payload?.verified_candidate_materialization;
         if (verified?.candidate_id === wanted) found = Object.freeze(structuredClone(verified));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findExternalEvaluationBundleByDigest(bundleDigest) {
+    const wanted = String(bundleDigest || '').trim().toLowerCase();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const bundle = row?.payload?.external_evaluation_bundle;
+        if (bundle?.bundle_digest === wanted) found = Object.freeze(structuredClone(bundle));
+      }
+      cursor = page.at(-1).seq;
+      if (page.length < 256) break;
+    }
+    return found;
+  }
+
+  #findRetrievalInfluenceByAssessmentId(assessmentId) {
+    const wanted = String(assessmentId || '').trim();
+    let cursor = 0;
+    let found = null;
+    while (true) {
+      const page = this.#ledger.eventsSince({ after_seq: cursor, limit: 256 });
+      if (page.length === 0) break;
+      for (const row of page) {
+        const admission = row?.payload?.retrieval_influence_admission;
+        if (admission?.assessment_id === wanted) found = Object.freeze(structuredClone(admission));
       }
       cursor = page.at(-1).seq;
       if (page.length < 256) break;
@@ -1224,6 +1264,62 @@ export class RsiRuntimeService {
         candidate_id: bundle.candidate_id,
       }),
     });
+  }
+
+  async recordRetrievalInfluenceEvidence({
+    external_evaluation_bundle_digest,
+    assessment,
+  } = {}) {
+    this.#assertRunning();
+    const bundleDigest = String(external_evaluation_bundle_digest || '').trim().toLowerCase();
+    if (!SHA256_PREFIXED.test(bundleDigest)) throw new Error('rsi_runtime_external_evaluation_bundle_digest_invalid');
+    const bundle = this.#findExternalEvaluationBundleByDigest(bundleDigest);
+    if (!bundle) throw new Error('rsi_runtime_external_evaluation_bundle_not_persisted');
+    verifyRsiExternalEvaluationBundle(bundle);
+    if (bundle.any_class_ambiguous !== false) {
+      throw new Error('rsi_runtime_retrieval_influence_ambiguous_evaluation_forbidden');
+    }
+    const contextPlan = this.#experienceContextPlans.get(bundle.episode_id) || null;
+    if (!contextPlan) throw new Error('rsi_runtime_retrieval_influence_context_plan_not_persisted');
+    if (!this.#experienceGraphSnapshot) throw new Error('rsi_runtime_retrieval_influence_experience_graph_required');
+    const assessmentId = String(assessment?.assessment_id || '').trim();
+    if (assessmentId && this.#findRetrievalInfluenceByAssessmentId(assessmentId)) {
+      throw new Error('rsi_runtime_retrieval_influence_assessment_duplicate');
+    }
+    const admission = createRsiRetrievalInfluenceAdmission({
+      episode_id: bundle.episode_id,
+      context_plan: contextPlan,
+      external_evaluation_bundle: bundle,
+      experience_graph_snapshot: this.#experienceGraphSnapshot,
+      assessment,
+    });
+    verifyRsiRetrievalInfluenceAdmission(admission, {
+      context_plan: contextPlan,
+      external_evaluation_bundle: bundle,
+      experience_graph_snapshot: this.#experienceGraphSnapshot,
+    });
+    const nextGraph = applyRsiRetrievalInfluenceAdmission({
+      previous_snapshot: this.#experienceGraphSnapshot,
+      admission,
+    });
+    await this.#ledger.append('RSI_RETRIEVAL_INFLUENCE_EVIDENCE_RECORDED', {
+      retrieval_influence_admission: admission,
+      external_evaluation_bundle_digest: bundleDigest,
+      context_plan_digest: contextPlan.context_plan_digest,
+      per_case_utility_only: true,
+      trajectory_level_reward_assigned: false,
+      co_retrieved_memories_share_reward: false,
+      unassessed_cases_receive_no_utility: true,
+      candidate_can_rate_memory: false,
+      graph_applied_after_durable_append: true,
+      authority_effect: false,
+    });
+    this.#experienceGraphSnapshot = nextGraph;
+    this.#retrievalInfluenceCount += 1;
+    this.#lastRetrievalInfluenceAdmissionDigest = admission.admission_digest;
+    this.#lastRetrievalInfluenceAssessmentId = admission.assessment_id;
+    this.#lastRetrievalInfluenceEvaluationBundleDigest = admission.external_evaluation_bundle_digest;
+    return admission;
   }
 
   async prepareExternalPromotionReview({
@@ -2203,6 +2299,24 @@ export class RsiRuntimeService {
         workspace_created: false,
         candidate_materialized: false,
         execution_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        authority_effect: false,
+      }),
+      retrieval_influence: Object.freeze({
+        count: this.#retrievalInfluenceCount,
+        last_admission_digest: this.#lastRetrievalInfluenceAdmissionDigest,
+        last_assessment_id: this.#lastRetrievalInfluenceAssessmentId,
+        last_external_evaluation_bundle_digest: this.#lastRetrievalInfluenceEvaluationBundleDigest,
+        external_evaluation_bundle_required: true,
+        per_case_utility_only: true,
+        trajectory_level_reward_assigned: false,
+        co_retrieved_memories_share_reward: false,
+        unassessed_cases_receive_no_utility: true,
+        candidate_can_rate_memory: false,
+        graph_append_only: true,
+        execution_authority: false,
+        release_authority: false,
         promotion_authority: false,
         self_update_authority: false,
         authority_effect: false,
