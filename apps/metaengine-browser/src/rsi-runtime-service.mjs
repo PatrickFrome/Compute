@@ -1412,6 +1412,7 @@ export class RsiRuntimeService {
       same_effect_id_retry_allowed: false,
       retrieval_exposure_changed: result.retrieval_exposure_changed === true,
       exploration_exposure_released: result.exploration_exposure_released === true,
+      exploration_only_hold_applied: result.exploration_only_hold_applied === true,
       resulting_state: result.resulting_state || null,
       full_activation_authorized: false,
       execution_authority: false,
