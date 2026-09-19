@@ -1,0 +1,43 @@
+name: RSI R9 Lineage Preflight
+
+on:
+  push:
+    branches:
+      - 'work/browser-final-2026-convergence-rsi-r9-deterministic-lineage-v1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsi-r9-lineage-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lineage-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact head
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+
+      - name: Run deterministic lineage and transition-proof tests
+        working-directory: apps/metaengine-browser
+        run: |
+          node --test             test/rsi-skill-lineage-contamination-review.test.mjs             test/rsi-skill-exposure-release-transition-proof.test.mjs             test/rsi-r9-exposure-trust-root-closure.test.mjs
