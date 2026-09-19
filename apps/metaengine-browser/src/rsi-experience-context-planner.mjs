@@ -174,6 +174,8 @@ function selectedCaseSummary(item,reliabilityRow=null) {
     memory_reliability_tier: reliabilityRow?.tier || 'COLD',
     memory_reliability_reason: reliabilityRow?.tier_reason || 'NO_RELIABILITY_PROJECTION',
     memory_utility_conflicted: reliabilityRow?.utility_conflicted === true,
+    memory_severe_harm_history: reliabilityRow?.severe_harm_history === true,
+    memory_rehabilitation_evidence_satisfied: reliabilityRow?.rehabilitation_evidence_satisfied === true,
     memory_candidate_guidance_allowed: reliabilityRow?.candidate_guidance_allowed !== false,
     memory_remains_queryable: true,
     source_context_truth_is_portable: false,
@@ -406,6 +408,8 @@ export function verifyRsiExperienceContextPlan(plan) {
         || rel.candidate_guidance_allowed !== true
         || selected.memory_reliability_tier !== rel.tier
         || selected.memory_reliability_reason !== rel.tier_reason
+        || selected.memory_severe_harm_history !== rel.severe_harm_history
+        || selected.memory_rehabilitation_evidence_satisfied !== rel.rehabilitation_evidence_satisfied
         || selected.memory_candidate_guidance_allowed !== true
         || selected.memory_remains_queryable !== true
       ) throw new Error('rsi_context_selected_case_reliability_mismatch');
@@ -456,6 +460,8 @@ export function rsiExperienceContextTrustRootSnapshot() {
     quarantined_memory_is_candidate_guidance: false,
     candidate_can_set_memory_tier: false,
     candidate_can_set_memory_reliability_thresholds: false,
+    rehabilitation_margin_required_for_harmful_history: true,
+    candidate_cannot_self_rehabilitate_memory: true,
     harmful_dominant_case_cap: 4,
     evidence_sparse_case_cap: 6,
     raw_trajectory_exposed: false,
