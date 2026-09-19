@@ -686,6 +686,8 @@ export function rsiSkillLibraryGovernanceTrustRootSnapshot() {
     premature_retirement_protected_by_minimum_evidence: true,
     router_false_positive_diagnostics_required: true,
     zero_evidence_skill_activation_forbidden: true,
+    admission_exposure_holds_force_inactive: true,
+    admission_exposure_hold_release_requires_external_governance: true,
     meta_skill_authoring_prior_is_tiebreak_only: true,
     candidate_can_change_governance: false,
     candidate_can_reactivate_skill: false,
