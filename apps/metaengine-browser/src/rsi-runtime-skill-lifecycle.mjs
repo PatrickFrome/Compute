@@ -304,6 +304,8 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     admission_exposure_hold_release_requires_external_governance:true,
     window_seq_by_skill:Object.fromEntries([...windowSeqBySkill.entries()].sort(([a],[b])=>a.localeCompare(b))),
     evidence_append_only:true,pending_is_bounded:true,max_pending:MAX_PENDING,max_evidence:MAX_EVIDENCE,
+    persistence_temp_file_fsync_required:true,persistence_atomic_rename_required:true,
+    persistence_post_rename_file_fsync_required:true,persistence_parent_directory_fsync_required_on_posix:true,
     admission_attempts_append_only:true,max_admission_attempts:MAX_ADMISSION_ATTEMPTS,
     exposure_release_attempts_append_only:true,max_exposure_release_attempts:MAX_EXPOSURE_RELEASE_ATTEMPTS,
     exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
@@ -321,6 +323,23 @@ function stateCore({sourceSha,library,lifecycleEvidence,pending,windowSeqBySkill
     automatic_retry_allowed:false,authority_effect:false,
   };
   return {...core,state_digest:digest(core)};
+}
+
+async function syncRenamedStateDurability(filePath){
+  const finalHandle=await fs.open(filePath,'r+');
+  try{
+    await finalHandle.sync();
+  }finally{
+    await finalHandle.close();
+  }
+  if(process.platform!=='win32'){
+    const directoryHandle=await fs.open(path.dirname(filePath),'r');
+    try{
+      await directoryHandle.sync();
+    }finally{
+      await directoryHandle.close();
+    }
+  }
 }
 
 export class RsiRuntimeSkillLifecycle{
@@ -415,7 +434,9 @@ export class RsiRuntimeSkillLifecycle{
     const state=stateCore({sourceSha:this.#sourceSha,library:this.#library,lifecycleEvidence:this.#evidence,pending:this.#pending,windowSeqBySkill:this.#seq,admissionAttempts:this.#admissionAttempts,admissionExposureHolds:this.#admissionExposureHolds,exposureReleaseAttempts:this.#exposureReleaseAttempts});
     const temp=`${this.#path}.tmp`;const handle=await fs.open(temp,'w',0o600);
     try{await handle.writeFile(`${JSON.stringify(state)}\n`,'utf8');await handle.sync()}finally{await handle.close()}
-    await fs.rename(temp,this.#path);return state;
+    await fs.rename(temp,this.#path);
+    await syncRenamedStateDurability(this.#path);
+    return state;
   }
   #assertInit(){if(!this.#initialized)throw new Error('rsi_runtime_skill_not_initialized')}
   #libraryContainsAll(skillDigests){return !!this.#library&&skillDigests.every(d=>this.#library.entries.some(e=>e.skill_digest===d))}
@@ -1303,6 +1324,8 @@ export class RsiRuntimeSkillLifecycle{
       active_count:governance?.active_count||0,quarantined_count:governance?.quarantined_count||0,
       retired_count:governance?.retired_count||0,dormant_count:governance?.dormant_count||0,
       evidence_append_only:true,pending_is_bounded:true,contextual_credit_not_global_truth:true,
+      persistence_temp_file_fsync_required:true,persistence_atomic_rename_required:true,
+      persistence_post_rename_file_fsync_required:true,persistence_parent_directory_fsync_required_on_posix:true,
       admission_attempts_append_only:true,admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
       exposure_release_attempts_append_only:true,exposure_release_effect_attempt_limit:1,blind_retry_for_exposure_release_effect:false,
       exposure_release_prepared_is_zero_effect:true,
@@ -1329,6 +1352,8 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     schema:'metaengine.rsi.runtime-skill-lifecycle-root.v1',version:1,
     policy_path:'apps/metaengine-browser/src/rsi-runtime-skill-lifecycle.mjs',
     verified_library_required:true,library_updates_append_only:true,exact_library_digest_cas_supported:true,
+    persistence_temp_file_fsync_required:true,persistence_atomic_rename_required:true,
+    persistence_post_rename_file_fsync_required:true,persistence_parent_directory_fsync_required_on_posix:true,
     phase34_anytime_admission_certificate_required:true,admission_attempts_durable_before_effect:true,
     admission_effect_attempt_limit:1,blind_retry_for_admission_effect:false,
     pre_effect_state_readback_after_attempt_persist_required:true,
