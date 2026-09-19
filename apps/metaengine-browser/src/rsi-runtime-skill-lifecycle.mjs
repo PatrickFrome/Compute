@@ -866,17 +866,16 @@ export class RsiRuntimeSkillLifecycle{
     const attemptId=boundedId(attempt_id,'exposure_release_attempt_id');
     let row=this.#findExposureReleaseAttempt(attemptId);
     if(!row)throw new Error('rsi_runtime_skill_exposure_release_attempt_missing');
-    if(row.current_state==='PREPARED'){
-      await this.recordExposureReleaseAttempted({attempt_id:attemptId,effect_executor_identity_digest,external_effect_executor,authored_by_candidate});
-      row=this.#findExposureReleaseAttempt(attemptId);
-    }else if(row.current_state==='ATTEMPTED'){
-      if(external_effect_executor!==true||authored_by_candidate!==false)throw new Error('rsi_runtime_skill_exposure_release_external_executor_required');
-      if(exactDigest(effect_executor_identity_digest,'exposure_release_effect_executor')!==row.effect_executor_identity_digest){
-        throw new Error('rsi_runtime_skill_exposure_release_executor_identity_mismatch');
+    if(row.current_state!=='PREPARED'){
+      if(row.current_state==='ATTEMPTED'||row.current_state==='RECONCILIATION_ONLY'){
+        throw new Error('rsi_runtime_skill_exposure_release_attempt_ambiguous_reconcile_required');
       }
-    }else{
       throw new Error('rsi_runtime_skill_exposure_release_attempt_not_prepared');
     }
+    await this.recordExposureReleaseAttempted({
+      attempt_id:attemptId,effect_executor_identity_digest,external_effect_executor,authored_by_candidate,
+    });
+    row=this.#findExposureReleaseAttempt(attemptId);
     if(row.current_state!=='ATTEMPTED'||row.effect_attempt_count!==1)throw new Error('rsi_runtime_skill_exposure_release_attempt_state_invalid');
 
     const current=this.governance();
