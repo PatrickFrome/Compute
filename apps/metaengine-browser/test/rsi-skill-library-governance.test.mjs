@@ -489,6 +489,60 @@ test('activation view rejects retired, quarantined and cap-dormant skills', () =
   }), /requested_skill_not_active:QUARANTINED/);
 });
 
+test('admission exposure hold keeps a proven-positive skill dormant until a separate external release exists', () => {
+  const { library, strong } = fixture();
+  const positive = lifecycle(library, strong, {
+    id: 'exposure.strong.positive',
+    invocations: 8,
+    helpful: 7,
+    harmful: 0,
+    neutral: 1,
+    delta: 0.25,
+  });
+  const normal = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exposure.normal',
+    library,
+    lifecycle_evidence: [positive],
+    max_active_skills: 4,
+    exploration_slots: 1,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  const normalRow = normal.entries.find((row) => row.skill_digest === strong.skill_digest);
+  assert.equal(normalRow.proven_positive, true);
+  assert.equal(normalRow.state, 'ACTIVE');
+  assert.equal(normalRow.active_for_composition, true);
+
+  const held = createRsiSkillLibraryGovernance({
+    governance_id: 'governance.exposure.held',
+    library,
+    lifecycle_evidence: [positive],
+    admission_exposure_hold_skill_digests: [strong.skill_digest],
+    max_active_skills: 4,
+    exploration_slots: 1,
+    external_library_owner: true,
+    authored_by_candidate: false,
+  });
+  verifyRsiSkillLibraryGovernance(held, library);
+  const heldRow = held.entries.find((row) => row.skill_digest === strong.skill_digest);
+  assert.equal(heldRow.proven_positive, true);
+  assert.equal(heldRow.state, 'DORMANT_CAP');
+  assert.equal(heldRow.active_for_composition, false);
+  assert.equal(heldRow.admission_exposure_held, true);
+  assert.equal(heldRow.admission_exposure_hold_external_release_required, true);
+  assert.equal(held.admission_exposure_hold_count, 1);
+  assert.deepEqual(held.admission_exposure_hold_skill_digests, [strong.skill_digest]);
+  assert.equal(held.admission_exposure_holds_force_dormant, true);
+  assert.equal(held.admission_exposure_hold_release_is_external_governance_action, true);
+  assert.throws(() => createRsiSkillActivationView({
+    governance: held,
+    library,
+    requested_skill_digests: [strong.skill_digest],
+    external_planner: true,
+    authored_by_candidate: false,
+  }), /requested_skill_not_active:DORMANT_CAP/);
+});
+
 test('skill governance trust root encodes library-drift defenses without widening authority', () => {
   const root = rsiSkillLibraryGovernanceTrustRootSnapshot();
   assert.equal(root.library_evidence_remains_append_only, true);
