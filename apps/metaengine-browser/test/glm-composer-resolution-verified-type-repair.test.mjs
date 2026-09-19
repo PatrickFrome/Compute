@@ -562,12 +562,15 @@ test('D-K7: three consecutive composer-blocking failures request a rollover', as
     sessionMonitor: new AgentSessionMonitor({ clock: () => Date.parse('2026-09-19T15:00:00Z'), settleMs: 1500 }),
   });
   await runtime.start();
-  // Three cycles with a poisoned composer -> rollover requested.
+  // Three cycles with a poisoned composer -> rollover requested. start() runs
+  // the first cycle; depending on runner timing the rollover attempt may also
+  // have executed (its NEW_TAB throws in this fake) — every post-request
+  // rollover state proves the D-K7 transition fired.
   await runtime.cycle({ force: true });
   await runtime.cycle({ force: true });
   await runtime.cycle({ force: true });
   const snap = runtime.snapshot();
-  assert.equal(['ROLLOVER_REQUIRED', 'ROLLOVER_DEFERRED', 'ROLLOVER_PENDING'].includes(snap.keepalive.state), true,
+  assert.equal(['ROLLOVER_REQUIRED', 'ROLLOVER_DEFERRED', 'ROLLOVER_PENDING', 'ROLLOVER_AMBIGUOUS'].includes(snap.keepalive.state), true,
     `expected a rollover state after 3 composer-blocking failures, got ${snap.keepalive.state}`);
   assert.equal(snap.keepalive.rollover_reason, 'COMPOSER_UNCLEARABLE_DK7');
   await fs.rm(dir, { recursive: true, force: true });
