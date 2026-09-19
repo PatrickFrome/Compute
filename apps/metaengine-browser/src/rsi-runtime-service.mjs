@@ -1123,19 +1123,28 @@ export class RsiRuntimeService {
       external_effect_executor,
       authored_by_candidate,
     });
-    await this.#ledger.append('ANYTIME_LIBRARY_ADMISSION_EFFECT_CONFIRMED', {
-      attempt_id: result.attempt_id,
-      attempt_digest: result.attempt_digest,
-      state: result.state,
-      library_digest: result.library_digest,
-      entry_count: result.entry_count,
-      effect_attempt_count: result.effect_attempt_count,
-      storage_only: result.storage_only === true,
-      retrieval_exposure_changed: false,
-      skill_activation_performed: false,
-      automatic_retry_allowed: false,
-      authority_effect: false,
-    });
+    const effectConfirmed = result.state === 'CONFIRMED_APPLIED_STORAGE_ONLY';
+    await this.#ledger.append(
+      effectConfirmed ? 'ANYTIME_LIBRARY_ADMISSION_EFFECT_CONFIRMED' : 'ANYTIME_LIBRARY_ADMISSION_PRE_EFFECT_DRIFT',
+      {
+        attempt_id: result.attempt_id,
+        attempt_digest: result.attempt_digest,
+        state: result.state,
+        library_digest: result.library_digest || result.observed_library_digest || null,
+        governance_digest: result.observed_governance_digest || null,
+        entry_count: result.entry_count || null,
+        effect_attempt_count: result.effect_attempt_count,
+        effect_performed: effectConfirmed,
+        effect_started: effectConfirmed,
+        storage_only: effectConfirmed && result.storage_only === true,
+        reconciliation_required: result.reconciliation_required === true,
+        pre_effect_readback_passed: result.pre_effect_readback_passed === true,
+        retrieval_exposure_changed: false,
+        skill_activation_performed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    );
     return result;
   }
 
