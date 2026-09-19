@@ -707,6 +707,53 @@ export class RsiRuntimeSkillLifecycle{
       external_library_owner:true,authored_by_candidate:false,
     });
   }
+  exposureReleaseGovernancePreview(skillDigest){
+    this.#assertInit();
+    if(!this.#library)throw new Error('rsi_runtime_skill_library_unavailable');
+    const skill=exactDigest(skillDigest,'exposure_release_preview_skill');
+    if(!this.#exposureHolds.has(skill))throw new Error('rsi_runtime_skill_exposure_release_hold_required');
+    const admissionProvenance=this.admissionExposureHoldProvenance(skill);
+    if(!admissionProvenance)throw new Error('rsi_runtime_skill_exposure_release_admission_provenance_required');
+    const currentGovernance=this.governance();
+    verifyRsiSkillLibraryGovernance(currentGovernance,this.#library);
+    const nextHolds=[...this.#exposureHolds].filter(value=>value!==skill);
+    if(nextHolds.length!==this.#exposureHolds.size-1)throw new Error('rsi_runtime_skill_exposure_release_hold_cardinality_invalid');
+    const nextGovernance=createRsiSkillLibraryGovernance({
+      governance_id:this.#governanceId(),library:this.#library,lifecycle_evidence:this.#evidence,
+      historical_libraries:this.#governanceHistoricalLibraries(),
+      admission_exposure_hold_skill_digests:nextHolds,
+      external_library_owner:true,authored_by_candidate:false,
+    });
+    verifyRsiSkillLibraryGovernance(nextGovernance,this.#library);
+    const currentRow=currentGovernance.entries.find(row=>row.skill_digest===skill);
+    const nextRow=nextGovernance.entries.find(row=>row.skill_digest===skill);
+    if(!currentRow||currentRow.state!=='DORMANT_CAP'||currentRow.active_for_composition!==false||currentRow.admission_exposure_held!==true){
+      throw new Error('rsi_runtime_skill_exposure_release_current_state_invalid');
+    }
+    if(!nextRow||nextRow.state!=='EXPLORATION_ACTIVE'||nextRow.active_for_composition!==true||nextRow.admission_exposure_held!==false){
+      throw new Error('rsi_runtime_skill_exposure_release_next_state_not_exploration_active');
+    }
+    return zero({
+      state:'ZERO_EFFECT_PREVIEW_READY',
+      skill_digest:skill,
+      library:structuredClone(this.#library),
+      current_governance:currentGovernance,
+      next_governance:nextGovernance,
+      admission_provenance:admissionProvenance,
+      current_governance_digest:currentGovernance.governance_digest,
+      next_governance_digest:nextGovernance.governance_digest,
+      current_state:currentRow.state,
+      next_state:nextRow.state,
+      current_admission_exposure_held:true,
+      next_admission_exposure_held:false,
+      preview_mutates_lifecycle:false,
+      preview_releases_hold:false,
+      preview_changes_retrieval_exposure:false,
+      browser_authority:false,
+      task_authority:false,
+      scheduler_authority:false,
+    });
+  }
   activationView(requestedSkillDigests){
     const governance=this.governance();if(!governance)throw new Error('rsi_runtime_skill_library_unavailable');
     verifyRsiSkillLibraryGovernance(governance,this.#library);
@@ -735,6 +782,9 @@ export class RsiRuntimeSkillLifecycle{
       ambiguous_admission_effect_requires_readback_only_reconciliation:true,
       admission_exposure_holds_force_dormant:true,
       admission_exposure_hold_release_requires_external_governance:true,
+      exposure_release_governance_preview_is_zero_effect:true,
+      exposure_release_preview_requires_fresh_credited_lifecycle_state:true,
+      exposure_release_preview_requires_exploration_active_next_state:true,
       candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
       execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
       automatic_retry_allowed:false,authority_effect:false,
@@ -756,6 +806,10 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     append_new_skills_require_exposure_hold:true,admission_exposure_holds_force_dormant:true,
     admission_exposure_hold_release_requires_external_governance:true,
     exposure_release_requires_confirmed_admission_provenance:true,
+    exposure_release_governance_preview_is_zero_effect:true,
+    exposure_release_preview_requires_exact_hold_removal:true,
+    exposure_release_preview_requires_fresh_credited_lifecycle_state:true,
+    exposure_release_preview_requires_exploration_active_next_state:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,

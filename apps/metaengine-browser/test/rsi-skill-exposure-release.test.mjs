@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
@@ -18,6 +21,11 @@ import {
   verifyRsiSkillExposureReleaseCertificate,
   rsiSkillExposureReleaseTrustRootSnapshot,
 } from '../src/rsi-skill-exposure-release.mjs';
+import {
+  RsiRuntimeSkillExposureCertificateLedger,
+  rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot,
+} from '../src/rsi-runtime-skill-exposure-certificate-ledger.mjs';
+import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 
 const d=(c)=>`sha256:${c.repeat(64)}`;
 function stable(v){if(Array.isArray(v))return v.map(stable);if(!v||typeof v!=='object')return v;return Object.fromEntries(Object.keys(v).sort().map((k)=>[k,stable(v[k])]))}
@@ -278,5 +286,111 @@ test('Phase36 exposure-release trust root requires external, bounded, exploratio
   assert.equal(root.execution_authority,false);
   assert.equal(root.browser_authority,false);
   assert.equal(root.promotion_authority,false);
+  assert.equal(root.authority_effect,false);
+});
+
+
+test('Phase36 zero-effect certificate ledger is durable-before-visible, restart-safe and idempotent',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase36-cert-ledger-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'certificates.json');
+  const fx=fixture();
+  const input=args(fx);
+  const cert=createRsiSkillExposureReleaseCertificate(input);
+
+  const failed=new RsiRuntimeSkillExposureCertificateLedger({statePath,source_sha:'a'.repeat(40),clock:()=>1_800_000_000_000});
+  await failed.init();
+  await fs.mkdir(statePath);
+  await assert.rejects(()=>failed.add({certificate:cert,verification_args:input}));
+  assert.equal(failed.snapshot().record_count,0);
+  await fs.rm(statePath,{recursive:true,force:true});
+
+  const ledger=new RsiRuntimeSkillExposureCertificateLedger({statePath,source_sha:'a'.repeat(40),clock:()=>1_800_000_000_000});
+  await ledger.init();
+  const recorded=await ledger.add({certificate:cert,verification_args:input});
+  assert.equal(recorded.state,'RECORDED_ZERO_EFFECT');
+  assert.equal(recorded.record.eligible_for_one_attempt_exposure_release,true);
+  assert.equal(recorded.record.certificate_can_execute_release,false);
+  assert.equal(recorded.record.release_effect_performed,false);
+  assert.equal(ledger.snapshot().eligible_record_count,1);
+  assert.equal(ledger.snapshot().ledger_can_release_hold,false);
+
+  const restored=new RsiRuntimeSkillExposureCertificateLedger({statePath,source_sha:'a'.repeat(40),clock:()=>1_800_000_000_000});
+  await restored.init();
+  assert.equal(restored.snapshot().record_count,1);
+  assert.equal((await restored.add({certificate:cert,verification_args:input})).state,'IDEMPOTENT');
+
+  const duplicateInput=args(fx,{certificate_id:'phase36.exposure.certificate.duplicate-transition'});
+  const duplicateCertificate=createRsiSkillExposureReleaseCertificate(duplicateInput);
+  await assert.rejects(
+    ()=>restored.add({certificate:duplicateCertificate,verification_args:duplicateInput}),
+    /transition_already_certified/,
+  );
+  assert.equal(restored.snapshot().record_count,1);
+  assert.equal(restored.snapshot().unique_eligible_transition_required,true);
+});
+
+test('Phase36 zero-effect certificate ledger retains rejected evidence and rejects self-rehashed authority widening',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase36-cert-tamper-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const statePath=path.join(dir,'certificates.json');
+  const fx=fixture();
+  const rejectedInput=args(fx,{certificate_id:'phase36.exposure.certificate.rejected',negative_transfer_clear:false});
+  const rejected=createRsiSkillExposureReleaseCertificate(rejectedInput);
+  const ledger=new RsiRuntimeSkillExposureCertificateLedger({statePath,source_sha:'a'.repeat(40)});
+  await ledger.init();
+  await ledger.add({certificate:rejected,verification_args:rejectedInput});
+  assert.equal(ledger.snapshot().rejected_record_count,1);
+
+  const raw=JSON.parse(await fs.readFile(statePath,'utf8'));
+  raw.records[0].certificate.execution_authority=true;
+  const certCore=structuredClone(raw.records[0].certificate);delete certCore.certificate_digest;
+  raw.records[0].certificate.certificate_digest=digest(certCore);
+  raw.records[0].certificate_digest=raw.records[0].certificate.certificate_digest;
+  const recordCore=structuredClone(raw.records[0]);delete recordCore.record_digest;
+  raw.records[0].record_digest=digest(recordCore);
+  const stateCore=structuredClone(raw);delete stateCore.state_digest;
+  raw.state_digest=digest(stateCore);
+  await fs.writeFile(statePath,`${JSON.stringify(raw)}\n`,'utf8');
+
+  const restored=new RsiRuntimeSkillExposureCertificateLedger({statePath,source_sha:'a'.repeat(40)});
+  await assert.rejects(()=>restored.init(),/certificate_execution_authority_invalid/);
+});
+
+test('Phase36 runtime refuses certificate persistence without exact live library/governance readback',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase36-runtime-cert-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const runtime=new RsiRuntimeService({
+    source_sha:'a'.repeat(40),
+    ledgerPath:path.join(dir,'runtime.jsonl'),
+    clock:()=>1_800_000_000_000,
+  });
+  await runtime.start();
+  const fx=fixture();
+  const input=args(fx);
+  const cert=createRsiSkillExposureReleaseCertificate(input);
+  await assert.rejects(
+    ()=>runtime.recordSkillExposureReleaseCertificate({certificate:cert,verification_args:input}),
+    /verified_skill_library_unavailable|skill_library_unavailable/,
+  );
+  const snap=runtime.skillExposureReleaseCertificateLedgerSnapshot();
+  assert.equal(snap.record_count,0);
+  assert.equal(snap.ledger_can_release_hold,false);
+  assert.equal(snap.execution_authority,false);
+  assert.equal(runtime.snapshot().candidate_effect_executor_exposed,false);
+});
+
+test('Phase36 certificate-ledger trust root keeps persistence separate from release execution',()=>{
+  const root=rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot();
+  assert.equal(root.verified_phase36_certificate_required,true);
+  assert.equal(root.durable_before_visible,true);
+  assert.equal(root.unique_eligible_transition_required,true);
+  assert.equal(root.certificate_is_evidence_not_effect_authority,true);
+  assert.equal(root.one_attempt_release_execution_implemented_here,false);
+  assert.equal(root.ledger_can_release_hold,false);
+  assert.equal(root.ledger_can_change_retrieval_exposure,false);
+  assert.equal(root.ledger_can_activate_skill,false);
+  assert.equal(root.execution_authority,false);
+  assert.equal(root.browser_authority,false);
   assert.equal(root.authority_effect,false);
 });

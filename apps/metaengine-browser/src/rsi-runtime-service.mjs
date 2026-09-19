@@ -45,6 +45,7 @@ import { RsiCommandAttributionRegistry, RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA,
 import { createRsiStepCreditReceipt, rsiStepCreditTrustRootSnapshot } from './rsi-runtime-credit-assignment.mjs';
 import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiRuntimeExperienceStoreTrustRootSnapshot } from './rsi-runtime-experience-store.mjs';
 import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } from './rsi-runtime-skill-lifecycle.mjs';
+import { RsiRuntimeSkillExposureCertificateLedger, rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot } from './rsi-runtime-skill-exposure-certificate-ledger.mjs';
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
 import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
 import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
@@ -59,6 +60,7 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
+import { createRsiSkillExposureReleasePreview, createRsiSkillExposureReleaseCertificate, rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -127,7 +129,9 @@ function trustRoots() {
     step_credit: rsiStepCreditTrustRootSnapshot(),
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
+    runtime_skill_exposure_certificate_ledger: rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot(),
     dormant_skill_retrieval_review: rsiDormantSkillRetrievalReviewTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
@@ -159,6 +163,7 @@ export class RsiRuntimeService {
   #commandAttribution;
   #experienceStore;
   #skillLifecycle;
+  #skillExposureCertificateLedger;
   #skillRouter;
   #skillCuration;
   #skillRevisionFrontier;
@@ -187,7 +192,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillExposureCertificateLedgerPath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -206,6 +211,12 @@ export class RsiRuntimeService {
     const runtimeSkillLifecyclePath = skillLifecyclePath || (ledgerPath ? `${ledgerPath}.skill-lifecycle.json` : null);
     this.#skillLifecycle = new RsiRuntimeSkillLifecycle({
       statePath: runtimeSkillLifecyclePath,
+      source_sha: this.#sourceSha,
+      clock,
+    });
+    const runtimeSkillExposureCertificateLedgerPath = skillExposureCertificateLedgerPath || (ledgerPath ? `${ledgerPath}.skill-exposure-certificates.json` : null);
+    this.#skillExposureCertificateLedger = new RsiRuntimeSkillExposureCertificateLedger({
+      statePath: runtimeSkillExposureCertificateLedgerPath,
       source_sha: this.#sourceSha,
       clock,
     });
@@ -276,6 +287,7 @@ export class RsiRuntimeService {
     await this.#commandAttribution.init();
     await this.#experienceStore.init();
     await this.#skillLifecycle.init();
+    await this.#skillExposureCertificateLedger.init();
     await this.#skillRouter.init();
     await this.#skillCuration.init();
     await this.#skillRevisionFrontier.init();
@@ -298,6 +310,7 @@ export class RsiRuntimeService {
       command_attribution_registry: RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA,
       runtime_experience_store_schema: this.#experienceStore.snapshot().schema,
       runtime_skill_lifecycle_schema: this.#skillLifecycle.snapshot().schema,
+      runtime_skill_exposure_certificate_ledger_schema: this.#skillExposureCertificateLedger.snapshot().schema,
       runtime_skill_router_schema: this.#skillRouter.snapshot().schema,
       runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
       skill_revision_frontier_schema: this.#skillRevisionFrontier.snapshot().schema,
@@ -1077,6 +1090,201 @@ export class RsiRuntimeService {
     });
   }
 
+  async createSkillExposureReleasePreview({ skill_digest } = {}) {
+    this.#assertRunning();
+    const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(skill_digest);
+    const preview = createRsiSkillExposureReleasePreview({
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      skill_digest: statePreview.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED', {
+      skill_digest: preview.skill_digest,
+      preview_digest: preview.preview_digest,
+      current_governance_digest: preview.current_governance_digest,
+      next_governance_digest: preview.next_governance_digest,
+      admission_provenance_digest: statePreview.admission_provenance.provenance_digest,
+      current_state: preview.current_state,
+      next_state: preview.next_state,
+      current_admission_exposure_held: preview.current_admission_exposure_held,
+      next_admission_exposure_held: preview.next_admission_exposure_held,
+      fresh_credited_lifecycle_state_required: true,
+      release_authorized: false,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return preview;
+  }
+
+  async createSkillExposureReleaseCertificate({
+    certificate_id,
+    skill_digest,
+    dormant_retrieval_review,
+    routing_context_manifest_digest,
+    retrieval_profile_digest,
+    shadow_routing_manifest_digest,
+    no_skill_ablation_receipt_digest,
+    coalition_ablation_receipt_digest,
+    memory_poisoning_scan_digest,
+    source_grounding_receipt_digest,
+    bounded_canary_policy_digest,
+    bounded_canary_result_digest,
+    negative_transfer_memory_digest,
+    shadow_context_count,
+    shadow_success_count,
+    shadow_hard_invariants_pass,
+    no_skill_ablation_pass,
+    coalition_ablation_pass,
+    negative_transfer_clear,
+    memory_poisoning_scan_pass,
+    source_grounding_pass,
+    bounded_canary_pass,
+    canary_effect_mode,
+    external_governance_owner_identity_digest,
+    external_shadow_evaluator_identity_digest,
+    external_security_reviewer_identity_digest,
+    external_canary_evaluator_identity_digest,
+    external_governance_owner = false,
+    external_shadow_evaluator = false,
+    external_security_reviewer = false,
+    external_canary_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(skill_digest);
+    const releasePreview = createRsiSkillExposureReleasePreview({
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      skill_digest: statePreview.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    const verificationArgs = {
+      certificate_id,
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      release_preview: releasePreview,
+      dormant_retrieval_review,
+      skill_digest: statePreview.skill_digest,
+      routing_context_manifest_digest,
+      retrieval_profile_digest,
+      shadow_routing_manifest_digest,
+      no_skill_ablation_receipt_digest,
+      coalition_ablation_receipt_digest,
+      memory_poisoning_scan_digest,
+      source_grounding_receipt_digest,
+      bounded_canary_policy_digest,
+      bounded_canary_result_digest,
+      negative_transfer_memory_digest,
+      shadow_context_count,
+      shadow_success_count,
+      shadow_hard_invariants_pass,
+      no_skill_ablation_pass,
+      coalition_ablation_pass,
+      negative_transfer_clear,
+      memory_poisoning_scan_pass,
+      source_grounding_pass,
+      bounded_canary_pass,
+      canary_effect_mode,
+      external_governance_owner_identity_digest,
+      external_shadow_evaluator_identity_digest,
+      external_security_reviewer_identity_digest,
+      external_canary_evaluator_identity_digest,
+      external_governance_owner,
+      external_shadow_evaluator,
+      external_security_reviewer,
+      external_canary_evaluator,
+      authored_by_candidate,
+    };
+    const certificate = createRsiSkillExposureReleaseCertificate(verificationArgs);
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED', {
+      certificate_id: certificate.certificate_id,
+      certificate_digest: certificate.certificate_digest,
+      state: certificate.state,
+      skill_digest: certificate.skill_digest,
+      library_digest: certificate.library_digest,
+      current_governance_digest: certificate.current_governance_digest,
+      next_governance_digest: certificate.next_governance_digest,
+      release_preview_digest: certificate.release_preview_digest,
+      admission_provenance_digest: statePreview.admission_provenance.provenance_digest,
+      certificate_is_effect_authority: false,
+      release_effect_authorized: false,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ certificate, verification_args: Object.freeze(verificationArgs) });
+  }
+
+  async recordSkillExposureReleaseCertificate({ certificate, dormant_retrieval_review = null, verification_args } = {}) {
+    this.#assertRunning();
+    if (!certificate?.skill_digest) throw new Error('rsi_runtime_exposure_certificate_skill_required');
+    const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(certificate.skill_digest);
+    const livePreview = createRsiSkillExposureReleasePreview({
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      skill_digest: statePreview.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    if (certificate.library_digest !== statePreview.library.library_digest
+      || certificate.current_governance_digest !== statePreview.current_governance.governance_digest
+      || certificate.next_governance_digest !== statePreview.next_governance.governance_digest
+      || certificate.release_preview_digest !== livePreview.preview_digest) {
+      throw new Error('rsi_runtime_exposure_certificate_current_state_drift');
+    }
+    const boundVerificationArgs = {
+      ...(verification_args || {}),
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      release_preview: livePreview,
+      dormant_retrieval_review: dormant_retrieval_review || verification_args?.dormant_retrieval_review,
+      skill_digest: statePreview.skill_digest,
+    };
+    const result = await this.#skillExposureCertificateLedger.add({ certificate, verification_args: boundVerificationArgs });
+    const record = result.record;
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_RECORDED', {
+      certificate_id: record.certificate_id,
+      certificate_digest: record.certificate_digest,
+      state: record.state,
+      eligible_for_one_attempt_exposure_release: record.eligible_for_one_attempt_exposure_release,
+      skill_digest: record.skill_digest,
+      library_digest: record.library_digest,
+      current_governance_digest: record.current_governance_digest,
+      next_governance_digest: record.next_governance_digest,
+      release_preview_digest: record.release_preview_digest,
+      admission_provenance_digest: statePreview.admission_provenance.provenance_digest,
+      exact_runtime_state_readback_required: true,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      certificate_is_effect_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  skillExposureReleaseCertificateLedgerSnapshot() {
+    this.#assertRunning();
+    return this.#skillExposureCertificateLedger.snapshot();
+  }
+
   async prepareAnytimeLibraryAdmissionAttempt({
     attempt_id,
     admission_certificate,
@@ -1705,6 +1913,7 @@ export class RsiRuntimeService {
       command_attribution: this.#commandAttribution.snapshot(),
       runtime_experience_store: this.#experienceStore.snapshot(),
       runtime_skill_lifecycle: this.#skillLifecycle.snapshot(),
+      runtime_skill_exposure_certificate_ledger: this.#skillExposureCertificateLedger.snapshot(),
       runtime_skill_router: this.#skillRouter.snapshot(),
       runtime_skill_curation: this.#skillCuration.snapshot(),
       skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
