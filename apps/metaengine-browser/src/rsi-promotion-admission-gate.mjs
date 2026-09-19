@@ -84,6 +84,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-lineage-structural-provenance.mjs',
   'apps/metaengine-browser/src/rsi-github-attestation-verification-receipt.mjs',
   'apps/metaengine-browser/src/rsi-lineage-provenance-acceptance.mjs',
+  'apps/metaengine-browser/src/rsi-durable-state-persistence.mjs',
   'apps/metaengine-browser/src/rsi-skill-lineage-contamination-review.mjs',
   'apps/metaengine-browser/src/rsi-held-skill-credit-admission.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
