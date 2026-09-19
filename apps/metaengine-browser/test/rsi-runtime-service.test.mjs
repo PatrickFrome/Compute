@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import { BROWSER_BRAIN_WORKING_MEMORY_SCHEMA } from '../src/browser-brain-working-memory.mjs';
 import { RSI_HARD_INVARIANTS } from '../src/rsi-shadow-core.mjs';
+import { createRsiBrowserOutcomeEpisode } from '../src/rsi-browser-outcome-ingest.mjs';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
 import {
   createRsiSkillCapsule,
@@ -966,6 +967,79 @@ test('runtime relation graph constrains verified-skill routing without widening 
     const runtime = new RsiRuntimeService({ source_sha: source, ledgerPath: path.join(root, 'rsi.jsonl') });
     await runtime.start();
     await runtime.adoptVerifiedSkillLibrary({ library, external_library_owner: true, authored_by_candidate: false });
+
+    // Library membership is storage, not retrieval authority. Supply one explicit,
+    // externally credited lifecycle window before testing relation-constrained routing.
+    const episode = createRsiBrowserOutcomeEpisode({
+      source_sha: source,
+      readback: {
+        schema: 'metaengine.rsi.result-receipt-readback.v1',
+        command_id: '77777777-7777-4777-8777-777777777777',
+        found: true,
+        terminal: true,
+        status: 'COMPLETED',
+        receipt: {
+          schema: 'metaengine.native-supervisor.command-receipt.v2',
+          command_id: '77777777-7777-4777-8777-777777777777',
+          action: 'SCROLL',
+          platform: 'CHATGPT',
+          result: { moved: true },
+          effect_outcome: 'CONFIRMED',
+          lane: 'MUTATION',
+          effect_key: 'effect-runtime-relation-credit',
+          execution_ms: 5,
+          recorded_at: '2026-09-19T15:00:00.000Z',
+          authority_effect: false,
+        },
+        error: null,
+        execution_authority: false,
+        production_mutation_authority: false,
+        promotion_authority: false,
+        self_update_authority: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+      attribution: {
+        task_id: 'task.runtime.relation.credit',
+        task_signature_digest: d('8'),
+        environment_fingerprint: 'env.browser.chatgpt.v1',
+        model_family: 'GPT_5_6_SOL',
+        candidate_id: `candidate_sha256_${'9'.repeat(64)}`,
+        candidate_sha: 'e'.repeat(40),
+        proposal_digest: d('a'),
+        skill_digests: [first.capsule.skill_digest, second.capsule.skill_digest],
+        trajectory_id: 'trajectory.runtime.relation.credit',
+        step_index: 1,
+        step_count: 1,
+        external_attribution: true,
+        authored_by_candidate: false,
+      },
+    });
+    await runtime.recordBrowserStepCredit({
+      episode,
+      task_anchor: {
+        task_id: 'task.runtime.relation.credit',
+        task_signature_digest: d('8'),
+        challenge_family: 'BROWSER_INTERACTION',
+        hidden_manifest_digest: d('b'),
+        external_writer: true,
+        authored_by_candidate: false,
+      },
+      credit_id: 'credit.runtime.relation.1',
+      credit_sign: 'POSITIVE',
+      credit_score: 0.5,
+      method: 'EXTERNAL_STEP_EVALUATOR',
+      evaluator_digest: d('c'),
+      evaluation_digest: d('d'),
+      lesson_digests: [d('e')],
+      evidence_refs: ['evidence:runtime:relation:credit'],
+      skill_generation: 1,
+      skill_authoring_prior: 'VERIFIED_DIRECT_SKILL',
+      skill_authoring_provenance_digest: d('e'),
+      external_credit_assigner: true,
+      authored_by_candidate: false,
+    });
+
     const relation = await runtime.recordSkillRelation({
       relation_id: 'relation.runtime.first-antagonistic-second',
       from_skill_digest: first.capsule.skill_digest,
