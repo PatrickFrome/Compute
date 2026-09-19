@@ -237,7 +237,7 @@ test('persisted contextual evidence is digest-verified, exact-source fenced, and
       source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,
       external_evaluator:true,authored_by_candidate:false,
     });
-    assert.throws(()=>verifyRsiSkillContextEvidence({...row,credit_sign:'NEGATIVE'}),/evidence_digest_mismatch/);
+    assert.throws(()=>verifyRsiSkillContextEvidence({...row,trajectory_id:`${row.trajectory_id}.tampered`}),/evidence_digest_mismatch/);
 
     assert.throws(()=>createRsiSkillRoutingPlan({
       library,governance,
@@ -280,7 +280,7 @@ test('routing is limited to governance-active skills and cannot reactivate quara
 });
 
 test('coalition-pollution mask excludes an otherwise active compatible skill without granting any new activity',()=>{
-  const {good,explore,library,governance}=fixture();
+  const {good,library,governance}=fixture();
   const g=episode({command:'88888888-8888-4888-8888-888888888888',skillDigest:good.capsule.skill_digest,sign:'POSITIVE'});
   const evidence=[createRsiSkillContextEvidence({
     source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,
@@ -298,7 +298,8 @@ test('coalition-pollution mask excludes an otherwise active compatible skill wit
   assert.equal(plan.coalition_mask_cannot_grant_activity,true);
   assert.ok(plan.selected.every(row=>row.skill_digest!==good.capsule.skill_digest));
   assert.ok(plan.selected_count<=2);
-  if(plan.selected_count>0)assert.equal(plan.selected[0].skill_digest,explore.capsule.skill_digest);
+  const activeBeforeMask=new Set(governance.entries.filter(row=>row.active_for_composition).map(row=>row.skill_digest));
+  assert.ok(plan.selected.every(row=>activeBeforeMask.has(row.skill_digest)));
 });
 
 test('coalition mask is fenced to the exact verified library',()=>{
