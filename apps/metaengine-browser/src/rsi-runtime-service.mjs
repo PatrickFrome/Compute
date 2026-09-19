@@ -58,6 +58,10 @@ import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntime
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
+import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
+import { rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
+import { rsiSourceIdentityConvergenceTrustRootSnapshot } from './rsi-source-identity-convergence.mjs';
+import { rsiSourceIdentityFreshnessTrustRootSnapshot } from './rsi-source-identity-freshness.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -126,6 +130,10 @@ function trustRoots() {
     step_credit: rsiStepCreditTrustRootSnapshot(),
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
+    dormant_skill_retrieval_review: rsiDormantSkillRetrievalReviewTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
+    source_identity_convergence: rsiSourceIdentityConvergenceTrustRootSnapshot(),
+    source_identity_freshness: rsiSourceIdentityFreshnessTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
@@ -1020,6 +1028,7 @@ export class RsiRuntimeService {
   async adoptVerifiedSkillLibrary({
     library,
     expected_current_library_digest = null,
+    admission_exposure_hold_skill_digests = [],
     trusted_migration = false,
     external_library_owner = false,
     authored_by_candidate = true,
@@ -1035,6 +1044,7 @@ export class RsiRuntimeService {
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
       library,
       expected_current_library_digest: current ? expected_current_library_digest : null,
+      admission_exposure_hold_skill_digests,
       external_library_owner,
       authored_by_candidate,
     });
@@ -1045,6 +1055,8 @@ export class RsiRuntimeService {
       reconciled_pending: result.reconciled_pending,
       append_only_library_required: true,
       direct_adopt_scope: current ? 'TRUSTED_MIGRATION' : 'TRUSTED_BOOTSTRAP',
+      admission_exposure_hold_skill_digests: result.admission_exposure_hold_skill_digests || [],
+      retrieval_exposure_changed: false,
       phase34b_required_for_non_migration_updates: true,
       authority_effect: false,
     });
@@ -1137,6 +1149,8 @@ export class RsiRuntimeService {
         effect_performed: effectConfirmed,
         effect_started: effectConfirmed,
         storage_only: effectConfirmed && result.storage_only === true,
+        admission_exposure_held: effectConfirmed && result.admission_exposure_held === true,
+        held_skill_digest: result.held_skill_digest || null,
         reconciliation_required: result.reconciliation_required === true,
         pre_effect_readback_passed: result.pre_effect_readback_passed === true,
         retrieval_exposure_changed: false,
@@ -1168,6 +1182,8 @@ export class RsiRuntimeService {
       observed_library_digest: result.observed_library_digest,
       effect_attempt_count: result.effect_attempt_count,
       additional_effect_attempt_performed: false,
+      admission_exposure_held: result.admission_exposure_held === true,
+      held_skill_digest: result.held_skill_digest || null,
       same_effect_id_retry_allowed: false,
       authority_effect: false,
     });
@@ -1177,6 +1193,124 @@ export class RsiRuntimeService {
   anytimeLibraryAdmissionAttemptSnapshot(attempt_id) {
     this.#assertRunning();
     return this.#skillLifecycle.admissionAttemptSnapshot(attempt_id);
+  }
+
+  async reviewDormantSkillForRetrieval({
+    review_id,
+    attempt_id,
+    post_append_evaluation_epoch_digest,
+    post_append_holdout_digest,
+    post_append_evaluator_root_digest,
+    matched_control_receipt_digest,
+    treatment_receipt_digest,
+    post_append_evidence_digest,
+    coalition_ablation_receipt_digest,
+    marginal_contribution_receipt_digest,
+    active_cap_policy_digest,
+    retrieval_reviewer_identity_digest,
+    consumer_evaluator_identity_digest,
+    contamination_auditor_identity_digest,
+    coalition_auditor_identity_digest,
+    capacity_policy_owner_identity_digest,
+    same_instances_pass = false,
+    same_harness_pass = false,
+    same_budget_pass = false,
+    evaluator_integrity_pass = false,
+    consumer_state_integrity_pass = false,
+    retrieval_profile_integrity_pass = false,
+    hidden_holdout_pass = false,
+    contamination_clear = false,
+    from_scratch_replay_pass = false,
+    task_non_regression = false,
+    safety_non_regression = false,
+    security_non_regression = false,
+    process_non_regression = false,
+    outcome_non_regression = false,
+    efficiency_non_regression = false,
+    strict_post_append_improvement = false,
+    coalition_ablation_pass = false,
+    marginal_contribution_pass = false,
+    active_cap_pass = false,
+    external_retrieval_reviewer = false,
+    external_consumer_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const admissionAttempt = this.#skillLifecycle.admissionAttemptSnapshot(attempt_id);
+    const successorLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const currentGovernance = this.#skillLifecycle.governance();
+    if (!admissionAttempt || !successorLibrary || !currentGovernance) {
+      throw new Error('rsi_runtime_dormant_retrieval_review_readback_unavailable');
+    }
+    const provenance=this.#skillLifecycle.admissionExposureHoldProvenance(admissionAttempt.proposed_skill_digest);
+    if(!provenance
+      || provenance.admission_attempt_id!==admissionAttempt.attempt_id
+      || provenance.admission_certificate_digest!==admissionAttempt.admission_certificate_digest
+      || provenance.current_library_digest!==successorLibrary.library_digest
+      || provenance.current_governance_digest!==currentGovernance.governance_digest){
+      throw new Error('rsi_runtime_dormant_retrieval_review_admission_provenance_required');
+    }
+    const review = createRsiDormantSkillRetrievalReview({
+      review_id,
+      admission_attempt: admissionAttempt,
+      successor_library: successorLibrary,
+      current_governance: currentGovernance,
+      post_append_evaluation_epoch_digest,
+      post_append_holdout_digest,
+      post_append_evaluator_root_digest,
+      matched_control_receipt_digest,
+      treatment_receipt_digest,
+      post_append_evidence_digest,
+      coalition_ablation_receipt_digest,
+      marginal_contribution_receipt_digest,
+      active_cap_policy_digest,
+      retrieval_reviewer_identity_digest,
+      consumer_evaluator_identity_digest,
+      contamination_auditor_identity_digest,
+      coalition_auditor_identity_digest,
+      capacity_policy_owner_identity_digest,
+      same_instances_pass,
+      same_harness_pass,
+      same_budget_pass,
+      evaluator_integrity_pass,
+      consumer_state_integrity_pass,
+      retrieval_profile_integrity_pass,
+      hidden_holdout_pass,
+      contamination_clear,
+      from_scratch_replay_pass,
+      task_non_regression,
+      safety_non_regression,
+      security_non_regression,
+      process_non_regression,
+      outcome_non_regression,
+      efficiency_non_regression,
+      strict_post_append_improvement,
+      coalition_ablation_pass,
+      marginal_contribution_pass,
+      active_cap_pass,
+      external_runtime_readback: true,
+      external_retrieval_reviewer,
+      external_consumer_evaluator,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('DORMANT_SKILL_RETRIEVAL_REVIEWED', {
+      review_id: review.review_id,
+      retrieval_review_digest: review.retrieval_review_digest,
+      admission_attempt_id: review.admission_attempt_id,
+      admission_attempt_digest: review.admission_attempt_digest,
+      admission_provenance_digest: provenance.provenance_digest,
+      library_digest: review.library_digest,
+      governance_digest: review.governance_digest,
+      skill_digest: review.skill_digest,
+      state: review.state,
+      evidence_blockers: review.evidence_blockers,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      review_is_eligibility_evidence_only: true,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return review;
   }
 
   createSkillActivationView(requested_skill_digests) {
