@@ -47,6 +47,7 @@ const PROMOTION_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-post-deployment-correction.mjs',
   'apps/metaengine-browser/src/rsi-correction-retrieval-bridge.mjs',
   'apps/metaengine-browser/src/rsi-bounded-memory-utility-state.mjs',
+  'apps/metaengine-browser/src/rsi-retrieval-influence-evidence.mjs',
   'apps/metaengine-browser/src/rsi-runtime-service.mjs',
   'apps/metaengine-browser/src/rsi-runtime-ledger.mjs',
   'apps/metaengine-browser/src/rsi-verified-evolution-archive.mjs',
