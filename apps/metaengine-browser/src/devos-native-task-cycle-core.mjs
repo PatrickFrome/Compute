@@ -645,9 +645,24 @@ export class DevOsNativeTaskCycle {
         throw error;
       }
 
-      const post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
-      const normalizedUrl = conversationUrl(post?.url);
+      // Bounded conversation readback (D-S3, live-proven 2026-09-19): the GLM
+      // SPA navigates to /c/<id> asynchronously after a proven Enter submit, so
+      // a single immediate capture can miss the URL while the composer is
+      // already provably cleared — the physical effect happened but the proof
+      // contract (conversation_url_sha256) could not be collected, sending
+      // every dispatch into LEASE_EXPIRED_EFFECT_UNKNOWN ambiguity. Mirror the
+      // supervisor's observeSendReadback: bounded attempts, never a blind
+      // second submit.
+      let post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
+      let normalizedUrl = conversationUrl(post?.url);
       const submitState = String(submitted?.effect_state || '').toUpperCase();
+      const submitProven = ['PROVEN_COMPOSER_CLEARED','PROVEN_NEW_CONVERSATION','PROVEN_GENERATING'].includes(submitState)
+        || submitted?.new_conversation_observed === true;
+      for (let attempt = 0; attempt < 6 && !normalizedUrl && submitProven; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
+        normalizedUrl = conversationUrl(post?.url);
+      }
       const newConversationObserved = (!preConversation && Boolean(normalizedUrl)) || submitted?.new_conversation_observed === true;
       const effectState = ['PROVEN_COMPOSER_CLEARED','PROVEN_NEW_CONVERSATION','PROVEN_GENERATING'].includes(submitState)
         ? (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : submitState)
