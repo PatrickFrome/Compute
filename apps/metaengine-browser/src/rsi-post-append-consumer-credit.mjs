@@ -12,6 +12,7 @@ function exactSha(v,l){const o=String(v||'').trim().toLowerCase();if(!SHA40_RE.t
 function exactDigest(v,l){const o=String(v||'').trim().toLowerCase();if(!SHA256_RE.test(o))throw new Error(`rsi_post_append_credit_${l}_digest_invalid`);return o}
 function boundedId(v,l){const o=String(v||'').trim();if(!SAFE_ID_RE.test(o))throw new Error(`rsi_post_append_credit_${l}_invalid`);return o}
 function nonNegativeInt(v,l,max=1_000_000){const o=Number(v);if(!Number.isSafeInteger(o)||o<0||o>max)throw new Error(`rsi_post_append_credit_${l}_invalid`);return o}
+function positiveInt(v,l,max=1_000_000){const o=Number(v);if(!Number.isSafeInteger(o)||o<1||o>max)throw new Error(`rsi_post_append_credit_${l}_invalid`);return o}
 function finiteNumber(v,l){const o=Number(v);if(!Number.isFinite(o))throw new Error(`rsi_post_append_credit_${l}_invalid`);return o}
 function assertTrue(v,l){if(v!==true)throw new Error(`rsi_post_append_credit_${l}_required`)}
 function assertFalse(v,l){if(v!==false)throw new Error(`rsi_post_append_credit_${l}_must_be_false`)}
@@ -49,6 +50,7 @@ export function createRsiPostAppendConsumerCredit({
   treatment_receipt_digest,
   retention_evidence_digest,
   credit_assigner_identity_digest,
+  generation,
   measured_net_delta,
   regression_count=0,
   negative_transfer_count=0,
@@ -115,6 +117,7 @@ export function createRsiPostAppendConsumerCredit({
     treatment_receipt_digest:exactDigest(treatment_receipt_digest,'treatment_receipt'),
     retention_evidence_digest:exactDigest(retention_evidence_digest,'retention_evidence'),
     credit_assigner_identity_digest:assigner,
+    generation:positiveInt(generation,'generation'),
     measured_net_delta:delta,
     regression_count:regressions,
     negative_transfer_count:negativeTransfer,
@@ -167,6 +170,7 @@ export function verifyRsiPostAppendConsumerCredit(receipt,{
     treatment_receipt_digest:receipt.treatment_receipt_digest,
     retention_evidence_digest:receipt.retention_evidence_digest,
     credit_assigner_identity_digest:receipt.credit_assigner_identity_digest,
+    generation:receipt.generation,
     measured_net_delta:receipt.measured_net_delta,
     regression_count:receipt.regression_count,
     negative_transfer_count:receipt.negative_transfer_count,
