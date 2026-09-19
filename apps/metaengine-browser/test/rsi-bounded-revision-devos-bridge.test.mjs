@@ -2853,7 +2853,7 @@ test('Phase32 hardened consumer identity detects generation and epoch identity d
 test('Phase32 metamorphic identity boundary separates legitimate cross-generation revalidation from same-generation corruption',()=>{
   const fx=phase32Fixture('identity-metamorphic');
   const rebuild=(suffix,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
-    handoff_id:\`phase32.identity.metamorphic.\${suffix}\`,
+    handoff_id:`phase32.identity.metamorphic.${suffix}`,
     proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
     consumer_model_family:fx.handoff.consumer_model_family,
     consumer_environment_family:fx.handoff.consumer_environment_family,
