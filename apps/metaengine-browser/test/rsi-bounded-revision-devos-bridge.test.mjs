@@ -88,6 +88,7 @@ import {
   rsiRuntimeSkillLifecycleTrustRootSnapshot,
 } from '../src/rsi-runtime-skill-lifecycle.mjs';
 import { RsiRuntimeService } from '../src/rsi-runtime-service.mjs';
+import { createRsiBrowserOutcomeEpisode } from '../src/rsi-browser-outcome-ingest.mjs';
 import {
   RsiAnytimeLibraryAdmissionArchive,
   createRsiPhase33SourceQualification,
@@ -3900,6 +3901,106 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(review.active_cap_capacity_available,true);
   assert.equal(review.exploration_slot_capacity_available,true);
   assert.equal(review.bounded_exploration_capacity_available,true);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  // Eligibility evidence is not enough to expose a newly stored skill. The
+  // current-lineage preview must fail closed until there is fresh, consumer-local
+  // post-append credited evidence that makes the unheld next governance state
+  // EXPLORATION_ACTIVE.
+  await assert.rejects(
+    ()=>runtime.createSkillExposureReleasePreview({skill_digest:fx.skill.skill_digest}),
+    /next_state_not_exploration_active/,
+  );
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const postAppendEpisode=createRsiBrowserOutcomeEpisode({
+    source_sha:SOURCE,
+    readback:{
+      schema:'metaengine.rsi.result-receipt-readback.v1',
+      command_id:'88888888-8888-4888-8888-888888888888',
+      found:true,
+      terminal:true,
+      status:'COMPLETED',
+      receipt:{
+        schema:'metaengine.native-supervisor.command-receipt.v2',
+        command_id:'88888888-8888-4888-8888-888888888888',
+        action:'SCROLL',
+        platform:'CHATGPT',
+        result:{moved:true},
+        effect_outcome:'CONFIRMED',
+        lane:'MUTATION',
+        effect_key:'effect-phase36-post-append-credit',
+        execution_ms:4,
+        recorded_at:'2026-09-19T16:00:00.000Z',
+        authority_effect:false,
+      },
+      error:null,
+      execution_authority:false,
+      production_mutation_authority:false,
+      promotion_authority:false,
+      self_update_authority:false,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    },
+    attribution:{
+      task_id:'task.phase36.post-append.consumer',
+      task_signature_digest:labelDigest('phase36-post-append-task'),
+      environment_fingerprint:'env.phase36.post-append.consumer',
+      model_family:'GPT_5_6_SOL',
+      candidate_id:'candidate.phase36.post-append.consumer',
+      candidate_sha:'e'.repeat(40),
+      proposal_digest:labelDigest('phase36-post-append-proposal'),
+      skill_digests:[fx.skill.skill_digest],
+      trajectory_id:'trajectory.phase36.post-append.consumer',
+      step_index:1,
+      step_count:1,
+      external_attribution:true,
+      authored_by_candidate:false,
+    },
+  });
+  const credited=await runtime.recordBrowserStepCredit({
+    episode:postAppendEpisode,
+    task_anchor:{
+      task_id:'task.phase36.post-append.consumer',
+      task_signature_digest:labelDigest('phase36-post-append-task'),
+      challenge_family:'BROWSER_INTERACTION',
+      hidden_manifest_digest:labelDigest('phase36-post-append-hidden-manifest'),
+      external_writer:true,
+      authored_by_candidate:false,
+    },
+    credit_id:'credit.phase36.post-append.consumer.1',
+    credit_sign:'POSITIVE',
+    credit_score:0.6,
+    method:'EXTERNAL_STEP_EVALUATOR',
+    evaluator_digest:labelDigest('phase36-post-append-evaluator'),
+    evaluation_digest:labelDigest('phase36-post-append-evaluation'),
+    lesson_digests:[labelDigest('phase36-post-append-lesson')],
+    evidence_refs:['evidence:phase36:post-append:consumer'],
+    skill_generation:1,
+    skill_authoring_prior:'VERIFIED_DIRECT_SKILL',
+    skill_authoring_provenance_digest:labelDigest('phase36-post-append-skill-provenance'),
+    external_credit_assigner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(credited.skill_lifecycle.state,'APPLIED');
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.lifecycle_evidence_count,1);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+
+  const freshProvenance=runtime.admissionExposureHoldProvenance(fx.skill.skill_digest);
+  assert.equal(freshProvenance.admission_attempt_id,'phase34b.runtime.attempt.1');
+  assert.equal(freshProvenance.admission_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+  assert.equal(freshProvenance.current_library_digest,fx.successorLibrary.library_digest);
+
+  const positivePreview=await runtime.createSkillExposureReleasePreview({skill_digest:fx.skill.skill_digest});
+  assert.equal(positivePreview.current_state,'DORMANT_CAP');
+  assert.equal(positivePreview.next_state,'EXPLORATION_ACTIVE');
+  assert.equal(positivePreview.current_admission_exposure_held,true);
+  assert.equal(positivePreview.next_admission_exposure_held,false);
+  assert.equal(positivePreview.release_authorized,false);
+  assert.equal(positivePreview.exposure_effect_performed,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED');
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
