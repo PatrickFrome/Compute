@@ -4165,9 +4165,9 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(releaseCertificate2.state,'ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE');
 
   const releaseEffectExecutor=labelDigest('phase36-release-effect-executor');
-  const releasePrepared=await runtime.prepareSkillExposureReleaseAttempt({
+  const releasePrepared=await recoveredRuntime.prepareSkillExposureReleaseAttempt({
     attempt_id:'phase36.runtime.release-attempt.1',
-    certificate,
+    certificate:releaseCertificate2,
     release_review:freshExposureReview,
     effect_id_digest:labelDigest('phase36-release-effect-id'),
     idempotency_key_digest:labelDigest('phase36-release-idempotency'),
@@ -4178,10 +4178,10 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(releasePrepared.state,'PREPARED');
   assert.equal(releasePrepared.release_effect_performed,false);
   assert.equal(releasePrepared.retrieval_exposure_changed,false);
-  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,1);
-  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
-  assert.equal(runtime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1').current_state,'PREPARED');
-  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  assert.equal(recoveredRuntime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_count,2);
+  assert.equal(recoveredRuntime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.equal(recoveredRuntime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1').current_state,'PREPARED');
+  assert.throws(()=>recoveredRuntime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
   // PREPARED survives restart. The effect is still absent until the existing lifecycle
   // persists ATTEMPTED and passes an exact post-fence readback.
@@ -4231,7 +4231,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
     external_library_owner:true,
     authored_by_candidate:false,
   }),/direct_library_adopt_phase34b_required/);
-  assert.equal(runtime.anytimeLibraryAdmissionAttemptSnapshot('phase34b.runtime.attempt.1').current_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+  assert.equal(restoredRuntime.anytimeLibraryAdmissionAttemptSnapshot('phase34b.runtime.attempt.1').current_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
 });
 
 test('Phase34B lifecycle prepares admission durably before effect, survives restart, and appends storage-only once',async(t)=>{
