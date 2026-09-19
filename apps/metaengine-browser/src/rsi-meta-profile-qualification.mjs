@@ -303,7 +303,7 @@ export function createRsiMetaProfileQualification({
     qualified_for_shadow_profile_selection:pass,
     live_profile_activation_authorized:false,profile_replacement_authorized:false,
     canary_activation_authorized:false,external_activation_gate_still_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,qualification_digest:digest(core)});
@@ -360,7 +360,7 @@ export function rsiMetaProfileQualificationTrustRootSnapshot(){
     external_statistical_verifier_required:true,tradeoff_is_not_activation_eligible:true,
     candidate_can_choose_pair_count:false,candidate_can_choose_holdout:false,candidate_can_choose_seed_schedule:false,
     qualification_only_for_shadow_profile_selection:true,live_profile_activation_authorized:false,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false};
   return Object.freeze({...root,qualification_root_digest:digest(root)});
 }
