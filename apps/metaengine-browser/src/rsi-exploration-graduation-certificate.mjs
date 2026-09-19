@@ -3,6 +3,11 @@ import crypto from 'node:crypto';
 import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs';
 import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';
 import { verifyRsiSkillLineageContaminationReview } from './rsi-skill-lineage-contamination-review.mjs';
+import {
+  verifyRsiRecursiveRiskBudget,
+  verifyRsiExternalStatisticalCertificate,
+  verifyRsiRiskConfirmation,
+} from './rsi-recursive-risk-budget.mjs';
 
 export const RSI_EXPLORATION_GRADUATION_PREVIEW_SCHEMA='metaengine.rsi.exploration-graduation-preview.v1';
 export const RSI_EXPLORATION_GRADUATION_VERIFIER_RECEIPT_SCHEMA='metaengine.rsi.exploration-graduation-verifier-receipt.v1';
@@ -300,9 +305,14 @@ export function createRsiExplorationGraduationStatisticalReceipt({
   evaluation_contract_digest,
   paired_instance_manifest_digest,
   exploration_evidence_manifest_digest,
-  stopping_policy_digest,
-  false_admission_error_budget_policy_digest,
-  anytime_valid_certificate_digest,
+  statistical_holdout_digest,
+  statistical_evaluator_root_digest,
+  recursive_risk_budget,
+  external_statistical_certificate,
+  risk_confirmation,
+  candidate_id,
+  candidate_sha,
+  parent_sha,
   statistical_acceptor_identity_digest,
   false_admission_alpha_ppm,
   anytime_valid_e_value_microunits,
@@ -314,12 +324,57 @@ export function createRsiExplorationGraduationStatisticalReceipt({
   if(external_statistical_acceptor!==true||authored_by_candidate!==false){
     throw new Error('rsi_graduation_statistical_external_acceptor_required');
   }
+  const pairedManifest=exactDigest(paired_instance_manifest_digest,'statistical_paired_instances');
+  const holdout=exactDigest(statistical_holdout_digest,'statistical_holdout');
+  const evaluatorRoot=exactDigest(statistical_evaluator_root_digest,'statistical_evaluator_root');
+  const budget=verifyRsiRecursiveRiskBudget(recursive_risk_budget);
+  const confirmation=verifyRsiRiskConfirmation(risk_confirmation);
+  const checkedExternal=verifyRsiExternalStatisticalCertificate(external_statistical_certificate,{
+    budget,
+    expected_confirmation_index:confirmation.confirmation_index,
+    candidate_id,
+    candidate_sha,
+    parent_sha,
+    tournament_plan_digest:pairedManifest,
+    holdout_digest:holdout,
+    evaluator_root_digest:evaluatorRoot,
+  });
+  if(confirmation.state!=='STATISTICAL_GATE_PASS_FOR_EXTERNAL_REVIEW'
+    ||confirmation.superiority_certified!==true
+    ||confirmation.budget_digest!==budget.budget_digest
+    ||confirmation.certificate_digest!==checkedExternal.certificate_digest
+    ||confirmation.candidate_id!==checkedExternal.candidate_id
+    ||confirmation.candidate_sha!==checkedExternal.candidate_sha
+    ||confirmation.parent_sha!==checkedExternal.parent_sha
+    ||confirmation.tournament_plan_digest!==pairedManifest
+    ||confirmation.holdout_digest!==holdout
+    ||confirmation.evaluator_root_digest!==evaluatorRoot){
+    throw new Error('rsi_graduation_statistical_existing_risk_confirmation_mismatch');
+  }
+  if(checkedExternal.method!==STATISTICAL_METHOD
+    ||checkedExternal.paired_evaluation!==true
+    ||checkedExternal.independent_holdout!==true
+    ||checkedExternal.stopping_rule_precommitted!==true
+    ||checkedExternal.optional_stopping_used!==false
+    ||checkedExternal.familywise_valid!==true
+    ||checkedExternal.screening_spent_alpha!==false
+    ||checkedExternal.confirmation_triggered!==true){
+    throw new Error('rsi_graduation_statistical_external_certificate_policy_invalid');
+  }
+
   const alphaPpm=positiveInt(false_admission_alpha_ppm,'false_admission_alpha_ppm',1_000_000);
+  const expectedAlpha=alphaPpm/1_000_000;
+  if(Math.abs(checkedExternal.alpha_used-expectedAlpha)>1e-12){
+    throw new Error('rsi_graduation_statistical_alpha_policy_mismatch');
+  }
   const eValueMicro=positiveInt(anytime_valid_e_value_microunits,'anytime_valid_e_value_microunits');
   const pairs=positiveInt(paired_sample_count,'paired_sample_count');
   const minPairs=positiveInt(minimum_paired_sample_count,'minimum_paired_sample_count');
+  if(pairs!==checkedExternal.sample_count){
+    throw new Error('rsi_graduation_statistical_paired_sample_count_mismatch');
+  }
   const thresholdMicro=Math.ceil(1_000_000_000_000/alphaPpm);
-  const pass=pairs>=minPairs&&eValueMicro>=thresholdMicro;
+  const pass=eValueMicro>=thresholdMicro&&pairs>=minPairs;
   const core=zero({
     schema:RSI_EXPLORATION_GRADUATION_STATISTICAL_RECEIPT_SCHEMA,
     version:1,
@@ -331,14 +386,27 @@ export function createRsiExplorationGraduationStatisticalReceipt({
     target_consumer_snapshot_digest:exactDigest(target_consumer_snapshot_digest,'statistical_consumer'),
     target_retrieval_profile_digest:exactDigest(target_retrieval_profile_digest,'statistical_retrieval'),
     evaluation_contract_digest:exactDigest(evaluation_contract_digest,'statistical_evaluation_contract'),
-    paired_instance_manifest_digest:exactDigest(paired_instance_manifest_digest,'statistical_paired_instances'),
+    paired_instance_manifest_digest:pairedManifest,
     exploration_evidence_manifest_digest:exactDigest(exploration_evidence_manifest_digest,'statistical_exploration_evidence'),
-    stopping_policy_digest:exactDigest(stopping_policy_digest,'statistical_stopping_policy'),
-    false_admission_error_budget_policy_digest:exactDigest(false_admission_error_budget_policy_digest,'statistical_false_admission_policy'),
-    anytime_valid_certificate_digest:exactDigest(anytime_valid_certificate_digest,'statistical_anytime_certificate'),
+    statistical_holdout_digest:holdout,
+    statistical_evaluator_root_digest:evaluatorRoot,
+    recursive_risk_budget:structuredClone(budget),
+    recursive_risk_budget_digest:budget.budget_digest,
+    external_statistical_certificate:structuredClone(checkedExternal),
+    external_statistical_certificate_digest:checkedExternal.certificate_digest,
+    risk_confirmation:structuredClone(confirmation),
+    risk_confirmation_digest:confirmation.confirmation_digest,
+    confirmation_index:confirmation.confirmation_index,
+    candidate_id:checkedExternal.candidate_id,
+    candidate_sha:checkedExternal.candidate_sha,
+    parent_sha:checkedExternal.parent_sha,
     statistical_acceptor_identity_digest:exactDigest(statistical_acceptor_identity_digest,'statistical_acceptor_identity'),
     method:STATISTICAL_METHOD,
     false_admission_alpha_ppm:alphaPpm,
+    alpha_used:checkedExternal.alpha_used,
+    allocated_alpha:confirmation.allocated_alpha,
+    cumulative_alpha_spent:confirmation.cumulative_alpha_spent,
+    global_alpha:confirmation.global_alpha,
     anytime_valid_e_value_microunits:eValueMicro,
     anytime_valid_threshold_microunits:thresholdMicro,
     paired_sample_count:pairs,
@@ -346,9 +414,17 @@ export function createRsiExplorationGraduationStatisticalReceipt({
     paired_same_instances_required:true,
     numerical_anytime_valid_threshold_required:true,
     insufficient_evidence_abstain_required:true,
-    optional_stopping_safe_contract_required:true,
+    existing_recursive_risk_budget_required:true,
+    existing_recursive_risk_confirmation_required:true,
+    global_familywise_risk_budget_required:true,
+    confirmation_triggered_spending_required:true,
+    independent_holdout_required:true,
+    stopping_rule_precommitted_required:true,
+    optional_stopping_used:false,
+    screening_spent_alpha:false,
     external_estimator_required:true,
     local_module_does_not_estimate_e_value:true,
+    second_statistical_risk_ledger_created:false,
     state:pass?'PASS':'INSUFFICIENT_EVIDENCE',
     pass,
     statistical_receipt_is_effect_authority:false,
@@ -366,8 +442,15 @@ export function verifyRsiExplorationGraduationStatisticalReceipt(receipt){
   if(receipt.method!==STATISTICAL_METHOD||receipt.paired_same_instances_required!==true
     ||receipt.numerical_anytime_valid_threshold_required!==true
     ||receipt.insufficient_evidence_abstain_required!==true
-    ||receipt.optional_stopping_safe_contract_required!==true
+    ||receipt.existing_recursive_risk_budget_required!==true
+    ||receipt.existing_recursive_risk_confirmation_required!==true
+    ||receipt.global_familywise_risk_budget_required!==true
+    ||receipt.confirmation_triggered_spending_required!==true
+    ||receipt.independent_holdout_required!==true
+    ||receipt.stopping_rule_precommitted_required!==true
+    ||receipt.optional_stopping_used!==false||receipt.screening_spent_alpha!==false
     ||receipt.external_estimator_required!==true||receipt.local_module_does_not_estimate_e_value!==true
+    ||receipt.second_statistical_risk_ledger_created!==false
     ||receipt.statistical_receipt_is_effect_authority!==false
     ||receipt.external_statistical_acceptor!==true||receipt.authored_by_candidate!==false){
     throw new Error('rsi_graduation_statistical_receipt_policy_invalid');
@@ -383,9 +466,14 @@ export function verifyRsiExplorationGraduationStatisticalReceipt(receipt){
     evaluation_contract_digest:receipt.evaluation_contract_digest,
     paired_instance_manifest_digest:receipt.paired_instance_manifest_digest,
     exploration_evidence_manifest_digest:receipt.exploration_evidence_manifest_digest,
-    stopping_policy_digest:receipt.stopping_policy_digest,
-    false_admission_error_budget_policy_digest:receipt.false_admission_error_budget_policy_digest,
-    anytime_valid_certificate_digest:receipt.anytime_valid_certificate_digest,
+    statistical_holdout_digest:receipt.statistical_holdout_digest,
+    statistical_evaluator_root_digest:receipt.statistical_evaluator_root_digest,
+    recursive_risk_budget:receipt.recursive_risk_budget,
+    external_statistical_certificate:receipt.external_statistical_certificate,
+    risk_confirmation:receipt.risk_confirmation,
+    candidate_id:receipt.candidate_id,
+    candidate_sha:receipt.candidate_sha,
+    parent_sha:receipt.parent_sha,
     statistical_acceptor_identity_digest:receipt.statistical_acceptor_identity_digest,
     false_admission_alpha_ppm:receipt.false_admission_alpha_ppm,
     anytime_valid_e_value_microunits:receipt.anytime_valid_e_value_microunits,
@@ -698,6 +786,9 @@ export function rsiExplorationGraduationCertificateTrustRootSnapshot(){
     same_active_count_required:true,
     paired_same_instances_required:true,
     e_value_external_contract_required:true,
+    existing_recursive_risk_budget_required:true,
+    existing_recursive_risk_confirmation_required:true,
+    second_statistical_risk_ledger_created:false,
     numerical_anytime_valid_threshold_required:true,
     insufficient_evidence_abstains:true,
     process_and_outcome_verifiers_separate:true,
