@@ -11,7 +11,10 @@ import {
 } from './rsi-skill-library-governance.mjs';
 import { verifyRsiStepCreditReceipt } from './rsi-runtime-credit-assignment.mjs';
 import { verifyRsiAnytimeLibraryAdmissionCertificate } from './rsi-anytime-library-admission.mjs';
-import { verifyRsiSkillExposureReleaseCertificate } from './rsi-skill-exposure-release.mjs';
+import {
+  createRsiSkillExposureReleasePreview,
+  verifyRsiSkillExposureReleaseCertificate,
+} from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SKILL_LIFECYCLE_SCHEMA='metaengine.rsi.runtime-skill-lifecycle.v1';
 
@@ -878,7 +881,25 @@ export class RsiRuntimeSkillLifecycle{
       throw new Error('rsi_runtime_skill_exposure_release_attempt_capacity_exceeded');
     }
     const attemptId=boundedId(attempt_id,'exposure_release_attempt_id');
-    const certificate=verifyRsiSkillExposureReleaseCertificate(release_certificate,release_certificate_args||{});
+    const presentedSkill=exactDigest(release_certificate?.skill_digest,'exposure_release_certificate_skill');
+    const previewState=this.exposureReleaseGovernancePreview(presentedSkill);
+    const canonicalPreview=createRsiSkillExposureReleasePreview({
+      library:previewState.library,
+      current_governance:previewState.current_governance,
+      next_governance:previewState.next_governance,
+      skill_digest:previewState.skill_digest,
+      external_governance_owner:true,
+      authored_by_candidate:false,
+    });
+    const canonicalCertificateArgs={
+      ...(release_certificate_args||{}),
+      library:previewState.library,
+      current_governance:previewState.current_governance,
+      next_governance:previewState.next_governance,
+      release_preview:canonicalPreview,
+      admission_provenance:previewState.admission_provenance,
+    };
+    const certificate=verifyRsiSkillExposureReleaseCertificate(release_certificate,canonicalCertificateArgs);
     if(certificate.source_sha!==this.#sourceSha)throw new Error('rsi_runtime_skill_exposure_release_source_sha_mismatch');
     if(certificate.state!=='ELIGIBLE_FOR_ONE_ATTEMPT_EXPOSURE_RELEASE'||certificate.eligible_for_one_attempt_exposure_release!==true
       ||certificate.certificate_is_effect_authority!==false||certificate.release_effect_authorized!==false
@@ -889,18 +910,17 @@ export class RsiRuntimeSkillLifecycle{
     if(this.#library.library_digest!==certificate.library_digest){
       throw new Error('rsi_runtime_skill_exposure_release_current_library_drift');
     }
-    const governance=this.governance();
+    const governance=previewState.current_governance;
     if(!governance||governance.governance_digest!==certificate.current_governance_digest){
       throw new Error('rsi_runtime_skill_exposure_release_current_governance_drift');
     }
-    const previewState=this.exposureReleaseGovernancePreview(certificate.skill_digest);
     if(previewState.next_governance_digest!==certificate.next_governance_digest){
       throw new Error('rsi_runtime_skill_exposure_release_next_governance_drift');
     }
     const effectId=exactDigest(effect_id_digest,'exposure_release_effect_id');
     const idempotency=exactDigest(idempotency_key_digest,'exposure_release_idempotency_key');
     const executor=exactDigest(effect_executor_identity_digest,'exposure_release_effect_executor');
-    if(releasePrincipalDigests(certificate,release_certificate_args||{}).includes(executor)){
+    if(releasePrincipalDigests(certificate,canonicalCertificateArgs).includes(executor)){
       throw new Error('rsi_runtime_skill_exposure_release_executor_separation_invalid');
     }
     const existing=this.#findExposureReleaseAttempt(attemptId);
@@ -927,7 +947,7 @@ export class RsiRuntimeSkillLifecycle{
       schema:'metaengine.rsi.runtime-skill-exposure-release-attempt.v1',version:1,
       attempt_id:attemptId,source_sha:this.#sourceSha,
       release_certificate:structuredClone(certificate),
-      release_certificate_args:structuredClone(release_certificate_args||{}),
+      release_certificate_args:structuredClone(canonicalCertificateArgs),
       release_certificate_digest:certificate.certificate_digest,
       release_review_digest:certificate.release_review_digest,
       admission_provenance_digest:certificate.admission_provenance_digest,
