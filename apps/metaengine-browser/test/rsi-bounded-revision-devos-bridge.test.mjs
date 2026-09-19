@@ -4159,6 +4159,7 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(released.same_effect_id_retry_allowed,false);
   assert.equal(released.retrieval_exposure_changed,true);
   assert.equal(released.exploration_exposure_released,true);
+  assert.equal(released.exploration_only_hold_applied,true);
   assert.equal(released.resulting_state,'EXPLORATION_ACTIVE');
   assert.equal(released.full_activation_authorized,false);
   assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,0);
