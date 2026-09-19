@@ -45,6 +45,7 @@ import { RsiCommandAttributionRegistry, RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA,
 import { createRsiStepCreditReceipt, rsiStepCreditTrustRootSnapshot } from './rsi-runtime-credit-assignment.mjs';
 import { RsiRuntimeExperienceStore, materializeRsiExperienceCaseFromCredit, rsiRuntimeExperienceStoreTrustRootSnapshot } from './rsi-runtime-experience-store.mjs';
 import { RsiRuntimeSkillLifecycle, rsiRuntimeSkillLifecycleTrustRootSnapshot } from './rsi-runtime-skill-lifecycle.mjs';
+import { RsiRuntimeSkillExposureCertificateLedger, rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot } from './rsi-runtime-skill-exposure-certificate-ledger.mjs';
 import { RsiRuntimeSkillRouter, createRsiSkillRouteContext, rsiRuntimeSkillRouterTrustRootSnapshot } from './rsi-runtime-skill-router.mjs';
 import { RsiRuntimeSkillCurationQueue, createRsiSkillCurationRequest, rsiRuntimeSkillCurationTrustRootSnapshot } from './rsi-runtime-skill-curation.mjs';
 import { RsiSkillRevisionFrontier, createRsiSkillRevisionFrontierCandidate, rsiSkillRevisionFrontierTrustRootSnapshot } from './rsi-skill-revision-frontier.mjs';
@@ -127,6 +128,7 @@ function trustRoots() {
     step_credit: rsiStepCreditTrustRootSnapshot(),
     runtime_experience_store: rsiRuntimeExperienceStoreTrustRootSnapshot(),
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
+    runtime_skill_exposure_certificate_ledger: rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot(),
     dormant_skill_retrieval_review: rsiDormantSkillRetrievalReviewTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
@@ -159,6 +161,7 @@ export class RsiRuntimeService {
   #commandAttribution;
   #experienceStore;
   #skillLifecycle;
+  #skillExposureCertificateLedger;
   #skillRouter;
   #skillCuration;
   #skillRevisionFrontier;
@@ -187,7 +190,7 @@ export class RsiRuntimeService {
   #skillReliabilityPassCount = 0;
   #lastSkillReliabilityBindingDigest = null;
 
-  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, clock = () => Date.now() } = {}) {
+  constructor({ source_sha, ledgerPath, attributionPath = null, experiencePath = null, skillLifecyclePath = null, skillExposureCertificateLedgerPath = null, skillRouterPath = null, skillCurationPath = null, skillRevisionFrontierPath = null, skillRevisionIntegrityPath = null, skillReliabilityPath = null, revisionScopePath = null, skillCoalitionPath = null, skillRelationPath = null, metaSkillArchivePath = null, metaProfileQualificationPath = null, metaProfileShadowPath = null, clock = () => Date.now() } = {}) {
     this.#sourceSha = exactSha(source_sha);
     if (typeof clock !== 'function') throw new Error('rsi_runtime_clock_required');
     this.#clock = clock;
@@ -206,6 +209,12 @@ export class RsiRuntimeService {
     const runtimeSkillLifecyclePath = skillLifecyclePath || (ledgerPath ? `${ledgerPath}.skill-lifecycle.json` : null);
     this.#skillLifecycle = new RsiRuntimeSkillLifecycle({
       statePath: runtimeSkillLifecyclePath,
+      source_sha: this.#sourceSha,
+      clock,
+    });
+    const runtimeSkillExposureCertificateLedgerPath = skillExposureCertificateLedgerPath || (ledgerPath ? `${ledgerPath}.skill-exposure-certificates.json` : null);
+    this.#skillExposureCertificateLedger = new RsiRuntimeSkillExposureCertificateLedger({
+      statePath: runtimeSkillExposureCertificateLedgerPath,
       source_sha: this.#sourceSha,
       clock,
     });
@@ -276,6 +285,7 @@ export class RsiRuntimeService {
     await this.#commandAttribution.init();
     await this.#experienceStore.init();
     await this.#skillLifecycle.init();
+    await this.#skillExposureCertificateLedger.init();
     await this.#skillRouter.init();
     await this.#skillCuration.init();
     await this.#skillRevisionFrontier.init();
@@ -298,6 +308,7 @@ export class RsiRuntimeService {
       command_attribution_registry: RSI_COMMAND_ATTRIBUTION_REGISTRY_SCHEMA,
       runtime_experience_store_schema: this.#experienceStore.snapshot().schema,
       runtime_skill_lifecycle_schema: this.#skillLifecycle.snapshot().schema,
+      runtime_skill_exposure_certificate_ledger_schema: this.#skillExposureCertificateLedger.snapshot().schema,
       runtime_skill_router_schema: this.#skillRouter.snapshot().schema,
       runtime_skill_curation_schema: this.#skillCuration.snapshot().schema,
       skill_revision_frontier_schema: this.#skillRevisionFrontier.snapshot().schema,
@@ -1077,6 +1088,34 @@ export class RsiRuntimeService {
     });
   }
 
+  async recordSkillExposureReleaseCertificate({ certificate, verification_args } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillExposureCertificateLedger.add({ certificate, verification_args });
+    const record = result.record;
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_RECORDED', {
+      certificate_id: record.certificate_id,
+      certificate_digest: record.certificate_digest,
+      state: record.state,
+      eligible_for_one_attempt_exposure_release: record.eligible_for_one_attempt_exposure_release,
+      skill_digest: record.skill_digest,
+      library_digest: record.library_digest,
+      current_governance_digest: record.current_governance_digest,
+      next_governance_digest: record.next_governance_digest,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      certificate_is_effect_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  skillExposureReleaseCertificateLedgerSnapshot() {
+    this.#assertRunning();
+    return this.#skillExposureCertificateLedger.snapshot();
+  }
+
   async prepareAnytimeLibraryAdmissionAttempt({
     attempt_id,
     admission_certificate,
@@ -1705,6 +1744,7 @@ export class RsiRuntimeService {
       command_attribution: this.#commandAttribution.snapshot(),
       runtime_experience_store: this.#experienceStore.snapshot(),
       runtime_skill_lifecycle: this.#skillLifecycle.snapshot(),
+      runtime_skill_exposure_certificate_ledger: this.#skillExposureCertificateLedger.snapshot(),
       runtime_skill_router: this.#skillRouter.snapshot(),
       runtime_skill_curation: this.#skillCuration.snapshot(),
       skill_revision_frontier: this.#skillRevisionFrontier.snapshot(),
