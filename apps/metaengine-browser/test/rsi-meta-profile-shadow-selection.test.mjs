@@ -9,7 +9,10 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillLifecycleEvidence,
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiMetaSkillProfile,
   createRsiMetaSkillFastLoopSummary,
@@ -136,8 +139,18 @@ function qualifiedFixture(){
     qualification_id:'shadow.qual.final.1',meta_record:record,shadow_plan:shadowPlan,shadow_result:shadowResult,
     receipts,budget,certificate,confirmation_index:1,
   });
+  const lifecycleEvidence=[createRsiSkillLifecycleEvidence({
+    library,
+    evidence_id:'shadow.profile.analyzer-b.window.1',
+    skill_digest:analyzerB.capsule.skill_digest,
+    window_seq:1,generation_start:1,generation_end:1,
+    invocation_count:1,helpful_count:1,harmful_count:0,neutral_count:0,insufficient_evidence_count:0,
+    router_engagement_count:1,false_positive_injection_count:0,hard_invariant_violation_count:0,
+    measured_net_delta:0.1,authoring_prior:'VERIFIED_DIRECT_SKILL',authoring_provenance_digest:d('7'),
+    evidence_refs:['shadow:analyzer-b:lifecycle:1'],external_evaluator:true,authored_by_candidate:false,
+  })];
   const governance=createRsiSkillLibraryGovernance({
-    governance_id:'shadow.profile.governance.1',library,lifecycle_evidence:[],
+    governance_id:'shadow.profile.governance.1',library,lifecycle_evidence:lifecycleEvidence,
     max_active_skills:8,exploration_slots:8,external_library_owner:true,authored_by_candidate:false,
   });
   return {entries,analyzerA,analyzerB,library,parent,successor,record,qualification,governance};
