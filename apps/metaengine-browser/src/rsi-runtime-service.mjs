@@ -60,7 +60,7 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
-import { createRsiSkillExposureReleasePreview, rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
+import { createRsiSkillExposureReleasePreview, createRsiSkillExposureReleaseCertificate, rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -1125,7 +1125,111 @@ export class RsiRuntimeService {
     return preview;
   }
 
-  async recordSkillExposureReleaseCertificate({ certificate, verification_args } = {}) {
+  async createSkillExposureReleaseCertificate({
+    certificate_id,
+    skill_digest,
+    dormant_retrieval_review,
+    routing_context_manifest_digest,
+    retrieval_profile_digest,
+    shadow_routing_manifest_digest,
+    no_skill_ablation_receipt_digest,
+    coalition_ablation_receipt_digest,
+    memory_poisoning_scan_digest,
+    source_grounding_receipt_digest,
+    bounded_canary_policy_digest,
+    bounded_canary_result_digest,
+    negative_transfer_memory_digest,
+    shadow_context_count,
+    shadow_success_count,
+    shadow_hard_invariants_pass,
+    no_skill_ablation_pass,
+    coalition_ablation_pass,
+    negative_transfer_clear,
+    memory_poisoning_scan_pass,
+    source_grounding_pass,
+    bounded_canary_pass,
+    canary_effect_mode,
+    external_governance_owner_identity_digest,
+    external_shadow_evaluator_identity_digest,
+    external_security_reviewer_identity_digest,
+    external_canary_evaluator_identity_digest,
+    external_governance_owner = false,
+    external_shadow_evaluator = false,
+    external_security_reviewer = false,
+    external_canary_evaluator = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(skill_digest);
+    const releasePreview = createRsiSkillExposureReleasePreview({
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      skill_digest: statePreview.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    const verificationArgs = {
+      certificate_id,
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      release_preview: releasePreview,
+      dormant_retrieval_review,
+      skill_digest: statePreview.skill_digest,
+      routing_context_manifest_digest,
+      retrieval_profile_digest,
+      shadow_routing_manifest_digest,
+      no_skill_ablation_receipt_digest,
+      coalition_ablation_receipt_digest,
+      memory_poisoning_scan_digest,
+      source_grounding_receipt_digest,
+      bounded_canary_policy_digest,
+      bounded_canary_result_digest,
+      negative_transfer_memory_digest,
+      shadow_context_count,
+      shadow_success_count,
+      shadow_hard_invariants_pass,
+      no_skill_ablation_pass,
+      coalition_ablation_pass,
+      negative_transfer_clear,
+      memory_poisoning_scan_pass,
+      source_grounding_pass,
+      bounded_canary_pass,
+      canary_effect_mode,
+      external_governance_owner_identity_digest,
+      external_shadow_evaluator_identity_digest,
+      external_security_reviewer_identity_digest,
+      external_canary_evaluator_identity_digest,
+      external_governance_owner,
+      external_shadow_evaluator,
+      external_security_reviewer,
+      external_canary_evaluator,
+      authored_by_candidate,
+    };
+    const certificate = createRsiSkillExposureReleaseCertificate(verificationArgs);
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED', {
+      certificate_id: certificate.certificate_id,
+      certificate_digest: certificate.certificate_digest,
+      state: certificate.state,
+      skill_digest: certificate.skill_digest,
+      library_digest: certificate.library_digest,
+      current_governance_digest: certificate.current_governance_digest,
+      next_governance_digest: certificate.next_governance_digest,
+      release_preview_digest: certificate.release_preview_digest,
+      admission_provenance_digest: statePreview.admission_provenance.provenance_digest,
+      certificate_is_effect_authority: false,
+      release_effect_authorized: false,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return Object.freeze({ certificate, verification_args: Object.freeze(verificationArgs) });
+  }
+
+  async recordSkillExposureReleaseCertificate({ certificate, dormant_retrieval_review = null, verification_args } = {}) {
     this.#assertRunning();
     if (!certificate?.skill_digest) throw new Error('rsi_runtime_exposure_certificate_skill_required');
     const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(certificate.skill_digest);
@@ -1149,6 +1253,7 @@ export class RsiRuntimeService {
       current_governance: statePreview.current_governance,
       next_governance: statePreview.next_governance,
       release_preview: livePreview,
+      dormant_retrieval_review: dormant_retrieval_review || verification_args?.dormant_retrieval_review,
       skill_digest: statePreview.skill_digest,
     };
     const result = await this.#skillExposureCertificateLedger.add({ certificate, verification_args: boundVerificationArgs });
