@@ -12,6 +12,8 @@ import {
   createRsiLineageStructuralProvenance,
   rsiLineageComponentRootForCapsule,
 } from '../src/rsi-lineage-structural-provenance.mjs';
+import { createRsiGithubAttestationVerificationReceipt } from '../src/rsi-github-attestation-verification-receipt.mjs';
+import { createRsiLineageProvenanceAcceptance } from '../src/rsi-lineage-provenance-acceptance.mjs';
 import {
   createRsiSkillLineageContaminationReview,
   verifyRsiSkillLineageContaminationReview,
@@ -84,7 +86,7 @@ function fixture(){
   return {ancestor,target,descendant,library};
 }
 
-function provenance(fx,skill,label,{forgeImplementation=false}={}){
+function provenance(fx,skill,label,{forgeImplementation=false,omitCrypto=false}={}){
   const builder=digest(label+'-trusted-builder');
   const recipe=digest(label+'-trusted-recipe');
   const materials=digest(label+'-trusted-materials');
@@ -102,7 +104,7 @@ function provenance(fx,skill,label,{forgeImplementation=false}={}){
     external_builder:true,
     authored_by_candidate:false,
   });
-  return createRsiLineageStructuralProvenance({
+  const structural=createRsiLineageStructuralProvenance({
     attestation_id:'lineage.provenance.'+label,
     library:fx.library,
     skill_digest:skill.skill_digest,
@@ -115,12 +117,45 @@ function provenance(fx,skill,label,{forgeImplementation=false}={}){
     external_provenance_owner:true,
     authored_by_candidate:false,
   });
+  const github=omitCrypto?null:createRsiGithubAttestationVerificationReceipt({
+    verification_id:'lineage.github.verify.'+label,
+    subject_digest:digest(label+'-attested-file'),
+    provenance_bundle_digest:digest(label+'-bundle'),
+    structural_attestation_digest:structural.attestation_digest,
+    repository:'PatrickFrome/Compute',
+    signer_workflow:'.github/workflows/rsi-lineage-provenance-attestation.yml',
+    signer_digest:SOURCE,
+    source_ref:'refs/heads/main',
+    source_digest:SOURCE,
+    cert_oidc_issuer:'https://token.actions.githubusercontent.com',
+    predicate_type:'https://github.com/PatrickFrome/Compute/attestations/rsi-lineage-provenance/v1',
+    trusted_root_digest:digest(label+'-trusted-root'),
+    verification_json_digest:digest(label+'-verification-json'),
+    verification_result_count:1,
+    gh_attestation_verify_executed:true,
+    signature_verified:true,
+    signer_identity_verified:true,
+    subject_digest_verified:true,
+    trusted_root_verified:true,
+    deny_self_hosted_runners:true,
+    external_attestation_verifier:true,
+    authored_by_candidate:false,
+  });
+  return createRsiLineageProvenanceAcceptance({
+    acceptance_id:'lineage.provenance.acceptance.'+label,
+    library:fx.library,
+    skill_digest:skill.skill_digest,
+    structural_attestation:structural,
+    github_verification_receipt:github,
+    external_provenance_acceptor:true,
+    authored_by_candidate:false,
+  });
 }
 
 function finding(fx,skill,label,states={},overrides={}){
   return {
     skill_digest:skill.skill_digest,
-    provenance_attestation:provenance(fx,skill,label,{forgeImplementation:states.provenanceFail===true}),
+    provenance_acceptance:provenance(fx,skill,label,{forgeImplementation:states.provenanceFail===true,omitCrypto:states.provenanceCryptoMissing===true}),
     security_negative_transfer_state:states.security||'PASS',
     semantic_consistency_state:states.semantic||'PASS',
     negative_transfer_receipt_digest:digest(label+'-negative-transfer'),
@@ -146,7 +181,7 @@ function reviewArgs(fx,findings){
   };
 }
 
-test('R9 lineage review derives CLEAN only from structural provenance plus PASS security and semantic predicates',()=>{
+test('R9 lineage review derives CLEAN only from structural plus cryptographic provenance and PASS security and semantic predicates',()=>{
   const fx=fixture();
   const review=createRsiSkillLineageContaminationReview(reviewArgs(fx,[
     finding(fx,fx.ancestor,'ancestor'),
@@ -159,8 +194,9 @@ test('R9 lineage review derives CLEAN only from structural provenance plus PASS 
   assert.equal(review.finding_count,3);
   assert.ok(review.findings.every((row)=>row.status==='CLEAN'));
   assert.ok(review.findings.every((row)=>row.provenance_integrity_state==='PASS'));
-  assert.ok(review.findings.every((row)=>row.provenance_state_derived_from_structural_attestation===true));
-  assert.equal(review.structural_provenance_attestation_required,true);
+  assert.ok(review.findings.every((row)=>row.provenance_state_derived_from_structural_and_cryptographic_acceptance===true));
+  assert.equal(review.structural_and_cryptographic_provenance_acceptance_required,true);
+  assert.equal(review.missing_cryptographic_provenance_blocks_clean,true);
   assert.equal(review.candidate_supplied_provenance_state_allowed,false);
   assert.equal(review.candidate_supplied_status_allowed,false);
   assert.equal(review.reviewer_votes_are_not_authority,true);
@@ -188,6 +224,20 @@ test('R9 lineage review derives CONTAMINATED from a structurally mismatched prov
   assert.equal(target.status,'CONTAMINATED');
   assert.equal(review.eligible_for_exposure_precommit,false);
   assert.ok(review.blockers.includes('LINEAGE_CONTAMINATION_DETECTED'));
+});
+
+test('R9 missing cryptographic provenance remains UNKNOWN and blocks clean lineage',()=>{
+  const fx=fixture();
+  const review=createRsiSkillLineageContaminationReview(reviewArgs(fx,[
+    finding(fx,fx.ancestor,'ancestor'),
+    finding(fx,fx.target,'target',{provenanceCryptoMissing:true}),
+    finding(fx,fx.descendant,'descendant'),
+  ]));
+  const target=review.findings.find((row)=>row.skill_digest===fx.target.skill_digest);
+  assert.equal(target.provenance_integrity_state,'UNKNOWN');
+  assert.equal(target.status,'UNKNOWN');
+  assert.equal(review.eligible_for_exposure_precommit,false);
+  assert.ok(review.blockers.includes('LINEAGE_CONTAMINATION_UNKNOWN'));
 });
 
 test('R9 lineage review derives CONTAMINATED and UNKNOWN from security and semantic evidence states',()=>{
@@ -241,7 +291,7 @@ test('R9 keeps provenance security semantic reviewers distinct and disjoint from
     finding(fx,fx.target,'target'),
     finding(fx,fx.descendant,'descendant'),
   ];
-  const targetProvenanceReviewer=clean[1].provenance_attestation.provenance_reviewer_identity_digest;
+  const targetProvenanceReviewer=clean[1].provenance_acceptance.structural_attestation.provenance_reviewer_identity_digest;
 
   assert.throws(
     ()=>createRsiSkillLineageContaminationReview(reviewArgs(fx,[
@@ -267,7 +317,8 @@ test('R9 trust root freezes structural provenance and zero-effect deterministic 
   assert.equal(root.existing_verified_library_reused,true);
   assert.equal(root.second_lineage_graph_allowed,false);
   assert.equal(root.deterministic_predicate_status_derivation_required,true);
-  assert.equal(root.structural_provenance_attestation_required,true);
+  assert.equal(root.structural_and_cryptographic_provenance_acceptance_required,true);
+  assert.equal(root.missing_cryptographic_provenance_blocks_clean,true);
   assert.equal(root.candidate_supplied_provenance_state_allowed,false);
   assert.equal(root.candidate_supplied_status_allowed,false);
   assert.equal(root.reviewer_votes_are_not_authority,true);
