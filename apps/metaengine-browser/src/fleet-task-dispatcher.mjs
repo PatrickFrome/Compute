@@ -2,8 +2,10 @@ import crypto from 'node:crypto';
 import {
   AGENT_PLATFORM_ID,
   isAgentPlatformConversationUrl,
+  normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformComposer,
 } from './browser-agent-platform.mjs';
+import { boundedNavigation } from './bounded-navigation.mjs';
 
 const TASK_ID_RE = /^[A-Za-z0-9._:-]{8,160}$/;
 const AGENT_ID_RE = /^agent_[a-z0-9-]{8,64}$/;
@@ -58,6 +60,38 @@ function isConversationUrl(value) {
   return isAgentPlatformConversationUrl(value);
 }
 
+// D-M4 (live 2026-09-19): an agent with a proven transport conversation is
+// dispatched IN that conversation. The root agent-task composer defeats
+// programmatic text control on the live surface (editing keys ignored, mouse
+// selection defeated, account-synced draft that accumulates on every failed
+// replace - observed as a 28k-char poisoned draft blocking all task
+// delivery), while the CONVERSATION composer is proven to work end-to-end
+// with the key-atomic verified replace (the supervisor wake lane runs on it
+// continuously). If the agent tab is not currently on its proven
+// conversation, ONE bounded navigation returns it before any typing.
+// First dispatches (no proof yet) keep the root flow - a freshly
+// provisioned tab has a clean composer.
+function provenConversationUrlOf(agent) {
+  const url = String(agent?.transport_proof?.conversation_url || '').trim();
+  if (!url) return null;
+  try {
+    return normalizeAgentPlatformConversationUrl(url);
+  } catch {
+    return null;
+  }
+}
+
+function isAtConversationUrl(webContents, conversationUrl) {
+  let current = '';
+  try { current = String(webContents?.getURL?.() || ''); } catch { current = ''; }
+  if (!current) return false;
+  try {
+    return normalizeAgentPlatformConversationUrl(current) === conversationUrl;
+  } catch {
+    return false;
+  }
+}
+
 async function requireLiveBoundView({ fleet, getView, tabId, targetId, unavailableReason, mismatchReason }) {
   const view = getView(tabId);
   const webContents = view?.webContents;
@@ -100,6 +134,26 @@ export async function dispatchFleetTask({
     unavailableReason: 'DISPATCH_TARGET_UNAVAILABLE_PRE_CAPTURE',
     mismatchReason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_PRE_CAPTURE',
   });
+
+  // D-M4: return the agent to its proven task conversation when the tab
+  // drifted off it (post-task bounce to root, restart recovery, manual
+  // navigation). The navigation is bounded and confirmed by URL readback
+  // before any perception or typing runs.
+  const provenConversation = provenConversationUrlOf(agent);
+  if (provenConversation && !isAtConversationUrl(view.webContents, provenConversation)) {
+    const navigation = await boundedNavigation(view.webContents, provenConversation, { timeout_ms: 15000 });
+    if (navigation?.state !== 'CONFIRMED') {
+      throw new Error(`fleet_task_conversation_navigation_failed:${navigation?.state || 'NO_RECEIPT'}:${navigation?.reason || ''}`.slice(0, 240));
+    }
+    view = await requireLiveBoundView({
+      fleet,
+      getView,
+      tabId,
+      targetId,
+      unavailableReason: 'DISPATCH_TARGET_UNAVAILABLE_POST_NAVIGATION',
+      mismatchReason: 'DISPATCH_TARGET_INCARCATION_MISMATCH_POST_NAVIGATION',
+    });
+  }
 
   if (await agentBusyGenerating({ capture: () => captureSemanticFrame(view.webContents) })) {
     throw new Error('fleet_task_agent_busy_generating');

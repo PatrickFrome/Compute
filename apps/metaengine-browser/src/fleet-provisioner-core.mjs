@@ -340,6 +340,14 @@ export class FleetProvisioner {
         tab_id: tabId,
         target_id: targetId,
         generation_epoch: generationEpoch,
+        // D-M4 (live 2026-09-19): the exact conversation URL is retained (the
+        // hash stays the proof binding) so later dispatches can return the
+        // agent tab to its proven task conversation - the conversation
+        // composer is the surface where the key-atomic replace is proven to
+        // work, while the root agent-task composer defeats programmatic
+        // text control (editing keys ignored, mouse selection defeated,
+        // account-synced draft accumulates on every failed replace).
+        conversation_url: conversationUrl,
         conversation_url_sha256: crypto.createHash('sha256').update(conversationUrl, 'utf8').digest('hex'),
         proven_at: iso(this.#clock),
         authority_effect: false,
