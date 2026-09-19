@@ -15,9 +15,17 @@ function hostAllowed(url) {
 function requestKey(details) { return `${Number(details?.webContentsId || 0)}:${Number(details?.id || 0)}`; }
 
 export class TabNetworkActivityRegistry {
-  #clock; #requests = new Map(); #rows = new Map(); #listenersInstalled = false;
+  #clock; #requests = new Map(); #rows = new Map(); #listenersInstalled = false; #completionSink = null;
 
   constructor({ clock = () => Date.now() } = {}) { this.#clock = clock; }
+
+  // Observation plane sink (2026-09-19): every completed/failed tracked request
+  // is mirrored (metadata only) into the agent observation plane ring buffer so
+  // TAB_TELEMETRY can expose Playwright-MCP-style per-tab network observation.
+  // The registry snapshot itself continues to carry counters only.
+  setCompletionSink(fn) {
+    this.#completionSink = typeof fn === 'function' ? fn : null;
+  }
 
   #row(webContentsId) {
     const id = Number(webContentsId || 0);
@@ -50,7 +58,13 @@ export class TabNetworkActivityRegistry {
     const row = this.#row(details.webContentsId);
     const key = requestKey(details);
     if (!this.#requests.has(key)) {
-      this.#requests.set(key, { webcontents_id: row.webcontents_id, started_ms: this.#clock() });
+      this.#requests.set(key, {
+        webcontents_id: row.webcontents_id,
+        started_ms: this.#clock(),
+        method: String(details?.method || '').slice(0, 16),
+        url: String(details?.url || '').slice(0, 300),
+        resource_type: String(details?.resourceType || '').slice(0, 24),
+      });
       row.inflight_tracked += 1;
     }
     row.last_request_started_at = nowIso(this.#clock);
@@ -72,6 +86,19 @@ export class TabNetworkActivityRegistry {
       row.last_request_completed_at = row.last_activity_at;
       row.completed_count += 1;
     }
+    if (this.#completionSink) {
+      try {
+        this.#completionSink({
+          webContentsId: existing.webcontents_id,
+          method: existing.method || null,
+          url: existing.url || '',
+          resource_type: existing.resource_type || null,
+          status: Number.isSafeInteger(Number(details?.statusCode)) ? Number(details.statusCode) : null,
+          duration_ms: Math.max(0, this.#clock() - Number(existing.started_ms || 0)),
+          error: isError === true,
+        });
+      } catch { /* sink must never break the registry */ }
+    }
   }
 
   onCompleted(details) { this.#finish(details, false); }
@@ -80,7 +107,7 @@ export class TabNetworkActivityRegistry {
   attach(webRequest) {
     if (this.#listenersInstalled) return this.snapshot();
     if (!webRequest?.onBeforeRequest || !webRequest?.onCompleted || !webRequest?.onErrorOccurred) throw new Error('tab_network_webrequest_required');
-    const filter = { urls: ['https://chatgpt.com/*','https://*.chatgpt.com/*','https://openai.com/*','https://*.openai.com/*'] };
+    const filter = { urls: ['https://chat.z.ai/*','https://z.ai/*','https://chatgpt.com/*','https://*.chatgpt.com/*','https://openai.com/*','https://*.openai.com/*'] };
     webRequest.onBeforeRequest(filter, (details, callback) => {
       this.onBeforeRequest(details);
       if (typeof callback === 'function') callback({ cancel: false });

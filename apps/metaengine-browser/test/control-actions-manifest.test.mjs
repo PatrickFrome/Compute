@@ -14,7 +14,9 @@ import { classifyNativeSupervisorCommand } from '../src/native-supervisor-comman
 const exactTab = 'tab_00000000-0000-4000-8000-000000000001';
 
 test('canonical control action manifest is unique, bounded and digest-addressed', () => {
-  assert.equal(CONTROL_ACTION_MANIFEST.length, 46);
+  // 2026-09-19 observation/action plane: TAB_TELEMETRY, SYSTEM_TELEMETRY,
+  // READ_TRANSCRIPT (READ_ONLY) + PRESS_KEY (TAB_MUTATION) joined the canon.
+  assert.equal(CONTROL_ACTION_MANIFEST.length, 50);
   assert.equal(new Set(CONTROL_ACTION_MANIFEST.map((row) => row.action)).size, CONTROL_ACTION_MANIFEST.length);
   assert.match(CONTROL_ACTION_MANIFEST_REVISION, /^sha256:[0-9a-f]{64}$/);
   for (const row of CONTROL_ACTION_MANIFEST) {

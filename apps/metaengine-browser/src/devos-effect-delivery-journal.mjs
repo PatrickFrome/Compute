@@ -209,6 +209,23 @@ export class DevOsEffectDeliveryJournal {
     return structuredClone(this.#entries.find((entry) => entry.effect_key === key) || null);
   }
 
+  // Lease-scope lookup (2026-09-19 telemetry prompts): a task prompt now embeds
+  // a bounded live telemetry digest, so a process restart can render a
+  // different prompt for the SAME lease — the exact-key find misses and the
+  // drift fence would turn a recoverable reconcile into a hard ambiguity.
+  // This lookup returns the most recent entry for the lease regardless of the
+  // prompt hash so the dispatcher reconciles (never re-executes) any prior
+  // physical effect attempt for that lease.
+  findByLease(binding) {
+    this.#assertInitialized();
+    const b = normalizeBinding(binding);
+    const lk = leaseKey(b);
+    const matches = this.#entries
+      .filter((entry) => leaseKey(entry) === lk)
+      .sort((a, c) => Date.parse(c.updated_at || 0) - Date.parse(a.updated_at || 0) || c.effect_key.localeCompare(a.effect_key));
+    return matches.length ? structuredClone(matches[0]) : null;
+  }
+
   recoveryCandidates(limit = 1) {
     this.#assertInitialized();
     const boundedLimit = Math.max(1, Math.min(16, Number(limit) || 1));

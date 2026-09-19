@@ -12,7 +12,9 @@ import { createFleetTargetLocalObserver } from './fleet-target-local-observer.mj
 import { retireEligibleFleetAgents } from './fleet-elastic-governor.mjs';
 import { HumanTakeoverController } from './human-takeover.mjs';
 import { OwnerSafetyGateRegistry, bindGlobalOwnerSafetyGateRegistry } from './owner-safety-gate-registry.mjs';
-import { captureSemanticFrame, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import { captureSemanticFrame, captureTranscript, captureViewThumbnail, executeSemanticCommand } from './native-browser-control.mjs';
+import { AgentObservationPlane } from './agent-observation-plane.mjs';
+import { TabNetworkActivityRegistry } from './tab-network-activity.mjs';
 import { NativeSupervisorClient } from './native-supervisor-client.mjs';
 import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
@@ -63,6 +65,12 @@ let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
 const devosPresentationFocus = createDevOSPresentationFocusState();
 const devosSessionLayouts = createDevOSSessionLayoutRegistry({ max_sessions: 128 });
+// Agent observation plane (2026-09-19): bounded per-tab console/network/health
+// ring buffers plus the single-trace SYSTEM_TELEMETRY digest — the read lane
+// behind TAB_TELEMETRY / SYSTEM_TELEMETRY and the agent prompt telemetry.
+const agentObservationPlane = new AgentObservationPlane();
+const tabNetworkActivity = new TabNetworkActivityRegistry();
+tabNetworkActivity.setCompletionSink((entry) => agentObservationPlane.recordNetwork(entry.webContentsId, entry));
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let devosSurfaceGridPlan = null;
@@ -127,6 +135,12 @@ function configureUserSession() {
     session: userSession,
     rootPath: path.join(app.getPath('downloads'), 'METAENGINE'),
   });
+  try {
+    // Per-tab network observation (metadata only) feeding the agent
+    // observation plane ring buffers and the session monitor's
+    // network_active liveness signal.
+    tabNetworkActivity.attach(userSession.webRequest);
+  } catch {}
   userSessionConfigured = true;
 }
 
@@ -465,6 +479,7 @@ function invalidatePerception(tabId = null) {
 
 function wireRemoteView(tab, view) {
   installHumanTakeoverAccelerator(view.webContents);
+  agentObservationPlane.observe(view.webContents);
   view.webContents.setWindowOpenHandler(({ url }) => {
     const d = newWindowDecision(url);
     if (d.allow) setImmediate(() => createTab(d.normalized_url, { select: true }).catch(() => {}));
@@ -834,6 +849,7 @@ async function nativeSupervisorState() {
       developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null,
     ),
     fleet: fleet?.snapshot() || null,
+    tab_network: tabNetworkActivity.snapshot(),
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     compute,
     perception,
@@ -873,6 +889,29 @@ async function executeNativeSupervisorCommand(command) {
     ? assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views })
     : targetViewForSupervisorRead(command);
   if (action === 'CAPTURE') return { ...(await captureSemanticFrame(view.webContents)), tab_id: tab.tab_id };
+  if (action === 'READ_TRANSCRIPT') {
+    return {
+      ...(await captureTranscript(view.webContents, {
+        offset: payload?.offset,
+        max_chars: payload?.max_chars,
+      })),
+      tab_id: tab.tab_id,
+    };
+  }
+  if (action === 'TAB_TELEMETRY') {
+    return {
+      ...agentObservationPlane.telemetryFor(view.webContents.id, {
+        console_limit: payload?.console_limit,
+        network_limit: payload?.network_limit,
+      }),
+      tab_id: tab.tab_id,
+      network_activity: tabNetworkActivity.get(view.webContents.id),
+    };
+  }
+  if (action === 'SYSTEM_TELEMETRY') {
+    const state = await nativeSupervisorState();
+    return agentObservationPlane.systemTelemetry(state);
+  }
   if (action === 'CAPTURE_VIEW') {
     const surfaceAttached = Array.isArray(windowRef?.contentView?.children)
       && windowRef.contentView.children.includes(view)
@@ -882,7 +921,7 @@ async function executeNativeSupervisorCommand(command) {
       tab_id: tab.tab_id,
     };
   }
-  if (['STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK'].includes(action)) {
+  if (['STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK','PRESS_KEY'].includes(action)) {
     assertExactNativeSupervisorMutationTargetCurrent(exactMutationTarget, { views });
     const result = await executeSemanticCommand(view.webContents, command);
     invalidatePerception(tab.tab_id);

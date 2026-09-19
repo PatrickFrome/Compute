@@ -127,7 +127,9 @@ test('lost DB receipt survives restart and redelivers receipt without replaying 
 
   const persistedAfterLoss = new DevOsEffectDeliveryJournal({ statePath });
   await persistedAfterLoss.init();
-  assert.equal(persistedAfterLoss.find(journalBinding()).state, 'DELIVERY_PENDING');
+  // Telemetry prompts (2026-09-19) make the stored prompt hash cycle-derived,
+  // so external readbacks use the lease-scope lookup.
+  assert.equal(persistedAfterLoss.findByLease(journalBinding()).state, 'DELIVERY_PENDING');
 
   const secondJournal = new DevOsEffectDeliveryJournal({ statePath });
   const secondCalls = [];
@@ -162,7 +164,7 @@ test('lost DB receipt survives restart and redelivers receipt without replaying 
 
   const confirmed = new DevOsEffectDeliveryJournal({ statePath });
   await confirmed.init();
-  assert.equal(confirmed.find(journalBinding()).state, 'CONFIRMED');
+  assert.equal(confirmed.findByLease(journalBinding()).state, 'CONFIRMED');
 });
 
 test('restart from EXECUTION_STARTED becomes AMBIGUOUS and never types or clicks again', async () => {

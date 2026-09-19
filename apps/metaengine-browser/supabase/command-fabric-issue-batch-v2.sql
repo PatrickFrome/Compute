@@ -16,7 +16,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  v_expected_manifest_revision constant text := 'sha256:bf19e8d035bdd910982c61e50e53993a3bea945ab2c7396b6d7aa9dd0b383bd5';
+  v_expected_manifest_revision constant text := 'sha256:e7e47b9031563954512fe77ec91a967fb46860b5fc3c652b96e9d861af6339ac';
   v_item jsonb;
   v_action text;
   v_result jsonb;
@@ -41,10 +41,10 @@ begin
     end if;
     v_action := upper(btrim(coalesce(v_item->>'action', '')));
     if v_action not in (
-      'POLL','CAPTURE','CAPTURE_VIEW','DOWNLOAD_STATUS',
+      'POLL','CAPTURE','CAPTURE_VIEW','TAB_TELEMETRY','SYSTEM_TELEMETRY','READ_TRANSCRIPT','DOWNLOAD_STATUS',
       'DEV_PLANE_STATUS','DEV_PLANE_HEALTH','DEV_PLANE_CAPABILITIES','DEV_PLANE_PROCESS_METRICS','DEV_PLANE_REPO_HEAD',
       'SELF_UPDATE_STATUS','STOP_GENERATION','SCROLL','SEMANTIC_FOCUS','SEMANTIC_TYPE','TYPED_CLICK',
-      'SELECT_TAB','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD',
+      'SELECT_TAB','PRESS_KEY','CLOSE_TAB','NAVIGATE','BACK','FORWARD','RELOAD',
       'ARM','DISARM','SET_SUPERVISOR_MODE','SET_MODE','NEW_TAB',
       'FLEET_RECONCILE','FLEET_SET_PROFILE','DOWNLOAD_FILE','DOWNLOAD_CANCEL','SELF_UPDATE_CHECK','SELF_UPDATE_APPLY'
     ) then

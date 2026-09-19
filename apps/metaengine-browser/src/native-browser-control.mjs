@@ -27,6 +27,25 @@ import { isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-a
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
+// PRESS_KEY (2026-09-19 action-variability directive): geometry-free single
+// key dispatch to a tab. Whitelisted non-printing keys only — printing keys
+// and modifier combinations stay on the semantic type lane so every text
+// effect keeps its exact composer/ref proof contract.
+const SAFE_PRESS_KEYS = new Map([
+  ['Escape', { code: 'Escape', keyCode: 27 }],
+  ['Tab', { code: 'Tab', keyCode: 9 }],
+  ['Enter', { code: 'Enter', keyCode: 13 }],
+  ['ArrowUp', { code: 'ArrowUp', keyCode: 38 }],
+  ['ArrowDown', { code: 'ArrowDown', keyCode: 40 }],
+  ['ArrowLeft', { code: 'ArrowLeft', keyCode: 37 }],
+  ['ArrowRight', { code: 'ArrowRight', keyCode: 39 }],
+  ['Home', { code: 'Home', keyCode: 36 }],
+  ['End', { code: 'End', keyCode: 35 }],
+  ['PageUp', { code: 'PageUp', keyCode: 33 }],
+  ['PageDown', { code: 'PageDown', keyCode: 34 }],
+  ['Delete', { code: 'Delete', keyCode: 46 }],
+  ['Backspace', { code: 'Backspace', keyCode: 8 }],
+]);
 const CHATGPT_COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const CDP_SUBMIT_OUTCOME_METHODS = new Set([
   'Accessibility.nodesUpdated',
@@ -157,6 +176,52 @@ function textExcerpt(nodes = []) {
     if (parts.join('\n').length >= 12000) break;
   }
   return clip(parts.join('\n'), 12000);
+}
+
+// READ_TRANSCRIPT (2026-09-19 observability directive): paged, bounded text
+// read of a conversation surface. Same AX-tree text projection as the frame
+// excerpt, but with an explicit offset and a larger ceiling so agents and
+// supervisors can read long GLM conversations the 12k frame excerpt cannot
+// hold. Read-only: no semantic refs, no input values, no authority.
+export async function captureTranscript(webContents, { offset = 0, max_chars = 48000 } = {}) {
+  const identity = nativeBrowserTargetIdentity(webContents);
+  const boundedOffset = Math.max(0, Math.min(240000, Number(offset) || 0));
+  const boundedMax = Math.max(1000, Math.min(60000, Number(max_chars) || 48000));
+  return withDebugger(webContents, async (dbg) => {
+    const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
+    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+    const parts = [];
+    let total = 0;
+    for (const node of nodes) {
+      if (node?.ignored === true) continue;
+      const role = axValue(node, 'role').toLowerCase();
+      const name = axValue(node, 'name');
+      if (!name) continue;
+      if (['statictext','heading','paragraph','listitem','article','status','alert'].includes(role)) {
+        parts.push(name);
+        total += name.length + 1;
+        if (total >= boundedOffset + boundedMax) break;
+      }
+    }
+    const full = parts.join('\n');
+    const page = full.slice(boundedOffset, boundedOffset + boundedMax);
+    return {
+      schema: 'metaengine.native-browser.transcript.v1',
+      captured_at: new Date().toISOString(),
+      process_incarnation_id: identity.process_incarnation_id,
+      target_id: identity.target_id,
+      url: clip(webContents.getURL?.() || '', 1200),
+      title: clip(webContents.getTitle?.() || '', 240),
+      offset: boundedOffset,
+      max_chars: boundedMax,
+      total_chars: Math.min(full.length, 240000),
+      has_more: boundedOffset + page.length < full.length,
+      text: page,
+      semantic_refs_issued: 0,
+      page_data_authority: false,
+      authority_effect: false,
+    };
+  });
 }
 
 function isChatGptConversationUrl(value) {
@@ -559,6 +624,33 @@ export async function executeSemanticCommand(webContents, command) {
     const role = command?.payload?.role;
     const name = command?.payload?.accessible_name;
     const semanticRef = command?.payload?.semantic_ref || null;
+
+    if (action === 'PRESS_KEY') {
+      const keyName = String(command?.payload?.key || '');
+      const mapped = SAFE_PRESS_KEYS.get(keyName);
+      if (!mapped) throw new Error('native_press_key_invalid');
+      // Optional focus target: without a semantic_ref the key goes to the
+      // focused element of the tab (menus, modals, list navigation); with a
+      // ref the element is focused first — both paths keep the same
+      // effect-runtime binding proof as every other input mutation.
+      let keyTarget = null;
+      if (semanticRef) {
+        keyTarget = await exactTarget(webContents, dbg, role, name, semanticRef);
+        assertCurrentSemanticRef(webContents, dbg, semanticRef);
+        await dbg.sendCommand('DOM.focus', { backendNodeId: keyTarget.backend_node_id });
+      }
+      assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+      await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: keyName, code: mapped.code, windowsVirtualKeyCode: mapped.keyCode });
+      await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code: mapped.code, windowsVirtualKeyCode: mapped.keyCode });
+      return {
+        action,
+        key: keyName,
+        target: keyTarget,
+        mouse_geometry_required: false,
+        authority_effect: true,
+      };
+    }
+
     if (!semanticRef) throw new Error('native_semantic_ref_required');
     const target = await exactTarget(webContents, dbg, role, name, semanticRef);
 
