@@ -136,7 +136,7 @@ test('reliability tiers derive HOT WARM COLD and QUARANTINED without deleting me
   assert.equal(byId.get('case.reliability.1').tier_reason,'REPEATED_HELPFUL_EVIDENCE');
 
   assert.equal(byId.get('case.reliability.2').tier,'QUARANTINED');
-  assert.equal(byId.get('case.reliability.2').tier_reason,'HARMFUL_EVIDENCE_DOMINANT');
+  assert.equal(byId.get('case.reliability.2').tier_reason,'HARMFUL_HISTORY_REQUIRES_REHABILITATION_MARGIN');
   assert.equal(byId.get('case.reliability.2').candidate_guidance_allowed,false);
   assert.equal(byId.get('case.reliability.2').remains_queryable,true);
   assert.equal(byId.get('case.reliability.2').history_deleted,false);
@@ -248,6 +248,12 @@ test('memory reliability trust root fixes thresholds and preserves immutable his
   assert.equal(root.policy.cross_context_weight,0.25);
   assert.equal(root.conflicted_utility_never_hot,true);
   assert.equal(root.repeated_harmful_evidence_can_quarantine,true);
+  assert.equal(root.quarantine_exit_requires_exact_helpful_evidence,true);
+  assert.equal(root.rehabilitation_exact_helpful_min,2);
+  assert.equal(root.rehabilitation_helpful_margin,1);
+  assert.equal(root.balancing_conflicting_feedback_is_not_rehabilitation,true);
+  assert.equal(root.cross_context_helpful_evidence_alone_cannot_rehabilitate,true);
+  assert.equal(root.rehabilitated_memory_returns_cold_not_hot,true);
   assert.equal(root.quarantined_memory_remains_queryable,true);
   assert.equal(root.quarantine_deletes_history,false);
   assert.equal(root.quarantine_is_retrieval_filter_not_authority,true);
@@ -256,4 +262,90 @@ test('memory reliability trust root fixes thresholds and preserves immutable his
   assert.equal(root.candidate_can_set_thresholds,false);
   assert.equal(root.candidate_can_delete_memory,false);
   assert.equal(root.execution_authority,false);
+});
+
+
+test('balancing helpful feedback does not silently rehabilitate a previously harmful memory',()=>{
+  const base=graph();
+  const q=query();
+  const balanced=createRsiExperienceGraphSnapshot({
+    graph_id:'rsi.reliability.balanced-harm',
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:base.task_anchors,
+    cases:base.cases,
+    similarity_edges:[],
+    correction_edges:base.correction_edges,
+    utility_receipts:[
+      ...base.utility_receipts,
+      utility(40,'case.reliability.2','HELPFUL'),
+      utility(41,'case.reliability.2','HELPFUL'),
+    ],
+  });
+  const retrieval=retrieveRsiExperienceGraph({snapshot:balanced,query:q});
+  const projection=createRsiMemoryReliabilityProjection({experience_graph_snapshot:balanced,query:q,retrieval});
+  const row=projection.rows.find(item=>item.case_id==='case.reliability.2');
+  assert.equal(row.utility.exact_harmful,2);
+  assert.equal(row.utility.exact_helpful,2);
+  assert.equal(row.tier,'QUARANTINED');
+  assert.equal(row.severe_harm_history,true);
+  assert.equal(row.rehabilitation_evidence_satisfied,false);
+  assert.equal(row.candidate_guidance_allowed,false);
+});
+
+test('rehabilitation requires multiple exact helpful receipts and a strict positive evidence margin',()=>{
+  const base=graph();
+  const q=query();
+  const rehabilitated=createRsiExperienceGraphSnapshot({
+    graph_id:'rsi.reliability.rehabilitated-harm',
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:base.task_anchors,
+    cases:base.cases,
+    similarity_edges:[],
+    correction_edges:base.correction_edges,
+    utility_receipts:[
+      ...base.utility_receipts,
+      utility(50,'case.reliability.2','HELPFUL'),
+      utility(51,'case.reliability.2','HELPFUL'),
+      utility(52,'case.reliability.2','HELPFUL'),
+    ],
+  });
+  const retrieval=retrieveRsiExperienceGraph({snapshot:rehabilitated,query:q});
+  const projection=createRsiMemoryReliabilityProjection({experience_graph_snapshot:rehabilitated,query:q,retrieval});
+  const row=projection.rows.find(item=>item.case_id==='case.reliability.2');
+  assert.equal(row.utility.exact_harmful,2);
+  assert.equal(row.utility.exact_helpful,3);
+  assert.equal(row.tier,'COLD');
+  assert.equal(row.tier_reason,'EXTERNALLY_REHABILITATED_HARMFUL_HISTORY');
+  assert.equal(row.severe_harm_history,true);
+  assert.equal(row.rehabilitation_evidence_satisfied,true);
+  assert.equal(row.candidate_guidance_allowed,true);
+  assert.equal(row.remains_queryable,true);
+});
+
+test('cross-context helpful evidence alone cannot rehabilitate severe harmful history',()=>{
+  const base=graph();
+  const q=query();
+  const receipts=[...base.utility_receipts];
+  for(let i=0;i<16;i+=1){
+    receipts.push(utility(60+i,'case.reliability.2','HELPFUL',d('e')));
+  }
+  const snapshot=createRsiExperienceGraphSnapshot({
+    graph_id:'rsi.reliability.cross-help-rehab',
+    epoch:1,
+    predecessor_snapshot_digest:null,
+    task_anchors:base.task_anchors,
+    cases:base.cases,
+    similarity_edges:[],
+    correction_edges:base.correction_edges,
+    utility_receipts:receipts,
+  });
+  const retrieval=retrieveRsiExperienceGraph({snapshot,query:q});
+  const projection=createRsiMemoryReliabilityProjection({experience_graph_snapshot:snapshot,query:q,retrieval});
+  const row=projection.rows.find(item=>item.case_id==='case.reliability.2');
+  assert.ok(row.utility.weighted_helpful>row.utility.weighted_harmful);
+  assert.equal(row.utility.exact_helpful,0);
+  assert.equal(row.tier,'QUARANTINED');
+  assert.equal(row.rehabilitation_evidence_satisfied,false);
 });
