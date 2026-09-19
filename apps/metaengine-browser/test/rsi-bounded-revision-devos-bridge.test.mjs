@@ -2838,19 +2838,62 @@ test('Phase32 hardened consumer handoff rejects reuse of Phase31 transfer eviden
 test('Phase32 hardened consumer identity detects generation and epoch identity drift',()=>{
   const fx=phase32Fixture('identity-drift');
   assert.throws(()=>phase32Fixture('identity-drift-generation',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationSeq:fx.proposal.evaluator_generation_seq+1,
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-anchor',{
-    consumerGeneration:fx.proposal.evaluator_generation_digest,
     consumerGenerationAnchor:labelDigest('phase32-wrong-generation-anchor'),
   }),/evaluator_generation_identity_drift/);
   assert.throws(()=>phase32Fixture('identity-drift-epoch',{
-    consumerEpochDigest:fx.proposal.evaluation_epoch_digest,
     consumerEpochSeq:fx.proposal.evaluation_epoch_seq+1,
   }),/evaluation_epoch_identity_drift/);
 });
 
+
+
+test('Phase32 metamorphic identity boundary separates legitimate cross-generation revalidation from same-generation corruption',()=>{
+  const fx=phase32Fixture('identity-metamorphic');
+  const rebuild=(suffix,overrides={})=>createRsiValidatedKnowledgeConsumerHandoff({
+    handoff_id:`phase32.identity.metamorphic.${suffix}`,
+    proposal:fx.proposal,validations:fx.validations,admission:fx.admission,source_rows:fx.rows,
+    consumer_model_family:fx.handoff.consumer_model_family,
+    consumer_environment_family:fx.handoff.consumer_environment_family,
+    consumer_context_digest:fx.handoff.consumer_context_digest,
+    consumer_task_set_digest:fx.handoff.consumer_task_set_digest,
+    consumer_harness_digest:fx.handoff.consumer_harness_digest,
+    consumer_retrieval_profile_digest:fx.handoff.consumer_retrieval_profile_digest,
+    consumer_evaluator_root_digest:fx.handoff.consumer_evaluator_root_digest,
+    consumer_evaluator_generation_digest:fx.handoff.consumer_evaluator_generation_digest,
+    consumer_evaluator_generation_seq:fx.handoff.consumer_evaluator_generation_seq,
+    consumer_evaluator_generation_history_anchor_digest:fx.handoff.consumer_evaluator_generation_history_anchor_digest,
+    consumer_evaluation_epoch_seq:fx.handoff.consumer_evaluation_epoch_seq,
+    consumer_evaluation_epoch_digest:fx.handoff.consumer_evaluation_epoch_digest,
+    consumer_holdout_digest:fx.handoff.consumer_holdout_digest,
+    matched_reference_plan_digest:fx.handoff.matched_reference_plan_digest,
+    local_revalidation_protocol_digest:fx.handoff.local_revalidation_protocol_digest,
+    current_consumer_plane_digest:fx.handoff.current_consumer_plane_digest,
+    current_verified_library_digest:fx.handoff.current_verified_library_digest,
+    external_consumer_router:true,authored_by_candidate:false,
+    ...overrides,
+  });
+
+  const crossGeneration=rebuild('cross-generation',{
+    consumer_evaluator_generation_digest:labelDigest('phase32-metamorphic-new-generation'),
+  });
+  assert.notEqual(crossGeneration.consumer_evaluator_generation_digest,fx.handoff.consumer_evaluator_generation_digest);
+  assert.equal(crossGeneration.cross_generation_revalidation_required,true);
+  assert.equal(crossGeneration.source_generation_verdict_inherited,false);
+  assert.equal(crossGeneration.state,'ELIGIBLE_FOR_CONSUMER_LOCAL_REVALIDATION');
+
+  assert.throws(()=>rebuild('same-generation-seq-drift',{
+    consumer_evaluator_generation_seq:fx.handoff.consumer_evaluator_generation_seq+1,
+  }),/evaluator_generation_identity_drift/);
+  assert.throws(()=>rebuild('same-generation-anchor-drift',{
+    consumer_evaluator_generation_history_anchor_digest:labelDigest('phase32-metamorphic-wrong-anchor'),
+  }),/evaluator_generation_identity_drift/);
+  assert.throws(()=>rebuild('same-epoch-seq-drift',{
+    consumer_evaluation_epoch_seq:fx.handoff.consumer_evaluation_epoch_seq+1,
+  }),/evaluation_epoch_identity_drift/);
+});
 
 test('Phase32 consumer state, retrieval profile and library drift change the exact local evaluation contract',()=>{
   const fx=phase32Fixture('consumer-state-contract');
