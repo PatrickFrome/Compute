@@ -120,6 +120,21 @@ function verifyAdmissionReadback({ admission_attempt, successor_library, current
   exactDigest(admission_attempt.proposed_skill_digest, 'proposed_skill');
   exactDigest(admission_attempt.proposed_skill_evidence_digest, 'proposed_skill_evidence');
   exactDigest(admission_attempt.effect_executor_identity_digest, 'effect_executor');
+  const certificate = admission_attempt.admission_certificate;
+  if (!certificate || typeof certificate !== 'object') {
+    throw new Error('rsi_dormant_review_admission_certificate_missing');
+  }
+  const consumerTaskSetDigest = exactDigest(certificate.consumer_task_set_digest, 'consumer_task_set');
+  const retrievalProfileDigest = exactDigest(certificate.consumer_retrieval_profile_digest, 'consumer_retrieval_profile');
+  const consumerPlaneDigest = exactDigest(certificate.current_consumer_plane_digest, 'current_consumer_plane');
+  const consumerEvaluationContractDigest = exactDigest(certificate.consumer_evaluation_contract_digest, 'consumer_evaluation_contract');
+  if (
+    certificate.proposed_skill_digest !== admission_attempt.proposed_skill_digest
+    || certificate.proposed_skill_evidence_digest !== admission_attempt.proposed_skill_evidence_digest
+    || certificate.proposed_successor_library_digest !== admission_attempt.successor_library_digest
+  ) {
+    throw new Error('rsi_dormant_review_admission_certificate_binding_mismatch');
+  }
 
   if (
     admission_attempt.current_state !== 'CONFIRMED_APPLIED_STORAGE_ONLY'
@@ -159,7 +174,16 @@ function verifyAdmissionReadback({ admission_attempt, successor_library, current
     throw new Error('rsi_dormant_review_exposure_hold_required');
   }
 
-  return Object.freeze({ admission_attempt, library, governance, skill });
+  return Object.freeze({
+    admission_attempt,
+    library,
+    governance,
+    skill,
+    consumer_task_set_digest: consumerTaskSetDigest,
+    consumer_retrieval_profile_digest: retrievalProfileDigest,
+    current_consumer_plane_digest: consumerPlaneDigest,
+    consumer_evaluation_contract_digest: consumerEvaluationContractDigest,
+  });
 }
 
 function classify({
@@ -309,6 +333,10 @@ export function createRsiDormantSkillRetrievalReview({
     governance_digest: storage.governance.governance_digest,
     skill_digest: storage.skill.skill_digest,
     skill_evidence_digest: storage.admission_attempt.proposed_skill_evidence_digest,
+    consumer_task_set_digest: storage.consumer_task_set_digest,
+    consumer_retrieval_profile_digest: storage.consumer_retrieval_profile_digest,
+    current_consumer_plane_digest: storage.current_consumer_plane_digest,
+    consumer_evaluation_contract_digest: storage.consumer_evaluation_contract_digest,
     post_append_evaluation_epoch_digest: evidenceRoots[0],
     post_append_holdout_digest: evidenceRoots[1],
     post_append_evaluator_root_digest: evidenceRoots[2],
