@@ -306,7 +306,7 @@ test('R10 runtime exposure preview is zero-effect and converts the hold only in 
     assert.equal(preview.current_governance.entries[0].state,'DORMANT_CAP');
     assert.equal(preview.next_governance.entries[0].state,'EXPLORATION_ACTIVE');
     assert.equal(preview.next_governance.entries[0].exploration_only_hold,true);
-    assert.deepEqual(preview.next_governance.admission_exposure_hold_skill_digests,[]);
+    assert.equal(preview.next_governance.admission_exposure_hold_skill_digests,undefined);
     assert.deepEqual(preview.next_governance.exploration_only_skill_digests,[skill.capsule.skill_digest]);
 
     const after=store.snapshot();
