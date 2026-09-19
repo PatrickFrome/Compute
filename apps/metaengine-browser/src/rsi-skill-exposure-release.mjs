@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { verifyRsiVerifiedSkillLibrary } from './rsi-verified-skill-library.mjs';
 import { verifyRsiSkillLibraryGovernance } from './rsi-skill-library-governance.mjs';
+import { verifyRsiFreshSourceIdentityConvergenceCertificate } from './rsi-source-identity-freshness.mjs';
 
 export const RSI_SKILL_EXPOSURE_RELEASE_PREVIEW_SCHEMA='metaengine.rsi.skill-exposure-release-preview.v1';
 export const RSI_SKILL_EXPOSURE_RELEASE_CERTIFICATE_SCHEMA='metaengine.rsi.skill-exposure-release-certificate.v1';
@@ -126,6 +127,7 @@ export function createRsiSkillExposureReleaseCertificate({
   next_governance,
   release_preview,
   dormant_retrieval_review,
+  fresh_source_identity_certificate,
   skill_digest,
   routing_context_manifest_digest,
   retrieval_profile_digest,
@@ -165,6 +167,12 @@ export function createRsiSkillExposureReleaseCertificate({
   const dormantRetrievalReviewDigest=verifyDormantRetrievalReview(dormant_retrieval_review,{
     library:checkedLibrary,currentGovernance:checkedGovernance,skillDigest,
   });
+  const freshSourceIdentity=verifyRsiFreshSourceIdentityConvergenceCertificate(fresh_source_identity_certificate);
+  if(freshSourceIdentity.state!=='FRESH_SOURCE_IDENTITY_CONVERGED'
+    ||freshSourceIdentity.fresh_source_identity_converged!==true
+    ||freshSourceIdentity.eligible_for_external_admission_review!==true){
+    throw new Error('rsi_exposure_release_fresh_source_identity_required');
+  }
   if(external_governance_owner!==true||external_shadow_evaluator!==true||external_security_reviewer!==true||external_canary_evaluator!==true||authored_by_candidate!==false)throw new Error('rsi_exposure_release_external_ownership_required');
 
   const identities=[
@@ -209,7 +217,8 @@ export function createRsiSkillExposureReleaseCertificate({
     certificate_id:id(certificate_id,'certificate_id'),
     library_id:checkedLibrary.library_id,library_digest:checkedLibrary.library_digest,
     current_governance_digest:checkedGovernance.governance_digest,next_governance_digest:checkedNextGovernance.governance_digest,
-    release_preview_digest:preview.preview_digest,dormant_retrieval_review_digest:dormantRetrievalReviewDigest,skill_digest:skillDigest,
+    release_preview_digest:preview.preview_digest,dormant_retrieval_review_digest:dormantRetrievalReviewDigest,
+    fresh_source_identity_certificate_digest:freshSourceIdentity.certificate_digest,skill_digest:skillDigest,
     release_mode:RELEASE_MODE,
     routing_context_manifest_digest:evidenceRoots[0],retrieval_profile_digest:evidenceRoots[1],
     shadow_routing_manifest_digest:evidenceRoots[2],no_skill_ablation_receipt_digest:evidenceRoots[3],
@@ -231,6 +240,7 @@ export function createRsiSkillExposureReleaseCertificate({
     authored_by_candidate:false,
     held_skill_required:true,current_state_must_be_dormant:true,next_state_must_be_exploration_active:true,
     fresh_dormant_retrieval_review_required:true,retrieval_review_can_authorize_release:false,
+    fresh_source_identity_required:true,source_identity_drift_blocks_release:true,runtime_process_incarnation_bound:true,
     only_target_governance_state_may_change:true,automatic_full_activation_allowed:false,
     release_does_not_grant_browser_authority:true,release_does_not_grant_tool_authority:true,
     one_attempt_release_required:true,ambiguous_release_retry_allowed:false,
@@ -244,7 +254,9 @@ export function verifyRsiSkillExposureReleaseCertificate(certificate,args={}){
   assertZero(certificate,'certificate');
   if(certificate.release_mode!==RELEASE_MODE||certificate.held_skill_required!==true||certificate.current_state_must_be_dormant!==true
     ||certificate.next_state_must_be_exploration_active!==true||certificate.fresh_dormant_retrieval_review_required!==true
-    ||certificate.retrieval_review_can_authorize_release!==false||certificate.only_target_governance_state_may_change!==true
+    ||certificate.retrieval_review_can_authorize_release!==false||certificate.fresh_source_identity_required!==true
+    ||certificate.source_identity_drift_blocks_release!==true||certificate.runtime_process_incarnation_bound!==true
+    ||certificate.only_target_governance_state_may_change!==true
     ||certificate.automatic_full_activation_allowed!==false||certificate.release_does_not_grant_browser_authority!==true
     ||certificate.release_does_not_grant_tool_authority!==true||certificate.one_attempt_release_required!==true
     ||certificate.ambiguous_release_retry_allowed!==false||certificate.release_token!==null
@@ -288,7 +300,8 @@ export function rsiSkillExposureReleaseTrustRootSnapshot(){
     policy_path:'apps/metaengine-browser/src/rsi-skill-exposure-release.mjs',
     exact_current_library_required:true,exact_current_governance_required:true,exact_next_governance_required:true,exact_next_governance_preview_required:true,
     held_dormant_skill_required:true,fresh_dormant_retrieval_review_required:true,
-    retrieval_review_can_authorize_release:false,exploration_only_release:true,only_target_governance_state_may_change:true,
+    retrieval_review_can_authorize_release:false,fresh_source_identity_required:true,source_identity_drift_blocks_release:true,
+    runtime_process_incarnation_bound:true,exploration_only_release:true,only_target_governance_state_may_change:true,
     minimum_shadow_context_count:3,all_shadow_contexts_must_pass:true,shadow_hard_invariants_required:true,
     no_skill_ablation_required:true,coalition_ablation_required:true,negative_transfer_clear_required:true,
     memory_poisoning_scan_required:true,source_grounding_required:true,read_only_shadow_canary_required:true,

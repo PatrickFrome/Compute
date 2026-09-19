@@ -42,6 +42,12 @@ test('unified RSI runtime binds the full converged trust-root set with zero auth
     assert.equal(snapshot.state, 'READY');
     assert.equal(snapshot.mode, 'SHADOW_VERIFIED');
     assert.ok(snapshot.trust_root_count >= 30, `expected broad RSI convergence, got ${snapshot.trust_root_count}`);
+    assert.ok(snapshot.trust_roots.skill_exposure_release);
+    assert.ok(snapshot.trust_roots.source_identity_convergence);
+    assert.ok(snapshot.trust_roots.source_identity_freshness);
+    assert.equal(snapshot.trust_roots.skill_exposure_release.authority_effect, false);
+    assert.equal(snapshot.trust_roots.source_identity_convergence.authority_effect, false);
+    assert.equal(snapshot.trust_roots.source_identity_freshness.authority_effect, false);
     assert.equal(snapshot.shadow_only, true);
     assert.equal(snapshot.candidate_effect_executor_exposed, false);
     assert.equal(snapshot.physical_effect_replay_allowed, false);
