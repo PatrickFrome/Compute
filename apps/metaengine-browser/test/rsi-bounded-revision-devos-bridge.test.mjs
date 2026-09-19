@@ -4144,6 +4144,59 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(attemptedReadback.effect_attempt_count,1);
   assert.equal(attemptedReadback.post_attempt_pre_effect_readback_required,true);
 
+  const released=await runtime.executeSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(released.state,'CONFIRMED_RELEASED_EXPLORATION_ONLY');
+  assert.equal(released.effect_attempt_count,1);
+  assert.equal(released.effect_started,true);
+  assert.equal(released.effect_performed,true);
+  assert.equal(released.post_attempt_pre_effect_readback_passed,true);
+  assert.equal(released.post_effect_readback_passed,true);
+  assert.equal(released.same_effect_id_retry_allowed,false);
+  assert.equal(released.retrieval_exposure_changed,true);
+  assert.equal(released.exploration_exposure_released,true);
+  assert.equal(released.resulting_state,'EXPLORATION_ACTIVE');
+  assert.equal(released.full_activation_authorized,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,0);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.exposure_release_attempt_state_counts.CONFIRMED_RELEASED_EXPLORATION_ONLY,1);
+
+  const activated=runtime.createSkillActivationView([fx.skill.skill_digest]);
+  assert.equal(activated.selected_count,1);
+  assert.equal(activated.selected[0].skill_digest,fx.skill.skill_digest);
+  assert.equal(activated.selected[0].governance_state,'EXPLORATION_ACTIVE');
+  assert.equal(activated.activation_view_is_execution_authority,false);
+
+  const terminalReadback=runtime.skillExposureReleaseAttemptSnapshot('phase36.runtime.release-attempt.1');
+  assert.equal(terminalReadback.current_state,'CONFIRMED_RELEASED_EXPLORATION_ONLY');
+  assert.equal(terminalReadback.effect_attempt_count,1);
+  assert.deepEqual(
+    terminalReadback.transitions.map((row)=>row.state),
+    ['PREPARED','ATTEMPTED','CONFIRMED_RELEASED_EXPLORATION_ONLY'],
+  );
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_EXECUTED');
+
+  await assert.rejects(()=>runtime.executeSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    effect_executor_identity_digest:labelDigest('phase36-release-effect-executor'),
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  }),/attempt_not_attempted/);
+
+  const terminalReconcile=await runtime.reconcileSkillExposureReleaseAttempt({
+    attempt_id:'phase36.runtime.release-attempt.1',
+    readback_owner_identity_digest:labelDigest('phase36-release-readback-owner'),
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(terminalReconcile.state,'IDEMPOTENT_TERMINAL');
+  assert.equal(terminalReconcile.current_state,'CONFIRMED_RELEASED_EXPLORATION_ONLY');
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,0);
+  assert.equal(runtime.snapshot().ledger.last_event_type,'SKILL_EXPOSURE_RELEASE_RECONCILED');
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
