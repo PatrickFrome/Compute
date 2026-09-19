@@ -6,6 +6,11 @@ import {
   verifyRsiExperienceGraphSnapshot,
   verifyRsiExperienceGraphRetrieval,
 } from './rsi-experience-graph.mjs';
+import {
+  createRsiBoundedMemoryUtilityState,
+  verifyRsiBoundedMemoryUtilityState,
+  rsiBoundedMemoryUtilityTrustRootSnapshot,
+} from './rsi-bounded-memory-utility-state.mjs';
 
 export const RSI_EXPERIENCE_CONTEXT_PLAN_SCHEMA = 'metaengine.rsi.experience-context-plan.v1';
 export const RSI_EXPERIENCE_CONTEXT_ROOT_SCHEMA = 'metaengine.rsi.experience-context-root.v1';
@@ -209,14 +214,26 @@ export function createRsiExperienceContextPlan({
   let graphSnapshotDigest = null;
   let retrievalDigest = null;
   let selectedCases = [];
+  let boundedUtilityState = null;
   if (experience_graph_snapshot != null) {
     const snapshot = verifyRsiExperienceGraphSnapshot(experience_graph_snapshot);
     const retrieval = retrieveRsiExperienceGraph({ snapshot, query });
     verifyRsiExperienceGraphRetrieval(retrieval, snapshot, query);
+    boundedUtilityState = createRsiBoundedMemoryUtilityState({
+      experience_graph_snapshot: snapshot,
+      query,
+      retrieval,
+    });
+    verifyRsiBoundedMemoryUtilityState(boundedUtilityState, {
+      experience_graph_snapshot: snapshot,
+      query,
+      retrieval,
+    });
     mode = retrieval.item_count > 0 ? 'VERIFIED_EXPERIENCE_RETRIEVAL' : 'VERIFIED_GRAPH_NO_MATCH';
     graphSnapshotDigest = snapshot.snapshot_digest;
     retrievalDigest = retrieval.retrieval_digest;
-    selectedCases = retrieval.items.slice(0, MAX_SELECTED_CASES).map(selectedCaseSummary);
+    const boundedCaseCap = Math.min(MAX_SELECTED_CASES, boundedUtilityState.recommended_case_cap);
+    selectedCases = retrieval.items.slice(0, boundedCaseCap).map(selectedCaseSummary);
   } else if (bridges.length > 0) {
     throw new Error('rsi_context_bridge_cases_require_experience_graph');
   }
@@ -239,9 +256,18 @@ export function createRsiExperienceContextPlan({
     query_digest: query.query_digest,
     graph_snapshot_digest: graphSnapshotDigest,
     retrieval_digest: retrievalDigest,
+    bounded_memory_utility_state: boundedUtilityState,
+    bounded_memory_utility_state_digest: boundedUtilityState?.state_digest || null,
+    bounded_memory_utility_mode: boundedUtilityState?.mode || 'NO_GRAPH',
     selected_cases: Object.freeze(selectedCases),
     selected_case_count: selectedCases.length,
     max_selected_cases: MAX_SELECTED_CASES,
+    bounded_memory_utility_root: rsiBoundedMemoryUtilityTrustRootSnapshot(),
+    utility_state_controls_case_cap: true,
+    harmful_dominant_case_cap: 4,
+    evidence_sparse_case_cap: 6,
+    utility_bounded_case_cap: boundedUtilityState?.recommended_case_cap || 0,
+    utility_state_controls_case_cap: true,
     environment_fingerprint: environmentFingerprint,
     model_family: modelFamily,
     source_context_truth_is_portable: false,
@@ -279,6 +305,7 @@ export function verifyRsiExperienceContextPlan(plan) {
     || plan.candidate_can_select_retrieval_thresholds !== false
     || plan.candidate_can_mark_memory_portable !== false
     || plan.candidate_can_mutate_context_plan !== false
+    || plan.utility_state_controls_case_cap !== true
     || plan.no_verified_experience_is_explicit !== true
     || plan.raw_trajectory_exposed !== false
     || plan.raw_page_text_exposed !== false
@@ -291,6 +318,27 @@ export function verifyRsiExperienceContextPlan(plan) {
   }
   if (!Array.isArray(plan.selected_cases) || plan.selected_cases.length > MAX_SELECTED_CASES || plan.selected_case_count !== plan.selected_cases.length) {
     throw new Error('rsi_context_plan_selected_cases_invalid');
+  }
+  if (plan.graph_snapshot_digest == null) {
+    if (
+      plan.bounded_memory_utility_state !== null
+      || plan.bounded_memory_utility_state_digest !== null
+      || plan.bounded_memory_utility_mode !== 'NO_GRAPH'
+      || plan.utility_bounded_case_cap !== 0
+    ) throw new Error('rsi_context_bounded_utility_state_without_graph');
+  } else {
+    if (!plan.bounded_memory_utility_state) throw new Error('rsi_context_bounded_utility_state_missing');
+    const state = verifyRsiBoundedMemoryUtilityState(plan.bounded_memory_utility_state);
+    if (
+      state.state_digest !== plan.bounded_memory_utility_state_digest
+      || state.mode !== plan.bounded_memory_utility_mode
+      || state.recommended_case_cap !== plan.utility_bounded_case_cap
+      || plan.selected_case_count > state.recommended_case_cap
+      || state.graph_snapshot_digest !== plan.graph_snapshot_digest
+      || state.retrieval_digest !== plan.retrieval_digest
+      || state.query_digest !== plan.query_digest
+      || state.target_context_digest !== plan.target_context_digest
+    ) throw new Error('rsi_context_bounded_utility_state_mismatch');
   }
   const material = { ...plan };
   delete material.context_plan_digest;
