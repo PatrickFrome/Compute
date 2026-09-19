@@ -224,6 +224,7 @@ export async function reconcileRsiDurableJsonState({
   file_path,
   expected_state_digest,
   expected_file_digest,
+  rename_may_have_completed=true,
   io=fs,
 }={}){
   if(typeof file_path!=='string'||file_path.trim()==='')throw new Error('rsi_durable_state_file_path_required');
@@ -237,18 +238,21 @@ export async function reconcileRsiDurableJsonState({
     bytes=await io.readFile(finalPath);
   }catch(error){
     if(error?.code==='ENOENT'){
+      const renamePossible=rename_may_have_completed!==false;
       return zero({
         schema:RSI_DURABLE_STATE_RECONCILIATION_SCHEMA,
         version:1,
         file_path:finalPath,
-        state:'NO_EFFECT_PROVEN',
+        state:renamePossible?'AMBIGUOUS_MISSING_FINAL':'NO_EFFECT_PROVEN',
         expected_state_digest:stateDigest,
         expected_file_digest:fileDigest,
         observed_file_digest:null,
         final_file_present:false,
         exact_readback_match:false,
-        new_attempt_allowed:true,
-        reconciliation_required:false,
+        rename_may_have_completed:renamePossible,
+        no_effect_proven:!renamePossible,
+        new_attempt_allowed:!renamePossible,
+        reconciliation_required:renamePossible,
       });
     }
     throw error;
@@ -274,9 +278,111 @@ export async function reconcileRsiDurableJsonState({
     observed_file_digest:observedFileDigest,
     final_file_present:true,
     exact_readback_match:exact,
+    rename_may_have_completed:rename_may_have_completed!==false,
+    no_effect_proven:false,
     new_attempt_allowed:false,
     reconciliation_required:!exact,
   });
+}
+
+export async function qualifyRsiDurableJsonState({
+  file_path,
+  expected_state_digest,
+  expected_file_digest,
+  io=fs,
+  platform=process.platform,
+}={}){
+  const checkedPlatform=normalizePlatform(platform);
+  const reconciliation=await reconcileRsiDurableJsonState({
+    file_path,
+    expected_state_digest,
+    expected_file_digest,
+    rename_may_have_completed:true,
+    io,
+  });
+  if(reconciliation.state!=='CONFIRMED_EXACT_READBACK'){
+    return zero({
+      schema:RSI_DURABLE_STATE_RECONCILIATION_SCHEMA,
+      version:1,
+      file_path:path.resolve(file_path),
+      state:'DURABILITY_QUALIFICATION_BLOCKED',
+      prerequisite_state:reconciliation.state,
+      exact_readback_match:false,
+      logical_write_performed:false,
+      rename_replayed:false,
+      new_attempt_allowed:false,
+      reconciliation_required:true,
+    });
+  }
+
+  const finalPath=path.resolve(file_path);
+  let finalHandle=null;
+  let dirHandle=null;
+  let finalFileSyncCompleted=false;
+  let parentDirectorySyncCompleted=false;
+  let stage='QUALIFY_OPEN_FINAL';
+  try{
+    finalHandle=await io.open(finalPath,'r+');
+    stage='QUALIFY_SYNC_FINAL';
+    await finalHandle.sync();
+    finalFileSyncCompleted=true;
+    stage='QUALIFY_CLOSE_FINAL';
+    await safeClose(finalHandle);
+    finalHandle=null;
+
+    if(checkedPlatform!=='win32'){
+      stage='QUALIFY_OPEN_PARENT_DIRECTORY';
+      dirHandle=await io.open(path.dirname(finalPath),'r');
+      stage='QUALIFY_SYNC_PARENT_DIRECTORY';
+      await dirHandle.sync();
+      parentDirectorySyncCompleted=true;
+      stage='QUALIFY_CLOSE_PARENT_DIRECTORY';
+      await safeClose(dirHandle);
+      dirHandle=null;
+    }
+
+    const finalReadback=await reconcileRsiDurableJsonState({
+      file_path:finalPath,
+      expected_state_digest,
+      expected_file_digest,
+      rename_may_have_completed:true,
+      io,
+    });
+    if(finalReadback.state!=='CONFIRMED_EXACT_READBACK'){
+      throw new Error('rsi_durable_state_qualification_post_sync_readback_mismatch');
+    }
+    return zero({
+      schema:RSI_DURABLE_STATE_RECONCILIATION_SCHEMA,
+      version:1,
+      file_path:finalPath,
+      state:'DURABILITY_QUALIFIED_EXISTING_FINAL',
+      exact_readback_match:true,
+      final_file_sync_completed:true,
+      parent_directory_sync_required:checkedPlatform!=='win32',
+      parent_directory_sync_completed:parentDirectorySyncCompleted,
+      logical_write_performed:false,
+      rename_replayed:false,
+      same_attempt_retry_allowed:false,
+      new_attempt_allowed:false,
+      reconciliation_required:false,
+      windows_write_through_rename_used:false,
+      windows_rename_metadata_durability_claimed:false,
+      power_loss_durability_claimed:false,
+      platform_power_loss_qualification_required:true,
+    });
+  }catch(error){
+    throw wrapFailure(error,{
+      stage,
+      rename_completed:true,
+      final_file_sync_completed:finalFileSyncCompleted,
+      parent_directory_sync_completed:parentDirectorySyncCompleted,
+      expected_state_digest:exactDigest(expected_state_digest,'expected_state'),
+      expected_file_digest:exactDigest(expected_file_digest,'expected_file'),
+    });
+  }finally{
+    try{await safeClose(finalHandle)}catch{}
+    try{await safeClose(dirHandle)}catch{}
+  }
 }
 
 export function rsiDurableStatePersistenceTrustRootSnapshot(){
@@ -291,6 +397,10 @@ export function rsiDurableStatePersistenceTrustRootSnapshot(){
     exact_final_readback_required:true,
     post_rename_failure_is_ambiguous:true,
     post_rename_failure_reconciliation_only:true,
+    missing_final_after_possible_rename_is_ambiguous:true,
+    no_effect_requires_pre_rename_proof:true,
+    durability_only_qualification_requires_exact_readback:true,
+    durability_only_qualification_replays_rename:false,
     same_attempt_retry_allowed:false,
     pre_rename_failure_may_start_new_attempt:true,
     windows_write_through_rename_claimed:false,
