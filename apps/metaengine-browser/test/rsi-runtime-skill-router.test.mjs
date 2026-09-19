@@ -11,7 +11,10 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillLifecycleEvidence,
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiSkillRelationEdge,
   createRsiSkillRelationGraph,
@@ -57,10 +60,32 @@ function fixture(){
     external_library_owner:true,
     authored_by_candidate:false,
   });
+  const lifecycleEvidence=[good,bad,explore].map((item,index)=>createRsiSkillLifecycleEvidence({
+    library,
+    evidence_id:`router.lifecycle.${index+1}`,
+    skill_digest:item.capsule.skill_digest,
+    window_seq:1,
+    generation_start:1,
+    generation_end:1,
+    invocation_count:1,
+    helpful_count:0,
+    harmful_count:0,
+    neutral_count:1,
+    insufficient_evidence_count:0,
+    router_engagement_count:1,
+    false_positive_injection_count:0,
+    hard_invariant_violation_count:0,
+    measured_net_delta:0,
+    authoring_prior:'VERIFIED_DIRECT_SKILL',
+    authoring_provenance_digest:d('7'),
+    evidence_refs:[`router:governance:${item.capsule.skill_id}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  }));
   const governance=createRsiSkillLibraryGovernance({
     governance_id:'runtime.skill.router.governance',
     library,
-    lifecycle_evidence:[],
+    lifecycle_evidence:lifecycleEvidence,
     max_active_skills:3,
     exploration_slots:3,
     external_library_owner:true,
