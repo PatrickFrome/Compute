@@ -59,6 +59,11 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiSkillExposureReleaseReview, rsiSkillExposureReleaseReviewTrustRootSnapshot } from './rsi-skill-exposure-release-review.mjs';
+import {
+  createRsiSkillExposureReleasePreview,
+  createRsiSkillExposureReleaseCertificate,
+  rsiSkillExposureReleaseTrustRootSnapshot,
+} from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -116,6 +121,7 @@ function trustRoots() {
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
     skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
     memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
@@ -1239,6 +1245,88 @@ export class RsiRuntimeService {
       authority_effect: false,
     });
     return review;
+  }
+
+  async createSkillExposureReleasePreview({ skill_digest } = {}) {
+    this.#assertRunning();
+    const state = this.#skillLifecycle.exposureReleaseGovernancePreview(skill_digest);
+    const preview = createRsiSkillExposureReleasePreview({
+      library: state.library,
+      current_governance: state.current_governance,
+      next_governance: state.next_governance,
+      skill_digest: state.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED', {
+      skill_digest: preview.skill_digest,
+      library_digest: preview.library_digest,
+      current_governance_digest: preview.current_governance_digest,
+      next_governance_digest: preview.next_governance_digest,
+      preview_digest: preview.preview_digest,
+      release_mode: preview.release_mode,
+      preview_is_effect_authority: false,
+      release_authorized: false,
+      exposure_effect_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return preview;
+  }
+
+  async createSkillExposureReleaseCertificate(args = {}) {
+    this.#assertRunning();
+    const state = this.#skillLifecycle.exposureReleaseGovernancePreview(args.skill_digest);
+    const preview = createRsiSkillExposureReleasePreview({
+      library: state.library,
+      current_governance: state.current_governance,
+      next_governance: state.next_governance,
+      skill_digest: state.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    const certificate = createRsiSkillExposureReleaseCertificate({
+      ...args,
+      library: state.library,
+      current_governance: state.current_governance,
+      next_governance: state.next_governance,
+      release_preview: preview,
+      admission_provenance: state.admission_provenance,
+      skill_digest: state.skill_digest,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_CERTIFICATE_CREATED', {
+      certificate_id: certificate.certificate_id,
+      certificate_digest: certificate.certificate_digest,
+      state: certificate.state,
+      skill_digest: certificate.skill_digest,
+      library_digest: certificate.library_digest,
+      current_governance_digest: certificate.current_governance_digest,
+      next_governance_digest: certificate.next_governance_digest,
+      release_preview_digest: certificate.release_preview_digest,
+      release_review_digest: certificate.release_review_digest,
+      admission_provenance_digest: certificate.admission_provenance_digest,
+      admission_attempt_id: certificate.admission_attempt_id,
+      admission_attempt_digest: certificate.admission_attempt_digest,
+      blockers: certificate.blockers,
+      certificate_is_effect_authority: false,
+      release_effect_authorized: false,
+      release_effect_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return certificate;
   }
 
   async recordBrowserStepCredit({
