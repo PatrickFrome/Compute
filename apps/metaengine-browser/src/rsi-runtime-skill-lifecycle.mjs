@@ -714,6 +714,7 @@ export class RsiRuntimeSkillLifecycle{
   #appendExposureReleaseState(row,state,observationDigest=null){
     const transition=appendExposureReleaseTransition(row,state,this.#now(),observationDigest);
     const next={...structuredClone(row),current_state:state,transitions:[...row.transitions,transition]};
+    if(state==='ATTEMPT_STARTED')next.effect_attempt_count=1;
     delete next.attempt_digest;
     return validateExposureReleaseAttemptRow({...next,attempt_digest:digest(next)});
   }
@@ -834,14 +835,12 @@ export class RsiRuntimeSkillLifecycle{
     this.#exposureReleaseAttempts=[...this.#exposureReleaseAttempts,prepared];
     await this.#persist();
 
-    let started=this.#appendExposureReleaseState(prepared,'ATTEMPT_STARTED',digest({
+    const started=this.#appendExposureReleaseState(prepared,'ATTEMPT_STARTED',digest({
       stage:'ATTEMPT_STARTED',
       library_digest:this.#library.library_digest,
       governance_digest:current.governance_digest,
       hold_present:this.#admissionExposureHolds.has(skillDigest),
     }));
-    const startedCore=structuredClone(started);delete startedCore.attempt_digest;startedCore.effect_attempt_count=1;
-    started=validateExposureReleaseAttemptRow({...startedCore,attempt_digest:digest(startedCore)});
     this.#replaceExposureReleaseAttempt(started);
     await this.#persist();
 
