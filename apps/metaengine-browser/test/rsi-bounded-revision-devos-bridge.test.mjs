@@ -3833,6 +3833,108 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   assert.equal(runtime.anytimeLibraryAdmissionAttemptSnapshot('phase34b.runtime.attempt.1').current_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
 });
 
+test('R7 runtime records a provenance-bound dormant retrieval review without releasing the hold',async(t)=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-r7-runtime-review-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const ledgerPath=path.join(dir,'runtime.jsonl');
+  const fx=phase34bLifecycleFixture('r7-runtime-review');
+  const runtime=new RsiRuntimeService({
+    source_sha:SOURCE,
+    ledgerPath,
+    clock:()=>1_800_000_100_000,
+  });
+  await runtime.start();
+  await runtime.adoptVerifiedSkillLibrary({
+    library:fx.currentLibrary,
+    external_library_owner:true,
+    authored_by_candidate:false,
+  });
+  await runtime.prepareAnytimeLibraryAdmissionAttempt({
+    attempt_id:'phase34b.runtime.r7-review.1',
+    admission_certificate:fx.certificate,
+    admission_certificate_args:fx.fx.certificateArgs,
+    successor_library:fx.successorLibrary,
+    effect_id_digest:fx.effectId,
+    idempotency_key_digest:fx.idempotencyKey,
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_library_owner:true,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  const applied=await runtime.executeAnytimeLibraryAdmissionAttempt({
+    attempt_id:'phase34b.runtime.r7-review.1',
+    effect_executor_identity_digest:fx.executorIdentity,
+    external_effect_executor:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(applied.state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+
+  const review=await runtime.createDormantSkillRetrievalReview({
+    review_id:'r7.runtime.review.1',
+    skill_digest:fx.skill.skill_digest,
+    consumer_model_family:'GPT_5_6_SOL',
+    environment_fingerprint:'env.r7.runtime.windows.chromium',
+    task_signature_digest:labelDigest('r7-task-signature'),
+    routing_context_manifest_digest:labelDigest('r7-routing-context'),
+    retrieval_profile_digest:labelDigest('r7-retrieval-profile'),
+    memory_context_digest:labelDigest('r7-memory-context'),
+    harness_integrity_digest:labelDigest('r7-harness-integrity'),
+    benchmark_provenance_digest:labelDigest('r7-benchmark-provenance'),
+    matched_comparison_receipt_digest:labelDigest('r7-matched-comparison'),
+    negative_transfer_receipt_digest:labelDigest('r7-negative-transfer'),
+    cost_latency_receipt_digest:labelDigest('r7-cost-latency'),
+    source_grounding_receipt_digest:labelDigest('r7-source-grounding'),
+    contamination_receipt_digest:labelDigest('r7-contamination'),
+    from_scratch_replay_receipt_digest:labelDigest('r7-from-scratch-replay'),
+    coalition_ablation_receipt_digest:labelDigest('r7-coalition-ablation'),
+    marginal_contribution_receipt_digest:labelDigest('r7-marginal-contribution'),
+    capacity_policy_digest:labelDigest('r7-capacity-policy'),
+    matched_pair_count:4,
+    skill_success_count:4,
+    reference_success_count:2,
+    repair_count:2,
+    regression_count:0,
+    hard_invariant_failure_count:0,
+    negative_transfer_count:0,
+    cost_budget_pass:true,
+    latency_budget_pass:true,
+    harness_integrity_pass:true,
+    benchmark_provenance_pass:true,
+    memory_safety_pass:true,
+    source_grounding_pass:true,
+    contamination_clear:true,
+    from_scratch_replay_pass:true,
+    coalition_ablation_pass:true,
+    marginal_contribution_pass:true,
+    retrieval_reviewer_identity_digest:labelDigest('r7-retrieval-reviewer'),
+    consumer_evaluator_identity_digest:labelDigest('r7-consumer-evaluator'),
+    contamination_auditor_identity_digest:labelDigest('r7-contamination-auditor'),
+    coalition_auditor_identity_digest:labelDigest('r7-coalition-auditor'),
+    capacity_policy_owner_identity_digest:labelDigest('r7-capacity-policy-owner'),
+    external_retrieval_reviewer:true,
+    external_consumer_evaluator:true,
+    external_contamination_auditor:true,
+    external_coalition_auditor:true,
+    external_capacity_policy_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(review.state,'ELIGIBLE_FOR_EXTERNAL_RETRIEVAL_EXPOSURE_REVIEW');
+  assert.equal(review.eligible_for_external_retrieval_exposure_review,true);
+  assert.equal(review.review_is_zero_effect,true);
+  assert.equal(review.retrieval_exposure_changed,false);
+  assert.equal(review.skill_activation_performed,false);
+  assert.equal(review.authority_effect,false);
+  const state=runtime.verifiedSkillStateReadback();
+  const held=state.governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
+  assert.equal(held.admission_exposure_held,true);
+  assert.equal(held.state,'DORMANT_CAP');
+  assert.equal(held.active_for_composition,false);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+  const raw=await fs.readFile(ledgerPath,'utf8');
+  assert.match(raw,/DORMANT_SKILL_RETRIEVAL_REVIEW_CREATED/);
+  assert.equal(raw.includes(review.retrieval_review_digest),true);
+});
+
 test('Phase34B lifecycle prepares admission durably before effect, survives restart, and appends storage-only once',async(t)=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'rsi-phase34b-lifecycle-'));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
@@ -3886,6 +3988,22 @@ test('Phase34B lifecycle prepares admission durably before effect, survives rest
   assert.equal(restored.verifiedLibrarySnapshot().library_digest,fx.successorLibrary.library_digest);
   assert.equal(restored.snapshot().active_count,0);
   assert.equal(restored.snapshot().admission_exposure_hold_count,1);
+  assert.equal(restored.snapshot().confirmed_admission_exposure_provenance_count,1);
+  const provenance=restored.admissionExposureHoldProvenance(fx.skill.skill_digest);
+  assert.equal(provenance.schema,'metaengine.rsi.admission-exposure-hold-provenance.v1');
+  assert.equal(provenance.admission_attempt_id,'phase34b.attempt.prepare-execute');
+  assert.equal(provenance.admission_certificate_digest,fx.certificate.admission_certificate_digest);
+  assert.equal(provenance.admitted_successor_library_digest,fx.successorLibrary.library_digest);
+  assert.equal(provenance.current_library_digest,fx.successorLibrary.library_digest);
+  assert.equal(provenance.admission_state,'CONFIRMED_APPLIED_STORAGE_ONLY');
+  assert.equal(provenance.exposure_hold_observed,true);
+  assert.equal(provenance.dormant_cap_observed,true);
+  assert.equal(provenance.retrieval_exposure_allowed,false);
+  assert.equal(provenance.release_authority,false);
+  assert.equal(provenance.browser_authority,false);
+  assert.equal(provenance.task_authority,false);
+  assert.equal(provenance.scheduler_authority,false);
+  assert.match(provenance.provenance_digest,/^sha256:[0-9a-f]{64}$/);
   const governance=restored.governance();
   const added=governance.entries.find(row=>row.skill_digest===fx.skill.skill_digest);
   assert.equal(added.evidence_window_count,0);

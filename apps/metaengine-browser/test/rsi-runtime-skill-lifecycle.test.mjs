@@ -203,6 +203,8 @@ test('verified library updates are append-only and cannot silently remove or rew
     assert.equal(held.state,'DORMANT_CAP');
     assert.equal(held.active_for_composition,false);
     assert.equal(held.admission_exposure_held,true);
+    assert.equal(store.admissionExposureHoldProvenance(second.capsule.skill_digest),null);
+    assert.equal(store.snapshot().confirmed_admission_exposure_provenance_count,0);
     await assert.rejects(()=>store.adoptVerifiedLibrary({
       library:library([first,second],'runtime.skill.library.append'),
       admission_exposure_hold_skill_digests:[second.capsule.skill_digest],
@@ -389,6 +391,7 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   assert.equal(root.append_new_skills_require_exposure_hold,true);
   assert.equal(root.admission_exposure_holds_force_dormant,true);
   assert.equal(root.admission_exposure_hold_release_requires_external_governance,true);
+  assert.equal(root.exposure_release_requires_confirmed_admission_provenance,true);
   assert.equal(root.independently_credited_outcomes_only,true);
   assert.equal(root.contextual_credit_not_global_truth,true);
   assert.equal(root.candidate_can_write_lifecycle,false);
