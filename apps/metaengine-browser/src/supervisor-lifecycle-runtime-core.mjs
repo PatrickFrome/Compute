@@ -561,7 +561,7 @@ export class SupervisorLifecycleRuntime {
       // re-restores after every clear attempt). Roll over to a fresh
       // conversation instead of looping forever.
       this.#composerBlockingFailureCount = 0;
-      this.#keepalive.requestRollover('COMPOSER_UNCLEARABLE_DK7').catch(() => {});
+      this.#keepalive.requestRollover('COMPOSER_UNCLEARABLE_DK7', { autoRelease: true }).catch(() => {});
     }
   }
 
