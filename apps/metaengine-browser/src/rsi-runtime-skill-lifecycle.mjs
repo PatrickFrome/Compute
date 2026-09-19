@@ -697,6 +697,40 @@ export class RsiRuntimeSkillLifecycle{
       external_library_owner:true,authored_by_candidate:false,
     });
   }
+  previewExposureHoldReleaseGovernance(skillDigest){
+    this.#assertInit();
+    if(!this.#library)throw new Error('rsi_runtime_skill_library_unavailable');
+    const skill=exactDigest(skillDigest,'exposure_release_preview_skill');
+    if(!this.#admissionExposureHolds.has(skill))throw new Error('rsi_runtime_skill_exposure_release_preview_hold_required');
+    const nextHolds=[...this.#admissionExposureHolds].filter(value=>value!==skill);
+    const preview=createRsiSkillLibraryGovernance({
+      governance_id:this.#governanceId(),
+      library:this.#library,
+      lifecycle_evidence:this.#evidence,
+      historical_libraries:this.#governanceHistoricalLibraries(),
+      admission_exposure_hold_skill_digests:nextHolds,
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    return Object.freeze({
+      governance:preview,
+      skill_digest:skill,
+      current_hold_count:this.#admissionExposureHolds.size,
+      next_hold_count:nextHolds.length,
+      hold_release_effect_performed:false,
+      retrieval_exposure_changed:false,
+      skill_activation_performed:false,
+      execution_authority:false,
+      browser_authority:false,
+      task_authority:false,
+      scheduler_authority:false,
+      production_mutation_authority:false,
+      promotion_authority:false,
+      self_update_authority:false,
+      automatic_retry_allowed:false,
+      authority_effect:false,
+    });
+  }
   activationView(requestedSkillDigests){
     const governance=this.governance();if(!governance)throw new Error('rsi_runtime_skill_library_unavailable');
     verifyRsiSkillLibraryGovernance(governance,this.#library);
@@ -750,6 +784,8 @@ export function rsiRuntimeSkillLifecycleTrustRootSnapshot(){
     exposure_release_requires_confirmed_admission_provenance:true,
     confirmed_admission_provenance_binds_attempt_digest:true,
     confirmed_admission_provenance_binds_effect_executor_identity:true,
+    exposure_release_governance_preview_is_zero_effect:true,
+    exposure_release_governance_preview_removes_exactly_one_hold:true,
     independently_credited_outcomes_only:true,contextual_credit_not_global_truth:true,
     lifecycle_windows_are_append_only:true,bounded_pending_before_library:true,
     candidate_can_write_lifecycle:false,candidate_can_reactivate_skill:false,candidate_can_retire_skill:false,
