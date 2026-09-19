@@ -60,6 +60,7 @@ import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, c
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
 import { createRsiDormantSkillRetrievalReview, rsiDormantSkillRetrievalReviewTrustRootSnapshot } from './rsi-dormant-skill-retrieval-review.mjs';
+import { createRsiSkillExposureReleasePreview, rsiSkillExposureReleaseTrustRootSnapshot } from './rsi-skill-exposure-release.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -130,6 +131,7 @@ function trustRoots() {
     runtime_skill_lifecycle: rsiRuntimeSkillLifecycleTrustRootSnapshot(),
     runtime_skill_exposure_certificate_ledger: rsiRuntimeSkillExposureCertificateLedgerTrustRootSnapshot(),
     dormant_skill_retrieval_review: rsiDormantSkillRetrievalReviewTrustRootSnapshot(),
+    skill_exposure_release: rsiSkillExposureReleaseTrustRootSnapshot(),
     runtime_skill_router: rsiRuntimeSkillRouterTrustRootSnapshot(),
     runtime_skill_curation: rsiRuntimeSkillCurationTrustRootSnapshot(),
     skill_revision_frontier: rsiSkillRevisionFrontierTrustRootSnapshot(),
@@ -1086,6 +1088,41 @@ export class RsiRuntimeService {
       self_update_authority: false,
       authority_effect: false,
     });
+  }
+
+  async createSkillExposureReleasePreview({ skill_digest } = {}) {
+    this.#assertRunning();
+    const statePreview = this.#skillLifecycle.exposureReleaseGovernancePreview(skill_digest);
+    const preview = createRsiSkillExposureReleasePreview({
+      library: statePreview.library,
+      current_governance: statePreview.current_governance,
+      next_governance: statePreview.next_governance,
+      skill_digest: statePreview.skill_digest,
+      external_governance_owner: true,
+      authored_by_candidate: false,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_PREVIEW_CREATED', {
+      skill_digest: preview.skill_digest,
+      preview_digest: preview.preview_digest,
+      current_governance_digest: preview.current_governance_digest,
+      next_governance_digest: preview.next_governance_digest,
+      admission_provenance_digest: statePreview.admission_provenance.provenance_digest,
+      current_state: preview.current_state,
+      next_state: preview.next_state,
+      current_admission_exposure_held: preview.current_admission_exposure_held,
+      next_admission_exposure_held: preview.next_admission_exposure_held,
+      fresh_credited_lifecycle_state_required: true,
+      release_authorized: false,
+      release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return preview;
   }
 
   async recordSkillExposureReleaseCertificate({ certificate, verification_args } = {}) {
