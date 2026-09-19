@@ -723,6 +723,7 @@ export class RsiRuntimeSkillLifecycle{
     return zero({
       schema:'metaengine.rsi.runtime-skill-exposure-release-preview.v1',version:1,
       source_sha:this.#sourceSha,library_digest:this.#library.library_digest,
+      current_governance:structuredClone(current),next_governance:structuredClone(next),
       current_governance_digest:current.governance_digest,next_governance_digest:next.governance_digest,
       skill_digest:skill,current_state:currentRow.state,next_state:nextRow.state,
       changed_skill_digests:Object.freeze(changed),only_target_state_changed:changed.length===1&&changed[0]===skill,
