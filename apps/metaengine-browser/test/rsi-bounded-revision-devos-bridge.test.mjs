@@ -3905,6 +3905,54 @@ test('Phase34B runtime service closes direct-adopt bypass and routes storage app
   );
   assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
 
+  // Fresh post-append target-consumer credit is a separate measurement artifact.
+  // It may make a held skill eligible for a hypothetical EXPLORATION_ACTIVE transition,
+  // but it does not release the hold or activate the skill.
+  const postAppend=await runtime.recordPostAppendConsumerCredit({
+    credit_id:'phase36.runtime.post-append-credit.1',
+    skill_digest:fx.skill.skill_digest,
+    generation:1,
+    target_consumer_identity_digest:labelDigest('phase36-post-append-consumer'),
+    target_consumer_context_digest:labelDigest('phase36-post-append-context'),
+    evaluation_contract_digest:labelDigest('phase36-post-append-contract'),
+    matched_control_receipt_digest:labelDigest('phase36-post-append-control'),
+    treatment_receipt_digest:labelDigest('phase36-post-append-treatment'),
+    retention_evidence_digest:labelDigest('phase36-post-append-retention'),
+    credit_assigner_identity_digest:labelDigest('phase36-post-append-credit-assigner'),
+    measured_net_delta:0.25,
+    regression_count:0,
+    negative_transfer_count:0,
+    retention_regression_count:0,
+    hard_invariant_failure_count:0,
+    same_instances_pass:true,
+    same_harness_pass:true,
+    same_budget_pass:true,
+    from_scratch_replay_pass:true,
+    contamination_clear:true,
+    retention_gate_pass:true,
+    fresh_post_append_measurement:true,
+    measurement_captured_after_admission:true,
+    external_credit_assigner:true,
+    authored_by_candidate:false,
+  });
+  assert.equal(postAppend.credit_receipt.credit_sign,'POSITIVE');
+  assert.equal(postAppend.credit_receipt.storage_admission_is_credit,false);
+  assert.equal(postAppend.credit_receipt.release_review_is_credit,false);
+  assert.equal(postAppend.skill_lifecycle.state,'APPLIED');
+  assert.equal(postAppend.skill_lifecycle.admission_exposure_held,true);
+  assert.equal(postAppend.skill_lifecycle.retrieval_exposure_changed,false);
+  assert.equal(postAppend.skill_lifecycle.skill_activation_performed,false);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
+  const readyPreview=await runtime.createSkillExposureReleasePreview({skill_digest:fx.skill.skill_digest});
+  assert.equal(readyPreview.release_mode,'EXPLORATION_ACTIVE_ONLY');
+  assert.equal(readyPreview.current_state,'DORMANT_CAP');
+  assert.equal(readyPreview.next_state,'EXPLORATION_ACTIVE');
+  assert.equal(readyPreview.exposure_effect_performed,false);
+  assert.equal(readyPreview.release_authorized,false);
+  assert.equal(runtime.snapshot().runtime_skill_lifecycle.admission_exposure_hold_count,1);
+  assert.throws(()=>runtime.createSkillActivationView([fx.skill.skill_digest]),/requested_skill_not_active:DORMANT_CAP/);
+
   await assert.rejects(()=>runtime.adoptVerifiedSkillLibrary({
     library:fx.successorLibrary,
     external_library_owner:true,
