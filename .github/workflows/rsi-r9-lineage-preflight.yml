@@ -41,3 +41,4 @@ jobs:
         working-directory: apps/metaengine-browser
         run: |
           node --test             test/rsi-skill-lineage-contamination-review.test.mjs             test/rsi-skill-exposure-release-transition-proof.test.mjs             test/rsi-r9-exposure-trust-root-closure.test.mjs
+            test/rsi-held-skill-credit-admission.test.mjs
