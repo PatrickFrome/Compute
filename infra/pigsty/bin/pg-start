@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Start the Pigsty rootless PG17 cluster.
+set -euo pipefail
+PIGSTY_ROOT="${PIGSTY_ROOT:-/home/z/my-project/pigsty}"
+PGBIN="${PGBIN:-$PIGSTY_ROOT/rootless/pgroot/usr/lib/postgresql/17/bin}"
+PGDATA="$PIGSTY_ROOT/rootless/PGDATA"
+mkdir -p "$PIGSTY_ROOT/rootless/run" "$PIGSTY_ROOT/rootless/log"
+exec "$PGBIN/pg_ctl" -D "$PGDATA" start -l "$PIGSTY_ROOT/rootless/log/postgres.log"

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Stop the Pigsty rootless PG17 cluster (fast shutdown).
+set -euo pipefail
+PIGSTY_ROOT="${PIGSTY_ROOT:-/home/z/my-project/pigsty}"
+PGBIN="${PGBIN:-$PIGSTY_ROOT/rootless/pgroot/usr/lib/postgresql/17/bin}"
+exec "$PGBIN/pg_ctl" -D "$PIGSTY_ROOT/rootless/PGDATA" stop -m fast

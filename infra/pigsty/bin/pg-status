@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Status of the Pigsty rootless PG17 cluster.
+set -euo pipefail
+PIGSTY_ROOT="${PIGSTY_ROOT:-/home/z/my-project/pigsty}"
+PGBIN="${PGBIN:-$PIGSTY_ROOT/rootless/pgroot/usr/lib/postgresql/17/bin}"
+PGCLIENTBIN="${PGCLIENTBIN:-/home/z/my-project/pg17/usr/lib/postgresql/17/bin}"
+"$PGBIN/pg_ctl" -D "$PIGSTY_ROOT/rootless/PGDATA" status || true
+exec "$PGCLIENTBIN/pg_isready" -h "$PIGSTY_ROOT/rootless/run" -p 55432
