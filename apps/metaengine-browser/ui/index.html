@@ -11,7 +11,7 @@
 </head>
 <body data-sidebar="EXPANDED" data-operations="CLOSED" data-final-shell="metaengine-dark-workspace-v2">
   <header class="commandBar" aria-label="Browser command bar">
-    <button id="sidebarToggle" class="railToggle" title="Toggle contexts (Ctrl+B)" aria-label="Toggle contexts"><span aria-hidden="true">☰</span></button>
+    <button id="sidebarToggle" class="railToggle" title="Toggle contexts (Ctrl+B)" aria-label="Toggle contexts"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
 
     <div class="brand" aria-label="METAENGINE Browser">
       <span class="brandMark" aria-hidden="true">M</span>
@@ -19,16 +19,17 @@
     </div>
 
     <nav class="navControls" aria-label="Navigation">
-      <button class="iconButton" data-cmd="BACK" title="Back" aria-label="Back"><span aria-hidden="true">‹</span></button>
-      <button class="iconButton" data-cmd="FORWARD" title="Forward" aria-label="Forward"><span aria-hidden="true">›</span></button>
-      <button class="iconButton" data-cmd="RELOAD" title="Reload" aria-label="Reload"><span aria-hidden="true">↻</span></button>
+      <button class="iconButton" data-cmd="BACK" title="Back" aria-label="Back"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path d="M10.5 3.5 6 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="iconButton" data-cmd="FORWARD" title="Forward" aria-label="Forward"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path d="M5.5 3.5 10 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="iconButton" data-cmd="RELOAD" title="Reload" aria-label="Reload"><svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"><path d="M13 8a5 5 0 1 1-1.6-3.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M13 2.6v2.8h-2.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </nav>
 
     <form id="addressForm" class="omnibox" aria-label="Search, address, or Browser command">
       <span id="routeKind" class="routeKind" aria-hidden="true">WEB</span>
       <input id="address" aria-label="Search, address, or command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search · > command · @ agent · / skill">
       <span class="shortcutHint" aria-hidden="true">Ctrl K</span>
-      <button class="goButton" aria-label="Open" title="Open">↵</button>
+      <button class="goButton" aria-label="Open" title="Open"><svg viewBox="0 0 16 16" aria-hidden="true" width="14" height="14"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div id="omniboxHints" class="omniboxHints" role="listbox" aria-label="Omnibox suggestions" hidden></div>
     </form>
 
     <div class="activeContext" aria-live="polite" aria-label="Exact active BrowserCell">
@@ -39,6 +40,7 @@
       <div id="fleetStatus" class="systemChip neutral" title="Fleet"><span class="systemDot" aria-hidden="true"></span><b>Fleet</b><span class="systemValue">…</span></div>
       <div id="supervisorStatus" class="systemChip neutral" title="Supervisor"><span class="systemDot" aria-hidden="true"></span><b>Supervisor</b><span class="systemValue">…</span></div>
       <div id="updateStatus" class="systemChip neutral" title="Update"><span class="systemDot" aria-hidden="true"></span><b>Update</b><span class="systemValue">…</span></div>
+      <div id="rsiStatus" class="systemChip neutral" title="RSI runtime" role="button" tabindex="0"><span class="systemDot" aria-hidden="true"></span><b>RSI</b><span class="systemValue">…</span></div>
       <div id="devPlaneStatus" class="systemChip neutral" title="Development Plane"><span class="systemDot" aria-hidden="true"></span><b>Dev</b><span class="systemValue">…</span></div>
       <div id="computeStatus" class="systemChip neutral" title="Compute"><span class="systemDot" aria-hidden="true"></span><b>Compute</b><span class="systemValue">…</span></div>
       <div id="gateStatus" class="systemChip neutral" title="Safety"><span class="systemDot" aria-hidden="true"></span><b>Gates</b><span class="systemValue">…</span></div>
@@ -54,13 +56,14 @@
       <button id="railCollapse" class="miniButton" title="Collapse contexts" aria-label="Collapse contexts">‹</button>
     </div>
     <div class="tabSearchWrap">
-      <span aria-hidden="true">⌕</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true" width="13" height="13"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m10.4 10.4 3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       <input id="tabSearch" class="tabSearch" autocomplete="off" spellcheck="false" placeholder="Search BrowserCells" aria-label="Filter workspaces and open tabs">
     </div>
     <div class="railSectionHead"><span>BrowserCells</span><b id="tabCount">0</b></div>
     <div id="verticalTabs" class="verticalTabs" role="list"></div>
     <div class="railFooter">
       <span id="fleetProfile" class="railFooterValue">Fleet ready</span>
+      <small id="railRsi" class="railFooterValue railFooterRsi">RSI · …</small>
       <small id="railGeometry" class="srOnly">Native inset</small>
     </div>
   </aside>
@@ -78,7 +81,7 @@
       <button data-section="commands">Actions</button>
     </nav>
     <div id="opsContent" class="opsContent"></div>
-    <footer class="opsLegend" aria-label="Brain command hint"><span><b>Ctrl K</b> command · @ agent · / skill</span></footer>
+    <footer class="opsLegend" aria-label="Brain command hint"><span><b>Ctrl K</b> command · @ agent · / skill</span><small id="brainSeqLine" class="opsLegendStream">Brain stream offline</small></footer>
   </aside>
 
   <div id="shellBackdrop" class="shellBackdrop" aria-hidden="true"></div>

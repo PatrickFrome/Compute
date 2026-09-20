@@ -26,6 +26,9 @@ const statusEls = Object.freeze({
   compute: document.getElementById('computeStatus'),
   gates: document.getElementById('gateStatus'),
 });
+const rsiStatusEl = document.getElementById('rsiStatus');
+const railRsiEl = document.getElementById('railRsi');
+const omniboxHintsEl = document.getElementById('omniboxHints');
 
 let snapshot = null;
 let tabFilter = '';
@@ -289,6 +292,7 @@ function makeTabRow(tab, active, agent, actuation, workspace = null) {
   const row = document.createElement('div');
   row.className = `verticalTab ${active ? 'active' : ''} ${agent ? 'agent' : ''}`;
   row.setAttribute('role', 'listitem');
+  row.dataset.tabId = String(tab.tab_id || '');
 
   const select = document.createElement('button');
   select.type = 'button';
@@ -328,9 +332,10 @@ function makeTabRow(tab, active, agent, actuation, workspace = null) {
   return row;
 }
 
-function railHeader(label, value = '') {
+function railHeader(label, value = '', key = '') {
   const row = document.createElement('div');
   row.className = 'railSectionHead';
+  if (key) row.dataset.railKey = key;
   const left = document.createElement('span');
   left.textContent = label;
   const right = document.createElement('b');
@@ -348,7 +353,7 @@ function renderContextRail(next) {
   for (const group of projection.groups) {
     const haystack = [group.branch_name, group.point_id, group.repo_id, group.role, group.state, group.tab?.title, group.tab?.url].join(' ').toLowerCase();
     if (filter && !haystack.includes(filter)) continue;
-    nodes.push(railHeader(compact(group.branch_name || group.point_id || 'Workspace', 28), `${group.state} · l${group.lease_generation}`));
+    nodes.push(railHeader(compact(group.branch_name || group.point_id || 'Workspace', 28), `${group.state} · l${group.lease_generation}`, `ws:${group.workspace_id || group.tab_id}`));
     nodes.push(makeTabRow(group.tab, group.tab_id === state.selected_tab_id, group.agent, exactActuationForTab(next, group.tab_id), group));
   }
 
@@ -358,14 +363,14 @@ function renderContextRail(next) {
     return [tab.title, tab.url, agent?.role, agent?.lifecycle_state].some((value) => String(value || '').toLowerCase().includes(filter));
   });
   if (sessions.length || projection.groups.length === 0) {
-    nodes.push(railHeader('Sessions', String(projection.sessions.length)));
+    nodes.push(railHeader('Sessions', String(projection.sessions.length), 'hdr:sessions'));
     for (const tab of sessions) {
       nodes.push(makeTabRow(tab, tab.tab_id === state.selected_tab_id, fleetAgentForTab(next, tab.tab_id), exactActuationForTab(next, tab.tab_id)));
     }
   }
 
   tabCount.textContent = String((state.tabs || []).length);
-  verticalTabs.replaceChildren(...nodes);
+  reconcileKeyedChildren(verticalTabs, nodes, (node) => node.dataset.tabId || node.dataset.railKey || '');
   if (projection.source_state === 'AVAILABLE') {
     fleetProfile.textContent = `${projection.counts.workspaces} workspace${projection.counts.workspaces === 1 ? '' : 's'} · ${projection.counts.issues} drift`;
   } else if (projection.source_state === 'RUNTIME_NOT_DEPLOYED') {
@@ -744,6 +749,7 @@ function renderCommands() {
     commandButton('Open Workspaces', 'Read only', () => { opsSection = 'workspaces'; renderOps(snapshot); }),
     commandButton('Open Safety contracts', 'Read only', () => { opsSection = 'safety'; renderOps(snapshot); }),
     commandButton('Open DevOS evidence', 'Read only', () => { opsSection = 'devos'; renderOps(snapshot); }),
+    commandButton('Open Mechanisms', 'RSI · takeover · background · Brain stream', () => { opsSection = 'mechanisms'; renderOps(snapshot); }),
   );
   fragment.append(list);
   return fragment;
@@ -757,6 +763,7 @@ function renderOps(next) {
   else if (opsSection === 'supervisor') content = renderSupervisor(next);
   else if (opsSection === 'devos') content = renderDevos(next);
   else if (opsSection === 'runtime') content = renderRuntime(next);
+  else if (opsSection === 'mechanisms') content = renderMechanisms(next);
   else if (opsSection === 'safety') content = renderSafety(next);
   else if (opsSection === 'commands') content = renderCommands();
   else content = renderOverview(next);
@@ -776,6 +783,8 @@ function render(next) {
   setSystemStatus(statusEls.dev, developmentPlaneStatus(next));
   setSystemStatus(statusEls.compute, computeStatus(next));
   setSystemStatus(statusEls.gates, gateStatus(next));
+  setSystemStatus(rsiStatusEl, rsiStatus(next));
+  updateRailMechanismStrip(next);
   renderOps(next);
 }
 
@@ -1355,6 +1364,7 @@ function workbenchCommandTarget(token) {
     attention: ['agentic', 'attention'], activity: ['agentic', 'activity'], context: ['agentic', 'context'], sessions: ['agentic', 'sessions'], skills: ['agentic', 'skills'],
     fleet: ['core', 'fleet'], workspaces: ['core', 'workspaces'], supervisor: ['core', 'supervisor'], devos: ['core', 'devos'],
     runtime: ['core', 'runtime'], safety: ['core', 'safety'], commands: ['core', 'commands'], overview: ['core', 'overview'],
+    mechanisms: ['core', 'mechanisms'],
   });
   return aliases[normalized] || null;
 }
@@ -1468,3 +1478,320 @@ api.onSnapshot((next) => {
   if (agenticSection) renderAgenticSection(next);
   updateWorkbenchRouteKind();
 });
+
+/* ── Mechanism strip (RSI · takeover · background service · Brain stream) ─────
+   Presentation-only projection of deep metaengine mechanisms that previously
+   had no shell surface. Everything below reads the canonical snapshot or the
+   narrow preload bridge; nothing here adds scheduler, execution, command
+   leasing, retry, page/model authority, or any authority effect. Fail-closed:
+   a missing projection renders UNKNOWN, never a fabricated healthy state. */
+
+const RSI_RUNTIME_SCHEMA = 'metaengine.rsi.runtime-service.v1';
+
+function rsiProjection(next) {
+  const rsi = next?.supervisor?.rsi;
+  if (!rsi || rsi.schema !== RSI_RUNTIME_SCHEMA) return Object.freeze({
+    schema: RSI_RUNTIME_SCHEMA,
+    valid: false,
+    reason: rsi ? 'INVALID_PROJECTION' : 'NOT_EXPOSED',
+    state: 'UNKNOWN',
+    mode: 'UNKNOWN',
+    shadow_only: null,
+    candidate_count: null,
+    trust_root_count: null,
+    authority_effect: false,
+  });
+  return Object.freeze({ ...rsi, valid: true, reason: 'EXACT_PROJECTION' });
+}
+
+function rsiStatus(next) {
+  const rsi = rsiProjection(next);
+  if (!rsi.valid) return { value: 'n/a', tone: 'neutral', title: `RSI runtime · ${rsi.reason} · no runtime inference from source presence` };
+  const state = text(rsi.state, 'UNKNOWN').toUpperCase();
+  return {
+    value: compact(state.replaceAll('_', ' '), 9),
+    tone: state === 'READY' ? 'good' : (['CREATED', 'SHADOW_VERIFIED'].includes(state) ? 'warn' : (state === 'UNAVAILABLE' ? 'neutral' : 'bad')),
+    title: `RSI runtime · ${state} · ${text(rsi.mode, 'mode unknown')} · ${rsi.trust_root_count ?? '?'} trust root(s) · ${rsi.candidate_count ?? 0} candidate(s) · shadow verified, no physical effect path`,
+  };
+}
+
+function updateRailMechanismStrip(next) {
+  const rsi = rsiProjection(next);
+  if (railRsiEl) {
+    const label = rsi.valid ? `RSI ${compact(text(rsi.state, 'UNKNOWN'), 12)}${rsi.trust_root_count != null ? ` · ${rsi.trust_root_count} roots` : ''}` : 'RSI not exposed';
+    if (railRsiEl.textContent !== label) railRsiEl.textContent = label;
+  }
+  updateBrainStreamLine();
+}
+
+function updateBrainStreamLine() {
+  const line = document.getElementById('brainSeqLine');
+  if (!line || typeof api.brainStreamStatus !== 'function') return;
+  const stream = api.brainStreamStatus();
+  const label = stream.connected
+    ? `Brain stream ${shortId(stream.stream_id, 10)} · seq ${stream.acknowledged_through_sequence}`
+    : 'Brain stream offline';
+  if (line.textContent !== label) line.textContent = label;
+}
+
+function renderMechanisms(next) {
+  const fragment = document.createDocumentFragment();
+  fragment.append(hero(
+    'MetaEngine mechanisms',
+    'Deep runtime surfaces projected read-only from the canonical snapshot: RSI runtime, human takeover, background service and the Brain cognitive stream. Missing projections stay UNKNOWN.',
+    'zero authority',
+  ));
+
+  const rsi = rsiProjection(next);
+  const rsiGrid = el('div', 'opsGrid');
+  rsiGrid.append(
+    metric('RSI state', rsi.valid ? rsi.state : 'UNKNOWN', rsi.valid ? stateTone(rsi.state) : 'neutral'),
+    metric('Trust roots', rsi.valid ? (rsi.trust_root_count ?? 'UNKNOWN') : 'UNKNOWN', rsi.valid ? 'good' : 'neutral'),
+    metric('Candidates', rsi.valid ? (rsi.candidate_count ?? 0) : 'UNKNOWN', rsi.valid ? 'neutral' : 'neutral'),
+    metric('Skill evals', rsi.valid ? (rsi.skill_revision_reliability?.evaluation_count ?? 'UNKNOWN') : 'UNKNOWN', 'neutral'),
+  );
+  fragment.append(rsiGrid);
+
+  const rsiSection = section('RSI runtime', rsi.valid ? `${text(rsi.mode, 'UNKNOWN')} · shadow-verified` : rsi.reason);
+  if (rsi.valid) {
+    rsiSection.list.append(
+      kvRow('Schema', RSI_RUNTIME_SCHEMA === rsi.schema ? 'v1 EXACT' : 'MISMATCH', 'good'),
+      kvRow('State', rsi.state, stateTone(rsi.state)),
+      kvRow('Mode', text(rsi.mode, 'UNKNOWN'), 'neutral'),
+      kvRow('Source sha', shortId(rsi.source_sha, 16), 'neutral'),
+      kvRow('Trust root set digest', shortId(rsi.trust_root_set_digest, 16), 'neutral'),
+      kvRow('Last observation', rsi.last_observation_at || 'NONE', rsi.last_observation_at ? 'good' : 'neutral'),
+      kvRow('Observation persistence', text(rsi.observation_persistence_mode, 'UNKNOWN'), 'neutral'),
+      kvRow('Promotion nominations', rsi.promotion_nomination_count ?? 'UNKNOWN', 'neutral'),
+      kvRow('Skill reliability', rsi.skill_revision_reliability
+        ? `${rsi.skill_revision_reliability.pass_count ?? 0}/${rsi.skill_revision_reliability.evaluation_count ?? 0} pass`
+        : 'UNKNOWN', 'neutral'),
+    );
+  } else {
+    rsiSection.list.append(kvRow('State', 'NOT EXPOSED', 'muted'));
+    rsiSection.list.append(kvRow('Runtime inference', 'DISABLED', 'good'));
+  }
+  fragment.append(rsiSection.wrap);
+
+  const rsiFence = section('RSI authority fences', 'shadow line only');
+  rsiFence.list.append(
+    kvRow('Candidate effect executor', rsi.candidate_effect_executor_exposed === false ? 'NOT EXPOSED' : 'UNKNOWN', rsi.candidate_effect_executor_exposed === false ? 'good' : 'neutral'),
+    kvRow('Physical effect replay', rsi.physical_effect_replay_allowed === false ? 'FORBIDDEN' : 'UNKNOWN', rsi.physical_effect_replay_allowed === false ? 'good' : 'neutral'),
+    kvRow('Direct promotion', rsi.direct_promotion_enabled === false ? 'DISABLED' : 'UNKNOWN', rsi.direct_promotion_enabled === false ? 'good' : 'neutral'),
+    kvRow('Direct self-update', rsi.direct_self_update_enabled === false ? 'DISABLED' : 'UNKNOWN', rsi.direct_self_update_enabled === false ? 'good' : 'neutral'),
+    kvRow('Authority effect', rsi.authority_effect === false ? 'NONE' : 'UNKNOWN', rsi.authority_effect === false ? 'good' : 'neutral'),
+  );
+  fragment.append(rsiFence.wrap);
+
+  const takeover = next?.human_takeover;
+  const takeoverSection = section('Human takeover', 'operator control plane');
+  takeoverSection.list.append(
+    kvRow('State', takeover ? text(takeover.state, 'UNKNOWN') : 'NOT EXPOSED', takeover ? stateTone(takeover.state) : 'muted'),
+    kvRow('Mode', takeover ? text(takeover.mode, 'UNKNOWN') : 'UNKNOWN', 'neutral'),
+    kvRow('Armed', takeover ? (takeover.armed === true ? 'TRUE' : 'FALSE') : 'UNKNOWN', takeover ? (takeover.armed === true ? 'good' : 'warn') : 'neutral'),
+    kvRow('Hold reason', takeover?.reason ? compact(takeover.reason, 30) : 'NONE', takeover?.reason ? 'warn' : 'good'),
+    kvRow('Command path', 'MANUAL OPERATOR ACTION ONLY', 'good'),
+  );
+  fragment.append(takeoverSection.wrap);
+
+  const background = next?.background_service;
+  const backgroundSection = section('Background service', 'startup boundaries');
+  const degraded = Array.isArray(background?.startup_degraded_subsystems) ? background.startup_degraded_subsystems : [];
+  backgroundSection.list.append(
+    kvRow('Close-to-background', background ? (background.close_to_background === true ? 'ACTIVE' : 'NO') : 'UNKNOWN', background ? 'neutral' : 'muted'),
+    kvRow('Shutdown requested', background ? (background.shutdown_requested === true ? 'YES' : 'NO') : 'UNKNOWN', background ? (background.shutdown_requested ? 'warn' : 'good') : 'neutral'),
+    kvRow('Browser runtime ready', background ? (background.browser_runtime_ready === true ? 'YES' : 'NO') : 'UNKNOWN', background ? (background.browser_runtime_ready ? 'good' : 'warn') : 'neutral'),
+    kvRow('Startup retry', background ? (background.startup_retry_pending === true ? `PENDING · attempt ${background.startup_retry_attempt ?? 'UNKNOWN'}` : 'NONE') : 'UNKNOWN', background ? (background.startup_retry_pending ? 'warn' : 'good') : 'neutral'),
+    kvRow('Runtime genesis', background?.runtime_genesis ? compact(text(background.runtime_genesis.state || background.runtime_genesis.status, 24) || 'EXPOSED', 24) : 'NOT EXPOSED', 'neutral'),
+    kvRow('Degraded subsystems', background ? (degraded.length ? `${degraded.length} · ${compact(degraded.map((row) => text(row?.subsystem || row?.name || row, 14)).join(', '), 42)}` : 'NONE') : 'UNKNOWN', degraded.length ? 'warn' : 'good'),
+    kvRow('Terminal stop', background?.terminal_requires_external_stop === true ? 'EXTERNAL REQUIRED' : 'UNKNOWN', 'neutral'),
+  );
+  fragment.append(backgroundSection.wrap);
+
+  const stream = typeof api.brainStreamStatus === 'function' ? api.brainStreamStatus() : null;
+  const brainSection = section('Brain cognitive stream', 'long-lived message port');
+  brainSection.list.append(
+    kvRow('Port', stream ? (stream.connected === true ? 'CONNECTED' : 'DISCONNECTED') : 'UNKNOWN', stream ? (stream.connected ? 'good' : 'warn') : 'neutral'),
+    kvRow('Stream id', stream?.stream_id ? shortId(stream.stream_id, 18) : 'NONE', 'neutral'),
+    kvRow('Acknowledged through', stream ? `seq ${stream.acknowledged_through_sequence}` : 'UNKNOWN', 'neutral'),
+    kvRow('Transport', stream?.long_lived_message_port === true ? 'MESSAGE PORT' : 'UNKNOWN', 'neutral'),
+    kvRow('Full snapshot per delta', stream?.full_snapshot_per_delta === false ? 'NO · BOUNDED BATCHES' : 'UNKNOWN', stream?.full_snapshot_per_delta === false ? 'good' : 'neutral'),
+    kvRow('Control authority', stream?.control_authority === false ? 'NONE' : 'UNKNOWN', stream?.control_authority === false ? 'good' : 'neutral'),
+    kvRow('Command leasing', stream?.command_leasing === false ? 'NONE' : 'UNKNOWN', stream?.command_leasing === false ? 'good' : 'neutral'),
+  );
+  fragment.append(brainSection.wrap);
+
+  const contract = section('Mechanism contract', 'read-only projections');
+  contract.list.append(
+    kvRow('Scheduler authority', 'NONE', 'good'),
+    kvRow('Execution authority', 'NONE', 'good'),
+    kvRow('Automatic effect retry', 'NONE', 'good'),
+    kvRow('Page/model content', 'NOT EXPOSED', 'good'),
+  );
+  fragment.append(contract.wrap);
+  return fragment;
+}
+
+function installMechanismNav() {
+  if (opsNav.querySelector('button[data-section="mechanisms"]')) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.section = 'mechanisms';
+  button.textContent = 'Mechanisms';
+  const anchor = opsNav.querySelector('button[data-section="overview"]') || opsNav.querySelector('button[data-section="commands"]');
+  if (anchor) anchor.before(button);
+  else opsNav.append(button);
+}
+
+/* ── Keyed rail reconciliation ── preserves scroll position and DOM identity
+   across snapshots without ever emptying the container. Presentation only. */
+function reconcileKeyedChildren(container, nodes, keyOf) {
+  const desired = nodes;
+  while (container.children.length > desired.length) container.lastChild.remove();
+  for (let index = 0; index < desired.length; index += 1) {
+    const node = desired[index];
+    const current = container.children[index] || null;
+    if (current === node) continue;
+    const key = keyOf ? keyOf(node) : '';
+    if (key && current && keyOf(current) === key) {
+      current.replaceChildren(...node.childNodes);
+      current.className = node.className;
+    } else if (current) container.replaceChild(node, current);
+    else container.append(node);
+  }
+}
+
+/* ── Omnibox inline hint surface ── a palette inside the single bounded
+   command surface. It suggests existing workbench targets only; it never
+   introduces new commands or authority. Arrow keys + Enter select; Esc
+   dismisses; raw input keeps the legacy routing above. */
+const WORKBENCH_COMMAND_HINTS = Object.freeze([
+  ['attention', 'Attention'], ['sessions', 'Sessions'], ['activity', 'Activity'], ['context', 'Context Set'],
+  ['fleet', 'Fleet'], ['workspaces', 'Workspaces'], ['supervisor', 'Supervisor'], ['devos', 'DevOS cycle'],
+  ['runtime', 'Runtime'], ['safety', 'Safety'], ['mechanisms', 'Mechanisms'], ['skills', 'Skills'],
+  ['commands', 'Actions'], ['overview', 'System'],
+]);
+const WORKBENCH_SKILL_HINTS = Object.freeze([
+  ['research', 'Research Focus'], ['triage', 'Triage Attention'], ['activity', 'Activity Trace'],
+  ['authority', 'Authority Review'], ['context', 'Context Set'], ['sessions', 'Session Surfaces'],
+  ['new', 'New ChatGPT tab'],
+]);
+const omniboxHintRunners = new WeakMap();
+let omniboxHintIndex = 0;
+
+function omniboxHintItems(value) {
+  const input = String(value || '');
+  const prefix = input[0];
+  const query = input.slice(1).trim().toLowerCase();
+  const items = [];
+  if (prefix === '>') {
+    for (const [token, label] of WORKBENCH_COMMAND_HINTS) {
+      if (query && !token.includes(query) && !label.toLowerCase().includes(query)) continue;
+      items.push({ kind: 'CMD', label, hint: token, run: () => {
+        const target = workbenchCommandTarget(token);
+        return target ? (target[0] === 'agentic' ? openAgenticSection(target[1]) : openCoreOpsSection(target[1])) : null;
+      } });
+    }
+  } else if (prefix === '/') {
+    for (const [token, label] of WORKBENCH_SKILL_HINTS) {
+      if (query && !token.includes(query) && !label.toLowerCase().includes(query)) continue;
+      items.push({ kind: 'SKILL', label, hint: token, run: () => runWorkbenchSkill(token) });
+    }
+  } else if (prefix === '@') {
+    for (const tab of tabSearchMatches(snapshot, query).slice(0, 8)) {
+      const chat = tab.kind === 'CHATGPT';
+      items.push({ kind: 'TAB', label: compact(tab.title || (chat ? 'ChatGPT' : tab.url), 40), hint: chat ? 'chat surface' : hostFor(tab.url), run: () => api.command('SELECT_TAB', { tab_id: tab.tab_id }) });
+    }
+  }
+  return items.slice(0, 8);
+}
+
+function hideOmniboxHints() {
+  if (!omniboxHintsEl) return;
+  omniboxHintsEl.hidden = true;
+  omniboxHintsEl.replaceChildren();
+  omniboxHintIndex = 0;
+}
+
+function renderOmniboxHints() {
+  if (!omniboxHintsEl) return;
+  const value = String(address.value || '');
+  if (document.activeElement !== address || !/^[>@/]/.test(value)) {
+    hideOmniboxHints();
+    return;
+  }
+  const items = omniboxHintItems(value);
+  if (!items.length) {
+    hideOmniboxHints();
+    return;
+  }
+  if (omniboxHintIndex >= items.length) omniboxHintIndex = items.length - 1;
+  const fragment = document.createDocumentFragment();
+  items.forEach((item, index) => {
+    const row = el('div', `omniboxHintRow ${index === omniboxHintIndex ? 'selected' : ''}`);
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', index === omniboxHintIndex ? 'true' : 'false');
+    row.append(el('span', 'omniboxHintKind', item.kind), el('strong', 'omniboxHintLabel', item.label), el('span', 'omniboxHintMeta', item.hint));
+    omniboxHintRunners.set(row, item.run);
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      const run = omniboxHintRunners.get(row);
+      hideOmniboxHints();
+      if (run) Promise.resolve(run()).catch(() => {});
+    });
+    fragment.append(row);
+  });
+  omniboxHintsEl.replaceChildren(fragment);
+  omniboxHintsEl.hidden = false;
+}
+
+function cycleOmniboxHint(delta) {
+  const rows = omniboxHintsEl ? [...omniboxHintsEl.querySelectorAll('.omniboxHintRow')] : [];
+  if (!rows.length) return;
+  omniboxHintIndex = (omniboxHintIndex + delta + rows.length) % rows.length;
+  rows.forEach((row, index) => {
+    row.classList.toggle('selected', index === omniboxHintIndex);
+    row.setAttribute('aria-selected', index === omniboxHintIndex ? 'true' : 'false');
+  });
+}
+
+installMechanismNav();
+if (rsiStatusEl) {
+  rsiStatusEl.addEventListener('click', () => { openCoreOpsSection('mechanisms').catch(() => {}); });
+  rsiStatusEl.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openCoreOpsSection('mechanisms').catch(() => {});
+  });
+}
+address.addEventListener('input', renderOmniboxHints);
+address.addEventListener('blur', () => { setTimeout(hideOmniboxHints, 120); });
+window.addEventListener('keydown', (event) => {
+  if (!omniboxHintsEl || omniboxHintsEl.hidden || document.activeElement !== address) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    cycleOmniboxHint(event.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (event.key === 'Enter') {
+    const selected = omniboxHintsEl.querySelector('.omniboxHintRow.selected');
+    if (!selected) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const run = omniboxHintRunners.get(selected);
+    hideOmniboxHints();
+    if (run) Promise.resolve(run()).catch(() => {});
+    return;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    hideOmniboxHints();
+  }
+}, true);
+api.onSnapshot((next) => {
+  if (omniboxHintsEl && !omniboxHintsEl.hidden && String(address.value || '').startsWith('@')) renderOmniboxHints();
+  updateBrainStreamLine();
+});
+if (typeof api.onBrainDelta === 'function') api.onBrainDelta(() => updateBrainStreamLine());
