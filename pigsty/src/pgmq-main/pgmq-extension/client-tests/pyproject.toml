@@ -1,0 +1,12 @@
+[project]
+name = "client-tests"
+version = "0.1.0"
+description = "Client side tests for pgmq"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "psycopg[binary]>=3.2.10",
+    "pytest>=9.0.3",
+    "ruff>=0.12.12",
+    "semver>=3.0.4",
+]

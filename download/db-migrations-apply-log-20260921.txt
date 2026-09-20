@@ -1,0 +1,103 @@
+PASS 20260821044158_r1_continuity_plane_adoption
+PASS 20260821044429_r1_continuity_schema_contract.sql
+PASS 20260821044510_r1_continuity_semantic_guards.sql
+PASS 20260821044527_r1_continuity_trigger_contract.sql
+PASS 20260821044545_r1_continuity_acl_contract.sql
+FAIL 20260821090100_t0_hermetic_toolchain_contract_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260821090100_t0_hermetic_toolchain_contract_v2.sql:139: ERROR:  relation "d
+FAIL 20260821090200_t0_hermetic_toolchain_contract_v3.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260821090200_t0_hermetic_toolchain_contract_v3.sql:60: ERROR:  relation "de
+FAIL 20260821121846_h205f22_canonical_level1_roadmap_contract_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260821121846_h205f22_canonical_level1_roadmap_contract_v1.sql:46: ERROR:  r
+FAIL 20260821125449_h205f22_evidence_freshness_seal_gate_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260821125449_h205f22_evidence_freshness_seal_gate_v1.sql:93: ERROR:  relati
+PASS 20260821234739_r1_step09b_supervisor_db_ingestion_v1.sql
+PASS 20260821235859_r1_step09b_idempotency_truthfulness_v2.sql
+FAIL 20260823085243_w1_signed_reboot_identity_ingest_guard_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260823085243_w1_signed_reboot_identity_ingest_guard_v1.sql:303: ERROR:  rel
+FAIL 20260823141025_w1_persisted_admission_candidate_readback_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260823141025_w1_persisted_admission_candidate_readback_v1.sql:6: ERROR:  re
+FAIL 20260823141042_w1_admission_candidate_readback_volatility_fix.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260823141042_w1_admission_candidate_readback_volatility_fix.sql:5: ERROR:  
+PASS 20260824044849_aop1_microstep_lockstep_duel_v2.sql
+PASS 20260824061721_duel_submit_pair_idempotent_v3.sql
+PASS 20260824070409_duel_sovereign_inference_v1.sql
+PASS 20260824073410_same_point_duel_v4.sql
+PASS 20260824073803_same_point_duel_v4_executor_fencing.sql
+PASS 20260824074927_same_point_duel_v4_recovery_readback.sql
+PASS 20260824083901_same_point_duel_v4_peer_relay.sql
+PASS 20260824084008_same_point_duel_v4_peer_relay_flat_readback.sql
+PASS 20260825050000_a2_chat_bridge_receipts_v1.sql
+PASS 20260825213000_a2_chat_bridge_remote_runtime_v1.sql
+PASS 20260825215000_a2_chat_bridge_remote_runtime_rls_deny_v1.sql
+FAIL 20260826162536_a2_browser_operator_p0_transport_fsm_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260826162536_a2_browser_operator_p0_transport_fsm_v1.sql:24: ERROR:  column
+PASS 20260826162638_a2_browser_operator_p0_transport_fsm_v1_repair.sql
+PASS 20260827033500_a2_browser_operator_device_identity_v1.sql
+PASS 20260827034100_a2_browser_operator_device_identity_hardening_v2.sql
+PASS 20260827043107_a2_browser_supervisor_control_plane_v1.sql
+PASS 20260827115000_a2_browser_supervisor_idempotent_issuance_v2.sql
+PASS 20260827120215_a2_browser_supervisor_remote_authority_v3.sql
+PASS 20260827121557_a2_browser_supervisor_remote_bootstrap_v3.sql
+PASS 20260827123023_a2_browser_supervisor_control_lease_v4.sql
+PASS 20260827123103_a2_browser_supervisor_route_v2_control_lease_v4.sql
+PASS 20260827140000_a2_chat_bridge_remote_atomic_command_v2.sql
+PASS 20260827140612_a2_browser_supervisor_lease_budget_guard_v4.sql
+PASS 20260827140935_a2_browser_supervisor_privacy_scrub_v4.sql
+PASS 20260827141000_a2_browser_supervisor_atomic_result_v4.sql
+PASS 20260827143000_a2_browser_device_embedded_bootstrap_rotate_v5.sql
+PASS 20260827190000_a2_browser_device_bootstrap_rotation_scope_v6.sql
+PASS 20260829192000_a2_browser_autonomous_download_update_actuator_v1.sql
+PASS 20260829193500_a2_browser_self_update_observer_v1.sql
+PASS 20260830083000_owner_safety_gate_control_v1.sql
+PASS 20260830084500_owner_gate_server_registry_v1.sql
+FAIL 20260830085500_owner_gate_mesh_lease_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260830085500_owner_gate_mesh_lease_v2.sql:126: ERROR:  relation "public.com
+PASS 20260831054300_devos_fleet_reconcile_v1.sql
+FAIL 20260831120500_devos_fleet_reconcile_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260831120500_devos_fleet_reconcile_v1.sql:114: ERROR:  relation "destruktio
+FAIL 20260831121500_devos_fleet_priority_aging_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260831121500_devos_fleet_priority_aging_v1.sql:192: ERROR:  relation "destr
+FAIL 20260831123000_browser_global_resilience_hardening_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260831123000_browser_global_resilience_hardening_v1.sql:13: ERROR:  functio
+PASS 20260831124000_native_supervisor_effect_binding_v1.sql
+PASS 20260831125000_native_supervisor_mesh_sync_edge_authority_v1
+PASS 20260831152000_a2_workspace_binding_registry_v1.sql
+FAIL 20260831184500_devos_fleet_transport_admission_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260831184500_devos_fleet_transport_admission_v1.sql:120: ERROR:  relation "
+FAIL 20260831193000_meta_orchestrator_plan_state_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260831193000_meta_orchestrator_plan_state_v1.sql:177: ERROR:  relation "des
+FAIL 20260831200500_meta_orchestrator_authoritative_inputs_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260831200500_meta_orchestrator_authoritative_inputs_v1.sql:140: ERROR:  rel
+PASS 20260831204000_devos_fleet_scheduler_capacity_snapshot_v1.sql
+FAIL 20260901001500_meta_orchestrator_task_admission_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260901001500_meta_orchestrator_task_admission_v1.sql:186: ERROR:  relation 
+FAIL 20260901014000_devos_fleet_transport_promotion_lease_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260901014000_devos_fleet_transport_promotion_lease_v1.sql:151: ERROR:  rela
+PASS 20260901023000_devos_fleet_transport_promotion_claim_barrier_v1.sql
+PASS 20260901030000_meta_orchestrator_frontier_admission_v1.sql
+PASS 20260901034000_meta_orchestrator_controller_lease_v1.sql
+PASS 20260901034500_meta_orchestrator_frontier_leader_fence_v2.sql
+PASS 20260901035000_devos_fleet_scheduler_pressure_snapshot_v2.sql
+FAIL 20260901042000_devos_fleet_ambiguity_reconciliation_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260901042000_devos_fleet_ambiguity_reconciliation_v1.sql:302: ERROR:  relat
+PASS 20260901043000_devos_control_supervisor_authority_repair_v1.sql
+FAIL 20260901044000_devos_fleet_ambiguity_reconciliation_client_fence_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260901044000_devos_fleet_ambiguity_reconciliation_client_fence_v2.sql:164: 
+PASS 20260901144500_compute_unified_restart_effect_receipt_v1.sql
+PASS 20260901154500_compute_unified_restart_effect_receipt_persistence_v1.sql
+PASS 20260901165000_compute_unified_restart_effect_receipt_readback_v1.sql
+PASS 20260901235500_compute_unified_restart_actuator_precondition_v2.sql
+FAIL 20260902004500_c5_transport_promotion_lease_verifier_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902004500_c5_transport_promotion_lease_verifier_v2.sql:178: ERROR:  rela
+PASS 20260902090000_a2_workspace_binding_snapshot_v1.sql
+FAIL 20260902103000_a2_workspace_reincarnation_transition_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902103000_a2_workspace_reincarnation_transition_v1.sql:276: ERROR:  rela
+FAIL 20260902111500_a2_workspace_reincarnation_exact_replay_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902111500_a2_workspace_reincarnation_exact_replay_v2.sql:6: ERROR:  func
+FAIL 20260902181000_devos_chatgpt_rate_limit_backpressure_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902181000_devos_chatgpt_rate_limit_backpressure_v1.sql:204: ERROR:  rela
+FAIL 20260902182000_devos_ready_base_drift_fence_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902182000_devos_ready_base_drift_fence_v1.sql:52: ERROR:  relation "dest
+FAIL 20260902183500_devos_live_ambiguity_reconciliation_v3.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902183500_devos_live_ambiguity_reconciliation_v3.sql:167: ERROR:  relati
+FAIL 20260902190500_devos_dispatch_admission_runtime_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902190500_devos_dispatch_admission_runtime_v2.sql:166: ERROR:  relation 
+PASS 20260902191500_devos_refill_ignore_base_drift_cooldown_v1.sql
+FAIL 20260902205500_supervisor_mesh_terminal_freshness_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902205500_supervisor_mesh_terminal_freshness_v1.sql:251: ERROR:  relatio
+FAIL 20260902211500_devos_precise_rate_limit_backpressure_v2.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260902211500_devos_precise_rate_limit_backpressure_v2.sql:372: ERROR:  rela
+PASS 20260903052200_devos_dispatch_admission_signed_native_v3.sql
+FAIL 20260903112000_devos_runtime_capability_contract_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260903112000_devos_runtime_capability_contract_v1.sql:112: ERROR:  relation
+PASS 20260904202000_devos_durable_continuity_authority_v1.sql
+PASS 20260906005500_native_supervisor_effect_binding_v2_runtime_fence.sql
+PASS 20260906093000_browser_supervisor_realtime_command_wake_v1.sql
+PASS 20260906163500_browser_command_realtime_wake_single_trigger_v1.sql
+PASS 20260906164000_native_supervisor_effect_binding_v2_transport_compat.sql
+PASS 20260906164500_supervisor_complete_requires_effect_binding.sql
+PASS 20260906172000_browser_control_plane_fast_lane_release_v1.sql
+PASS 20260906172500_supervisor_complete_authority_order_v1.sql
+PASS 20260908143500_browser_supervisor_issue_batch_v1.sql
+PASS 20260908204500_browser_supervisor_issuer_replay_v2.sql
+PASS 20260911170000_a2_browser_supervisor_always_on_control_admission_v1.sql
+FAIL 20260913163614_devos_environment_reset_generation_fence_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260913163614_devos_environment_reset_generation_fence_v1.sql:25: ERROR:  re
+FAIL 20260913165258_devos_reset_supervisor_admission_fence_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260913165258_devos_reset_supervisor_admission_fence_v1.sql:63: ERROR:  func
+FAIL 20260913185443_devos_continuous_service_admission_fence_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260913185443_devos_continuous_service_admission_fence_v1.sql:7: ERROR:  fun
+FAIL 20260914001000_checkpoint_ledger_integrity_guard_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260914001000_checkpoint_ledger_integrity_guard_v1.sql:35: ERROR:  relation 
+PASS 20260918015500_browser_developer_emergency_update_command_admission_v1.sql
+FAIL 20260918150000_devos_transport_promotion_json_null_admission_fix_v1.sql :: psql:/home/z/my-project/rsi-work/Compute-r/supabase/migrations/20260918150000_devos_transport_promotion_json_null_admission_fix_v1.sql:158: 
+PASS 20260919030000_browser_agent_observation_actions_v1.sql
+PASS 20260921000000_browser_emergency_lane_and_lease_v1.sql
