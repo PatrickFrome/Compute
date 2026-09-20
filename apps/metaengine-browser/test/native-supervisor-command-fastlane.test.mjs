@@ -179,4 +179,19 @@ test('clean genesis shell requires held batch transport and disables the single-
   assert.match(main, /legacySingleLeaseFallback:\s*false/);
   assert.match(main, /commandFastlane:\s*false/);
   assert.doesNotMatch(main, /commandFastlaneIntervalMs:\s*750/);
+  // Tier 1 amendment: the wake-aware batch fastlane is the sanctioned pickup
+  // accelerator against a bounded DB poll edge. It runs alongside the held
+  // wait-batch ONLY until the edge proves notify wake, then suspends itself —
+  // the single steady-state lease loop contract is preserved.
+  assert.match(main, /commandBatchFastlane:\s*true/);
+  assert.match(main, /commandBatchFastlaneIntervalMs:\s*600/);
+  const base = await readFile(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
+  assert.match(base, /this\.#batchFastlane\?\.observeWake\(this\.#lastBatchWakeReason\)/);
+  assert.match(base, /command_batch_fastlane: this\.#batchFastlane\?\.snapshot\(\)/);
+  assert.match(base, /batch_fastlane_suspends_on_notify_wake:\s*true/);
+  const batchFastlaneSource = await readFile(new URL('../src/native-supervisor-command-batch-fastlane.mjs', import.meta.url), 'utf8');
+  assert.match(batchFastlaneSource, /command_pickup_transport_only: true/);
+  assert.match(batchFastlaneSource, /auto_suspend_on_notify_wake: true/);
+  assert.match(batchFastlaneSource, /scheduler_authority: false/);
+  assert.doesNotMatch(batchFastlaneSource, /setInterval\s*\(/);
 });

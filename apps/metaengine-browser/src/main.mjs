@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { RsiRuntimeService } from './rsi-runtime-service.mjs';
+import { createRsiOperatorConsole } from './rsi-operator-console.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
@@ -349,6 +350,12 @@ async function shellSnapshot() {
     human_takeover: supervisor ? humanTakeover.snapshot() : null,
     workspaces,
     compute,
+    // Bounded RSI operator console projection (Tier 1 wiring): gives the
+    // Quantum Console the outcome-river counters (browser outcome ingest,
+    // command attribution, experience store) next to the aggregate candidate
+    // counts. Fails closed to an UNAVAILABLE projection when the runtime is
+    // not ready — never a fabricated healthy state.
+    rsi: await rsiOperatorConsole.projection(),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     surface_grid: devosSurfaceGridPlan ? structuredClone(devosSurfaceGridPlan) : null,
     session_layouts: structuredClone(sessionLayouts),
@@ -688,6 +695,17 @@ async function initRsiRuntime() {
   return rsiRuntime.snapshot();
 }
 
+// Operator console over the RSI runtime. Fails closed when the runtime is not
+// ready (source sha unavailable on a dev machine, plane degraded): the console
+// projection then reports UNAVAILABLE and every action throws
+// rsi_operator_console_runtime_not_ready. No authority is granted anywhere.
+const rsiOperatorConsole = createRsiOperatorConsole({
+  ensureRuntime: async () => {
+    await initRsiRuntime();
+    return rsiRuntime;
+  },
+});
+
 async function runDevelopmentPlaneSmoke() {
   const state = await initDevelopmentPlane();
   const health = await developmentPlane.request('HEALTH');
@@ -730,6 +748,14 @@ async function handleCommand(command, payload = {}) {
   }
   if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
   if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
+  // RSI operator console — local main-process actions over the shadow runtime.
+  // Read-mostly; the only ledger-writing action is promotion nomination, which
+  // by design grants nothing without the external promotion gate.
+  if (command.startsWith('RSI_')) {
+    const result = await rsiOperatorConsole.execute(command, payload);
+    await publishSnapshot().catch(() => {});
+    return result;
+  }
   if (command === 'NEW_CHATGPT') return createTab('https://chatgpt.com/', { select: true, load: true, awaitLoad: false });
   if (command === 'NEW_TAB') return createTab(payload?.url || AGENT_PLATFORM_HOME_URL, { select: payload?.select !== false, load: true, created_by_continuity_id: payload?.created_by_continuity_id || null });
   if (command === 'SELECT_TAB') { registry.select(payload?.tab_id); attachSelected(); invalidatePerception(); await publishSnapshot(); return { ok: true, tab_id: String(payload?.tab_id) }; }
@@ -1032,13 +1058,16 @@ async function initNativeSupervisor() {
       commandBatchSize: 64,
       commandReadConcurrency: 32,
       commandMutationConcurrency: 16,
-      // P2 control latency: the deployed edge serves wait-batch as a bounded
-      // DB poll (BOUNDED_DB_POLL — no LISTEN/NOTIFY wake yet), so the wait
-      // budget is also the worst-case command pickup delay. 15s was tuned for
-      // the long-poll edge; against the deployed edge it produced a live p50
-      // of ~6.9s issue→COMPLETED. 4s matches the client DEFAULT_BATCH_WAIT_MS
-      // and cuts p50 to ~2s at one client's poll volume. When the edge gains
-      // notify wake, an early wake ends the wait below this budget anyway.
+      // P2 control latency: the deployed edge currently serves wait-batch as a
+      // bounded DB poll (live-observed DB_POLL_TIMEOUT_FALLBACK), so the 4s
+      // wait budget is also the worst-case command pickup delay. The batch
+      // fastlane polls the same signed single-lease endpoint at 600ms while
+      // the cycle is parked in its held wait-batch, cutting pickup to
+      // ~0.6s + one round trip. It auto-suspends the moment the edge proves
+      // notify wake (POSTGRES_NOTIFY / REALTIME wake reasons), restoring the
+      // single steady-state lease loop.
+      commandBatchFastlane: true,
+      commandBatchFastlaneIntervalMs: 600,
       commandBatchWaitMs: 4000,
       legacySingleLeaseFallback: false,
       commandFastlane: false,

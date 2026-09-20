@@ -9,6 +9,7 @@ import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
 import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
 import { SelfUpdateRuntime } from './self-update-runtime.mjs';
 import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fastlane.mjs';
+import { NativeSupervisorCommandBatchFastlane } from './native-supervisor-command-batch-fastlane.mjs';
 import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
 import { persistPreInstallReceipt } from './self-update-handoff.mjs';
 import { readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
@@ -329,6 +330,8 @@ export class NativeSupervisorClient {
   #resultDeliveryBackoffMs;
   #resultDeliveryAdapter = null;
   #onRsiOutcomeReadback = null;
+  #batchFastlane = null;
+  #batchFastlaneBusy = false;
   #rsiOutcomeReadbackObserved = 0;
   #rsiOutcomeReadbackDropped = 0;
   #lastRsiOutcomeReadbackAt = null;
@@ -351,6 +354,8 @@ export class NativeSupervisorClient {
     legacySingleLeaseFallback = true,
     commandFastlane = false,
     commandFastlaneIntervalMs = 750,
+    commandBatchFastlane = false,
+    commandBatchFastlaneIntervalMs = 600,
     controlStatePath = null,
     hostResilience = undefined,
     resultDeliveryAttempts = 3,
@@ -391,6 +396,19 @@ export class NativeSupervisorClient {
         })
       : null;
     this.#onRsiOutcomeReadback = onRsiOutcomeReadback;
+    // Wake-aware pickup accelerator for poll-fallback edges. Transport only:
+    // the held wait-batch cycle stays the single steady-state lease loop once
+    // the edge proves notify wake; until then this cuts PENDING pickup to
+    // ~interval + one round trip against a bounded DB poll edge.
+    this.#batchFastlane = commandBatchFastlane === true
+      ? new NativeSupervisorCommandBatchFastlane({
+          intervalMs: Math.max(250, Number(commandBatchFastlaneIntervalMs) || 600),
+          isRunning: () => this.#running,
+          isSlotBusy: () => this.#currentCommands.size > 0 || this.#legacyFastlaneBusy,
+          identitySnapshot: () => this.#identity.snapshot(),
+          pickupAndRun: () => this.#pickupAndRunBatchFastlaneCommand(),
+        })
+      : null;
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
@@ -512,6 +530,8 @@ export class NativeSupervisorClient {
       armed: this.#armed,
       command_fastlane: this.#commandFastlane?.snapshot()
         || Object.freeze({ enabled: false, scheduler_authority: false, command_pickup_transport_only: false, authority_effect: false }),
+      command_batch_fastlane: this.#batchFastlane?.snapshot()
+        || Object.freeze({ enabled: false, mode: 'DISABLED', scheduler_authority: false, command_pickup_transport_only: false, auto_suspend_on_notify_wake: false, authority_effect: false }),
       lifecycle: this.#lifecycle?.snapshot() || null,
       supervisor_mesh: this.#mesh?.snapshot() || null,
       self_update: this.#selfUpdate?.snapshot() || null,
@@ -543,6 +563,9 @@ export class NativeSupervisorClient {
         long_poll_replaces_idle_timer_latency: this.#batchTransport === 'SUPPORTED',
         legacy_750ms_fallback_configured: this.#commandFastlane != null,
         legacy_fallback_suppressed_by_batch_transport: this.#batchTransport === 'SUPPORTED',
+        batch_fastlane_configured: this.#batchFastlane != null,
+        batch_fastlane_mode: this.#batchFastlane?.mode || 'DISABLED',
+        batch_fastlane_suspends_on_notify_wake: true,
         one_steady_state_lease_loop: true,
         transport_delivery_is_authority: false,
         automatic_effect_retry_allowed: false,
@@ -733,6 +756,7 @@ export class NativeSupervisorClient {
     this.#startedAt = new Date().toISOString();
     this.#schedule();
     this.#commandFastlane?.start();
+    this.#batchFastlane?.start();
     try {
       await this.#identity.ensure();
       // Obtain the authoritative DB-backed admission projection before the first
@@ -767,6 +791,7 @@ export class NativeSupervisorClient {
     this.#mesh?.stop?.();
     this.#lifecycle?.stop?.();
     this.#commandFastlane?.stop();
+    this.#batchFastlane?.stop();
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
   }
@@ -939,6 +964,23 @@ export class NativeSupervisorClient {
     }
   }
 
+  // Batch fastlane pickup. Unlike the legacy fastlane this runs WHILE the
+  // supervisor cycle is parked inside its held wait-batch request — that idle
+  // window is exactly what it accelerates on a bounded DB poll edge. Mutual
+  // exclusion stays owned by the in-flight command slot plus the
+  // transactional DB lease (a PENDING command flips to LEASED exactly once).
+  async #pickupAndRunBatchFastlaneCommand() {
+    if (this.#batchFastlaneBusy || this.#legacyFastlaneBusy) return null;
+    this.#batchFastlaneBusy = true;
+    try {
+      const command = await this.#nextCommand();
+      if (command) await this.#runCommand(command);
+      return command || null;
+    } finally {
+      this.#batchFastlaneBusy = false;
+    }
+  }
+
   async #nextCommands() {
     if (this.#batchTransport !== 'UNAVAILABLE') {
       const waitStartedAt = Date.now();
@@ -954,6 +996,7 @@ export class NativeSupervisorClient {
         this.#lastBatchWakeReason = `HTTP_${response.status}_UNSUPPORTED`;
         this.#lastBatchWaitElapsedMs = Math.max(0, Date.now() - waitStartedAt);
         this.#lastBatchResponseAt = new Date().toISOString();
+        this.#batchFastlane?.stop();
         if (this.#legacySingleLeaseFallback) {
           this.#batchTransport = 'UNAVAILABLE';
           this.#commandFastlane?.start();
@@ -973,6 +1016,7 @@ export class NativeSupervisorClient {
         }
         this.#batchTransport = 'SUPPORTED';
         this.#commandFastlane?.stop();
+        this.#batchFastlane?.observeWake(this.#lastBatchWakeReason);
         this.#lastBatchCount = body.commands.length;
         return body.commands;
       }

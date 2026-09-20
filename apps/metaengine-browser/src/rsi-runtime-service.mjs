@@ -1614,6 +1614,76 @@ export class RsiRuntimeService {
     return this.#verifiedArchive;
   }
 
+  // Bounded read accessor for the operator console: the verified skill library
+  // snapshot (digest + entry manifest) without exposing the lifecycle writer.
+  verifiedLibrarySnapshot() {
+    this.#assertRunning();
+    return this.#skillLifecycle.verifiedLibrarySnapshot();
+  }
+
+  // Operator console read accessors — bounded, read-only projections for the
+  // shell surface. The shadow candidate list and the experience graph are the
+  // two "is the loop actually flowing" surfaces an operator needs beside the
+  // aggregate counters in snapshot(). No mutation path is exposed here.
+  shadowCandidates() {
+    this.#assertRunning();
+    const shadow = this.#archive.snapshot();
+    return Object.freeze(shadow.candidates.map((row) => Object.freeze({
+      candidate_id: row.candidate_id,
+      state: row.state,
+      candidate_sha: row.candidate_sha,
+      parent_sha: row.parent_sha,
+      created_at: row.created_at || null,
+      final_digest: row.final_digest || null,
+      authority_effect: false,
+    })));
+  }
+
+  experienceGraph() {
+    this.#assertRunning();
+    const graph = this.#experienceStore.graphSnapshot();
+    if (!graph) return Object.freeze({
+      schema: 'metaengine.rsi.experience-graph.v1',
+      graph_id: null,
+      epoch: 0,
+      case_count: 0,
+      task_anchor_count: 0,
+      cases: Object.freeze([]),
+      task_anchors: Object.freeze([]),
+      graph_present: false,
+      authority_effect: false,
+    });
+    const boundedCases = (Array.isArray(graph.cases) ? graph.cases : []).slice(-64).map((row) => Object.freeze({
+      case_id: row.case_id,
+      case_digest: row.case_digest,
+      task_id: row.task_id,
+      attempt_index: row.attempt_index,
+      candidate_id: row.candidate_id || null,
+      outcome: row.outcome || null,
+      model_family: row.model_family || null,
+      failure_codes: Array.isArray(row.failure_codes) ? Object.freeze([...row.failure_codes]) : Object.freeze([]),
+      mechanism_tags: Array.isArray(row.mechanism_tags) ? Object.freeze([...row.mechanism_tags]) : Object.freeze([]),
+      authority_effect: false,
+    }));
+    const boundedAnchors = (Array.isArray(graph.task_anchors) ? graph.task_anchors : []).slice(-64).map((row) => Object.freeze({
+      task_id: row.task_id,
+      task_signature_digest: row.task_signature_digest || null,
+      authority_effect: false,
+    }));
+    return Object.freeze({
+      schema: 'metaengine.rsi.experience-graph.v1',
+      graph_id: graph.graph_id,
+      epoch: graph.epoch,
+      case_count: graph.case_count ?? boundedCases.length,
+      task_anchor_count: graph.task_anchor_count ?? boundedAnchors.length,
+      snapshot_digest: graph.snapshot_digest || null,
+      cases: Object.freeze(boundedCases),
+      task_anchors: Object.freeze(boundedAnchors),
+      graph_present: true,
+      authority_effect: false,
+    });
+  }
+
   snapshot() {
     const shadow = this.#archive.snapshot();
     return Object.freeze({
