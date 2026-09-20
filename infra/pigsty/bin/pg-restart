@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Restart the Pigsty rootless PG17 cluster (applies conf changes).
+set -euo pipefail
+PIGSTY_ROOT="${PIGSTY_ROOT:-/home/z/my-project/pigsty}"
+PGBIN="${PGBIN:-$PIGSTY_ROOT/rootless/pgroot/usr/lib/postgresql/17/bin}"
+exec "$PGBIN/pg_ctl" -D "$PIGSTY_ROOT/rootless/PGDATA" restart -m fast \
+  -l "$PIGSTY_ROOT/rootless/log/postgres.log"
