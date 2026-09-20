@@ -5,6 +5,7 @@ import test from 'node:test';
 const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const runtime = await fs.readFile(new URL('../src/rsi-runtime-service.mjs', import.meta.url), 'utf8');
 const ledger = await fs.readFile(new URL('../src/rsi-runtime-ledger.mjs', import.meta.url), 'utf8');
+const consoleSource = await fs.readFile(new URL('../src/rsi-operator-console.mjs', import.meta.url), 'utf8');
 
 test('Browser lifecycle starts RSI only after exact Development Plane source binding', () => {
   assert.match(main, /import \{ RsiRuntimeService \} from '\.\/rsi-runtime-service\.mjs'/);
@@ -72,9 +73,16 @@ test('Outcome River binds task-attributed queued commands pre-execution and cred
 test('RSI operator steering wheel exposes status/pause/resume/nominate/approve without execution authority', () => {
   assert.match(main, /import \{ RsiOperatorSteering \} from '\.\/rsi-operator-steering\.mjs'/);
   assert.match(main, /metaengine-rsi-runtime-ledger-v1\.jsonl\.operator-steering\.json/);
+  // Single RSI_* entry point: every RSI_* shell command routes through the
+  // operator console, which delegates the steering actions to the controller.
+  assert.match(main, /command\.startsWith\('RSI_'\)/);
+  assert.match(main, /rsiOperatorConsole\.execute\(command, payload\)/);
   for (const cmd of ['RSI_STATUS', 'RSI_PAUSE', 'RSI_RESUME', 'RSI_NOMINATE', 'RSI_APPROVE']) {
-    assert.ok(main.includes(`command === '${cmd}'`), `missing shell command ${cmd}`);
+    assert.ok(consoleSource.includes(`'${cmd}'`), `console action list missing ${cmd}`);
   }
+  // The console wires the steering provider and fails closed without it.
+  assert.match(main, /ensureSteering: async \(\)/);
+  assert.match(consoleSource, /rsi_operator_console_steering_unavailable/);
   // Pause gates only the learning-side credit effect; episodes still ingest.
   assert.match(main, /rsiOperatorSteering\?\.allows\?\.\('CREDIT_ASSIGNMENT'\) === false/);
   assert.match(main, /rsiOperatorSteering\.recordGateSkip\('CREDIT_ASSIGNMENT'\)/);
