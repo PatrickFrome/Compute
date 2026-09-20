@@ -1,28 +1,45 @@
+/* ==========================================================================
+   METAENGINE Browser - Dark Workspace v2 "Quantum Console" presentation.
+   Browser-first, low-noise, information-dense engineering surface.
+   Geometry mirrors the trusted main-process shell layout plan exactly:
+   top 44px - sidebar 240px (52 compact) - operations 320px - native inset.
+   This stylesheet is presentation only: it adds no network, execution,
+   scheduler, leasing, retry, page/model trust, or authority surface.
+   ========================================================================== */
+
 :root{
   color-scheme:dark;
   --bg:#090c11;
-  --top:#0c1016;
-  --surface:#10151d;
+  --top:#0b0f15;
+  --surface:#0c1117;
   --surface-soft:#0d1219;
-  --surface-strong:#151c26;
-  --surface-hover:#18212c;
-  --line:#202a36;
-  --line-strong:#2b3746;
-  --text:#e8edf4;
-  --muted:#9aa8b8;
-  --subtle:#687788;
+  --surface-strong:#10161f;
+  --surface-hover:#141c27;
+  --raised:#111a25;
+  --raised-2:#152030;
+  --line:#1b2532;
+  --line-strong:#26344a;
+  --text:#e9eff7;
+  --muted:#a7b4c6;
+  --subtle:#7f8fa3;
   --accent:#6ea8ff;
-  --accent-strong:#8bb9ff;
-  --accent-soft:rgba(110,168,255,.12);
-  --good:#64d6a2;
-  --warn:#e9bd68;
-  --bad:#ff7b8c;
-  --neutral:#718093;
+  --accent-strong:#8db9ff;
+  --accent-soft:rgba(110,168,255,.13);
+  --accent-line:rgba(110,168,255,.32);
+  --good:#5fd6a5;
+  --warn:#e8bd6d;
+  --bad:#ff7b8d;
+  --neutral:#7d8ca1;
   --shadow:none;
   --shadow-soft:none;
+  --shadow-pop:0 18px 44px rgba(0,0,0,.5);
   --sidebar-width:240px;
   --ops-width:320px;
   --top-height:44px;
+  --border:var(--line);
+  --panel:var(--surface);
+  --panel-2:var(--surface-strong);
+  --focus:var(--accent);
 }
 
 html,body{background:var(--bg);color:var(--text)}
@@ -31,6 +48,7 @@ body[data-final-shell="metaengine-dark-workspace-v2"]{
   color:var(--text);
   letter-spacing:.005em;
 }
+body[data-final-shell="metaengine-dark-workspace-v2"] ::selection{background:rgba(110,168,255,.24);color:#f4f8ff}
 body[data-final-shell="metaengine-dark-workspace-v2"] button,
 body[data-final-shell="metaengine-dark-workspace-v2"] input{color:inherit}
 body[data-final-shell="metaengine-dark-workspace-v2"] button:focus-visible,
@@ -38,16 +56,21 @@ body[data-final-shell="metaengine-dark-workspace-v2"] input:focus-visible{
   outline:2px solid var(--accent);
   outline-offset:2px;
 }
+body[data-final-shell="metaengine-dark-workspace-v2"] *{scrollbar-width:thin;scrollbar-color:#263448 transparent}
+body[data-final-shell="metaengine-dark-workspace-v2"] ::-webkit-scrollbar{width:10px;height:10px}
+body[data-final-shell="metaengine-dark-workspace-v2"] ::-webkit-scrollbar-thumb{border-radius:6px;background:#263448;border:2px solid transparent;background-clip:padding-box}
+body[data-final-shell="metaengine-dark-workspace-v2"] ::-webkit-scrollbar-thumb:hover{background:#334862;border:2px solid transparent;background-clip:padding-box}
+body[data-final-shell="metaengine-dark-workspace-v2"] ::-webkit-scrollbar-track{background:transparent}
 
-/* Browser-first command strip: dense, flat and visually subordinate to the active page. */
+/* Command bar: dense, flat, subordinate to the active page. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .commandBar{
   height:var(--top-height);
-  gap:4px;
-  padding:4px 7px;
-  background:rgba(12,16,22,.98);
+  gap:5px;
+  padding:4px 8px;
+  background:rgba(11,15,21,.97);
   border-bottom:1px solid var(--line);
   box-shadow:none;
-  backdrop-filter:blur(12px) saturate(1.05);
+  backdrop-filter:blur(14px) saturate(1.06);
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .railToggle,
 body[data-final-shell="metaengine-dark-workspace-v2"] .iconButton,
@@ -55,7 +78,7 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .miniButton,
 body[data-final-shell="metaengine-dark-workspace-v2"] .goButton{
   background:transparent;
   color:var(--muted);
-  border-radius:7px;
+  border-radius:8px;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .railToggle:hover,
 body[data-final-shell="metaengine-dark-workspace-v2"] .iconButton:hover,
@@ -64,59 +87,62 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .goButton:hover{
   background:var(--surface-hover);
   color:var(--text);
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .railToggle{width:32px;height:32px;flex-basis:32px;border-radius:7px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .railToggle{width:32px;height:32px;flex-basis:32px;border-radius:8px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .navControls{gap:0}
-body[data-final-shell="metaengine-dark-workspace-v2"] .iconButton{width:28px;height:28px;border-radius:6px;font-size:17px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .iconButton{width:28px;height:28px;border-radius:7px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .brand{width:30px;height:32px;flex-basis:30px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .brandMark{
-  width:24px;height:24px;
-  border-radius:6px;
-  background:#17263a;
-  color:#9bc4ff;
-  border:1px solid #29466a;
+  width:26px;height:26px;
+  border-radius:7px;
+  background:#16243a;
+  color:#9cc3ff;
+  border:1px solid #27466a;
   box-shadow:none;
   font-size:10px;
   font-weight:800;
 }
+
+/* Omnibox: the single bounded command surface - visual centerpiece. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .omnibox{
-  height:34px;
+  height:33px;
   min-width:260px;
-  max-width:940px;
-  margin:0 5px;
-  padding:2px 4px 2px 8px;
+  max-width:880px;
+  margin:0 6px;
+  padding:2px 4px 2px 9px;
   gap:7px;
-  background:#0f151d;
-  border:1px solid #273240;
-  border-radius:8px;
+  background:#0e1520;
+  border:1px solid #27354a;
+  border-radius:9px;
   box-shadow:none;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .omnibox:hover{border-color:#344355;background:#111924}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omnibox:hover{border-color:#334762;background:#101824}
 body[data-final-shell="metaengine-dark-workspace-v2"] .omnibox:focus-within{
-  background:#121a24;
-  border-color:#4f78ad;
-  box-shadow:0 0 0 2px rgba(110,168,255,.10);
+  background:#111a26;
+  border-color:#4d7ab8;
+  box-shadow:0 0 0 2.5px rgba(110,168,255,.13);
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .routeKind{
-  min-width:35px;
+  min-width:36px;
   padding:3px 5px;
   border-radius:5px;
-  background:#1a222d;
-  color:#a5b3c2;
-  border:1px solid #26313e;
-  font:700 9px/1 "Segoe UI Variable Text","Segoe UI",sans-serif;
+  background:#18202c;
+  color:#a5b3c4;
+  border:1px solid #243040;
+  font-size:8.5px;
+  font-weight:800;
   letter-spacing:.06em;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .routeKind.chat{
-  background:rgba(110,168,255,.12);
-  border-color:rgba(110,168,255,.28);
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
   color:#a9ccff;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] #address{
-  color:#e9eff7;
+  color:#eaf0f8;
   font-size:12.5px;
   line-height:1.3;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] #address::placeholder{color:#627183}
+body[data-final-shell="metaengine-dark-workspace-v2"] #address::placeholder{color:#5f708a}
 body[data-final-shell="metaengine-dark-workspace-v2"] .shortcutHint{
   padding:3px 6px;
   border:1px solid #273240;
@@ -126,69 +152,125 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .shortcutHint{
   font-size:9px;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .goButton{width:27px;height:27px;font-size:13px}
+
+/* Inline omnibox hints: a palette inside the one bounded command surface. */
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHints{
+  border:1px solid var(--line-strong);
+  border-radius:10px;
+  background:#0d141d;
+  box-shadow:var(--shadow-pop);
+  overflow:hidden;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintRow{height:34px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintRow:hover{background:#131c28}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintRow.selected{background:rgba(110,168,255,.13)}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintKind{
+  background:#18202c;
+  color:#8fa0b4;
+  border:1px solid #243040;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintRow.selected .omniboxHintKind{
+  background:var(--accent-soft);
+  border-color:var(--accent-line);
+  color:#a9ccff;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintLabel{color:#d6dfea;font-weight:620}
+body[data-final-shell="metaengine-dark-workspace-v2"] .omniboxHintMeta{color:#6d7d92}
+
+/* Active context chip: quiet echo of the focused surface. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .activeContext{
   min-width:0;
-  max-width:210px;
-  height:32px;
+  max-width:212px;
+  height:31px;
   display:grid;
-  grid-template-columns:24px minmax(0,1fr);
-  grid-template-rows:16px 12px;
+  grid-template-columns:22px minmax(0,1fr);
+  grid-template-rows:15px 12px;
   align-items:center;
   column-gap:7px;
   padding:2px 8px 2px 4px;
   border:1px solid var(--line);
-  border-radius:7px;
-  background:#0d1218;
+  border-radius:8px;
+  background:#0c1219;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] #activeKind{
   grid-row:1/3;
-  width:24px;height:24px;
+  width:22px;height:22px;
   display:grid;place-items:center;
   border-radius:6px;
-  background:#172131;
+  background:#16202e;
   color:#9cc5ff;
   font-size:9px;
   font-weight:800;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] #activeTitle,
 body[data-final-shell="metaengine-dark-workspace-v2"] #activeMeta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body[data-final-shell="metaengine-dark-workspace-v2"] #activeTitle{color:#dbe5ef;font-size:10.5px;font-weight:650}
-body[data-final-shell="metaengine-dark-workspace-v2"] #activeMeta{color:#728295;font-size:9px}
+body[data-final-shell="metaengine-dark-workspace-v2"] #activeTitle{color:#dde6f0;font-size:10.5px;font-weight:650}
+body[data-final-shell="metaengine-dark-workspace-v2"] #activeMeta{color:#75859b;font-size:9px}
+
+/* System status: readable chips (dot + label + value). The operator must be
+   able to read fleet, supervisor, update, RSI, compute and gate state at a
+   glance; color is never the only signal. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .systems{
-  height:28px;
-  gap:4px;
-  padding:0 7px;
+  height:29px;
+  gap:3px;
+  padding:0 6px;
   border:1px solid var(--line);
-  border-radius:7px;
-  background:#0d1218;
+  border-radius:8px;
+  background:#0c1219;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip{width:9px;height:18px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .systemDot{width:5px;height:5px;background:var(--neutral)}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip{
+  width:auto;
+  height:21px;
+  display:flex;
+  align-items:center;
+  gap:5px;
+  padding:0 6px;
+  border-radius:6px;
+  cursor:default;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip[role="button"]{cursor:pointer}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip[role="button"]:hover{background:#131c28}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemDot{width:6px;height:6px;background:var(--neutral);box-shadow:0 0 0 3px rgba(125,140,161,.10)}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip.good .systemDot{background:var(--good);box-shadow:0 0 0 3px rgba(95,214,165,.12)}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip.warn .systemDot{background:var(--warn);box-shadow:0 0 0 3px rgba(232,189,109,.12)}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip.bad .systemDot{background:var(--bad);box-shadow:0 0 0 3px rgba(255,123,141,.13)}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip b,
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip .systemValue{
+  display:block!important;position:static!important;width:auto!important;height:auto!important;
+  overflow:visible!important;clip:auto!important;clip-path:none!important;
+  white-space:nowrap!important;margin:0!important;padding:0!important;border:0!important;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip b{color:#93a3b6;font-size:9.5px;font-weight:700}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip .systemValue{color:#c3cfdd;font-size:10px;font-weight:620;font-variant-numeric:tabular-nums}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip.good .systemValue{color:#9fe3c4}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip.warn .systemValue{color:#f0cd8d}
+body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip.bad .systemValue{color:#ffa4b1}
+
 body[data-final-shell="metaengine-dark-workspace-v2"] .operationsToggle,
 body[data-final-shell="metaengine-dark-workspace-v2"] .primaryButton{
-  height:32px;
-  border-radius:7px;
+  height:31px;
+  border-radius:8px;
   box-shadow:none;
   font-size:10px;
   font-weight:680;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .operationsToggle{
-  padding:0 9px;
+  padding:0 10px;
   border:1px solid var(--line);
-  background:#0f151c;
+  background:#0f151d;
   color:#aeb9c6;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .operationsToggle:hover{background:#161e28;border-color:#344255;color:#e1e8ef}
+body[data-final-shell="metaengine-dark-workspace-v2"] .operationsToggle:hover{background:#161e29;border-color:#33425a;color:#e1e8f0}
 body[data-final-shell="metaengine-dark-workspace-v2"] .brainGlyph{color:#74d7b1}
 body[data-final-shell="metaengine-dark-workspace-v2"] .primaryButton{
-  padding:0 10px;
-  background:#1b5fae;
+  padding:0 11px;
+  background:#1d64b8;
   color:#fff;
-  border:1px solid #2b72c5;
+  border:1px solid #2f7ad0;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .primaryButton:hover{background:#246fc3;border-color:#3a82d4}
+body[data-final-shell="metaengine-dark-workspace-v2"] .primaryButton:hover{background:#2672cc;border-color:#3f86dc}
 
-/* Context workspace: vertical navigation without messenger/chat-list visual metaphors. */
+/* Context rail: vertical navigation, workspaces then sessions. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .contextRail{
   left:0;
   top:var(--top-height);
@@ -197,17 +279,17 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .contextRail{
   border:0;
   border-right:1px solid var(--line);
   border-radius:0;
-  background:#0c1117;
+  background:var(--surface);
   box-shadow:none;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .railHeader{
-  height:42px;
-  flex-basis:42px;
+  height:40px;
+  flex-basis:40px;
   padding:6px 7px 4px 11px;
-  border-bottom:1px solid rgba(32,42,54,.55);
+  border-bottom:1px solid rgba(27,37,50,.6);
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .railHeader strong{
-  color:#dbe4ed;
+  color:#dce5ee;
   font-size:11px;
   font-weight:700;
   letter-spacing:.035em;
@@ -215,29 +297,29 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .railHeader strong{
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .miniButton{width:28px;height:28px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearchWrap{
-  height:34px;
-  flex-basis:34px;
+  height:32px;
+  flex-basis:32px;
   margin:7px 8px 6px;
   padding:0 9px;
   gap:7px;
-  border:1px solid #202b37;
-  border-radius:7px;
-  background:#0f151d;
+  border:1px solid #202b38;
+  border-radius:8px;
+  background:#0e151d;
   color:#6f7f90;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearchWrap:focus-within{border-color:#3d5f87;background:#111a24}
-body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearch{color:#dbe5ef;font-size:11px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearch::placeholder{color:#627183}
+body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearchWrap:focus-within{border-color:#3d5f87;background:#101924}
+body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearch{color:#dce5ee;font-size:11.5px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .tabSearch::placeholder{color:#5f708a}
 body[data-final-shell="metaengine-dark-workspace-v2"] .railSectionHead{
-  height:24px;
-  flex-basis:24px;
+  height:25px;
+  flex-basis:25px;
   padding:0 10px;
   color:#6d7d8e;
   font-size:9px;
-  font-weight:650;
+  font-weight:700;
   letter-spacing:.06em;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .railSectionHead b{color:#8291a2;font-size:9px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .railSectionHead b{color:#8b9aac;font-size:9px;font-variant-numeric:tabular-nums}
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTabs{
   padding:3px 5px 8px;
   scrollbar-color:#273443 transparent;
@@ -246,9 +328,10 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab{
   min-height:46px;
   margin:1px 0;
   padding:3px;
-  border-radius:7px;
+  border-radius:8px;
   color:#a8b4c1;
   border:1px solid transparent;
+  transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab:hover{
   background:#111923;
@@ -257,45 +340,49 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab:hover{
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.active{
   background:#141d28;
   color:#eef4fa;
-  border-color:#29394b;
+  border-color:#2c3d52;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.active::before{
   display:block;
   left:0;
   top:8px;
   bottom:8px;
-  width:2px;
+  width:2.5px;
+  border-radius:999px;
   background:var(--accent);
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTabSelect{min-height:38px;gap:8px;padding:1px 2px;border-radius:6px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .tabAvatar{
   width:30px;height:30px;flex-basis:30px;
   border-radius:7px;
-  background:#18212c;
+  background:#17202c;
   color:#94a6b8;
-  border:1px solid #222e3b;
-  font-size:9px;
+  border:1px solid #212d3b;
+  font-size:9.5px;
+  font-weight:800;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.active .tabAvatar{background:#1c2b3d;color:#b8d7ff;border-color:#315176}
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.agent .tabAvatar{background:#1e1c2b;color:#c5b8ff;border-color:#35304c}
-body[data-final-shell="metaengine-dark-workspace-v2"] .tabStateDot{right:-2px;bottom:-2px;width:8px;height:8px;border:2px solid #0c1117}
+body[data-final-shell="metaengine-dark-workspace-v2"] .tabStateDot{right:-2px;bottom:-2px;width:8px;height:8px;border:2px solid #0c1117;background:#7d8ca1}
 body[data-final-shell="metaengine-dark-workspace-v2"] .tabCopy{gap:2px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .tabCopy strong{color:inherit;font-size:11px;font-weight:620}
-body[data-final-shell="metaengine-dark-workspace-v2"] .tabCopy small{color:#708092;font-size:9.5px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .tabCopy strong{color:inherit;font-size:11.5px;font-weight:620}
+body[data-final-shell="metaengine-dark-workspace-v2"] .tabCopy small{color:#75859a;font-size:9.5px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.active .tabCopy small{color:#94a5b7}
 body[data-final-shell="metaengine-dark-workspace-v2"] .tabClose{width:26px;height:26px;border-radius:6px;color:#69798b}
 body[data-final-shell="metaengine-dark-workspace-v2"] .tabClose:hover{background:#202c39;color:#d7e0e9}
 body[data-final-shell="metaengine-dark-workspace-v2"] .railFooter{
-  height:32px;
-  flex-basis:32px;
+  height:34px;
+  flex-basis:34px;
+  gap:8px;
   padding:0 10px;
   border-top:1px solid var(--line);
   background:#0a0f15;
   color:#6d7d8e;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .railFooterValue{font-size:9px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .railFooterRsi{margin-left:auto;color:#7f93ad}
 
-/* Brain inspector: information-dense engineering surface, not a messenger drawer. */
+/* Brain inspector: information-dense engineering surface, not a messenger. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .operationsPanel{
   right:0;
   top:var(--top-height);
@@ -304,46 +391,47 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .operationsPanel{
   border:0;
   border-left:1px solid var(--line);
   border-radius:0;
-  background:#0c1117;
+  background:var(--surface);
   box-shadow:none;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsHeader{
-  height:44px;
-  flex-basis:44px;
+  height:42px;
+  flex-basis:42px;
   padding:6px 8px 5px 11px;
   border-bottom:1px solid var(--line);
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsEyebrow{
   color:#6f8194;
   font-size:9px;
-  font-weight:650;
+  font-weight:700;
   letter-spacing:.07em;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .brainTitle strong{color:#e1e8ef;font-size:12px;font-weight:700}
+body[data-final-shell="metaengine-dark-workspace-v2"] .brainTitle strong{color:#e1e8f0;font-size:12.5px;font-weight:700}
 body[data-final-shell="metaengine-dark-workspace-v2"] .brainPresence{
   height:22px;
   gap:5px;
   padding:0 7px;
-  border:1px solid rgba(100,214,162,.20);
+  border:1px solid rgba(100,214,162,.22);
   border-radius:6px;
   background:rgba(100,214,162,.07);
   color:#83dcb7;
   font-size:9px;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav{
-  min-height:36px;
+  min-height:34px;
   padding:4px 7px;
   gap:2px;
   border-bottom:1px solid var(--line);
   background:#0a0f15;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button{
-  height:27px;
+  height:26px;
   padding:0 8px;
-  border-radius:5px;
+  border-radius:6px;
   color:#8292a3;
   font-size:9.5px;
-  font-weight:620;
+  font-weight:640;
+  transition:background-color 120ms ease,color 120ms ease;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button:hover{background:#151d27;color:#b9c5d1}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button.active{background:#172435;color:#a8ccff}
@@ -352,13 +440,15 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agenti
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="context"],
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="sessions"],
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="skills"]{display:block}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-brain-now="true"]{order:0}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="attention"]{order:1}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="sessions"]{order:2}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="activity"]{order:3}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="context"]{order:4}
-body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="skills"]{order:5}
-body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-section="overview"]{order:6}
-body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-section="commands"]{order:7}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-section="mechanisms"]{order:5}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-agentic-section="skills"]{order:6}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-section="overview"]{order:7}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsNav button[data-section="commands"]{order:8}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsContent{
   padding:0 10px 13px;
   scrollbar-color:#273443 transparent;
@@ -368,73 +458,82 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .opsHero{
   margin:0 0 7px;
   border-bottom:1px solid var(--line);
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .opsHero strong{color:#e1e8ef;font-size:12px;font-weight:680}
-body[data-final-shell="metaengine-dark-workspace-v2"] .opsHero small{margin-top:4px;color:#8090a1;font-size:9.5px;line-height:1.45}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsHero strong{color:#e1e8f0;font-size:12.5px;font-weight:680}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsHero small{margin-top:4px;color:#84929f;font-size:9.5px;line-height:1.5}
 body[data-final-shell="metaengine-dark-workspace-v2"] .heroBadge{
-  padding:3px 6px;
+  padding:3px 7px;
   border:1px solid #263241;
-  border-radius:5px;
+  border-radius:6px;
   background:#121922;
   color:#8495a7;
   font-size:8.5px;
+  font-weight:700;
+  letter-spacing:.04em;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsGrid{gap:5px;margin:7px 0 9px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard{
-  padding:8px 9px;
+  padding:9px 10px;
   border:1px solid #202b38;
-  border-radius:7px;
+  border-radius:8px;
   background:#0f151c;
+  transition:border-color 120ms ease,background-color 120ms ease;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard span{color:#728294;font-size:8.5px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard strong{margin-top:4px;color:#c7d2de;font-size:11px;font-weight:650}
+body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard:hover{border-color:#2c3c52}
+body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard span{color:#75859a;font-size:8.5px;letter-spacing:.05em}
+body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard strong{margin-top:4px;color:#cad5e1;font-size:12px;font-weight:660;font-variant-numeric:tabular-nums}
 body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard.good strong{color:var(--good)}
 body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard.warn strong{color:var(--warn)}
 body[data-final-shell="metaengine-dark-workspace-v2"] .metricCard.bad strong{color:var(--bad)}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsSection{margin-top:11px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsSectionTitle{padding:0 1px 6px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .opsSectionTitle strong{color:#acb9c6;font-size:10px;font-weight:650}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsSectionTitle strong{color:#acb9c6;font-size:10.5px;font-weight:660}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsSectionTitle span{color:#69798b;font-size:9px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .kvList{
   border:1px solid #202a36;
-  border-radius:7px;
+  border-radius:8px;
   background:#0e141b;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow{min-height:32px;padding:6px 8px;border-bottom:1px solid #1b2530}
-body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow span{color:#8292a3;font-size:9.5px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow b{color:#b9c5d1;font-size:9.5px;font-weight:620}
+body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow{min-height:31px;padding:6px 9px;border-bottom:1px solid #1a2430}
+body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow:last-child{border-bottom:0}
+body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow span{color:#8292a3;font-size:10px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .kvRow b{color:#bac6d3;font-size:10px;font-weight:620;font-variant-numeric:tabular-nums}
 body[data-final-shell="metaengine-dark-workspace-v2"] .entityList,
 body[data-final-shell="metaengine-dark-workspace-v2"] .commandList{gap:5px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .entityRow,
 body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton{
   border:1px solid #202b38;
-  border-radius:7px;
+  border-radius:8px;
   background:#0f151c;
+  transition:border-color 120ms ease,background-color 120ms ease;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .entityRow{padding:8px 9px}
-body[data-final-shell="metaengine-dark-workspace-v2"] .entityTop strong{color:#cbd6e1;font-size:10px}
+body[data-final-shell="metaengine-dark-workspace-v2"] .entityRow:hover,
+body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton:hover{border-color:#2e4058}
+body[data-final-shell="metaengine-dark-workspace-v2"] .entityTop strong{color:#cbd6e1;font-size:10.5px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .entityTop span{color:#708193;font-size:9px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .tinyTag{
-  padding:3px 5px;
-  border-radius:4px;
+  padding:3px 6px;
+  border-radius:5px;
   background:#17202a;
+  border:1px solid #202b38;
   color:#8798aa;
   font-size:8.5px;
+  font-weight:640;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton{
   min-height:42px;
   padding:7px 9px;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton:hover{
-  border-color:#34465c;
-  background:#141d27;
+  background:#131c27;
   transform:none;
   box-shadow:none;
 }
-body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton strong{color:#cbd5e0;font-size:10px;font-weight:640}
+body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton strong{color:#cbd5e0;font-size:10.5px;font-weight:640}
 body[data-final-shell="metaengine-dark-workspace-v2"] .commandButton span{color:#728295;font-size:9px}
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsLegend{
-  height:31px;
-  flex-basis:31px;
+  height:30px;
+  flex-basis:30px;
   padding:0 10px;
   border-top:1px solid var(--line);
   background:#0a0f15;
@@ -442,6 +541,7 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .opsLegend{
   font-size:9px;
 }
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsLegend b{color:#91a1b2}
+body[data-final-shell="metaengine-dark-workspace-v2"] .opsLegendStream{color:#6d7d92;font-size:9px}
 
 /* Semantic states remain distinguishable by both hue and luminance. */
 body[data-final-shell="metaengine-dark-workspace-v2"] .good{color:var(--good)!important}
@@ -456,7 +556,7 @@ body[data-final-shell="metaengine-dark-workspace-v2"] .entityRow{user-select:tex
 body[data-final-shell="metaengine-dark-workspace-v2"] .opsContent button,
 body[data-final-shell="metaengine-dark-workspace-v2"] .activeContext button{user-select:none}
 
-/* Compact rail is a true icon rail; no hidden panel still consumes active-surface pixels. */
+/* Compact rail is a true icon rail; no hidden panel consumes surface pixels. */
 body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .contextRail{
   left:0;
   width:var(--sidebar-width);
@@ -473,6 +573,7 @@ body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .v
 body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .verticalTabSelect{min-height:38px}
 body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .tabAvatar{width:30px;height:30px;flex-basis:30px}
 
+/* Responsive degradation: shed chrome, never the status cluster. */
 @media(max-width:1320px){
   body[data-final-shell="metaengine-dark-workspace-v2"] .activeContext{display:none}
 }
@@ -480,7 +581,11 @@ body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .t
   body[data-final-shell="metaengine-dark-workspace-v2"] .brand{display:none}
   body[data-final-shell="metaengine-dark-workspace-v2"] .primaryLabel{display:none}
   body[data-final-shell="metaengine-dark-workspace-v2"] .primaryButton{width:32px;padding:0;justify-content:center}
-  body[data-final-shell="metaengine-dark-workspace-v2"] .systems{display:flex!important;gap:2px;padding:0 5px}
+  body[data-final-shell="metaengine-dark-workspace-v2"] .systems{display:flex!important;gap:1px;padding:0 4px}
+  body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip{padding:0 3px}
+  body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip b{display:none!important}
+  body[data-final-shell="metaengine-dark-workspace-v2"] .systemChip .systemValue{display:none!important}
+  body[data-final-shell="metaengine-dark-workspace-v2"] .systemDot{width:7px;height:7px}
 }
 @media(max-width:900px){
   body[data-final-shell="metaengine-dark-workspace-v2"] .shortcutHint{display:none}
@@ -499,8 +604,7 @@ body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .t
   body[data-final-shell="metaengine-dark-workspace-v2"] input:focus-visible{outline:2px solid Highlight}
 }
 
-
-/* DevOS Multi-Surface V1: geometry is supplied by trusted main-process surface_grid. */
+/* DevOS Multi-Surface: geometry is supplied by the trusted main-process grid. */
 #devosSurfaceGrid{position:fixed;inset:0;z-index:5;pointer-events:none;overflow:hidden}
 #devosSurfaceGrid[hidden]{display:none}
 .devosSurfacePane{position:absolute;box-sizing:border-box;border:1px solid var(--border);background:var(--panel);overflow:hidden;pointer-events:none}
