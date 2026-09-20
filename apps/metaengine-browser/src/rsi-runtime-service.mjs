@@ -28,6 +28,7 @@ import { rsiMetaSkillEvolutionTrustRootSnapshot } from './rsi-meta-skill-evoluti
 import { rsiProxyCalibrationTrustRootSnapshot } from './rsi-proxy-reliability-calibration.mjs';
 import { rsiRecursiveDepthTrustRootSnapshot } from './rsi-recursive-depth-controller.mjs';
 import { rsiRecursiveRiskTrustRootSnapshot } from './rsi-recursive-risk-budget.mjs';
+import { rsiDurableRecursiveRiskTrustRootSnapshot } from './rsi-durable-recursive-risk-ledger.mjs';
 import { rsiRegressionReplayTrustRootSnapshot } from './rsi-regression-replay.mjs';
 import { rsiSkillLibraryGovernanceTrustRootSnapshot } from './rsi-skill-library-governance.mjs';
 import { rsiSkillScopeExpansionTrustRootSnapshot } from './rsi-skill-scope-expansion.mjs';
@@ -120,6 +121,7 @@ function trustRoots() {
     proxy_calibration: rsiProxyCalibrationTrustRootSnapshot(),
     recursive_depth: rsiRecursiveDepthTrustRootSnapshot(),
     recursive_risk: rsiRecursiveRiskTrustRootSnapshot(),
+    durable_recursive_risk: rsiDurableRecursiveRiskTrustRootSnapshot(),
     regression_replay: rsiRegressionReplayTrustRootSnapshot(),
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),

@@ -46,6 +46,7 @@ const TOURNAMENT_TRUST_ROOT_PATHS = new Set([
   'apps/metaengine-browser/src/rsi-isolated-candidate-builder.mjs',
   'apps/metaengine-browser/src/rsi-open-ended-search-policy.mjs',
   'apps/metaengine-browser/src/rsi-recursive-risk-budget.mjs',
+  'apps/metaengine-browser/src/rsi-durable-recursive-risk-ledger.mjs',
   'apps/metaengine-browser/src/rsi-adversarial-challenge-producer.mjs',
   'apps/metaengine-browser/src/rsi-component-attribution.mjs',
   'apps/metaengine-browser/src/rsi-group-experience-exchange.mjs',
