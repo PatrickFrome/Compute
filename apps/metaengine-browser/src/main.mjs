@@ -384,6 +384,11 @@ async function shellSnapshot() {
       supervisor,
       system_delta_tail: nativeSupervisor?.systemDeltaTail?.(32) || [],
       compute,
+      // Closed-loop audit fix (Mission Control honesty): surface the T2-5
+      // unified Work Graph (roadmap + plan + backlog + claims) that the DevOS
+      // cycle already computes on every heartbeat — previously rendered
+      // nowhere while the screen claimed to be the unified work graph.
+      work_graph: supervisor?.devos_task_cycle?.work_graph || null,
     }),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     surface_grid: devosSurfaceGridPlan ? structuredClone(devosSurfaceGridPlan) : null,
@@ -618,7 +623,7 @@ async function retireFleetSurplus(retireAgentIds) {
   const ids = retireAgentIds
     .map((value) => String(value || '').toLowerCase())
     .filter((value) => /^agent_[a-z0-9-]{8,64}$/.test(value))
-    .slice(0, 4);
+    .slice(0, 8);
   const retired = [];
   for (const agentId of ids) {
     const snapshot = fleet.snapshot();
@@ -641,7 +646,7 @@ async function sweepOrphanFleetTabs() {
     .map((row) => (row?.tab_id ? String(row.tab_id) : null))
     .filter(Boolean));
   const census = registry.census();
-  const orphanIds = census.fleet_tab_ids.filter((tabId) => !boundTabIds.has(tabId)).slice(0, 4);
+  const orphanIds = census.fleet_tab_ids.filter((tabId) => !boundTabIds.has(tabId)).slice(0, 8);
   const swept = [];
   for (const tabId of orphanIds) {
     try {
@@ -663,6 +668,16 @@ async function initOwnerSafetyGates() {
   return ownerSafetyGates.snapshot();
 }
 
+// Closed-loop audit fix (fleet scale): startup fleet policy carries the
+// elastic live-agent ceiling (A2_FLEET_MAX_TARGET_AGENTS; absent -> the
+// governor's own default). Flows through the persisted policy into
+// planElasticFleetCapacity, so the shell/DB can observe and audit it.
+function fleetElasticMaxTargetAgents() {
+  const parsed = Number(process.env.A2_FLEET_MAX_TARGET_AGENTS);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 64) return null;
+  return parsed;
+}
+
 async function initFleet() {
   fleet = new FleetProvisioner({
     createTab: async ({ url, select, load, ownership }) => createTab(url, {
@@ -675,7 +690,7 @@ async function initFleet() {
     loadState: loadFleetState,
     saveState: saveFleetState,
     census: () => registry.census(),
-    policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8 },
+    policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8, elastic_max_target_agents: fleetElasticMaxTargetAgents() },
   });
   await fleet.init();
   await fleet.reconcile({ active: false });

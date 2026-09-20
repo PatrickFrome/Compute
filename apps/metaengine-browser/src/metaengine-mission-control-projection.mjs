@@ -98,12 +98,58 @@ function projectEffects(systemDeltaTail) {
   })));
 }
 
+// Closed-loop audit fix (Mission Control honesty): the T2-5 unified Work
+// Graph projection (roadmap authority row + compiled plan + backlog + claims)\n// was computed on every cycle but rendered NOWHERE — Mission Control's hero
+// claimed to be the unified work graph while projecting only the fabric
+// workbench. This projection surfaces the authoritative work graph next to
+// the workbench view. Fails closed: malformed shapes drop to null.
+function projectWorkGraph(workGraph) {
+  if (!workGraph || typeof workGraph !== 'object' || Array.isArray(workGraph)) return null;
+  const roadmap = workGraph.roadmap && typeof workGraph.roadmap === 'object' && !Array.isArray(workGraph.roadmap)
+    ? workGraph.roadmap
+    : null;
+  const tasks = workGraph.tasks && typeof workGraph.tasks === 'object' && !Array.isArray(workGraph.tasks)
+    ? workGraph.tasks
+    : {};
+  const claims = workGraph.claims && typeof workGraph.claims === 'object' && !Array.isArray(workGraph.claims)
+    ? workGraph.claims
+    : {};
+  const nodes = Array.isArray(workGraph.nodes) ? workGraph.nodes : null;
+  return Object.freeze({
+    schema: clip(workGraph.schema, 96) || 'metaengine.devos.work-graph.v1',
+    roadmap: roadmap ? Object.freeze({
+      roadmap_id: clip(roadmap.roadmap_id, 160),
+      milestone: clip(roadmap.milestone, 160),
+      objective: clip(roadmap.objective, 480),
+      plan_generation: Number.isSafeInteger(Number(roadmap.plan_generation)) ? Number(roadmap.plan_generation) : null,
+      plan_state: clip(roadmap.plan_state, 32),
+      node_count: Number.isSafeInteger(Number(roadmap.node_count)) ? Number(roadmap.node_count) : null,
+    }) : null,
+    nodes: nodes ? Object.freeze(safeArray(nodes, 64).map((row) => Object.freeze({
+      node_id: clip(row?.node_id ?? row?.id, 160),
+      title: clip(row?.title ?? row?.objective, 480),
+      state: clip(row?.state ?? row?.status, 48),
+      risk: clip(row?.risk, 32),
+      ...zeroAuthority(),
+    })).filter((row) => Boolean(row.node_id))) : null,
+    tasks: Object.freeze({
+      ready: Number.isSafeInteger(Number(tasks.ready)) ? Number(tasks.ready) : null,
+      running: Number.isSafeInteger(Number(tasks.running)) ? Number(tasks.running) : null,
+    }),
+    claims: Object.freeze({
+      leased_this_cycle: Number.isSafeInteger(Number(claims.leased_this_cycle)) ? Number(claims.leased_this_cycle) : null,
+    }),
+    ...zeroAuthority(),
+  });
+}
+
 export function projectMissionControl({
   workspaces = null,
   fleet = null,
   supervisor = null,
   system_delta_tail = null,
   compute = null,
+  work_graph = null,
 } = {}) {
   const devos = workspaces && typeof workspaces === 'object' ? workspaces.devos : null;
   if (!devos) {
@@ -117,6 +163,7 @@ export function projectMissionControl({
       effects: Object.freeze([]),
       artifacts: Object.freeze([]),
       attention: Object.freeze([]),
+      work_graph: null,
       epochs: null,
       counts: Object.freeze({ objectives: 0, tasks: 0, agents: 0, effects: 0, artifacts: 0, attention: 0 }),
       ...zeroAuthority(),
@@ -128,6 +175,7 @@ export function projectMissionControl({
   const artifacts = projectArtifacts(devos);
   const attention = projectAttention(devos);
   const effects = projectEffects(system_delta_tail);
+  const workGraph = projectWorkGraph(work_graph);
   const counts = Object.freeze({
     objectives: objectives.length,
     tasks: tasks.length,
@@ -145,6 +193,7 @@ export function projectMissionControl({
     effects,
     artifacts,
     attention,
+    work_graph: workGraph,
     epochs: Object.freeze({
       fleet_generation_epochs: Object.freeze([...new Set(agents
         .map((row) => row.generation_epoch)

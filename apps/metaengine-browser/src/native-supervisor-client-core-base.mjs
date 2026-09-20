@@ -403,6 +403,21 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     if (typeof this.#devosTaskCycle?.bindArtifactRecorder === 'function') this.#devosTaskCycle.bindArtifactRecorder(fn);
   }
 
+  // Closed-loop audit fix (memory): late-bound task-outcome advancer (terminal
+  // DevOS outcomes materialize episodes in episodic memory) and memory
+  // retriever (bounded hybrid retrieval into agent prompts). Same contract as
+  // the artifact recorder — optional at construction, bound once the realtime
+  // process plane exists.
+  bindDevosTaskOutcomeAdvancer(fn) {
+    if (fn != null && typeof fn !== 'function') throw new Error('native_supervisor_task_outcome_advancer_invalid');
+    if (typeof this.#devosTaskCycle?.bindTaskOutcomeAdvancer === 'function') this.#devosTaskCycle.bindTaskOutcomeAdvancer(fn);
+  }
+
+  bindDevosMemoryRetriever(fn) {
+    if (fn != null && typeof fn !== 'function') throw new Error('native_supervisor_memory_retriever_invalid');
+    if (typeof this.#devosTaskCycle?.bindMemoryRetriever === 'function') this.#devosTaskCycle.bindMemoryRetriever(fn);
+  }
+
   async #observeWorkers() {
     if (!this.#workerObserver) return;
     try {

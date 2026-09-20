@@ -179,9 +179,25 @@ export function renderAgentContextBriefing({
     && String(envelope.schema || '') === AGENT_CONTEXT_TOKEN_SCHEMA;
   if (!verifiedShape) throw new Error('agent_context_briefing_envelope_invalid');
   const fleetRows = Array.isArray(fleet?.agents) ? fleet.agents : [];
-  const roster = fleetRows.slice(0, 12)
-    .map((row) => `${String(row?.role || '?').toUpperCase()}:${clip(String(row?.agent_id || '').replace(/^agent_/, ''), 8)}`)
-    .join(' ');
+  // Closed-loop audit fix (fleet scale): the roster previously truncated
+  // silently at 12 agents — beyond that, agents lost fleet awareness. Now the
+  // first 16 agents are listed by identity and the remainder are summarized
+  // by role so full overview is preserved at any fleet size within the
+  // briefing budget.
+  const ROSTER_LISTED = 16;
+  const shown = fleetRows.slice(0, ROSTER_LISTED)
+    .map((row) => `${String(row?.role || '?').toUpperCase()}:${clip(String(row?.agent_id || '').replace(/^agent_/, ''), 8)}`);
+  if (fleetRows.length > ROSTER_LISTED) {
+    const rest = fleetRows.slice(ROSTER_LISTED);
+    const byRole = new Map();
+    for (const row of rest) {
+      const role = String(row?.role || '?').toUpperCase();
+      byRole.set(role, (byRole.get(role) || 0) + 1);
+    }
+    const summary = [...byRole.entries()].map(([role, count]) => `${role}x${count}`).join(' ');
+    shown.push(`+${rest.length}more(${clip(summary, 120)})`);
+  }
+  const roster = shown.join(' ');
   const lines = [
     'AGENT CONTEXT (isolated session — you have NO shared context with other agents; everything you need is in this message)',
     `context_token_sha256=${clip(String(envelope.token_sha256 || ''), 64)} expires_at=${clip(envelope.expires_at, 32)}`,

@@ -29,12 +29,25 @@ const WRITE_AHEAD_EFFECT_BARRIER = 'WRITE_AHEAD_V1';
 // foreground focus, so raising this only harvests results faster — it never
 // introduces parallel physical effects. The server-side plan remains the
 // authority on which tasks exist.
-const RUNNING_OBSERVATION_BUDGET = 4;
+// Closed-loop audit fix (fleet scale): the budget SCALES with the live fleet
+// (half the live agents, clamped to the historical floor/cap) so a larger
+// fleet is not starved by a fixed fan-out of 4.
+const RUNNING_OBSERVATION_BUDGET_FLOOR = 4;
+const RUNNING_OBSERVATION_BUDGET_CAP = 16;
+function runningObservationBudget(liveAgents) {
+  const live = Number.isSafeInteger(Number(liveAgents)) && Number(liveAgents) > 0 ? Number(liveAgents) : 0;
+  return Math.max(RUNNING_OBSERVATION_BUDGET_FLOOR, Math.min(RUNNING_OBSERVATION_BUDGET_CAP, Math.ceil(live / 2)));
+}
 // D-C2 (2026-09-19 operator directive: commands must work multiply and
 // simultaneously): the cycle dispatches up to this many leases concurrently.
 // Each lease targets its OWN agent tab; per-tab effects are serialized by the
 // tab gate, so this bound only limits cross-tab fan-out per heartbeat.
-const FLEET_LEASE_DISPATCH_CONCURRENCY = 4;
+// Closed-loop audit fix (fleet scale): same scaling contract as the
+// observation budget — larger fleets get proportionally more concurrent
+// dispatch, distinct-tab effects stay independent by design.
+function fleetLeaseDispatchConcurrency(liveAgents) {
+  return runningObservationBudget(liveAgents);
+}
 // D-C3: a poisoned root-task composer draft beyond this size is not
 // submittable (live-proven boundary 2026-09-19: a 31,395-char draft submitted
 // successfully, a 34,193-char draft was silently refused — the site exposes
@@ -45,7 +58,8 @@ const GLM_ROOT_DRAFT_FLUSH_MAX_CHARS = 32000;
 const GLM_ROOT_DRAFT_FLUSH_MARKER = '[METAENGINE FLEET BOOTSTRAP FLUSH v1 - prior accumulated briefs are historical; operate on the next verified task block]';
 // D-C1: context tokens are re-issued at most this often per agent+epoch so the
 // rendered prompt (and its journal hash) stays deterministic within a lease.
-const AGENT_CONTEXT_TOKEN_CACHE_MAX = 64;
+// Closed-loop audit fix (fleet scale): raised 64 -> 128 for larger fleets.
+const AGENT_CONTEXT_TOKEN_CACHE_MAX = 128;
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 500) => String(value ?? '').slice(0, max);
@@ -113,7 +127,7 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
   return readiness;
 }
 
-export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null } = {}) {
+export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null, team_memory = null } = {}) {
   const taskSpec = jsonObject(lease.task_spec, 'task_spec');
   const objective = clip(taskSpec.objective ?? taskSpec.goal, 12000).trim();
   if (!objective) throw new Error('devos_task_objective_missing');
@@ -140,6 +154,12 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   if (toolProtocolBlock) lines.push('', toolProtocolBlock);
   const toolResultsBlock = clip(renderAgentToolResults(tool_results), 2400).trim();
   if (toolResultsBlock) lines.push('', toolResultsBlock);
+  // Closed-loop audit fix (memory): bounded block of the team's recent VERIFIED
+  // experience (episodic memory retrieval, token-budgeted by the memory
+  // itself). Clipped hard so the task body stays dominant; absent when the
+  // fleet has no relevant history yet (fresh installs).
+  const teamMemoryBlock = clip(String(team_memory || ''), 1400).trim();
+  if (teamMemoryBlock) lines.push('', teamMemoryBlock);
   // D-C1 (2026-09-19 operator directive): GLM agents have NO shared context —
   // every chat.z.ai Task conversation starts blank. The briefing trains each
   // agent individually (identity token, mission, fleet roster, coordination
@@ -287,13 +307,28 @@ export class DevOsNativeTaskCycle {
   // Tier 2 break repair #4 (results→artifacts): late-bound durable artifact
   // recorder (realtime process plane → collaboration fabric).
   #recordArtifact = null;
+  // Closed-loop audit fix (memory): late-bound task-outcome advancer
+  // (terminal outcomes → episodic memory episodes) and bounded memory
+  // retriever (recent verified team experience → agent prompts).
+  #advanceTaskOutcome = null;
+  #retrieveMemory = null;
+  // Per-lease memory block cache: one retrieval per (task, lease_generation)
+  // keeps the rendered prompt — and its effect-journal hash — deterministic
+  // within a lease (same contract as the telemetry digest cache).
+  #memoryBlockCache = new Map();
   // Per-lease tool harvest memory: once generation has stopped, the
   // conversation is final until a new message — parse it once per lease.
   #toolHarvest = new Map();
+  // Closed-loop audit fix (fleet scale): effective observation/dispatch budget
+  // of the most recent cycle (fleet-scaled) — surfaced numerically in the
+  // cycle snapshot so operators and tests can audit the scaling.
+  #lastObservationBudget = RUNNING_OBSERVATION_BUDGET_FLOOR;
 
-  constructor({ getState, executeCommand, signedRequest, effectJournal = null, identity = null, recordArtifact = null } = {}) {
+  constructor({ getState, executeCommand, signedRequest, effectJournal = null, identity = null, recordArtifact = null, advanceTaskOutcome = null, retrieveMemory = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof signedRequest !== 'function') throw new Error('devos_cycle_dependencies_invalid');
     if (recordArtifact != null && typeof recordArtifact !== 'function') throw new Error('devos_cycle_artifact_recorder_invalid');
+    if (advanceTaskOutcome != null && typeof advanceTaskOutcome !== 'function') throw new Error('devos_cycle_task_outcome_advancer_invalid');
+    if (retrieveMemory != null && typeof retrieveMemory !== 'function') throw new Error('devos_cycle_memory_retriever_invalid');
     if (effectJournal != null && (
       typeof effectJournal.init !== 'function'
       || typeof effectJournal.find !== 'function'
@@ -319,6 +354,8 @@ export class DevOsNativeTaskCycle {
     // recorder (realtime process plane → collaboration fabric). Optional for
     // tests; the live client always provides it once the plane is running.
     this.#recordArtifact = recordArtifact;
+    this.#advanceTaskOutcome = advanceTaskOutcome;
+    this.#retrieveMemory = retrieveMemory;
   }
 
   // Tier 2 break repair #4: late-bound durable artifact recorder binding —
@@ -326,6 +363,17 @@ export class DevOsNativeTaskCycle {
   bindArtifactRecorder(fn) {
     if (fn != null && typeof fn !== 'function') throw new Error('devos_cycle_artifact_recorder_invalid');
     this.#recordArtifact = fn;
+  }
+
+  // Closed-loop audit fix (memory): late-bound outcome advancer + retriever.
+  bindTaskOutcomeAdvancer(fn) {
+    if (fn != null && typeof fn !== 'function') throw new Error('devos_cycle_task_outcome_advancer_invalid');
+    this.#advanceTaskOutcome = fn;
+  }
+
+  bindMemoryRetriever(fn) {
+    if (fn != null && typeof fn !== 'function') throw new Error('devos_cycle_memory_retriever_invalid');
+    this.#retrieveMemory = fn;
   }
 
   async #ensureJournal() {
@@ -420,12 +468,19 @@ export class DevOsNativeTaskCycle {
     await this.#executeCommand({ action: 'FLEET_RECONCILE', platform: null, payload: capacity });
 
     const postState = await this.#getState();
+    // Closed-loop audit fix (fleet scale): dispatch/observation budgets scale
+    // with the live fleet (floor 4, cap 16) — a 24-agent fleet is no longer
+    // starved by the historical fixed fan-out.
+    const liveAgents = Array.isArray(fleetSnapshot?.agents) ? fleetSnapshot.agents.length : 0;
+    const dispatchConcurrency = fleetLeaseDispatchConcurrency(liveAgents);
+    const observationBudget = runningObservationBudget(liveAgents);
+    this.#lastObservationBudget = observationBudget;
     // D-C2: the server may return a batch of leases (one per idle agent).
     // Each lease targets its own agent tab and dispatches concurrently —
     // commands must work multiply and simultaneously. The single-lease field
     // remains the backward-compatible shape for older edges.
     const leaseBatch = Array.isArray(plan.leases) && plan.leases.length
-      ? plan.leases.slice(0, FLEET_LEASE_DISPATCH_CONCURRENCY)
+      ? plan.leases.slice(0, dispatchConcurrency)
       : (plan.lease ? [plan.lease] : []);
     let dispatch = null;
     if (leaseBatch.length === 1) dispatch = await this.#dispatchLease(leaseBatch[0], postState?.fleet);
@@ -433,7 +488,7 @@ export class DevOsNativeTaskCycle {
     let resultReady = null;
     let resultReadyBatch = null;
     if (Array.isArray(plan.running) && plan.running.length) {
-      const batch = plan.running.slice(0, RUNNING_OBSERVATION_BUDGET);
+      const batch = plan.running.slice(0, observationBudget);
       // D-C2: running observations fan out in parallel — each observation is
       // an independent read-back of its own bound tab. Failures are collected
       // per task; the first error is rethrown only when EVERY observation
@@ -460,7 +515,7 @@ export class DevOsNativeTaskCycle {
       if (failures.length === batch.length) throw failures[0];
       resultReady = observations[0] ?? null;
       resultReadyBatch = Object.freeze({
-        budget: RUNNING_OBSERVATION_BUDGET,
+        budget: observationBudget,
         observed: observations.length,
         failed: failures.length,
         parallel: true,
@@ -668,7 +723,7 @@ export class DevOsNativeTaskCycle {
       // Route not deployed yet on this edge — the digest is strictly optional.
     }
     const digest = lines.join('\n').slice(0, 2400);
-    if (this.#telemetryCache.size > 64) this.#telemetryCache.clear();
+    if (this.#telemetryCache.size > 128) this.#telemetryCache.clear();
     this.#telemetryCache.set(cacheKey, digest);
     return digest;
   }
@@ -681,9 +736,9 @@ export class DevOsNativeTaskCycle {
     const prior = this.#tabGates.get(key) || Promise.resolve();
     const run = prior.then(fn, fn);
     this.#tabGates.set(key, run.catch(() => {}));
-    if (this.#tabGates.size > 64) {
+    if (this.#tabGates.size > 256) {
       for (const [mapKey, chain] of this.#tabGates) {
-        if (mapKey !== key && this.#tabGates.size <= 64) break;
+        if (mapKey !== key && this.#tabGates.size <= 256) break;
         if (mapKey !== key) this.#tabGates.delete(mapKey);
       }
     }
@@ -835,7 +890,9 @@ export class DevOsNativeTaskCycle {
   // mirrors the running-observation batch shape (first success as headline,
   // per-lease results, all-failed rethrows the first error).
   async #dispatchLeases(rawLeases, fleetSnapshot) {
-    const batch = Array.isArray(rawLeases) ? rawLeases.slice(0, FLEET_LEASE_DISPATCH_CONCURRENCY) : [];
+    // Closed-loop audit fix (fleet scale): budget scales with the live fleet.
+    const concurrency = fleetLeaseDispatchConcurrency(Array.isArray(fleetSnapshot?.agents) ? fleetSnapshot.agents.length : 0);
+    const batch = Array.isArray(rawLeases) ? rawLeases.slice(0, concurrency) : [];
     const settled = await Promise.allSettled(batch.map((raw) => this.#withTabGate(raw?.tab_id, () => this.#dispatchLease(raw, fleetSnapshot))));
     const results = [];
     const failures = [];
@@ -857,7 +914,7 @@ export class DevOsNativeTaskCycle {
     if (failures.length === batch.length && batch.length > 0) throw failures[0];
     return Object.freeze({
       state: 'BATCH_DISPATCHED',
-      budget: FLEET_LEASE_DISPATCH_CONCURRENCY,
+      budget: concurrency,
       dispatched: results.length - failures.length,
       failed: failures.length,
       parallel: true,
@@ -888,7 +945,8 @@ export class DevOsNativeTaskCycle {
     // stays stable.
     const toolProtocol = renderAgentToolProtocol({ tab_id: lease.tab_id });
     const toolResults = this.#toolbelt.resultsForAgent(lease.agent_id);
-    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol });
+    const teamMemory = await this.#memoryBlockFor(lease);
+    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol, team_memory: teamMemory });
     const promptHash = sha256(prompt);
     const effectBinding = journalBinding(lease, promptHash);
     const journal = await this.#ensureJournal();
@@ -1105,6 +1163,10 @@ export class DevOsNativeTaskCycle {
     // Recorded before the completion write so an artifact exists even when the
     // write goes ambiguous; never throws.
     this.#recordTaskOutcomeArtifact(lease, state, summary);
+    // Closed-loop audit fix (memory): the SAME terminal outcome advances the
+    // collaboration task so an episodic-memory episode materializes (the
+    // learning write path). Never throws, idempotent per lease generation.
+    this.#advanceTaskOutcomeFor(lease, state, summary);
     try {
       const response = await this.#signedRequest('/v1/devos/complete', {
         payload: { ...bindingPayload(lease), state, summary, error: error ? clip(error, 160) : null },
@@ -1172,6 +1234,71 @@ export class DevOsNativeTaskCycle {
     }
   }
 
+  // Closed-loop audit fix (memory): the learning write path. One bounded,
+  // never-throwing advance per terminal outcome — the realtime process plane
+  // maps the DevOS state onto the collaboration task lifecycle so terminal
+  // episodes materialize in episodic memory. Degradations surface in the
+  // cycle snapshot only (same contract as the artifact recorder).
+  #advanceTaskOutcomeFor(lease, state, summary) {
+    try {
+      if (typeof this.#advanceTaskOutcome !== 'function') return;
+      const taskId = String(lease.task_id || '').toLowerCase();
+      if (!UUID_RE.test(taskId)) return;
+      const advanced = this.#advanceTaskOutcome({
+        task_id: taskId,
+        context_id: 'devos-fleet-task-results',
+        lease_generation: Number(lease.lease_generation) || 1,
+        state: String(state || '').toUpperCase(),
+        blocker: String(summary?.transport_state || state || '').slice(0, 160),
+        task_objective: clip(lease?.task_spec?.objective, 768) || null,
+        owner_agent_id: /^agent_[a-z0-9-]{8,64}$/.test(String(lease.agent_id || '')) ? String(lease.agent_id) : null,
+      });
+      if (advanced && advanced.advanced !== true && advanced.reason && String(advanced.reason).length < 120) {
+        this.#last = { ...this.#last, last_task_outcome_advance_reason: String(advanced.reason) };
+      }
+    } catch {
+      // Memory advancement must never gate task completion.
+    }
+  }
+
+  // Closed-loop audit fix (memory): the learning read path. One bounded
+  // retrieval per (task, lease_generation) — cached so the prompt and its
+  // effect-journal hash stay deterministic within a lease (identical contract
+  // to the telemetry digest). Renders the team's recent VERIFIED episodes
+  // (objective + outcome + next actions) as a compact block; returns null
+  // when there is no retriever or no relevant history.
+  async #memoryBlockFor(lease) {
+    const cacheKey = `${String(lease.task_id)}:${Number(lease.lease_generation)}`;
+    if (this.#memoryBlockCache.has(cacheKey)) return this.#memoryBlockCache.get(cacheKey);
+    let block = null;
+    try {
+      if (typeof this.#retrieveMemory === 'function') {
+        const objective = clip(lease?.task_spec?.objective ?? lease?.task_spec?.goal, 400);
+        const query = [objective, `role:${String(lease.role || '').toUpperCase()}`].filter(Boolean).join(' ');
+        const retrieval = await this.#retrieveMemory({ query, max_results: 5, token_budget: 900 });
+        const results = Array.isArray(retrieval?.results) ? retrieval.results.slice(0, 5) : [];
+        if (results.length > 0) {
+          const lines = ['TEAM MEMORY — recent verified episodes from this fleet (advisory context; verify before reuse):'];
+          for (const item of results) {
+            const episode = item?.episode || {};
+            const objectiveText = clip(episode.objective, 160);
+            if (!objectiveText) continue;
+            const facts = Array.isArray(episode.verified_facts) ? episode.verified_facts.slice(0, 2).map((v) => clip(v, 100)) : [];
+            const actions = Array.isArray(episode.next_actions) ? episode.next_actions.slice(0, 2).map((v) => clip(v, 100)) : [];
+            lines.push(`- [${String(episode.outcome || 'COMPLETED')}] ${objectiveText}${facts.length ? ` | facts: ${facts.join('; ')}` : ''}${actions.length ? ` | next: ${actions.join('; ')}` : ''}`);
+          }
+          if (lines.length > 1) block = lines.join('\n').slice(0, 1400);
+        }
+      }
+    } catch {
+      // Memory retrieval must never block dispatch.
+      block = null;
+    }
+    if (this.#memoryBlockCache.size > 128) this.#memoryBlockCache.clear();
+    this.#memoryBlockCache.set(cacheKey, block);
+    return block;
+  }
+
   #record(fields) {
     this.#last = {
       schema: 'metaengine.devos.native-task-cycle.v1',
@@ -1180,7 +1307,7 @@ export class DevOsNativeTaskCycle {
       durable_effect_delivery_journal: this.#effectJournal != null,
       write_ahead_effect_barrier: this.#effectJournal != null ? WRITE_AHEAD_EFFECT_BARRIER : null,
       ambiguity_recovery_fanout_per_cycle: this.#effectJournal != null ? 1 : 0,
-      running_observation_fanout_per_cycle: RUNNING_OBSERVATION_BUDGET,
+      running_observation_fanout_per_cycle: this.#lastObservationBudget,
       elastic_fleet_governor: 'ELASTIC_BACKLOG_DRIVEN_WITH_IDLE_SHRINK',
       elastic_idle_cycles: this.#elasticIdleCycles,
       second_scheduler_loop: false,

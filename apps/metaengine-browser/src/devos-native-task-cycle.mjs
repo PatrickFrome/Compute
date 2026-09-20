@@ -329,6 +329,17 @@ export class DevOsNativeTaskCycle {
     if (typeof this.#inner?.bindArtifactRecorder === 'function') this.#inner.bindArtifactRecorder(fn);
   }
 
+  // Closed-loop audit fix (memory): forward the late-bound task-outcome
+  // advancer (episodic memory episodes) and memory retriever (bounded hybrid
+  // retrieval into agent prompts) to the core cycle.
+  bindTaskOutcomeAdvancer(fn) {
+    if (typeof this.#inner?.bindTaskOutcomeAdvancer === 'function') this.#inner.bindTaskOutcomeAdvancer(fn);
+  }
+
+  bindMemoryRetriever(fn) {
+    if (typeof this.#inner?.bindMemoryRetriever === 'function') this.#inner.bindMemoryRetriever(fn);
+  }
+
   snapshot() {
     return {
       ...this.#inner.snapshot(),
@@ -342,7 +353,6 @@ export class DevOsNativeTaskCycle {
       restart_transport_promotion_before_scheduler_cycle: true,
       preconversation_transport_promotion_non_effect: true,
       promotion_fanout_per_cycle: 1,
-      running_observation_fanout_per_cycle: 4,
       tab_census_capacity_grounding: 'READ_ONLY_TAB_REGISTRY_CENSUS',
       elastic_fleet_governor: ELASTIC_FLEET_CONTRACT.capacity_model,
       elastic_scale_down_retire_states: 'PROVISIONING_AND_BOUND_UNVERIFIED_ONLY',

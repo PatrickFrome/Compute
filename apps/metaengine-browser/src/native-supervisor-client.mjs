@@ -571,6 +571,12 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         } catch { /* observation never gates the record */ }
         return recorded;
       });
+      // Closed-loop audit fix (memory): terminal DevOS outcomes advance the
+      // collaboration task (episodes materialize in episodic memory) and the
+      // bounded memory retriever feeds recent verified team experience into
+      // agent prompts. Same late-binding contract as the artifact recorder.
+      this.bindDevosTaskOutcomeAdvancer?.((outcome) => plane.advanceTaskOutcome(outcome));
+      this.bindDevosMemoryRetriever?.((query) => plane.retrieveCollaborationMemory(query));
       const snapshot = plane.start();
       this.#processPlaneError = null;
       this.#scheduleRealtimeStatePush();
