@@ -2,9 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+// Windows-safe dynamic import: absolute paths must be file:// URLs in ESM.
+function importAbsolute(absolutePath) {
+  return import(pathToFileURL(absolutePath).href);
+}
 const SRC = path.join(HERE, '..', 'src');
 const EDGE = path.join(HERE, '..', 'supabase', 'a2-browser-native-supervisor-v1');
 const MIGRATIONS = path.join(HERE, '..', '..', '..', 'supabase', 'migrations');
@@ -21,7 +26,7 @@ function readEdge(relative) {
 // ---------------------------------------------------------------------------
 
 test('edge cognitive delta route accepts SYSTEM-source events (T3-8 bus compatibility)', async () => {
-  const { projectCognitiveDeltaEvent, COGNITIVE_DELTA_EVENT_SCHEMA } = await import(
+  const { projectCognitiveDeltaEvent, COGNITIVE_DELTA_EVENT_SCHEMA } = await importAbsolute(
     path.join(EDGE, 'cognitive-delta-routes.mjs')
   );
   const streamId = '11111111-1111-4111-8111-111111111111';
@@ -58,7 +63,7 @@ test('emergency wait route is mounted on the edge and leases DEVELOPER_EMERGENCY
   assert.match(indexSource, /emergencyRoutes\(\{req,path,body,clientId:identity\.id\}\)/, 'edge must mount the emergency route after device auth');
   assert.match(indexSource, /emergency_wait_route:true/, 'health must advertise the emergency wait route');
 
-  const { waitForEmergencyCommand } = await import(path.join(EDGE, 'emergency-command-wait.mjs'));
+  const { waitForEmergencyCommand } = await importAbsolute(path.join(EDGE, 'emergency-command-wait.mjs'));
   const emergencyLease = {
     command: { command_id: 'c1', action: 'DEVELOPER_EMERGENCY_UPDATE', payload: {} },
   };
@@ -100,8 +105,8 @@ test('emergency lane migration reclassifies the action and creates the real leas
 // ---------------------------------------------------------------------------
 
 test('plane advanceTaskOutcome materializes episodic memory episodes and retrieval feeds prompts', async () => {
-  const { BrowserRealtimeProcessPlane } = await import(path.join(SRC, 'browser-realtime-process-plane.mjs'));
-  const { BrowserBrainCollaborationRuntimeV2 } = await import(path.join(SRC, 'browser-brain-collaboration-runtime-v2.mjs'));
+  const { BrowserRealtimeProcessPlane } = await importAbsolute(path.join(SRC, 'browser-realtime-process-plane.mjs'));
+  const { BrowserBrainCollaborationRuntimeV2 } = await importAbsolute(path.join(SRC, 'browser-brain-collaboration-runtime-v2.mjs'));
 
   const coordinator = {
     observeEdge: () => ({}),
@@ -159,7 +164,7 @@ test('plane advanceTaskOutcome materializes episodic memory episodes and retriev
 });
 
 test('devos cycle prompt carries the bounded team memory block and terminal outcomes advance memory', async () => {
-  const { renderDevosTaskPrompt } = await import(path.join(SRC, 'devos-native-task-cycle-core.mjs'));
+  const { renderDevosTaskPrompt } = await importAbsolute(path.join(SRC, 'devos-native-task-cycle-core.mjs'));
   const lease = {
     task_id: '11111111-2222-4333-8444-555555555555',
     agent_id: 'agent_12345678',
@@ -212,12 +217,12 @@ test('lifecycle core source carries the deferred rollover bounded auto-release',
 // ---------------------------------------------------------------------------
 
 test('fleet ceilings are raised by default and bounded by contract', async () => {
-  const { FLEET_TAB_CEILING, MAX_TABS } = await import(path.join(SRC, 'tab-registry.mjs'));
+  const { FLEET_TAB_CEILING, MAX_TABS } = await importAbsolute(path.join(SRC, 'tab-registry.mjs'));
   assert.ok(FLEET_TAB_CEILING >= 16, `fleet tab ceiling raised (got ${FLEET_TAB_CEILING})`);
   assert.ok(MAX_TABS >= 48, `shared tab wall raised (got ${MAX_TABS})`);
   assert.ok(MAX_TABS - FLEET_TAB_CEILING >= 16, 'user reservation never shrinks below the historical guarantee');
 
-  const { ELASTIC_FLEET_CONTRACT, planElasticFleetCapacity } = await import(path.join(SRC, 'fleet-elastic-governor.mjs'));
+  const { ELASTIC_FLEET_CONTRACT, planElasticFleetCapacity } = await importAbsolute(path.join(SRC, 'fleet-elastic-governor.mjs'));
   assert.ok(ELASTIC_FLEET_CONTRACT.max_target_agents_default >= 24, 'live-agent ceiling raised');
   // The governor honors the policy ceiling passthrough end-to-end.
   const plan = planElasticFleetCapacity({
@@ -232,7 +237,7 @@ test('fleet ceilings are raised by default and bounded by contract', async () =>
 test('provisioner policy carries elastic_max_target_agents through normalization', async () => {
   const source = readSource('fleet-provisioner-core.mjs');
   assert.match(source, /elastic_max_target_agents/);
-  const { FleetProvisioner } = await import(path.join(SRC, 'fleet-provisioner.mjs'));
+  const { FleetProvisioner } = await importAbsolute(path.join(SRC, 'fleet-provisioner.mjs'));
   const provisioner = new FleetProvisioner({
     createTab: async () => ({ tab_id: 'tab_11111111-1111-4111-8111-111111111111' }),
     loadTab: async () => null,
@@ -256,7 +261,7 @@ test('dispatch and observation budgets scale with the live fleet', async () => {
 });
 
 test('agent briefing roster keeps full overview beyond 16 agents', async () => {
-  const { renderAgentContextBriefing, AGENT_CONTEXT_TOKEN_SCHEMA } = await import(path.join(SRC, 'agent-context-token.mjs'));
+  const { renderAgentContextBriefing, AGENT_CONTEXT_TOKEN_SCHEMA } = await importAbsolute(path.join(SRC, 'agent-context-token.mjs'));
   const envelope = {
     schema: AGENT_CONTEXT_TOKEN_SCHEMA,
     token_sha256: 'a'.repeat(64),
@@ -284,7 +289,7 @@ test('agent briefing roster keeps full overview beyond 16 agents', async () => {
 // ---------------------------------------------------------------------------
 
 test('mission control projection surfaces the authoritative work graph', async () => {
-  const { projectMissionControl } = await import(path.join(SRC, 'metaengine-mission-control-projection.mjs'));
+  const { projectMissionControl } = await importAbsolute(path.join(SRC, 'metaengine-mission-control-projection.mjs'));
   const projected = projectMissionControl({
     workspaces: { devos: { objectives: [], sessions: [], artifacts: [], attention: [] } },
     fleet: { agents: [] },
