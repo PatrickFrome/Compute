@@ -51,8 +51,10 @@ test('unified RSI runtime binds the full converged trust-root set with zero auth
       'lineage_provenance_acceptance',
       'held_skill_credit_admission',
       'durable_state_persistence',
+      'exploration_graduation_certificate',
+      'durable_recursive_risk',
     ]) {
-      assert.ok(snapshot.trust_roots[key], `missing R9 runtime trust root: ${key}`);
+      assert.ok(snapshot.trust_roots[key], `missing converged RSI runtime trust root: ${key}`);
       assert.equal(snapshot.trust_roots[key].authority_effect, false);
       assert.match(snapshot.trust_roots[key].digest, /^[0-9a-f]{64}$/);
     }
