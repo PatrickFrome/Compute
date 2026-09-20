@@ -1643,6 +1643,9 @@ function renderMechanisms(next) {
     kvRow('Outcome episodes', ingest ? `${ingest.outcome_count ?? 0} ingested · ${ingest.learning_eligible_count ?? 0} learning-eligible` : 'UNKNOWN', ingest ? (riverFlows ? 'good' : 'neutral') : 'muted'),
     kvRow('Quarantined', ingest ? String(ingest.quarantined_count ?? 0) : 'UNKNOWN', ingest ? ((ingest.quarantined_count ?? 0) > 0 ? 'warn' : 'good') : 'muted'),
     kvRow('Last episode', ingest?.last_episode_digest ? shortId(ingest.last_episode_digest, 16) : 'NONE', 'neutral'),
+    kvRow('Receipt readback', next?.supervisor?.rsi_outcome_readback
+      ? `${next.supervisor.rsi_outcome_readback.observed_count ?? 0} observed · ${next.supervisor.rsi_outcome_readback.dropped_count ?? 0} dropped`
+      : 'UNKNOWN', 'neutral'),
     kvRow('Readback policy', ingest?.terminal_receipt_readback_required === true ? 'TERMINAL RECEIPT REQUIRED' : 'UNKNOWN', ingest?.terminal_receipt_readback_required === true ? 'good' : 'neutral'),
     kvRow('Attribution bindings', attribution ? `${attribution.binding_count ?? 0} bound · ${attribution.pending_count ?? 0} pending · ${attribution.consumed_count ?? 0} consumed` : 'UNKNOWN', 'neutral'),
     kvRow('Experience cases', store ? `${store.case_count ?? 0} case(s) · ${store.task_anchor_count ?? 0} anchor(s)` : 'UNKNOWN', store ? ((store.case_count ?? 0) > 0 ? 'good' : 'neutral') : 'muted'),
