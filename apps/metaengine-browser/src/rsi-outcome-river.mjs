@@ -35,6 +35,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const MAX_COMMANDS = 8192;
 const MAX_ANCHORS = 4096;
 const MAX_ERRORS = 8;
+const MAX_RECENT_CREDITS = 64;
 const TRAJECTORY_WINDOW = 15;
 
 function stable(v) { if (Array.isArray(v)) return v.map(stable); if (!v || typeof v !== 'object') return v; return Object.fromEntries(Object.keys(v).sort().map((k) => [k, stable(v[k])])); }
@@ -157,6 +158,7 @@ export class RsiOutcomeRiver {
       anchors: {},
       trajectories: {},
       commands: {},
+      recent_credits: [],
       counters: { bound_count: 0, duplicate_bind_count: 0, bind_error_count: 0, credit_attempt_count: 0, credit_success_count: 0, case_materialized_count: 0, credit_error_count: 0 },
       last_errors: [],
       execution_authority: false,
@@ -179,6 +181,7 @@ export class RsiOutcomeRiver {
       if (stateDigest(parsed) !== exactDigest(parsed.state_digest, 'state')) throw new Error('rsi_outcome_river_state_digest_mismatch');
       if (Object.keys(parsed.commands || {}).length > MAX_COMMANDS) throw new Error('rsi_outcome_river_state_capacity_exceeded');
       this.#state = parsed;
+      if (!Array.isArray(this.#state.recent_credits)) this.#state.recent_credits = [];
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
       this.#state = this.#blank();
@@ -362,6 +365,11 @@ export class RsiOutcomeRiver {
       });
       entry.credited = true;
       entry.credit_state = credited.stored?.state || 'UNKNOWN';
+      // T3-9 experience ring: the bounded recent-credit window the fleet
+      // experience signal derives from (velocity + per-role reliability).
+      // Ring only — digests and ids, never payloads.
+      this.#state.recent_credits.push({ at: this.#now(), task_id: episode.task_id, agent_id: entry.agent_id || null, credit: creditSign });
+      while (this.#state.recent_credits.length > MAX_RECENT_CREDITS) this.#state.recent_credits.shift();
       const trajectory = this.#state.trajectories[episode.task_id];
       if (trajectory) trajectory.last_episode_digest = episode.episode_digest;
       if (credited.stored?.appended === true) {
@@ -415,6 +423,7 @@ export class RsiOutcomeRiver {
       bound_command_count: commands.length,
       credited_command_count: commands.filter((row) => row.credited === true).length,
       case_materialized_count: this.#state.counters.case_materialized_count,
+      recent_credits: Object.freeze((this.#state.recent_credits || []).slice(-32).map((row) => Object.freeze({ ...row }))),
       counters: Object.freeze({ ...this.#state.counters }),
       last_errors: Object.freeze([...this.#state.last_errors]),
       task_ids: Object.freeze(anchors.slice(0, 32).map((row) => row.task_id)),

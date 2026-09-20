@@ -12,6 +12,7 @@ import { parseAgentToolRequests, renderAgentToolProtocol, renderAgentToolResults
 import { AgentToolbelt } from './agent-toolbelt-core.mjs';
 import { markFleetTransportProvenFromNativeFrame } from './fleet-runtime-bridge.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
+import { deriveFleetExperienceSignal } from './fleet-experience-signal.mjs';
 import { FLEET_TAB_CEILING } from './tab-registry.mjs';
 import { devosRuntimeControlAllowsContinuousService, normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
 
@@ -409,7 +410,12 @@ export class DevOsNativeTaskCycle {
       });
     }
 
-    const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state) });
+    // T3-9 experience-driven fleet: the Outcome River's recent-credit ring
+    // (state.rsi_outcome_river.recent_credits) becomes the fleet signal —
+    // idle-shrink grace + reliability-ordered retirement. Pure projection;
+    // demand math and the scheduler authority are unchanged.
+    const fleetExperience = deriveFleetExperienceSignal({ riverSnapshot: state?.rsi_outcome_river || null, fleetSnapshot });
+    const capacity = planElasticFleetCapacity({ backlog: plan.backlog, fleetSnapshot, idleCycles: this.#elasticIdleCycles, tabCensus: tabCensusFromState(state), experience: fleetExperience });
     this.#elasticIdleCycles = capacity.idle_cycles;
     await this.#executeCommand({ action: 'FLEET_RECONCILE', platform: null, payload: capacity });
 
