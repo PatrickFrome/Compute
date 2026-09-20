@@ -31,6 +31,7 @@ import {
   unavailableDevosRuntimeControl,
 } from './devos-runtime-control.mjs';
 import { classifyFleetReconcileOutcome, projectFleetReconcileSemantics } from './fleet-provisioner.mjs';
+import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-result-delivery-adapter.mjs';
 
 export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
@@ -326,6 +327,11 @@ export class NativeSupervisorClient {
   #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
   #resultDeliveryAttempts;
   #resultDeliveryBackoffMs;
+  #resultDeliveryAdapter = null;
+  #onRsiOutcomeReadback = null;
+  #rsiOutcomeReadbackObserved = 0;
+  #rsiOutcomeReadbackDropped = 0;
+  #lastRsiOutcomeReadbackAt = null;
 
   constructor({
     identity,
@@ -349,6 +355,8 @@ export class NativeSupervisorClient {
     hostResilience = undefined,
     resultDeliveryAttempts = 3,
     resultDeliveryBackoffMs = [1000, 3000],
+    rsiResultReceiptReconciliation = false,
+    onRsiOutcomeReadback = null,
   }) {
     if (!identity) throw new Error('native_supervisor_identity_required');
     if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
@@ -356,6 +364,7 @@ export class NativeSupervisorClient {
     if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
     if (developerEmergencyUpdate != null && typeof developerEmergencyUpdate !== 'function') throw new Error('native_supervisor_developer_emergency_update_handler_invalid');
     if (beforeSelfUpdateInstall != null && typeof beforeSelfUpdateInstall !== 'function') throw new Error('native_supervisor_self_update_handoff_invalid');
+    if (onRsiOutcomeReadback != null && typeof onRsiOutcomeReadback !== 'function') throw new Error('native_supervisor_rsi_outcome_readback_handler_invalid');
     this.#identity = identity;
     this.#fetch = fetchImpl;
     this.#getState = getState;
@@ -373,6 +382,15 @@ export class NativeSupervisorClient {
     this.#resultDeliveryBackoffMs = Array.isArray(resultDeliveryBackoffMs) && resultDeliveryBackoffMs.length
       ? resultDeliveryBackoffMs.map((ms) => Math.max(0, Number(ms) || 0))
       : [1000, 3000];
+    this.#resultDeliveryAdapter = rsiResultReceiptReconciliation === true
+      ? createSupervisorRsiResultDeliveryAdapter({
+          signedRequest: (path, options = {}) => this.#signedRequest(path, options),
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          attempts: this.#resultDeliveryAttempts,
+          backoffMs: this.#resultDeliveryBackoffMs,
+        })
+      : null;
+    this.#onRsiOutcomeReadback = onRsiOutcomeReadback;
     this.#commandLane = new NativeSupervisorCommandLaneScheduler({
       readConcurrency: commandReadConcurrency,
       mutationConcurrency: commandMutationConcurrency,
@@ -460,6 +478,16 @@ export class NativeSupervisorClient {
       last_error: this.#lastError,
       last_command_id: this.#lastCommandId,
       last_command_status: this.#lastCommandStatus,
+      rsi_outcome_readback: Object.freeze({
+        enabled: this.#resultDeliveryAdapter != null && typeof this.#onRsiOutcomeReadback === 'function',
+        observed_count: this.#rsiOutcomeReadbackObserved,
+        dropped_count: this.#rsiOutcomeReadbackDropped,
+        last_observed_at: this.#lastRsiOutcomeReadbackAt,
+        same_client_terminal_receipt_required: true,
+        sidecar_only: true,
+        execution_authority: false,
+        authority_effect: false,
+      }),
       current_command: this.#currentCommand,
       current_commands: [...this.#currentCommands.values()].map((row) => structuredClone(row)),
       // F-L1d: makes the "heartbeat alive but command plane wedged" state externally
@@ -527,6 +555,15 @@ export class NativeSupervisorClient {
         runtime_control: structuredClone(this.#runtimeControl),
         authoritative_admission_required: true,
         actuation_allowed: devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+        authority_effect: false,
+      },
+      result_receipt_reconciliation: {
+        enabled: this.#resultDeliveryAdapter != null,
+        same_receipt_transport_only: true,
+        independent_terminal_readback_required: true,
+        candidate_effect_executor_exposed: false,
+        physical_effect_replay_allowed: false,
+        automatic_effect_retry_allowed: false,
         authority_effect: false,
       },
       developer_emergency_update: {
@@ -769,12 +806,13 @@ export class NativeSupervisorClient {
     return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'POST', headers, body: bodyText, cache: 'no-store' });
   }
 
-  async #signedRequest(path, { method = 'POST', payload = null } = {}) {
+  async #signedRequest(path, { method = 'POST', payload = null, signal = null } = {}) {
     const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
     const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
     const headers = await this.#identity.deviceHeaders(method, requestPath, bodyText);
     const init = { method, headers, cache: 'no-store' };
     if (method !== 'GET') init.body = bodyText;
+    if (signal) init.signal = signal;
     return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
   }
 
@@ -983,49 +1021,141 @@ export class NativeSupervisorClient {
     throw lastError || new Error('native_supervisor_result_delivery_failed');
   }
 
+  #assertRsiResultDeliveryOutcome(outcome, commandId) {
+    const state = String(outcome?.state || '').toUpperCase();
+    if (state === 'DELIVERED' || state === 'RECONCILED') return outcome;
+    const detail = String(outcome?.error || state || 'UNKNOWN').slice(0, 240);
+    const error = new Error(state === 'REJECTED'
+      ? `native_supervisor_result_rejected:${commandId}:${detail}`
+      : `native_supervisor_result_delivery_ambiguous:${commandId}:${detail}`);
+    error.code = state === 'REJECTED' ? 'NATIVE_RESULT_DELIVERY_REJECTED' : 'NATIVE_RESULT_DELIVERY_AMBIGUOUS';
+    throw error;
+  }
+
+  #scheduleRsiOutcomeReadback(command, payload) {
+    if (!this.#resultDeliveryAdapter || typeof this.#onRsiOutcomeReadback !== 'function') return false;
+    const commandId = String(command?.command_id || payload?.receipt?.command_id || '').trim();
+    if (!commandId) return false;
+    const binding = Object.freeze({
+      command_id: commandId,
+      action: String(command?.action || payload?.receipt?.action || '').trim().toUpperCase(),
+      platform: command?.platform == null && payload?.receipt?.platform == null
+        ? null
+        : String(command?.platform || payload?.receipt?.platform || '').trim().toUpperCase(),
+      effect_key: command?.effect_key || payload?.receipt?.effect_key || null,
+      authority_effect: false,
+    });
+    void this.#resultDeliveryAdapter.readStoredReceipt({ commandId, payload })
+      .then(async (readback) => {
+        if (!readback) {
+          this.#rsiOutcomeReadbackDropped += 1;
+          return;
+        }
+        await this.#onRsiOutcomeReadback({ command: binding, readback });
+        this.#rsiOutcomeReadbackObserved += 1;
+        this.#lastRsiOutcomeReadbackAt = new Date().toISOString();
+      })
+      .catch(() => { this.#rsiOutcomeReadbackDropped += 1; });
+    return true;
+  }
+
   async #postResult(command, ok, result, error = null, effectOutcome = null) {
-    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, recorded_at: new Date().toISOString(), authority_effect: false }, error };
+    const receiptDescriptor = classifyNativeSupervisorCommand(command);
+    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, lane: receiptDescriptor.lane, effect_key: receiptDescriptor.effect_key, recorded_at: new Date().toISOString(), authority_effect: false }, error };
+    if (this.#resultDeliveryAdapter) {
+      const outcome = await this.#resultDeliveryAdapter.deliver({
+        commandId: command.command_id,
+        effectKey: command.effect_key || null,
+        payload,
+      });
+      const accepted = this.#assertRsiResultDeliveryOutcome(outcome, command.command_id);
+      this.#scheduleRsiOutcomeReadback(command, payload);
+      return accepted;
+    }
     await this.#deliverResultWithRetry(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, payload);
+    return null;
   }
 
   async #postBatchResults(rows) {
-  const results = rows.map((row) => ({
-    command_id: row.command.command_id,
-    ok: row.ok,
-    receipt: {
-      schema: 'metaengine.native-supervisor.command-receipt.v2',
+    const results = rows.map((row) => ({
       command_id: row.command.command_id,
-      action: row.command.action,
-      platform: row.command.platform || null,
-      result: row.result ?? null,
-      effect_outcome: row.effect_outcome,
-      lane: row.descriptor.lane,
-      effect_key: row.descriptor.effect_key,
-      execution_ms: row.execution_ms,
-      recorded_at: new Date().toISOString(),
+      ok: row.ok,
+      receipt: {
+        schema: 'metaengine.native-supervisor.command-receipt.v2',
+        command_id: row.command.command_id,
+        action: row.command.action,
+        platform: row.command.platform || null,
+        result: row.result ?? null,
+        effect_outcome: row.effect_outcome,
+        lane: row.descriptor.lane,
+        effect_key: row.descriptor.effect_key,
+        execution_ms: row.execution_ms,
+        recorded_at: new Date().toISOString(),
+        authority_effect: false,
+      },
+      error: row.ok ? null : row.error,
       authority_effect: false,
-    },
-    error: row.ok ? null : row.error,
-    authority_effect: false,
-  }));
-  const chunks = partitionNativeSupervisorBatchResults(results);
-  const acknowledgements = [];
-  for (const chunk of chunks) {
-    const response = await this.#deliverResultWithRetry('/v1/commands/result-batch', { results: chunk });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
-    acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+    }));
+    const chunks = partitionNativeSupervisorBatchResults(results);
+    const acknowledgements = [];
+    for (const chunk of chunks) {
+      if (!this.#resultDeliveryAdapter) {
+        const response = await this.#deliverResultWithRetry('/v1/commands/result-batch', { results: chunk });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
+        acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+        continue;
+      }
+
+      let batchResponse = null;
+      try {
+        batchResponse = await this.#signedRequest('/v1/commands/result-batch', { payload: { results: chunk } });
+      } catch {}
+      if (batchResponse?.ok === true) {
+        const body = await batchResponse.json().catch(() => ({}));
+        acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+        for (const row of chunk) {
+          const payload = { ok: row.ok === true, receipt: row.receipt, error: row.ok === true ? null : row.error };
+          this.#scheduleRsiOutcomeReadback(row, payload);
+        }
+        continue;
+      }
+      if (batchResponse && !NativeSupervisorClient.#retryableResultDeliveryFailure(batchResponse.status)) {
+        const body = await batchResponse.json().catch(() => ({}));
+        throw new Error(`native_supervisor_batch_result_http_${batchResponse.status}:${body?.error || 'unknown'}`);
+      }
+
+      // Ambiguous batch delivery is transport ambiguity only. The physical Browser
+      // effect has already happened at most once; reconcile immutable receipts and
+      // never route this path back into the effect executor.
+      for (const row of chunk) {
+        const payload = { ok: row.ok === true, receipt: row.receipt, error: row.ok === true ? null : row.error };
+        const outcome = await this.#resultDeliveryAdapter.deliver({
+          commandId: row.command_id,
+          effectKey: row.effect_key || row.receipt?.effect_key || null,
+          payload,
+          readbackBeforeReplay: true,
+        });
+        this.#assertRsiResultDeliveryOutcome(outcome, row.command_id);
+        this.#scheduleRsiOutcomeReadback(row, payload);
+        acknowledgements.push(Object.freeze({
+          command_id: String(row.command_id).toLowerCase(),
+          accepted: true,
+          status: row.ok === true ? 'COMPLETED' : 'FAILED',
+          reconciled_after_batch_ambiguity: true,
+        }));
+      }
+    }
+    return Object.freeze({
+      schema: 'metaengine.native-supervisor.batch-result-delivery.v1',
+      chunk_count: chunks.length,
+      result_count: acknowledgements.length,
+      results: Object.freeze(acknowledgements),
+      transport_delivery_is_authority: false,
+      automatic_effect_retry_allowed: false,
+      authority_effect: false,
+    });
   }
-  return Object.freeze({
-    schema: 'metaengine.native-supervisor.batch-result-delivery.v1',
-    chunk_count: chunks.length,
-    result_count: acknowledgements.length,
-    results: Object.freeze(acknowledgements),
-    transport_delivery_is_authority: false,
-    automatic_effect_retry_allowed: false,
-    authority_effect: false,
-  });
-}
 
   async #executeLocalOrRemote(command) {
     const action = String(command?.action || '').toUpperCase();
@@ -1220,6 +1350,13 @@ export class NativeSupervisorClient {
       this.#lastCommandStatus = descriptor.read_only || ['CONFIRMED','NO_EFFECT_PROVEN'].includes(effectOutcome) ? 'COMPLETED' : 'AMBIGUOUS';
       return result;
     } catch (error) {
+      if (String(error?.code || '').startsWith('NATIVE_RESULT_DELIVERY_')) {
+        // The command/effect already ran and the immutable receipt is unresolved.
+        // Never manufacture a second failure receipt and never re-execute the effect.
+        this.#lastCommandId = command.command_id;
+        this.#lastCommandStatus = 'AMBIGUOUS';
+        throw error;
+      }
       const message = clipError(error);
       effectOutcome = failedCommandEffectOutcome(command, descriptor, error);
       await this.#postResult(command, false, result, message, effectOutcome).catch(() => {});
