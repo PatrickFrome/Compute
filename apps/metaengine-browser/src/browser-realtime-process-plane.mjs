@@ -1,5 +1,6 @@
 import { BrowserRealtimeSemanticPlane } from './browser-realtime-semantic-plane.mjs';
 import { BrowserCognitiveDeltaBus } from './browser-cognitive-delta-bus.mjs';
+import { BrowserCognitiveSystemDeltaRing, publishCognitiveSystemDelta, projectSystemDeltaTail } from './browser-cognitive-system-deltas.mjs';
 import { BrowserBrainContinuousCoordinator } from './browser-brain-continuous-coordinator.mjs';
 import { createBrowserBrainDurablePersistenceForApp } from './browser-brain-durable-persistence.mjs';
 import { BrowserMainEventLoopPressure } from './browser-main-event-loop-pressure.mjs';
@@ -130,6 +131,7 @@ export class BrowserRealtimeProcessPlane {
   #semanticStartPromise = null;
   #semanticLastError = null;
   #cognitiveBus;
+  #systemDeltaRing;
   #brain;
   #brainPersistence = null;
   #brainLastError = null;
@@ -164,6 +166,9 @@ export class BrowserRealtimeProcessPlane {
       clock,
       maxEvents: boundedInt(cognitiveEventLimit, DEFAULT_COGNITIVE_EVENT_LIMIT, 64, 16384),
     });
+    // T3-8: session-scoped tail of system deltas for Mission Control live
+    // effects — semantic noise can never drown system events here.
+    this.#systemDeltaRing = new BrowserCognitiveSystemDeltaRing({ maxEntries: 64 });
     this.#mainLoopPressure = mainLoopPressure || new BrowserMainEventLoopPressure({ expectedIntervalMs: this.#sampleMs });
     if (typeof this.#mainLoopPressure.sample !== 'function' || typeof this.#mainLoopPressure.snapshot !== 'function') {
       throw new Error('browser_realtime_process_plane_loop_pressure_invalid');
@@ -519,6 +524,14 @@ export class BrowserRealtimeProcessPlane {
       delta_is_execution_authority: false,
       authority_effect: false,
     });
+  }
+
+  publishCognitiveSystemDelta(input = {}) {
+    return publishCognitiveSystemDelta(this.#cognitiveBus, this.#systemDeltaRing, input);
+  }
+
+  systemDeltaTail(limit = 32) {
+    return projectSystemDeltaTail(this.#systemDeltaRing, limit);
   }
 
   semanticSnapshot({ includeText = true, eventsSince = null, eventLimit = 128 } = {}) {
