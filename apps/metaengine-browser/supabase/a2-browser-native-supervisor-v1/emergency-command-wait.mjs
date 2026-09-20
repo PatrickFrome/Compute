@@ -9,6 +9,12 @@ function validLease(value) {
   const action = String(command.action || '').trim().toUpperCase();
   if (action === 'DISARM') return command;
   if (action === 'SET_SUPERVISOR_MODE' && String(command?.payload?.mode || '').trim().toUpperCase() === 'OFF') return command;
+  // Emergency transport wiring (closed-loop audit): the dedicated developer
+  // emergency update intent rides the SAME EMERGENCY lane. The browser-side
+  // handler independently proves owner/device binding, immutable release
+  // authority and the Guardian durable effect journal before any dispatch —
+  // this route only carries the lease.
+  if (action === 'DEVELOPER_EMERGENCY_UPDATE') return command;
   throw new Error('emergency_wait_non_emergency_lease_rejected');
 }
 

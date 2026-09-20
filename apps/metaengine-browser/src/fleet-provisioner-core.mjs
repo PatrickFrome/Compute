@@ -70,10 +70,21 @@ function normalizePolicy(policy = {}) {
   const desiredAgents = nonNegativeInteger(policy.desired_agents, DEFAULT_SEED_AGENTS, 'desired_agents');
   const spawnBurstLimit = burstLimit(policy.spawn_burst_limit, DEFAULT_SPAWN_BURST_LIMIT);
   if (warmAgents > desiredAgents) throw new Error('fleet_capacity_order_invalid');
+  // Closed-loop audit fix (fleet scale): the elastic live-agent ceiling flows
+  // through the persisted fleet policy (the governor reads
+  // policy.elastic_max_target_agents; before this key was normalized away and
+  // the ceiling could never be configured from the shell).
+  const elasticMaxTargetAgents = (() => {
+    const out = policy.elastic_max_target_agents == null ? null : Number(policy.elastic_max_target_agents);
+    if (out == null) return null;
+    if (!Number.isSafeInteger(out) || out < 1 || out > 64) throw new Error('fleet_elastic_max_target_agents_invalid');
+    return out;
+  })();
   return Object.freeze({
     profile,
     warm_agents: warmAgents,
     desired_agents: desiredAgents,
+    ...(elasticMaxTargetAgents != null ? { elastic_max_target_agents: elasticMaxTargetAgents } : {}),
     elastic: true,
     hard_agent_cap: null,
     max_agents: null,

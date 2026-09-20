@@ -36,13 +36,21 @@
 
 const DEFAULT_WARM_AGENTS = 2;
 const DEFAULT_SPAWN_BURST_LIMIT = 8;
-// Live-agent ceiling. The TabRegistry hard wall is 32 tabs shared between the
-// human user and the fleet; the ceiling keeps bounded headroom for user tabs.
-const DEFAULT_MAX_TARGET_AGENTS = 12;
+// Live-agent ceiling. Closed-loop audit fix (fleet scale): raised 12 -> 24 and
+// operator-tunable via A2_FLEET_MAX_TARGET_AGENTS (bounded by the physical
+// tab ceiling the TabRegistry enforces). The governor only ever grows the
+// fleet on server-authoritative backlog demand, so a higher ceiling simply
+// means the fleet CAN scale when work exists — idle agents still shrink away
+// after the hysteresis window.
+function envBoundedInt(name, fallback, min, max) {
+  const parsed = Number(process.env[name]);
+  return Number.isSafeInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+const DEFAULT_MAX_TARGET_AGENTS = envBoundedInt('A2_FLEET_MAX_TARGET_AGENTS', 24, 1, 64);
 // Hysteresis: consecutive zero-demand cycles before scale-down may start.
 const IDLE_CYCLES_REQUIRED = 3;
 // Bounded retire fan-out per cycle (tabs closed per DevOS cycle).
-const MAX_RETIRE_PER_CYCLE = 4;
+const MAX_RETIRE_PER_CYCLE = 8;
 // States that hold a physical tab and are eligible for auto-shrink.
 // PROVISIONING/BOUND_UNVERIFIED appear in raw provisioner snapshots;
 // ADMISSION_FENCED is their projection inside the transport-admitted cycle

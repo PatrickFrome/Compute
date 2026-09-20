@@ -19,6 +19,10 @@ const CHAT_RE = /^https:\/\/chat\.z\.ai\/c\/[a-z0-9-]+/i;
 const CHAT_ROOT_RE = /^https:\/\/chat\.z\.ai\/?$/i;
 const LIMIT_RE = /(maximum conversation length|conversation is too long|start a new chat|диалог.{0,20}слишком длин|начните новый чат)/i;
 const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
+// ROLLOVER_DEFERRED bounded auto-release window (closed-loop audit fix):
+// generous operator window before the lifecycle self-releases an operator-
+// class rollover that approveRollover (no caller, D-K8) would park forever.
+const DEFERRED_ROLLOVER_AUTO_RELEASE_MS = 15 * 60 * 1000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
@@ -1185,6 +1189,17 @@ export class SupervisorLifecycleRuntime {
   // poisoned attempt tab.
   #rolloverNoProgressCycles = 0;
   #lastAmbiguousRolloverScanAt = 0;
+  // ROLLOVER_DEFERRED bounded auto-release (closed-loop audit fix): operator-
+  // class rollovers (CHATGPT_CONVERSATION_LIMIT_HINT) park the primary in
+  // DEFERRED because approveRollover has NO caller anywhere (D-K8) — wakes
+  // are blocked in every rollover state, so a deferred primary is a dead
+  // supervisor on a single-conversation install. The escape mirrors D-C5:
+  // after DEFERRED_ROLLOVER_AUTO_RELEASE_MS with no operator release, the
+  // lifecycle re-requests the rollover with autoRelease on a FRESH tab. The
+  // operator window stays generous (15 minutes) — far longer than any human
+  // reaction chain — and the superseded conversation is only replaced, never
+  // destroyed (close-by-proof discipline unchanged).
+  #deferredRolloverSince = null;
 
   async cycle({ force = false } = {}) {
     if (!this.#keepalive) return this.snapshot();
@@ -1247,6 +1262,27 @@ export class SupervisorLifecycleRuntime {
         }
       } else {
         this.#rolloverNoProgressCycles = 0;
+      }
+      // ROLLOVER_DEFERRED bounded auto-release (closed-loop audit fix).
+      let keepalivePre = this.#keepalive.snapshot();
+      if (keepalivePre.state === 'ROLLOVER_DEFERRED') {
+        if (this.#deferredRolloverSince == null) this.#deferredRolloverSince = now;
+        const deferredMs = now - this.#deferredRolloverSince;
+        if (deferredMs >= DEFERRED_ROLLOVER_AUTO_RELEASE_MS && this.#canActuate() === true) {
+          const deferredReason = String(keepalivePre.rollover_reason || 'ROLLOVER_DEFERRED').slice(0, 120);
+          await this.#keepalive.requestRollover(`${deferredReason}:DEFERRED_AUTO_RELEASE_TIMEOUT`, { autoRelease: true }).catch(() => {});
+          this.#deferredRolloverSince = null;
+          this.#lastRecovery = {
+            action: 'ROLLOVER_DEFERRED_AUTO_RELEASE',
+            rollover_reason: deferredReason,
+            deferred_ms: deferredMs,
+            fresh_tab_rollover: true,
+            confirmed: false, ambiguous: false, automatic_retry_allowed: false,
+            at: new Date().toISOString(), authority_effect: false,
+          };
+        }
+      } else {
+        this.#deferredRolloverSince = null;
       }
       let keepalive = this.#keepalive.snapshot();
       if (keepalive.state === 'WAKE_AMBIGUOUS'

@@ -4,6 +4,7 @@ import { createDbInspectRoutes } from './db-inspect-routes.mjs';
 import { createDevosPromotionRoutes } from './devos-promotion-routes.mjs';
 import { createMetaSupervisorRoutes } from './meta-routes.mjs';
 import { createCognitiveDeltaRoutes } from './cognitive-delta-routes.mjs';
+import { createEmergencyCommandRoutes } from './emergency-routes.mjs';
 import { projectNativeSupervisorRuntimeCapabilityHealth, runtimeCapabilityHealthResponseFields } from './runtime-capability-health.mjs';
 import { openRealtimeCommandWake } from './realtime-command-wake.mjs';
 import { createPostgresCommandWakeHub } from './postgres-command-wake.mjs';
@@ -241,7 +242,7 @@ async function issueTool(req:Request,body:any){
     return json(409,{accepted:false,error:'agent_tool_issue_failed',reason:String((error as any)?.message||error).slice(0,160),authority_effect:false});
   }
 }
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,emergency_wait_route:true,emergency_wait_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
 async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
@@ -249,6 +250,18 @@ const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE
 const metaRoutes=createMetaSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID});
 const cognitiveRoutes=createCognitiveDeltaRoutes({rpc,workspaceId:WORKSPACE_ID,json});
 const dbInspectRoutes=createDbInspectRoutes({sql,json});
+// Emergency transport wiring (closed-loop audit): the dedicated emergency
+// wait route is now MOUNTED. The browser's normal wait-batch already leases
+// EMERGENCY-lane commands with lane priority 0 (lease_batch_v1); this route
+// exists for external operator tooling that must not contend with the
+// general scheduler. The lease RPC is a real migration
+// (20260921000000_browser_emergency_lane_and_lease_v1.sql).
+const emergencyRoutes=createEmergencyCommandRoutes({
+  rpc,
+  workspaceId:WORKSPACE_ID,
+  openWake:({clientId,waitMs}:{clientId:string,waitMs:number})=>postgresWakeHub.open({clientId,timeoutMs:waitMs}),
+  json,
+});
 
 Deno.serve(async(req:Request)=>{
   if(req.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
@@ -266,6 +279,7 @@ Deno.serve(async(req:Request)=>{
     const identity=await authenticateDevice(req,canonicalPath,bodyText);
     if(identity.ok!==true)return json(401,{error:'device_auth_required',reason:identity.reason});
     const cognitive=await cognitiveRoutes({req,path,body,bodyText,identity});if(cognitive)return cognitive;
+    const emergency=await emergencyRoutes({req,path,body,clientId:identity.id});if(emergency)return emergency;
     const dbInspect=await dbInspectRoutes({req,path});if(dbInspect)return dbInspect;
     const promotion=await devosPromotionRoutes({req,path,body,clientId:identity.id});if(promotion)return promotion;
     const meta=await metaRoutes({req,path,body,clientId:identity.id});if(meta)return meta;

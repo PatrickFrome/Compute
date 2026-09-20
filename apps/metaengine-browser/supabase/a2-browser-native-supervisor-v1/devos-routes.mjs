@@ -301,9 +301,12 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       let lease=null,leases=[],leaseAttempts=0,leaseFence=null,backpressure=null;
       const remainingByRole={...(rawBacklog?.by_role||{})};
       const exhaustedRoles=new Set();
-      const leaseCeiling=Math.max(1,Math.min(8,Number(rawBacklog?.ready||0)||0));
+      // Closed-loop audit fix (fleet scale): lease ceiling raised 8 -> 16 and
+      // the candidate scan widened to the full idle roster (bounded 32) — the
+      // browser-side dispatch concurrency now scales with its live fleet.
+      const leaseCeiling=Math.max(1,Math.min(16,Number(rawBacklog?.ready||0)||0));
       const candidates=fairIdleLeaseCandidates(snapshot,agents,rawBacklog);
-      for(const agent of candidates.slice(0,8)){
+      for(const agent of candidates.slice(0,32)){
         if((Number(remainingByRole[agent.role]||0)||0)<1||exhaustedRoles.has(agent.role))continue;
         leaseAttempts+=1;
         try{

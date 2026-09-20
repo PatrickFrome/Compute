@@ -27,7 +27,9 @@ test('elastic contract is frozen, authority-free and never reads worker telemetr
   assert.equal(ELASTIC_FLEET_CONTRACT.second_scheduler_loop, false);
   assert.equal(ELASTIC_FLEET_CONTRACT.worker_telemetry_capacity_authority, false);
   assert.equal(ELASTIC_FLEET_CONTRACT.idle_cycles_required, 3);
-  assert.equal(ELASTIC_FLEET_CONTRACT.max_retire_per_cycle, 4);
+  // Closed-loop audit fix (fleet scale): the retire fan-out is 8 per cycle
+  // (was 4) so a large fleet drains surplus agents at double the rate.
+  assert.equal(ELASTIC_FLEET_CONTRACT.max_retire_per_cycle, 8);
   assert.deepEqual([...ELASTIC_FLEET_CONTRACT.retire_eligible_states], ['PROVISIONING', 'BOUND_UNVERIFIED', 'ADMISSION_FENCED']);
   assert.ok(Object.isFrozen(ELASTIC_FLEET_CONTRACT));
   assert.ok(Object.isFrozen(ELASTIC_FLEET_CONTRACT.retire_eligible_states));
@@ -45,7 +47,9 @@ test('scale-up stays demand-driven and identical to the backlog plan while below
 test('scale-up ceiling protects the shared tab budget', () => {
   const plan = planElasticFleetCapacity({ backlog: { ready: 500, running: 40 }, fleetSnapshot: fleetSnapshot([]), maxTargetAgents: 10 });
   assert.equal(plan.target_agents, 10);
-  const atCeiling = fleetSnapshot(Array.from({ length: 12 }, (_, i) => agent(`agent_h${i + 1}`, 'ACTIVE', { tab_id: `tab_h${i + 1}` })));
+  // Closed-loop audit fix (fleet scale): the live-agent ceiling follows the
+  // contract default (24, env-tunable) — a fleet at that ceiling never grows.
+  const atCeiling = fleetSnapshot(Array.from({ length: ELASTIC_FLEET_CONTRACT.max_target_agents_default }, (_, i) => agent(`agent_h${i + 1}`, 'ACTIVE', { tab_id: `tab_h${i + 1}` })));
   const held = planElasticFleetCapacity({ backlog: { ready: 500, running: 40 }, fleetSnapshot: atCeiling });
   assert.equal(held.target_agents, ELASTIC_FLEET_CONTRACT.max_target_agents_default, 'a fleet already at the ceiling never grows past it');
 });
@@ -94,9 +98,9 @@ test('third idle cycle retires only surplus claim-ineligible agents, newest firs
 });
 
 test('retire list is bounded to the per-cycle fan-out even with deep surplus', () => {
-  const agents = Array.from({ length: 12 }, (_, i) => agent(`agent_b${i + 1}`, 'BOUND_UNVERIFIED', { tab_id: `tab_b${i + 1}`, created_at: `2026-09-03T1${i}:00:00.000Z` }));
+  const agents = Array.from({ length: 16 }, (_, i) => agent(`agent_b${i + 1}`, 'BOUND_UNVERIFIED', { tab_id: `tab_b${i + 1}`, created_at: `2026-09-03T1${i % 10}:00:00.000Z` }));
   const plan = planElasticFleetCapacity({ backlog: { ready: 0, running: 0 }, fleetSnapshot: fleetSnapshot(agents), idleCycles: 5 });
-  assert.equal(plan.retire_agent_ids.length, 4);
+  assert.equal(plan.retire_agent_ids.length, ELASTIC_FLEET_CONTRACT.max_retire_per_cycle);
 });
 
 test('ACTIVE agents are never auto-retired even when they alone exceed the warm floor', () => {
@@ -206,7 +210,7 @@ test('cycle-level integration: idle cycles accumulate across cycles and surface 
   const snapshot = cycle.snapshot();
   assert.equal(snapshot.elastic_fleet_governor, 'ELASTIC_BACKLOG_DRIVEN_WITH_IDLE_SHRINK');
   assert.equal(snapshot.elastic_idle_cycles_required, 3);
-  assert.equal(snapshot.elastic_max_retire_per_cycle, 4);
+  assert.equal(snapshot.elastic_max_retire_per_cycle, ELASTIC_FLEET_CONTRACT.max_retire_per_cycle);
 });
 
 test('demand arriving mid-idle resets hysteresis and stops shrink at the boundary', async () => {

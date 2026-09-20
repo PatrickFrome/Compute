@@ -1618,6 +1618,25 @@ function renderMissionControl(next) {
   );
   fragment.append(epochSection.wrap);
 
+  // Closed-loop audit fix (Mission Control honesty): the authoritative Work
+  // Graph (roadmap authority row + compiled plan + backlog + claims) from the
+  // DevOS cycle — previously computed but never rendered.
+  const wg = mc.work_graph || null;
+  if (wg && (wg.roadmap || (wg.nodes || []).length)) {
+    const wgSection = section('Work graph (authoritative)', 'roadmap · plan · backlog · claims');
+    if (wg.roadmap) {
+      wgSection.list.append(
+        kvRow('Objective', text(wg.roadmap.objective, 'UNKNOWN'), 'neutral'),
+        kvRow('Milestone', `${text(wg.roadmap.milestone, '—')} · plan g${wg.roadmap.plan_generation ?? '?'} ${text(wg.roadmap.plan_state, '')}`, stateTone(wg.roadmap.plan_state)),
+        kvRow('Backlog', `ready ${wg.tasks.ready ?? '?'} · running ${wg.tasks.running ?? '?'} · leased this cycle ${wg.claims.leased_this_cycle ?? '?'}`, (wg.tasks.ready ?? 0) > 0 ? 'good' : 'neutral'),
+      );
+    }
+    for (const node of (wg.nodes || []).slice(0, 12)) {
+      wgSection.list.append(kvRow(`  ${text(node.state, 'UNKNOWN')}`, text(node.title, node.node_id), stateTone(node.state)));
+    }
+    fragment.append(wgSection.wrap);
+  }
+
   const objectivesSection = section('Objectives & tasks', `${mc.counts.objectives} objectives · ${mc.counts.tasks} tasks`);
   const tasksByObjective = new Map();
   for (const task of mc.tasks) {
@@ -1761,31 +1780,63 @@ function renderMechanisms(next) {
   // Tier 1 operator wheel: explicit operator actions over the shadow runtime.
   // Read paths surface candidates / experience / skills on demand; nomination
   // is the one ledger-writing action and still grants nothing by itself.
+  // Closed-loop audit fix: command results now render IN THE UI (previously
+  // console.info only — the buttons looked decorative without devtools).
   const rsiOps = section('RSI operations', 'operator trainer surface · zero authority');
   const rsiOpsList = el('div', 'commandList');
+  const rsiOutput = el('div', 'commandList');
+  const renderRsiResult = (label, result) => {
+    rsiOutput.replaceChildren();
+    const rows = [];
+    const pushRow = (key, value, tone) => rows.push(kvRow(key, value, tone));
+    if (result && typeof result === 'object') {
+      const entries = Object.entries(result)
+        .filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value == null)
+        .slice(0, 10);
+      if (entries.length) {
+        for (const [key, value] of entries) {
+          pushRow(compact(key, 22), value == null ? 'NONE' : compact(String(value), 46), 'neutral');
+        }
+      } else {
+        const complex = Object.entries(result).slice(0, 6);
+        for (const [key, value] of complex) {
+          const count = Array.isArray(value) ? value.length : Object.keys(value || {}).length;
+          pushRow(compact(key, 22), `${count} entr${count === 1 ? 'y' : 'ies'}`, 'neutral');
+        }
+      }
+    } else {
+      pushRow('Result', text(result, 'NONE'), 'neutral');
+    }
+    rsiOutput.append(kvRow('Last command', label, 'good'), ...rows);
+  };
   rsiOpsList.append(
     commandButton('Candidates', 'Shadow archive list', async () => {
       const result = await api.command('RSI_CANDIDATES', {});
       console.info('metaengine.rsi.candidates', result);
+      renderRsiResult('RSI_CANDIDATES', result);
       api.snapshot().then(render).catch(() => {});
     }),
     commandButton('Experience cases', 'Outcome river detail', async () => {
       const result = await api.command('RSI_EXPERIENCE', {});
       console.info('metaengine.rsi.experience', result);
+      renderRsiResult('RSI_EXPERIENCE', result);
       api.snapshot().then(render).catch(() => {});
     }),
     commandButton('Skill library', 'Verified skills + reliability', async () => {
       const result = await api.command('RSI_SKILLS', {});
       console.info('metaengine.rsi.skills', result);
+      renderRsiResult('RSI_SKILLS', result);
       api.snapshot().then(render).catch(() => {});
     }),
     commandButton('RSI status', 'Full runtime counters', async () => {
       const result = await api.command('RSI_STATUS', {});
       console.info('metaengine.rsi.status', result);
+      renderRsiResult('RSI_STATUS', result);
       api.snapshot().then(render).catch(() => {});
     }),
   );
   rsiOps.wrap.append(rsiOpsList);
+  rsiOps.wrap.append(rsiOutput);
   rsiOps.list.append(
     kvRow('Nominate promotion', 'omnibox: rsi nominate <candidate_id> <qualification_digest>', 'neutral'),
     kvRow('Nomination grants', 'NOTHING · external promotion gate required', 'good'),

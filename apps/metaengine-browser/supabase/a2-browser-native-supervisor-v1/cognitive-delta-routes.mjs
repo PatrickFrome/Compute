@@ -9,7 +9,12 @@ export const COGNITIVE_DELTA_MAX_BODY_BYTES = 256 * 1024;
 
 const STREAM_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRIORITIES = new Set(['P0', 'P1', 'P2', 'P3']);
-const SOURCES = new Set(['PROCESS', 'SEMANTIC', 'METRICS']);
+// T3-8 audit fix: the browser's cognitive bus stamps system events (fleet
+// lifecycle, supervisor commands, artifacts, compute health) with
+// source='SYSTEM' (browser-cognitive-delta-bus.mjs). The acceptor set must
+// include it, or the first system delta in a batch would 400 the whole batch
+// and permanently degrade the transport into full-state fallback.
+const SOURCES = new Set(['PROCESS', 'SEMANTIC', 'METRICS', 'SYSTEM']);
 
 function utf8Bytes(value) {
   return new TextEncoder().encode(String(value || '')).byteLength;

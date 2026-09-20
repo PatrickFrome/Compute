@@ -1,14 +1,19 @@
 import crypto from 'node:crypto';
 
-// Per-role quota (W3): the fleet may never occupy more than FLEET_TAB_CEILING
-// physical tabs, which guarantees the human user at least
-// MAX_TABS - FLEET_TAB_CEILING = 16 slots of headroom at all times, no matter
-// how the elastic governor scales the worker pool. The ceiling deliberately
-// sits above the governor's 12-agent live ceiling so PROVISIONING_AMBIGUOUS
-// and orphan tabs (which still hold physical slots) do not collide with live
-// workers inside the same pass.
-export const FLEET_TAB_CEILING = 16;
-const MAX_TABS = 32;
+// Closed-loop audit fix (fleet scale): the per-role quota and the shared tab
+// wall are now operator-tunable through the environment so the fleet can grow
+// past the historical small-constant bounds on capable machines
+// (A2_FLEET_TAB_CEILING, A2_MAX_TABS). Defaults are raised (fleet 16 -> 28,
+// total 32 -> 48) — the elastic governor only ever grows the fleet on
+// server-authoritative demand, so a higher ceiling never means idle tabs.
+// The human user keeps MAX_TABS - FLEET_TAB_CEILING = 20 reserved slots at
+// all times (was 16).
+function envBoundedInt(name, fallback, min, max) {
+  const parsed = Number(process.env[name]);
+  return Number.isSafeInteger(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+export const FLEET_TAB_CEILING = envBoundedInt('A2_FLEET_TAB_CEILING', 28, 4, 64);
+export const MAX_TABS = envBoundedInt('A2_MAX_TABS', 48, 8, 128);
 const TAB_ROLES = Object.freeze(['USER', 'FLEET']);
 // Continuity provenance stamp (P0 repair, point 4): tabs created by a
 // self-update session-continuity restore attempt carry the attempt's
