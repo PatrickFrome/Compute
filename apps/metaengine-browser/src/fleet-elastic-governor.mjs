@@ -80,7 +80,7 @@ export function liveFleetAgents(fleetSnapshot = {}) {
   return agents.filter((row) => LIVE_STATES.includes(String(row?.lifecycle_state || '')));
 }
 
-export function retireEligibleFleetAgents(fleetSnapshot = {}, { limit = MAX_RETIRE_PER_CYCLE } = {}) {
+export function retireEligibleFleetAgents(fleetSnapshot = {}, { limit = MAX_RETIRE_PER_CYCLE, reliability = null } = {}) {
   const bounded = Math.max(1, Math.min(Number(limit) || MAX_RETIRE_PER_CYCLE, MAX_RETIRE_PER_CYCLE));
   const agents = Array.isArray(fleetSnapshot?.agents) ? fleetSnapshot.agents : [];
   // Newest first: the youngest surplus workers were the most recently spawned
@@ -95,6 +95,20 @@ export function retireEligibleFleetAgents(fleetSnapshot = {}, { limit = MAX_RETI
         && !row?.ambiguous_reason;
     })
     .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  // T3-9 reliability ordering: when the fleet experience signal supplies
+  // per-role success rates, retirement order is re-ranked BEFORE the bound is
+  // applied — lowest-reliability roles shrink first, proven-good roles keep
+  // their agents even when they are the newest. Unknown reliability sits
+  // BETWEEN the known bands (neutral 0.5 midpoint), and the stable sort keeps
+  // the newest-first order inside every band.
+  if (reliability && typeof reliability === 'object') {
+    const band = (row) => {
+      const entry = reliability[String(row?.role || '').toUpperCase()];
+      const rate = entry && Number.isFinite(Number(entry.success_rate)) ? Number(entry.success_rate) : null;
+      return rate === null ? 0.5 : Math.max(0, Math.min(1, rate));
+    };
+    eligible.sort((a, b) => band(a) - band(b));
+  }
   return eligible.slice(0, bounded);
 }
 
@@ -123,7 +137,7 @@ function normalizeTabCensus(tabCensus) {
   return Object.freeze({ fleet_tabs: fleetTabs, fleet_tab_ceiling: ceiling });
 }
 
-export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idleCycles = 0, maxTargetAgents = null, tabCensus = null } = {}) {
+export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idleCycles = 0, maxTargetAgents = null, tabCensus = null, experience = null } = {}) {
   const ready = nonNegative(backlog?.ready);
   const running = nonNegative(backlog?.running);
   const policy = fleetSnapshot?.policy || {};
@@ -142,6 +156,18 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
   const physicalPool = census ? Math.max(pool, census.fleet_tabs) : pool;
   const demand = ready + running;
   const previousIdleCycles = Math.max(0, nonNegative(idleCycles));
+  // T3-9 experience-driven fleet: the Outcome River signal extends the idle
+  // shrink horizon (productive fleets — recent verified positives — stay warm
+  // longer) and orders retirement by role reliability (lowest first). The
+  // demand math and the warm floor are UNCHANGED; the DB stays the scheduler
+  // authority. A missing/empty signal keeps every pre-T3 behavior exact.
+  const experienceGrace = experience && experience.available === true
+    ? Math.max(0, Math.min(4, Math.floor(Number(experience.experience_grace_cycles) || 0)))
+    : 0;
+  const idleRequired = IDLE_CYCLES_REQUIRED + experienceGrace;
+  const roleReliability = experience && experience.available === true && experience.per_role && typeof experience.per_role === 'object'
+    ? experience.per_role
+    : null;
 
   let nextIdleCycles = previousIdleCycles;
   let target;
@@ -152,12 +178,15 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
     target = Math.max(warm, Math.min(Math.max(live, warm) + Math.min(ready, burst), warm + demand, ceiling));
   } else {
     nextIdleCycles = previousIdleCycles + 1;
-    if (nextIdleCycles >= IDLE_CYCLES_REQUIRED) {
+    if (nextIdleCycles >= idleRequired) {
       target = warm;
       const surplus = Math.max(0, physicalPool - target);
       if (surplus > 0) {
-        retireAgentIds = retireEligibleFleetAgents(fleetSnapshot, { limit: Math.min(surplus, MAX_RETIRE_PER_CYCLE) })
-          .map((row) => String(row.agent_id));
+        const eligible = retireEligibleFleetAgents(fleetSnapshot, {
+          limit: Math.min(surplus, MAX_RETIRE_PER_CYCLE),
+          reliability: roleReliability,
+        });
+        retireAgentIds = eligible.map((row) => String(row.agent_id));
       }
     } else {
       target = Math.max(warm, Math.min(live, ceiling));
@@ -174,11 +203,20 @@ export function planElasticFleetCapacity({ backlog = {}, fleetSnapshot = {}, idl
     running,
     idle_cycles: nextIdleCycles,
     idle_cycles_required: IDLE_CYCLES_REQUIRED,
+    idle_cycles_required_effective: idleRequired,
     max_target_agents: ceiling,
     worker_tab_pool: pool,
     physical_worker_tabs: census ? census.fleet_tabs : null,
     fleet_tab_ceiling: census ? census.fleet_tab_ceiling : null,
     tab_census_grounded: census != null,
+    experience: Object.freeze({
+      reliability_informed: experienceGrace > 0 || roleReliability != null,
+      available: experience?.available === true,
+      sample_count: Number(experience?.sample_count) || 0,
+      recent_positive: Number(experience?.recent_positive) || 0,
+      fleet_success_rate: experience?.fleet_success_rate ?? null,
+      experience_grace_cycles: experienceGrace,
+    }),
     retire_agent_ids: Object.freeze(retireAgentIds),
     retire_count: retireAgentIds.length,
     scale_down: retireAgentIds.length > 0,
