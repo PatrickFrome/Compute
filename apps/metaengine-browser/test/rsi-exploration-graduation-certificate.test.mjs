@@ -26,6 +26,10 @@ import {
   RSI_RISK_SPENDING_POLICIES,
 } from '../src/rsi-recursive-risk-budget.mjs';
 import {
+  reconstructRsiDurableRecursiveRiskLedgerState,
+  createRsiDurableRiskConfirmationWitness,
+} from '../src/rsi-durable-recursive-risk-ledger.mjs';
+import {
   createRsiExplorationGraduationPreview,
   verifyRsiExplorationGraduationPreview,
   createRsiExplorationGraduationVerifierReceipt,
@@ -339,6 +343,24 @@ function statistical(fx,overrides={}){
 }
 
 function certificateArgs(fx,overrides={}){
+  const statisticalReceipt=overrides.statistical_receipt??statistical(fx);
+  const durableState=overrides.durable_risk_ledger_state??reconstructRsiDurableRecursiveRiskLedgerState({
+    source_sha:SOURCE,
+    budget:statisticalReceipt.recursive_risk_budget,
+    rows:[{
+      certificate:statisticalReceipt.external_statistical_certificate,
+      confirmation:statisticalReceipt.risk_confirmation,
+    }],
+  });
+  const durableWitness=overrides.durable_risk_confirmation_witness??createRsiDurableRiskConfirmationWitness({
+    durable_ledger_state:durableState,
+    source_sha:SOURCE,
+    recursive_risk_budget:statisticalReceipt.recursive_risk_budget,
+    confirmation_digest:statisticalReceipt.risk_confirmation_digest,
+    readback_owner_identity_digest:d('durable-risk-readback-owner'),
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
   return {
     certificate_id:'phase37a.graduation.certificate',
     source_sha:SOURCE,
@@ -353,7 +375,9 @@ function certificateArgs(fx,overrides={}){
     exploration_evidence_manifest_digest:EXPLORATION_EVIDENCE,
     process_verifier_receipt:verifier(fx,'PROCESS'),
     outcome_verifier_receipt:verifier(fx,'OUTCOME'),
-    statistical_receipt:statistical(fx),
+    statistical_receipt:statisticalReceipt,
+    durable_risk_confirmation_witness:durableWitness,
+    durable_risk_ledger_state:durableState,
     lineage_review:lineage(fx),
     future_effect_executor_identity_digest:FUTURE_EXECUTOR,
     certificate_owner_identity_digest:d('certificate-owner'),
@@ -375,6 +399,9 @@ function certificateArgs(fx,overrides={}){
     external_certificate_owner:true,
     authored_by_candidate:false,
     ...overrides,
+    statistical_receipt:statisticalReceipt,
+    durable_risk_confirmation_witness:durableWitness,
+    durable_risk_ledger_state:durableState,
   };
 }
 
@@ -408,6 +435,9 @@ test('Phase37A certificate is eligible only with exact paired anytime-valid proc
   assert.equal(cert.outcome_verifier_pass,true);
   assert.equal(cert.anytime_valid_acceptance_pass,true);
   assert.equal(cert.deterministic_skill_statistical_candidate_binding,true);
+  assert.equal(cert.restart_durable_statistical_confirmation_bound,true);
+  assert.match(cert.durable_risk_confirmation_witness_digest,/^sha256:[0-9a-f]{64}$/);
+  assert.match(cert.durable_risk_ledger_state_digest,/^sha256:[0-9a-f]{64}$/);
   assert.equal(cert.statistical_candidate_id,`skill:${fx.capsule.skill_digest}`);
   assert.equal(cert.statistical_candidate_sha,fx.capsule.source_candidate_sha);
   assert.equal(cert.lineage_contamination_clear,true);
@@ -514,6 +544,50 @@ test('Phase37A fails closed on cross-receipt scope drift and cross-stage identit
   );
 });
 
+test('Phase37A rejects a durable witness for a different confirmation or forged durable-state digest',()=>{
+  const fx=fixture();
+  const args=certificateArgs(fx);
+  const forgedWitness={...args.durable_risk_confirmation_witness,durable_ledger_state_digest:d('forged-durable-state')};
+  assert.throws(
+    ()=>createRsiExplorationGraduationCertificate({...args,durable_risk_confirmation_witness:forgedWitness}),
+    /witness_digest_mismatch/,
+  );
+  assert.throws(
+    ()=>createRsiExplorationGraduationCertificate({...args,durable_risk_ledger_state:{
+      ...args.durable_risk_ledger_state,
+      state_digest:d('forged-ledger-state'),
+    }}),
+    /state_digest_mismatch/,
+  );
+});
+
+test('Phase37A durable readback owner is separated from statistical acceptor and future effect executor',()=>{
+  const fx=fixture();
+  const stats=statistical(fx);
+  const durableState=reconstructRsiDurableRecursiveRiskLedgerState({
+    source_sha:SOURCE,
+    budget:stats.recursive_risk_budget,
+    rows:[{certificate:stats.external_statistical_certificate,confirmation:stats.risk_confirmation}],
+  });
+  const colliding=createRsiDurableRiskConfirmationWitness({
+    durable_ledger_state:durableState,
+    source_sha:SOURCE,
+    recursive_risk_budget:stats.recursive_risk_budget,
+    confirmation_digest:stats.risk_confirmation_digest,
+    readback_owner_identity_digest:stats.statistical_acceptor_identity_digest,
+    external_readback_owner:true,
+    authored_by_candidate:false,
+  });
+  assert.throws(
+    ()=>createRsiExplorationGraduationCertificate(certificateArgs(fx,{
+      statistical_receipt:stats,
+      durable_risk_ledger_state:durableState,
+      durable_risk_confirmation_witness:colliding,
+    })),
+    /cross_stage_identity_separation_required/,
+  );
+});
+
 test('Phase37A preview rejects direct ACTIVE-without-hold input and non-target governance drift',()=>{
   const fx=fixture();
   assert.throws(
@@ -551,6 +625,9 @@ test('Phase37A trust root keeps graduation certificate outside activation and ef
   assert.equal(root.e_value_external_contract_required,true);
   assert.equal(root.existing_recursive_risk_budget_required,true);
   assert.equal(root.existing_recursive_risk_confirmation_required,true);
+  assert.equal(root.durable_recursive_risk_witness_required,true);
+  assert.equal(root.restart_durable_statistical_confirmation_required,true);
+  assert.equal(root.external_durable_readback_owner_separate_from_acceptor_and_effect_required,true);
   assert.equal(root.second_statistical_risk_ledger_created,false);
   assert.equal(root.process_and_outcome_verifiers_separate,true);
   assert.equal(root.controllable_and_uncontrollable_failures_separate,true);
