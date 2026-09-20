@@ -868,6 +868,29 @@ async function handleCommand(command, payload = {}) {
   if (command === 'GATE_DISABLE_ALL') { const result = await ownerSafetyGates?.disable({ ...payload, gate_id: '*' }); await publishSnapshot(); return result; }
   if (command === 'GATE_ENABLE') { const result = await ownerSafetyGates?.enable(payload); await publishSnapshot(); return result; }
   if (command === 'GATE_ENABLE_ALL') { const result = await ownerSafetyGates?.enableAll(payload); await publishSnapshot(); return result; }
+  // T2-5 Unified Work Graph item 3: the operator commands over the Work
+  // Graph admission surface. DEVOS_RESUME re-opens the fenced environment
+  // through the generation-floor CAS (the SQL is the authority); the shell
+  // command itself IS the operator confirmation. DEVOS_OBJECTIVE_SET
+  // activates the next plan generation for an operator objective (compiled
+  // against the current roadmap authority on the edge). Both ride the same
+  // device-signed supervisor rail; neither grants scheduler authority.
+  if (command === 'DEVOS_RESUME') {
+    const result = await nativeSupervisor?.devosResumeAdmission({
+      expected_generation_floor: payload?.expected_generation_floor ?? null,
+    });
+    await publishSnapshot();
+    return result || null;
+  }
+  if (command === 'DEVOS_OBJECTIVE_SET') {
+    const result = await nativeSupervisor?.metaObjectiveSet({
+      roadmap_id: payload?.roadmap_id ?? null,
+      objective: payload?.objective,
+      nodes: Array.isArray(payload?.nodes) ? payload.nodes : null,
+    });
+    await publishSnapshot();
+    return result || null;
+  }
   // RSI_* commands all route through the single operator console surface
   // above (rsiOperatorConsole.execute): status/candidates/experience/skills,
   // promotion nomination, admission attempt snapshots, AND the steering wheel

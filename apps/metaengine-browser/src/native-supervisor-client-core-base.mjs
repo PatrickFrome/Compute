@@ -258,6 +258,21 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       const workerObserver = localSnapshot?.worker_observer || null;
       const devosRuntime = buildDevosRuntimeObservability(localSnapshot || {});
       const supervisorLifecycle = mergeDevosRuntimeObservability(state?.supervisor_lifecycle, devosRuntime);
+      // T2-5 Unified Work Graph item 4: bounded cross-plane epoch stamp for
+      // the devos cycle body — the supervisor mesh epoch and the cognitive
+      // causal-stream cursor (stream_id + acknowledged sequence) ride the
+      // same state projection the cycle already reads. Pure observability.
+      const workGraphPlanes = localSnapshot ? {
+        mesh_epoch: Number(localSnapshot?.supervisor_mesh?.mesh_epoch) > 0
+          ? Number(localSnapshot.supervisor_mesh.mesh_epoch)
+          : null,
+        cognitive_stream: localSnapshot?.cognitive_delta_transport?.stream_id
+          ? {
+              stream_id: String(localSnapshot.cognitive_delta_transport.stream_id).slice(0, 160),
+              acknowledged_through_sequence: Number(localSnapshot.cognitive_delta_transport.acknowledged_through_sequence) || 0,
+            }
+          : null,
+      } : null;
       return {
         ...state,
         supervisor_lifecycle: supervisorLifecycle,
@@ -268,6 +283,7 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
         // an explicit null so the stored state reflects reality instead of
         // retaining a stale mesh from a previous writer.
         supervisor_mesh: supervisorMesh,
+        ...(workGraphPlanes ? { work_graph_planes: workGraphPlanes } : {}),
         ...(workerObserver ? { worker_observer: workerObserver } : {}),
       };
     };

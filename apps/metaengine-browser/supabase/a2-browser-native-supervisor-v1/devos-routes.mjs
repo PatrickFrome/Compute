@@ -53,6 +53,50 @@ export async function readDevosRuntimeControl({rpc,workspaceId}={}){
   catch{return unavailableDevosRuntimeControl('READ_FAILED');}
 }
 
+// T2-5 Unified Work Graph item 4: the Objective→Milestone→Task→Claim→Effect
+// view model with the cross-plane epochs (fleet generation epochs, supervisor
+// mesh epoch, cognitive causal-stream cursor) the browser stamps on the cycle
+// body. Pure projection over already-read inputs; no scheduling, no authority.
+// The Mechanisms panel becomes a projection OF this graph, not a parallel
+// coordination plane.
+export function projectDevosWorkGraph({planSnapshot=null,metaOrchestrator=null,backlog=null,running=null,leases=null,planes=null}={}){
+  const spec=planSnapshot&&planSnapshot.found===true&&planSnapshot.plan_spec&&typeof planSnapshot.plan_spec==='object'&&!Array.isArray(planSnapshot.plan_spec)?planSnapshot.plan_spec:null;
+  const nodes=Array.isArray(spec?.nodes)?spec.nodes:[];
+  const leaseRows=Array.isArray(leases)?leases:(leases?1:0);
+  const cognitive=planes?.cognitive_stream&&typeof planes.cognitive_stream==='object'&&!Array.isArray(planes.cognitive_stream)&&typeof planes.cognitive_stream.stream_id==='string'
+    ?{stream_id:String(planes.cognitive_stream.stream_id).slice(0,160),acknowledged_through_sequence:Number(planes.cognitive_stream.acknowledged_through_sequence)||0}
+    :null;
+  return Object.freeze({
+    schema:'metaengine.devos.work-graph.v1',
+    roadmap:Object.freeze({
+      roadmap_id:String(planSnapshot?.roadmap_id||'').slice(0,160),
+      milestone:spec?.active_milestone_key?String(spec.active_milestone_key).slice(0,160):null,
+      plan_generation:Number(planSnapshot?.plan_generation)||0,
+      plan_state:planSnapshot?.found===true?String(planSnapshot?.state||'ACTIVE').slice(0,32):'NONE',
+      objective:spec?.objective?String(spec.objective).slice(0,480):null,
+      node_count:nodes.length,
+    }),
+    tasks:Object.freeze({
+      ready:Number(backlog?.ready)||0,
+      running:Array.isArray(running)?running.length:0,
+      by_role:Object.freeze({...((backlog&&typeof backlog==='object'&&backlog.by_role&&typeof backlog.by_role==='object')?backlog.by_role:{})}),
+    }),
+    claims:Object.freeze({leased_this_cycle:typeof leaseRows==='number'?leaseRows:leaseRows.length}),
+    planes:Object.freeze({
+      fleet_generation_epochs:Object.freeze([...new Set((Array.isArray(planes?.fleet_generation_epochs)?planes.fleet_generation_epochs:[]).map((v)=>Number(v)).filter((v)=>Number.isSafeInteger(v)&&v>0))].sort((a,b)=>a-b).slice(0,64)),
+      mesh_epoch:Number.isSafeInteger(Number(planes?.mesh_epoch))?Number(planes.mesh_epoch):null,
+      cognitive_stream:cognitive,
+      meta_orchestrator_state:metaOrchestrator?.state?String(metaOrchestrator.state).slice(0,64):null,
+    }),
+    task_content_authority:false,
+    scheduler_authority:false,
+    browser_authority:false,
+    release_authority:false,
+    automatic_retry_allowed:false,
+    authority_effect:false,
+  });
+}
+
 function int(value,name){const n=Number(value);if(!Number.isSafeInteger(n)||n<1)throw new Error(`devos_${name}_invalid`);return n;}
 function binding(body={}){
   const out={task_id:String(body.task_id||'').toLowerCase(),agent_id:String(body.agent_id||'').toLowerCase(),lease_generation:int(body.lease_generation,'lease_generation'),tab_id:String(body.tab_id||''),target_id:String(body.target_id||'').toLowerCase(),agent_generation_epoch:int(body.agent_generation_epoch,'agent_generation_epoch')};
@@ -186,9 +230,9 @@ function schedulerBackpressure(result){
   return Object.freeze({active:true,reason:String(result?.reason||'SCHEDULER_BACKPRESSURE').slice(0,120),retry_after_ms:Math.max(1000,Math.min(300000,Number(result?.retry_after_ms)||60000)),page_signal_authority:false,automatic_retry_allowed:false,authority_effect:false});
 }
 
-export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=null}={}){
+export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=null,metaRoadmapId='metaengine-development-os-v1'}={}){
   if(typeof rpc!=='function'||!UUID_RE.test(String(workspaceId||'')))throw new Error('devos_routes_dependencies_invalid');
-  const metaSuperstep=createMetaDevosSuperstep({rpc,workspaceId});
+  const metaSuperstep=createMetaDevosSuperstep({rpc,workspaceId,roadmapId:metaRoadmapId});
   const workspaceObservation=createWorkspaceObservationRoutes({rpc,workspaceId});
   return async function handle({req,path,body,clientId}={}){
     const effectMatch=String(path||'').match(/^\/v1\/commands\/([0-9a-f-]{36})\/effect-intent$/i);
@@ -209,6 +253,30 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
     if(!clientId)return json(401,{error:'device_auth_required'});
     const workspaceReadback=await workspaceObservation({req,path,clientId});
     if(workspaceReadback)return workspaceReadback;
+    // T2-5 Unified Work Graph item 1: operator-gated admission resume. The
+    // environment fence (continuous_service_allowed=false) holds the whole
+    // DevOS task cycle fail-closed; the designed exit is an operator-CONFIRMED
+    // resume with a generation-floor CAS (devos_environment_resume_v1). The
+    // SQL CAS is the authority: a stale floor resumes nothing (409) and the
+    // route never bypasses the fence by other means.
+    if(req?.method==='POST'&&path==='/v1/devos/resume-admission'){
+      if(body?.confirm!==true)return json(400,{error:'devos_resume_confirmation_required',automatic_retry_allowed:false,authority_effect:false});
+      let before;
+      try{before=normalizeDevosRuntimeControl(await rpc('devos_environment_state_v1',{p_workspace:workspaceId}),{workspaceId});}
+      catch{return json(503,{error:'devos_resume_state_unavailable',automatic_retry_allowed:false,authority_effect:false});}
+      const expectedFloor=Number(body?.expected_generation_floor);
+      const floor=Number.isSafeInteger(expectedFloor)&&expectedFloor>=0?expectedFloor:Number(before.generation_floor);
+      if(!Number.isSafeInteger(floor)||floor<0)return json(409,{error:'devos_resume_generation_floor_unavailable',automatic_retry_allowed:false,authority_effect:false});
+      try{
+        const readback=await rpc('devos_environment_resume_v1',{p_workspace:workspaceId,p_expected_generation_floor:floor});
+        const after=normalizeDevosRuntimeControl(await rpc('devos_environment_state_v1',{p_workspace:workspaceId}),{workspaceId});
+        return json(200,{schema:'metaengine.devos.environment-resume.v1',resumed:true,requested_floor:floor,before:{state:before.state,generation_floor:before.generation_floor,supervisor_admission_enabled:before.supervisor_admission_enabled},after:{state:after.state,generation_floor:after.generation_floor,supervisor_admission_enabled:after.supervisor_admission_enabled,continuous_service_allowed:after.continuous_service_allowed},readback:readback&&typeof readback==='object'&&!Array.isArray(readback)?readback:null,operator_initiated:true,automatic_retry_allowed:false,authority_effect:false});
+      }catch(error){
+        const message=String(error?.message||error||'devos_resume_failed');
+        if(message.includes('devos_environment_resume_generation_mismatch'))return json(409,{error:'devos_resume_generation_mismatch',requested_floor:floor,automatic_retry_allowed:false,authority_effect:false});
+        throw error;
+      }
+    }
     if(req?.method==='POST'&&path==='/v1/devos/cycle'){
       const runtimeControl=typeof readRuntimeControl==='function'?await readRuntimeControl():null;
       if(runtimeControl&&runtimeControl.continuous_service_allowed!==true){
@@ -254,7 +322,16 @@ export function createDevosSupervisorRoutes({rpc,workspaceId,readRuntimeControl=
       }
       lease=leases[0]||null;
       const backlog=deferredBacklog(rawBacklog,backpressure);
-      return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'OPEN',runtime_control:runtimeControl,admission_fenced:false,meta_orchestrator:metaOrchestrator,reconcile,backlog,lease,leases,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningForAgents(snapshot,agents),scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
+      const runningRows=runningForAgents(snapshot,agents);
+      // T2-5 item 4: unified Work Graph projection rides the cycle response —
+      // one bounded plan-snapshot read (leader-independent, deterministic).
+      // A read failure degrades to null; it never gates the cycle itself.
+      let workGraph=null;
+      try{
+        const planSnapshot=await rpc('meta_orchestrator_plan_snapshot_v1',{p_workspace_id:workspaceId,p_roadmap_id:metaRoadmapId});
+        workGraph=projectDevosWorkGraph({planSnapshot,metaOrchestrator,backlog,running:runningRows,leases,planes:body?.planes});
+      }catch{workGraph=null;}
+      return json(200,{schema:'metaengine.devos.browser-cycle.v1',state:'OPEN',runtime_control:runtimeControl,admission_fenced:false,meta_orchestrator:metaOrchestrator,reconcile,backlog,work_graph:workGraph,lease,leases,scheduler_backpressure:backpressure,lease_fenced:leaseFence?.fenced===true,lease_fence_reason:leaseFence?.reason||null,running:runningRows,scheduler_source:'NATIVE_SUPERVISOR_HEARTBEAT',scheduler_policy:'IDLE_ROLE_FAIR_SHARE_V1',lease_attempts:leaseAttempts,second_scheduler_loop:false,automatic_retry_allowed:false,authority_effect:false});
     }
     if(req?.method==='POST'&&path==='/v1/devos/mark-running'){
       const b=binding(body); const proof=body?.proof||{};

@@ -363,6 +363,23 @@ export class DevOsNativeTaskCycle {
       authority_effect: false,
     })) : null;
 
+    // T2-5 Unified Work Graph item 4: the browser stamps its cross-plane
+    // epochs (fleet generation epochs from the fleet snapshot, supervisor mesh
+    // epoch, cognitive causal-stream cursor) on the cycle body so the edge can
+    // project the unified Work Graph view (Objective→Milestone→Task→Claim→
+    // Effect) with every coordination plane visible in one place.
+    const workGraphPlanes = {
+      fleet_generation_epochs: [...new Set((Array.isArray(fleetSnapshot.agents) ? fleetSnapshot.agents : [])
+        .map((row) => Number(row?.generation_epoch))
+        .filter((epoch) => Number.isSafeInteger(epoch) && epoch > 0))].sort((a, b) => a - b),
+      mesh_epoch: Number(state?.work_graph_planes?.mesh_epoch) > 0 ? Number(state.work_graph_planes.mesh_epoch) : null,
+      cognitive_stream: state?.work_graph_planes?.cognitive_stream?.stream_id
+        ? {
+            stream_id: String(state.work_graph_planes.cognitive_stream.stream_id).slice(0, 160),
+            acknowledged_through_sequence: Number(state.work_graph_planes.cognitive_stream.acknowledged_through_sequence) || 0,
+          }
+        : null,
+    };
     const planResponse = await this.#signedRequest('/v1/devos/cycle', {
       payload: {
         fleet: {
@@ -373,6 +390,7 @@ export class DevOsNativeTaskCycle {
             tab_id: row.tab_id, target_id: row.target_id, generation_epoch: row.generation_epoch,
           })),
         },
+        planes: workGraphPlanes,
       },
     });
     if (planResponse.status === 404) return this.#record({ state: 'SERVER_ROUTE_UNAVAILABLE', ambiguity_recovery: ambiguityRecovery });
@@ -444,7 +462,7 @@ export class DevOsNativeTaskCycle {
         authority_effect: false,
       });
     }
-    return this.#record({ state: 'OK', backlog: structuredClone(plan.backlog || {}), capacity, ambiguity_recovery: ambiguityRecovery, dispatch, result_ready: resultReady, result_ready_batch: resultReadyBatch });
+    return this.#record({ state: 'OK', backlog: structuredClone(plan.backlog || {}), work_graph: plan.work_graph && typeof plan.work_graph === 'object' ? structuredClone(plan.work_graph) : null, capacity, ambiguity_recovery: ambiguityRecovery, dispatch, result_ready: resultReady, result_ready_batch: resultReadyBatch });
   }
 
   async completeFromTrustedCommand(payload = {}) {
