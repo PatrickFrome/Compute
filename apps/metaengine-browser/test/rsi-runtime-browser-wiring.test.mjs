@@ -5,6 +5,7 @@ import test from 'node:test';
 const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const runtime = await fs.readFile(new URL('../src/rsi-runtime-service.mjs', import.meta.url), 'utf8');
 const ledger = await fs.readFile(new URL('../src/rsi-runtime-ledger.mjs', import.meta.url), 'utf8');
+const consoleSource = await fs.readFile(new URL('../src/rsi-operator-console.mjs', import.meta.url), 'utf8');
 
 test('Browser lifecycle starts RSI only after exact Development Plane source binding', () => {
   assert.match(main, /import \{ RsiRuntimeService \} from '\.\/rsi-runtime-service\.mjs'/);
@@ -46,7 +47,46 @@ test('Browser enables trusted result reconciliation and feeds only stored receip
   assert.match(main, /await initRsiRuntime\(\)/);
   assert.match(main, /await rsiRuntime\.ingestBrowserOutcome\(\{/);
   assert.match(main, /readback,/);
-  assert.match(main, /attribution:\s*rsiOutcomeAttributionForCommand\(command\)/);
+  // Outcome River contract: a BOUND registry binding is ingested with
+  // attribution null (the service resolves + consumes the trusted binding);
+  // every other command keeps the synthetic candidate-less attribution.
+  assert.match(main, /rsiRuntime\.peekCommandAttribution\(\{/);
+  assert.match(main, /attribution:\s*bound \? null : rsiOutcomeAttributionForCommand\(command\)/);
+});
+
+test('Outcome River binds task-attributed queued commands pre-execution and credits eligible episodes', () => {
+  assert.match(main, /import \{ RsiOutcomeRiver, extractRsiCommandTaskContext \} from '\.\/rsi-outcome-river\.mjs'/);
+  assert.match(main, /let rsiOutcomeRiver = null/);
+  assert.match(main, /new RsiOutcomeRiver\(\{/);
+  assert.match(main, /metaengine-rsi-runtime-ledger-v1\.jsonl\.outcome-river\.json/);
+  // Pre-execution binding: gated on a DB command_id + declared task context,
+  // wrapped so a bind failure can never gate command execution.
+  assert.match(main, /if \(command\?\.command_id && extractRsiCommandTaskContext\(command\)\)/);
+  assert.match(main, /rsiOutcomeRiver\?\.bindLeasedCommand\(command/);
+  // Post-ingest credit assignment closes the loop (1 attributed command = 1 case).
+  assert.match(main, /episode\.eligible_for_credit_assignment === true/);
+  assert.match(main, /rsiOutcomeRiver\?\.creditIngestedEpisode\(episode/);
+  // River observability rides the supervisor state snapshot.
+  assert.match(main, /rsi_outcome_river: rsiOutcomeRiver\?\.snapshot\(\) \|\| null/);
+});
+
+test('RSI operator steering wheel exposes status/pause/resume/nominate/approve without execution authority', () => {
+  assert.match(main, /import \{ RsiOperatorSteering \} from '\.\/rsi-operator-steering\.mjs'/);
+  assert.match(main, /metaengine-rsi-runtime-ledger-v1\.jsonl\.operator-steering\.json/);
+  // Single RSI_* entry point: every RSI_* shell command routes through the
+  // operator console, which delegates the steering actions to the controller.
+  assert.match(main, /command\.startsWith\('RSI_'\)/);
+  assert.match(main, /rsiOperatorConsole\.execute\(command, payload\)/);
+  for (const cmd of ['RSI_STATUS', 'RSI_PAUSE', 'RSI_RESUME', 'RSI_NOMINATE', 'RSI_APPROVE']) {
+    assert.ok(consoleSource.includes(`'${cmd}'`), `console action list missing ${cmd}`);
+  }
+  // The console wires the steering provider and fails closed without it.
+  assert.match(main, /ensureSteering: async \(\)/);
+  assert.match(consoleSource, /rsi_operator_console_steering_unavailable/);
+  // Pause gates only the learning-side credit effect; episodes still ingest.
+  assert.match(main, /rsiOperatorSteering\?\.allows\?\.\('CREDIT_ASSIGNMENT'\) === false/);
+  assert.match(main, /rsiOperatorSteering\.recordGateSkip\('CREDIT_ASSIGNMENT'\)/);
+  assert.match(main, /rsi_operator_steering: rsiOperatorSteering\?\.snapshot\(\) \|\| null/);
 });
 
 test('generic Browser command attribution cannot manufacture candidate or skill credit', () => {

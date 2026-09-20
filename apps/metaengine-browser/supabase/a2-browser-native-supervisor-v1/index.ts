@@ -31,6 +31,16 @@ const COMPLETE_RPC='h205f22_a2_browser_supervisor_complete_v5';
 const BATCH_LEASE_RPC='h205f22_a2_browser_supervisor_lease_batch_v1';
 const BATCH_COMPLETE_RPC='h205f22_a2_browser_supervisor_complete_batch_v1';
 const BIND_EFFECT_RPC='h205f22_a2_browser_supervisor_bind_effect_v1';
+const ISSUE_NATIVE_RPC='h205f22_a2_browser_supervisor_issue_native_v1';
+// Agent Toolbelt issue allowlist (Tier 2 break #3): read-heavy observation +
+// bounded navigation only. Conversation mutation (SEMANTIC_TYPE) stays
+// dispatch-only — the task prompt remains the only text the supervisor types
+// into an agent conversation.
+const TOOL_ISSUE_ACTIONS=new Set(['CAPTURE','READ_TRANSCRIPT','TAB_TELEMETRY','SYSTEM_TELEMETRY','SCROLL','SEMANTIC_FOCUS']);
+const TOOL_REQUEST_ID_RE=/^[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$/;
+const TOOL_AGENT_RE=/^agent_[a-z0-9-]{8,64}$/;
+const TOOL_TAB_RE=/^tab_[0-9a-f-]{36}$/i;
+const TOOL_TASK_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EFFECT_BINDING_SCHEMAS=new Set(['metaengine.native-supervisor.effect-binding.v1','metaengine.native-supervisor.effect-binding.v2']);
 const ACTIVATE_RPC='h205f22_a2_browser_device_activate_approved_v1';
 const MESH_SYNC_RPC='h205f22_a2_supervisor_mesh_sync_v1';
@@ -196,8 +206,43 @@ async function bindEffect(req:Request,commandId:string,body:any){const binding=b
 async function readCommandReceipt(req:Request,commandId:string){try{const value=await rsiReceiptReadback.read({workspaceId:WORKSPACE_ID,commandId,clientId:clientId(req)});return json(200,value)}catch(error){const message=String((error as any)?.message||error);if(message.includes('_invalid')||message.includes('_required'))return json(400,{error:'result_receipt_readback_invalid',authority_effect:false});throw error}}
 async function complete(req:Request,commandId:string,body:any){const rows=await commandLookup(commandId);if(!rows[0])return json(404,{error:'command_not_found'});const r=await rpc(COMPLETE_RPC,{p_workspace_id:WORKSPACE_ID,p_command_id:commandId,p_client_id:clientId(req),p_ok:body?.ok===true,p_receipt:body?.receipt&&typeof body.receipt==='object'?body.receipt:{},p_error:body?.ok===true?null:String(body?.error||'command_failed').slice(0,500),p_authority_effect:false});return json(r?.accepted===true?200:409,r)}
 async function completeBatch(req:Request,body:any){if(!Array.isArray(body?.results)||body.results.length>64)return json(400,{error:'command_batch_results_invalid'});const r=await rpc(BATCH_COMPLETE_RPC,{p_workspace_id:WORKSPACE_ID,p_client_id:clientId(req),p_results:body.results});return json(200,r)}
-async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
-async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,states,commands}}
+// Agent Toolbelt issue route (Tier 2 break #3): a device-authenticated
+// supervisor issues ONE command-plane command on behalf of a fleet agent.
+// Every issued command carries per-agent attribution (issued_by=agent:<id>)
+// and the Outcome River task context (payload.rsi_task), so the command
+// leases back to this same device, executes through the normal lane
+// machinery, and its terminal receipt ingests as a candidate-bound,
+// credit-eligible episode (one tool command = one experience case).
+async function issueTool(req:Request,body:any){
+  const action=String(body?.action||'').toUpperCase();
+  if(!TOOL_ISSUE_ACTIONS.has(action))return json(400,{accepted:false,error:'agent_tool_action_not_allowed',allowed:[...TOOL_ISSUE_ACTIONS].sort(),authority_effect:false});
+  const agentId=String(body?.agent_id||'').toLowerCase();
+  if(!TOOL_AGENT_RE.test(agentId))return json(400,{accepted:false,error:'agent_tool_agent_id_invalid',authority_effect:false});
+  const requestId=String(body?.request_id||'');
+  if(!TOOL_REQUEST_ID_RE.test(requestId))return json(400,{accepted:false,error:'agent_tool_request_id_invalid',authority_effect:false});
+  const taskId=String(body?.task_id||'').toLowerCase();
+  if(!TOOL_TASK_RE.test(taskId))return json(400,{accepted:false,error:'agent_tool_task_id_invalid',authority_effect:false});
+  const payload=boundedObject(body?.payload,4096);
+  if(!payload)return json(400,{accepted:false,error:'agent_tool_payload_invalid',authority_effect:false});
+  const tabIdRaw=body?.tab_id==null?'':String(body.tab_id);
+  if(tabIdRaw!==''&&!TOOL_TAB_RE.test(tabIdRaw))return json(400,{accepted:false,error:'agent_tool_tab_id_invalid',authority_effect:false});
+  const toolPayload:any={...payload};
+  if(tabIdRaw!==''&&toolPayload.tab_id==null)toolPayload.tab_id=tabIdRaw;
+  // Outcome River binding context: the issuing supervisor binds this command
+  // to the task trajectory before execution (client-side river), keyed by the
+  // same task_id/agent_id declared here.
+  toolPayload.rsi_task={schema:'metaengine.rsi.command-task-context.v1',task_id:taskId,agent_id:agentId};
+  const idem=`tool:${(await sha256(`${agentId}:${taskId}:${requestId}`)).slice(0,40)}`;
+  try{
+    const result=await rpc(ISSUE_NATIVE_RPC,{p_client_id:clientId(req),p_action:action,p_platform:'GLM_ZAI',p_payload:toolPayload,p_ttl_seconds:120,p_issued_by:`agent:${agentId}`,p_idempotency_key:idem});
+    if(!result||typeof result!=='object'||result.accepted!==true)return json(409,{accepted:false,error:'agent_tool_issue_rejected',reason:String(result?.error||result?.reason||'unknown').slice(0,160),authority_effect:false});
+    return json(200,{accepted:true,command_id:result.command_id,status:result.status||'PENDING',idempotency_key:idem,replayed:result.replayed===true,issued_by:`agent:${agentId}`,rsi_task_bound:true,authority_effect:false});
+  }catch(error){
+    return json(409,{accepted:false,error:'agent_tool_issue_failed',reason:String((error as any)?.message||error).slice(0,160),authority_effect:false});
+  }
+}
+async function health(){const capability=await projectNativeSupervisorRuntimeCapabilityHealth({rpc:(name:any,args:any)=>name==='devos_runtime_capabilities_v1'?boundedRpc(name,args,HEALTH_CAPABILITY_ATTESTATION_TIMEOUT_MS):Promise.reject(new Error('health_capability_rpc_not_allowed'))});return{ok:true,schema:'metaengine.native-browser-supervisor.health.v1',backend_transport:'DIRECT_POSTGRES',profile:PROFILE,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_process_state_projection:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_access_token_compatible:Boolean(REALTIME_ACCESS_TOKEN),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,command_wake_delivery_is_authority:false,realtime_observation_push_is_authority:false,...runtimeCapabilityHealthResponseFields(capability)}}
+async function status(){const {states,commands}=await statusRows();return{schema:'metaengine.native-browser-supervisor.status.v1',workspace_id:WORKSPACE_ID,backend_transport:'DIRECT_POSTGRES',device_auth_required:true,approval_enrollment:true,typed_commands_only:true,arbitrary_eval:false,supervisor_mesh:true,devos_routes:true,devos_promotion_routes:true,meta_orchestrator_routes:true,command_batch_transport:true,command_wait_batch:(REALTIME_API_KEY&&REALTIME_ACCESS_TOKEN)?'REALTIME_BROADCAST_PROXY':'POSTGRES_NOTIFY_PROXY',effect_intent_sealing:true,effect_intent_binding_schemas:['v1','v2'],result_receipt_readback:true,result_receipt_readback_is_authority:false,result_receipt_terminal_statuses:['COMPLETED','FAILED'],agent_tool_issue:true,agent_tool_issue_allowlist:[...TOOL_ISSUE_ACTIONS].sort(),realtime_process_plane:true,realtime_observation_push:true,cognitive_delta_route:true,cognitive_delta_acceptor_required:true,cognitive_delta_delivery_is_authority:false,realtime_public_api_key_present:Boolean(REALTIME_API_KEY),realtime_url_uses_service_role:false,postgres_notify_wake:true,postgres_notify_delivery_is_authority:false,states,commands}}
 const runtimeControl=()=>readDevosRuntimeControl({rpc,workspaceId:WORKSPACE_ID}).catch(()=>unavailableDevosRuntimeControl('READ_FAILED'));
 const devosRoutes=createDevosSupervisorRoutes({rpc,workspaceId:WORKSPACE_ID,readRuntimeControl:runtimeControl});
 const devosPromotionRoutes=createDevosPromotionRoutes({rpc,workspaceId:WORKSPACE_ID});
@@ -230,6 +275,7 @@ Deno.serve(async(req:Request)=>{
     if(req.method==='POST'&&path==='/v1/commands/next-batch')return json(200,await leaseBatch(req,body));
     if(req.method==='POST'&&path==='/v1/commands/wait-batch')return json(200,await waitBatch(req,body));
     if(req.method==='POST'&&path==='/v1/commands/result-batch')return completeBatch(req,body);
+    if(req.method==='POST'&&path==='/v1/commands/issue-tool')return issueTool(req,body);
     const effect=path.match(/^\/v1\/commands\/([^/]+)\/effect-intent$/);
     if(req.method==='POST'&&effect)return bindEffect(req,decodeURIComponent(effect[1]),body);
     const receipt=path.match(/^\/v1\/commands\/([^/]+)\/receipt$/);

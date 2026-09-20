@@ -27,6 +27,14 @@ export const RSI_OPERATOR_CONSOLE_ACTIONS = Object.freeze([
   'RSI_SKILLS',
   'RSI_NOMINATE_PROMOTION',
   'RSI_ADMISSION_ATTEMPT',
+  // Steering wheel (Tier 1 item 3) — delegated to the steering controller:
+  // pause/resume gate learning-side scopes only (never execution);
+  // nominate is an operator-authored external-planner nomination; approve
+  // records an audited external confirmation (never execution authority).
+  'RSI_PAUSE',
+  'RSI_RESUME',
+  'RSI_NOMINATE',
+  'RSI_APPROVE',
 ]);
 
 function boundedNonEmptyString(value, label, max = 256) {
@@ -53,7 +61,7 @@ function unavailableRuntimeProjection(reason) {
   });
 }
 
-export function createRsiOperatorConsole({ ensureRuntime } = {}) {
+export function createRsiOperatorConsole({ ensureRuntime, ensureSteering, ensureOutcomeRiver } = {}) {
   if (typeof ensureRuntime !== 'function') throw new Error('rsi_operator_console_runtime_provider_required');
 
   async function readyRuntime() {
@@ -62,6 +70,25 @@ export function createRsiOperatorConsole({ ensureRuntime } = {}) {
     const state = runtime.snapshot?.()?.state;
     if (state !== 'READY') throw new Error('rsi_operator_console_runtime_not_ready');
     return runtime;
+  }
+
+  // Steering provider is optional for backward compatibility (the console
+  // without it keeps the pre-steering action set semantics); steering
+  // actions fail closed when it is not wired.
+  async function readySteering() {
+    if (typeof ensureSteering !== 'function') throw new Error('rsi_operator_console_steering_unavailable');
+    const steering = await ensureSteering();
+    if (!steering || typeof steering !== 'object') throw new Error('rsi_operator_console_steering_unavailable');
+    return steering;
+  }
+
+  async function outcomeRiverProjection() {
+    if (typeof ensureOutcomeRiver !== 'function') return null;
+    try {
+      return (await ensureOutcomeRiver())?.snapshot?.() || null;
+    } catch {
+      return null;
+    }
   }
 
   // Bounded steady-state projection for the shell snapshot. Keeps the full
@@ -115,7 +142,71 @@ export function createRsiOperatorConsole({ ensureRuntime } = {}) {
 
     if (action === 'RSI_STATUS') {
       const runtime = await readyRuntime();
-      return { ...projection(runtime), operator_actions: [...RSI_OPERATOR_CONSOLE_ACTIONS] };
+      // Steering + outcome-river ride along when wired (absent ⇒ null, never
+      // a fabricated healthy projection).
+      let steering = null;
+      try { steering = (await readySteering()).snapshot(); } catch { steering = null; }
+      return {
+        ...projection(runtime),
+        outcome_river: await outcomeRiverProjection(),
+        steering,
+        operator_actions: [...RSI_OPERATOR_CONSOLE_ACTIONS],
+      };
+    }
+
+    if (action === 'RSI_PAUSE') {
+      const steering = await readySteering();
+      const result = await steering.pause({ scope: payload?.scope, reason: payload?.reason });
+      return Object.freeze({
+        schema: 'metaengine.rsi.operator-console.steering.v1',
+        action,
+        result,
+        pause_gates_execution: false,
+        authority_effect: false,
+      });
+    }
+
+    if (action === 'RSI_RESUME') {
+      const steering = await readySteering();
+      const result = await steering.resume({ scope: payload?.scope });
+      return Object.freeze({
+        schema: 'metaengine.rsi.operator-console.steering.v1',
+        action,
+        result,
+        authority_effect: false,
+      });
+    }
+
+    if (action === 'RSI_NOMINATE') {
+      const steering = await readySteering();
+      const result = await steering.nominate({
+        candidate_id: payload?.candidate_id,
+        hypothesis: payload?.hypothesis,
+        mutation_surface: payload?.mutation_surface,
+      });
+      return Object.freeze({
+        schema: 'metaengine.rsi.operator-console.steering.v1',
+        action,
+        result,
+        requires_external_promotion_gate: true,
+        authority_effect: false,
+      });
+    }
+
+    if (action === 'RSI_APPROVE') {
+      const steering = await readySteering();
+      const result = await steering.approve({
+        kind: payload?.kind,
+        digest: payload?.digest,
+        note: payload?.note,
+      });
+      return Object.freeze({
+        schema: 'metaengine.rsi.operator-console.steering.v1',
+        action,
+        result,
+        approval_is_execution_authority: false,
+        authority_effect: false,
+      });
     }
 
     if (action === 'RSI_CANDIDATES') {

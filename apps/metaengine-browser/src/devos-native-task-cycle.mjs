@@ -323,6 +323,12 @@ export class DevOsNativeTaskCycle {
     });
   }
 
+  // Tier 2 break repair #4 (results→artifacts): forward the late-bound durable
+  // artifact recorder (realtime process plane) to the core cycle.
+  bindArtifactRecorder(fn) {
+    if (typeof this.#inner?.bindArtifactRecorder === 'function') this.#inner.bindArtifactRecorder(fn);
+  }
+
   snapshot() {
     return {
       ...this.#inner.snapshot(),

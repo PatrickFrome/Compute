@@ -178,6 +178,72 @@ function textExcerpt(nodes = []) {
   return clip(parts.join('\n'), 12000);
 }
 
+// Structured perception (Tier 2 break repair #8, perception poverty): the
+// interaction element tree — role / text / selector / visibility per element
+// with a bounded ancestor role path, derived from the SAME Accessibility tree
+// the frame already walks. Read-only projection: no geometry, no input
+// values, no authority. Agents and operators get addressable structure
+// instead of a flat text excerpt.
+const INTERACTION_TREE_ROLES = new Set([
+  ...SAFE_ROLES,
+  'heading', 'paragraph', 'link', 'statictext', 'listitem', 'article', 'status', 'alert', 'dialog', 'menu', 'menubar', 'list', 'listitem', 'navigation', 'region', 'main',
+]);
+const INTERACTION_TREE_MAX_ELEMENTS = 96;
+const INTERACTION_TREE_MAX_DEPTH = 8;
+
+export function buildInteractionTree(nodes = []) {
+  const byNodeId = new Map();
+  for (const node of nodes) {
+    const id = String(node?.nodeId || '');
+    if (id) byNodeId.set(id, node);
+  }
+  const rolePath = (node) => {
+    const parts = [];
+    let current = node;
+    for (let depth = 0; current && depth < INTERACTION_TREE_MAX_DEPTH; depth += 1) {
+      const role = axValue(current, 'role').toLowerCase();
+      if (role && role !== 'none' && role !== 'generic' && role !== 'ignored') parts.unshift(role);
+      current = current?.parentId ? byNodeId.get(String(current.parentId)) : null;
+    }
+    return parts;
+  };
+  const visibilityOf = (node) => {
+    const properties = Array.isArray(node?.properties) ? node.properties : [];
+    for (const property of properties) {
+      if (String(property?.name || '') === 'hidden') {
+        const value = property?.value?.value;
+        return value !== true;
+      }
+    }
+    return null;
+  };
+  const elements = [];
+  for (const node of nodes) {
+    if (elements.length >= INTERACTION_TREE_MAX_ELEMENTS) break;
+    if (node?.ignored === true) continue;
+    const role = axValue(node, 'role').toLowerCase();
+    const text = axValue(node, 'name');
+    if (!INTERACTION_TREE_ROLES.has(role) || !text) continue;
+    const backendNodeId = Number(node?.backendDOMNodeId || 0);
+    const path = rolePath(node).join('>');
+    elements.push(Object.freeze({
+      path: clip(path || role, 160),
+      role,
+      text: clip(text, 160),
+      selector: Number.isInteger(backendNodeId) && backendNodeId > 0 ? `backend_node_id:${backendNodeId}` : null,
+      visible: visibilityOf(node),
+    }));
+  }
+  return Object.freeze({
+    schema: 'metaengine.native-browser.interaction-tree.v1',
+    element_count: elements.length,
+    truncated: elements.length >= INTERACTION_TREE_MAX_ELEMENTS,
+    elements: Object.freeze(elements),
+    input_values_exposed: false,
+    authority_effect: false,
+  });
+}
+
 // READ_TRANSCRIPT (2026-09-19 observability directive): paged, bounded text
 // read of a conversation surface. Same AX-tree text projection as the frame
 // excerpt, but with an explicit offset and a larger ceiling so agents and
@@ -453,6 +519,7 @@ export async function captureSemanticFrame(webContents) {
       semantic_input_values_exposed: false,
       semantic_input_value_hashes: true,
       text_excerpt: textExcerpt(nodes),
+      interaction_tree: buildInteractionTree(nodes),
       viewport: viewport ? {
         width: Number(viewport.clientWidth || viewport.width || 0),
         height: Number(viewport.clientHeight || viewport.height || 0),

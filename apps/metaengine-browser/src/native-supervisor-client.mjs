@@ -542,6 +542,11 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
         },
       });
       this.#processPlaneSet?.(plane);
+      // Tier 2 break repair #4 (results→artifacts): every terminal DevOS task
+      // outcome now records an immutable artifact reference through the
+      // collaboration fabric riding this plane (journal + durable persistence
+      // + workbench projection). Bind the recorder the moment the plane exists.
+      this.bindDevosArtifactRecorder((artifact) => plane.recordTaskArtifact(artifact));
       const snapshot = plane.start();
       this.#processPlaneError = null;
       this.#scheduleRealtimeStatePush();
