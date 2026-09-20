@@ -77,6 +77,46 @@ export function buildDevosRuntimeObservability(snapshot = {}) {
       authority_effect: false,
     }),
     transport_promotion: promotionProjection(taskCycle.fleet_transport_promotion),
+    // T2-5 addendum: the agent toolbelt and the unified work graph ride the
+    // same bounded runtime-observability plane (supervisor_lifecycle is on
+    // the edge state whitelist), giving the operator remote live evidence of
+    // tool issue flow and the Objective→Task→Claim graph without any new
+    // authority surface. Bounded counters only; no payloads.
+    agent_toolbelt: Object.freeze({
+      state: clip(taskCycle.agent_toolbelt?.state, 64),
+      lease_count: intOrNull(taskCycle.agent_toolbelt?.lease_count),
+      issued_command_count: intOrNull(taskCycle.agent_toolbelt?.issued_command_count),
+      pending_command_count: intOrNull(taskCycle.agent_toolbelt?.pending_command_count),
+      served_result_count: intOrNull(taskCycle.agent_toolbelt?.served_result_count),
+      requests_parsed: intOrNull(taskCycle.agent_toolbelt?.counters?.requests_parsed),
+      requests_issued: intOrNull(taskCycle.agent_toolbelt?.counters?.requests_issued),
+      requests_unavailable: intOrNull(taskCycle.agent_toolbelt?.counters?.requests_unavailable),
+      results_terminal: intOrNull(taskCycle.agent_toolbelt?.counters?.results_terminal),
+      issue_errors: intOrNull(taskCycle.agent_toolbelt?.counters?.issue_errors),
+      route_unavailable_streak: intOrNull(taskCycle.agent_toolbelt?.counters?.route_unavailable_streak),
+      authority_effect: false,
+    }),
+    work_graph: taskCycle.work_graph && typeof taskCycle.work_graph === 'object' && !Array.isArray(taskCycle.work_graph)
+      ? Object.freeze({
+        schema: clip(taskCycle.work_graph.schema, 96),
+        roadmap: Object.freeze({
+          roadmap_id: clip(taskCycle.work_graph.roadmap?.roadmap_id, 160),
+          milestone: clip(taskCycle.work_graph.roadmap?.milestone, 160),
+          plan_generation: intOrNull(taskCycle.work_graph.roadmap?.plan_generation),
+          plan_state: clip(taskCycle.work_graph.roadmap?.plan_state, 32),
+          objective: clip(taskCycle.work_graph.roadmap?.objective, 480),
+          node_count: intOrNull(taskCycle.work_graph.roadmap?.node_count),
+        }),
+        tasks: Object.freeze({
+          ready: intOrNull(taskCycle.work_graph.tasks?.ready),
+          running: intOrNull(taskCycle.work_graph.tasks?.running),
+        }),
+        claims: Object.freeze({
+          leased_this_cycle: intOrNull(taskCycle.work_graph.claims?.leased_this_cycle),
+        }),
+        authority_effect: false,
+      })
+      : null,
     page_text_exposed: false,
     prompt_plaintext_exposed: false,
     raw_payload_exposed: false,

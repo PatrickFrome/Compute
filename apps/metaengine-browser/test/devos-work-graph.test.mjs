@@ -474,3 +474,48 @@ test('shell wiring pins DEVOS_RESUME / DEVOS_OBJECTIVE_SET and the cycle planes 
   const coreBase = await fs.readFile(new URL('../src/native-supervisor-client-core-base.mjs', import.meta.url), 'utf8');
   assert.match(coreBase, /work_graph_planes/);
 });
+
+test('runtime observability carries bounded agent toolbelt + work graph planes (remote live-check surface)', async () => {
+  const { buildDevosRuntimeObservability } = await import('../src/devos-runtime-observability.mjs');
+  const projection = buildDevosRuntimeObservability({
+    devos_task_cycle: {
+      agent_toolbelt: {
+        state: 'READY',
+        lease_count: 2,
+        issued_command_count: 3,
+        pending_command_count: 1,
+        served_result_count: 2,
+        counters: {
+          requests_parsed: 3, requests_issued: 3, requests_unavailable: 0,
+          results_terminal: 2, issue_errors: 0, route_unavailable_streak: 0,
+        },
+      },
+      work_graph: {
+        schema: 'metaengine.devos.work-graph.v1',
+        roadmap: { roadmap_id: 'metaengine-development-os-v1', milestone: 'DEVOS_IDE_V1', plan_generation: 1, plan_state: 'ACTIVE', objective: 'Ship it', node_count: 2 },
+        tasks: { ready: 1, running: 1 },
+        claims: { leased_this_cycle: 1 },
+      },
+    },
+  });
+  assert.equal(projection.agent_toolbelt.state, 'READY');
+  assert.equal(projection.agent_toolbelt.requests_issued, 3);
+  assert.equal(projection.agent_toolbelt.pending_command_count, 1);
+  assert.equal(projection.agent_toolbelt.authority_effect, false);
+  assert.equal(projection.work_graph.roadmap.objective, 'Ship it');
+  assert.equal(projection.work_graph.roadmap.plan_generation, 1);
+  assert.equal(projection.work_graph.tasks.ready, 1);
+  assert.equal(projection.work_graph.authority_effect, false);
+
+  // Absent planes degrade to null without throwing.
+  const empty = buildDevosRuntimeObservability({});
+  assert.equal(empty.work_graph, null);
+  assert.equal(empty.agent_toolbelt.state, null);
+  assert.equal(empty.agent_toolbelt.requests_issued, null);
+
+  // The edge state whitelist passes the rsi planes through boundedObject.
+  const edge = await fs.readFile(new URL('../supabase/a2-browser-native-supervisor-v1/index.ts', import.meta.url), 'utf8');
+  assert.match(edge, /if\('rsi'in s\)row\.rsi=boundedObject\(s\.rsi,16384\)/);
+  assert.match(edge, /if\('rsi_outcome_river'in s\)row\.rsi_outcome_river=boundedObject\(s\.rsi_outcome_river,16384\)/);
+  assert.match(edge, /if\('rsi_operator_steering'in s\)row\.rsi_operator_steering=boundedObject\(s\.rsi_operator_steering,16384\)/);
+});
