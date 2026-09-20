@@ -410,6 +410,18 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     app.on('before-quit', this.#quitBarrierHandler);
   }
 
+  publishSystemDelta(input = {}) {
+    const plane = this.#processPlaneRef?.();
+    if (!plane || typeof plane.publishCognitiveSystemDelta !== 'function') return null;
+    try { return plane.publishCognitiveSystemDelta(input); } catch { return null; }
+  }
+
+  systemDeltaTail(limit = 32) {
+    const plane = this.#processPlaneRef?.();
+    if (!plane || typeof plane.systemDeltaTail !== 'function') return Object.freeze([]);
+    try { return plane.systemDeltaTail(limit); } catch { return Object.freeze([]); }
+  }
+
   async #bootstrapEnrollment() {
     if (this.#enrollmentBootstrapPromise) return this.#enrollmentBootstrapPromise;
     this.#enrollmentBootstrapPromise = (async () => {
@@ -546,7 +558,19 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       // outcome now records an immutable artifact reference through the
       // collaboration fabric riding this plane (journal + durable persistence
       // + workbench projection). Bind the recorder the moment the plane exists.
-      this.bindDevosArtifactRecorder((artifact) => plane.recordTaskArtifact(artifact));
+      // T3-8: every recorded artifact also rides the cognitive bus as a
+      // SYSTEM_EVENT so Mission Control live effects see results land.
+      this.bindDevosArtifactRecorder((artifact) => {
+        const recorded = plane.recordTaskArtifact(artifact);
+        try {
+          plane.publishCognitiveSystemDelta?.({
+            system_kind: 'ARTIFACT_RECORDED',
+            subject_id: artifact?.artifact_id,
+            detail: `${artifact?.kind || 'artifact'}${artifact?.task_id ? ` task:${artifact.task_id}` : ''}`,
+          });
+        } catch { /* observation never gates the record */ }
+        return recorded;
+      });
       const snapshot = plane.start();
       this.#processPlaneError = null;
       this.#scheduleRealtimeStatePush();

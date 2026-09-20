@@ -45,6 +45,13 @@ function semanticPriority(methodRaw) {
 export function classifyCognitiveDeltaPriority(input = {}) {
   const type = String(input?.type || '').toUpperCase();
   if (type === 'METRICS_SAMPLE') return 'P3';
+  if (type === 'SYSTEM_EVENT') {
+    // T3-8: system lifecycle deltas ride the same bus. Fleet and supervisor
+    // transitions are coordination-critical (P1); artifacts/health are P2.
+    const kind = String(input?.system_kind || '');
+    if (kind === 'FLEET_AGENT_LIFECYCLE' || kind === 'SUPERVISOR_COMMAND') return 'P1';
+    return 'P2';
+  }
   if (type === 'SEMANTIC_EVENT') return semanticPriority(input?.semantic_method);
   if (
     type === 'RENDER_PROCESS_GONE'
@@ -62,9 +69,12 @@ function safeDeltaProjection(input = {}) {
   const type = clip(input?.type, 96) || 'UNKNOWN';
   return Object.freeze({
     source_sequence: input?.seq != null && Number.isSafeInteger(Number(input.seq)) ? Number(input.seq) : null,
-    source: type === 'SEMANTIC_EVENT' ? 'SEMANTIC' : (type === 'METRICS_SAMPLE' ? 'METRICS' : 'PROCESS'),
+    source: type === 'SEMANTIC_EVENT' ? 'SEMANTIC' : (type === 'METRICS_SAMPLE' ? 'METRICS' : (type === 'SYSTEM_EVENT' ? 'SYSTEM' : 'PROCESS')),
     type,
     semantic_method: semanticMethod,
+    system_kind: type === 'SYSTEM_EVENT' ? clip(input?.system_kind, 96) : null,
+    subject_id: type === 'SYSTEM_EVENT' ? clip(input?.subject_id, 160) : null,
+    detail: type === 'SYSTEM_EVENT' ? clip(input?.detail, 240) : null,
     observed_at: clip(input?.observed_at, 64),
     tab_id: clip(input?.tab_id, 96),
     target_id: clip(input?.target_id, 160),

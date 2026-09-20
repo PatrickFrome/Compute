@@ -136,5 +136,7 @@ test('devos cycle records one artifact per terminal completion through the late-
   // Late-bound chain.
   assert.match(coreSource, /bindArtifactRecorder\(fn\)/);
   assert.match(wrapperSource, /bindArtifactRecorder\(fn\) \{\s*\n\s*if \(typeof this\.#inner\?\.bindArtifactRecorder === 'function'\) this\.#inner\.bindArtifactRecorder\(fn\);/);
-  assert.match(clientSource, /this\.bindDevosArtifactRecorder\(\(artifact\) => plane\.recordTaskArtifact\(artifact\)\);/);
+  // T3-8: the recorder still delegates to plane.recordTaskArtifact (the pin's
+  // intent) and additionally rides the artifact onto the cognitive bus.
+  assert.match(clientSource, /this\.bindDevosArtifactRecorder\(\(artifact\) => \{[\s\S]*plane\.recordTaskArtifact\(artifact\)[\s\S]*ARTIFACT_RECORDED[\s\S]*\}\);/);
 });

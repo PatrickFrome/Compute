@@ -32,7 +32,7 @@ const omniboxHintsEl = document.getElementById('omniboxHints');
 
 let snapshot = null;
 let tabFilter = '';
-let opsSection = 'overview';
+let opsSection = 'mission';
 let requestedLayout = { sidebar: 'EXPANDED', operations: 'OPEN' };
 
 function text(value, fallback = '—') {
@@ -746,6 +746,7 @@ function renderCommands() {
     commandButton('Reload', 'Current tab only', () => api.command('RELOAD', {})),
     commandButton('Cycle Context Rail', 'Ctrl+B', cycleSidebar),
     commandButton('Toggle Operations', 'Ctrl+Shift+O', toggleOperations),
+    commandButton('Open Mission Control', 'Objectives · agents · live effects', () => { opsSection = 'mission'; renderOps(snapshot); }),
     commandButton('Open Workspaces', 'Read only', () => { opsSection = 'workspaces'; renderOps(snapshot); }),
     commandButton('Open Safety contracts', 'Read only', () => { opsSection = 'safety'; renderOps(snapshot); }),
     commandButton('Open DevOS evidence', 'Read only', () => { opsSection = 'devos'; renderOps(snapshot); }),
@@ -758,7 +759,8 @@ function renderCommands() {
 function renderOps(next) {
   for (const button of opsNav.querySelectorAll('button[data-section]')) button.classList.toggle('active', button.dataset.section === opsSection);
   let content;
-  if (opsSection === 'workspaces') content = renderWorkspaces(next);
+  if (opsSection === 'mission') content = renderMissionControl(next);
+  else if (opsSection === 'workspaces') content = renderWorkspaces(next);
   else if (opsSection === 'fleet') content = renderFleet(next);
   else if (opsSection === 'supervisor') content = renderSupervisor(next);
   else if (opsSection === 'devos') content = renderDevos(next);
@@ -1580,6 +1582,109 @@ function updateBrainStreamLine() {
   if (line.textContent !== label) line.textContent = label;
 }
 
+function renderMissionControl(next) {
+  const fragment = document.createDocumentFragment();
+  const mc = next?.mission_control || null;
+  fragment.append(hero(
+    'Mission Control',
+    'Objectives → tasks → agents → live effects: the unified work graph projected read-only from the canonical snapshot. System effects stream from the cognitive delta bus.',
+    mc?.state === 'OK' ? 'live projection' : 'unavailable',
+  ));
+  if (!mc || mc.state !== 'OK') {
+    const unavailable = section('Mission Control', 'projection unavailable');
+    unavailable.list.append(kvRow('State', text(mc?.reason, 'DEVOS_PROJECTION_NOT_READY'), 'muted'));
+    unavailable.list.append(kvRow('Authority effect', mc?.authority_effect === false ? 'NONE' : 'UNKNOWN', 'good'));
+    fragment.append(unavailable.wrap);
+    return fragment;
+  }
+  const grid = el('div', 'opsGrid');
+  grid.append(
+    metric('Objectives', mc.counts.objectives, 'neutral'),
+    metric('Tasks', mc.counts.tasks, 'neutral'),
+    metric('Agents', mc.counts.agents, mc.counts.agents > 0 ? 'good' : 'neutral'),
+    metric('Live effects', mc.counts.effects, 'neutral'),
+    metric('Artifacts', mc.counts.artifacts, 'neutral'),
+    metric('Attention', mc.counts.attention, mc.counts.attention > 0 ? 'warn' : 'good'),
+  );
+  fragment.append(grid);
+
+  const epochs = mc.epochs || {};
+  const epochSection = section('Cross-plane epochs', 'fleet · mesh · cognitive stream');
+  epochSection.list.append(
+    kvRow('Fleet generations', (epochs.fleet_generation_epochs || []).length ? epochs.fleet_generation_epochs.join(', ') : 'NONE', 'neutral'),
+    kvRow('Mesh epoch', epochs.mesh_epoch ?? 'UNKNOWN', 'neutral'),
+    kvRow('Cognitive stream', epochs.cognitive_stream ? `${shortId(epochs.cognitive_stream.stream_id, 12)} @ ${epochs.cognitive_stream.acknowledged_through_sequence}` : 'UNKNOWN', 'neutral'),
+    kvRow('Compute bridge', text(epochs.compute_state, 'UNKNOWN'), stateTone(epochs.compute_state)),
+  );
+  fragment.append(epochSection.wrap);
+
+  const objectivesSection = section('Objectives & tasks', `${mc.counts.objectives} objectives · ${mc.counts.tasks} tasks`);
+  const tasksByObjective = new Map();
+  for (const task of mc.tasks) {
+    const key = task.objective_id || 'unassigned';
+    if (!tasksByObjective.has(key)) tasksByObjective.set(key, []);
+    tasksByObjective.get(key).push(task);
+  }
+  for (const objective of (mc.objectives || []).slice(0, 12)) {
+    const tasks = tasksByObjective.get(objective.objective_id) || [];
+    const done = tasks.filter((task) => task.status === 'COMPLETED' || task.status === 'DONE').length;
+    objectivesSection.list.append(kvRow(
+      objective.title || objective.objective_id,
+      tasks.length ? `${done}/${tasks.length} tasks · ${text(objective.status, 'UNKNOWN')}${objective.attention_count ? ` · ${objective.attention_count} attention` : ''}` : 'no tasks yet',
+      objective.attention_count > 0 ? 'warn' : 'neutral',
+    ));
+    for (const task of tasks.slice(0, 4)) {
+      objectivesSection.list.append(kvRow(
+        `  ${task.status}`,
+        `${task.owner_agent_id ? `${shortId(task.owner_agent_id, 12)} · ` : ''}${text(task.blocker, text(task.updated_at, '')) || '—'}`,
+        stateTone(task.status),
+      ));
+    }
+  }
+  if (!(mc.objectives || []).length) objectivesSection.list.append(kvRow('Objectives', 'NONE EXPOSED', 'muted'));
+  fragment.append(objectivesSection.wrap);
+
+  const agentsSection = section('Agent fleet', `${mc.counts.agents} agents`);
+  for (const agent of (mc.agents || []).slice(0, 16)) {
+    agentsSection.list.append(kvRow(
+      `${shortId(agent.agent_id, 14)} · ${text(agent.role, '?')}`,
+      `${text(agent.lifecycle_state, 'UNKNOWN')} · g${agent.generation_epoch ?? '?'}${agent.tab_id ? ` · ${shortId(agent.tab_id, 8)}` : ''}`,
+      stateTone(agent.lifecycle_state === 'ACTIVE' ? 'OK' : agent.lifecycle_state),
+    ));
+  }
+  if (!(mc.agents || []).length) agentsSection.list.append(kvRow('Agents', 'NONE', 'muted'));
+  fragment.append(agentsSection.wrap);
+
+  const effectsSection = section('Live effects', 'cognitive bus system deltas · newest last');
+  const effectTone = { FLEET_AGENT_LIFECYCLE: 'neutral', SUPERVISOR_COMMAND: 'good', ARTIFACT_RECORDED: 'good', COMPUTE_BRIDGE_HEALTH: 'warn' };
+  const effectRows = (mc.effects || []).slice(-12);
+  for (const effect of effectRows) {
+    effectsSection.list.append(kvRow(
+      `${text(effect.system_kind, 'SYSTEM')} ${shortId(effect.subject_id, 14)}`,
+      `${text(effect.detail, '—')}${effect.observed_at ? ` · ${String(effect.observed_at).slice(11, 19)}` : ''}`,
+      effectTone[effect.system_kind] || 'neutral',
+    ));
+  }
+  if (!effectRows.length) effectsSection.list.append(kvRow('Effects', 'NO SYSTEM DELTAS YET', 'muted'));
+  fragment.append(effectsSection.wrap);
+
+  const artifactsSection = section('Artifacts', `${mc.counts.artifacts} recorded · immutable refs`);
+  for (const artifact of (mc.artifacts || []).slice(0, 10)) {
+    artifactsSection.list.append(kvRow(
+      shortId(artifact.artifact_id || artifact.ref, 18),
+      `${text(artifact.kind, 'REFERENCE')}${artifact.objective_id ? ` · ${shortId(artifact.objective_id, 12)}` : ''}`,
+      'neutral',
+    ));
+  }
+  if (!(mc.artifacts || []).length) artifactsSection.list.append(kvRow('Artifacts', 'NONE RECORDED', 'muted'));
+  const openerGrid = el('div', 'opsGrid');
+  openerGrid.append(commandButton('Open DevOS evidence', 'Artifacts · sessions · attention', () => { opsSection = 'devos'; renderOps(next); }));
+  artifactsSection.wrap.append(openerGrid);
+  fragment.append(artifactsSection.wrap);
+
+  return fragment;
+}
+
 function renderMechanisms(next) {
   const fragment = document.createDocumentFragment();
   fragment.append(hero(
@@ -1773,7 +1878,7 @@ function reconcileKeyedChildren(container, nodes, keyOf) {
 const WORKBENCH_COMMAND_HINTS = Object.freeze([
   ['attention', 'Attention'], ['sessions', 'Sessions'], ['activity', 'Activity'], ['context', 'Context Set'],
   ['fleet', 'Fleet'], ['workspaces', 'Workspaces'], ['supervisor', 'Supervisor'], ['devos', 'DevOS cycle'],
-  ['runtime', 'Runtime'], ['safety', 'Safety'], ['mechanisms', 'Mechanisms'], ['skills', 'Skills'],
+  ['mission', 'Mission Control'], ['runtime', 'Runtime'], ['safety', 'Safety'], ['mechanisms', 'Mechanisms'], ['skills', 'Skills'],
   ['commands', 'Actions'], ['overview', 'System'],
 ]);
 const WORKBENCH_SKILL_HINTS = Object.freeze([

@@ -38,6 +38,9 @@ import { createDevOSPresentationFocusState } from './metaengine-devos-presentati
 import { applyDevOSPresentationActivation } from './metaengine-devos-presentation-activation-runtime.mjs';
 import { normalizeDevelopmentPlaneProjection, projectWorkspaceWorkbench } from './workspace-workbench-projection.mjs';
 import { projectDevOSDevelopmentSources } from './metaengine-devos-development-sources.mjs';
+import { projectMissionControl } from './metaengine-mission-control-projection.mjs';
+import { SupervisorLoopbackRpcServer } from './supervisor-loopback-rpc-server.mjs';
+import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervisorCommand } from './browser-cognitive-system-deltas.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -95,6 +98,8 @@ let startupFailurePresented = false;
 let startupControlState = null;
 let runtimeGenesisState = null;
 let computeHealthCache = { value: null, observed_ms: 0, promise: null };
+let lastComputeHealthState = null;
+let supervisorLoopbackRpc = null;
 const degradedStartupSubsystems = new Map();
 
 function mimeFor(filePath) {
@@ -249,6 +254,17 @@ async function currentComputeHealth() {
   if (computeHealthCache.promise) return computeHealthCache.promise;
   const pending = bridge.health().then((value) => {
     computeHealthCache = { value, observed_ms: Date.now(), promise: pending };
+    try {
+      // T3-8: compute bridge state transitions ride the cognitive bus.
+      const nextState = String(value?.state || 'UNKNOWN');
+      if (lastComputeHealthState !== null && nextState !== lastComputeHealthState) {
+        publishComputeBridgeHealth({ publish: (input) => nativeSupervisor?.publishSystemDelta?.(input) ?? null }, null, {
+          state: nextState,
+          reason_code: value?.reason_code || 'transition',
+        });
+      }
+      lastComputeHealthState = nextState;
+    } catch { /* observation never gates health */ }
     return value;
   }).finally(() => {
     if (computeHealthCache.promise === pending) computeHealthCache.promise = null;
@@ -360,6 +376,15 @@ async function shellSnapshot() {
     // counts. Fails closed to an UNAVAILABLE projection when the runtime is
     // not ready — never a fabricated healthy state.
     rsi: await rsiOperatorConsole.projection(),
+    // T3-10 Mission Control main screen: objectives -> tasks -> agents ->
+    // live effects (+ artifacts, attention, cross-plane epochs), read-only.
+    mission_control: projectMissionControl({
+      workspaces,
+      fleet: fleetSnapshot,
+      supervisor,
+      system_delta_tail: nativeSupervisor?.systemDeltaTail?.(32) || [],
+      compute,
+    }),
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     surface_grid: devosSurfaceGridPlan ? structuredClone(devosSurfaceGridPlan) : null,
     session_layouts: structuredClone(sessionLayouts),
@@ -839,6 +864,21 @@ async function handleCommand(command, payload = {}) {
     });
     if (physicalCleanupCount > 0) await publishSnapshot();
     const result = fleet?.snapshot() || null;
+    try {
+      // T3-8: fleet lifecycle transitions ride the cognitive bus.
+      const beforeAgents = new Map((before?.agents || []).map((row) => [row.agent_id, row]));
+      for (const row of (result?.agents || []).slice(0, 64)) {
+        const prior = beforeAgents.get(row.agent_id);
+        if (!prior || prior.lifecycle_state !== row.lifecycle_state || prior.generation_epoch !== row.generation_epoch) {
+          publishFleetAgentLifecycle(systemDeltaPublisher(), null, {
+            agent_id: row.agent_id,
+            role: row.role,
+            lifecycle_state: row.lifecycle_state,
+            generation_epoch: row.generation_epoch,
+          });
+        }
+      }
+    } catch { /* observation never gates reconcile */ }
     const outcome = classifyFleetReconcileOutcome({
       before,
       after: result,
@@ -975,12 +1015,47 @@ async function nativeSupervisorState() {
     rsi_operator_steering: rsiOperatorSteering?.snapshot() || null,
     tab_network: tabNetworkActivity.snapshot(),
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
+    loopback_rpc: supervisorLoopbackRpc?.snapshot() || null,
     compute,
     perception,
   };
 }
 
+function systemDeltaPublisher() {
+  // T3-8: typed system-delta publishers write through the supervisor's
+  // cognitive bus — the same bus the semantic/process/metrics streams ride.
+  return { publish: (input) => nativeSupervisor?.publishSystemDelta?.(input) ?? null };
+}
+
 async function executeNativeSupervisorCommand(command) {
+  // T3-8: every supervisor command completion (ok or failed) is a system
+  // delta on the cognitive bus — Mission Control live effects.
+  const startedAt = Date.now();
+  try {
+    const result = await executeNativeSupervisorCommandFenced(command);
+    try {
+      publishSupervisorCommand(systemDeltaPublisher(), null, {
+        command_id: command?.command_id,
+        action: command?.action,
+        status: 'OK',
+        duration_ms: Date.now() - startedAt,
+      });
+    } catch { /* observation never gates execution */ }
+    return result;
+  } catch (error) {
+    try {
+      publishSupervisorCommand(systemDeltaPublisher(), null, {
+        command_id: command?.command_id,
+        action: command?.action,
+        status: 'FAILED',
+        duration_ms: Date.now() - startedAt,
+      });
+    } catch { /* observation never gates execution */ }
+    throw error;
+  }
+}
+
+async function executeNativeSupervisorCommandFenced(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
   // Outcome River pre-execution binding: only remote DB-leased commands carry
@@ -1199,6 +1274,19 @@ async function initNativeSupervisor() {
     });
   }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
+  // T3-11 supervisor loopback RPC primary: local callers get the SAME fenced
+  // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
+  // path stays as the remote fallback (native-supervisor-runtime-transport).
+  try {
+    supervisorLoopbackRpc = new SupervisorLoopbackRpcServer({
+      executeCommand: executeNativeSupervisorCommand,
+      snapshotProvider: () => nativeSupervisorState(),
+    });
+    await supervisorLoopbackRpc.start();
+  } catch (error) {
+    supervisorLoopbackRpc = null;
+    recordStartupSubsystemDegraded('SUPERVISOR_LOOPBACK_RPC', error);
+  }
   if (!shellBrainPortConsumerId) attachShellBrainPort();
   await publishSnapshot().catch(() => {});
   return nativeSupervisor.snapshot();
@@ -1206,6 +1294,8 @@ async function initNativeSupervisor() {
 
 function destroyWindowContents() {
   detachShellBrainPort();
+  supervisorLoopbackRpc?.stop().catch(() => {});
+  supervisorLoopbackRpc = null;
   nativeSupervisor?.stop();
   downloads?.close?.().catch(() => {});
   downloads = null;
@@ -1446,6 +1536,11 @@ async function createWindow() {
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
+ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
+  assertShellSender(event);
+  const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;
+  return nativeSupervisor?.systemDeltaTail?.(limit) || Object.freeze([]);
+});
 ipcMain.handle('metaengine:shell:command', async (event, message) => { assertShellSender(event); return handleCommand(String(message?.command || ''), message?.payload || {}); });
 ipcMain.handle('metaengine:shell:presentation-focus:snapshot', async (event) => {
   assertShellSender(event);
