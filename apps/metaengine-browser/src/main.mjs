@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { ComputeBridgeClient } from './compute-bridge-client.mjs';
 import { DevelopmentPlane } from './development-plane.mjs';
 import { RsiRuntimeService } from './rsi-runtime-service.mjs';
+import { RsiOutcomeRiver, extractRsiCommandTaskContext } from './rsi-outcome-river.mjs';
+import { RsiOperatorSteering } from './rsi-operator-steering.mjs';
 import { loadNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
 import { ensureRuntimeGenesis } from './runtime-genesis.mjs';
 import { FleetProvisioner, classifyFleetReconcileOutcome } from './fleet-provisioner.mjs';
@@ -62,6 +64,8 @@ let fleet = null;
 let ownerSafetyGates = null;
 let developmentPlane = null;
 let rsiRuntime = null;
+let rsiOutcomeRiver = null;
+let rsiOperatorSteering = null;
 let nativeSupervisor = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -685,6 +689,29 @@ async function initRsiRuntime() {
   }
   const snapshot = rsiRuntime.snapshot();
   if (snapshot.state !== 'READY') await rsiRuntime.start();
+  // Outcome River (Tier 1 break repair #2, action→learning): the external
+  // planner bridge that binds task-attributed queued commands to candidates
+  // + trajectories BEFORE execution and assigns step credit after verified
+  // ingest — one attributed command becomes one durable experience case.
+  // Bind failures are recorded, never gating command execution.
+  if (!rsiOutcomeRiver) {
+    rsiOutcomeRiver = new RsiOutcomeRiver({
+      source_sha: sourceSha,
+      statePath: path.join(app.getPath('userData'), 'metaengine-rsi-runtime-ledger-v1.jsonl.outcome-river.json'),
+    }).attach(rsiRuntime);
+  }
+  if (rsiOutcomeRiver.snapshot()?.state !== 'READY') await rsiOutcomeRiver.init();
+  // Operator steering wheel (Tier 1 item 3): pause/nominate/approve surfaces
+  // over the RSI's external confirmation gates. Pause gates learning-side
+  // effects only — never execution or observation; approval is an audited
+  // operator decision, not execution authority.
+  if (!rsiOperatorSteering) {
+    rsiOperatorSteering = new RsiOperatorSteering({
+      source_sha: sourceSha,
+      statePath: path.join(app.getPath('userData'), 'metaengine-rsi-runtime-ledger-v1.jsonl.operator-steering.json'),
+    }).attach(rsiRuntime);
+  }
+  if (rsiOperatorSteering.snapshot()?.state !== 'READY') await rsiOperatorSteering.init();
   return rsiRuntime.snapshot();
 }
 
@@ -802,6 +829,51 @@ async function handleCommand(command, payload = {}) {
   if (command === 'GATE_DISABLE_ALL') { const result = await ownerSafetyGates?.disable({ ...payload, gate_id: '*' }); await publishSnapshot(); return result; }
   if (command === 'GATE_ENABLE') { const result = await ownerSafetyGates?.enable(payload); await publishSnapshot(); return result; }
   if (command === 'GATE_ENABLE_ALL') { const result = await ownerSafetyGates?.enableAll(payload); await publishSnapshot(); return result; }
+  // RSI operator steering wheel (Tier 1 item 3): the operator console
+  // surface over the RSI's external confirmation gates. RSI_STATUS is the
+  // read lane; PAUSE/RESUME gate learning-side scopes; NOMINATE is an
+  // operator-authored external-planner nomination; APPROVE records an
+  // external confirmation (never execution authority).
+  if (command === 'RSI_STATUS') {
+    return {
+      rsi: rsiRuntime?.snapshot() || null,
+      outcome_river: rsiOutcomeRiver?.snapshot() || null,
+      steering: rsiOperatorSteering?.snapshot() || null,
+      authority_effect: false,
+    };
+  }
+  if (command === 'RSI_PAUSE') {
+    await initRsiRuntime().catch(() => {});
+    const result = await rsiOperatorSteering?.pause({ scope: payload?.scope, reason: payload?.reason });
+    await publishSnapshot();
+    return result || null;
+  }
+  if (command === 'RSI_RESUME') {
+    await initRsiRuntime().catch(() => {});
+    const result = await rsiOperatorSteering?.resume({ scope: payload?.scope });
+    await publishSnapshot();
+    return result || null;
+  }
+  if (command === 'RSI_NOMINATE') {
+    await initRsiRuntime();
+    const result = await rsiOperatorSteering.nominate({
+      candidate_id: payload?.candidate_id,
+      hypothesis: payload?.hypothesis,
+      mutation_surface: payload?.mutation_surface,
+    });
+    await publishSnapshot();
+    return result;
+  }
+  if (command === 'RSI_APPROVE') {
+    await initRsiRuntime().catch(() => {});
+    const result = await rsiOperatorSteering?.approve({
+      kind: payload?.kind,
+      digest: payload?.digest,
+      note: payload?.note,
+    });
+    await publishSnapshot();
+    return result || null;
+  }
   throw new Error('shell_command_unknown');
 }
 
@@ -877,6 +949,8 @@ async function nativeSupervisorState() {
       direct_self_update_enabled: false,
       authority_effect: false,
     }),
+    rsi_outcome_river: rsiOutcomeRiver?.snapshot() || null,
+    rsi_operator_steering: rsiOperatorSteering?.snapshot() || null,
     tab_network: tabNetworkActivity.snapshot(),
     owner_safety_gates: ownerSafetyGates?.snapshot() || null,
     compute,
@@ -887,6 +961,17 @@ async function nativeSupervisorState() {
 async function executeNativeSupervisorCommand(command) {
   const action = String(command?.action || '');
   const payload = command?.payload || {};
+  // Outcome River pre-execution binding: only remote DB-leased commands carry
+  // a command_id; when the issuer declared task context (payload.rsi_task)
+  // the river binds command→candidate+trajectory before execution so the
+  // later receipt readback ingests a candidate-bound, credit-eligible episode.
+  // Never throws — a bind failure must not gate execution.
+  if (command?.command_id && extractRsiCommandTaskContext(command)) {
+    try { await initRsiRuntime(); } catch {}
+    await rsiOutcomeRiver?.bindLeasedCommand(command, {
+      environment_fingerprint: `metaengine-browser-${app.getVersion()}`,
+    }).catch(() => {});
+  }
   const exactMutationTarget = resolveExactNativeSupervisorMutationTarget(command, { registry, views });
   if (action === 'POLL') return { ok: true, snapshot: await nativeSupervisorState(), authority_effect: false };
   if (action === 'SET_MODE') {
@@ -1056,10 +1141,34 @@ async function initNativeSupervisor() {
       onRsiOutcomeReadback: async ({ command, readback }) => {
         await initRsiRuntime();
         if (!rsiRuntime || rsiRuntime.snapshot()?.state !== 'READY') return false;
-        await rsiRuntime.ingestBrowserOutcome({
-          readback,
-          attribution: rsiOutcomeAttributionForCommand(command),
+        // Outcome River: when the registry holds a BOUND binding for exactly
+        // this command shape, ingest with attribution null so the service
+        // resolves + consumes the trusted binding (candidate-bound episode).
+        // Generic commands keep the synthetic candidate-less attribution —
+        // they stay learning-inert by contract.
+        const bound = rsiRuntime.peekCommandAttribution({
+          command_id: readback?.receipt?.command_id || command?.command_id,
+          action: readback?.receipt?.action || command?.action,
+          platform: readback?.receipt?.platform ?? command?.platform ?? null,
+          effect_key: readback?.receipt?.effect_key ?? command?.effect_key ?? null,
         });
+        const episode = await rsiRuntime.ingestBrowserOutcome({
+          readback,
+          attribution: bound ? null : rsiOutcomeAttributionForCommand(command),
+        });
+        // Close the loop: assign external step credit against the river's
+        // task anchor → experience case materializes (1 command = 1 case).
+        // The operator steering wheel gates this learning-side effect — a
+        // paused CREDIT_ASSIGNMENT scope holds credit (episodes still ingest).
+        if (episode.eligible_for_credit_assignment === true) {
+          if (rsiOperatorSteering?.allows?.('CREDIT_ASSIGNMENT') === false) {
+            await rsiOperatorSteering.recordGateSkip('CREDIT_ASSIGNMENT').catch(() => {});
+          } else {
+            await rsiOutcomeRiver?.creditIngestedEpisode(episode, {
+              environment_fingerprint: `metaengine-browser-${app.getVersion()}`,
+            }).catch(() => {});
+          }
+        }
         return true;
       },
     });
@@ -1082,6 +1191,8 @@ function destroyWindowContents() {
   shellView = null;
   fleet = null;
   rsiRuntime = null;
+  rsiOutcomeRiver = null;
+  rsiOperatorSteering = null;
   developmentPlane?.stop();
 }
 

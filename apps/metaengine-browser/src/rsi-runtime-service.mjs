@@ -568,6 +568,21 @@ export class RsiRuntimeService {
     return episode;
   }
 
+  // Read-only attribution probe for the wiring layer: answers "does a BOUND
+  // registry binding exist for exactly this command shape?" without consuming
+  // it, so callers can decide between registry-resolved ingest (attribution
+  // null) and the generic synthetic attribution. Mirrors the exact resolve
+  // shape ingestBrowserOutcome performs internally — consistent by
+  // construction; zero authority, zero side effects.
+  peekCommandAttribution({ command_id, action, platform = null, effect_key = null } = {}) {
+    this.#assertRunning();
+    try {
+      return this.#commandAttribution.resolve({ command_id, action, platform, effect_key });
+    } catch {
+      return null;
+    }
+  }
+
   async routeVerifiedSkills({
     context_id,
     task_signature_digest,
