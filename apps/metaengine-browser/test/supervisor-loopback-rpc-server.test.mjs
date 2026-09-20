@@ -41,7 +41,9 @@ test('constructor refuses non-loopback bind hosts', () => {
 test('start writes a 0600 manifest and serves supervisor.health/snapshot', async () => {
   await withServer({}, async ({ url, token, manifestPath }) => {
     const stat = await fs.stat(manifestPath);
-    assert.equal(stat.mode & 0o077, 0);
+    // POSIX-only: Windows fs.stat does not reflect chmod bits (0600 request
+    // is still made — it is just not observable there).
+    if (process.platform !== 'win32') assert.equal(stat.mode & 0o077, 0);
     const health = await rpc(url, token, { method: 'supervisor.health' });
     assert.equal(health.status, 200);
     assert.equal(health.body.ok, true);
