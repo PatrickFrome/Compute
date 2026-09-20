@@ -232,6 +232,39 @@ export class BrowserRealtimeProcessPlane {
     }
   }
 
+  // Tier 2 break repair #4 (results→artifacts): durable artifact producer
+  // surface. The DevOS task cycle records one immutable artifact reference per
+  // terminal task outcome through the collaboration fabric (journal + durable
+  // persistence + workbench projection). Never throws — artifact recording
+  // must not gate task completion.
+  recordTaskArtifact(artifact) {
+    try {
+      if (typeof this.#brain?.recordCollaborationArtifact !== 'function') {
+        return { recorded: false, reason: 'BRAIN_COORDINATOR_UNAVAILABLE' };
+      }
+      // The fabric's referential contract requires the collaboration task to
+      // exist before an artifact can reference it — ensure it idempotently.
+      if (artifact?.task_id != null && typeof this.#brain.recordCollaborationTask === 'function') {
+        try {
+          this.#brain.recordCollaborationTask({
+            context_id: artifact.context_id,
+            task_id: artifact.task_id,
+            objective: artifact.task_objective || `DevOS fleet task ${artifact.task_id}`,
+            owner_agent_id: artifact.owner_agent_id || null,
+            status: 'READY',
+          });
+        } catch (error) {
+          if (!String(error?.message || '').includes('task_exists')) throw error;
+        }
+      }
+      const result = this.#brain.recordCollaborationArtifact(artifact);
+      return { recorded: true, duplicate: result?.duplicate === true };
+    } catch (error) {
+      this.#brainLastError = `ARTIFACT_RECORD:${text(error?.message || error, 240)}`;
+      return { recorded: false, reason: text(error?.message || error, 240) };
+    }
+  }
+
   #emit(type, details = {}) {
     this.#sequence += 1;
     const event = Object.freeze({

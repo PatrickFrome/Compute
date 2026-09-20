@@ -378,6 +378,15 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#devosTaskCycle = devosRef;
   }
 
+  // Tier 2 break repair #4 (results→artifacts): late-bound durable artifact
+  // recorder. The realtime process plane (and its collaboration fabric) is
+  // constructed after the DevOS task cycle, so the subclass binds the plane's
+  // recordTaskArtifact surface here once the plane is running.
+  bindDevosArtifactRecorder(fn) {
+    if (fn != null && typeof fn !== 'function') throw new Error('native_supervisor_artifact_recorder_invalid');
+    if (typeof this.#devosTaskCycle?.bindArtifactRecorder === 'function') this.#devosTaskCycle.bindArtifactRecorder(fn);
+  }
+
   async #observeWorkers() {
     if (!this.#workerObserver) return;
     try {

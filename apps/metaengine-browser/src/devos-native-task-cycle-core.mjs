@@ -283,12 +283,16 @@ export class DevOsNativeTaskCycle {
   // the normal command plane with per-agent attribution + Outcome River
   // task context (one tool command = one experience case).
   #toolbelt = null;
+  // Tier 2 break repair #4 (results→artifacts): late-bound durable artifact
+  // recorder (realtime process plane → collaboration fabric).
+  #recordArtifact = null;
   // Per-lease tool harvest memory: once generation has stopped, the
   // conversation is final until a new message — parse it once per lease.
   #toolHarvest = new Map();
 
-  constructor({ getState, executeCommand, signedRequest, effectJournal = null, identity = null } = {}) {
+  constructor({ getState, executeCommand, signedRequest, effectJournal = null, identity = null, recordArtifact = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof signedRequest !== 'function') throw new Error('devos_cycle_dependencies_invalid');
+    if (recordArtifact != null && typeof recordArtifact !== 'function') throw new Error('devos_cycle_artifact_recorder_invalid');
     if (effectJournal != null && (
       typeof effectJournal.init !== 'function'
       || typeof effectJournal.find !== 'function'
@@ -310,6 +314,17 @@ export class DevOsNativeTaskCycle {
     // briefing instead of failing construction.
     this.#identity = identity && typeof identity.agentContextTokenProof === 'function' ? identity : null;
     this.#toolbelt = new AgentToolbelt({ signedRequest });
+    // Tier 2 break repair #4 (results→artifacts): late-bound durable artifact
+    // recorder (realtime process plane → collaboration fabric). Optional for
+    // tests; the live client always provides it once the plane is running.
+    this.#recordArtifact = recordArtifact;
+  }
+
+  // Tier 2 break repair #4: late-bound durable artifact recorder binding —
+  // called by the supervisor client once the realtime process plane exists.
+  bindArtifactRecorder(fn) {
+    if (fn != null && typeof fn !== 'function') throw new Error('devos_cycle_artifact_recorder_invalid');
+    this.#recordArtifact = fn;
   }
 
   async #ensureJournal() {
@@ -1060,6 +1075,12 @@ export class DevOsNativeTaskCycle {
   }
 
   async #postCompletionWithReadback(lease, state, summary, error = null) {
+    // Tier 2 break repair #4 (results→artifacts): EVERY terminal task outcome
+    // records one immutable artifact reference in the collaboration fabric
+    // (digest-only, refs to the durable task record + proven conversation).
+    // Recorded before the completion write so an artifact exists even when the
+    // write goes ambiguous; never throws.
+    this.#recordTaskOutcomeArtifact(lease, state, summary);
     try {
       const response = await this.#signedRequest('/v1/devos/complete', {
         payload: { ...bindingPayload(lease), state, summary, error: error ? clip(error, 160) : null },
@@ -1081,6 +1102,49 @@ export class DevOsNativeTaskCycle {
       const errorOut = new Error(`devos_completion_transport_ambiguous:${clip(writeError?.message || writeError, 200)}`);
       errorOut.automatic_retry_allowed = false;
       throw errorOut;
+    }
+  }
+
+  // Tier 2 break repair #4: one immutable artifact per terminal task outcome.
+  // artifact_id is deterministic per (task, lease_generation) so retries and
+  // ambiguous-write reconciliations are idempotent; content is digest-only
+  // (the durable content lives in the DB task record + the proven
+  // conversation); refs bind the artifact to both.
+  #recordTaskOutcomeArtifact(lease, state, summary) {
+    try {
+      if (typeof this.#recordArtifact !== 'function') return;
+      const taskId = String(lease.task_id || '').toLowerCase();
+      if (!UUID_RE.test(taskId)) return;
+      const normalizedState = String(state || '').toUpperCase();
+      const conversationSha = String(summary?.conversation_url_sha256 || '').toLowerCase();
+      const refs = [`devos_task:${taskId}`];
+      if (HASH_RE.test(conversationSha)) refs.push(`conversation:${conversationSha}`);
+      const contentDigest = `sha256:${sha256(JSON.stringify({
+        task_id: taskId,
+        lease_generation: Number(lease.lease_generation),
+        state: normalizedState,
+        transport_state: String(summary?.transport_state || ''),
+        tool_results_count: Number(summary?.tool_results_count || 0),
+        conversation_url_sha256: HASH_RE.test(conversationSha) ? conversationSha : null,
+      }))}`;
+      const recorded = this.#recordArtifact({
+        artifact_id: `devos.task-result.${taskId}.${Number(lease.lease_generation)}`,
+        context_id: 'devos-fleet-task-results',
+        task_id: taskId,
+        kind: `task-result-${normalizedState.toLowerCase()}`,
+        content_digest: contentDigest,
+        refs,
+        base_sha: SHA40_RE.test(String(lease.base_sha || '')) ? String(lease.base_sha).toLowerCase() : null,
+        branch: null,
+        task_objective: clip(lease?.task_spec?.objective, 768) || null,
+        owner_agent_id: /^agent_[a-z0-9-]{8,64}$/.test(String(lease.agent_id || '')) ? String(lease.agent_id) : null,
+      });
+      if (recorded && recorded.recorded !== true && recorded.reason && String(recorded.reason).length < 120) {
+        // Surface non-fatal recorder degradation in the cycle snapshot only.
+        this.#last = { ...this.#last, last_artifact_record_reason: String(recorded.reason) };
+      }
+    } catch {
+      // Artifact recording must never gate task completion.
     }
   }
 
