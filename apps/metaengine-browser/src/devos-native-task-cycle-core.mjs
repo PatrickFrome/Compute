@@ -8,6 +8,8 @@ import {
   classifyAgentPlatformSurface,
 } from './browser-agent-platform.mjs';
 import { renderAgentContextBriefing } from './agent-context-token.mjs';
+import { parseAgentToolRequests, renderAgentToolProtocol, renderAgentToolResults } from './agent-tool-protocol.mjs';
+import { AgentToolbelt } from './agent-toolbelt-core.mjs';
 import { markFleetTransportProvenFromNativeFrame } from './fleet-runtime-bridge.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
 import { FLEET_TAB_CEILING } from './tab-registry.mjs';
@@ -110,7 +112,7 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
   return readiness;
 }
 
-export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null } = {}) {
+export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null } = {}) {
   const taskSpec = jsonObject(lease.task_spec, 'task_spec');
   const objective = clip(taskSpec.objective ?? taskSpec.goal, 12000).trim();
   if (!objective) throw new Error('devos_task_objective_missing');
@@ -130,6 +132,13 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   if (constraints.length) lines.push('', 'Constraints:', ...constraints.map((row) => `- ${row}`));
   const deliverable = clip(taskSpec.deliverable || '', 4000).trim();
   if (deliverable) lines.push('', `Deliverable: ${deliverable}`);
+  // Agent Toolbelt (Tier 2 break #3): the tool protocol (how to request
+  // command-plane actions) and the agent's PREVIOUS confirmed tool outcomes
+  // ride the task prompt — both clipped hard so the task body stays dominant.
+  const toolProtocolBlock = clip(String(tool_protocol || ''), 1200).trim();
+  if (toolProtocolBlock) lines.push('', toolProtocolBlock);
+  const toolResultsBlock = clip(renderAgentToolResults(tool_results), 2400).trim();
+  if (toolResultsBlock) lines.push('', toolResultsBlock);
   // D-C1 (2026-09-19 operator directive): GLM agents have NO shared context —
   // every chat.z.ai Task conversation starts blank. The briefing trains each
   // agent individually (identity token, mission, fleet roster, coordination
@@ -269,6 +278,14 @@ export class DevOsNativeTaskCycle {
   // D-C1: enrolled device identity (token signing). Optional for tests; the
   // live main-entry always provides it.
   #identity = null;
+  // Agent Toolbelt (Tier 2 break #3): serves the agent's TOOL_REQUEST blocks
+  // through the device-authenticated edge issue route; issued commands ride
+  // the normal command plane with per-agent attribution + Outcome River
+  // task context (one tool command = one experience case).
+  #toolbelt = null;
+  // Per-lease tool harvest memory: once generation has stopped, the
+  // conversation is final until a new message — parse it once per lease.
+  #toolHarvest = new Map();
 
   constructor({ getState, executeCommand, signedRequest, effectJournal = null, identity = null } = {}) {
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof signedRequest !== 'function') throw new Error('devos_cycle_dependencies_invalid');
@@ -292,6 +309,7 @@ export class DevOsNativeTaskCycle {
     // pre-enrollment edge cases) degrades to the deterministic unsigned
     // briefing instead of failing construction.
     this.#identity = identity && typeof identity.agentContextTokenProof === 'function' ? identity : null;
+    this.#toolbelt = new AgentToolbelt({ signedRequest });
   }
 
   async #ensureJournal() {
@@ -311,7 +329,7 @@ export class DevOsNativeTaskCycle {
     if (this.#effectJournal && this.#journalInitialized && typeof this.#effectJournal.snapshot === 'function') {
       journal = this.#effectJournal.snapshot();
     }
-    return structuredClone({ ...this.#last, effect_delivery_journal: journal });
+    return structuredClone({ ...this.#last, effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot() });
   }
 
   async cycle() {
@@ -678,6 +696,36 @@ export class DevOsNativeTaskCycle {
     return briefingText;
   }
 
+  // Agent Toolbelt (Tier 2 break #3): harvest TOOL_REQUEST_V1 blocks from the
+  // agent's conversation once generation has stopped, serve them through the
+  // command plane (per-agent attribution + river task context), and harvest
+  // terminal receipts. Never throws — tool unavailability must not block
+  // task completion.
+  async #serveAgentTools(lease) {
+    const key = `${String(lease.task_id)}:${Number(lease.lease_generation)}`;
+    try {
+      let harvest = this.#toolHarvest.get(key) || null;
+      if (!harvest) {
+        const head = await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: 0, max_chars: 2000 } });
+        const total = Number(head?.total_chars || 0);
+        const tailOffset = Math.max(0, total - 20000);
+        const tail = tailOffset > 0
+          ? await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: tailOffset, max_chars: 20000 } })
+          : head;
+        harvest = parseAgentToolRequests(tail?.text || '');
+        if (this.#toolHarvest.size > 128) this.#toolHarvest.clear();
+        this.#toolHarvest.set(key, harvest);
+        if (harvest.requests.length > 0) {
+          await this.#toolbelt.serveToolRequests({ lease, requests: harvest.requests });
+        }
+      }
+      const results = await this.#toolbelt.harvestResults({ lease });
+      return { pending: this.#toolbelt.pendingCount(lease), results };
+    } catch {
+      return { pending: 0, results: [] };
+    }
+  }
+
   // D-C3: ensure the agent has a PROVEN conversation before the lease's
   // physical effect. Live root cause (2026-09-19): the root task composer is
   // append-only for synthetic input and silently refuses Enter on oversized
@@ -794,7 +842,14 @@ export class DevOsNativeTaskCycle {
     }
     const telemetryDigest = await this.#telemetryDigest(lease);
     const contextBriefing = await this.#contextBriefingFor(lease, fleetSnapshot);
-    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing });
+    // Agent Toolbelt: the protocol rides every dispatch (isolated sessions
+    // must relearn the grammar per task); the agent's previous confirmed tool
+    // outcomes ride the next task message. Both are deterministic within a
+    // lease (terminal results are immutable), so the journal prompt hash
+    // stays stable.
+    const toolProtocol = renderAgentToolProtocol({ tab_id: lease.tab_id });
+    const toolResults = this.#toolbelt.resultsForAgent(lease.agent_id);
+    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol });
     const promptHash = sha256(prompt);
     const effectBinding = journalBinding(lease, promptHash);
     const journal = await this.#ensureJournal();
@@ -981,11 +1036,22 @@ export class DevOsNativeTaskCycle {
       await this.#reportAmbiguous(lease, 'COMPLETION_CONVERSATION_BINDING_MISMATCH').catch(() => {});
       return { state: 'AMBIGUOUS', task_id: lease.task_id, automatic_retry_allowed: false, authority_effect: false };
     }
+    // Agent Toolbelt (Tier 2 break #3): generation has stopped on the proven
+    // conversation — harvest any TOOL_REQUEST blocks, serve them through the
+    // command plane, and keep the task RUNNING while tool commands are in
+    // flight. Results land in the completion summary (durable task record)
+    // and in the agent's next task message.
+    const toolState = await this.#serveAgentTools(lease);
+    if (toolState.pending > 0) {
+      return { state: 'TOOL_EXECUTION_PENDING', task_id: lease.task_id, pending_tool_commands: toolState.pending, authority_effect: false };
+    }
     return this.#postCompletionWithReadback(lease, 'RESULT_READY', {
       transport_state: 'GENERATION_STOPPED_ON_PROVEN_CONVERSATION',
       conversation_url_sha256: expectedUrlHash,
       page_content_included: false,
       page_data_authority: false,
+      tool_results: toolState.results.slice(0, 8),
+      tool_results_count: toolState.results.length,
     });
   }
 
