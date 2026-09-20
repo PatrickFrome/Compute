@@ -1385,7 +1385,21 @@ function executeWorkbenchAddress(value) {
   const input = String(value || '').trim();
   if (!input) return false;
   if (input.startsWith('>')) {
-    const target = workbenchCommandTarget(input.slice(1));
+    const commandText = input.slice(1).trim();
+    // Tier 1 RSI operator wheel: ">rsi nominate <candidate_id> <qualification_digest>"
+    // routes the one ledger-writing operator action. Everything else stays a
+    // section navigation token.
+    const rsiNomination = commandText.match(/^rsi\s+nominate\s+(\S+)\s+(\S+)$/i);
+    if (rsiNomination) {
+      return api.command('RSI_NOMINATE_PROMOTION', {
+        candidate_id: rsiNomination[1],
+        qualification_digest: rsiNomination[2],
+      }).then((result) => {
+        console.info('metaengine.rsi.nominate', result);
+        return openCoreOpsSection('mechanisms');
+      }).then(() => true);
+    }
+    const target = workbenchCommandTarget(commandText);
     if (!target) return openAgenticSection('skills').then(() => true);
     return (target[0] === 'agentic' ? openAgenticSection(target[1]) : openCoreOpsSection(target[1])).then(() => true);
   }
@@ -1487,9 +1501,35 @@ api.onSnapshot((next) => {
    a missing projection renders UNKNOWN, never a fabricated healthy state. */
 
 const RSI_RUNTIME_SCHEMA = 'metaengine.rsi.runtime-service.v1';
+const RSI_CONSOLE_SCHEMA = 'metaengine.rsi.operator-console.v1';
 
+// Tier 1 wiring: the shell snapshot now carries a bounded operator-console
+// projection at the top level (rsi) with the outcome-river counters. The
+// legacy supervisor.rsi path stays as a fallback so neither surface regresses.
 function rsiProjection(next) {
-  const rsi = next?.supervisor?.rsi;
+  const consoleProjection = next?.rsi;
+  const rsi = next?.supervisor?.rsi || (consoleProjection && consoleProjection.schema === RSI_CONSOLE_SCHEMA && consoleProjection.runtime_state === 'READY'
+    ? {
+      schema: RSI_RUNTIME_SCHEMA,
+      state: consoleProjection.runtime_state,
+      mode: consoleProjection.mode,
+      source_sha: consoleProjection.source_sha,
+      trust_root_count: consoleProjection.trust_root_count,
+      trust_root_set_digest: consoleProjection.trust_root_set_digest,
+      candidate_count: consoleProjection.candidate_count,
+      candidate_state_counts: consoleProjection.candidate_state_counts,
+      promotion_nomination_count: consoleProjection.promotion_nomination_count,
+      last_observation_at: consoleProjection.last_observation_at,
+      observation_persistence_mode: consoleProjection.observation_persistence_mode,
+      skill_revision_reliability: consoleProjection.skill_revision_reliability,
+      shadow_only: consoleProjection.shadow_only,
+      candidate_effect_executor_exposed: consoleProjection.candidate_effect_executor_exposed,
+      physical_effect_replay_allowed: consoleProjection.physical_effect_replay_allowed,
+      direct_promotion_enabled: consoleProjection.direct_promotion_enabled,
+      direct_self_update_enabled: consoleProjection.direct_self_update_enabled,
+      authority_effect: consoleProjection.authority_effect,
+    }
+    : null);
   if (!rsi || rsi.schema !== RSI_RUNTIME_SCHEMA) return Object.freeze({
     schema: RSI_RUNTIME_SCHEMA,
     valid: false,
@@ -1502,6 +1542,12 @@ function rsiProjection(next) {
     authority_effect: false,
   });
   return Object.freeze({ ...rsi, valid: true, reason: 'EXACT_PROJECTION' });
+}
+
+function rsiConsoleProjection(next) {
+  const consoleProjection = next?.rsi;
+  if (!consoleProjection || consoleProjection.schema !== RSI_CONSOLE_SCHEMA) return null;
+  return consoleProjection;
 }
 
 function rsiStatus(next) {
@@ -1582,6 +1628,65 @@ function renderMechanisms(next) {
     kvRow('Authority effect', rsi.authority_effect === false ? 'NONE' : 'UNKNOWN', rsi.authority_effect === false ? 'good' : 'neutral'),
   );
   fragment.append(rsiFence.wrap);
+
+  // Tier 1 "outcome river" surface: is the receipt → attribution → experience
+  // loop actually flowing? These counters are the operator's first answer to
+  // "is the system learning from what it does".
+  const rsiConsole = rsiConsoleProjection(next);
+  const river = section('RSI outcome river', 'receipt → attribution → experience');
+  const ingest = rsiConsole?.browser_outcome_ingest || null;
+  const attribution = rsiConsole?.command_attribution || null;
+  const store = rsiConsole?.runtime_experience_store || null;
+  const router = rsiConsole?.runtime_skill_router || null;
+  const riverFlows = (ingest?.outcome_count ?? 0) > 0;
+  river.list.append(
+    kvRow('Outcome episodes', ingest ? `${ingest.outcome_count ?? 0} ingested · ${ingest.learning_eligible_count ?? 0} learning-eligible` : 'UNKNOWN', ingest ? (riverFlows ? 'good' : 'neutral') : 'muted'),
+    kvRow('Quarantined', ingest ? String(ingest.quarantined_count ?? 0) : 'UNKNOWN', ingest ? ((ingest.quarantined_count ?? 0) > 0 ? 'warn' : 'good') : 'muted'),
+    kvRow('Last episode', ingest?.last_episode_digest ? shortId(ingest.last_episode_digest, 16) : 'NONE', 'neutral'),
+    kvRow('Receipt readback', next?.supervisor?.rsi_outcome_readback
+      ? `${next.supervisor.rsi_outcome_readback.observed_count ?? 0} observed · ${next.supervisor.rsi_outcome_readback.dropped_count ?? 0} dropped`
+      : 'UNKNOWN', 'neutral'),
+    kvRow('Readback policy', ingest?.terminal_receipt_readback_required === true ? 'TERMINAL RECEIPT REQUIRED' : 'UNKNOWN', ingest?.terminal_receipt_readback_required === true ? 'good' : 'neutral'),
+    kvRow('Attribution bindings', attribution ? `${attribution.binding_count ?? 0} bound · ${attribution.pending_count ?? 0} pending · ${attribution.consumed_count ?? 0} consumed` : 'UNKNOWN', 'neutral'),
+    kvRow('Experience cases', store ? `${store.case_count ?? 0} case(s) · ${store.task_anchor_count ?? 0} anchor(s)` : 'UNKNOWN', store ? ((store.case_count ?? 0) > 0 ? 'good' : 'neutral') : 'muted'),
+    kvRow('Skill routings', router ? String(router.route_count ?? 0) : 'UNKNOWN', 'neutral'),
+  );
+  fragment.append(river.wrap);
+
+  // Tier 1 operator wheel: explicit operator actions over the shadow runtime.
+  // Read paths surface candidates / experience / skills on demand; nomination
+  // is the one ledger-writing action and still grants nothing by itself.
+  const rsiOps = section('RSI operations', 'operator trainer surface · zero authority');
+  const rsiOpsList = el('div', 'commandList');
+  rsiOpsList.append(
+    commandButton('Candidates', 'Shadow archive list', async () => {
+      const result = await api.command('RSI_CANDIDATES', {});
+      console.info('metaengine.rsi.candidates', result);
+      api.snapshot().then(render).catch(() => {});
+    }),
+    commandButton('Experience cases', 'Outcome river detail', async () => {
+      const result = await api.command('RSI_EXPERIENCE', {});
+      console.info('metaengine.rsi.experience', result);
+      api.snapshot().then(render).catch(() => {});
+    }),
+    commandButton('Skill library', 'Verified skills + reliability', async () => {
+      const result = await api.command('RSI_SKILLS', {});
+      console.info('metaengine.rsi.skills', result);
+      api.snapshot().then(render).catch(() => {});
+    }),
+    commandButton('RSI status', 'Full runtime counters', async () => {
+      const result = await api.command('RSI_STATUS', {});
+      console.info('metaengine.rsi.status', result);
+      api.snapshot().then(render).catch(() => {});
+    }),
+  );
+  rsiOps.wrap.append(rsiOpsList);
+  rsiOps.list.append(
+    kvRow('Nominate promotion', 'omnibox: rsi nominate <candidate_id> <qualification_digest>', 'neutral'),
+    kvRow('Nomination grants', 'NOTHING · external promotion gate required', 'good'),
+    kvRow('Direct library replacement', 'FORBIDDEN', 'good'),
+  );
+  fragment.append(rsiOps.wrap);
 
   const takeover = next?.human_takeover;
   const takeoverSection = section('Human takeover', 'operator control plane');
