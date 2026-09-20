@@ -149,6 +149,10 @@ test('runtime meta archive is append-only, restart durable, and cannot activate 
     assert.equal(archive.snapshot().active_profile_digest,null);
     assert.equal(archive.snapshot().archive_can_activate_profile,false);
     assert.equal(archive.eligible().length,1);
+    const lookedUp=archive.recordByDigest(record.record_digest);
+    assert.equal(lookedUp.record_digest,record.record_digest);
+    assert.equal(lookedUp.record_id,record.record_id);
+    assert.throws(()=>archive.recordByDigest('not-a-sha256-digest'),/record_digest_invalid/);
 
     const restored=new RsiRuntimeMetaSkillArchive({statePath,source_sha:SOURCE});
     await restored.init();

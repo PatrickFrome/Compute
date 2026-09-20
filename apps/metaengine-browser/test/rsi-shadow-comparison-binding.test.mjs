@@ -28,7 +28,7 @@ function qualification(){
     state:'QUALIFIED_FOR_SHADOW_PROFILE_SELECTION',qualified_for_shadow_profile_selection:true,
     live_profile_activation_authorized:false,profile_replacement_authorized:false,
     canary_activation_authorized:false,external_activation_gate_still_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,qualification_digest:digest(core)});
@@ -43,7 +43,7 @@ function selection(q){
     candidate_can_select_profile:false,selection_can_change_execution:false,
     selection_can_replace_incumbent:false,selection_can_grant_skill_activity:false,
     continuous_shadow_review_required:true,canary_gate_still_required:true,
-    execution_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
+    execution_authority:false,browser_authority:false,task_authority:false,production_mutation_authority:false,promotion_authority:false,self_update_authority:false,
     scheduler_authority:false,automatic_retry_allowed:false,authority_effect:false,
   };
   return Object.freeze({...core,selection_digest:digest(core)});

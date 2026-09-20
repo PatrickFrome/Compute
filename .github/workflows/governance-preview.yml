@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# RSI_CI_ACCELERATION_R9: keep only the latest governance preview for each ref.
+concurrency:
+  group: compute-fabric-governance-preview-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   preview:
     runs-on: ubuntu-latest

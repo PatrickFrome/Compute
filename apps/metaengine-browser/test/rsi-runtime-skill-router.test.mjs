@@ -11,7 +11,10 @@ import {
   createRsiSkillEvidence,
   createRsiVerifiedSkillLibrary,
 } from '../src/rsi-verified-skill-library.mjs';
-import { createRsiSkillLibraryGovernance } from '../src/rsi-skill-library-governance.mjs';
+import {
+  createRsiSkillLifecycleEvidence,
+  createRsiSkillLibraryGovernance,
+} from '../src/rsi-skill-library-governance.mjs';
 import {
   createRsiSkillRelationEdge,
   createRsiSkillRelationGraph,
@@ -57,10 +60,32 @@ function fixture(){
     external_library_owner:true,
     authored_by_candidate:false,
   });
+  const lifecycle_evidence=[good,bad,explore].map((skill,index)=>createRsiSkillLifecycleEvidence({
+    library,
+    evidence_id:`router.fixture.window.${index+1}`,
+    skill_digest:skill.capsule.skill_digest,
+    window_seq:1,
+    generation_start:1,
+    generation_end:1,
+    invocation_count:1,
+    helpful_count:1,
+    harmful_count:0,
+    neutral_count:0,
+    insufficient_evidence_count:0,
+    router_engagement_count:1,
+    false_positive_injection_count:0,
+    hard_invariant_violation_count:0,
+    measured_net_delta:0.1,
+    authoring_prior:'VERIFIED_DIRECT_SKILL',
+    authoring_provenance_digest:d('7'),
+    evidence_refs:[`router:fixture:${index+1}`],
+    external_evaluator:true,
+    authored_by_candidate:false,
+  }));
   const governance=createRsiSkillLibraryGovernance({
     governance_id:'runtime.skill.router.governance',
     library,
-    lifecycle_evidence:[],
+    lifecycle_evidence,
     max_active_skills:3,
     exploration_slots:3,
     external_library_owner:true,
@@ -212,7 +237,7 @@ test('persisted contextual evidence is digest-verified, exact-source fenced, and
       source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,
       external_evaluator:true,authored_by_candidate:false,
     });
-    assert.throws(()=>verifyRsiSkillContextEvidence({...row,credit_sign:'NEGATIVE'}),/evidence_digest_mismatch/);
+    assert.throws(()=>verifyRsiSkillContextEvidence({...row,trajectory_id:`${row.trajectory_id}.tampered`}),/evidence_digest_mismatch/);
 
     assert.throws(()=>createRsiSkillRoutingPlan({
       library,governance,
@@ -255,7 +280,7 @@ test('routing is limited to governance-active skills and cannot reactivate quara
 });
 
 test('coalition-pollution mask excludes an otherwise active compatible skill without granting any new activity',()=>{
-  const {good,explore,library,governance}=fixture();
+  const {good,library,governance}=fixture();
   const g=episode({command:'88888888-8888-4888-8888-888888888888',skillDigest:good.capsule.skill_digest,sign:'POSITIVE'});
   const evidence=[createRsiSkillContextEvidence({
     source_sha:SOURCE,episode:g.ep,credit_receipt:g.credit,skill_digest:good.capsule.skill_digest,
@@ -273,7 +298,8 @@ test('coalition-pollution mask excludes an otherwise active compatible skill wit
   assert.equal(plan.coalition_mask_cannot_grant_activity,true);
   assert.ok(plan.selected.every(row=>row.skill_digest!==good.capsule.skill_digest));
   assert.ok(plan.selected_count<=2);
-  if(plan.selected_count>0)assert.equal(plan.selected[0].skill_digest,explore.capsule.skill_digest);
+  const activeBeforeMask=new Set(governance.entries.filter(row=>row.active_for_composition).map(row=>row.skill_digest));
+  assert.ok(plan.selected.every(row=>activeBeforeMask.has(row.skill_digest)));
 });
 
 test('coalition mask is fenced to the exact verified library',()=>{

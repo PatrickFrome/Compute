@@ -28,6 +28,7 @@ import { rsiMetaSkillEvolutionTrustRootSnapshot } from './rsi-meta-skill-evoluti
 import { rsiProxyCalibrationTrustRootSnapshot } from './rsi-proxy-reliability-calibration.mjs';
 import { rsiRecursiveDepthTrustRootSnapshot } from './rsi-recursive-depth-controller.mjs';
 import { rsiRecursiveRiskTrustRootSnapshot } from './rsi-recursive-risk-budget.mjs';
+import { rsiDurableRecursiveRiskTrustRootSnapshot } from './rsi-durable-recursive-risk-ledger.mjs';
 import { rsiRegressionReplayTrustRootSnapshot } from './rsi-regression-replay.mjs';
 import { rsiSkillLibraryGovernanceTrustRootSnapshot } from './rsi-skill-library-governance.mjs';
 import { rsiSkillScopeExpansionTrustRootSnapshot } from './rsi-skill-scope-expansion.mjs';
@@ -58,6 +59,15 @@ import { RsiRuntimeMetaSkillArchive, createRsiRuntimeMetaSkillRecord, rsiRuntime
 import { RsiMetaProfileQualificationLedger, createRsiMetaProfileQualification, createRsiMetaProfileShadowPlan, rsiMetaProfileQualificationTrustRootSnapshot } from './rsi-meta-profile-qualification.mjs';
 import { RsiMetaProfileShadowRegistry, createRsiMetaProfileShadowSelection, createRsiMetaProfileShadowProjection, rsiMetaProfileShadowSelectionTrustRootSnapshot } from './rsi-meta-profile-shadow-selection.mjs';
 import { createRsiShadowComparisonBinding, rsiShadowComparisonBindingTrustRootSnapshot } from './rsi-shadow-comparison-binding.mjs';
+import { createRsiSkillExposureReleaseReview, rsiSkillExposureReleaseReviewTrustRootSnapshot } from './rsi-skill-exposure-release-review.mjs';
+import { rsiDurableStatePersistenceTrustRootSnapshot } from './rsi-durable-state-persistence.mjs';
+import { rsiHeldSkillCreditAdmissionTrustRootSnapshot } from './rsi-held-skill-credit-admission.mjs';
+import { rsiLineageProvenanceAcceptanceTrustRootSnapshot } from './rsi-lineage-provenance-acceptance.mjs';
+import { rsiGithubAttestationVerificationReceiptTrustRootSnapshot } from './rsi-github-attestation-verification-receipt.mjs';
+import { rsiLineageStructuralProvenanceTrustRootSnapshot } from './rsi-lineage-structural-provenance.mjs';
+import { rsiSkillLineageContaminationReviewTrustRootSnapshot } from './rsi-skill-lineage-contamination-review.mjs';
+import { rsiSkillExposureReleaseTransitionProofTrustRootSnapshot } from './rsi-skill-exposure-release-transition-proof.mjs';
+import { rsiExplorationGraduationCertificateTrustRootSnapshot } from './rsi-exploration-graduation-certificate.mjs';
 
 export const RSI_RUNTIME_SERVICE_SCHEMA = 'metaengine.rsi.runtime-service.v1';
 export const RSI_RUNTIME_MODE = 'SHADOW_VERIFIED';
@@ -111,9 +121,19 @@ function trustRoots() {
     proxy_calibration: rsiProxyCalibrationTrustRootSnapshot(),
     recursive_depth: rsiRecursiveDepthTrustRootSnapshot(),
     recursive_risk: rsiRecursiveRiskTrustRootSnapshot(),
+    durable_recursive_risk: rsiDurableRecursiveRiskTrustRootSnapshot(),
     regression_replay: rsiRegressionReplayTrustRootSnapshot(),
     skill_library: rsiVerifiedSkillLibraryTrustRootSnapshot(),
     skill_governance: rsiSkillLibraryGovernanceTrustRootSnapshot(),
+    skill_exposure_release_review: rsiSkillExposureReleaseReviewTrustRootSnapshot(),
+    durable_state_persistence: rsiDurableStatePersistenceTrustRootSnapshot(),
+    held_skill_credit_admission: rsiHeldSkillCreditAdmissionTrustRootSnapshot(),
+    lineage_provenance_acceptance: rsiLineageProvenanceAcceptanceTrustRootSnapshot(),
+    github_attestation_verification_receipt: rsiGithubAttestationVerificationReceiptTrustRootSnapshot(),
+    lineage_structural_provenance: rsiLineageStructuralProvenanceTrustRootSnapshot(),
+    skill_lineage_contamination_review: rsiSkillLineageContaminationReviewTrustRootSnapshot(),
+    skill_exposure_release_transition_proof: rsiSkillExposureReleaseTransitionProofTrustRootSnapshot(),
+    exploration_graduation_certificate: rsiExplorationGraduationCertificateTrustRootSnapshot(),
     skill_scope_expansion: rsiSkillScopeExpansionTrustRootSnapshot(),
     trace_guided_harness_repair: rsiTraceGuidedHarnessRepairTrustRootSnapshot(),
     memory_governance: rsiMemoryGovernanceTrustRootSnapshot(),
@@ -1017,10 +1037,24 @@ export class RsiRuntimeService {
     return this.#metaProfileShadowRegistry.current();
   }
 
-  async adoptVerifiedSkillLibrary({ library, external_library_owner = false, authored_by_candidate = true } = {}) {
+  async adoptVerifiedSkillLibrary({
+    library,
+    expected_current_library_digest = null,
+    trusted_migration = false,
+    external_library_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
     this.#assertRunning();
+    const current = this.#skillLifecycle.verifiedLibrarySnapshot();
+    if (current && trusted_migration !== true) {
+      throw new Error('rsi_runtime_direct_library_adopt_phase34b_required');
+    }
+    if (current && expected_current_library_digest == null) {
+      throw new Error('rsi_runtime_trusted_migration_expected_library_digest_required');
+    }
     const result = await this.#skillLifecycle.adoptVerifiedLibrary({
       library,
+      expected_current_library_digest: current ? expected_current_library_digest : null,
       external_library_owner,
       authored_by_candidate,
     });
@@ -1030,14 +1064,186 @@ export class RsiRuntimeService {
       entry_count: result.entry_count,
       reconciled_pending: result.reconciled_pending,
       append_only_library_required: true,
+      direct_adopt_scope: current ? 'TRUSTED_MIGRATION' : 'TRUSTED_BOOTSTRAP',
+      phase34b_required_for_non_migration_updates: true,
       authority_effect: false,
     });
     return result;
   }
 
+  verifiedSkillStateReadback() {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_verified_skill_library_unavailable');
+    return Object.freeze({
+      library,
+      governance,
+      library_digest: library.library_digest,
+      governance_digest: governance.governance_digest,
+      readback_is_execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      authority_effect: false,
+    });
+  }
+
+  async prepareAnytimeLibraryAdmissionAttempt({
+    attempt_id,
+    admission_certificate,
+    admission_certificate_args,
+    successor_library,
+    effect_id_digest,
+    idempotency_key_digest,
+    effect_executor_identity_digest,
+    external_library_owner = false,
+    external_effect_executor = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.prepareLibraryAdmissionAttempt({
+      attempt_id,
+      admission_certificate,
+      admission_certificate_args,
+      successor_library,
+      effect_id_digest,
+      idempotency_key_digest,
+      effect_executor_identity_digest,
+      external_library_owner,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('ANYTIME_LIBRARY_ADMISSION_PREPARED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest,
+      predecessor_library_digest: result.predecessor_library_digest,
+      successor_library_digest: result.successor_library_digest,
+      effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  async executeAnytimeLibraryAdmissionAttempt({
+    attempt_id,
+    effect_executor_identity_digest,
+    external_effect_executor = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.executePreparedLibraryAdmissionAttempt({
+      attempt_id,
+      effect_executor_identity_digest,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    const effectConfirmed = result.state === 'CONFIRMED_APPLIED_STORAGE_ONLY';
+    await this.#ledger.append(
+      effectConfirmed ? 'ANYTIME_LIBRARY_ADMISSION_EFFECT_CONFIRMED' : 'ANYTIME_LIBRARY_ADMISSION_PRE_EFFECT_DRIFT',
+      {
+        attempt_id: result.attempt_id,
+        attempt_digest: result.attempt_digest,
+        state: result.state,
+        library_digest: result.library_digest || result.observed_library_digest || null,
+        governance_digest: result.observed_governance_digest || null,
+        entry_count: result.entry_count || null,
+        effect_attempt_count: result.effect_attempt_count,
+        effect_performed: effectConfirmed,
+        effect_started: effectConfirmed,
+        storage_only: effectConfirmed && result.storage_only === true,
+        reconciliation_required: result.reconciliation_required === true,
+        pre_effect_readback_passed: result.pre_effect_readback_passed === true,
+        retrieval_exposure_changed: false,
+        skill_activation_performed: false,
+        automatic_retry_allowed: false,
+        authority_effect: false,
+      },
+    );
+    return result;
+  }
+
+  async reconcileAnytimeLibraryAdmissionAttempt({
+    attempt_id,
+    readback_owner_identity_digest,
+    external_readback_owner = false,
+    authored_by_candidate = true,
+  } = {}) {
+    this.#assertRunning();
+    const result = await this.#skillLifecycle.reconcileLibraryAdmissionAttempt({
+      attempt_id,
+      readback_owner_identity_digest,
+      external_readback_owner,
+      authored_by_candidate,
+    });
+    await this.#ledger.append('ANYTIME_LIBRARY_ADMISSION_RECONCILED', {
+      attempt_id: result.attempt_id,
+      attempt_digest: result.attempt_digest,
+      state: result.state,
+      observed_library_digest: result.observed_library_digest,
+      effect_attempt_count: result.effect_attempt_count,
+      additional_effect_attempt_performed: false,
+      same_effect_id_retry_allowed: false,
+      authority_effect: false,
+    });
+    return result;
+  }
+
+  anytimeLibraryAdmissionAttemptSnapshot(attempt_id) {
+    this.#assertRunning();
+    return this.#skillLifecycle.admissionAttemptSnapshot(attempt_id);
+  }
+
   createSkillActivationView(requested_skill_digests) {
     this.#assertRunning();
     return this.#skillLifecycle.activationView(requested_skill_digests);
+  }
+
+  async createSkillExposureReleaseReview(args = {}) {
+    this.#assertRunning();
+    const library = this.#skillLifecycle.verifiedLibrarySnapshot();
+    const governance = this.#skillLifecycle.governance();
+    if (!library || !governance) throw new Error('rsi_runtime_skill_library_unavailable');
+    const review = createRsiSkillExposureReleaseReview({
+      ...args,
+      source_sha: this.#sourceSha,
+      library,
+      current_governance: governance,
+    });
+    await this.#ledger.append('SKILL_EXPOSURE_RELEASE_REVIEW_CREATED', {
+      review_id: review.review_id,
+      review_digest: review.review_digest,
+      state: review.state,
+      skill_digest: review.skill_digest,
+      library_digest: review.library_digest,
+      current_governance_digest: review.current_governance_digest,
+      consumer_model_family: review.consumer_model_family,
+      environment_fingerprint: review.environment_fingerprint,
+      task_signature_digest: review.task_signature_digest,
+      matched_pair_count: review.matched_pair_count,
+      repair_count: review.repair_count,
+      regression_count: review.regression_count,
+      negative_transfer_count: review.negative_transfer_count,
+      blockers: review.blockers,
+      hold_release_effect_authorized: false,
+      hold_release_effect_performed: false,
+      retrieval_exposure_changed: false,
+      skill_activation_performed: false,
+      execution_authority: false,
+      browser_authority: false,
+      task_authority: false,
+      scheduler_authority: false,
+      promotion_authority: false,
+      self_update_authority: false,
+      automatic_retry_allowed: false,
+      authority_effect: false,
+    });
+    return review;
   }
 
   async recordBrowserStepCredit({
@@ -1308,13 +1514,26 @@ export class RsiRuntimeService {
     successor_skill,
     successor_evidence,
     sealed_library_holdout = false,
+    phase34_admission_attempt_id,
+    phase34_admission_certificate,
+    phase34_admission_certificate_args,
+    effect_id_digest,
+    idempotency_key_digest,
+    effect_executor_identity_digest,
     external_library_owner = false,
+    external_effect_executor = false,
     authored_by_candidate = true,
   } = {}) {
     this.#assertRunning();
     const scopeAdmission = this.#revisionScopeLedger.admissionByDigest(scope_admission_digest);
     if (!scopeAdmission || scopeAdmission.state !== 'ELIGIBLE_FOR_EXTERNAL_LIBRARY_EVIDENCE') {
       throw new Error('rsi_runtime_scope_eligible_revision_required');
+    }
+    if (!phase34_admission_certificate) {
+      throw new Error('rsi_runtime_scope_revision_phase34_certificate_required');
+    }
+    if (!phase34_admission_attempt_id || !effect_id_digest || !idempotency_key_digest || !effect_executor_identity_digest) {
+      throw new Error('rsi_runtime_scope_revision_phase34_effect_identity_required');
     }
     const currentLibrary = this.#skillLifecycle.verifiedLibrarySnapshot();
     if (!currentLibrary) throw new Error('rsi_runtime_verified_skill_library_unavailable');
@@ -1329,10 +1548,23 @@ export class RsiRuntimeService {
       external_library_owner,
       authored_by_candidate,
     });
-    const adoption = await this.#skillLifecycle.adoptVerifiedLibrary({
-      library: admission.proposed_library,
-      external_library_owner: true,
-      authored_by_candidate: false,
+    const prepared = await this.prepareAnytimeLibraryAdmissionAttempt({
+      attempt_id: phase34_admission_attempt_id,
+      admission_certificate: phase34_admission_certificate,
+      admission_certificate_args: phase34_admission_certificate_args,
+      successor_library: admission.proposed_library,
+      effect_id_digest,
+      idempotency_key_digest,
+      effect_executor_identity_digest,
+      external_library_owner,
+      external_effect_executor,
+      authored_by_candidate,
+    });
+    const adoption = await this.executeAnytimeLibraryAdmissionAttempt({
+      attempt_id: phase34_admission_attempt_id,
+      effect_executor_identity_digest,
+      external_effect_executor,
+      authored_by_candidate,
     });
     await this.#ledger.append('SKILL_REVISION_LIBRARY_ADMITTED', {
       admission_id: admission.admission_id,
@@ -1343,12 +1575,15 @@ export class RsiRuntimeService {
       successor_evidence_digest: admission.successor_evidence_digest,
       previous_library_digest: admission.current_library_digest,
       adopted_library_digest: admission.proposed_library_digest,
+      phase34_admission_attempt_id: prepared.attempt_id,
+      phase34_admission_attempt_digest: adoption.attempt_digest,
       append_only_library_update: true,
+      phase34_certificate_and_durable_attempt_required: true,
       parent_retained: true,
       direct_browser_execution_authority: false,
       authority_effect: false,
     });
-    return Object.freeze({ admission, adoption });
+    return Object.freeze({ admission, prepared, adoption });
   }
 
   async nominatePromotion({ candidate_id, qualification_digest } = {}) {
