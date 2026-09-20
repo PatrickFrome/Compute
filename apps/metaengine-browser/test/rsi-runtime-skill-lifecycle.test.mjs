@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,16 @@ import {
 
 const SOURCE='a'.repeat(40);
 const d=(char)=>`sha256:${char.repeat(64)}`;
+function stableState(value){
+  if(Array.isArray(value))return value.map(stableState);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key)=>[key,stableState(value[key])]));
+}
+function lifecycleStateDigest(value){
+  const clone=structuredClone(value);
+  delete clone.state_digest;
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableState(clone)),'utf8').digest('hex')}`;
+}
 
 function verifiedSkill({id='skill.runtime.credit',source='b',impl='c'}={}){
   const capsule=createRsiSkillCapsule({
@@ -246,6 +257,96 @@ test('library append does not imply activation and one external shadow evidence 
   }finally{await fs.rm(root,{recursive:true,force:true})}
 });
 
+
+test('R10 runtime exposure preview is zero-effect and converts the hold only in the derived governance',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-exposure-preview-'));
+  try{
+    const statePath=path.join(root,'skill-state.json');
+    const skill=verifiedSkill({id:'skill.runtime.exposure.preview',source:'b',impl:'c'});
+    const seed=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+    await seed.init();
+    await seed.adoptVerifiedLibrary({
+      library:library([skill],'runtime.skill.library.exposure.preview'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    const ep=episode({command:uuidFor(251),skillDigest:skill.capsule.skill_digest});
+    await seed.recordCreditedOutcome({
+      episode:ep,
+      credit_receipt:credit(ep,{sign:'POSITIVE',score:0.25,id:'credit.exposure.preview.1'}),
+      generation:1,
+      authoring_prior:'VERIFIED_DIRECT_SKILL',
+      authoring_provenance_digest:d('e'),
+      external_evaluator:true,
+      authored_by_candidate:false,
+    });
+
+    const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+    persisted.admission_exposure_hold_skill_digests=[skill.capsule.skill_digest];
+    persisted.admission_exposure_hold_count=1;
+    persisted.exploration_only_skill_digests=[];
+    persisted.exploration_only_skill_count=0;
+    persisted.exploration_only_prevents_full_active=true;
+    persisted.exploration_only_release_requires_external_governance=true;
+    persisted.state_digest=lifecycleStateDigest(persisted);
+    await fs.writeFile(statePath,JSON.stringify(persisted)+'\n','utf8');
+
+    const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+    await store.init();
+    const before=store.snapshot();
+    assert.equal(before.admission_exposure_hold_count,1);
+    assert.equal(before.exploration_only_skill_count,0);
+    assert.equal(store.governance().entries[0].state,'DORMANT_CAP');
+
+    const preview=store.exposureReleaseGovernancePreview(skill.capsule.skill_digest);
+    assert.equal(preview.preview_only,true);
+    assert.equal(preview.hold_mutation_performed,false);
+    assert.equal(preview.retrieval_exposure_changed,false);
+    assert.equal(preview.full_activation_authorized,false);
+    assert.equal(preview.current_governance.entries[0].state,'DORMANT_CAP');
+    assert.equal(preview.next_governance.entries[0].state,'EXPLORATION_ACTIVE');
+    assert.equal(preview.next_governance.entries[0].exploration_only_hold,true);
+    assert.equal(preview.next_governance.admission_exposure_hold_skill_digests,undefined);
+    assert.deepEqual(preview.next_governance.exploration_only_skill_digests,[skill.capsule.skill_digest]);
+
+    const after=store.snapshot();
+    assert.equal(after.governance_digest,before.governance_digest);
+    assert.deepEqual(after.admission_exposure_hold_skill_digests,before.admission_exposure_hold_skill_digests);
+    assert.deepEqual(after.exploration_only_skill_digests,before.exploration_only_skill_digests);
+    const diskAfter=JSON.parse(await fs.readFile(statePath,'utf8'));
+    assert.equal(diskAfter.state_digest,persisted.state_digest);
+    assert.deepEqual(diskAfter.admission_exposure_hold_skill_digests,persisted.admission_exposure_hold_skill_digests);
+    assert.deepEqual(diskAfter.exploration_only_skill_digests,persisted.exploration_only_skill_digests);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
+});
+
+test('R10 runtime lifecycle rejects overlapping admission and exploration-only holds on reload',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-hold-overlap-'));
+  try{
+    const statePath=path.join(root,'skill-state.json');
+    const skill=verifiedSkill({id:'skill.runtime.hold.overlap',source:'b',impl:'c'});
+    const store=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+    await store.init();
+    await store.adoptVerifiedLibrary({
+      library:library([skill],'runtime.skill.library.hold.overlap'),
+      external_library_owner:true,
+      authored_by_candidate:false,
+    });
+    const persisted=JSON.parse(await fs.readFile(statePath,'utf8'));
+    persisted.admission_exposure_hold_skill_digests=[skill.capsule.skill_digest];
+    persisted.admission_exposure_hold_count=1;
+    persisted.exploration_only_skill_digests=[skill.capsule.skill_digest];
+    persisted.exploration_only_skill_count=1;
+    persisted.exploration_only_prevents_full_active=true;
+    persisted.exploration_only_release_requires_external_governance=true;
+    persisted.state_digest=lifecycleStateDigest(persisted);
+    await fs.writeFile(statePath,JSON.stringify(persisted)+'\n','utf8');
+
+    const reloaded=new RsiRuntimeSkillLifecycle({statePath,source_sha:SOURCE});
+    await assert.rejects(()=>reloaded.init(),/hold_kind_overlap_forbidden/);
+  }finally{await fs.rm(root,{recursive:true,force:true})}
+});
+
 test('candidate-authored lifecycle evidence and unrouted attribution fail closed',async()=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'metaengine-rsi-skill-authority-'));
   try{
@@ -371,6 +472,11 @@ test('skill lifecycle trust root remains evidence-only and cannot widen Browser 
   assert.equal(root.candidate_can_write_lifecycle,false);
   assert.equal(root.candidate_can_reactivate_skill,false);
   assert.equal(root.candidate_can_retire_skill,false);
+  assert.equal(root.exploration_only_holds_persisted,true);
+  assert.equal(root.exploration_only_prevents_full_active,true);
+  assert.equal(root.exploration_only_release_requires_external_governance,true);
+  assert.equal(root.exposure_release_governance_preview_is_zero_effect,true);
+  assert.equal(root.exposure_release_preview_swaps_admission_hold_for_exploration_hold,true);
   assert.equal(root.skill_activation_view_is_execution_authority,false);
   assert.equal(root.execution_authority,false);
   assert.equal(root.promotion_authority,false);

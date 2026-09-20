@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: browser-windows-installed-chat-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-installed-chat-qualification:
     runs-on: windows-2025

@@ -22,6 +22,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: browser-windows-package-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-nsis-package-smoke:
     runs-on: windows-2025
