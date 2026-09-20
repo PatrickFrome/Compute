@@ -796,6 +796,33 @@ export class NativeSupervisorClient {
     this.#timer = null;
   }
 
+  // T2-5 Unified Work Graph item 3: operator shell commands reach the edge
+  // through the same device-signed rail as every other supervisor action.
+  // Both methods are thin transport — all validation/CAS lives in the edge
+  // routes and the SQL beneath them; neither grants any authority here.
+  async devosResumeAdmission({ expected_generation_floor = null } = {}) {
+    const payload = { confirm: true };
+    if (expected_generation_floor != null) {
+      const floor = Number(expected_generation_floor);
+      if (!Number.isSafeInteger(floor) || floor < 0) throw new Error('native_supervisor_devos_resume_floor_invalid');
+      payload.expected_generation_floor = floor;
+    }
+    const response = await this.#signedRequest('/v1/devos/resume-admission', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`native_supervisor_devos_resume_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+    return body;
+  }
+
+  async metaObjectiveSet({ roadmap_id = null, objective, nodes = null } = {}) {
+    const payload = { objective: String(objective ?? '') };
+    if (roadmap_id != null) payload.roadmap_id = String(roadmap_id);
+    if (Array.isArray(nodes)) payload.nodes = nodes;
+    const response = await this.#signedRequest('/v1/meta/objective', { payload });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`native_supervisor_meta_objective_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+    return body;
+  }
+
   setControlState({ mode, armed } = {}) {
     if (mode !== undefined && String(mode).trim().toUpperCase() !== 'CONTROL') {
       const error = new Error(ALWAYS_ON_CONTROL_ERROR);
