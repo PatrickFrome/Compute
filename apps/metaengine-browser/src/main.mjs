@@ -705,7 +705,13 @@ async function initFleet() {
     policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8, elastic_max_target_agents: fleetElasticMaxTargetAgents() },
   });
   await fleet.init();
-  await fleet.reconcile({ active: false });
+  // Operator fleet target persistence: honor the persisted boot_fleet_target
+  // (>0) with ONE active reconcile so the operator's fleet is restored after a
+  // restart (self-update, crash, reboot). Restart-stale LOST rows occupy no
+  // slots, so the pass spawns fresh agents up to the recorded target. A target
+  // of 0 keeps the historical fail-safe boot posture (no auto-grow).
+  const bootFleetTarget = Math.min(64, Math.max(0, Math.floor(Number(fleet?.snapshot?.()?.policy?.boot_fleet_target)) || 0));
+  await fleet.reconcile({ active: bootFleetTarget > 0, target_agents: bootFleetTarget > 0 ? bootFleetTarget : null });
 }
 
 function developmentPlaneRepoRoot() {
@@ -892,6 +898,15 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
   if (command === 'FLEET_RECONCILE') {
     const before = fleet?.snapshot() || null;
+    // Operator fleet target persistence (2026-09-21): an operator-issued
+    // explicit target is recorded as boot_fleet_target and survives restarts.
+    // The DevOS elastic governor's plan payload carries its schema marker and
+    // is NEVER captured as the boot seed — demand-driven targets stay
+    // ephemeral by design.
+    const isGovernorPlan = payload?.schema === 'metaengine.browser.fleet-elastic-plan.v1' || payload?.governor != null;
+    if (!isGovernorPlan && payload?.target_agents != null && typeof fleet?.setOperatorFleetTarget === 'function') {
+      await fleet.setOperatorFleetTarget(payload.target_agents);
+    }
     const retired = await retireFleetSurplus(payload?.retire_agent_ids);
     const sweptOrphans = await sweepOrphanFleetTabs();
     const physicalCleanupCount = retired.length + sweptOrphans.length;
