@@ -5495,3 +5495,25 @@ Stage Summary:
 - Все 12 контуров T1-T12, зависящие от БД (T1 окружение, T5 command fabric, T8 emergency, T11 wake), теперь верифицируемы локально.
 - Следующий шаг: (a) оператор — дамп supabase-backup-20260920.tar.gz для паритета ДАННЫХ (storage 1831, история эпизодов, крон-задачи); (b) преемник — локальный прогон edge a2-browser-native-supervisor-v1 против БД (репетиция T5/T8/T11 с edge-кода), затем реконструкция ДАННЫХ DevOS-плоскости невозможна без дампа — переключить фокус на edge-деплой подготовку (вариант A).
 - Риски: стабы облачных функций могут отличаться поведением от облачных оригиналов (некритично: облачные вызывались только через применённые миграции); таблица sandbox.migration_ledger — локальный инструмент, в дамп не смешивать.
+---
+Task ID: EDGE-LOCAL-RUNTIME-20260921-004
+Agent: main (Super Z, автономный раунд по крону)
+Task: Поднять каноническую edge-функцию a2-browser-native-supervisor-v1 локально против Pigsty; E2E-репетиция T2/T5/T11 с device-подписью; QA багов по ходу.
+
+Work Log:
+- Рантайм-решение: bun 1.3.14 (deno в песочнице нет). Барьеры и решения:
+  1) bun не резолвит Deno-спесифик 'npm:postgres@3.4.7' → мини-сервис mini-services/a2-edge-local с НЕДЕРЖАТЕЛЬНЫМ синком: при каждом старте cp канонического кода edge + apps/metaengine-browser/src (сохранение относительной глубины ../../src) в edge-runtime/ + переписывание единственной строки импорта. Репозиторий чистый.
+  2) Полифилл Deno.{env,serve} → Bun.serve (порт 3031, idleTimeout 120).
+  3) service_role НЕ в JWT-форме → realtime-приватные каналы выключены, wake идёт по POSTGRES_NOTIFY (канонический локальный путь).
+- Реконструкция enrollment-слоя (облачные артефакты вне миграций, контракт из index.ts): infra/pigsty/bootstrap/06-reconstruct-device-enrollment.sql — таблица device_enrollment_request (12 колонок, zero-authority: revoke insert/update/delete от service_role) + RPC h205f22_a2_browser_device_activate_approved_v1 (APPROVED-гейт, device upsert + pairing-токен sha256, возвращает одноразовый pairing_token). Фиксы по ходу: extensions.gen_random_bytes/дigest квалификация (search_path), bytea→uuid через encode hex.
+- Найден и задокументирован гon потери: триггер glm_pulse_command (восстановленный ранее вручную) ПОГИБ при пересоздании командной таблицы миграционным раннером в раунде 003. Канонизирован infra/pigsty/bootstrap/07-wake-triggers.sql (glm_pulse_command + glm_pulse_state) — применять после любых пересозданий таблиц. После восстановления wake заработал.
+- E2E-клиент mini-services/a2-edge-local/test-e2e.ts (10 проверок, bun, WebCrypto P-256): enrollment proof → DB approve (эмуляция оператор-гейта) → activation → signed heartbeat → issue→lease→receipt→readback → pg_notify wake с замером латентности.
+- QA-баги E2E-клиента (найдены и исправлены): (1) порядок ключей JWK должен соответствовать canonicalJwk edge {crv,ext,key_ops,kty,x,y} — иначе fingerprint mismatch; (2) Bun.spawnSync требует МАССИВ команды; (3) подпись покрывает ПОЛНЫЙ canonicalPath с маркером /a2-browser-native-supervisor-v1/... (edge line 278), не укороченный путь; (4) batch-результат требует топ-уровневый ok:true (v_ok:=item->>'ok'; иначе FAILED command_failed); (5) wake-notify смэтчит официанта только при target_client_id=client_id (иначе client=null — будит всех; в тесте было без target → TIMEOUT при живом notify).
+- ВАЖНОЕ наблюдение для прод-клиентов: команды chat-plane без target_client_id будят ВСХ официантов (широковещательный wake) — контракт сохранён из облака.
+
+Stage Summary:
+- EDGE-ФУНКЦИЯ КАНОНИЧЕСКОГО КОДА РАБОТАЕТ ЛОКАЛЬНО: health ok=true, 19 маршрутов задекларировано, backend_transport=DIRECT_POSTGRES, command_wait_batch=POSTGRES_NOTIFY_PROXY. E2E 10/10 PASS (отчёт download/edge-e2e-10-of-10-20260921.txt): T2 enrollment/activation/heartbeat ✓, T5 issue→lease(command-batch.v1)→receipt→readback COMPLETED ✓, T11 wake за 1517ms при вставке на 1500ms (wake_reason=POSTGRES_NOTIFY — мгновенное пробуждение, не поллинг) ✓.
+- Контракты задокументированы в mini-services/a2-edge-local/README.md (canonicalPath-подпись, JWK-канонизация, ok:true, effect_outcome для мутаций, wake-конверт).
+- T1-T12 статус: T1 окружение ✓ (103/103 миграций + smoke 11/13), T2 репетиция через edge ✓, T5 ✓, T11 ✓ — всё на локальном контуре. Полностью готовы встречать live-браузер оператора: достаточно смены 3 pinned-URL (вариант A).
+- Следующие шаги: (a) T8 emergency-wait через edge (wait-emergency route смонтирован, требует теста с service_role issuer); (b) cognitive-delta роуты через edge; (c) реанимация rehearsal для оператора: скрипт-инструкция подключения его браузера к локальному edge (3 pinned-URL + сборка), либо перенос edge на VPS.
+- Риски: edge-runtime/ — производная копия (не коммитить в репо); стабы облачных функций требуют замены телами из дампа оператора при его появлении; после пересоздания таблиц миграциями — перевыполнить bootstrap/07 (задокументировано).

@@ -1,0 +1,7 @@
+import projectionCore from './metaengine-devos-projection-core.cjs';
+
+export const METAENGINE_DEVOS_PROJECTION_SCHEMA = projectionCore.METAENGINE_DEVOS_PROJECTION_SCHEMA;
+export const METAENGINE_DEVOS_SURFACE_REGISTRY_SCHEMA = projectionCore.METAENGINE_DEVOS_SURFACE_REGISTRY_SCHEMA;
+export const METAENGINE_DEVOS_SURFACE_TYPES = projectionCore.METAENGINE_DEVOS_SURFACE_TYPES;
+export const createMetaengineDevOSSurfaceRegistry = projectionCore.createMetaengineDevOSSurfaceRegistry;
+export const projectMetaengineDevOS = projectionCore.projectMetaengineDevOS;

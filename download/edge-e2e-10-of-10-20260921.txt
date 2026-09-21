@@ -1,0 +1,13 @@
+✅ T2 health — wait=POSTGRES_NOTIFY_PROXY
+✅ T2 enrollment request — request_id=0e68efc2-4363-4ad9-ab82-66c2113450dd
+✅ OP operator-approve gate — status=APPROVED (zero-authority: gate is operator-only, here emulated in DB)
+✅ T2 device activation — device_id=8df5be30-654d-5791-d426-1ddc424329d0
+✅ T2 signed heartbeat — state upsert via edge (per-plane merge)
+✅ T5 lease via edge — leased=1, своя команда в батче=true
+✅ T5 result-batch receipt — {"schema":"metaengine.native-supervisor.command-batch-completion.v1","results":[
+✅ T5 readback COMPLETED — COMPLETED ok=true
+✅ T11 pg_notify wake — wake за 1515ms (insert на ~1500ms, wait_ms=6000) wake_reason=POSTGRES_NOTIFY
+✅ T11 woken command completed — COMPLETED
+
+=== ИТОГ ===
+10/10 PASS
