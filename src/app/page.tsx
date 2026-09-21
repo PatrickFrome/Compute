@@ -13,8 +13,9 @@ import { FleetPanel } from "@/components/mc/fleet-panel";
 import { MechanicsPanel } from "@/components/mc/mechanics-panel";
 import { RoadmapPanel } from "@/components/mc/roadmap-panel";
 import { E2ePanel } from "@/components/mc/e2e-panel";
+import { FallbackPanel } from "@/components/mc/fallback-panel";
 import { usePoll, timeAgo, formatMs } from "@/components/mc/use-poll";
-import { RefreshCw, RadioTower, Database, Hexagon, ChevronLast } from "lucide-react";
+import { RefreshCw, RadioTower, Database, Hexagon, ChevronLast, ShieldAlert } from "lucide-react";
 
 const REFRESH_OPTIONS = [
   { label: "2s", ms: 2000 },
@@ -24,8 +25,19 @@ const REFRESH_OPTIONS = [
 ];
 
 const TAB_ORDER = [
-  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "mechanics", "roadmap", "lab",
+  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "fallback", "mechanics", "roadmap", "lab",
 ] as const;
+
+interface FallbackData {
+  ok: boolean;
+  snapshot: {
+    mode: string;
+    gate: { locked: boolean };
+    simulation: { active: boolean };
+  };
+  dbTransitions: Record<string, unknown>[];
+  at: string;
+}
 
 interface OverviewData {
   ok: boolean;
@@ -64,6 +76,7 @@ export default function Home() {
   const fleet = usePoll("/api/fleet", interval ?? 15000);
   const mechanics = usePoll<MechanicsData>("/api/mechanics", null);
   const roadmap = usePoll("/api/roadmap", null);
+  const fallback = usePoll<FallbackData>("/api/fallback", interval ?? 15000);
 
   // Alt+1..8 — quick tab navigation (hint in footer)
   useEffect(() => {
@@ -82,6 +95,8 @@ export default function Home() {
   const pendingCount = enrollment.data?.requests.filter((r) => r.status === "PENDING").length ?? 0;
   const dbOk = !!overview.data?.db?.version;
   const edgeOk = overview.data?.edge.ok === true;
+  const reserveActive = fallback.data?.snapshot?.mode === "LOCAL_FALLBACK";
+  const simActive = fallback.data?.snapshot?.simulation?.active === true;
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100">
@@ -128,6 +143,15 @@ export default function Home() {
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
                 </span>
                 {pendingCount} pending gate
+              </span>
+            )}
+            {(reserveActive || simActive) && (
+              <span
+                data-testid="reserve-mode-alert"
+                className="flex items-center gap-1 rounded-md border border-amber-500/50 bg-amber-500/15 px-2 py-1 font-mono text-[10px] text-amber-300"
+              >
+                <ShieldAlert className="h-3 w-3" aria-hidden />
+                {simActive && !reserveActive ? "RESERVE DRILL (SIM)" : "RESERVE MODE ACTIVE"}
               </span>
             )}
             <div className="flex items-center overflow-hidden rounded-md border border-zinc-800">
@@ -179,6 +203,9 @@ export default function Home() {
               Cognitive Bus
             </TabsTrigger>
             <TabsTrigger value="fleet" className="font-mono text-[11px] data-[state=active]:bg-teal-500/15 data-[state=active]:text-teal-300">DevOS Fleet</TabsTrigger>
+            <TabsTrigger value="fallback" data-testid="tab-fallback" className="font-mono text-[11px] data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
+              Fallback Console
+            </TabsTrigger>
             <TabsTrigger value="mechanics" data-testid="tab-mechanics" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">Mechanics</TabsTrigger>
             <TabsTrigger value="roadmap" className="font-mono text-[11px] data-[state=active]:bg-zinc-700 data-[state=active]:text-zinc-200">Roadmap</TabsTrigger>
             <TabsTrigger value="lab" data-testid="tab-lab" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">E2E Lab</TabsTrigger>
@@ -201,6 +228,9 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="fleet" className="mt-0 outline-none">
             <FleetPanel poll={fleet as unknown as Parameters<typeof FleetPanel>[0]["poll"]} />
+          </TabsContent>
+          <TabsContent value="fallback" className="mt-0 outline-none">
+            <FallbackPanel poll={fallback as unknown as Parameters<typeof FallbackPanel>[0]["poll"]} />
           </TabsContent>
           <TabsContent value="mechanics" className="mt-0 outline-none">
             <MechanicsPanel poll={mechanics as unknown as Parameters<typeof MechanicsPanel>[0]["poll"]} />
