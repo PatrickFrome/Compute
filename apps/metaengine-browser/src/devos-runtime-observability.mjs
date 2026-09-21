@@ -77,6 +77,27 @@ export function buildDevosRuntimeObservability(snapshot = {}) {
       authority_effect: false,
     }),
     transport_promotion: promotionProjection(taskCycle.fleet_transport_promotion),
+    // Root-surface dispatch-effect telemetry (2026-09-21): the lease→effect
+    // bootstrap (conversation seed / poisoned-draft flush) and the dispatch
+    // outcome ride the runtime plane so the operator console can see WHY a
+    // leased task is not producing conversations. Bounded scalars only.
+    dispatch: Object.freeze({
+      last_state: clip(taskCycle.dispatch_effect?.last?.state, 64),
+      last_stage: clip(taskCycle.dispatch_effect?.last?.stage, 16),
+      last_effect_state: clip(taskCycle.dispatch_effect?.last?.effect_state, 48),
+      last_reason: clip(taskCycle.dispatch_effect?.last?.reason, 160),
+      last_task_id: clip(taskCycle.dispatch_effect?.last?.task_id, 96),
+      last_agent_id: clip(taskCycle.dispatch_effect?.last?.agent_id, 96),
+      last_at: clip(taskCycle.dispatch_effect?.last?.at, 64),
+      last_composer_chars_before: intOrNull(taskCycle.dispatch_effect?.last?.composer_chars_before),
+      dispatches: intOrNull(taskCycle.dispatch_effect?.counters?.dispatches),
+      proven: intOrNull(taskCycle.dispatch_effect?.counters?.proven),
+      ambiguous: intOrNull(taskCycle.dispatch_effect?.counters?.ambiguous),
+      seed_attempts: intOrNull(taskCycle.dispatch_effect?.counters?.seed_attempts),
+      seed_proven: intOrNull(taskCycle.dispatch_effect?.counters?.seed_proven),
+      flush_over_limit: intOrNull(taskCycle.dispatch_effect?.counters?.flush_over_limit),
+      authority_effect: false,
+    }),
     // T2-5 addendum: the agent toolbelt and the unified work graph ride the
     // same bounded runtime-observability plane (supervisor_lifecycle is on
     // the edge state whitelist), giving the operator remote live evidence of

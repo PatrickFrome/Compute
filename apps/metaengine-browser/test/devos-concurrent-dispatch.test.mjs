@@ -208,7 +208,7 @@ test('D-C3: poisoned root draft is flushed into a proven conversation BEFORE the
   }
 });
 
-test('D-C3: an over-limit draft skips the flush and fails with the precise reason (no blind append)', async () => {
+test('D-C3: an over-limit draft attempts the verified seed replace and still fails with the precise reason when it cannot be proven (no blind append)', async () => {
   const lease = mkLease(4, 'tab_c05a46b6-5fbd-4b36-97e2-d7dbbfe94d14');
   const fleet = fleetOf([lease]);
   const types = [];
@@ -219,12 +219,14 @@ test('D-C3: an over-limit draft skips the flush and fails with the precise reaso
   const executeCommand = async (command) => {
     if (command.action === 'FLEET_RECONCILE') return fleet;
     if (command.action === 'CAPTURE') return frame({ url: 'https://chat.z.ai/', tabId: lease.tab_id, targetId: lease.target_id, composerValueLength: 34064 });
-    if (command.action === 'SEMANTIC_TYPE') { types.push(command.payload.text.length); return { effect_state: 'AMBIGUOUS_AFTER_ENTER', automatic_retry_allowed: false, authority_effect: true }; }
+    if (command.action === 'SEMANTIC_TYPE') { types.push(command.payload); return { effect_state: 'AMBIGUOUS_AFTER_ENTER', automatic_retry_allowed: false, authority_effect: true }; }
     throw new Error(`unexpected_action:${command.action}`);
   };
   const cycle = new DevOsNativeTaskCycle({ getState: async () => ({ fleet, active_tab: { tab_id: 'tab_other' }, tabs: [] }), executeCommand, signedRequest });
   await assert.rejects(() => cycle.cycle(), /fleet_task_root_draft_over_flush_limit:34064/);
-  assert.equal(types.length, 0, 'nothing was appended to the dead draft');
+  assert.equal(types.length, 1, 'exactly one verified-replace attempt: the SHORT seed replaces the dead draft wholesale');
+  assert.equal(types[0].replace_existing, true, 'the seed replace never appends to the poisoned draft');
+  assert.ok(types[0].text.length < 1000, 'the submitted text is tiny — no oversized garbage can ever be sent');
 });
 
 test('D-C3: a refused flush (Enter refused by the site) degrades to the normal root dispatch path', async () => {

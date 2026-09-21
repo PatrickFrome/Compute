@@ -56,6 +56,13 @@ function fleetLeaseDispatchConcurrency(liveAgents) {
 // prompt to a dead draft.
 const GLM_ROOT_DRAFT_FLUSH_MAX_CHARS = 32000;
 const GLM_ROOT_DRAFT_FLUSH_MARKER = '[METAENGINE FLEET BOOTSTRAP FLUSH v1 - prior accumulated briefs are historical; operate on the next verified task block]';
+// LIVE 2026-09-21 (B0/A1/C10 triple-AMBIGUOUS): the GLM root composer
+// silently refuses Enter on oversized drafts, so a capsule-sized FIRST
+// dispatch can never create the conversation. The root surface is now
+// bootstrapped with a tiny deterministic seed (far below any site-side
+// refusal threshold) that proves the conversation before the real dispatch
+// runs against the conversation surface, where replace+Enter are proven.
+const GLM_ROOT_CONVERSATION_SEED = 'METAENGINE FLEET CONVERSATION SEED v1 — bootstrap message: a verified fleet task block arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
 // D-C1: context tokens are re-issued at most this often per agent+epoch so the
 // rendered prompt (and its journal hash) stays deterministic within a lease.
 // Closed-loop audit fix (fleet scale): raised 64 -> 128 for larger fleets.
@@ -302,6 +309,12 @@ export class DevOsNativeTaskCycle {
   // D-C3: one flush attempt per (agent, epoch) — a refused flush must not
   // append markers on every heartbeat.
   #flushGuard = new Set();
+  // Root-surface dispatch-effect telemetry (2026-09-21 observability): the
+  // last bootstrap/dispatch outcome and bounded counters ride the cycle
+  // snapshot → supervisor_lifecycle.devos_runtime → cloud state, so the
+  // operator console can see lease→effect progress without DB access.
+  #lastDispatchEffect = null;
+  #dispatchEffectCounters = { dispatches: 0, proven: 0, ambiguous: 0, seed_attempts: 0, seed_proven: 0, flush_over_limit: 0 };
   // D-C1: enrolled device identity (token signing). Optional for tests; the
   // live main-entry always provides it.
   #identity = null;
@@ -408,7 +421,7 @@ export class DevOsNativeTaskCycle {
     if (this.#effectJournal && this.#journalInitialized && typeof this.#effectJournal.snapshot === 'function') {
       journal = this.#effectJournal.snapshot();
     }
-    return structuredClone({ ...this.#last, effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot() });
+    return structuredClone({ ...this.#last, effect_delivery_journal: journal, agent_toolbelt: this.#toolbelt.snapshot(), dispatch_effect: { last: this.#lastDispatchEffect, counters: { ...this.#dispatchEffectCounters } } });
   }
 
   async cycle() {
@@ -844,23 +857,12 @@ export class DevOsNativeTaskCycle {
   // append + Enter), which creates the conversation, clears the composer, and
   // upgrades the agent's transport proof; the real task then dispatches into
   // the clean CONVERSATION composer where the verified replace is proven.
-  async #ensureProvenConversation(lease, agent, pre) {
-    const proof = agent?.transport_proof || null;
-    const provenConversation = proof?.conversation_url ? conversationUrl(proof.conversation_url) : null;
-    const stage = classifyAgentPlatformSurface(pre?.url)?.stage || null;
-    if (provenConversation) return { state: 'PROVEN_CONVERSATION_PRESENT', conversation_url: provenConversation };
-    if (stage !== 'PRECONVERSATION_ROOT') return { state: 'NOT_AT_ROOT', conversation_url: null };
-    const composer = resolveAgentPlatformComposer(pre);
-    const draftLength = Number.isFinite(Number(composer?.value_length)) ? Number(composer.value_length) : null;
-    if (!composer || !draftLength || draftLength <= 0) return { state: 'CLEAN_ROOT_COMPOSER', conversation_url: null };
-    const guardKey = `${lease.agent_id}:${Number(lease.agent_generation_epoch ?? lease.generation_epoch ?? 1)}`;
-    if (this.#flushGuard.has(guardKey)) return { state: 'FLUSH_ALREADY_ATTEMPTED', conversation_url: null };
-    if (draftLength > GLM_ROOT_DRAFT_FLUSH_MAX_CHARS) {
-      const error = new Error(`fleet_task_root_draft_over_flush_limit:${draftLength}`);
-      error.automatic_retry_allowed = false;
-      throw error;
-    }
-    this.#flushGuard.add(guardKey);
+  // Root bootstrap submit: ONE SEMANTIC_TYPE (submit_after_type) + bounded
+  // conversation readback (6×700ms — mirrors the dispatch readback contract;
+  // the 2s command latch alone can miss the async SPA navigation). Returns
+  // the submitted observation, the last captured frame and the normalized
+  // conversation URL (null when the submit provably produced no effect).
+  async #submitRootBootstrap(lease, composer, text, { replace = false } = {}) {
     const submitted = await this.#executeCommand({
       action: 'SEMANTIC_TYPE', platform: AGENT_PLATFORM_ID,
       payload: {
@@ -868,8 +870,8 @@ export class DevOsNativeTaskCycle {
         role: composer.role,
         accessible_name: composer.accessible_name,
         semantic_ref: composer.semantic_ref,
-        text: `\n${GLM_ROOT_DRAFT_FLUSH_MARKER}`,
-        replace_existing: false,
+        text,
+        replace_existing: replace === true,
         submit_after_type: true,
       },
     });
@@ -880,9 +882,13 @@ export class DevOsNativeTaskCycle {
       post = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } });
       normalizedUrl = conversationUrl(post?.url);
     }
-    if (!normalizedUrl) {
-      return { state: 'FLUSH_SUBMIT_REFUSED', conversation_url: null, effect_state: submitted?.effect_state || null };
-    }
+    return { submitted, post, normalizedUrl };
+  }
+
+  // Prove the conversation upgrade for a root bootstrap outcome (seed or
+  // flush): marks the fleet transport proof from the captured frame and
+  // returns the bootstrap state string for the dispatch telemetry.
+  async #proveRootBootstrapConversation(lease, post, normalizedUrl, provenState, unprovenState) {
     const upgraded = await markFleetTransportProvenFromNativeFrame({
       binding: {
         agent_id: lease.agent_id,
@@ -893,10 +899,120 @@ export class DevOsNativeTaskCycle {
       frame: post,
       expected_conversation_url_sha256: sha256(normalizedUrl),
     }).catch(() => null);
+    return upgraded?.state === 'UPGRADED_CONVERSATION' ? provenState : unprovenState;
+  }
+
+  async #ensureProvenConversation(lease, agent, pre) {
+    const proof = agent?.transport_proof || null;
+    const provenConversation = proof?.conversation_url ? conversationUrl(proof.conversation_url) : null;
+    const stage = classifyAgentPlatformSurface(pre?.url)?.stage || null;
+    if (provenConversation) return { state: 'PROVEN_CONVERSATION_PRESENT', conversation_url: provenConversation };
+    if (stage !== 'PRECONVERSATION_ROOT') return { state: 'NOT_AT_ROOT', conversation_url: null };
+    const composer = resolveAgentPlatformComposer(pre);
+    // Live captures ALWAYS set value_length for text inputs (0 = empty).
+    // An ABSENT length (null/undefined — mocked or opaque frames) is treated
+    // as unknown: keep the historical clean-composer passthrough, fail-closed.
+    const rawDraftLength = composer?.value_length;
+    const draftLength = (rawDraftLength === null || rawDraftLength === undefined)
+      ? null
+      : (Number.isFinite(Number(rawDraftLength)) ? Number(rawDraftLength) : null);
+    const guardKey = `${lease.agent_id}:${Number(lease.agent_generation_epoch ?? lease.generation_epoch ?? 1)}`;
+    if (!composer || draftLength == null) return { state: 'CLEAN_ROOT_COMPOSER', conversation_url: null };
+    if (draftLength <= 0) {
+      // LIVE 2026-09-21 (B0/A1/C10 triple-AMBIGUOUS): the root composer
+      // silently refuses Enter on oversized drafts, so the first full-size
+      // dispatch could never create the conversation — the prompt stayed as
+      // a poisoned draft and every later generation hit the flush guard.
+      // Fix: prove the conversation FIRST with the tiny deterministic seed,
+      // then let the real dispatch run against the conversation surface
+      // where the verified replace is proven. One bootstrap attempt per
+      // (agent, epoch) — a refused seed must not loop on every heartbeat.
+      if (this.#flushGuard.has(guardKey)) return { state: 'SEED_ALREADY_ATTEMPTED', conversation_url: null };
+      this.#flushGuard.add(guardKey);
+      this.#dispatchEffectCounters.seed_attempts += 1;
+      this.#noteDispatchEffect({ stage: 'SEED', state: 'SEED_ATTEMPTED', task_id: lease.task_id, agent_id: lease.agent_id });
+      let boot;
+      try {
+        boot = await this.#submitRootBootstrap(lease, composer, GLM_ROOT_CONVERSATION_SEED, { replace: true });
+      } catch (error) {
+        this.#noteDispatchEffect({ stage: 'SEED', state: 'SEED_TYPE_FAILED', reason: clip(error?.message || error, 160), task_id: lease.task_id, agent_id: lease.agent_id });
+        throw error;
+      }
+      if (!boot.normalizedUrl) {
+        this.#noteDispatchEffect({ stage: 'SEED', state: 'SEED_SUBMIT_REFUSED', effect_state: boot.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
+        const error = new Error('devos_seed_submit_refused');
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
+      this.#dispatchEffectCounters.seed_proven += 1;
+      const seedState = await this.#proveRootBootstrapConversation(lease, boot.post, boot.normalizedUrl, 'SEED_CONVERSATION_PROVEN', 'SEED_CONVERSATION_UNPROVEN');
+      this.#noteDispatchEffect({ stage: 'SEED', state: seedState, effect_state: boot.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
+      return { state: seedState, conversation_url: boot.normalizedUrl, seed_effect_state: boot.submitted?.effect_state || null };
+    }
+    if (this.#flushGuard.has(guardKey)) return { state: 'FLUSH_ALREADY_ATTEMPTED', conversation_url: null };
+    if (draftLength > GLM_ROOT_DRAFT_FLUSH_MAX_CHARS) {
+      // LIVE 2026-09-21: a draft over the flush limit used to be a permanent
+      // dead end (over_flush_limit, fail-closed forever). The CLICK_SELECT
+      // gesture is live-proven to replace a poisoned root draft WHOLESALE
+      // (D-M3), so replace the oversized garbage with the SHORT seed and
+      // submit that — the submitted text is tiny, which removes the oversize
+      // refusal risk entirely. If even the verified replace fails (typed
+      // BEFORE Enter, no effect), fall back to the historical over_flush_limit
+      // fail-closed error so the task stays honestly ambiguous.
+      this.#flushGuard.add(guardKey);
+      this.#noteDispatchEffect({ stage: 'SEED', state: 'OVER_LIMIT_REPLACE_SEED_ATTEMPTED', composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
+      let boot = null;
+      try {
+        boot = await this.#submitRootBootstrap(lease, composer, GLM_ROOT_CONVERSATION_SEED, { replace: true });
+      } catch {
+        boot = null;
+      }
+      if (!boot?.normalizedUrl) {
+        this.#dispatchEffectCounters.flush_over_limit += 1;
+        this.#noteDispatchEffect({ stage: 'SEED', state: 'OVER_LIMIT_REPLACE_SEED_FAILED', composer_chars_before: draftLength, effect_state: boot?.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
+        const error = new Error(`fleet_task_root_draft_over_flush_limit:${draftLength}`);
+        error.automatic_retry_allowed = false;
+        throw error;
+      }
+      this.#dispatchEffectCounters.seed_proven += 1;
+      const replaceState = await this.#proveRootBootstrapConversation(lease, boot.post, boot.normalizedUrl, 'SEED_CONVERSATION_PROVEN', 'SEED_CONVERSATION_UNPROVEN');
+      this.#noteDispatchEffect({ stage: 'SEED', state: replaceState, effect_state: boot.submitted?.effect_state || null, composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
+      return { state: replaceState, conversation_url: boot.normalizedUrl, seed_effect_state: boot.submitted?.effect_state || null };
+    }
+    this.#flushGuard.add(guardKey);
+    const boot = await this.#submitRootBootstrap(lease, composer, `\n${GLM_ROOT_DRAFT_FLUSH_MARKER}`, { replace: false });
+    if (!boot.normalizedUrl) {
+      this.#noteDispatchEffect({ stage: 'FLUSH', state: 'FLUSH_SUBMIT_REFUSED', effect_state: boot.submitted?.effect_state || null, composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
+      return { state: 'FLUSH_SUBMIT_REFUSED', conversation_url: null, effect_state: boot.submitted?.effect_state || null };
+    }
+    const flushState = await this.#proveRootBootstrapConversation(lease, boot.post, boot.normalizedUrl, 'FLUSHED_CONVERSATION_PROVEN', 'FLUSHED_CONVERSATION_UNPROVEN');
+    this.#noteDispatchEffect({ stage: 'FLUSH', state: flushState, effect_state: boot.submitted?.effect_state || null, composer_chars_before: draftLength, task_id: lease.task_id, agent_id: lease.agent_id });
     return {
-      state: upgraded?.state === 'UPGRADED_CONVERSATION' ? 'FLUSHED_CONVERSATION_PROVEN' : 'FLUSHED_CONVERSATION_UNPROVEN',
-      conversation_url: normalizedUrl,
-      flush_effect_state: submitted?.effect_state || null,
+      state: flushState,
+      conversation_url: boot.normalizedUrl,
+      flush_effect_state: boot.submitted?.effect_state || null,
+    };
+  }
+
+  // Bounded dispatch-effect telemetry note: replaces the last record and
+  // stamps the wall clock. Payload fields are clipped scalars only — no
+  // prompt text ever rides the observability plane. composer_chars_before
+  // describes the root surface at the START of the dispatch attempt, so it
+  // inherits across the seed→dispatch chain until a new attempt resets it.
+  #noteDispatchEffect(patch = {}) {
+    const prior = this.#lastDispatchEffect || {};
+    const chars = Number.isSafeInteger(patch.composer_chars_before)
+      ? patch.composer_chars_before
+      : (prior.composer_chars_before ?? null);
+    this.#lastDispatchEffect = {
+      at: new Date().toISOString(),
+      stage: clip(patch.stage, 16),
+      state: clip(patch.state, 64),
+      effect_state: clip(patch.effect_state, 48) || null,
+      reason: clip(patch.reason, 160) || null,
+      task_id: clip(patch.task_id, 96) || null,
+      agent_id: clip(patch.agent_id, 96) || null,
+      composer_chars_before: chars,
     };
   }
 
@@ -1043,6 +1159,8 @@ export class DevOsNativeTaskCycle {
           effect_barrier_crossed: true,
         });
       } catch (error) {
+        this.#dispatchEffectCounters.ambiguous += 1;
+        this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'AMBIGUOUS', reason: 'ENTER_SUBMIT_EFFECT_AMBIGUOUS', effect_state: submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
         await journal?.markAmbiguous(effectBinding, { reason: 'ENTER_SUBMIT_EFFECT_AMBIGUOUS', enter_submit_attempted: clickIssued, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
         await this.#reportAmbiguous(lease, 'ENTER_SUBMIT_EFFECT_AMBIGUOUS').catch(() => {});
         throw error;
@@ -1071,6 +1189,9 @@ export class DevOsNativeTaskCycle {
         ? (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : submitState)
         : (newConversationObserved ? 'PROVEN_NEW_CONVERSATION' : null);
       if (!effectState || !normalizedUrl) {
+        this.#dispatchEffectCounters.dispatches += 1;
+        this.#dispatchEffectCounters.ambiguous += 1;
+        this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'AMBIGUOUS', reason: 'SEND_EFFECT_NOT_PROVEN', effect_state: submitState || null, task_id: lease.task_id, agent_id: lease.agent_id });
         await journal?.markAmbiguous(effectBinding, { reason: 'SEND_EFFECT_NOT_PROVEN', enter_submit_attempted: true, physical_effect_attempted: true, effect_barrier_crossed: true }).catch(() => {});
         await this.#reportAmbiguous(lease, 'SEND_EFFECT_NOT_PROVEN').catch(() => {});
         const error = new Error('devos_send_effect_ambiguous');
@@ -1083,6 +1204,9 @@ export class DevOsNativeTaskCycle {
         conversation_url_sha256: sha256(normalizedUrl),
         effect_state: effectState,
       };
+      this.#dispatchEffectCounters.dispatches += 1;
+      this.#dispatchEffectCounters.proven += 1;
+      this.#noteDispatchEffect({ stage: 'DISPATCH', state: 'PROVEN', effect_state: effectState, task_id: lease.task_id, agent_id: lease.agent_id });
       await journal?.markDeliveryPending(effectBinding, {
         conversation_url_sha256: proof.conversation_url_sha256,
         effect_state: proof.effect_state,
