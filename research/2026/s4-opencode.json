@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "GitHub - opencode-ai/opencode: A powerful AI coding",
+    "snippet": "Sep 18, 2025 — OpenCode is a Go-based CLI application that brings AI assistance to your terminal. It provides a TUI (Terminal User Interface) for interacting ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "Sep 18, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://opencode.ai",
+    "name": "Intro | AI coding agent built for the terminal",
+    "snippet": "OpenCode is an open source AI coding agent . It's available as a terminal-based interface, desktop app, or IDE extension. OpenCode TUI with the opencode theme. Read more",
+    "host_name": "opencode.ai",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://nimbalyst.com",
+    "name": "What is OpenCode? The Complete 2026 Guide",
+    "snippet": "Apr 25, 2026 — OpenCode is an open-source, model-agnostic AI coding agent that runs in your terminal, desktop, or IDE and can drive over 75 AI providers ... Read more",
+    "host_name": "nimbalyst.com",
+    "rank": 2,
+    "date": "Apr 25, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.developersdigest.tech",
+    "name": "OpenCode Developer Guide: The Open Source AI Coding",
+    "snippet": "Jun 12, 2026 — The core architecture: Terminal UI (TUI ) built with Bubble Tea - a rich interactive interface in your terminal",
+    "host_name": "www.developersdigest.tech",
+    "rank": 3,
+    "date": "Jun 12, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com",
+    "name": "Opencode: AI coding agent, built for the terminal",
+    "snippet": "Jul 6, 2025 — gemini- cli , claude code , acli ・ libraries for building a TUI as an \" open - source stack\". focused on LLMs or AI, move opencode to charm ・ ...",
+    "host_name": "news.ycombinator.com",
+    "rank": 4,
+    "date": "Jul 6, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://ofox.ai",
+    "name": "OpenCode vs Codex CLI: Terminal AI Coding Agent",
+    "snippet": "Jul 29, 2026 — OpenCode and Codex CLI are both terminal-first coding agents, TUI , run /models , and pick. Both are open source, and both read an AGENTS.md ...",
+    "host_name": "ofox.ai",
+    "rank": 5,
+    "date": "Jul 29, 2026",
+    "favicon": ""
+  }
+]

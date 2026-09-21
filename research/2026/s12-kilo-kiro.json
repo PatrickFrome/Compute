@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://dev.to",
+    "name": "I Tested the Top Spec-Driven Dev Tools in 2026",
+    "snippet": "Mar 24, 2026 — Kiro is AWS's answer to spec-driven development . Launched mid-2025, it's a full VS Code fork, not just an extension bolted onto the side. What ... Read more",
+    "host_name": "dev.to",
+    "rank": 0,
+    "date": "Mar 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://kiro.dev",
+    "name": "Specs - Features - Docs",
+    "snippet": "Aug 27, 2026 — Use Kiro's structured specifications to break down complex features into detailed implementation plans with tracking.",
+    "host_name": "kiro.dev",
+    "rank": 1,
+    "date": "Aug 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.augmentcode.com",
+    "name": "Kiro vs Intent (2026): AWS Spec-Driven IDE vs Living",
+    "snippet": "Mar 2, 2026 — Both Kiro and Intent are spec-driven . The difference: Kiro uses EARS notation inside VS Code. Intent uses living specs with multi-agent ...",
+    "host_name": "www.augmentcode.com",
+    "rank": 2,
+    "date": "Mar 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.doit.com",
+    "name": "Spec-Driven Development with Kiro: AI Code Ownership - DoiT",
+    "snippet": "Apr 27, 2026 — AI agents write the code , but who owns the architectural decisions? Explore how Kiro's spec-driven workflow keeps teams aligned.",
+    "host_name": "www.doit.com",
+    "rank": 3,
+    "date": "Apr 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://aws.plainenglish.io",
+    "name": "What Is Spec-Driven Development and How to Implement",
+    "snippet": "Apr 24, 2026 — Kiro's spec-driven development is built on three core features: specs, steering, and hooks . Each serves a distinct purpose in the development ...",
+    "host_name": "aws.plainenglish.io",
+    "rank": 4,
+    "date": "Apr 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.vibecoder.me",
+    "name": "Amazon Kiro Reviewed for Spec-Driven AI Development in 2026",
+    "snippet": "Apr 4, 2026 — The biggest advantage of spec-driven development is architectural consistency . . The API design is consistent across endpoints.",
+    "host_name": "blog.vibecoder.me",
+    "rank": 5,
+    "date": "Apr 4, 2026",
+    "favicon": ""
+  }
+]
