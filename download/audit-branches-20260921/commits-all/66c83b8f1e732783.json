@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "27ab100eaddcc13d3a601f563da350c979b307bf",
+    "node_id": "C_kwDOT_OzB9oAKDI3YWIxMDBlYWRkY2MxM2QzYTYwMWY1NjNkYTM1MGM5NzliMzA3YmY",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-08-28T21:56:38Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-08-28T21:56:38Z"
+      },
+      "message": "ci(browser): require the no-new-privs argument in the R7L invariant\n\nThe R7L static-invariant step pinned the launcher token\n'set_no_new_privs()', the bare call form that cannot compile against\nthe workflow's own sha256-pinned rustix 1.1.4 (signature:\nset_no_new_privs(no_new_privs: bool) -> io::Result<()>, prctl.rs:631).\nRun 33214554916 failed at this token after the compile repair supplied\nthe required argument, proving the token encoded the defect rather\nthan the invariant.\n\nRequiring 'set_no_new_privs(true)' pins the actual semantic (NNP\nenabled) and is strictly stronger: it also rejects a future regression\nto set_no_new_privs(false), which the old token accepted.\n\nEvidence: E0061 at src/bin/a2-skill-source-launcher.rs:31 against the\nlocked dependency set (Cargo.lock ffdf4d85... verified unchanged by the\nsame workflow's dependency-closure step).\n\nAuthored-by: GLM 5.3 (zai/glm-5.3) - R7L CI repair, third slice.",
+      "tree": {
+        "sha": "5fab7358e41fd5d89dbac46e74e6ad849a2cff32",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/5fab7358e41fd5d89dbac46e74e6ad849a2cff32"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/27ab100eaddcc13d3a601f563da350c979b307bf",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/27ab100eaddcc13d3a601f563da350c979b307bf",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/27ab100eaddcc13d3a601f563da350c979b307bf",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/27ab100eaddcc13d3a601f563da350c979b307bf/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "89a798fc2fc1aaea61636a15f3052afd2a2ee945",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/89a798fc2fc1aaea61636a15f3052afd2a2ee945",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/89a798fc2fc1aaea61636a15f3052afd2a2ee945"
+      }
+    ]
+  }
+]

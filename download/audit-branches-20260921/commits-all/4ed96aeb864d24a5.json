@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f",
+    "node_id": "C_kwDOT_OzB9oAKDU3ZjEzMmYzMWE4N2Q4YzMwY2YzN2MyNmJkODljZDU2ZjljYzBkMmY",
+    "commit": {
+      "author": {
+        "name": "GLM Operator",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-20T06:33:55Z"
+      },
+      "committer": {
+        "name": "GLM Operator",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-20T06:33:55Z"
+      },
+      "message": "chore: refresh PR statuses (stale AppVeyor/governance contexts from the retargeted PR #930 evaluated against the wrong base)",
+      "tree": {
+        "sha": "371b895dabb12585bbdabaf787091974b43274c8",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/371b895dabb12585bbdabaf787091974b43274c8"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "c8b05c5444ca07a0f57f05c83bb4605b6e78d149",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c8b05c5444ca07a0f57f05c83bb4605b6e78d149",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/c8b05c5444ca07a0f57f05c83bb4605b6e78d149"
+      }
+    ]
+  }
+]

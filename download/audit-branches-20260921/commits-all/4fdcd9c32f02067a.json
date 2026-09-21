@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "2c64eef07be7e51debfc9d233d548dd17fc917a8",
+    "node_id": "C_kwDOT_OzB9oAKDJjNjRlZWYwN2JlN2U1MWRlYmZjOWQyMzNkNTQ4ZGQxN2ZjOTE3YTg",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T18:30:44Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T18:30:44Z"
+      },
+      "message": "feat(browser): migrate the supervisor keepalive session to the GLM agent platform\n\nThe supervisor's own conversation now runs on chat.z.ai like the fleet:\n\n- agent-session-monitor.mjs (new): digest-based GLM session monitor with\n  the ChatGptSessionMonitor public contract. GENERATING is entered only\n  through markGenerationStarted after a proven Enter submit; digest churn\n  / network / external progress refresh progress; a quiet settle window\n  flips IDLE terminal-ready; adaptive soft/hard stall floors unchanged.\n  Recovery is ESCALATE-only - chat.z.ai has no addressable stop or\n  continuation control, and navigation-class recovery stays forbidden.\n- supervisor-lifecycle-runtime-core: conversation/root regexes, auth-tab\n  reuse, NEW_TAB surfaces and the wake submit move to the platform; the\n  ambiguous-wake and rollover continuations re-submit through the Enter\n  lane when the composer still holds the exact message (sha256 proof the\n  prior submit never happened) instead of clicking a named Send control;\n  the keepalive conversation validator accepts chat.z.ai/c/<id>.\n- supervisor-keepalive: conversation URL contract is the GLM platform\n  shape; snapshot schema default is the agent session monitor.\n- tests: supervisor/keepalive/bootstrap/continuity suites migrated to\n  chat.z.ai fixtures and the GLM submit contract; the restart suite now\n  proves the ambiguous predecessor is fenced into history while exactly\n  one fresh current-process wake is emitted with a proven submit.\n\nFull suite 2373 pass / 0 fail / 2 pre-existing skips; security static\ngate clean; npm run check clean.",
+      "tree": {
+        "sha": "53c686e87acbaaef7898fc73477f24198a15f734",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/53c686e87acbaaef7898fc73477f24198a15f734"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/2c64eef07be7e51debfc9d233d548dd17fc917a8",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2c64eef07be7e51debfc9d233d548dd17fc917a8",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/2c64eef07be7e51debfc9d233d548dd17fc917a8",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2c64eef07be7e51debfc9d233d548dd17fc917a8/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "2b39283c3a1fcbed68e94cb79aad5fb37f57da97",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2b39283c3a1fcbed68e94cb79aad5fb37f57da97",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/2b39283c3a1fcbed68e94cb79aad5fb37f57da97"
+      }
+    ]
+  }
+]

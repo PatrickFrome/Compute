@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "3dc510ad66202d075a924dae78628da55690c5f9",
+    "node_id": "C_kwDOT_OzB9oAKDNkYzUxMGFkNjYyMDJkMDc1YTkyNGRhZTc4NjI4ZGE1NTY5MGM1Zjk",
+    "commit": {
+      "author": {
+        "name": "GLM DevOS",
+        "email": "glm@metaengine.dev",
+        "date": "2026-09-05T11:55:06Z"
+      },
+      "committer": {
+        "name": "GLM DevOS",
+        "email": "glm@metaengine.dev",
+        "date": "2026-09-05T11:55:06Z"
+      },
+      "message": "fix(browser): sentinel worker crashed at require time under ELECTRON_RUN_AS_NODE — unpack asar closure + path resolver + exit-code telemetry\n\nLive-host root cause (Windows, v0.6.6-dev.15.1): worker_script resolved to\nresources/app.asar/src/browser-sentinel-worker.cjs, but ELECTRON_RUN_AS_NODE\nruns the Electron binary as vanilla Node which cannot load modules from an\nasar archive. The worker died at require time every generation — 1177\nworker recovery generations in ~65 minutes, each ending in\nCANDIDATE_CONFIRMED_ABSENT — so waitUntilHealthy never succeeded,\nhost_resilience stayed DEGRADED_SENTINEL and self-update restart was\nblocked with host_resilience_sentinel_not_ready_for_expected_restart.\n(An earlier 50-minute CANDIDATE_ALIVE_HEARTBEAT_AMBIGUOUS stall was the\nsame instant exit plus Windows pid reuse.)\n\n- electron-builder.test.json: asarUnpack the sentinel worker require\n  closure (browser-sentinel-worker.cjs, browser-sentinel-liveness.cjs,\n  browser-sentinel-action-journal.cjs, durable-json-file.cjs).\n- host-resilience-runtime.mjs: resolveSentinelWorkerScript maps the asar\n  path onto app.asar.unpacked when present (both separators), falls back\n  to the original path in dev mode; no new authority, same spawn contract.\n- browser-sentinel.mjs: worker recovery telemetry now records the exact\n  child exit code and signal for both the old worker and the candidate\n  (exact_child_exit_observed:exit_code:N / CANDIDATE_CONFIRMED_ABSENT\n  ... :exit_code:N) — this class of defect becomes directly visible in\n  state snapshots instead of churning silently.\n- Tests (6): resolver mapping/fallback/dev-path/posix; asarUnpack closure\n  guard; REAL vanilla-node spawn from a simulated app.asar.unpacked layout\n  proving the closure loads and heartbeats under the RUN_AS_NODE regime\n  (with parent-side pid binding fence simulated); exit-code telemetry.\n  Full suite 1062 pass / 0 fail (2 pre-existing skips); check green.",
+      "tree": {
+        "sha": "9f749a0cccce108d7a8c2b3451bf3e6d7610a63d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/9f749a0cccce108d7a8c2b3451bf3e6d7610a63d"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/3dc510ad66202d075a924dae78628da55690c5f9",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3dc510ad66202d075a924dae78628da55690c5f9",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/3dc510ad66202d075a924dae78628da55690c5f9",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3dc510ad66202d075a924dae78628da55690c5f9/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e"
+      }
+    ]
+  }
+]

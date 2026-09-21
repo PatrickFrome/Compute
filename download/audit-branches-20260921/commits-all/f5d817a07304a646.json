@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "367b7fbd51c1249e888c0bc1a43a00d87318d1f2",
+    "node_id": "C_kwDOT_OzB9oAKDM2N2I3ZmJkNTFjMTI0OWU4ODhjMGJjMWE0M2EwMGQ4NzMxOGQxZjI",
+    "commit": {
+      "author": {
+        "name": "GLM",
+        "email": "glm@metaengine.peer",
+        "date": "2026-08-29T05:30:07Z"
+      },
+      "committer": {
+        "name": "GLM",
+        "email": "glm@metaengine.peer",
+        "date": "2026-08-29T05:30:07Z"
+      },
+      "message": "fix(sovereign-legacy): preserve upstream tariff and served-model provenance\n\nThe legacy runner (src/index.ts, start:legacy) reads the same\nSOVEREIGN_GPT_URL/SOVEREIGN_GLM_URL env vars as v4 but still hard-coded\ntariff_dependency=false in executor receipts, lockstep metadata, all five\nterminal envelopes and lifecycle telemetry, and its error path carried no\nprovenance at all. Mirror the v4 rule by reusing upstream_provenance.ts:\ncustom endpoints default tariff-dependent, proved-local requires explicit\nopt-out with fail-LOUD validation, mergeUpstreamProvenance supplies the\nfull served-model/zero-spend/data-policy field set, executor errors keep\nendpoint provenance, lockstep derives per-actor dependency, a sticky\naccumulator feeds all terminal envelopes, and lifecycle telemetry reports\nCONFIGURATION_MINIMUM with per-actor breakdown.\n\nCloses OBS-SOV-LEGACY-3 from GLM review #243. canonical=false,\nauthority_effect=false, PREPARE_ONLY.",
+      "tree": {
+        "sha": "70390b28e5fb75aa3db0cdccd99bf4f7036b6e98",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/70390b28e5fb75aa3db0cdccd99bf4f7036b6e98"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/367b7fbd51c1249e888c0bc1a43a00d87318d1f2",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/367b7fbd51c1249e888c0bc1a43a00d87318d1f2",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/367b7fbd51c1249e888c0bc1a43a00d87318d1f2",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/367b7fbd51c1249e888c0bc1a43a00d87318d1f2/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "9af19936336df816e21e9142b61e17e76be79642",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/9af19936336df816e21e9142b61e17e76be79642",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/9af19936336df816e21e9142b61e17e76be79642"
+      }
+    ]
+  }
+]

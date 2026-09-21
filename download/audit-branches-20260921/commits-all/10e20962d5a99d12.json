@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2",
+    "node_id": "C_kwDOT_OzB9oAKGE1ZGIxNWEzYWRhZTk3ZWIwMTU5NmE5YTI2YTVlZjQzZmJiOGJjYjI",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T19:05:50Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T19:05:50Z"
+      },
+      "message": "test(browser): Windows-safe dynamic imports in closed-loop audit tests (pathToFileURL)",
+      "tree": {
+        "sha": "14f33bdea69f48ff43b9ef759409a4edad67a575",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/14f33bdea69f48ff43b9ef759409a4edad67a575"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "f849c8539ddb14c20efe70326e031f127a99aaa2",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f849c8539ddb14c20efe70326e031f127a99aaa2",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/f849c8539ddb14c20efe70326e031f127a99aaa2"
+      }
+    ]
+  }
+]

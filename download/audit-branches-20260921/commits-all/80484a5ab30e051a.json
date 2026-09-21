@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "d3ef1f5e66a5480832563dca55543d299da43fd4",
+    "node_id": "C_kwDOT_OzB9oAKGQzZWYxZjVlNjZhNTQ4MDgzMjU2M2RjYTU1NTQzZDI5OWRhNDNmZDQ",
+    "commit": {
+      "author": {
+        "name": "METAENGINE Repair Bot",
+        "email": "actions@users.noreply.github.com",
+        "date": "2026-09-16T10:58:40Z"
+      },
+      "committer": {
+        "name": "METAENGINE Repair Bot",
+        "email": "actions@users.noreply.github.com",
+        "date": "2026-09-16T10:58:40Z"
+      },
+      "message": "fix(browser): preserve multihop ambiguity fence",
+      "tree": {
+        "sha": "42fe2789cbaa50dea95ee93aa08be074494b4b97",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/42fe2789cbaa50dea95ee93aa08be074494b4b97"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/d3ef1f5e66a5480832563dca55543d299da43fd4",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d3ef1f5e66a5480832563dca55543d299da43fd4",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/d3ef1f5e66a5480832563dca55543d299da43fd4",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d3ef1f5e66a5480832563dca55543d299da43fd4/comments",
+    "author": {
+      "login": "actions",
+      "id": 44036562,
+      "node_id": "MDEyOk9yZ2FuaXphdGlvbjQ0MDM2NTYy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/44036562?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/actions",
+      "html_url": "https://github.com/actions",
+      "followers_url": "https://api.github.com/users/actions/followers",
+      "following_url": "https://api.github.com/users/actions/following{/other_user}",
+      "gists_url": "https://api.github.com/users/actions/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/actions/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/actions/subscriptions",
+      "organizations_url": "https://api.github.com/users/actions/orgs",
+      "repos_url": "https://api.github.com/users/actions/repos",
+      "events_url": "https://api.github.com/users/actions/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/actions/received_events",
+      "type": "Organization",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "actions",
+      "id": 44036562,
+      "node_id": "MDEyOk9yZ2FuaXphdGlvbjQ0MDM2NTYy",
+      "avatar_url": "https://avatars.githubusercontent.com/u/44036562?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/actions",
+      "html_url": "https://github.com/actions",
+      "followers_url": "https://api.github.com/users/actions/followers",
+      "following_url": "https://api.github.com/users/actions/following{/other_user}",
+      "gists_url": "https://api.github.com/users/actions/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/actions/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/actions/subscriptions",
+      "organizations_url": "https://api.github.com/users/actions/orgs",
+      "repos_url": "https://api.github.com/users/actions/repos",
+      "events_url": "https://api.github.com/users/actions/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/actions/received_events",
+      "type": "Organization",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "639109d8916f1cbb1980a71d1ef97ad3835b9b56",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/639109d8916f1cbb1980a71d1ef97ad3835b9b56",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/639109d8916f1cbb1980a71d1ef97ad3835b9b56"
+      }
+    ]
+  }
+]

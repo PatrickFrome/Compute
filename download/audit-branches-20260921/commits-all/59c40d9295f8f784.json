@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "17c9667651aee19a2207e8ade86451e17ed556fd",
+    "node_id": "C_kwDOT_OzB9oAKDE3Yzk2Njc2NTFhZWUxOWEyMjA3ZThhZGU4NjQ1MWUxN2VkNTU2ZmQ",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-27T18:05:46Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-27T18:05:46Z"
+      },
+      "message": "feat(roadmap): add deterministic cycle oracle",
+      "tree": {
+        "sha": "aa53ff39e4238cffc0af7cf4d0c7294b4afee51b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/aa53ff39e4238cffc0af7cf4d0c7294b4afee51b"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/17c9667651aee19a2207e8ade86451e17ed556fd",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/17c9667651aee19a2207e8ade86451e17ed556fd",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/17c9667651aee19a2207e8ade86451e17ed556fd",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/17c9667651aee19a2207e8ade86451e17ed556fd/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "e7c4bac9f1d71f2bc967f533ec4572abf9c1e507",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e7c4bac9f1d71f2bc967f533ec4572abf9c1e507",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/e7c4bac9f1d71f2bc967f533ec4572abf9c1e507"
+      }
+    ]
+  }
+]

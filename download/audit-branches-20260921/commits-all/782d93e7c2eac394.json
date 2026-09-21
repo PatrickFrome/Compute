@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "bfca124352e84f02bc1557c51621af62b4a96ded",
+    "node_id": "C_kwDOT_OzB9oAKGJmY2ExMjQzNTJlODRmMDJiYzE1NTdjNTE2MjFhZjYyYjRhOTZkZWQ",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-24T11:52:48Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-24T11:52:48Z"
+      },
+      "message": "chore(a2): wire observer and peer runtime scripts",
+      "tree": {
+        "sha": "af96fcfccaeb6e52c08dc36655d74501a0f439e6",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/af96fcfccaeb6e52c08dc36655d74501a0f439e6"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/bfca124352e84f02bc1557c51621af62b4a96ded",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bfca124352e84f02bc1557c51621af62b4a96ded",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/bfca124352e84f02bc1557c51621af62b4a96ded",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bfca124352e84f02bc1557c51621af62b4a96ded/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "8002b60cd61b1ccc1236d5ebf0477fa2b6504424",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/8002b60cd61b1ccc1236d5ebf0477fa2b6504424",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/8002b60cd61b1ccc1236d5ebf0477fa2b6504424"
+      }
+    ]
+  }
+]

@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "0ae889dabeaff8affaf7212d31ee79eec5aba8cf",
+    "node_id": "C_kwDOT_OzB9oAKDBhZTg4OWRhYmVhZmY4YWZmYWY3MjEyZDMxZWU3OWVlYzVhYmE4Y2Y",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T01:31:10Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-18T01:31:10Z"
+      },
+      "message": "test(devos): align Monaco reconcile contract with source capability (#593)\n\nExact-head development merge after all configured Browser CI workflows completed successfully. No production deployment is performed by this merge.",
+      "tree": {
+        "sha": "be39412bcf5a59f9743d08c1fe3f0ad1087e3c02",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/be39412bcf5a59f9743d08c1fe3f0ad1087e3c02"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/0ae889dabeaff8affaf7212d31ee79eec5aba8cf",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqrJReCRC1aQ7uu5UhlAAAfyQQAHwcfMfzDcqdRCYzF7tCO4Yv\nyt5SZaiFn/S9g6rmNEvRnno0vpR4ADbrzuLnvOuHIgIvgIOelT9wJGM2w+yqlOVr\neRORKT6PSMVoNXdpotPtrlr3djwJUEI0Dt8S4HaOBH1EsZr1G4Oc8DVv4C5/GHuy\nRP3FbcqhC/NAme/x/WlTtlmbwXJgTAQbWD3eZJNx5ManCweUPCnW3mGI55TPN93y\ncuhrE1OwsP/2PDVKIeN/eOFHCgMCXNdQptmh+nZQKzUOYULjmgPe63Z2HqAQRxjo\nzNszFxgW0ExOihkImr5eTUw+bcVDEd1bAEGyz7bbUCAJLdIKo2M+JKQjH+h4CkwE\nv9txL8alDmwDu87eJNFUjfMcHF8RT0wbQmemoW5xZRnmjHFFE+1Hx37kBPnkQ8/m\n82GxHn7CwAxxn0vu9WeQtw0QFJ+vgWjzSYwJ8Jtl5TPnrwgx17MjDd+yPWnnarbw\n79qNAjmBVQKAxtyThb259d9uBfMfaJa8nFk4RK6zxLuoMbPqDxAPCENrVYji07P+\nPdKQa+DPpNQ4OdUJOwpWOPrHvyxsuKeayrLMsiev1uA4nB6BYReryam+Oghkcjkj\nxsqCYM01nk+hP2VZg1Tj7LV+2OjUYPSyM0PY39F2wOjNwDH5B1tcPkUVq5p/maHb\nJ7qP9QZ/whKZ0NQxiJzc\n=woJT\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree be39412bcf5a59f9743d08c1fe3f0ad1087e3c02\nparent 4f50b27204d847be03656e7da53a90b70cf92483\nparent 7bc8fe4af950d6d1e3f65092313b369029602cc6\nauthor PatrickFrome <igradolius@gmail.com> 1789695070 +0300\ncommitter GitHub <noreply@github.com> 1789695070 +0300\n\ntest(devos): align Monaco reconcile contract with source capability (#593)\n\nExact-head development merge after all configured Browser CI workflows completed successfully. No production deployment is performed by this merge.",
+        "verified_at": "2026-09-18T01:31:11Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0ae889dabeaff8affaf7212d31ee79eec5aba8cf",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/0ae889dabeaff8affaf7212d31ee79eec5aba8cf",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0ae889dabeaff8affaf7212d31ee79eec5aba8cf/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "4f50b27204d847be03656e7da53a90b70cf92483",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4f50b27204d847be03656e7da53a90b70cf92483",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/4f50b27204d847be03656e7da53a90b70cf92483"
+      },
+      {
+        "sha": "7bc8fe4af950d6d1e3f65092313b369029602cc6",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7bc8fe4af950d6d1e3f65092313b369029602cc6",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/7bc8fe4af950d6d1e3f65092313b369029602cc6"
+      }
+    ]
+  }
+]

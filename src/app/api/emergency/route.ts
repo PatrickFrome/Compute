@@ -32,7 +32,7 @@ export async function GET() {
       getProbeDevice(),
       query(
         `select command_id, action, status, command_lane, target_client_id, issued_by,
-                issued_at, completed_at, expires_at, lease_count,
+                issued_at, completed_at, expires_at, leased_by,
                 left(error, 80) as error
            from public.compute_fabric_a2_browser_supervisor_command_h205f22
           where command_lane = 'EMERGENCY'
@@ -75,11 +75,24 @@ export async function POST(req: Request) {
       // Canonical supervisor-side issue RPC — the same chat-plane entry point a
       // real developer emergency update uses (no lease/execution authority here).
       const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
-      const sha = typeof body.expected_git_sha === "string" && /^[0-9a-f]{7,40}$/i.test(body.expected_git_sha)
-        ? body.expected_git_sha
-        : "6bf173c7";
+      const sha = typeof body.expected_git_sha === "string" && /^[0-9a-f]{40}$/i.test(body.expected_git_sha.trim())
+        ? body.expected_git_sha.trim().toLowerCase()
+        : "6bf173c71dc3026b02171085d956625ef9526378"; // release v0.7.0-dev.35532004761.1 (rail tip)
       const ttl = Math.max(60, Math.min(900, Number(body.ttl_seconds) || 300));
       const identity = await getProbeDevice();
+      // The issue RPC requires the target client to be "seen" — send a signed
+      // heartbeat first so the probe registers in supervisor_state (canonical /v1/state).
+      const hb = await edgeDevicePost("/v1/state", {
+        state: {
+          shell_version: "0.7.0-dev.35532004761.1",
+          supervisor_mode: "CONTROL",
+          armed: true,
+          operator_mode: "MC_CONSOLE_PROBE",
+        },
+      });
+      if (hb.status !== 202) {
+        return jsonError("probe_heartbeat_failed", 502, { heartbeat: hb.json, http: hb.status });
+      }
       const res = await query(
         `select h205f22_a2_browser_supervisor_issue_developer_emergency_update_(
             p_client_id => $1, p_request_nonce => $2, p_expected_git_sha => $3,

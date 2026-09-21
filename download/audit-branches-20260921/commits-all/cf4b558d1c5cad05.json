@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "1fc383b02f3560c3053d4d99ce1f285ebd58b6fe",
+    "node_id": "C_kwDOT_OzB9oAKDFmYzM4M2IwMmYzNTYwYzMwNTNkNGQ5OWNlMWYyODVlYmQ1OGI2ZmU",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-08-28T21:36:50Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-08-28T21:36:50Z"
+      },
+      "message": "fix(labs): align chat-control-plane behavior labs with the R-series runtime contracts\n\nLayered staleness exposed after the contract pin repair (PR #65 first\ncommit): each unblocked CI step revealed the next pre-existing stale\nexpectation at the compute-browser stack heads.\n\n1. tests/chat_bridge_worker_combined_load_behavior.mjs\n   - A2_OPERATOR_RUNTIME hand pin '0.6.2-auto-rollover' -> derived from\n     runtime-package-manifest.json operator_runtime (drift-immune).\n   - The lab seeded armed=false yet expected an immediate /v1/commands/next\n     fetch — stale v0.6.2 behavior. The R-series runtime deliberately\n     suppresses the command fetch while disarmed (v0.6.3 DISARM fetch\n     suppression, closes the live command regeneration storm). The lab now\n     asserts BOTH sides of the invariant: disarmed load issues zero remote\n     calls and persists bridgeCommandFetchSuppressed='DISARMED'; arming via\n     the storage-change path unlocks the poll and sources the pairing\n     header from the IndexedDB vault. Strictly stronger than the original\n     one-sided expectation.\n\n2. tests/adversarial_chat_bridge_dom_f7.mjs\n   - manifest version hand pin '0.6.2' -> derived from\n     runtime-package-manifest.json package_version.\n   - content_scripts entry pin updated from the retired versioned filename\n     content-recovery-v062.js to the packaged content-recovery.js (policy:\n     reject_versioned_runtime_files); the recovery source read now targets\n     the packaged file instead of the byte-identical legacy orphan.\n\nLocal full-battery verification at parent 7555c2c (c50dd086 lineage):\n44/44 pytest (bridge contract 15 + receipt 12 + remote 9 + debugger\nintegration 8) and 6/6 node labs green.\n\nAuthored-by: GLM 5.3 (zai/glm-5.3) - independent review of PR #62/#63\n(mailbox #224/#229); tests-only change, no production code touched.",
+      "tree": {
+        "sha": "bca7bb7021885fae1c7692a13e09bc7242fa47d1",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/bca7bb7021885fae1c7692a13e09bc7242fa47d1"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/1fc383b02f3560c3053d4d99ce1f285ebd58b6fe",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1fc383b02f3560c3053d4d99ce1f285ebd58b6fe",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/1fc383b02f3560c3053d4d99ce1f285ebd58b6fe",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1fc383b02f3560c3053d4d99ce1f285ebd58b6fe/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "7555c2c6a699e02096109d3fe3bb12f8904dd0d8",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7555c2c6a699e02096109d3fe3bb12f8904dd0d8",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/7555c2c6a699e02096109d3fe3bb12f8904dd0d8"
+      }
+    ]
+  }
+]

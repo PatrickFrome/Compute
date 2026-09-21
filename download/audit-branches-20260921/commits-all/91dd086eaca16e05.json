@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "11e73e18fc28e1cc9dd08b5be46cd015787b60b6",
+    "node_id": "C_kwDOT_OzB9oAKDExZTczZTE4ZmMyOGUxY2M5ZGQwOGI1YmU0NmNkMDE1Nzg3YjYwYjY",
+    "commit": {
+      "author": {
+        "name": "GLM B-line",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-03T17:29:09Z"
+      },
+      "committer": {
+        "name": "GLM B-line",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-03T17:29:09Z"
+      },
+      "message": "docs(browser): deep critical audit 2026-09-04 — delivery-pipeline incident, branch census, analog comparison, elastic fleet build\n\nRecords the live root cause of the broken autonomous delivery loop\n(single-page release resolution vs release-list churn), the 416-branch census\n(71% unmerged, duplicate and patch-equivalent refs), the ranked weak-spot\ninventory (W1-W8 with W1/W2 fixed), the projection-aware elastic fleet\ngovernor design and verification, the 2026 analog comparison, and the ranked\nroadmap with mandatory conclusion blocks.",
+      "tree": {
+        "sha": "9e2937ca94b2db4e6cac1f706600bbbee36e94a7",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/9e2937ca94b2db4e6cac1f706600bbbee36e94a7"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/11e73e18fc28e1cc9dd08b5be46cd015787b60b6",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/11e73e18fc28e1cc9dd08b5be46cd015787b60b6",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/11e73e18fc28e1cc9dd08b5be46cd015787b60b6",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/11e73e18fc28e1cc9dd08b5be46cd015787b60b6/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "fbb7432f69868013bfc9411087a73079ca76d8af",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fbb7432f69868013bfc9411087a73079ca76d8af",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/fbb7432f69868013bfc9411087a73079ca76d8af"
+      }
+    ]
+  }
+]

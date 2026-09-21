@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "c50dd08650a81305c42ab8369e0e519df35ff321",
+    "node_id": "C_kwDOT_OzB9oAKGM1MGRkMDg2NTBhODEzMDVjNDJhYjgzNjllMGU1MTlkZjM1ZmYzMjE",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-27T23:58:50Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-27T23:58:50Z"
+      },
+      "message": "feat(browser-compute): add fail-closed B2 contexts",
+      "tree": {
+        "sha": "eb4bec4c9f86a85d89750c06091f23b13d31d392",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/eb4bec4c9f86a85d89750c06091f23b13d31d392"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/c50dd08650a81305c42ab8369e0e519df35ff321",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c50dd08650a81305c42ab8369e0e519df35ff321",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/c50dd08650a81305c42ab8369e0e519df35ff321",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c50dd08650a81305c42ab8369e0e519df35ff321/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "d927d2da8e4984886f828c07779c737de19d310a",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d927d2da8e4984886f828c07779c737de19d310a",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/d927d2da8e4984886f828c07779c737de19d310a"
+      }
+    ]
+  }
+]

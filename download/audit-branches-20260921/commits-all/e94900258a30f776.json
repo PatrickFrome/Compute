@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "63a78463a07caad94242363caabcfc0a81595199",
+    "node_id": "C_kwDOT_OzB9oAKDYzYTc4NDYzYTA3Y2FhZDk0MjQyMzYzY2FhYmNmYzBhODE1OTUxOTk",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-08-29T03:31:15Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-08-29T03:31:15Z"
+      },
+      "message": "research(browser-compute): close OBS_CB_5 with a real-engine dispose probe\n\nFour-case probe on Chrome for Testing 151 over the production native-pipe\ntransport: disposing a disposeOnDetach context after its last target closed\nSUCCEEDS (the hypothesized closeContext orphan mode is falsified); double\ndispose fails with cdp_error:-32000 (dispose is not idempotent, confirming\nthat dead-incarnation CLOSING rows must reconcile to RETIRED without\nreplaying the engine call — exactly what this slice does); creating a target\nin a disposed context id fails cleanly.",
+      "tree": {
+        "sha": "147fc1664d56b55ff285168feb9d57fb4197aaca",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/147fc1664d56b55ff285168feb9d57fb4197aaca"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/63a78463a07caad94242363caabcfc0a81595199",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/63a78463a07caad94242363caabcfc0a81595199",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/63a78463a07caad94242363caabcfc0a81595199",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/63a78463a07caad94242363caabcfc0a81595199/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "b7f221ab8ff522927cdada26b13054ad40a6db55",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b7f221ab8ff522927cdada26b13054ad40a6db55",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/b7f221ab8ff522927cdada26b13054ad40a6db55"
+      }
+    ]
+  }
+]

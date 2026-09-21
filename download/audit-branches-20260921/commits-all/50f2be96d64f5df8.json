@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "19e74166308521848a0ac05af5efec75584b8724",
+    "node_id": "C_kwDOT_OzB9oAKDE5ZTc0MTY2MzA4NTIxODQ4YTBhYzA1YWY1ZWZlYzc1NTg0Yjg3MjQ",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-11T21:04:03Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-11T21:04:03Z"
+      },
+      "message": "test(browser): fence direct adaptive fanout executor wiring",
+      "tree": {
+        "sha": "af9acc3842a9c76bc6f58cd298a14613ce4da32d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/af9acc3842a9c76bc6f58cd298a14613ce4da32d"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/19e74166308521848a0ac05af5efec75584b8724",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/19e74166308521848a0ac05af5efec75584b8724",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/19e74166308521848a0ac05af5efec75584b8724",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/19e74166308521848a0ac05af5efec75584b8724/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "67f97716d008e3181fa947308e8b1d48dcebb416",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/67f97716d008e3181fa947308e8b1d48dcebb416",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/67f97716d008e3181fa947308e8b1d48dcebb416"
+      }
+    ]
+  }
+]

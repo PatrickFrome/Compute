@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "9e53bfff721ee6df81ff3c3eb2c8e57d9d85dfe4",
+    "node_id": "C_kwDOT_OzB9oAKDllNTNiZmZmNzIxZWU2ZGY4MWZmM2MzZWIyYzhlNTdkOWQ4NWRmZTQ",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T19:19:16Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T19:19:16Z"
+      },
+      "message": "test(rsi): freeze Phase28 bridge mutation surface",
+      "tree": {
+        "sha": "3ae512b4930ba1bb56cc393a83b269505cf4a07d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/3ae512b4930ba1bb56cc393a83b269505cf4a07d"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/9e53bfff721ee6df81ff3c3eb2c8e57d9d85dfe4",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/9e53bfff721ee6df81ff3c3eb2c8e57d9d85dfe4",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/9e53bfff721ee6df81ff3c3eb2c8e57d9d85dfe4",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/9e53bfff721ee6df81ff3c3eb2c8e57d9d85dfe4/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "0f42134a61cf15ecbeacbf79b0b8e24b33426a1d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0f42134a61cf15ecbeacbf79b0b8e24b33426a1d",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/0f42134a61cf15ecbeacbf79b0b8e24b33426a1d"
+      }
+    ]
+  }
+]

@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "a7c01d917f5b14b0eb18688651622d223e90e47d",
+    "node_id": "C_kwDOT_OzB9oAKGE3YzAxZDkxN2Y1YjE0YjBlYjE4Njg4NjUxNjIyZDIyM2U5MGU0N2Q",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-29T05:52:36Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-29T05:52:36Z"
+      },
+      "message": "docs(browser): seal R9 GPT chat fleet post-research",
+      "tree": {
+        "sha": "38ebc4c3be55860fd7dbf02e39847475186532bb",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/38ebc4c3be55860fd7dbf02e39847475186532bb"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/a7c01d917f5b14b0eb18688651622d223e90e47d",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a7c01d917f5b14b0eb18688651622d223e90e47d",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/a7c01d917f5b14b0eb18688651622d223e90e47d",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a7c01d917f5b14b0eb18688651622d223e90e47d/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "c6ba73aeb5ea39e6a3fce8ab2cc1595494238234",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c6ba73aeb5ea39e6a3fce8ab2cc1595494238234",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/c6ba73aeb5ea39e6a3fce8ab2cc1595494238234"
+      }
+    ]
+  }
+]

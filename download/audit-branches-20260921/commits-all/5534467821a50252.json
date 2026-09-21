@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "6d1fc6104b1f47c4c711f4153e30601fd932f772",
+    "node_id": "C_kwDOT_OzB9oAKDZkMWZjNjEwNGIxZjQ3YzRjNzExZjQxNTNlMzA2MDFmZDkzMmY3NzI",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T18:51:06Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T18:51:06Z"
+      },
+      "message": "test(rsi): harden paired experiment replay and durability",
+      "tree": {
+        "sha": "75298f32704bbdd9f02a18f97cf3f2d1ecd37253",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/75298f32704bbdd9f02a18f97cf3f2d1ecd37253"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/6d1fc6104b1f47c4c711f4153e30601fd932f772",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6d1fc6104b1f47c4c711f4153e30601fd932f772",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/6d1fc6104b1f47c4c711f4153e30601fd932f772",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6d1fc6104b1f47c4c711f4153e30601fd932f772/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "07befd68c1a4bdfb57ef9481813dd8004953a830",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/07befd68c1a4bdfb57ef9481813dd8004953a830",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/07befd68c1a4bdfb57ef9481813dd8004953a830"
+      }
+    ]
+  }
+]

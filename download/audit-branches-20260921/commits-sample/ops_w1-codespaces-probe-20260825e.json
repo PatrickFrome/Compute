@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df",
+    "node_id": "C_kwDOT_OzB9oAKDBkNmJmZDNmYzU0ZDJkMGViZGNkODE5NGY5OGM5YmVjZDA2N2E0ZGY",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-24T09:48:28Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-08-24T09:48:28Z"
+      },
+      "message": "feat(w1): add fail-closed Linux host observation collector\n\nImplement the first executable slice of SAME_POINT_DUEL_V4 CANARY_REQUIRED synthesis: provenance-only stdin, kernel-derived host safety facts, exact admission-contract validation, and fail-closed tests. No W1 verification or authority effect.",
+      "tree": {
+        "sha": "33fec90574061ec4627c6d7311ce0a69137f47f9",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/33fec90574061ec4627c6d7311ce0a69137f47f9"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqjBNsCRC1aQ7uu5UhlAAATU8QAIoHvutDxvoC5uJBkGMSO49d\nE4ce7dcVThTQxfNwRcfgGnV9X6NoosDYpCAMdrm6oU7K0mOjn15p50Xz1JkZiFzG\nvsKcbDWA/BvoglC0qyGT2Mf7qf0g9jPFfJoS/YxUVfA9YdzHsQh+RiQb4wg40Wun\n7mS1C3NIFbchjyoph8+E2WiM8R2RRZwIHxPkmrDrWb53Y41cFwjQTXsKqqEkkmxp\nRfvKsmCKp6XrrusTXUlOOR8k2Nxr3g1y4IgseXQNFV45JiGhLImV2gN7DgNgjFd0\nf6rKQwfi4hRcHqJRLeUiOI78ngcjh16rhLt+htSFiPAAiuUP3GIMs5kvEbPkWHBn\n8OOFVkIJWcSXpa6IQCoIBx4/vrT+23gtyVT8tK8CwPj9M4HAlK7Zi/Qhizw5fpi0\nTkjWhs2q6PNwBJdAPJM1g4A2JsoBpaN9YBl7OXN/LNIHi9wcwZmH+CIzWberSJAd\nE9wdlFWYdJA1lm1o3qV/zL7IIBB3ISA3aV3L2mV/BJFhxpurvQKZaxc0VXsb7ii7\nuQjbwJJOetNiSKMNUuxN5DSHefv7gdf8QooGSJrNBICSbGAdrNx+Okl5FGFO9BuB\nW2CDuR0QFdBVte+2W6UV0sheANB2bll04ga0mqog8C+YpRXjEb8PNYAQY3hukPBc\n/ZzT14xoGj+Sn5S0DcE9\n=4cQ2\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 33fec90574061ec4627c6d7311ce0a69137f47f9\nparent 5bb133d068bf37c2c2a581f674048443061caf37\nparent 2bfa332ae6ce6da3b958314e068154b3726854c1\nauthor PatrickFrome <igradolius@gmail.com> 1787564908 +0300\ncommitter GitHub <noreply@github.com> 1787564908 +0300\n\nfeat(w1): add fail-closed Linux host observation collector\n\nImplement the first executable slice of SAME_POINT_DUEL_V4 CANARY_REQUIRED synthesis: provenance-only stdin, kernel-derived host safety facts, exact admission-contract validation, and fail-closed tests. No W1 verification or authority effect.",
+        "verified_at": "2026-08-24T09:48:29Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0d6bfd3fc54d2d0ebdcd8194f98c9becd067a4df/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "5bb133d068bf37c2c2a581f674048443061caf37",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5bb133d068bf37c2c2a581f674048443061caf37",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/5bb133d068bf37c2c2a581f674048443061caf37"
+      },
+      {
+        "sha": "2bfa332ae6ce6da3b958314e068154b3726854c1",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2bfa332ae6ce6da3b958314e068154b3726854c1",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/2bfa332ae6ce6da3b958314e068154b3726854c1"
+      }
+    ]
+  }
+]

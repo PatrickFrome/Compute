@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "96ebf47fe050598981872b4abd3b309d65c17a08",
+    "node_id": "C_kwDOT_OzB9oAKDk2ZWJmNDdmZTA1MDU5ODk4MTg3MmI0YWJkM2IzMDlkNjVjMTdhMDg",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-09T23:34:22Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-09T23:34:22Z"
+      },
+      "message": "Merge PR #443: single-owner self-update installer handoff\n\nfix(browser): make self-update installer handoff single-owner",
+      "tree": {
+        "sha": "b87a45ec55b9ea1046968653f864e04ccae73725",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/b87a45ec55b9ea1046968653f864e04ccae73725"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/96ebf47fe050598981872b4abd3b309d65c17a08",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqoez+CRC1aQ7uu5UhlAAAMkgQAGxdohY3EbJ+iXZAz1czPvxF\n3n6j3C+rbRV4VxdqiFESpOaVDWBBR7e2EgKCwLdNrP1hHo6pt7Qqxx9+w8A674uU\nC06lO8wOPQ9weUn63Id5lMx34PdMJlXIYUCMqx6cdBMAsrXuWJUd3CTwSuwv5nbs\nU2IHaf6hdPk5A9aHOYdsrXBjU6TskbKUzco/0qAEOZ6B6G0xvICsTuptiIjdkpW8\nosoOyTw1fQIj21ZXyiFo4KfptrnmXPFutqlOFklrA1kB6uuDLbZ5IsP6vc3qa2jh\nGqSsrbygx1pcaIPChhtjRjC8PzzEf0SU0PtG3hrefjb+XkTM1wTGxPyDe/V+fsNK\nT/PGlZ1Hfag0dQfXmqEJ8qHCxm9yJXWyF+Y+Y1gSTenxm74Qv3CvCz8fUaPJp6Lv\n56VGS8lEisaZE8tnzPV69lLicPqg6qcGxOWBCRFYU+OcXh9UhH+S4DJyKXIFv6wo\nU1wfMcqshFXHdKbI80EIv8HnYOzARHu8UYFf7S27/atQzycqgAgmnU+ndboHsG01\n17plHJeHhOz1ppoZYkQCELBlG0qyj6kFrgZMyE5BnKLumcMrbpUM7CL8T58+CPbM\nsBf6gscU69E7XOuDe/e6Mrv5GVVFUnjhctzxH6NPwnyOOPzP9NcZ5rj663079dIm\nO8EXRE1WOU0EBkvRpNRc\n=uhrL\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree b87a45ec55b9ea1046968653f864e04ccae73725\nparent d385736868c3740ab256f0414c09864e9911bf9d\nparent cb0269d13018ee327524a5416a738bad4191a881\nauthor PatrickFrome <igradolius@gmail.com> 1788996862 +0300\ncommitter GitHub <noreply@github.com> 1788996862 +0300\n\nMerge PR #443: single-owner self-update installer handoff\n\nfix(browser): make self-update installer handoff single-owner",
+        "verified_at": "2026-09-09T23:34:23Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/96ebf47fe050598981872b4abd3b309d65c17a08",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/96ebf47fe050598981872b4abd3b309d65c17a08",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/96ebf47fe050598981872b4abd3b309d65c17a08/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "d385736868c3740ab256f0414c09864e9911bf9d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d385736868c3740ab256f0414c09864e9911bf9d",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/d385736868c3740ab256f0414c09864e9911bf9d"
+      },
+      {
+        "sha": "cb0269d13018ee327524a5416a738bad4191a881",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cb0269d13018ee327524a5416a738bad4191a881",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/cb0269d13018ee327524a5416a738bad4191a881"
+      }
+    ]
+  }
+]

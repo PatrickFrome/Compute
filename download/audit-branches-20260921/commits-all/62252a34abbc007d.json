@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "86f8da911482932dcfab02348183288002e6a8df",
+    "node_id": "C_kwDOT_OzB9oAKDg2ZjhkYTkxMTQ4MjkzMmRjZmFiMDIzNDgxODMyODgwMDJlNmE4ZGY",
+    "commit": {
+      "author": {
+        "name": "GLM B-line",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-03T17:16:59Z"
+      },
+      "committer": {
+        "name": "GLM B-line",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-03T17:16:59Z"
+      },
+      "message": "fix(browser): paginate trusted dev release resolution so the immutable baseline survives release-list churn\n\nThe physical self-update E2E resolves an immutable published baseline with the\nexact same trust resolver the runtime uses. The resolver fetched a single\nnewest-first page of 30 releases and required a same-core dev candidate. After\nthe 30 newest releases all became 0.6.6-dev line releases, every 0.6.3-dev\nbaseline fell off page one, resolution returned null, and every integration\npush failed at published_baseline_resolution_failed - breaking the physical\nE2E, the verified dev release, and therefore the autonomous delivery loop.\n\nResolution now scans a bounded window of newest-first pages (30 per page, at\nmost 10 pages) and stops at the first page containing the newest same-family\ncandidate. Short or empty pages end the scan; no candidate in the window\nfails closed to null exactly as before. The read-only release-list GET also\ngains a bounded 403/429 retry with backoff for pooled runner-IP rate limits.\n\nInvariants preserved: fail-closed on malformed newest candidate, no fallback\nto older releases, draft/stable filtering, byte-exact asset digest\nverification, authority_effect stays false, zero write paths.",
+      "tree": {
+        "sha": "36b2adbe4b77c06f2d696ae17074ca18b6e5b4cc",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/36b2adbe4b77c06f2d696ae17074ca18b6e5b4cc"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/86f8da911482932dcfab02348183288002e6a8df",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/86f8da911482932dcfab02348183288002e6a8df",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/86f8da911482932dcfab02348183288002e6a8df",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/86f8da911482932dcfab02348183288002e6a8df/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "86c08ac39d121636c1b9a992f095ff5af9f23127",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/86c08ac39d121636c1b9a992f095ff5af9f23127",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/86c08ac39d121636c1b9a992f095ff5af9f23127"
+      }
+    ]
+  }
+]

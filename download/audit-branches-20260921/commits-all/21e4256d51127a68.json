@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "246bbada11cf34dc74a384ee6c927e6922ea4b0a",
+    "node_id": "C_kwDOT_OzB9oAKDI0NmJiYWRhMTFjZjM0ZGM3NGEzODRlZTZjOTI3ZTY5MjJlYTRiMGE",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T13:45:51Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T13:45:51Z"
+      },
+      "message": "fix(browser): dispatch returns proven agents to their task conversations (D-M4)\n\nLive follow-up to the D-M3 deployment (35445466775.1): the click-select\nreplace gesture is correctly fail-closed on the root agent-task composer\n(bounded single-append, no Enter on unverified text) but the live editor\nalso defeats the mouse selection - the account-synced draft kept growing\n(28k chars across all four agent tabs) and task delivery stayed blocked.\n\nThe conversation composer is the surface that provably works end-to-end\n(the supervisor wake lane runs on it continuously: key-atomic verified\nreplace + Enter submit). Every ACTIVE agent already owns a proven task\nconversation (the /c/<uuid> from its first successful dispatch).\n\n- fleet-provisioner-core: markTransportProven retains the exact\n  conversation_url alongside the hash (the hash stays the proof binding)\n- fleet-task-dispatcher: an agent with a proven conversation is dispatched\n  IN that conversation - when the tab drifted off it (post-task bounce to\n  root, restart), ONE bounded navigation (15s deadline, CONFIRMED-by-\n  readback) returns it before any perception or typing; a failed\n  navigation fails the dispatch before any effect\n- first dispatches (BOUND_UNVERIFIED, no proof) keep the root flow - a\n  freshly provisioned tab has a clean composer\n- 4 new contract tests: drift navigation, at-conversation no-op, failed\n  navigation fail-closed, unproven root flow\n\nFull npm test: 2440/2438 pass/2 skip, zero fails.",
+      "tree": {
+        "sha": "5ad0957177650702afcd0543992e8802f20e2c43",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/5ad0957177650702afcd0543992e8802f20e2c43"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/246bbada11cf34dc74a384ee6c927e6922ea4b0a",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/246bbada11cf34dc74a384ee6c927e6922ea4b0a",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/246bbada11cf34dc74a384ee6c927e6922ea4b0a",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/246bbada11cf34dc74a384ee6c927e6922ea4b0a/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "42eb3aab52dc246052482259e65c38c806bb7544",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/42eb3aab52dc246052482259e65c38c806bb7544",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/42eb3aab52dc246052482259e65c38c806bb7544"
+      }
+    ]
+  }
+]

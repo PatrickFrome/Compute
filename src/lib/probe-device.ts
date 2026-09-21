@@ -218,6 +218,22 @@ export function probeWorkspaceId(): string {
   return WORKSPACE_ID;
 }
 
+/** Allocate the next cognitive batch range on the probe's persistent stream. */
+export function nextCognitiveRange(identity: ProbeIdentity, eventCount: number): {
+  afterSequence: number;
+  throughSequence: number;
+} {
+  const afterSequence = identity.streamSeq;
+  const throughSequence = afterSequence + eventCount;
+  identity.streamSeq = throughSequence;
+  try {
+    writeFileSync(IDENTITY_PATH, JSON.stringify(identity, null, 2), { mode: 0o600 });
+  } catch {
+    // module cache still consistent for this process
+  }
+  return { afterSequence, throughSequence };
+}
+
 /** Signed device headers for POST to a canonical edge route (full path with marker). */
 export async function signDeviceRequest(
   identity: ProbeIdentity,

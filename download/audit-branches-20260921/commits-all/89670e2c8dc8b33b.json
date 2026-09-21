@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "ce0dcd644cb5987e76b9315369e9feebcbfa6d64",
+    "node_id": "C_kwDOT_OzB9oAKGNlMGRjZDY0NGNiNTk4N2U3NmI5MzE1MzY5ZTlmZWViY2JmYTZkNjQ",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-30T09:44:41Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-30T09:44:41Z"
+      },
+      "message": "feat(browser): wire durable transactional update states",
+      "tree": {
+        "sha": "a822553d638a6b12b6940f5ad2c0d3c23504ac05",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/a822553d638a6b12b6940f5ad2c0d3c23504ac05"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/ce0dcd644cb5987e76b9315369e9feebcbfa6d64",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ce0dcd644cb5987e76b9315369e9feebcbfa6d64",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/ce0dcd644cb5987e76b9315369e9feebcbfa6d64",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ce0dcd644cb5987e76b9315369e9feebcbfa6d64/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "eac223d2f5beada7359e5f5fab9518c53acfd12b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/eac223d2f5beada7359e5f5fab9518c53acfd12b",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/eac223d2f5beada7359e5f5fab9518c53acfd12b"
+      }
+    ]
+  }
+]

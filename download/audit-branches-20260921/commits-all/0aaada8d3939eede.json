@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "83abcc9c75ce84f00f3efa3ad033687949647118",
+    "node_id": "C_kwDOT_OzB9oAKDgzYWJjYzljNzVjZTg0ZjAwZjNlZmEzYWQwMzM2ODc5NDk2NDcxMTg",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T04:45:27Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T04:45:27Z"
+      },
+      "message": "docs(rsi): define V1.22 proxy reliability calibration",
+      "tree": {
+        "sha": "cb547f67f73a6a86fa2231326213eb838cc68037",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/cb547f67f73a6a86fa2231326213eb838cc68037"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/83abcc9c75ce84f00f3efa3ad033687949647118",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/83abcc9c75ce84f00f3efa3ad033687949647118",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/83abcc9c75ce84f00f3efa3ad033687949647118",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/83abcc9c75ce84f00f3efa3ad033687949647118/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "02de99395a6bb0904839a6aea0338e23a96566ce",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/02de99395a6bb0904839a6aea0338e23a96566ce",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/02de99395a6bb0904839a6aea0338e23a96566ce"
+      }
+    ]
+  }
+]

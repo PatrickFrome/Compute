@@ -1,0 +1,3179 @@
+[
+ {
+  "number": 917,
+  "title": "feat(rsi): gate stable-source Phase36 exposure on lineage contamination",
+  "branch": "work/browser-final-2026-convergence-rsi-r8d-lineage-contamination-gate-v1-sol",
+  "created": "2026-09-19T16:35:30Z",
+  "updated": "2026-09-19T16:35:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 913,
+  "title": "feat(rsi): add zero-effect exposure transition proof",
+  "branch": "work/browser-final-2026-rsi-phase36-transition-proof-v1",
+  "created": "2026-09-19T16:27:06Z",
+  "updated": "2026-09-19T16:32:20Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 909,
+  "title": "feat(rsi): execute one-attempt exploration release with exact readback reconciliation",
+  "branch": "work/browser-final-2026-convergence-rsi-phase36-one-attempt-release-effect-v1-sol",
+  "created": "2026-09-19T16:22:04Z",
+  "updated": "2026-09-19T16:30:22Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 903,
+  "title": "fix(rsi): bind Phase36 certificate to fresh source identity",
+  "branch": "work/browser-final-2026-convergence-rsi-phase36-source-freshness-v1",
+  "created": "2026-09-19T16:14:23Z",
+  "updated": "2026-09-19T16:17:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 902,
+  "title": "feat(rsi): converge R5-R8 on one current lineage with cross-stage authority separation",
+  "branch": "work/browser-final-2026-convergence-rsi-r5-r8-current-v1-gpt",
+  "created": "2026-09-19T16:12:02Z",
+  "updated": "2026-09-19T16:16:49Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 901,
+  "title": "feat(rsi): bind Phase36 exposure certificate to fresh source identity",
+  "branch": "work/browser-final-2026-convergence-rsi-r8-fresh-source-binding-v1",
+  "created": "2026-09-19T16:11:47Z",
+  "updated": "2026-09-19T16:11:47Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 896,
+  "title": "feat(rsi): add durable one-attempt Phase36 exposure release",
+  "branch": "work/browser-final-2026-rsi-r8-exposure-effect-current-v1-sol",
+  "created": "2026-09-19T16:09:32Z",
+  "updated": "2026-09-19T16:18:37Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 894,
+  "title": "feat(rsi): persist Phase36 exposure certificates as zero-effect evidence",
+  "branch": "work/browser-final-2026-convergence-rsi-r8-certificate-ledger-current-v1-sol",
+  "created": "2026-09-19T16:06:56Z",
+  "updated": "2026-09-19T16:15:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 892,
+  "title": "feat(rsi): converge fresh GitHub-DB-runtime source identity on current repair head",
+  "branch": "work/browser-final-2026-convergence-rsi-r5-source-identity-current-v1-gpt",
+  "created": "2026-09-19T16:04:54Z",
+  "updated": "2026-09-19T16:04:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 889,
+  "title": "feat(rsi): bind Phase36 certificate to reviewed admission lineage v2",
+  "branch": "work/browser-final-2026-convergence-rsi-phase36-reviewed-certificate-v2-sol",
+  "created": "2026-09-19T16:01:25Z",
+  "updated": "2026-09-19T16:12:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 887,
+  "title": "feat(rsi): add provenance-bound dormant retrieval review",
+  "branch": "work/browser-final-2026-convergence-rsi-r7-review-v1",
+  "created": "2026-09-19T16:00:27Z",
+  "updated": "2026-09-19T16:00:33Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 886,
+  "title": "feat(rsi): add provenance-bound dormant retrieval review on current Phase35 lineage",
+  "branch": "work/browser-final-2026-convergence-rsi-r7-dormant-review-current-v1-gpt",
+  "created": "2026-09-19T15:59:23Z",
+  "updated": "2026-09-19T15:59:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 885,
+  "title": "feat(rsi): gate admission on exact source identity convergence",
+  "branch": "work/metaengine-rsi-source-identity-convergence-v1-gpt",
+  "created": "2026-09-19T15:56:27Z",
+  "updated": "2026-09-19T15:56:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 884,
+  "title": "feat(rsi): converge Phase35 explicit exposure hold on current canonical repair lineage",
+  "branch": "work/browser-final-2026-convergence-rsi-r6-exposure-hold-current-v1-gpt",
+  "created": "2026-09-19T15:55:55Z",
+  "updated": "2026-09-19T15:55:55Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 883,
+  "title": "fix(rsi): bind matched exposure review to confirmed Phase34B admission",
+  "branch": "work/browser-final-2026-convergence-rsi-r7-provenance-review-v1-sol",
+  "created": "2026-09-19T15:55:52Z",
+  "updated": "2026-09-19T15:58:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 882,
+  "title": "fix(governance): converge RSI merge-admission contract",
+  "branch": "work/same-point-duel-v4-rsi-governance-contract-v2-gpt",
+  "created": "2026-09-19T15:55:22Z",
+  "updated": "2026-09-19T15:55:22Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 881,
+  "title": "fix(rsi): bind Phase36 exposure certificate to exact next governance",
+  "branch": "work/browser-final-2026-convergence-rsi-phase36-exact-preview-v1-gpt",
+  "created": "2026-09-19T15:52:06Z",
+  "updated": "2026-09-19T15:52:06Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 876,
+  "title": "feat(rsi): bind dormant exposure review to confirmed admission provenance",
+  "branch": "work/browser-final-2026-convergence-rsi-phase35-provenance-v1",
+  "created": "2026-09-19T15:48:48Z",
+  "updated": "2026-09-19T15:48:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 874,
+  "title": "feat(rsi): add Phase36 external exposure release certificate",
+  "branch": "work/browser-final-2026-convergence-rsi-phase36-exposure-certificate-v1",
+  "created": "2026-09-19T15:48:30Z",
+  "updated": "2026-09-19T15:48:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 872,
+  "title": "test(rsi): repair Phase32 exact-evidence revalidation fixtures",
+  "branch": "work/browser-final-2026-convergence-rsi-phase32-evidence-oracle-v1",
+  "created": "2026-09-19T15:47:16Z",
+  "updated": "2026-09-19T15:47:16Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 869,
+  "title": "feat(rsi): add fresh dormant retrieval review certificate",
+  "branch": "work/browser-final-2026-convergence-rsi-dormant-retrieval-review-v1",
+  "created": "2026-09-19T15:45:43Z",
+  "updated": "2026-09-19T15:50:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 868,
+  "title": "feat(rsi): bind Phase35 lineage and admission exposure holds",
+  "branch": "work/browser-final-2026-convergence-rsi-phase35-lineage-holds-v1",
+  "created": "2026-09-19T15:44:51Z",
+  "updated": "2026-09-19T15:44:51Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 865,
+  "title": "test(rsi): repair Phase34 cross-stage reviewer fixtures",
+  "branch": "work/browser-final-2026-convergence-rsi-phase34-reviewer-oracle-v1",
+  "created": "2026-09-19T15:43:31Z",
+  "updated": "2026-09-19T15:43:31Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 862,
+  "title": "fix(rsi): converge current Phase35 repair with lineage and router governance",
+  "branch": "work/browser-final-2026-convergence-rsi-post821-repair-v4-gpt",
+  "created": "2026-09-19T15:42:05Z",
+  "updated": "2026-09-19T15:42:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 851,
+  "title": "fix(rsi): converge explicit append-only library evidence lineage",
+  "branch": "work/browser-final-2026-convergence-rsi-lineage-v2",
+  "created": "2026-09-19T15:39:09Z",
+  "updated": "2026-09-19T15:44:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 849,
+  "title": "test(rsi): repair curation privacy oracle",
+  "branch": "work/browser-final-2026-convergence-rsi-curation-privacy-oracle-v1",
+  "created": "2026-09-19T15:38:32Z",
+  "updated": "2026-09-19T15:38:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 848,
+  "title": "test(rsi): isolate Phase32 consumer identity drift oracles",
+  "branch": "work/browser-final-2026-convergence-rsi-phase32-identity-v1",
+  "created": "2026-09-19T15:38:30Z",
+  "updated": "2026-09-19T15:46:16Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 845,
+  "title": "test(rsi): restore full zero-authority canary fixtures",
+  "branch": "work/browser-final-2026-convergence-rsi-canary-authority-oracle-v1",
+  "created": "2026-09-19T15:37:28Z",
+  "updated": "2026-09-19T15:37:28Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 843,
+  "title": "fix(rsi): preserve lifecycle evidence across append-only library lineage",
+  "branch": "work/browser-final-2026-convergence-rsi-lifecycle-evidence-lineage-v1",
+  "created": "2026-09-19T15:35:26Z",
+  "updated": "2026-09-19T15:35:26Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 839,
+  "title": "fix(rsi): converge post-821 canonical repair and oracle integrity",
+  "branch": "work/browser-final-2026-convergence-rsi-repair-v1",
+  "created": "2026-09-19T15:33:05Z",
+  "updated": "2026-09-20T00:07:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 837,
+  "title": "test(rsi): align router oracle with dormant-by-default governance",
+  "branch": "work/browser-final-2026-convergence-rsi-router-oracle-repair-v1",
+  "created": "2026-09-19T15:32:20Z",
+  "updated": "2026-09-19T15:32:20Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 836,
+  "title": "fix(rsi): converge post-821 repair on dormant-first semantics",
+  "branch": "work/browser-final-2026-convergence-rsi-post821-repair-v2",
+  "created": "2026-09-19T15:31:25Z",
+  "updated": "2026-09-19T15:42:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 834,
+  "title": "fix(rsi): canonical post-821 repair and Phase34B runtime closure",
+  "branch": "work/browser-final-2026-convergence-rsi-post821-repair-v1",
+  "created": "2026-09-19T15:27:01Z",
+  "updated": "2026-09-19T15:47:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 830,
+  "title": "test(browser): accept ROLLOVER_AMBIGUOUS in the D-K7 contract (Windows timing)",
+  "branch": "fix/glm-rollover-test-windows-v1",
+  "created": "2026-09-19T07:59:51Z",
+  "updated": "2026-09-19T08:14:27Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 820,
+  "title": "ci(release): fail fast on workflow-authority blockers",
+  "branch": "work/browser-release-workflow-auth-preflight-wiring-v1",
+  "created": "2026-09-18T21:29:21Z",
+  "updated": "2026-09-18T21:29:21Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 818,
+  "title": "fix(release): classify blocked publisher targets",
+  "branch": "work/browser-release-workflow-auth-preflight-v1",
+  "created": "2026-09-18T21:19:48Z",
+  "updated": "2026-09-18T21:19:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 813,
+  "title": "feat(rsi): fully converge Phase34 admission, dormant default and CAS lifecycle",
+  "branch": "work/metaengine-rsi-phase34-full-convergence-v1",
+  "created": "2026-09-18T20:46:35Z",
+  "updated": "2026-09-18T20:46:35Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 812,
+  "title": "feat(rsi): add durable one-attempt library admission barrier",
+  "branch": "work/metaengine-rsi-phase34-admission-journal-v1",
+  "created": "2026-09-18T20:43:34Z",
+  "updated": "2026-09-18T20:45:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 811,
+  "title": "feat(rsi): rebase Phase34 library admission on exact consumer state",
+  "branch": "work/metaengine-rsi-phase34-consumer-state-library-admission-v1",
+  "created": "2026-09-18T20:39:44Z",
+  "updated": "2026-09-18T20:43:02Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 809,
+  "title": "feat(rsi): converge current-state Phase34 anytime library admission",
+  "branch": "work/metaengine-rsi-phase34-current-state-anytime-admission-v1",
+  "created": "2026-09-18T20:37:52Z",
+  "updated": "2026-09-18T20:37:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 808,
+  "title": "fix(rsi): keep zero-evidence skills dormant",
+  "branch": "work/metaengine-rsi-phase33-shadow-admission-guard-v1",
+  "created": "2026-09-18T20:36:02Z",
+  "updated": "2026-09-18T20:36:45Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 779,
+  "title": "feat(rsi): admit verified post-adoption outcomes into the existing experience graph",
+  "branch": "work/metaengine-rsi-post-adoption-experience-admission-v1",
+  "created": "2026-09-18T19:45:52Z",
+  "updated": "2026-09-18T19:45:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 760,
+  "title": "feat(rsi): add final external install-cycle admission",
+  "branch": "work/metaengine-rsi-final-install-cycle-admission-v1",
+  "created": "2026-09-18T19:17:05Z",
+  "updated": "2026-09-18T19:17:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 750,
+  "title": "feat(rsi): add single-cycle restart-gate probe admission",
+  "branch": "work/metaengine-rsi-restart-gate-probe-admission-v1",
+  "created": "2026-09-18T18:55:35Z",
+  "updated": "2026-09-18T18:55:35Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 735,
+  "title": "feat(rsi): admit self-update checks only from healthy external control state",
+  "branch": "work/metaengine-rsi-selfupdate-check-admission-v1",
+  "created": "2026-09-18T18:47:03Z",
+  "updated": "2026-09-18T18:47:03Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 729,
+  "title": "feat(rsi): add mastery-throttled benchmark coevolution admission",
+  "branch": "work/metaengine-rsi-benchmark-coevolution-admission-v1",
+  "created": "2026-09-18T18:43:25Z",
+  "updated": "2026-09-18T18:43:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 728,
+  "title": "feat(rsi): gate self-update review on confirmed release authority",
+  "branch": "work/metaengine-rsi-release-outcome-selfupdate-review-v1",
+  "created": "2026-09-18T18:43:19Z",
+  "updated": "2026-09-18T18:43:19Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 716,
+  "title": "feat(rsi): add dual-verifier shadow admission for verifier evolution",
+  "branch": "work/metaengine-rsi-verifier-evolution-admission-v1",
+  "created": "2026-09-18T18:33:39Z",
+  "updated": "2026-09-18T18:33:39Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 715,
+  "title": "feat(rsi): admit verifier evolution only through sealed shadow qualification",
+  "branch": "work/metaengine-rsi-sealed-verifier-evolution-admission-v1",
+  "created": "2026-09-18T18:33:37Z",
+  "updated": "2026-09-18T18:33:37Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 701,
+  "title": "feat(rsi): add identity-stable bounded meta-profile canary",
+  "branch": "work/metaengine-rsi-bounded-canary-admission-v1",
+  "created": "2026-09-18T18:16:19Z",
+  "updated": "2026-09-18T18:16:19Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 697,
+  "title": "feat(rsi): admit only fresh externally leased release effects",
+  "branch": "work/metaengine-rsi-release-executor-admission-v1-gpt",
+  "created": "2026-09-18T18:13:58Z",
+  "updated": "2026-09-18T18:13:58Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 695,
+  "title": "feat(rsi): add identity-stable bounded shadow canary admission",
+  "branch": "work/metaengine-rsi-bounded-shadow-canary-admission-v1",
+  "created": "2026-09-18T18:13:10Z",
+  "updated": "2026-09-18T18:20:34Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 681,
+  "title": "feat(rsi): converge trusted Browser outcomes into durable experience",
+  "branch": "work/metaengine-rsi-trusted-learning-convergence-v1",
+  "created": "2026-09-18T17:55:46Z",
+  "updated": "2026-09-18T17:55:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 673,
+  "title": "feat(rsi): admit scope-qualified revisions through sealed external library evidence",
+  "branch": "work/metaengine-rsi-external-library-admission-v1",
+  "created": "2026-09-18T17:40:06Z",
+  "updated": "2026-09-18T17:40:06Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 670,
+  "title": "feat(rsi): converge closed-loop runtime onto release-aligned Browser",
+  "branch": "work/metaengine-rsi-browser-runtime-convergence-v3",
+  "created": "2026-09-18T17:35:23Z",
+  "updated": "2026-09-18T17:36:40Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 666,
+  "title": "feat(rsi): bind skill revision frontier to sealed evaluation integrity",
+  "branch": "work/metaengine-rsi-revision-integrity-admission-v1",
+  "created": "2026-09-18T17:21:33Z",
+  "updated": "2026-09-18T17:21:33Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 660,
+  "title": "feat(rsi): add service-role DevOS admission for prepared requests",
+  "branch": "work/metaengine-rsi-devos-admission-v1",
+  "created": "2026-09-18T17:11:56Z",
+  "updated": "2026-09-18T17:11:56Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 659,
+  "title": "RSI Browser runtime convergence v2",
+  "branch": "work/metaengine-rsi-browser-runtime-convergence-v2",
+  "created": "2026-09-18T17:10:46Z",
+  "updated": "2026-09-18T17:54:18Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 657,
+  "title": "feat(rsi): add trusted turn credit and durable experience graph admissions",
+  "branch": "work/metaengine-rsi-credit-experience-adapter-v1-gpt",
+  "created": "2026-09-18T17:08:26Z",
+  "updated": "2026-09-18T17:08:26Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 654,
+  "title": "feat(rsi): drive verified skill lifecycle from credited Browser outcomes",
+  "branch": "work/metaengine-rsi-credited-skill-lifecycle-v1",
+  "created": "2026-09-18T17:03:33Z",
+  "updated": "2026-09-18T17:03:33Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 652,
+  "title": "feat(rsi): converge verified Browser outcomes and evidence-gated episodes",
+  "branch": "work/metaengine-rsi-runtime-convergence-v5",
+  "created": "2026-09-18T16:59:40Z",
+  "updated": "2026-09-18T16:59:40Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 645,
+  "title": "feat(rsi): wire verified Browser receipts into runtime sidecar",
+  "branch": "work/metaengine-rsi-browser-outcome-wiring-v1",
+  "created": "2026-09-18T16:43:20Z",
+  "updated": "2026-09-18T16:55:50Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 644,
+  "title": "feat(rsi): feed bounded Browser Brain observations into RSI runtime",
+  "branch": "work/metaengine-rsi-browser-observation-feed-v1",
+  "created": "2026-09-18T16:41:30Z",
+  "updated": "2026-09-18T16:41:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 643,
+  "title": "feat(rsi): ingest verified Browser outcomes into durable learning evidence",
+  "branch": "work/metaengine-rsi-browser-outcome-ingest-v2",
+  "created": "2026-09-18T16:38:22Z",
+  "updated": "2026-09-18T16:38:22Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 641,
+  "title": "chore(rsi): sync current Browser release into RSI convergence",
+  "branch": "work/metaengine-rsi-browser-release-sync-v1",
+  "created": "2026-09-18T16:35:17Z",
+  "updated": "2026-09-18T16:35:17Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 639,
+  "title": "feat(rsi): converge RSI V1.32 into Browser runtime shadow plane",
+  "branch": "work/metaengine-rsi-browser-runtime-convergence-v1",
+  "created": "2026-09-18T16:10:10Z",
+  "updated": "2026-09-18T17:03:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 599,
+  "title": "perf(brain): forward-port P3 no-resync admission onto current release",
+  "branch": "work/browser-cognitive-p3-drop-no-resync-v2",
+  "created": "2026-09-18T02:06:42Z",
+  "updated": "2026-09-18T02:06:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 598,
+  "title": "perf(brain): stop P3 telemetry drops from forcing full resync",
+  "branch": "work/browser-cognitive-p3-drop-no-resync-v1",
+  "created": "2026-09-18T01:44:54Z",
+  "updated": "2026-09-18T01:44:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 588,
+  "title": "ci: cancel superseded Browser qualification heads",
+  "branch": "work/ci-superseded-head-cancellation-v1",
+  "created": "2026-09-17T23:40:14Z",
+  "updated": "2026-09-17T23:40:14Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 581,
+  "title": "feat(fleet): derive elastic ceiling from trusted tab census",
+  "branch": "work/fleet-census-derived-ceiling-v1",
+  "created": "2026-09-17T22:52:37Z",
+  "updated": "2026-09-17T22:52:37Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 580,
+  "title": "fix(rsi): forward-port supervisor mesh startup recovery",
+  "branch": "work/metaengine-rsi-mesh-start-recovery-forwardport-v1",
+  "created": "2026-09-17T22:49:21Z",
+  "updated": "2026-09-17T22:49:21Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 567,
+  "title": "fix(rsi): require cryptographic origin proof before evaluator admission",
+  "branch": "work/metaengine-rsi-v1-evidence-attestation-s2",
+  "created": "2026-09-17T13:46:40Z",
+  "updated": "2026-09-17T13:46:40Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 558,
+  "title": "fix(browser): recover multi-hop bootstrap ambiguity",
+  "branch": "repair/supervisor-multihop-process-boundary-r1",
+  "created": "2026-09-16T07:55:31Z",
+  "updated": "2026-09-16T07:55:31Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 557,
+  "title": "fix(browser): recover transitive process-boundary wake ambiguity",
+  "branch": "repair/supervisor-transitive-process-boundary-r6",
+  "created": "2026-09-16T07:31:39Z",
+  "updated": "2026-09-16T07:31:39Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 550,
+  "title": "fix(browser): restore deployed heartbeat state route for installer",
+  "branch": "repair/heartbeat-state-compat-installer-v1",
+  "created": "2026-09-14T02:41:53Z",
+  "updated": "2026-09-14T02:43:58Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 546,
+  "title": "feat(browser): integrate StateRevision into runtime-coherence heartbeat candidate",
+  "branch": "work/runtime-identity-state-revision-v1",
+  "created": "2026-09-14T00:47:09Z",
+  "updated": "2026-09-14T00:47:09Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 545,
+  "title": "feat(browser): integrate StateRevision and ledger integrity into convergence",
+  "branch": "work/runtime-coherence-parallel-integration-v1",
+  "created": "2026-09-14T00:46:00Z",
+  "updated": "2026-09-14T00:48:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 544,
+  "title": "fix(browser): integrate bounded heartbeat split into runtime convergence",
+  "branch": "repair/native-supervisor-heartbeat-contract-v1",
+  "created": "2026-09-14T00:45:48Z",
+  "updated": "2026-09-14T00:47:44Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 540,
+  "title": "Repair native supervisor heartbeat liveness isolation",
+  "branch": "repair/native-heartbeat-liveness-v1",
+  "created": "2026-09-14T00:24:37Z",
+  "updated": "2026-09-14T00:58:03Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 536,
+  "title": "fix(browser): split watchdog liveness from state publication",
+  "branch": "work/browser-heartbeat-coherence-v1",
+  "created": "2026-09-14T00:02:31Z",
+  "updated": "2026-09-14T00:38:12Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 534,
+  "title": "METAENGINE: reconcile native supervisor heartbeat contract",
+  "branch": "work/native-supervisor-heartbeat-contract-reconcile-v1",
+  "created": "2026-09-13T23:48:14Z",
+  "updated": "2026-09-13T23:48:14Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 533,
+  "title": "fix(browser): converge runtime coherence, detached capture and exact identity",
+  "branch": "repair/runtime-coherence-convergence-v2",
+  "created": "2026-09-13T23:43:04Z",
+  "updated": "2026-09-14T00:32:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 532,
+  "title": "feat(browser): realtime full observation and exact JPEG keyframes",
+  "branch": "work/browser-realtime-full-control-v1",
+  "created": "2026-09-13T22:01:06Z",
+  "updated": "2026-09-13T22:04:13Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 531,
+  "title": "test(browser): prove hidden-attached JPEG capture",
+  "branch": "repair/hidden-attached-jpeg-proof-v1",
+  "created": "2026-09-13T21:51:54Z",
+  "updated": "2026-09-13T21:51:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 530,
+  "title": "test(browser): isolate detached CDP blocking stage",
+  "branch": "repair/detached-cdp-stage-diagnostic-v1",
+  "created": "2026-09-13T21:43:17Z",
+  "updated": "2026-09-13T21:46:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 527,
+  "title": "Release integrate self-update recovery onto live 0.7.0 source line",
+  "branch": "release/self-update-ambiguity-live-v1",
+  "created": "2026-09-12T12:47:19Z",
+  "updated": "2026-09-12T12:49:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 526,
+  "title": "Self-update ambiguity recovery and developer emergency Guardian path",
+  "branch": "fix/self-update-ambiguous-recovery",
+  "created": "2026-09-12T04:18:41Z",
+  "updated": "2026-09-12T12:47:11Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 525,
+  "title": "perf(browser): avoid full causal snapshots on cognition hot path",
+  "branch": "work/browser-brain-causal-summary-fastpath-v1",
+  "created": "2026-09-12T02:00:33Z",
+  "updated": "2026-09-12T03:02:53Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 524,
+  "title": "perf(browser): index cognition plans by BrowserCell",
+  "branch": "work/browser-brain-tab-plan-index-v1",
+  "created": "2026-09-12T00:59:41Z",
+  "updated": "2026-09-12T01:02:31Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 523,
+  "title": "perf(browser): collapse synchronous custom preflight reactions",
+  "branch": "work/browser-brain-custom-preflight-sync-collapse-v1",
+  "created": "2026-09-11T23:59:46Z",
+  "updated": "2026-09-12T00:02:11Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 522,
+  "title": "perf(browser): fast-path synchronous fanout budget",
+  "branch": "work/browser-brain-sync-budget-fastpath-v1",
+  "created": "2026-09-11T21:59:49Z",
+  "updated": "2026-09-11T23:04:36Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 521,
+  "title": "perf(browser): pass runtime-fenced executor directly to fanout",
+  "branch": "work/browser-brain-direct-runtime-executor-v1",
+  "created": "2026-09-11T21:04:17Z",
+  "updated": "2026-09-11T21:06:53Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 520,
+  "title": "perf(browser): fast-path exact-tab adaptive validation",
+  "branch": "work/browser-brain-fast-exact-tab-validation-v1",
+  "created": "2026-09-11T19:59:30Z",
+  "updated": "2026-09-11T20:04:09Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 519,
+  "title": "perf(browser): route adaptive fanout through default cell fast path",
+  "branch": "work/browser-brain-reuse-clock-result-vector-v1",
+  "created": "2026-09-11T19:05:49Z",
+  "updated": "2026-09-11T19:10:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 518,
+  "title": "perf(browser): direct-await default fanout preflight",
+  "branch": "work/browser-brain-default-preflight-direct-await-v1",
+  "created": "2026-09-11T18:01:27Z",
+  "updated": "2026-09-11T18:06:15Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 517,
+  "title": "Browser Final V2: always-on control invariant and bounded worker observation",
+  "branch": "work/browser-always-on-control-v1",
+  "created": "2026-09-11T17:07:18Z",
+  "updated": "2026-09-11T23:41:45Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 516,
+  "title": "perf(browser): launch fanout effects without deferred lane turn",
+  "branch": "work/browser-brain-direct-effect-launch-v1",
+  "created": "2026-09-11T17:00:17Z",
+  "updated": "2026-09-11T17:04:10Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 515,
+  "title": "perf(browser): fast-path default BrowserCell preflight",
+  "branch": "work/browser-brain-default-cell-fast-preflight-v1",
+  "created": "2026-09-11T15:04:02Z",
+  "updated": "2026-09-11T16:03:51Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 513,
+  "title": "perf(browser): collapse fanout preflight validation reactions",
+  "branch": "work/browser-brain-preflight-reaction-collapse-v1",
+  "created": "2026-09-11T14:00:12Z",
+  "updated": "2026-09-11T14:03:13Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 512,
+  "title": "perf(browser): preallocate stream snapshot projection",
+  "branch": "work/browser-brain-preallocated-snapshot-projection-v1",
+  "created": "2026-09-11T12:59:21Z",
+  "updated": "2026-09-11T13:02:53Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 509,
+  "title": "perf(browser): keep ordered stream states beside source order",
+  "branch": "work/browser-brain-ordered-state-vector-v1",
+  "created": "2026-09-11T12:00:02Z",
+  "updated": "2026-09-11T12:02:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 504,
+  "title": "Final V2: stage hardened Host Agent replay and restart fences",
+  "branch": "work/browser-final-2026-convergence-host-restart-fence-v1",
+  "created": "2026-09-11T11:16:12Z",
+  "updated": "2026-09-11T11:21:34Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 501,
+  "title": "test(browser): gate final convergence source composition",
+  "branch": "work/browser-final-2026-convergence-gate-v1",
+  "created": "2026-09-11T10:52:43Z",
+  "updated": "2026-09-11T11:16:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 499,
+  "title": "feat(browser): wire leased BrowserPlan outcomes through VEF",
+  "branch": "work/browser-final-2026-convergence-vef-wiring-v1",
+  "created": "2026-09-11T10:44:33Z",
+  "updated": "2026-09-11T11:15:31Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 497,
+  "title": "feat(browser): add VEF v1 terminal-proof classifier",
+  "branch": "work/metaengine-final-convergence-vef-v1",
+  "created": "2026-09-11T10:37:35Z",
+  "updated": "2026-09-11T10:42:02Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 496,
+  "title": "feat(browser): preflight hardened Host Agent v3 on final candidate",
+  "branch": "work/browser-final-2026-convergence-host-restart-fence-v1",
+  "created": "2026-09-11T10:36:14Z",
+  "updated": "2026-09-11T10:39:12Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 495,
+  "title": "fix(host-agent): enforce fresh session keys across remote composition restart",
+  "branch": "work/browser-final-2026-convergence-host-restart-fence-v1",
+  "created": "2026-09-11T10:34:18Z",
+  "updated": "2026-09-11T10:38:07Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 492,
+  "title": "fix(host-agent): harden replay fence beyond bounded nonce eviction",
+  "branch": "work/browser-final-2026-convergence-host-replay-fence-v2",
+  "created": "2026-09-11T10:15:02Z",
+  "updated": "2026-09-11T10:22:59Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 483,
+  "title": "WIP: METAENGINE Browser final 2026 convergence",
+  "branch": "work/browser-final-2026-convergence-v1",
+  "created": "2026-09-11T09:23:03Z",
+  "updated": "2026-09-11T15:18:36Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 480,
+  "title": "test(browser): repair stable stream source-order regression",
+  "branch": "work/browser-brain-stable-stream-source-order-fix-v1",
+  "created": "2026-09-11T09:02:48Z",
+  "updated": "2026-09-11T09:05:45Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 479,
+  "title": "perf(browser): keep stream source order incrementally",
+  "branch": "work/browser-brain-stable-stream-source-order-v1",
+  "created": "2026-09-11T08:58:47Z",
+  "updated": "2026-09-11T10:05:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 478,
+  "title": "perf(browser): cache immutable stream source rows",
+  "branch": "work/browser-brain-source-row-cache-v1",
+  "created": "2026-09-11T08:02:09Z",
+  "updated": "2026-09-11T08:06:38Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 477,
+  "title": "perf(browser): remove stream clock validation tuple allocation",
+  "branch": "work/browser-brain-zero-allocation-stream-validate-v1",
+  "created": "2026-09-11T07:00:37Z",
+  "updated": "2026-09-11T07:04:12Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 476,
+  "title": "perf(browser): remove producer staging from cognition hot path",
+  "branch": "work/browser-brain-zero-allocation-producer-observe-v1",
+  "created": "2026-09-11T06:04:43Z",
+  "updated": "2026-09-11T06:09:20Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 475,
+  "title": "perf(browser): read stream clock once per perception edge",
+  "branch": "work/browser-brain-single-stream-clock-read-v1",
+  "created": "2026-09-11T05:10:38Z",
+  "updated": "2026-09-11T05:13:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 474,
+  "title": "perf(browser): cache immutable stream clock snapshots",
+  "branch": "work/browser-brain-stream-clock-snapshot-cache-v1",
+  "created": "2026-09-11T04:04:40Z",
+  "updated": "2026-09-11T04:08:22Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 473,
+  "title": "perf(browser): use dense sidecars for fanout metadata",
+  "branch": "work/browser-brain-struct-of-arrays-fanout-v1",
+  "created": "2026-09-11T03:02:21Z",
+  "updated": "2026-09-11T03:06:45Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 472,
+  "title": "perf(browser): pass through signal-less preflight promise",
+  "branch": "work/browser-brain-direct-preflight-pass-through-v1",
+  "created": "2026-09-11T02:01:25Z",
+  "updated": "2026-09-11T02:04:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 471,
+  "title": "perf(browser): reuse one deferred turn across fanout lanes",
+  "branch": "work/browser-brain-reuse-deferred-turn-v1",
+  "created": "2026-09-11T00:59:38Z",
+  "updated": "2026-09-11T01:04:38Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 470,
+  "title": "perf(browser): preallocate fanout execution vector",
+  "branch": "work/browser-brain-preallocate-execution-vector-v1",
+  "created": "2026-09-11T00:00:46Z",
+  "updated": "2026-09-11T00:05:19Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 469,
+  "title": "perf(browser): build fanout preflight aggregate in one vector",
+  "branch": "work/browser-brain-flat-preflight-vector-v1",
+  "created": "2026-09-10T23:02:39Z",
+  "updated": "2026-09-10T23:07:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 468,
+  "title": "perf(browser): preallocate bounded fanout plan",
+  "branch": "work/browser-brain-preallocate-fanout-plan-v1",
+  "created": "2026-09-10T20:59:22Z",
+  "updated": "2026-09-10T22:52:28Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 467,
+  "title": "perf(browser): remove redundant exact-cell extraction",
+  "branch": "work/browser-brain-single-pass-exact-cell-v1",
+  "created": "2026-09-10T20:08:16Z",
+  "updated": "2026-09-10T20:10:59Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 466,
+  "title": "perf(browser): reuse scheduler pressure update snapshot",
+  "branch": "work/browser-brain-single-scheduler-pressure-snapshot-v1",
+  "created": "2026-09-10T19:04:25Z",
+  "updated": "2026-09-10T19:07:20Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 465,
+  "title": "perf(browser): materialize pressure evidence only on demand",
+  "branch": "work/browser-brain-lazy-pressure-evidence-v1",
+  "created": "2026-09-10T18:03:57Z",
+  "updated": "2026-09-10T18:06:28Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 464,
+  "title": "perf(browser): remove intermediate pressure budget allocations",
+  "branch": "work/browser-brain-zero-allocation-pressure-budget-v1",
+  "created": "2026-09-10T17:03:23Z",
+  "updated": "2026-09-10T17:06:19Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 463,
+  "title": "feat(browser): extract Host Agent boundary and fix DevOS source correctness",
+  "branch": "work/browser-host-agent-p0",
+  "created": "2026-09-10T16:33:55Z",
+  "updated": "2026-09-10T22:21:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 462,
+  "title": "feat(browser): architecture hardening v1",
+  "branch": "work/browser-architecture-hardening-v1",
+  "created": "2026-09-10T16:33:34Z",
+  "updated": "2026-09-10T16:37:07Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 461,
+  "title": "perf(browser): reuse immutable pressure evidence snapshots",
+  "branch": "work/browser-brain-reuse-pressure-evidence-v1",
+  "created": "2026-09-10T16:03:13Z",
+  "updated": "2026-09-10T16:06:49Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 460,
+  "title": "perf(browser): streamline pressure control-flow hot path",
+  "branch": "work/browser-brain-pressure-controlflow-hotpath-v1",
+  "created": "2026-09-10T15:00:14Z",
+  "updated": "2026-09-10T15:02:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 459,
+  "title": "perf(browser): remove per-metric pressure allocations",
+  "branch": "work/browser-brain-allocation-free-pressure-metrics-v1",
+  "created": "2026-09-10T14:00:48Z",
+  "updated": "2026-09-10T14:05:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 458,
+  "title": "perf(browser): remove pressure signal wrapper allocations",
+  "branch": "work/browser-brain-allocation-free-pressure-signals-v1",
+  "created": "2026-09-10T13:03:50Z",
+  "updated": "2026-09-10T13:08:21Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 457,
+  "title": "perf(browser): reuse validated live-cell pressure budget",
+  "branch": "work/browser-brain-single-pass-live-cell-budget-v1",
+  "created": "2026-09-10T10:59:31Z",
+  "updated": "2026-09-10T12:05:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 456,
+  "title": "fix(browser): fail closed on malformed pressure recovery hysteresis",
+  "branch": "work/browser-brain-strict-recovery-samples-v1",
+  "created": "2026-09-10T09:00:45Z",
+  "updated": "2026-09-10T09:03:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 455,
+  "title": "fix(browser): fail closed on malformed live cell pressure",
+  "branch": "work/browser-brain-strict-live-cell-pressure-v1",
+  "created": "2026-09-10T08:01:24Z",
+  "updated": "2026-09-10T08:04:49Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 454,
+  "title": "fix(browser): close mutation fanout with zero live cells",
+  "branch": "work/browser-brain-zero-live-cell-fence-v1",
+  "created": "2026-09-10T07:02:19Z",
+  "updated": "2026-09-10T07:04:41Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 453,
+  "title": "feat(browser): start Command Fabric v2 fast control plane P0",
+  "branch": "work/browser-command-fabric-v2-p0",
+  "created": "2026-09-10T06:28:08Z",
+  "updated": "2026-09-10T15:15:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 452,
+  "title": "fix(browser): fail closed on malformed pressure metrics",
+  "branch": "work/browser-brain-strict-pressure-metrics-v1",
+  "created": "2026-09-10T06:03:00Z",
+  "updated": "2026-09-10T06:06:37Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 451,
+  "title": "fix(browser): fail closed on malformed liveness pressure",
+  "branch": "work/browser-brain-strict-liveness-pressure-v1",
+  "created": "2026-09-10T05:03:32Z",
+  "updated": "2026-09-10T05:06:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 450,
+  "title": "perf(browser): bind fanout cells during concurrent preflight",
+  "branch": "work/browser-brain-bind-cell-in-preflight-v1",
+  "created": "2026-09-10T04:02:06Z",
+  "updated": "2026-09-10T04:04:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 449,
+  "title": "perf(browser): fail fast on same-cell preflight overlap",
+  "branch": "work/browser-brain-fast-fail-same-cell-v1",
+  "created": "2026-09-10T02:58:14Z",
+  "updated": "2026-09-10T03:01:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 448,
+  "title": "perf(browser): fail fast when fanout exceeds pressure budget",
+  "branch": "work/browser-brain-fast-fail-over-budget-v1",
+  "created": "2026-09-10T02:03:23Z",
+  "updated": "2026-09-10T02:06:37Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 447,
+  "title": "perf(browser): fail fast on missing BrowserCell evidence",
+  "branch": "work/browser-brain-fast-fail-missing-cell-v1",
+  "created": "2026-09-10T00:59:58Z",
+  "updated": "2026-09-10T01:03:12Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 446,
+  "title": "perf(browser): fail fast on invalid pressure evidence",
+  "branch": "work/browser-brain-fast-fail-invalid-pressure-v1",
+  "created": "2026-09-09T23:58:21Z",
+  "updated": "2026-09-10T00:01:41Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 444,
+  "title": "fix(browser): fail closed on invalid hard fanout limit",
+  "branch": "work/browser-brain-strict-hard-batch-limit-v1",
+  "created": "2026-09-09T23:03:05Z",
+  "updated": "2026-09-09T23:05:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 442,
+  "title": "fix(browser): fail closed on invalid fanout pressure budget",
+  "branch": "work/browser-brain-strict-pressure-budget-v1",
+  "created": "2026-09-09T22:04:06Z",
+  "updated": "2026-09-09T22:06:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 441,
+  "title": "METAENGINE Browser final integration staging",
+  "branch": "work/browser-final-integration-v1",
+  "created": "2026-09-09T21:49:36Z",
+  "updated": "2026-09-09T21:52:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 440,
+  "title": "METAENGINE Browser final convergence: hardening + restart evidence + hot-path optimization",
+  "branch": "work/browser-final-convergence-v1",
+  "created": "2026-09-09T21:04:36Z",
+  "updated": "2026-09-09T23:38:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 439,
+  "title": "Converge Browser Brain hot-path optimization line",
+  "branch": "work/browser-brain-fresh-snapshot-pressure-v1",
+  "created": "2026-09-09T20:54:52Z",
+  "updated": "2026-09-09T20:56:36Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 436,
+  "title": "fix(browser): refresh pressure on fresh process snapshots",
+  "branch": "work/browser-brain-fresh-snapshot-pressure-v1",
+  "created": "2026-09-09T20:00:25Z",
+  "updated": "2026-09-09T20:52:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 435,
+  "title": "perf(browser): compute process coverage in one pass",
+  "branch": "work/browser-brain-single-pass-coverage-v1",
+  "created": "2026-09-09T18:01:43Z",
+  "updated": "2026-09-09T19:00:02Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 434,
+  "title": "Bind emergency maintenance to immutable packaged trust root",
+  "branch": "work/browser-immutable-emergency-trust-root-v1",
+  "created": "2026-09-09T17:58:45Z",
+  "updated": "2026-09-09T20:31:16Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 431,
+  "title": "perf(browser): reuse process coverage across semantic edges",
+  "branch": "work/browser-brain-semantic-coverage-reuse-v1",
+  "created": "2026-09-09T16:03:16Z",
+  "updated": "2026-09-09T16:06:11Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 429,
+  "title": "perf(browser): flatten fanout preflight aggregation",
+  "branch": "work/browser-brain-flat-preflight-aggregate-v1",
+  "created": "2026-09-09T15:01:20Z",
+  "updated": "2026-09-09T15:03:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 428,
+  "title": "perf(browser): materialize fanout results per lane",
+  "branch": "work/browser-brain-fanout-direct-result-materialization-v1",
+  "created": "2026-09-09T14:01:26Z",
+  "updated": "2026-09-09T14:03:36Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 427,
+  "title": "perf(browser): fail fast on fanout preflight abort",
+  "branch": "work/browser-brain-preflight-abort-race-v1",
+  "created": "2026-09-09T12:03:05Z",
+  "updated": "2026-09-09T12:06:18Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 426,
+  "title": "fix(browser): fence fanout peers on execution-start abort",
+  "branch": "work/browser-brain-execution-abort-fence-v1",
+  "created": "2026-09-09T11:01:08Z",
+  "updated": "2026-09-09T11:03:14Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 425,
+  "title": "Bound restart-stale Fleet forensic history",
+  "branch": "work/fleet-restart-stale-history-bound-v1",
+  "created": "2026-09-09T10:04:24Z",
+  "updated": "2026-09-09T15:49:47Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 424,
+  "title": "perf(browser): isolate synchronous fanout preflight throws",
+  "branch": "work/browser-brain-preflight-sync-throw-isolation-v1",
+  "created": "2026-09-09T10:00:49Z",
+  "updated": "2026-09-09T10:02:06Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 423,
+  "title": "fix(browser): isolate synchronous fanout executor throws",
+  "branch": "work/browser-brain-fanout-sync-throw-isolation-v1",
+  "created": "2026-09-09T08:59:32Z",
+  "updated": "2026-09-09T09:03:16Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 422,
+  "title": "perf(browser): overlap fanout pressure and identity preflight",
+  "branch": "work/browser-brain-parallel-admission-preflight-v1",
+  "created": "2026-09-09T07:59:00Z",
+  "updated": "2026-09-09T08:01:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 421,
+  "title": "perf(browser): parallelize BrowserCell fanout resolver preflight",
+  "branch": "work/browser-brain-parallel-fanout-resolver-preflight-v1",
+  "created": "2026-09-09T07:01:30Z",
+  "updated": "2026-09-09T07:04:06Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 419,
+  "title": "perf(browser): route observation cohort callers in one pass",
+  "branch": "work/browser-brain-observation-bulk-delta-resume-v1",
+  "created": "2026-09-09T06:03:56Z",
+  "updated": "2026-09-09T06:05:58Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 418,
+  "title": "perf(browser): collect changed cohorts during materialization",
+  "branch": "work/browser-brain-observation-cohort-single-pass-changed-v1",
+  "created": "2026-09-09T04:59:00Z",
+  "updated": "2026-09-09T05:01:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 417,
+  "title": "perf(browser): remove changed cohort flag allocation",
+  "branch": "work/browser-brain-observation-cohort-direct-membership-v1",
+  "created": "2026-09-09T04:03:26Z",
+  "updated": "2026-09-09T04:06:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 416,
+  "title": "perf(browser): preserve changed caller order without post-sort",
+  "branch": "work/browser-brain-observation-cohort-caller-order-v1",
+  "created": "2026-09-09T02:01:18Z",
+  "updated": "2026-09-09T03:02:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 415,
+  "title": "perf(browser): expose direct changed observation cohort work",
+  "branch": "work/browser-brain-observation-cohort-direct-work-v1",
+  "created": "2026-09-09T00:58:25Z",
+  "updated": "2026-09-09T01:00:36Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 414,
+  "title": "perf(browser): index changed observation cohort work",
+  "branch": "work/browser-brain-observation-cohort-work-index-v1",
+  "created": "2026-09-09T00:00:21Z",
+  "updated": "2026-09-09T00:03:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 413,
+  "title": "perf(browser): add direct observation cohort fan-out indexes",
+  "branch": "work/browser-brain-observation-cursor-cohort-fanout-v1",
+  "created": "2026-09-08T22:58:00Z",
+  "updated": "2026-09-08T23:01:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 412,
+  "title": "Browser successor: converge all fixes for trusted update",
+  "branch": "work/browser-successor-convergence-all-fixes-v1",
+  "created": "2026-09-08T22:07:20Z",
+  "updated": "2026-09-08T22:20:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 411,
+  "title": "perf(browser): route cohort delta requests without rematching",
+  "branch": "work/browser-brain-observation-cursor-cohort-routing-v1",
+  "created": "2026-09-08T22:01:54Z",
+  "updated": "2026-09-08T22:05:08Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 410,
+  "title": "Browser Fleet: require physical capture identity before submit",
+  "branch": "work/devos-fleet-causal-readback-v1",
+  "created": "2026-09-08T21:51:02Z",
+  "updated": "2026-09-08T21:53:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 409,
+  "title": "perf(browser): cohort observation delta resume reads",
+  "branch": "work/browser-brain-observation-cursor-cohort-delta-resume-v1",
+  "created": "2026-09-08T21:02:36Z",
+  "updated": "2026-09-08T21:26:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 408,
+  "title": "Browser control plane: make command replay idempotent",
+  "branch": "work/native-supervisor-issuer-contract-v1",
+  "created": "2026-09-08T20:43:58Z",
+  "updated": "2026-09-08T20:51:09Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 407,
+  "title": "Browser successor: fail closed on empty view capture",
+  "branch": "work/native-capture-surface-contract-v1",
+  "created": "2026-09-08T20:35:06Z",
+  "updated": "2026-09-08T20:38:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 406,
+  "title": "Browser successor: reconcile persisted stale self-update recovery",
+  "branch": "work/self-update-persistent-ambiguous-supersede-v1",
+  "created": "2026-09-08T20:22:06Z",
+  "updated": "2026-09-08T20:25:22Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 405,
+  "title": "perf(browser): resume only observation consumers changed since revision",
+  "branch": "work/browser-brain-observation-cursor-delta-resume-v1",
+  "created": "2026-09-08T19:58:44Z",
+  "updated": "2026-09-08T20:00:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 404,
+  "title": "Browser successor: reconcile Sentinel journal across installed incarnations",
+  "branch": "work/sentinel-successor-journal-reconcile-v1",
+  "created": "2026-09-08T19:22:44Z",
+  "updated": "2026-09-08T19:28:03Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 403,
+  "title": "Browser successor: bound batch receipts and align Clean Genesis installed gates",
+  "branch": "work/browser-successor-batch-receipt-bounds-v1",
+  "created": "2026-09-08T19:04:16Z",
+  "updated": "2026-09-08T19:06:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 402,
+  "title": "Browser successor: exact recovery identity and Sentinel failure evidence",
+  "branch": "work/browser-successor-recovery-sentinel-v1",
+  "created": "2026-09-08T18:14:41Z",
+  "updated": "2026-09-08T18:27:16Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 401,
+  "title": "Self-update: reconcile stale ambiguous journal on proven newer packaged runtime",
+  "branch": "fix/devos-070-self-heal-runtime-v1",
+  "created": "2026-09-08T18:09:00Z",
+  "updated": "2026-09-08T18:18:13Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 400,
+  "title": "perf(browser): gate full cursor resume by durable revision",
+  "branch": "work/browser-brain-observation-cursor-conditional-resume-v1",
+  "created": "2026-09-08T18:00:05Z",
+  "updated": "2026-09-08T19:03:53Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 399,
+  "title": "perf(browser): resume full observation cursor capacity",
+  "branch": "work/browser-brain-observation-cursor-full-capacity-resume-v1",
+  "created": "2026-09-08T16:02:49Z",
+  "updated": "2026-09-08T16:04:35Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 397,
+  "title": "fix(browser): restore full-capacity observation cursor snapshots",
+  "branch": "work/browser-brain-observation-cursor-full-capacity-restore-v1",
+  "created": "2026-09-08T15:02:10Z",
+  "updated": "2026-09-08T15:05:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 395,
+  "title": "perf(browser): batch observation cursor resume",
+  "branch": "work/browser-brain-observation-cursor-batch-resume-v1",
+  "created": "2026-09-08T13:59:10Z",
+  "updated": "2026-09-08T14:02:18Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 393,
+  "title": "perf(browser): restore observation cursors transactionally",
+  "branch": "work/browser-brain-observation-cursor-fast-restore-v1",
+  "created": "2026-09-08T13:03:07Z",
+  "updated": "2026-09-08T13:05:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 391,
+  "title": "perf(browser): batch realtime observation cursor checkpoints",
+  "branch": "work/browser-brain-observation-cursor-batch-checkpoint-v1",
+  "created": "2026-09-08T11:59:27Z",
+  "updated": "2026-09-08T12:01:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 390,
+  "title": "perf(browser): batch preparation delta append",
+  "branch": "work/browser-brain-fanout-preparation-delta-batch-append-v1",
+  "created": "2026-09-08T11:02:08Z",
+  "updated": "2026-09-08T11:05:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 389,
+  "title": "feat(browser): add dark browser-first workspace v2",
+  "branch": "work/metaengine-browser-dark-workspace-v2",
+  "created": "2026-09-08T10:48:34Z",
+  "updated": "2026-09-08T11:02:49Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 388,
+  "title": "perf(browser): append preparation deltas from one restore",
+  "branch": "work/browser-brain-fanout-preparation-delta-fast-append-v1",
+  "created": "2026-09-08T10:03:18Z",
+  "updated": "2026-09-08T10:05:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 387,
+  "title": "ci(browser): harden self-update proof liveness",
+  "branch": "work/metaengine-browser-self-update-proof-liveness-v1",
+  "created": "2026-09-08T10:02:29Z",
+  "updated": "2026-09-08T10:11:21Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 386,
+  "title": "ci(browser): make negative security gate executable",
+  "branch": "work/metaengine-browser-security-negative-gate-v1",
+  "created": "2026-09-08T09:12:47Z",
+  "updated": "2026-09-08T09:35:07Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 385,
+  "title": "perf(browser): batch preparation delta replay",
+  "branch": "work/browser-brain-fanout-preparation-delta-batch-replay-v1",
+  "created": "2026-09-08T08:59:40Z",
+  "updated": "2026-09-08T09:02:13Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 384,
+  "title": "feat(browser): add Session-first DevOS surface controls",
+  "branch": "work/metaengine-devos-session-surface-ui-v1",
+  "created": "2026-09-08T06:56:12Z",
+  "updated": "2026-09-08T09:02:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 383,
+  "title": "feat(browser): activate exact Session surfaces from DevOS focus",
+  "branch": "work/metaengine-devos-session-surface-activation-v1",
+  "created": "2026-09-08T06:26:45Z",
+  "updated": "2026-09-08T06:48:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 382,
+  "title": "feat(browser): centralize DevOS Now system attention",
+  "branch": "work/metaengine-devos-now-v1",
+  "created": "2026-09-08T05:28:56Z",
+  "updated": "2026-09-08T06:23:07Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 381,
+  "title": "feat(browser): render DevOS Now Sessions and Surfaces from canonical shell DTO",
+  "branch": "work/metaengine-devos-shell-renderer-v1",
+  "created": "2026-09-08T05:25:19Z",
+  "updated": "2026-09-08T05:29:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 380,
+  "title": "feat(browser): wire explicit DevOS presentation focus into main-process shell",
+  "branch": "work/metaengine-devos-presentation-focus-wire-v1",
+  "created": "2026-09-08T05:13:51Z",
+  "updated": "2026-09-08T05:19:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 379,
+  "title": "feat(browser): separate DevOS presentation focus from Browser and layout state",
+  "branch": "work/metaengine-devos-presentation-focus-v1",
+  "created": "2026-09-08T04:51:52Z",
+  "updated": "2026-09-08T04:54:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 378,
+  "title": "feat(browser): make DevOS Session focus independent from Browser tab selection",
+  "branch": "work/metaengine-devos-session-focus-v1",
+  "created": "2026-09-08T04:47:48Z",
+  "updated": "2026-09-08T04:50:01Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 376,
+  "title": "perf(browser): append preparation checkpoint deltas",
+  "branch": "work/browser-brain-fanout-preparation-checkpoint-delta-v1",
+  "created": "2026-09-08T00:00:42Z",
+  "updated": "2026-09-08T07:07:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 375,
+  "title": "feat(browser): persist restart-safe fanout preparation state",
+  "branch": "work/browser-brain-fanout-preparation-durable-checkpoint-v1",
+  "created": "2026-09-07T23:01:42Z",
+  "updated": "2026-09-07T23:04:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 374,
+  "title": "perf(browser): stream exact ready-shard evidence",
+  "branch": "work/browser-brain-fanout-ready-shard-evidence-v1",
+  "created": "2026-09-07T21:59:34Z",
+  "updated": "2026-09-07T22:01:41Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 373,
+  "title": "feat(browser): converge METAENGINE DevOS shell v1",
+  "branch": "work/metaengine-devos-shell-v1",
+  "created": "2026-09-07T20:31:59Z",
+  "updated": "2026-09-08T05:03:34Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 372,
+  "title": "perf(browser): accumulate parallel fanout preparation incrementally",
+  "branch": "work/browser-brain-fanout-preparation-accumulator-v1",
+  "created": "2026-09-07T20:01:21Z",
+  "updated": "2026-09-07T21:00:22Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 371,
+  "title": "perf(browser): bind prepared fanout digests to exact shards",
+  "branch": "work/browser-brain-fanout-prepared-manifest-v1",
+  "created": "2026-09-07T19:00:23Z",
+  "updated": "2026-09-07T19:02:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 370,
+  "title": "perf(browser): shard fanout preparation deterministically",
+  "branch": "work/browser-brain-fanout-preparation-shards-v1",
+  "created": "2026-09-07T18:00:16Z",
+  "updated": "2026-09-07T18:02:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 369,
+  "title": "perf(browser): bind fanout issuance targets to exact window",
+  "branch": "work/browser-brain-fanout-issuance-manifest-v1",
+  "created": "2026-09-07T17:02:35Z",
+  "updated": "2026-09-07T17:04:47Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 368,
+  "title": "perf(browser): add bounded fanout issuance window",
+  "branch": "work/browser-brain-fanout-issuance-window-v1",
+  "created": "2026-09-07T14:04:30Z",
+  "updated": "2026-09-07T16:04:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 367,
+  "title": "perf(browser): project bounded fanout capacity",
+  "branch": "work/browser-brain-fanout-capacity-projection-v1",
+  "created": "2026-09-07T13:08:03Z",
+  "updated": "2026-09-07T13:11:20Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 366,
+  "title": "perf(browser): compress realtime resume acknowledgements by cohort",
+  "branch": "work/browser-brain-cohort-resume-acks-v1",
+  "created": "2026-09-07T12:01:27Z",
+  "updated": "2026-09-07T12:03:34Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 365,
+  "title": "feat(browser): fence realtime resume acknowledgements",
+  "branch": "work/browser-brain-observation-resume-acks-v1",
+  "created": "2026-09-07T11:02:02Z",
+  "updated": "2026-09-07T11:03:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 364,
+  "title": "perf(browser): share realtime observation resume reads",
+  "branch": "work/browser-brain-shared-observation-resume-reads-v1",
+  "created": "2026-09-07T10:02:50Z",
+  "updated": "2026-09-07T10:05:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 363,
+  "title": "perf(browser): cohort realtime observation resumes",
+  "branch": "work/browser-brain-observation-resume-cohorts-v1",
+  "created": "2026-09-07T08:01:06Z",
+  "updated": "2026-09-07T09:02:03Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 362,
+  "title": "feat(browser): add durable realtime observation cursors",
+  "branch": "work/browser-brain-observation-cursors-v1",
+  "created": "2026-09-07T07:07:11Z",
+  "updated": "2026-09-07T07:09:31Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 361,
+  "title": "feat(browser): add bounded realtime observation window",
+  "branch": "work/browser-brain-realtime-observation-window-v1",
+  "created": "2026-09-07T05:59:42Z",
+  "updated": "2026-09-07T06:03:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 360,
+  "title": "feat(browser): bridge fanout progress into causal Brain stream",
+  "branch": "work/browser-brain-fanout-causal-bridge-v1",
+  "created": "2026-09-07T05:01:50Z",
+  "updated": "2026-09-07T05:04:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 359,
+  "title": "perf(browser): add append-only fanout checkpoint deltas",
+  "branch": "work/browser-brain-fanout-checkpoint-delta-v1",
+  "created": "2026-09-07T02:03:04Z",
+  "updated": "2026-09-07T04:04:47Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 358,
+  "title": "feat(browser): add durable fanout checkpoint",
+  "branch": "work/browser-brain-fanout-durable-checkpoint-v1",
+  "created": "2026-09-07T00:59:15Z",
+  "updated": "2026-09-07T01:02:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 357,
+  "title": "perf(browser): stream fanout progress incrementally",
+  "branch": "work/browser-brain-fanout-progress-stream-v1",
+  "created": "2026-09-06T23:58:57Z",
+  "updated": "2026-09-07T00:01:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 356,
+  "title": "perf(browser): accumulate fanout receipts incrementally",
+  "branch": "work/browser-brain-fanout-receipt-accumulator-v1",
+  "created": "2026-09-06T22:59:38Z",
+  "updated": "2026-09-06T23:02:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 355,
+  "title": "feat(browser): add bounded fanout receipt coordination",
+  "branch": "work/browser-brain-fanout-receipts-v1",
+  "created": "2026-09-06T21:59:41Z",
+  "updated": "2026-09-06T22:03:21Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 354,
+  "title": "feat(browser): add provider-neutral bounded command fanout",
+  "branch": "work/browser-brain-provider-neutral-fanout-v1",
+  "created": "2026-09-06T21:01:44Z",
+  "updated": "2026-09-06T21:03:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 353,
+  "title": "feat(browser): add autonomous collaboration fabric",
+  "branch": "work/browser-brain-collaboration-fabric-v1",
+  "created": "2026-09-06T20:41:59Z",
+  "updated": "2026-09-07T16:34:36Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 352,
+  "title": "perf(browser): fence shared semantic cache on runtime lifecycle",
+  "branch": "work/browser-brain-native-semantic-callsite-v1",
+  "created": "2026-09-06T20:04:23Z",
+  "updated": "2026-09-06T20:07:33Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 351,
+  "title": "perf(browser): share native semantic runtime cache",
+  "branch": "work/browser-brain-semantic-runtime-v1",
+  "created": "2026-09-06T18:01:07Z",
+  "updated": "2026-09-06T19:02:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 350,
+  "title": "perf(browser): add native semantic hot-path seam",
+  "branch": "work/browser-brain-native-semantic-wiring-v1",
+  "created": "2026-09-06T16:03:01Z",
+  "updated": "2026-09-06T17:03:55Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 349,
+  "title": "perf(browser): bridge native debugger identity into semantic fast path",
+  "branch": "work/browser-brain-native-semantic-adapter-v1",
+  "created": "2026-09-06T15:03:46Z",
+  "updated": "2026-09-06T15:06:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 348,
+  "title": "perf(browser): compose generation-fenced semantic fast path",
+  "branch": "work/browser-brain-semantic-fast-path-v1",
+  "created": "2026-09-06T14:03:49Z",
+  "updated": "2026-09-06T14:06:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 347,
+  "title": "perf(browser): harden exact-target admission and add Windows autonomous soak",
+  "branch": "work/browser-windows-soak-optimization-v1",
+  "created": "2026-09-06T13:40:13Z",
+  "updated": "2026-09-06T20:10:12Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 346,
+  "title": "perf(browser): add generation-fenced semantic target cache",
+  "branch": "work/browser-brain-semantic-target-cache-v1",
+  "created": "2026-09-06T13:07:38Z",
+  "updated": "2026-09-06T13:11:02Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 345,
+  "title": "feat(browser-ui): converge final chat-first control shell",
+  "branch": "work/browser-final-shell-v1",
+  "created": "2026-09-06T12:47:20Z",
+  "updated": "2026-09-06T13:00:17Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 344,
+  "title": "feat(browser): add bounded causal cognition fabric",
+  "branch": "work/browser-brain-cognition-fabric-v1",
+  "created": "2026-09-06T12:22:54Z",
+  "updated": "2026-09-06T12:26:41Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 343,
+  "title": "feat(browser): add bounded realtime stream causal clock",
+  "branch": "work/browser-brain-stream-clock-v1",
+  "created": "2026-09-06T12:02:08Z",
+  "updated": "2026-09-06T12:05:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 342,
+  "title": "feat(browser): compose always-on Browser Brain fast path",
+  "branch": "work/browser-brain-event-driven-submit-readback-v1",
+  "created": "2026-09-06T10:27:06Z",
+  "updated": "2026-09-06T11:41:09Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 341,
+  "title": "perf(browser): broadcast command availability from durable trigger",
+  "branch": "work/browser-brain-realtime-command-wake-v1",
+  "created": "2026-09-06T10:06:09Z",
+  "updated": "2026-09-06T10:07:50Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 340,
+  "title": "browser brain: project realtime process pressure into adaptive fanout",
+  "branch": "work/browser-brain-realtime-pressure-bridge-v1",
+  "created": "2026-09-06T06:59:59Z",
+  "updated": "2026-09-06T11:00:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 339,
+  "title": "feat(browser): bridge adaptive pressure into bounded BrowserCell fanout",
+  "branch": "work/browser-brain-adaptive-fanout-runtime-v1",
+  "created": "2026-09-06T06:06:38Z",
+  "updated": "2026-09-06T06:08:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 338,
+  "title": "feat(browser): add bounded parallel BrowserCell fanout coordinator",
+  "branch": "work/browser-brain-parallel-fanout-v1",
+  "created": "2026-09-06T03:02:43Z",
+  "updated": "2026-09-06T05:06:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 337,
+  "title": "feat(browser): seal runtime generation before native effects",
+  "branch": "work/browser-brain-effect-binding-v2-fence",
+  "created": "2026-09-06T00:52:55Z",
+  "updated": "2026-09-06T09:04:45Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 336,
+  "title": "perf(browser): persistent CDP effects and exact effect-intent bridge",
+  "branch": "work/browser-brain-persistent-cdp-effect-path-v1",
+  "created": "2026-09-06T00:41:26Z",
+  "updated": "2026-09-06T00:42:49Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 335,
+  "title": "browser: exact BrowserCell mutation router",
+  "branch": "work/browser-brain-exact-mutation-router-v1",
+  "created": "2026-09-05T23:59:19Z",
+  "updated": "2026-09-06T00:01:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 334,
+  "title": "browser: runtime mutation fence + event-driven semantic readback",
+  "branch": "work/browser-brain-runtime-fence-v1",
+  "created": "2026-09-05T23:09:10Z",
+  "updated": "2026-09-05T23:18:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 333,
+  "title": "feat(browser): bridge realtime observations into working memory",
+  "branch": "work/browser-brain-realtime-observation-bridge-v1",
+  "created": "2026-09-05T23:05:35Z",
+  "updated": "2026-09-05T23:07:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 332,
+  "title": "perf(browser): adapt command fan-out to live pressure",
+  "branch": "work/browser-brain-adaptive-pressure-v1",
+  "created": "2026-09-05T22:41:54Z",
+  "updated": "2026-09-05T22:43:10Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 331,
+  "title": "perf(browser): make command causal bookkeeping O(1)",
+  "branch": "work/browser-brain-o1-scheduler-v1",
+  "created": "2026-09-05T22:38:45Z",
+  "updated": "2026-09-05T22:40:02Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 330,
+  "title": "feat(browser): bind BrowserCells to exact live runtime identity",
+  "branch": "work/browser-brain-cell-binding-v1",
+  "created": "2026-09-05T22:34:56Z",
+  "updated": "2026-09-05T22:38:34Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 329,
+  "title": "feat(browser): make cognitive ingest durable and gap-safe",
+  "branch": "work/browser-brain-cognitive-ingest-v1",
+  "created": "2026-09-05T22:11:58Z",
+  "updated": "2026-09-05T22:15:09Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 319,
+  "title": "fix(browser): preserve rollover attempt across invalid successor binding",
+  "branch": "work/supervisor-rollover-atomic-bind-recovery-v1",
+  "created": "2026-09-05T13:26:06Z",
+  "updated": "2026-09-05T13:30:53Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 318,
+  "title": "feat(browser): fuse live process plane with low-latency command transport",
+  "branch": "work/browser-control-plane-brain-fusion-v1",
+  "created": "2026-09-05T12:25:07Z",
+  "updated": "2026-09-05T12:39:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 308,
+  "title": "test(fabric): prove current-stack BrowserCell isolation",
+  "branch": "work/browser-cell-isolation-pilot-current-v1",
+  "created": "2026-09-05T04:26:50Z",
+  "updated": "2026-09-05T04:28:41Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 305,
+  "title": "feat(browser): harden Fabric immutable update trust",
+  "branch": "work/browser-sovereign-fabric-hardening-v1",
+  "created": "2026-09-05T04:18:50Z",
+  "updated": "2026-09-05T04:21:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 270,
+  "title": "feat(browser): add explicit Context Pack workbench",
+  "branch": "work/browser-context-packs-shell-v1",
+  "created": "2026-09-03T16:19:49Z",
+  "updated": "2026-09-03T17:05:51Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 269,
+  "title": "feat(browser): add exact-target native Split View V1",
+  "branch": "work/browser-native-split-view-v1-stacked",
+  "created": "2026-09-03T16:17:17Z",
+  "updated": "2026-09-03T16:19:01Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 268,
+  "title": "feat(browser): add Agentic Workbench V1",
+  "branch": "work/browser-agentic-workbench-v1",
+  "created": "2026-09-03T16:06:57Z",
+  "updated": "2026-09-03T17:21:06Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 221,
+  "title": "fix(browser): restore owner-gated fleet capacity core on current integration",
+  "branch": "work/fleet-core-capacity-backpressure-v3",
+  "created": "2026-09-02T19:06:56Z",
+  "updated": "2026-09-02T19:08:34Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 220,
+  "title": "fix(browser): resume stalled verified successor on current integration",
+  "branch": "work/browser-self-update-successor-recovery-v2",
+  "created": "2026-09-02T19:05:36Z",
+  "updated": "2026-09-02T19:08:09Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 219,
+  "title": "fix(browser): close successor and mesh continuity gaps",
+  "branch": "fix/browser-autonomy-hardening-v1",
+  "created": "2026-09-02T19:05:21Z",
+  "updated": "2026-09-02T19:07:03Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 218,
+  "title": "fix(browser): foreground-fence supervisor mesh recovery sends",
+  "branch": "work/browser-mesh-foreground-send-v1",
+  "created": "2026-09-02T19:00:39Z",
+  "updated": "2026-09-02T19:01:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 217,
+  "title": "fix(browser): recover unresolved successor qualification after normal restart",
+  "branch": "work/browser-self-update-successor-recovery-v1",
+  "created": "2026-09-02T18:57:44Z",
+  "updated": "2026-09-02T19:00:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 216,
+  "title": "fix(browser): keep fleet capacity backpressure owner-gated",
+  "branch": "work/fleet-core-capacity-backpressure-v2",
+  "created": "2026-09-02T18:43:06Z",
+  "updated": "2026-09-02T18:44:48Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 213,
+  "title": "fix(browser): restore fleet wrapper/core split after capacity backpressure",
+  "branch": "work/browser-fleet-capacity-core-split-v1",
+  "created": "2026-09-02T18:41:07Z",
+  "updated": "2026-09-02T18:44:02Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 210,
+  "title": "fix(browser): restore fleet wrapper/core authority split on current integration",
+  "branch": "work/supervisor-owner-safety-gate-repair-v1",
+  "created": "2026-09-02T18:31:09Z",
+  "updated": "2026-09-02T18:32:57Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 205,
+  "title": "fix(browser): isolate exact self-update discovery from heartbeat v2",
+  "branch": "work/browser-self-update-heartbeat-liveness-v2",
+  "created": "2026-09-02T18:06:58Z",
+  "updated": "2026-09-02T18:42:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 203,
+  "title": "fix(browser): recover dead crash-sentinel worker fail-closed",
+  "branch": "work/sentinel-worker-recovery-v1",
+  "created": "2026-09-02T18:03:19Z",
+  "updated": "2026-09-02T18:19:04Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 201,
+  "title": "fix(browser): decouple self-update verification from supervisor heartbeat",
+  "branch": "work/browser-supervisor-send-and-update-liveness-v1",
+  "created": "2026-09-02T17:52:27Z",
+  "updated": "2026-09-02T17:55:14Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 199,
+  "title": "fix(browser): foreground-bind supervisor send preflight",
+  "branch": "fix/supervisor-foreground-send-v1",
+  "created": "2026-09-02T16:33:34Z",
+  "updated": "2026-09-02T18:06:53Z",
+  "draft": false,
+  "labels": []
+ },
+ {
+  "number": 197,
+  "title": "fix(browser): exact supervisor tab activation before Send",
+  "branch": "work/browser-supervisor-send-positive-readback-v1",
+  "created": "2026-09-02T16:23:10Z",
+  "updated": "2026-09-02T16:29:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 192,
+  "title": "fix(browser): bootstrap root DevOS worker transport before task admission",
+  "branch": "work/browser-devos-root-transport-bootstrap-v1",
+  "created": "2026-09-02T12:56:51Z",
+  "updated": "2026-09-02T15:35:53Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 190,
+  "title": "Browser runtime: port exact PR-head Development Plane provenance gate",
+  "branch": "work/browser-runtime-compatibility-dp-provenance-v1",
+  "created": "2026-09-02T10:59:13Z",
+  "updated": "2026-09-02T15:18:58Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 189,
+  "title": "Browser Live Control Recovery V1: enrollment-first all-chat supervisor mesh",
+  "branch": "work/browser-live-control-recovery-v1",
+  "created": "2026-09-02T10:55:47Z",
+  "updated": "2026-09-02T11:20:00Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 185,
+  "title": "Browser Final Optimization V1: linear workspace projection",
+  "branch": "work/browser-final-optimization-v1",
+  "created": "2026-09-02T09:49:56Z",
+  "updated": "2026-09-02T09:57:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 184,
+  "title": "C0: verify final restart admission without granting authority",
+  "branch": "work/c0-recovery-restart-final-admission-v1",
+  "created": "2026-09-02T09:47:01Z",
+  "updated": "2026-09-02T09:47:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 183,
+  "title": "Browser Workspace Reincarnation V1: optimized 0.6.6 exact-CAS candidate",
+  "branch": "work/browser-workspace-reincarnation-v1",
+  "created": "2026-09-02T09:28:02Z",
+  "updated": "2026-09-02T10:05:13Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 182,
+  "title": "Browser Typed Workspaces V1: durable workspace groups",
+  "branch": "work/browser-typed-workspaces-v1",
+  "created": "2026-09-02T08:49:46Z",
+  "updated": "2026-09-02T09:30:11Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 180,
+  "title": "Browser Workbench V2: native context rail and operations drawer",
+  "branch": "work/browser-workbench-layout-v2",
+  "created": "2026-09-02T08:15:48Z",
+  "updated": "2026-09-02T08:37:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 179,
+  "title": "Browser shell v0.6.4 design system and verified Windows candidate",
+  "branch": "work/browser-shell-design-system-v1",
+  "created": "2026-09-02T07:50:26Z",
+  "updated": "2026-09-02T07:57:28Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 177,
+  "title": "CI: bind physical Development Plane proof to exact PR head",
+  "branch": "work/browser-dp-pr-head-provenance-v2",
+  "created": "2026-09-02T07:22:28Z",
+  "updated": "2026-09-02T07:43:15Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 173,
+  "title": "C0: compose recovery admission with typed restart precondition",
+  "branch": "work/c0-recovery-restart-precondition-v1",
+  "created": "2026-09-02T03:46:18Z",
+  "updated": "2026-09-02T03:47:34Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 172,
+  "title": "C0: verify durable recovery admission proof readback",
+  "branch": "work/c0-recovery-admission-proof-readback-v1",
+  "created": "2026-09-02T02:47:43Z",
+  "updated": "2026-09-02T03:45:23Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 171,
+  "title": "C0: persist recovery admission proof durably",
+  "branch": "work/c0-recovery-admission-proof-persistence-v1",
+  "created": "2026-09-02T01:47:16Z",
+  "updated": "2026-09-02T02:47:35Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 170,
+  "title": "C0: gate recovery admission on fresh quiescent evidence",
+  "branch": "work/c0-recovery-admission-gate-v1",
+  "created": "2026-09-02T00:48:51Z",
+  "updated": "2026-09-02T00:49:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 166,
+  "title": "browser: gate DevOS runtime compatibility and recovery debt",
+  "branch": "work/browser-runtime-compatibility-v2",
+  "created": "2026-09-01T20:04:01Z",
+  "updated": "2026-09-02T11:06:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 153,
+  "title": "C0: verify fresh successor heartbeat and enrollment readback",
+  "branch": "work/c0-successor-readback-v1",
+  "created": "2026-09-01T05:51:38Z",
+  "updated": "2026-09-01T05:52:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 147,
+  "title": "C0: derive zero-authority supervisor rollover readiness from durable snapshot",
+  "branch": "work/c0-supervisor-rollover-decision-v1",
+  "created": "2026-08-31T20:47:18Z",
+  "updated": "2026-08-31T21:53:32Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 144,
+  "title": "Browser: add zero-authority Meta-Orchestrator V1 above DevOS fleet",
+  "branch": "work/browser-meta-orchestrator-v1",
+  "created": "2026-08-31T18:08:05Z",
+  "updated": "2026-09-01T06:50:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 142,
+  "title": "Browser: converge elastic fleet continuity + two-phase dispatch hotfixes",
+  "branch": "work/browser-orchestra-hotfix-convergence-v1",
+  "created": "2026-08-31T17:45:17Z",
+  "updated": "2026-08-31T17:47:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 140,
+  "title": "Fix continuous supervisor active-wake retirement",
+  "branch": "work/supervisor-continuity-terminal-retirement-v2",
+  "created": "2026-08-31T15:26:30Z",
+  "updated": "2026-08-31T15:32:51Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 139,
+  "title": "DevOS: make native fleet dispatch foreground and two-phase",
+  "branch": "work/devos-native-two-phase-dispatch-v1",
+  "created": "2026-08-31T14:56:36Z",
+  "updated": "2026-08-31T15:00:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 138,
+  "title": "C5: require exact actuation lease before supervisor transport promotion",
+  "branch": "work/c5-supervisor-lease-promotion-gate-v1",
+  "created": "2026-08-31T14:53:40Z",
+  "updated": "2026-08-31T15:51:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 137,
+  "title": "C5: wire exact-bound two-phase fleet dispatch into composition",
+  "branch": "work/devbrowser-transport-runtime-wire-v1",
+  "created": "2026-08-31T14:45:25Z",
+  "updated": "2026-08-31T14:47:39Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 136,
+  "title": "C5: split fleet dispatch into foreground two-phase send",
+  "branch": "work/devbrowser-transport-two-phase-v1",
+  "created": "2026-08-31T14:30:07Z",
+  "updated": "2026-08-31T14:32:15Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 135,
+  "title": "DBR1: harden worktree identity with porcelain inventory and atomic lock",
+  "branch": "work/devbrowser-workspace-git-hardening-v1",
+  "created": "2026-08-31T14:21:34Z",
+  "updated": "2026-08-31T14:23:55Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 134,
+  "title": "C5: fail before background fleet send effects",
+  "branch": "work/devbrowser-transport-foreground-v1",
+  "created": "2026-08-31T14:21:14Z",
+  "updated": "2026-08-31T14:22:31Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 133,
+  "title": "Fleet: bind background submit to exact Send control",
+  "branch": "work/devbrowser-background-submit-click-v1",
+  "created": "2026-08-31T14:08:32Z",
+  "updated": "2026-08-31T14:09:55Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 132,
+  "title": "DBR1: add exact-identity Workspace Manager core",
+  "branch": "work/devbrowser-workspace-manager-v1",
+  "created": "2026-08-31T14:02:39Z",
+  "updated": "2026-08-31T14:19:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 131,
+  "title": "C5: wire restricted fleet composition into Browser main",
+  "branch": "work/c5-browser-main-composition-v1",
+  "created": "2026-08-31T13:56:57Z",
+  "updated": "2026-08-31T14:53:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 130,
+  "title": "DevBrowser: add autonomous Development Browser OS roadmap",
+  "branch": "work/devbrowser-roadmap-v1",
+  "created": "2026-08-31T13:49:06Z",
+  "updated": "2026-08-31T13:49:58Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 129,
+  "title": "C5: hide raw FleetProvisioner behind Browser composition",
+  "branch": "work/c5-browser-fleet-composition-v1",
+  "created": "2026-08-31T12:51:30Z",
+  "updated": "2026-08-31T13:56:41Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 128,
+  "title": "C5: add restricted Browser main-process transport authority boundary",
+  "branch": "work/c5-browser-main-transport-wiring-v1",
+  "created": "2026-08-31T11:52:43Z",
+  "updated": "2026-08-31T11:54:51Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 127,
+  "title": "C5: compose transport promotion behind Browser-local runtime facade",
+  "branch": "work/c5-browser-runtime-transport-composition-v1",
+  "created": "2026-08-31T10:50:27Z",
+  "updated": "2026-08-31T10:52:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 126,
+  "title": "C5: gate transport promotion behind Browser-local proof identity",
+  "branch": "work/c5-trusted-transport-promotion-v1",
+  "created": "2026-08-31T09:49:06Z",
+  "updated": "2026-08-31T09:51:30Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 125,
+  "title": "C5: derive transport proof only from Browser-local WebContents observation",
+  "branch": "work/c5-local-transport-observer-v1",
+  "created": "2026-08-31T08:50:54Z",
+  "updated": "2026-08-31T08:51:49Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 123,
+  "title": "C5: wire zero-authority target revalidation into FleetProvisioner",
+  "branch": "work/c5-fleet-provisioner-revalidation",
+  "created": "2026-08-31T07:00:54Z",
+  "updated": "2026-08-31T07:48:02Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 122,
+  "title": "C5: transact fleet-state target revalidation without authority",
+  "branch": "work/c5-fleet-state-revalidation-transaction-v1",
+  "created": "2026-08-31T05:52:04Z",
+  "updated": "2026-08-31T05:54:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 121,
+  "title": "Persist Browser-local fleet target revalidation without authority",
+  "branch": "work/c5-persisted-target-revalidation-v1",
+  "created": "2026-08-31T04:49:31Z",
+  "updated": "2026-08-31T04:51:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 120,
+  "title": "Bind fleet target revalidation to Browser-local WebContents evidence",
+  "branch": "work/c5-local-target-observer-v1",
+  "created": "2026-08-31T03:50:33Z",
+  "updated": "2026-08-31T04:49:45Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 119,
+  "title": "Add zero-authority fresh fleet target revalidation contract",
+  "branch": "work/c5-fleet-target-revalidation-v1",
+  "created": "2026-08-31T02:46:42Z",
+  "updated": "2026-08-31T03:50:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 118,
+  "title": "Fail-close supervisor table RLS and direct ACLs",
+  "branch": "work/c3-supervisor-table-rls-hardening-v1",
+  "created": "2026-08-31T00:46:57Z",
+  "updated": "2026-08-31T01:51:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 117,
+  "title": "Falsify persisted fleet transport proof across restart",
+  "branch": "work/c5-transport-proof-restart-fence-v1",
+  "created": "2026-08-30T22:48:33Z",
+  "updated": "2026-08-30T23:54:51Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 116,
+  "title": "Fail-close privileged supervisor RPC execution",
+  "branch": "work/c3-supervisor-rpc-acl-hardening-v1",
+  "created": "2026-08-30T17:49:54Z",
+  "updated": "2026-08-30T21:53:11Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 113,
+  "title": "Fence Development OS supervisor coordination by mesh epoch",
+  "branch": "work/devos-supervisor-mesh-epoch-fence-v1",
+  "created": "2026-08-30T11:52:51Z",
+  "updated": "2026-08-30T17:50:18Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 107,
+  "title": "Require accepted signed heartbeat before self-update qualification",
+  "branch": "work/self-update-signed-health-v1",
+  "created": "2026-08-30T10:21:46Z",
+  "updated": "2026-08-30T10:27:01Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 106,
+  "title": "Qualify self-update successor only after signed runtime health",
+  "branch": "work/self-update-health-qualification-v1",
+  "created": "2026-08-30T10:10:46Z",
+  "updated": "2026-08-30T10:17:44Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 105,
+  "title": "Qualify self-update successor only after healthy restored runtime",
+  "branch": "work/self-update-qualification-v1",
+  "created": "2026-08-30T09:53:40Z",
+  "updated": "2026-08-30T09:55:19Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 104,
+  "title": "Add Chromium/Firefox-style durable update transaction states",
+  "branch": "work/self-update-transactional-v2",
+  "created": "2026-08-30T09:45:11Z",
+  "updated": "2026-08-30T09:47:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 103,
+  "title": "Make Windows self-update transactional and sentinel-safe",
+  "branch": "work/self-update-sentinel-handoff-v1",
+  "created": "2026-08-30T09:41:32Z",
+  "updated": "2026-08-30T09:46:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 102,
+  "title": "Add federated autonomy runtime and geometry-independent fleet dispatch",
+  "branch": "work/federated-autonomy-runtime-v1",
+  "created": "2026-08-30T08:59:33Z",
+  "updated": "2026-08-30T09:08:09Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 101,
+  "title": "Harden supervisor mesh tables with fail-closed RLS",
+  "branch": "work/supervisor-mesh-rls-hardening-v1",
+  "created": "2026-08-30T08:52:07Z",
+  "updated": "2026-08-30T09:46:50Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 99,
+  "title": "Restore update session and eliminate idle blank tabs",
+  "branch": "work/self-update-session-resume-v1",
+  "created": "2026-08-30T07:57:34Z",
+  "updated": "2026-08-30T08:09:59Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 96,
+  "title": "Accelerate continuous verified self-update loop",
+  "branch": "work/self-update-fast-loop-v1",
+  "created": "2026-08-30T07:38:14Z",
+  "updated": "2026-09-11T23:55:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 95,
+  "title": "Make self-update nonblocking for active chats with session continuity",
+  "branch": "work/self-update-restart-safe-v1",
+  "created": "2026-08-30T07:13:39Z",
+  "updated": "2026-08-30T07:37:38Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 94,
+  "title": "Add versioned command contract for Browser Control Plane V2",
+  "branch": "work/browser-control-command-contract-v1",
+  "created": "2026-08-30T06:48:42Z",
+  "updated": "2026-08-30T06:50:05Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 93,
+  "title": "Add typed keyboard and isolated per-tab zoom control",
+  "branch": "work/browser-control-input-view-v1",
+  "created": "2026-08-30T06:43:50Z",
+  "updated": "2026-08-30T06:45:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 92,
+  "title": "Wire Browser Control Plane capabilities into runtime",
+  "branch": "work/browser-control-runtime-v1",
+  "created": "2026-08-30T06:38:13Z",
+  "updated": "2026-08-30T06:39:55Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 91,
+  "title": "Define maximum typed Browser Control Plane V2",
+  "branch": "work/browser-control-max-v1",
+  "created": "2026-08-30T06:23:48Z",
+  "updated": "2026-08-30T06:27:43Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 90,
+  "title": "Complete multi-supervisor mesh runtime and signed heartbeat sync",
+  "branch": "work/supervisor-mesh-runtime-v1",
+  "created": "2026-08-30T06:13:24Z",
+  "updated": "2026-08-30T06:52:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 89,
+  "title": "Persist trusted dev release anti-rollback state",
+  "branch": "work/self-update-trusted-history-v1",
+  "created": "2026-08-30T06:09:19Z",
+  "updated": "2026-08-30T06:12:36Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 88,
+  "title": "Add multi-supervisor mesh with shared actuation fence",
+  "branch": "work/supervisor-mesh-v1",
+  "created": "2026-08-30T06:07:05Z",
+  "updated": "2026-08-30T06:50:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 87,
+  "title": "Make verified dev self-update continuous",
+  "branch": "work/self-update-continuous-dev-v1",
+  "created": "2026-08-30T05:59:41Z",
+  "updated": "2026-08-30T06:01:51Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 86,
+  "title": "Fix trusted dev metadata raw-byte verification",
+  "branch": "work/self-update-raw-metadata-integrity-v1",
+  "created": "2026-08-30T05:49:08Z",
+  "updated": "2026-08-30T05:59:46Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 85,
+  "title": "Diagnose PR #83 packaged singleton verification",
+  "branch": "work/pr83-self-update-diagnostics-v1",
+  "created": "2026-08-29T22:52:34Z",
+  "updated": "2026-08-30T05:48:24Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 84,
+  "title": "Benchmark persistent Electron builder cache for Browser CI",
+  "branch": "work/ci-electron-cache-benchmark-v1",
+  "created": "2026-08-29T20:46:40Z",
+  "updated": "2026-08-29T21:46:29Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 83,
+  "title": "Add autonomous Browser dev-update command and release plane",
+  "branch": "work/dev-auto-update-control-v1",
+  "created": "2026-08-29T19:04:59Z",
+  "updated": "2026-08-30T06:49:27Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 81,
+  "title": "Add autonomous verified downloads and typed self-update control",
+  "branch": "work/self-update-autonomous-actuator-v1",
+  "created": "2026-08-29T19:01:16Z",
+  "updated": "2026-08-30T06:03:06Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 80,
+  "title": "C5: protect fleet-owned Browser tabs from shell close",
+  "branch": "work/fleet-owned-tab-lifecycle-v1",
+  "created": "2026-08-29T18:53:42Z",
+  "updated": "2026-08-29T18:55:52Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 79,
+  "title": "Observe live Browser self-update state safely",
+  "branch": "work/self-update-live-observability-v1",
+  "created": "2026-08-29T18:48:35Z",
+  "updated": "2026-08-29T18:50:56Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 77,
+  "title": "Finalize Browser self-update with in-place N→N+1 proof",
+  "branch": "work/self-update-finalization-v1",
+  "created": "2026-08-29T17:25:28Z",
+  "updated": "2026-08-29T18:49:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 74,
+  "title": "Browser liveness telemetry: exact renderer health binding",
+  "branch": "work/supervisor-liveness-telemetry-v1",
+  "created": "2026-08-29T15:47:21Z",
+  "updated": "2026-08-29T15:48:42Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 73,
+  "title": "METAENGINE Browser Dev Update Channel Alignment",
+  "branch": "work/convergence-update-channel-v1",
+  "created": "2026-08-29T15:31:44Z",
+  "updated": "2026-08-29T15:33:54Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 72,
+  "title": "METAENGINE Browser Privacy-Safe Tab Liveness V1",
+  "branch": "work/convergence-browser-liveness-v1",
+  "created": "2026-08-29T15:25:09Z",
+  "updated": "2026-08-29T15:27:17Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 71,
+  "title": "METAENGINE Browser Supervisor Keepalive + Self Update V1",
+  "branch": "work/convergence-supervisor-keepalive-v1",
+  "created": "2026-08-29T13:49:06Z",
+  "updated": "2026-08-29T15:45:04Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 68,
+  "title": "feat(a2): prepare Gemini advisory observation target",
+  "branch": "work/a2-browser-operator-gemini-advisory-v1",
+  "created": "2026-08-29T04:42:06Z",
+  "updated": "2026-08-29T04:43:48Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 65,
+  "title": "fix(contracts): derive manifest version and SW import closure from runtime package descriptor",
+  "branch": "work/a2-compute-browser-b2-contract-pin-repair",
+  "created": "2026-08-28T21:31:18Z",
+  "updated": "2026-08-28T21:38:12Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 64,
+  "title": "feat(browser-compute): add bounded B3/R4 perception",
+  "branch": "work/a2-compute-browser-b3-session-scheduler",
+  "created": "2026-08-28T05:10:05Z",
+  "updated": "2026-08-28T05:48:35Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 63,
+  "title": "feat(browser-compute): add fail-closed B2 contexts",
+  "branch": "work/a2-compute-browser-b2-contexts",
+  "created": "2026-08-28T00:01:05Z",
+  "updated": "2026-08-28T00:02:15Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 62,
+  "title": "feat(browser-compute): native B3 pipe and process-incarnation fence",
+  "branch": "work/a2-compute-browser-b2-b3",
+  "created": "2026-08-27T23:44:59Z",
+  "updated": "2026-08-27T23:46:17Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 61,
+  "title": "R3: Target Registry v1 and per-target observability",
+  "branch": "work/a2-browser-operator-r3-target-registry",
+  "created": "2026-08-27T20:30:51Z",
+  "updated": "2026-08-27T20:32:37Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 60,
+  "title": "A2 Browser Operator V1 R2 — canonical module consolidation / v0.6.9",
+  "branch": "work/a2-browser-operator-r2-module-consolidation",
+  "created": "2026-08-27T19:43:58Z",
+  "updated": "2026-08-27T19:45:07Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 59,
+  "title": "A2 Browser Operator V1 R1 — live runtime stability / v0.6.8",
+  "branch": "work/a2-browser-operator-r1-live-stability",
+  "created": "2026-08-27T19:16:31Z",
+  "updated": "2026-08-27T19:23:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 58,
+  "title": "A2 Browser Operator V1 R0 — source-of-truth repair",
+  "branch": "work/a2-browser-operator-r0-source-of-truth",
+  "created": "2026-08-27T19:02:16Z",
+  "updated": "2026-08-27T19:03:25Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 57,
+  "title": "A2 Browser Operator v0.6.0 — P0/P1 operator runtime",
+  "branch": "work/a2-browser-operator-v060",
+  "created": "2026-08-26T17:09:26Z",
+  "updated": "2026-08-27T08:03:57Z",
+  "draft": true,
+  "labels": []
+ },
+ {
+  "number": 54,
+  "title": "A2: dual web-chat bridge for GPT/GLM (PREP)",
+  "branch": "work/chat-control-plane-browser-bridge",
+  "created": "2026-08-25T04:56:38Z",
+  "updated": "2026-08-26T14:23:26Z",
+  "draft": true,
+  "labels": []
+ }
+]

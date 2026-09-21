@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "952326153fed52500fb678abdd78e67f92096d4f",
+    "node_id": "C_kwDOT_OzB9oAKDk1MjMyNjE1M2ZlZDUyNTAwZmI2NzhhYmRkNzhlNjdmOTIwOTZkNGY",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T02:07:35Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-18T02:07:35Z"
+      },
+      "message": "feat(devos): add packaged Monaco repository editor (#589)\n\nExact-head development-line merge after all configured Browser CI workflows completed successfully. No production deployment is performed by this Git merge.",
+      "tree": {
+        "sha": "be39412bcf5a59f9743d08c1fe3f0ad1087e3c02",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/be39412bcf5a59f9743d08c1fe3f0ad1087e3c02"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/952326153fed52500fb678abdd78e67f92096d4f",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqrJznCRC1aQ7uu5UhlAAATBcQAB7Ryr5erCgMI+OFjfD6Dlkb\nVelchU+0fZ74Tp/MO7v1nMWqhFm/W+fYyWnVBodmReAH0iLDNmuV8nDOoAeta6Ik\nkQKdxv0fVsTQENqFVbrsIuibb3Od9cFulVqpi9n9zVsdzJVPTdFMG0NpuC8yG7Jr\nX5zuRigs1k/yVrBBP290xxL1V9CEVkOeMFloUddoVPrfFC3J1hWodOQn2y4rrNiT\n+7CPrf3ASeh/EU9kEfaxz8OWz3sD7jvZWIkUdVuneP5uZbT6ME8sWXK2pfKLhEWi\nZP8e8XDUuJebxcrfd3TK+hn0ezYqD3EKwPCBFWm0nQqlblD+A6UMf+dwqEFk851r\nbf5XvRRt47tdY6eyezu49K4CyNs0VW09Ygx5FLOUweCIP/7rs4JZFqtT/QL/DHIM\nKellB3nujGWDXDnEYXwo/oorE9CYwT0Rxqv3SEoYW5KY9B2PYH+Ktr6DMRGQA1gU\nj67aLwxXiM85gezrtGLgYNhotDw3PsGAeIgr1m7OqxAi8JjNCK40hjVtD0e2G3dB\ncDjZmTiBtO5mBGmTK2vKrsvHLV0Ij2Fv/Q2Z49UCMzjAYBI5CJ9XrYr0Y9845ZQX\niTwVSk/Zoa9K7lMAnfbKFhJlQ9xF1Yx+GR0cnnCxqCIQv4tDcCVgR6oXuo1UOMRa\nY8bZA7fUWv7VQSb0AMeL\n=JPgg\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree be39412bcf5a59f9743d08c1fe3f0ad1087e3c02\nparent 114db933960894d81418fdf6b63b8b8064bb72c1\nparent 0ae889dabeaff8affaf7212d31ee79eec5aba8cf\nauthor PatrickFrome <igradolius@gmail.com> 1789697255 +0300\ncommitter GitHub <noreply@github.com> 1789697255 +0300\n\nfeat(devos): add packaged Monaco repository editor (#589)\n\nExact-head development-line merge after all configured Browser CI workflows completed successfully. No production deployment is performed by this Git merge.",
+        "verified_at": "2026-09-18T02:07:35Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/952326153fed52500fb678abdd78e67f92096d4f",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/952326153fed52500fb678abdd78e67f92096d4f",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/952326153fed52500fb678abdd78e67f92096d4f/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "114db933960894d81418fdf6b63b8b8064bb72c1",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/114db933960894d81418fdf6b63b8b8064bb72c1",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/114db933960894d81418fdf6b63b8b8064bb72c1"
+      },
+      {
+        "sha": "0ae889dabeaff8affaf7212d31ee79eec5aba8cf",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0ae889dabeaff8affaf7212d31ee79eec5aba8cf",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/0ae889dabeaff8affaf7212d31ee79eec5aba8cf"
+      }
+    ]
+  }
+]

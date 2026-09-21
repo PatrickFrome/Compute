@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "dbb436062d1bb0c1f1c07d1c98f659a2b717c5a6",
+    "node_id": "C_kwDOT_OzB9oAKGRiYjQzNjA2MmQxYmIwYzFmMWMwN2QxYzk4ZjY1OWEyYjcxN2M1YTY",
+    "commit": {
+      "author": {
+        "name": "GLM Repair Agent",
+        "email": "repair@metaengine.local",
+        "date": "2026-09-16T21:49:02Z"
+      },
+      "committer": {
+        "name": "GLM Repair Agent",
+        "email": "repair@metaengine.local",
+        "date": "2026-09-16T21:49:02Z"
+      },
+      "message": "fix(browser): successor qualification liveness — bounded re-probe, pending-prior tolerance, stale capsule reconcile\n\nRepairs the structural deadlock observed on the live host (13.5h stuck in\nTARGET_INSTALLED_PENDING_QUALIFICATION / SUCCESSOR_BOOTED):\n\n1. Qualification re-probe loop (main-entry wiring + module): the one-shot\n   30s startup window is no longer the only attempt. The same fail-closed\n   probe predicate re-runs on a bounded reconciliation interval while the\n   recovery diagnostic reports TARGET_INSTALLED_PENDING_QUALIFICATION; stops\n   on any terminal state; no installer effect, no authority.\n2. Signed-heartbeat updater-health tolerance: updater ERROR with exactly\n   self_update_transaction_unresolved_prior:SUCCESSOR_BOOTED is the pending\n   qualification itself, not unhealthiness — previously this self-referential\n   error permanently blocked the heartbeat the qualification needed.\n3. Signed-heartbeat continuity NONE acceptance: a restarted successor whose\n   capsule was already cleared has nothing to restore; NONE is a settled\n   state (the probe still independently verifies capsule absence on disk).\n   TARGET_VERSION_MISMATCH with a strictly-older capsule target is treated\n   as a stale leftover instead of a hard quarantine; newer/equal targets\n   still quarantine fail-closed.\n4. Stale capsule supersede-reconcile: strictly-older session-continuity\n   capsules are archived to a superseded sidecar (durable rename, never\n   deleted) by the watchdog mismatch branch and by the re-probe loop;\n   future-target and non-comparable capsules stay fail-closed.\n5. Updater self-poisoning guard: #launchInstaller holds the next install\n   (READY_RESTART, no error, pending_prior_qualification=true) while the\n   prior transaction is SUCCESSOR_BOOTED for the currently running version,\n   instead of latching the sticky unresolved_prior ERROR.\n6. D1 watchdog cancel-race fix: both continuity and old-parent-handoff\n   watchdogs honor cancellation at await points before effectful tails\n   (relaunch/exit); durable writes remain auditable.\n7. Result transport bounded redelivery: command receipts are immutable and\n   the completion RPC is idempotent per command_id — a transient 5xx now\n   gets one bounded redelivery instead of dropping the receipt into\n   lease_timeout_no_retry; 4xx still surfaces immediately; browser effects\n   are never re-executed.\n\nTested: 13 new contract tests + full self-update battery (161) + native\nsupervisor/sentinel battery (236), zero failures.",
+      "tree": {
+        "sha": "8325399e5b2f1041a5110fa284a3333bbdd53348",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/8325399e5b2f1041a5110fa284a3333bbdd53348"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/dbb436062d1bb0c1f1c07d1c98f659a2b717c5a6",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/dbb436062d1bb0c1f1c07d1c98f659a2b717c5a6",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/dbb436062d1bb0c1f1c07d1c98f659a2b717c5a6",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/dbb436062d1bb0c1f1c07d1c98f659a2b717c5a6/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "a0af13c0640fffb4b6d5da1645220e32786b5ec0",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a0af13c0640fffb4b6d5da1645220e32786b5ec0",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/a0af13c0640fffb4b6d5da1645220e32786b5ec0"
+      }
+    ]
+  }
+]

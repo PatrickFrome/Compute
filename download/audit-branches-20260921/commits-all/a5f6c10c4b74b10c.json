@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "b429600751c95b860a2aaa51913501bfdfd6606b",
+    "node_id": "C_kwDOT_OzB9oAKGI0Mjk2MDA3NTFjOTViODYwYTJhYWE1MTkxMzUwMWJmZGZkNjYwNmI",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-19T15:47:06Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-19T15:47:06Z"
+      },
+      "message": "test(rsi): prove exposure hold dominates positive evidence",
+      "tree": {
+        "sha": "d3fb5ff6bc6c3f79e14db72457b56570bee6e166",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/d3fb5ff6bc6c3f79e14db72457b56570bee6e166"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/b429600751c95b860a2aaa51913501bfdfd6606b",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b429600751c95b860a2aaa51913501bfdfd6606b",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/b429600751c95b860a2aaa51913501bfdfd6606b",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b429600751c95b860a2aaa51913501bfdfd6606b/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "cbeb1cac841e62a4e37348068a25af01ca8fd812",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cbeb1cac841e62a4e37348068a25af01ca8fd812",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/cbeb1cac841e62a4e37348068a25af01ca8fd812"
+      }
+    ]
+  }
+]

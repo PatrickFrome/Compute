@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "912d9f0a4b922b69a2fd545b2df18d622fc5a073",
+    "node_id": "C_kwDOT_OzB9oAKDkxMmQ5ZjBhNGI5MjJiNjlhMmZkNTQ1YjJkZjE4ZDYyMmZjNWEwNzM",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-30T08:07:45Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-30T08:07:45Z"
+      },
+      "message": "Checkpoint federated autonomy bootstrap",
+      "tree": {
+        "sha": "80360efd145e11cc2ca8b5c8663e48450e93aa1d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/80360efd145e11cc2ca8b5c8663e48450e93aa1d"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/912d9f0a4b922b69a2fd545b2df18d622fc5a073",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/912d9f0a4b922b69a2fd545b2df18d622fc5a073",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/912d9f0a4b922b69a2fd545b2df18d622fc5a073",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/912d9f0a4b922b69a2fd545b2df18d622fc5a073/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "c8ed8adfd00bb1cbfa4d2187227faa9966283da1",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c8ed8adfd00bb1cbfa4d2187227faa9966283da1",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/c8ed8adfd00bb1cbfa4d2187227faa9966283da1"
+      }
+    ]
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "24e062f0bcbbc95b8688219bd2c604c47d78213c",
+    "node_id": "C_kwDOT_OzB9oAKDI0ZTA2MmYwYmNiYmM5NWI4Njg4MjE5YmQyYzYwNGM0N2Q3ODIxM2M",
+    "commit": {
+      "author": {
+        "name": "GLM Operator",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-18T15:36:00Z"
+      },
+      "committer": {
+        "name": "GLM Operator",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-18T15:36:00Z"
+      },
+      "message": "perf(browser): cut live command pickup latency against the deployed bounded-poll edge\n\nThe deployed edge serves /v1/commands/wait-batch as BOUNDED_DB_POLL (no\nLISTEN/NOTIFY wake), so the client wait budget is also the worst-case\npickup delay. main.mjs overrode the 4000ms default with 15000ms, which\nwas tuned for the long-poll edge design; live measurement against the\ndeployed edge showed p50 6.9s / max 9.8s issue-to-COMPLETED on trivial\nSELECT_TAB commands (uniform pickup on the 15s poll boundary).\n\nLower the override back to 4000ms (the module DEFAULT_BATCH_WAIT_MS):\nexpected p50 pickup ~2s at one client's poll volume (~15 extra\nleaseBatch RPCs/min, indexed and cheap). No behavior change once the\nedge gains notify wake - an early wake ends the wait below budget.\n\nSource contract updated to the new composition value.",
+      "tree": {
+        "sha": "cf9b7c3a247718bdabe183cd9f84f9d8d54da157",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/cf9b7c3a247718bdabe183cd9f84f9d8d54da157"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/24e062f0bcbbc95b8688219bd2c604c47d78213c",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/24e062f0bcbbc95b8688219bd2c604c47d78213c",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/24e062f0bcbbc95b8688219bd2c604c47d78213c",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/24e062f0bcbbc95b8688219bd2c604c47d78213c/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "97b837bacdda6f08dfb34bacace9f6274e923d0a",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/97b837bacdda6f08dfb34bacace9f6274e923d0a",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/97b837bacdda6f08dfb34bacace9f6274e923d0a"
+      }
+    ]
+  }
+]

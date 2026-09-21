@@ -1,0 +1,101 @@
+{
+  "sha": "4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+  "node_id": "C_kwDOT_OzB9oAKDRkZTY4MGVlMjZhMDdkZGRmYTUxZWU4ZWVlM2RlOWNkNjM2NDNkOGE",
+  "commit": {
+    "author": {
+      "name": "PatrickFrome",
+      "email": "igradolius@gmail.com",
+      "date": "2026-08-27T04:37:46Z"
+    },
+    "committer": {
+      "name": "PatrickFrome",
+      "email": "igradolius@gmail.com",
+      "date": "2026-08-27T04:37:46Z"
+    },
+    "message": "ci(operator): add supervisor control behavioral gate",
+    "tree": {
+      "sha": "de0c2d5c319ba0059bc741bd344c494174004a92",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/de0c2d5c319ba0059bc741bd344c494174004a92"
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+    "comment_count": 0,
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  },
+  "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+  "html_url": "https://github.com/PatrickFrome/Compute/commit/4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+  "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4de680ee26a07dddfa51ee8eee3de9cd63643d8a/comments",
+  "author": {
+    "login": "PatrickFrome",
+    "id": 20597814,
+    "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+    "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/PatrickFrome",
+    "html_url": "https://github.com/PatrickFrome",
+    "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+    "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+    "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+    "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+    "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+    "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "PatrickFrome",
+    "id": 20597814,
+    "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+    "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/PatrickFrome",
+    "html_url": "https://github.com/PatrickFrome",
+    "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+    "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+    "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+    "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+    "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+    "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "b08638c53b9897edf3f2cca4b2fac025a056e851",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b08638c53b9897edf3f2cca4b2fac025a056e851",
+      "html_url": "https://github.com/PatrickFrome/Compute/commit/b08638c53b9897edf3f2cca4b2fac025a056e851"
+    }
+  ],
+  "stats": {
+    "total": 3,
+    "additions": 3,
+    "deletions": 0
+  },
+  "files": [
+    {
+      "sha": "1b1aade5e2ade599ff7077621e108a6fbfcc1310",
+      "filename": ".github/workflows/a2-browser-operator-runtime-canary.yml",
+      "status": "modified",
+      "additions": 3,
+      "deletions": 0,
+      "changes": 3,
+      "blob_url": "https://github.com/PatrickFrome/Compute/blob/4de680ee26a07dddfa51ee8eee3de9cd63643d8a/.github%2Fworkflows%2Fa2-browser-operator-runtime-canary.yml",
+      "raw_url": "https://github.com/PatrickFrome/Compute/raw/4de680ee26a07dddfa51ee8eee3de9cd63643d8a/.github%2Fworkflows%2Fa2-browser-operator-runtime-canary.yml",
+      "contents_url": "https://api.github.com/repos/PatrickFrome/Compute/contents/.github%2Fworkflows%2Fa2-browser-operator-runtime-canary.yml?ref=4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+      "patch": "@@ -37,6 +37,7 @@ jobs:\n             tests/a2_v060_oopif_perception_lab.mjs \\\n             tests/a2_v060_operator_actions_lab.mjs \\\n             tests/a2_v060_semantic_actions_lab.mjs \\\n+            tests/a2_v060_supervisor_control_lab.mjs \\\n             tests/a2_v060_update_manager_lab.mjs \\\n             tests/a2_v060_compat_config_lab.mjs; do\n             test -f \"$f\"\n@@ -94,6 +95,8 @@ jobs:\n             'glm_first_required':True,\n             'mv3_playwright_runtime_verified':True,\n             'semantic_ax_actions':True,\n+            'supervisor_board_v1':True,\n+            'chat_supervisor_typed_commands':True,\n             'debugger_broker_v2':True,\n             'oopif_flat_sessions':True,\n             'prompt_gate':True,"
+    }
+  ]
+}

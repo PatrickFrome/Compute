@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "cda186dfb2cbc6a22e97116e4b1bc0bbc559f968",
+    "node_id": "C_kwDOT_OzB9oAKGNkYTE4NmRmYjJjYmM2YTIyZTk3MTE2ZTRiMWJjMGJiYzU1OWY5Njg",
+    "commit": {
+      "author": {
+        "name": "GLM Repair Operator",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-17T18:47:31Z"
+      },
+      "committer": {
+        "name": "GLM Repair Operator",
+        "email": "glm@metaengine.local",
+        "date": "2026-09-17T18:47:31Z"
+      },
+      "message": "fix(browser): P0 tab-neutrality — failed bootstrap pre-effects close their own tabs\n\nLive-incident leg (2026-09-17, v0.7.0-dev.35230443849.1): the one-shot\ncontinuity fence (526042ee) removed the cross-process replay amplifier,\nbut the live host's 26 auth/login tabs also carry an intra-process leg:\nevery supervisor bootstrap retry created a fresh dedicated-root tab, the\nlogout auth redirect made waitForBootstrapRoot fail\n(BOOTSTRAP_ROOT_NOT_READY) and the failed-attempt tab was never closed,\nleaking one tab per maintenance tick until tab_capacity_exceeded froze\nsupervisor bootstrap. A second vector: once a conversation is bound,\nsupervisorTab recreated the bound conversation tab on every tick after\nthe original redirected to /auth/login.\n\nRepair:\n\n1. Close-by-proof: a bootstrap pre-effect failure closes exactly the tab\n   that THIS attempt created (never a preferred/existing root, never a\n   selected tab, never a fleet tab). CLOSE_TAB is best-effort with an\n   in-memory ledger retried before the next attempt, so a transiently\n   wedged command plane cannot turn one leak into unbounded growth.\n\n2. Auth-redirect reuse: when the bound conversation tab is gone but a\n   non-fleet auth-redirect tab exists, supervisorTab reuses it as the\n   observation target instead of creating a new tab per tick. The session\n   monitor classifies it (NOT_CHATGPT_CONVERSATION); every navigation-\n   class recovery stays gated on auth surfaces (reload-auth-redirect-gate).\n\n3. Honest recovery boundary: a successful bootstrap bind clears the stale\n   supervisor_bootstrap last_error so the state projection cannot keep\n   reporting an incident that is already over.\n\nTests: 5 new contract tests (supervisor-bootstrap-tab-neutrality) —\ntab-neutral retries (repeated logged-out attempts leave zero tabs),\nbounded ledger retry, user-claimed tab survival, auth-redirect reuse with\nzero NEW_TAB, stale error clearing. Full npm-test suite: 2303 tests,\n2301 pass, 0 fail, 2 Windows skips.",
+      "tree": {
+        "sha": "c08042831e7ae43a4e032219151bdfb843a8adc6",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/c08042831e7ae43a4e032219151bdfb843a8adc6"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/cda186dfb2cbc6a22e97116e4b1bc0bbc559f968",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cda186dfb2cbc6a22e97116e4b1bc0bbc559f968",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/cda186dfb2cbc6a22e97116e4b1bc0bbc559f968",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cda186dfb2cbc6a22e97116e4b1bc0bbc559f968/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "526042eeca36a10b4f9181219fa30b8da93df7c7",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/526042eeca36a10b4f9181219fa30b8da93df7c7",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/526042eeca36a10b4f9181219fa30b8da93df7c7"
+      }
+    ]
+  }
+]

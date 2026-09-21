@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { LiveDot } from "@/components/mc/badges";
 import { OverviewPanel } from "@/components/mc/overview-panel";
 import { EnrollmentPanel } from "@/components/mc/enrollment-panel";
 import { CommandsPanel } from "@/components/mc/commands-panel";
+import { EmergencyLanePanel } from "@/components/mc/emergency-panel";
+import { CognitiveBusPanel } from "@/components/mc/cognitive-panel";
 import { FleetPanel } from "@/components/mc/fleet-panel";
 import { RoadmapPanel } from "@/components/mc/roadmap-panel";
 import { E2ePanel } from "@/components/mc/e2e-panel";
@@ -20,6 +22,10 @@ const REFRESH_OPTIONS = [
   { label: "off", ms: null },
 ];
 
+const TAB_ORDER = [
+  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "roadmap", "lab",
+] as const;
+
 interface OverviewData {
   ok: boolean;
   db: { version: string; port: number; connections: number };
@@ -32,13 +38,30 @@ interface EnrollmentData {
 
 export default function Home() {
   const [refreshIdx, setRefreshIdx] = useState(1); // 5s default
+  const [tab, setTab] = useState<string>("overview");
   const interval = REFRESH_OPTIONS[refreshIdx].ms;
 
   const overview = usePoll<OverviewData>("/api/overview", interval);
   const enrollment = usePoll<EnrollmentData>("/api/enrollment", interval);
   const commands = usePoll("/api/commands?limit=60", interval);
+  const emergency = usePoll("/api/emergency", interval ?? 15000);
+  const cognitive = usePoll("/api/cognitive", interval ?? 15000);
   const fleet = usePoll("/api/fleet", interval ?? 15000);
   const roadmap = usePoll("/api/roadmap", null);
+
+  // Alt+1..8 — quick tab navigation (hint in footer)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      const n = Number(e.key);
+      if (Number.isInteger(n) && n >= 1 && n <= TAB_ORDER.length) {
+        e.preventDefault();
+        setTab(TAB_ORDER[n - 1]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const pendingCount = enrollment.data?.requests.filter((r) => r.status === "PENDING").length ?? 0;
   const dbOk = !!overview.data?.db?.version;
@@ -126,13 +149,19 @@ export default function Home() {
           </div>
         )}
 
-        <Tabs defaultValue="overview" className="space-y-4">
+        <Tabs value={tab} onValueChange={setTab} className="space-y-4">
           <TabsList className="h-auto flex-wrap justify-start gap-1 rounded-lg border border-zinc-800 bg-zinc-900/70 p-1">
             <TabsTrigger value="overview" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">Overview</TabsTrigger>
             <TabsTrigger value="gate" data-testid="tab-gate" className="font-mono text-[11px] data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
               Enrollment Gate{pendingCount > 0 ? ` (${pendingCount})` : ""}
             </TabsTrigger>
             <TabsTrigger value="commands" className="font-mono text-[11px] data-[state=active]:bg-violet-500/15 data-[state=active]:text-violet-300">Command Plane</TabsTrigger>
+            <TabsTrigger value="emergency" data-testid="tab-emergency" className="font-mono text-[11px] data-[state=active]:bg-rose-500/15 data-[state=active]:text-rose-300">
+              Emergency Lane
+            </TabsTrigger>
+            <TabsTrigger value="cognitive" data-testid="tab-cognitive" className="font-mono text-[11px] data-[state=active]:bg-violet-500/15 data-[state=active]:text-violet-300">
+              Cognitive Bus
+            </TabsTrigger>
             <TabsTrigger value="fleet" className="font-mono text-[11px] data-[state=active]:bg-teal-500/15 data-[state=active]:text-teal-300">DevOS Fleet</TabsTrigger>
             <TabsTrigger value="roadmap" className="font-mono text-[11px] data-[state=active]:bg-zinc-700 data-[state=active]:text-zinc-200">Roadmap</TabsTrigger>
             <TabsTrigger value="lab" data-testid="tab-lab" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">E2E Lab</TabsTrigger>
@@ -146,6 +175,12 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="commands" className="mt-0 outline-none">
             <CommandsPanel poll={commands as unknown as Parameters<typeof CommandsPanel>[0]["poll"]} />
+          </TabsContent>
+          <TabsContent value="emergency" className="mt-0 outline-none">
+            <EmergencyLanePanel poll={emergency as unknown as Parameters<typeof EmergencyLanePanel>[0]["poll"]} />
+          </TabsContent>
+          <TabsContent value="cognitive" className="mt-0 outline-none">
+            <CognitiveBusPanel poll={cognitive as unknown as Parameters<typeof CognitiveBusPanel>[0]["poll"]} />
           </TabsContent>
           <TabsContent value="fleet" className="mt-0 outline-none">
             <FleetPanel poll={fleet as unknown as Parameters<typeof FleetPanel>[0]["poll"]} />
@@ -166,7 +201,9 @@ export default function Home() {
             <span className="text-zinc-500">Compute rsi-contour</span> · rail release/self-update-ambiguity-live-v2 @ 6bf173c7 · release v0.7.0-dev.35532004761.1
           </p>
           <p className="flex items-center gap-3 font-mono text-[10px] text-zinc-600" data-testid="footer-status">
-            <span>schema 103/103</span>
+            <span className="hidden sm:inline text-zinc-700">Alt+1..8 tabs</span>
+            <span className="hidden sm:inline text-zinc-800">│</span>
+            <span>schema 103/103 + cursor</span>
             <span className="text-zinc-800">│</span>
             <span>E2E 10/10 (last audit)</span>
             <span className="text-zinc-800">│</span>

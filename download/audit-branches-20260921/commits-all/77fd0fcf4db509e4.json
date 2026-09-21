@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "fa77f7e8098668419d09108d9dd3f16c5f047fc7",
+    "node_id": "C_kwDOT_OzB9oAKGZhNzdmN2U4MDk4NjY4NDE5ZDA5MTA4ZDlkZDNmMTZjNWYwNDdmYzc",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T18:51:39Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-18T18:51:39Z"
+      },
+      "message": "fix(rsi): freeze evaluation budget routing policy root",
+      "tree": {
+        "sha": "93aedef77fdacf570c009fa4e726339744a478b8",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/93aedef77fdacf570c009fa4e726339744a478b8"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/fa77f7e8098668419d09108d9dd3f16c5f047fc7",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fa77f7e8098668419d09108d9dd3f16c5f047fc7",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/fa77f7e8098668419d09108d9dd3f16c5f047fc7",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fa77f7e8098668419d09108d9dd3f16c5f047fc7/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "a12dfe8dcc4027bb76e4f2de02e8beddbf6be06b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a12dfe8dcc4027bb76e4f2de02e8beddbf6be06b",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/a12dfe8dcc4027bb76e4f2de02e8beddbf6be06b"
+      }
+    ]
+  }
+]

@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "d589521f355b90b78896ae11a662f446dd21aa28",
+    "node_id": "C_kwDOT_OzB9oAKGQ1ODk1MjFmMzU1YjkwYjc4ODk2YWUxMWE2NjJmNDQ2ZGQyMWFhMjg",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T17:12:56Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T17:12:56Z"
+      },
+      "message": "test(browser): loopback RPC manifest 0600 assert is POSIX-only (Windows fs.stat carries no chmod bits)",
+      "tree": {
+        "sha": "b436ebdd5670f504b58835372bb4651c2f888693",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/b436ebdd5670f504b58835372bb4651c2f888693"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/d589521f355b90b78896ae11a662f446dd21aa28",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d589521f355b90b78896ae11a662f446dd21aa28",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/d589521f355b90b78896ae11a662f446dd21aa28",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d589521f355b90b78896ae11a662f446dd21aa28/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "5f65a76dcd77d15d55ccc26662cb4fcba8e7df70",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5f65a76dcd77d15d55ccc26662cb4fcba8e7df70",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/5f65a76dcd77d15d55ccc26662cb4fcba8e7df70"
+      }
+    ]
+  }
+]

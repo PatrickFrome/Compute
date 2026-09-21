@@ -1,0 +1,1514 @@
+     1→import crypto from 'node:crypto';
+     2→import { AGENT_PLATFORM_ID, isAgentPlatformUrl } from './browser-agent-platform.mjs';
+     3→import { browserControlCapabilities } from './browser-control-capabilities.mjs';
+     4→import { globalOwnerGateDisabled } from './owner-safety-gate-registry.mjs';
+     5→import { NativeSupervisorCommandLaneScheduler, classifyNativeSupervisorCommand } from './native-supervisor-command-lanes.mjs';
+     6→import { assertNativeSupervisorBatchCompletion, partitionNativeSupervisorBatchResults } from './native-supervisor-result-batch.mjs';
+     7→import { SUPERVISOR_DEVICE_PROFILE } from './supervisor-device-identity.mjs';
+     8→import { SupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime.mjs';
+     9→import { SupervisorMeshRuntime } from './supervisor-mesh-runtime.mjs';
+    10→import { SelfUpdateRuntime } from './self-update-runtime.mjs';
+    11→import { NativeSupervisorCommandFastlane } from './native-supervisor-command-fastlane.mjs';
+    12→import { NativeSupervisorCommandBatchFastlane } from './native-supervisor-command-batch-fastlane.mjs';
+    13→import { confirmSelfUpdateRestartSafety } from './self-update-restart-safety.mjs';
+    14→import { persistPreInstallReceipt } from './self-update-handoff.mjs';
+    15→import { readSelfUpdateTransaction } from './self-update-transaction-journal.mjs';
+    16→import { reconcileRestoredGeneratingChats } from './self-update-chat-reconcile.mjs';
+    17→import { DEVELOPER_EMERGENCY_UPDATE_ACTION } from './developer-emergency-update-admission.mjs';
+    18→import { loadNativeSupervisorControlState, persistNativeSupervisorControlState } from './native-supervisor-control-state.mjs';
+    19→import {
+    20→  beginSelfUpdateSessionContinuityRestoreAttempt,
+    21→  buildSelfUpdateSessionContinuity,
+    22→  persistSelfUpdateSessionContinuity,
+    23→  planPostRestoreDuplicateTabCleanup,
+    24→  restoreSelfUpdateSessionContinuity,
+    25→} from './self-update-session-continuity.mjs';
+    26→import { classifyChatAuthReadbackFromTabs } from './chatgpt-auth-readback.mjs';
+    27→import { SECURITY_POLICY } from './browser-policy.mjs';
+    28→import { verifiedDownloadReceiptConfirmsRequest } from './verified-download-manager.mjs';
+    29→import {
+    30→  devosRuntimeControlAllowsContinuousService,
+    31→  normalizeDevosRuntimeControl,
+    32→  unavailableDevosRuntimeControl,
+    33→} from './devos-runtime-control.mjs';
+    34→import { classifyFleetReconcileOutcome, projectFleetReconcileSemantics } from './fleet-provisioner.mjs';
+    35→import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-result-delivery-adapter.mjs';
+    36→
+    37→export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+    38→export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
+    39→export const NATIVE_SUPERVISOR_WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
+    40→
+    41→const clipError = (error) => String(error?.message || error || 'unknown_error').slice(0, 500);
+    42→const READ_ONLY_ACTIONS = Object.freeze({
+    43→  has: (action) => classifyNativeSupervisorCommand({ action }).read_only,
+    44→});
+    45→const ROOT_POLICY_ACTIONS = new Set(['GATE_STATUS','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL']);
+    46→const PROVEN_EFFECT_STATES = new Set(['PROVEN_GENERATING','PROVEN_NEW_CONVERSATION','CONFIRMED']);
+    47→const TERMINAL_EFFECT_OUTCOMES = new Set(['CONFIRMED','NO_EFFECT_PROVEN','AMBIGUOUS']);
+    48→const DEFAULT_BATCH_WAIT_MS = 4000;
+    49→const DEFAULT_MAINTENANCE_INTERVAL_MS = 10000;
+    50→const ALWAYS_ON_CONTROL_ERROR = 'FINAL_RUNTIME_ALWAYS_ON_CONTROL_REQUIRED';
+    51→
+    52→function stableValue(value) {
+    53→  if (Array.isArray(value)) return value.map(stableValue);
+    54→  if (!value || typeof value !== 'object') return value;
+    55→  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+    56→}
+    57→
+    58→function sameValue(left, right) {
+    59→  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
+    60→}
+    61→
+    62→function fleetSnapshotFrom(value) {
+    63→  const fleet = value?.fleet?.schema === 'metaengine.browser.fleet-snapshot.v1' ? value.fleet : value;
+    64→  return fleet?.schema === 'metaengine.browser.fleet-snapshot.v1' && Array.isArray(fleet?.agents) ? fleet : null;
+    65→}
+    66→
+    67→function failedCommandEffectOutcome(command, descriptor, error, { schedulerRejected = false } = {}) {
+    68→  if (descriptor.read_only) return null;
+    69→  if (schedulerRejected) return 'NO_EFFECT_PROVEN';
+    70→  const action = String(command?.action || '').toUpperCase();
+    71→  const message = String(error?.message || error || '');
+    72→  // TabRegistry raises this exact error before allocating a tab id or constructing
+    73→  // WebContents. Keep every other NEW_TAB failure ambiguous because it may occur
+    74→  // after registry allocation or renderer construction.
+    75→  if (action === 'NEW_TAB' && message === 'tab_capacity_exceeded') return 'NO_EFFECT_PROVEN';
+    76→  return 'AMBIGUOUS';
+    77→}
+    78→
+    79→function clipped(value, max) {
+    80→  return String(value ?? '').slice(0, max);
+    81→}
+    82→
+    83→function perceptionTransportProjection(frame) {
+    84→  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return null;
+    85→  const targets = Array.isArray(frame.semantic_targets) ? frame.semantic_targets : [];
+    86→  const textExcerpt = clipped(frame.text_excerpt, 2048);
+    87→  return Object.freeze({
+    88→    schema: clipped(frame.schema || 'metaengine.native-browser.perception.v1', 96),
+    89→    captured_at: frame.captured_at || null,
+    90→    tab_id: frame.tab_id ? clipped(frame.tab_id, 80) : null,
+    91→    process_incarnation_id: frame.process_incarnation_id ? clipped(frame.process_incarnation_id, 160) : null,
+    92→    target_id: frame.target_id ? clipped(frame.target_id, 160) : null,
+    93→    runtime_observation_id: frame.runtime_observation_id ? clipped(frame.runtime_observation_id, 160) : null,
+    94→    state_revision_id: frame.state_revision_id ? clipped(frame.state_revision_id, 160) : null,
+    95→    url: clipped(frame.url, 1200),
+    96→    title: clipped(frame.title, 240),
+    97→    viewport: frame.viewport && typeof frame.viewport === 'object' ? stableValue(frame.viewport) : null,
+    98→    semantic_targets: targets.slice(0, 24).map((row) => Object.freeze({
+    99→      role: clipped(row?.role, 48),
+   100→      name: clipped(row?.name, 160),
+   101→      disabled: row?.disabled === true,
+   102→      backend_node_id: Number.isSafeInteger(Number(row?.backend_node_id)) ? Number(row.backend_node_id) : null,
+   103→      frame_id: row?.frame_id ? clipped(row.frame_id, 192) : null,
+   104→      semantic_ref: row?.semantic_ref && typeof row.semantic_ref === 'object'
+   105→        ? stableValue(row.semantic_ref)
+   106→        : null,
+   107→      value_sha256: /^[a-f0-9]{64}$/i.test(String(row?.value_sha256 || '')) ? String(row.value_sha256).toLowerCase() : null,
+   108→      authority_effect: false,
+   109→    })),
+   110→    semantic_target_count: targets.length,
+   111→    semantic_targets_truncated: targets.length > 24,
+   112→    text_excerpt: textExcerpt,
+   113→    text_excerpt_bytes: Buffer.byteLength(String(frame.text_excerpt || ''), 'utf8'),
+   114→    text_excerpt_sha256: crypto.createHash('sha256').update(String(frame.text_excerpt || ''), 'utf8').digest('hex'),
+   115→    text_excerpt_truncated: textExcerpt.length < String(frame.text_excerpt || '').length,
+   116→    perception_error: frame.perception_error ? clipped(frame.perception_error, 240) : null,
+   117→    input_values_exposed: false,
+   118→    transport_projection: true,
+   119→    full_capture_available_by_command: true,
+   120→    authority_effect: false,
+   121→  });
+   122→}
+   123→
+   124→export function nativeSupervisorTransportState(state = {}) {
+   125→  if (!state || typeof state !== 'object' || Array.isArray(state)) return {};
+   126→  return {
+   127→    ...state,
+   128→    perception: perceptionTransportProjection(state.perception),
+   129→    heartbeat_payload_bounded: true,
+   130→    heartbeat_full_perception_embedded: false,
+   131→  };
+   132→}
+   133→
+   134→function controlModeAllows(supervisorMode) {
+   135→  return supervisorMode === 'CONTROL' || globalOwnerGateDisabled('authority.control_mode');
+   136→}
+   137→function armedAllows(armed) {
+   138→  return armed === true || globalOwnerGateDisabled('authority.armed');
+   139→}
+   140→
+   141→function generationStateForTab(lifecycle, tabId) {
+   142→  const row = lifecycle?.supervisor_session?.tabs?.find((item) => String(item?.tab_id || '') === String(tabId || ''));
+   143→  const state = String(row?.state || '').toUpperCase();
+   144→  if (['GENERATING','STALLED'].includes(state)) return 'GENERATING';
+   145→  if (['IDLE','INTERRUPTED'].includes(state)) return 'IDLE';
+   146→  return 'UNKNOWN';
+   147→}
+   148→
+   149→function isAgentPlatformRoot(value) {
+   150→  try {
+   151→    const url = new URL(String(value || ''));
+   152→    return url.protocol === 'https:'
+   153→      && isAgentPlatformUrl(url.href)
+   154→      && url.pathname.replace(/\/+$/, '') === '';
+   155→  } catch {
+   156→    return false;
+   157→  }
+   158→}
+   159→
+   160→// P0 repair (point 6): flush the persistent user-space partition's unwritten
+   161→// DOMStorage before the self-update handoff. Best-effort by design — Electron's
+   162→// flushStorageData() does NOT prove ChatGPT cookie persistence; it only removes
+   163→// the known "existed in memory, never written" class of false negatives. The
+   164→// pre/post auth readback comparison (Qualification V2) is the actual evidence.
+   165→export async function NativeSupervisorClientFlushUserSpaceStorage(app, { partition = SECURITY_POLICY.user_space_partition } = {}) {
+   166→  try {
+   167→    const electron = await import('electron');
+   168→    const targetSession = electron.session?.fromPath
+   169→      ? electron.session.fromPath(String(partition))
+   170→      : electron.default?.session?.fromPath
+   171→        ? electron.default.session.fromPath(String(partition))
+   172→        : null;
+   173→    await targetSession?.flushStorageData?.();
+   174→  } catch {
+   175→    // Hardening only: a failed flush must never block an update handoff that
+   176→    // the operator already admitted.
+   177→  }
+   178→}
+   179→
+   180→export function planPostRestoreBlankTabCleanup({ continuityRow, bindings = [], currentTabs = [] } = {}) {
+   181→  const desiredRootCount = (continuityRow?.tabs || []).filter((tab) => isAgentPlatformRoot(tab?.url)).length;
+   182→  const boundTabIds = new Set((bindings || []).map((row) => String(row?.tab_id || '')).filter(Boolean));
+   183→  let retainedRoots = (currentTabs || []).filter((tab) => boundTabIds.has(String(tab?.tab_id || '')) && isAgentPlatformRoot(tab?.url)).length;
+   184→  const candidates = (currentTabs || [])
+   185→    .filter((tab) => !boundTabIds.has(String(tab?.tab_id || '')) && isAgentPlatformRoot(tab?.url))
+   186→    .sort((a, b) => Number(a?.selected === true) - Number(b?.selected === true));
+   187→  const closeTabIds = [];
+   188→  for (const tab of candidates) {
+   189→    if (retainedRoots < desiredRootCount) {
+   190→      retainedRoots += 1;
+   191→      continue;
+   192→    }
+   193→    const tabId = String(tab?.tab_id || '');
+   194→    if (tabId) closeTabIds.push(tabId);
+   195→  }
+   196→  return Object.freeze({
+   197→    close_tab_ids: closeTabIds,
+   198→    desired_root_count: desiredRootCount,
+   199→    bound_tab_count: boundTabIds.size,
+   200→    current_root_count: (currentTabs || []).filter((tab) => isAgentPlatformRoot(tab?.url)).length,
+   201→    arbitrary_tab_close: false,
+   202→    authority_effect: false,
+   203→  });
+   204→}
+   205→
+   206→function stableCurrentCommand(command) {
+   207→  return command ? Object.freeze({
+   208→    command_id: command.command_id,
+   209→    action: command.action,
+   210→    platform: command.platform || null,
+   211→    issued_at: command.issued_at || null,
+   212→    expires_at: command.expires_at || null,
+   213→  }) : null;
+   214→}
+   215→
+   216→// F-L1c: after F-L1a/F-L1b every CDP await and result POST is bounded, so a healthy
+   217→// cycle can no longer hang forever. This guard turns any residual stall (a code
+   218→// path the bounds do not reach) into an observable last_error instead of the
+   219→// silent "alive heartbeat / dead command plane" zombie state observed live.
+   220→const COMMAND_CYCLE_STALL_GUARD_MS = 900000;
+   221→
+   222→// D-L2: pure classification of legitimate no-op completions. Exported for
+   223→// contract tests; returns null when the action still requires the generic
+   224→// postcondition readback path.
+   225→export function classifyNoOpEffectOutcome(actionRaw, result) {
+   226→  const action = String(actionRaw || '').toUpperCase();
+   227→  if (action === 'BACK' || action === 'FORWARD') {
+   228→    if (result && result.navigated === false) return 'NO_EFFECT_PROVEN';
+   229→    if (result && result.navigated === true) return 'CONFIRMED';
+   230→    return null;
+   231→  }
+   232→  if (action === 'RELOAD') {
+   233→    // webContents.reload() deterministically initiates the reload; a failed
+   234→    // load surfaces through perception_error afterwards.
+   235→    return 'CONFIRMED';
+   236→  }
+   237→  if (action === 'SCROLL') {
+   238→    const scroll = result?.scroll;
+   239→    if (scroll && scroll.proof === 'VIEWPORT_PAGE_Y_CHANGED') return 'CONFIRMED';
+   240→    if (scroll && scroll.proof === 'SCROLL_BOUNDARY_REACHED') return 'NO_EFFECT_PROVEN';
+   241→    return null;
+   242→  }
+   243→  if (action === 'SELF_UPDATE_CHECK') {
+   244→    const state = String(result?.state || '').toUpperCase();
+   245→    if (state === 'CURRENT') return 'NO_EFFECT_PROVEN';
+   246→    return 'CONFIRMED';
+   247→  }
+   248→  return null;
+   249→}
+   250→
+   251→// D-Q1 liveness repair: pure projection of a healed auth readback onto the
+   252→// latched continuity status. Exported for contract tests and reuse; returns
+   253→// the prior object unchanged unless the prior classification was AUTH_REQUIRED
+   254→// AND the fresh readback is positively AUTHENTICATED (metadata-only).
+   255→export function applyQuarantineAuthHealToContinuityStatus(prior, refreshedReadback, observedAt = new Date().toISOString()) {
+   256→  if (!prior || typeof prior !== 'object') return prior;
+   257→  const authRequired = prior.state === 'AUTH_REQUIRED' || prior.auth_readback_state === 'AUTH_REQUIRED';
+   258→  if (!authRequired) return prior;
+   259→  if (!refreshedReadback || String(refreshedReadback.auth_state || '').toUpperCase() !== 'AUTHENTICATED') return prior;
+   260→  const priorUserSession = String(prior.user_session_continuity || '').toUpperCase();
+   261→  return {
+   262→    ...prior,
+   263→    state: 'RESTORED',
+   264→    auth_readback_state: 'AUTHENTICATED',
+   265→    auth_redirect_tab_count: Number.isFinite(Number(refreshedReadback.auth_redirect_tab_count)) ? Number(refreshedReadback.auth_redirect_tab_count) : 0,
+   266→    auth_heal_chatgpt_tab_count: Number(refreshedReadback.chatgpt_tab_count || 0) || 0,
+   267→    auth_heal_authenticated_tab_count: Number(refreshedReadback.authenticated_tab_count || 0) || 0,
+   268→    user_session_continuity: priorUserSession === 'LOST' ? 'CONTINUED' : (priorUserSession || 'CONTINUED'),
+   269→    auth_heal_observed_at: observedAt,
+   270→    authority_effect: false,
+   271→  };
+   272→}
+   273→
+   274→export class NativeSupervisorClient {
+   275→  #identity;
+   276→  #fetch;
+   277→  #getState;
+   278→  #executeCommand;
+   279→  #developerEmergencyUpdate;
+   280→  #version;
+   281→  #intervalMs;
+   282→  #timer = null;
+   283→  #running = false;
+   284→  #cyclePromise = null;
+   285→  #startedAt = null;
+   286→  #lastError = null;
+   287→  #lastHeartbeatAt = null;
+   288→  #lastCommandId = null;
+   289→  #lastCommandStatus = null;
+   290→  #currentCommand = null;
+   291→  #currentCommands = new Map();
+   292→  // F-L1d: per-command execution start times + cycle start timestamp power the
+   293→  // command_plane observability projection (in-flight age) in snapshot().
+   294→  #commandStartsAtMs = new Map();
+   295→  #cycleStartedAtMs = 0;
+   296→  #enrollmentStatus = 'UNINITIALIZED';
+   297→  #supervisorMode = 'CONTROL';
+   298→  #armed = true;
+   299→  #lifecycle = null;
+   300→  #mesh = null;
+   301→  #selfUpdate = null;
+   302→  #continuityStatus = {
+   303→    state: 'NONE', restored_tabs: 0, target_version: null,
+   304→    user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false,
+   305→  };
+   306→  #commandLane;
+   307→  #batchTransport = 'UNKNOWN';
+   308→  #batchWaitMs;
+   309→  #maxBatch;
+   310→  #maxTabMutations;
+   311→  #lastBatchCount = 0;
+   312→  #lastBatchWakeReason = null;
+   313→  #lastBatchWaitElapsedMs = null;
+   314→  #lastBatchResponseAt = null;
+   315→  #heartbeatPromise = null;
+   316→  #maintenancePromise = null;
+   317→  #lastMaintenanceAtMs = 0;
+   318→  #maintenanceIntervalMs;
+   319→  // Preserve the already released 750ms transport accelerator only as a fallback.
+   320→  // Once wait-batch is proven supported, the held request becomes the sole lease path
+   321→  // and this helper is stopped so steady-state never has two competing lease loops.
+   322→  #commandFastlane = null;
+   323→  #legacyFastlaneBusy = false;
+   324→  #controlStatePath = null;
+   325→  #controlStateLoaded = false;
+   326→  #controlStatePersistenceError = null;
+   327→  #legacySingleLeaseFallback = true;
+   328→  #runtimeControl = unavailableDevosRuntimeControl('NOT_OBSERVED');
+   329→  #resultDeliveryAttempts;
+   330→  #resultDeliveryBackoffMs;
+   331→  #resultDeliveryAdapter = null;
+   332→  #onRsiOutcomeReadback = null;
+   333→  #batchFastlane = null;
+   334→  #batchFastlaneBusy = false;
+   335→  #rsiOutcomeReadbackObserved = 0;
+   336→  #rsiOutcomeReadbackDropped = 0;
+   337→  #lastRsiOutcomeReadbackAt = null;
+   338→
+   339→  constructor({
+   340→    identity,
+   341→    fetchImpl = globalThis.fetch,
+   342→    getState,
+   343→    executeCommand,
+   344→    developerEmergencyUpdate = null,
+   345→    version,
+   346→    intervalMs = 2000,
+   347→    beforeSelfUpdateInstall = null,
+   348→    meshStatePath = null,
+   349→    commandBatchSize = 64,
+   350→    commandReadConcurrency = 32,
+   351→    commandMutationConcurrency = 8,
+   352→    commandBatchWaitMs = DEFAULT_BATCH_WAIT_MS,
+   353→    maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
+   354→    legacySingleLeaseFallback = true,
+   355→    commandFastlane = false,
+   356→    commandFastlaneIntervalMs = 750,
+   357→    commandBatchFastlane = false,
+   358→    commandBatchFastlaneIntervalMs = 600,
+   359→    controlStatePath = null,
+   360→    hostResilience = undefined,
+   361→    resultDeliveryAttempts = 3,
+   362→    resultDeliveryBackoffMs = [1000, 3000],
+   363→    rsiResultReceiptReconciliation = false,
+   364→    onRsiOutcomeReadback = null,
+   365→  }) {
+   366→    if (!identity) throw new Error('native_supervisor_identity_required');
+   367→    if (typeof fetchImpl !== 'function') throw new Error('native_supervisor_fetch_required');
+   368→    if (typeof getState !== 'function') throw new Error('native_supervisor_state_provider_required');
+   369→    if (typeof executeCommand !== 'function') throw new Error('native_supervisor_command_executor_required');
+   370→    if (developerEmergencyUpdate != null && typeof developerEmergencyUpdate !== 'function') throw new Error('native_supervisor_developer_emergency_update_handler_invalid');
+   371→    if (beforeSelfUpdateInstall != null && typeof beforeSelfUpdateInstall !== 'function') throw new Error('native_supervisor_self_update_handoff_invalid');
+   372→    if (onRsiOutcomeReadback != null && typeof onRsiOutcomeReadback !== 'function') throw new Error('native_supervisor_rsi_outcome_readback_handler_invalid');
+   373→    this.#identity = identity;
+   374→    this.#fetch = fetchImpl;
+   375→    this.#getState = getState;
+   376→    this.#executeCommand = executeCommand;
+   377→    this.#developerEmergencyUpdate = developerEmergencyUpdate;
+   378→    this.#version = String(version || '0.0.0');
+   379→    this.#intervalMs = Math.max(250, Math.min(5000, Number(intervalMs || 2000)));
+   380→    this.#batchWaitMs = Math.max(250, Math.min(15000, Number(commandBatchWaitMs) || DEFAULT_BATCH_WAIT_MS));
+   381→    this.#maxBatch = Math.max(1, Math.min(64, Number(commandBatchSize) || 64));
+   382→    this.#maxTabMutations = Math.max(1, Math.min(16, Number(commandMutationConcurrency) || 8));
+   383→    this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
+   384→    this.#controlStatePath = controlStatePath ? String(controlStatePath) : null;
+   385→    this.#legacySingleLeaseFallback = legacySingleLeaseFallback !== false;
+   386→    this.#resultDeliveryAttempts = Math.max(1, Math.min(6, Number(resultDeliveryAttempts) || 3));
+   387→    this.#resultDeliveryBackoffMs = Array.isArray(resultDeliveryBackoffMs) && resultDeliveryBackoffMs.length
+   388→      ? resultDeliveryBackoffMs.map((ms) => Math.max(0, Number(ms) || 0))
+   389→      : [1000, 3000];
+   390→    this.#resultDeliveryAdapter = rsiResultReceiptReconciliation === true
+   391→      ? createSupervisorRsiResultDeliveryAdapter({
+   392→          signedRequest: (path, options = {}) => this.#signedRequest(path, options),
+   393→          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+   394→          attempts: this.#resultDeliveryAttempts,
+   395→          backoffMs: this.#resultDeliveryBackoffMs,
+   396→        })
+   397→      : null;
+   398→    this.#onRsiOutcomeReadback = onRsiOutcomeReadback;
+   399→    // Wake-aware pickup accelerator for poll-fallback edges. Transport only:
+   400→    // the held wait-batch cycle stays the single steady-state lease loop once
+   401→    // the edge proves notify wake; until then this cuts PENDING pickup to
+   402→    // ~interval + one round trip against a bounded DB poll edge.
+   403→    this.#batchFastlane = commandBatchFastlane === true
+   404→      ? new NativeSupervisorCommandBatchFastlane({
+   405→          intervalMs: Math.max(250, Number(commandBatchFastlaneIntervalMs) || 600),
+   406→          isRunning: () => this.#running,
+   407→          isSlotBusy: () => this.#currentCommands.size > 0 || this.#legacyFastlaneBusy,
+   408→          identitySnapshot: () => this.#identity.snapshot(),
+   409→          pickupAndRun: () => this.#pickupAndRunBatchFastlaneCommand(),
+   410→        })
+   411→      : null;
+   412→    this.#commandLane = new NativeSupervisorCommandLaneScheduler({
+   413→      readConcurrency: commandReadConcurrency,
+   414→      mutationConcurrency: commandMutationConcurrency,
+   415→      maxBatch: this.#maxBatch,
+   416→    });
+   417→    this.#commandFastlane = commandFastlane === true && this.#legacySingleLeaseFallback
+   418→      ? new NativeSupervisorCommandFastlane({
+   419→        intervalMs: Math.max(250, Number(commandFastlaneIntervalMs) || 750),
+   420→        isRunning: () => this.#running,
+   421→        isSlotBusy: () => this.#legacyFastlaneBusy
+   422→          || this.#cyclePromise != null
+   423→          || this.#currentCommands.size > 0
+   424→          || this.#batchTransport === 'SUPPORTED',
+   425→        identitySnapshot: () => this.#identity.snapshot?.() || null,
+   426→        pickupAndRun: () => this.#pickupAndRunLegacyFastlaneCommand(),
+   427→      })
+   428→      : null;
+   429→
+   430→    const continuousServiceCanActuate = () => controlModeAllows(this.#supervisorMode)
+   431→      && armedAllows(this.#armed)
+   432→      && devosRuntimeControlAllowsContinuousService(this.#runtimeControl);
+   433→    const executeSupervisorCommand = async (command) => {
+   434→      const action = String(command?.action || '');
+   435→      if (!READ_ONLY_ACTIONS.has(action) && !ROOT_POLICY_ACTIONS.has(action)) {
+   436→        if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+   437→        if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
+   438→        if (!devosRuntimeControlAllowsContinuousService(this.#runtimeControl)) throw new Error('continuous_service_admission_fenced');
+   439→      }
+   440→      return this.#executeCommand(command);
+   441→    };
+   442→
+   443→    this.#lifecycle = new SupervisorLifecycleRuntime({
+   444→      getState: this.#getState,
+   445→      canActuate: continuousServiceCanActuate,
+   446→      executeCommand: executeSupervisorCommand,
+   447→      requireAuthoritativeAdmission: true,
+   448→    });
+   449→    this.#mesh = new SupervisorMeshRuntime({
+   450→      getState: this.#getState,
+   451→      executeCommand: executeSupervisorCommand,
+   452→      canActuate: continuousServiceCanActuate,
+   453→      primaryLifecycle: () => this.#lifecycle?.snapshot() || null,
+   454→      ...(meshStatePath ? { statePath: meshStatePath } : {}),
+   455→    });
+   456→    this.#selfUpdate = new SelfUpdateRuntime({
+   457→      // main-entry owns the one process-wide Sentinel/parent-progress runtime.
+   458→      // Reusing that exact object is required: a second HostResilienceRuntime
+   459→      // would overwrite the shared Sentinel state path with a new token while
+   460→      // the first lease kept writing the old token, causing the healthy primary
+   461→      // to be terminated when the 180-second startup grace expires.
+   462→      hostResilience,
+   463→      canRestart: async () => {
+   464→        if (!controlModeAllows(this.#supervisorMode)) return false;
+   465→        if (!armedAllows(this.#armed)) return false;
+   466→        if (this.#currentCommands.size > 0 && !globalOwnerGateDisabled('self_update.current_command')) return false;
+   467→        return confirmSelfUpdateRestartSafety({ getState: this.#getState });
+   468→      },
+   469→      beforeInstall: async (receipt) => {
+   470→        const { app } = await import('electron');
+   471→        await persistPreInstallReceipt(app, receipt);
+   472→      },
+   473→      readPriorTransaction: async () => {
+   474→        const { app } = await import('electron');
+   475→        return readSelfUpdateTransaction(app).catch(() => null);
+   476→      },
+   477→      beforeInstallerLaunch: async (receipt) => {
+   478→        const { app } = await import('electron');
+   479→        if (!app?.isPackaged && !globalOwnerGateDisabled('self_update.packaged_required')) throw new Error('native_supervisor_self_update_packaged_required');
+   480→        if (!app.hasSingleInstanceLock() && !globalOwnerGateDisabled('self_update.primary_instance_lock')) throw new Error('native_supervisor_self_update_primary_lock_required');
+   481→        await this.#persistSessionContinuity(app, receipt);
+   482→        await beforeSelfUpdateInstall?.(structuredClone(receipt));
+   483→        this.stop();
+   484→        app.releaseSingleInstanceLock();
+   485→      },
+   486→    });
+   487→  }
+   488→
+   489→  snapshot() {
+   490→    return {
+   491→      schema: 'metaengine.native-supervisor.client.v1',
+   492→      running: this.#running,
+   493→      started_at: this.#startedAt,
+   494→      heartbeat_interval_ms: this.#intervalMs,
+   495→      last_heartbeat_at: this.#lastHeartbeatAt,
+   496→      last_error: this.#lastError,
+   497→      last_command_id: this.#lastCommandId,
+   498→      last_command_status: this.#lastCommandStatus,
+   499→      rsi_outcome_readback: Object.freeze({
+   500→        enabled: this.#resultDeliveryAdapter != null && typeof this.#onRsiOutcomeReadback === 'function',
+   501→        observed_count: this.#rsiOutcomeReadbackObserved,
+   502→        dropped_count: this.#rsiOutcomeReadbackDropped,
+   503→        last_observed_at: this.#lastRsiOutcomeReadbackAt,
+   504→        same_client_terminal_receipt_required: true,
+   505→        sidecar_only: true,
+   506→        execution_authority: false,
+   507→        authority_effect: false,
+   508→      }),
+   509→      current_command: this.#currentCommand,
+   510→      current_commands: [...this.#currentCommands.values()].map((row) => structuredClone(row)),
+   511→      // F-L1d: makes the "heartbeat alive but command plane wedged" state externally
+   512→      // detectable without waiting for a lease TTL sweep.
+   513→      command_plane: Object.freeze({
+   514→        schema: 'metaengine.native-supervisor.command-plane-observability.v1',
+   515→        cycle_in_flight: this.#cyclePromise != null,
+   516→        cycle_started_at: this.#cycleStartedAtMs > 0 ? new Date(this.#cycleStartedAtMs).toISOString() : null,
+   517→        cycle_age_ms: this.#cycleStartedAtMs > 0 ? Date.now() - this.#cycleStartedAtMs : 0,
+   518→        in_flight_commands: Object.freeze([...this.#currentCommands.values()].map((row) => Object.freeze({
+   519→          command_id: row.command_id,
+   520→          action: row.action,
+   521→          age_ms: this.#commandStartsAtMs.get(String(row.command_id)) != null
+   522→            ? Date.now() - this.#commandStartsAtMs.get(String(row.command_id))
+   523→            : null,
+   524→        }))),
+   525→        authority_effect: false,
+   526→      }),
+   527→      enrollment_status: this.#enrollmentStatus,
+   528→      identity: this.#identity.snapshot(),
+   529→      supervisor_mode: this.#supervisorMode,
+   530→      armed: this.#armed,
+   531→      command_fastlane: this.#commandFastlane?.snapshot()
+   532→        || Object.freeze({ enabled: false, scheduler_authority: false, command_pickup_transport_only: false, authority_effect: false }),
+   533→      command_batch_fastlane: this.#batchFastlane?.snapshot()
+   534→        || Object.freeze({ enabled: false, mode: 'DISABLED', scheduler_authority: false, command_pickup_transport_only: false, auto_suspend_on_notify_wake: false, authority_effect: false }),
+   535→      lifecycle: this.#lifecycle?.snapshot() || null,
+   536→      supervisor_mesh: this.#mesh?.snapshot() || null,
+   537→      self_update: this.#selfUpdate?.snapshot() || null,
+   538→      session_continuity: structuredClone(this.#continuityStatus),
+   539→      control_state: {
+   540→        schema: 'metaengine.native-supervisor.control-state-runtime.v1',
+   541→        path_configured: Boolean(this.#controlStatePath),
+   542→        loaded: this.#controlStateLoaded,
+   543→        persistence_error: this.#controlStatePersistenceError,
+   544→        quiescent: false,
+   545→        always_on_control: true,
+   546→        authority_effect: false,
+   547→      },
+   548→      control_fast_lane: {
+   549→        schema: 'metaengine.native-supervisor.control-fast-lane.v1',
+   550→        transport: this.#batchTransport,
+   551→        batch_transport_required: this.#legacySingleLeaseFallback === false,
+   552→        legacy_single_lease_fallback_enabled: this.#legacySingleLeaseFallback,
+   553→        wait_batch_ms: this.#batchWaitMs,
+   554→        last_batch_count: this.#lastBatchCount,
+   555→        last_wait_batch_wake_reason: this.#lastBatchWakeReason,
+   556→        last_wait_batch_elapsed_ms: this.#lastBatchWaitElapsedMs,
+   557→        last_wait_batch_response_at: this.#lastBatchResponseAt,
+   558→        scheduler: this.#commandLane.snapshot(),
+   559→        maintenance_interval_ms: this.#maintenanceIntervalMs,
+   560→        maintenance_in_flight: this.#maintenancePromise != null,
+   561→        heartbeat_in_flight: this.#heartbeatPromise != null,
+   562→        command_lane_precedes_maintenance: true,
+   563→        long_poll_replaces_idle_timer_latency: this.#batchTransport === 'SUPPORTED',
+   564→        legacy_750ms_fallback_configured: this.#commandFastlane != null,
+   565→        legacy_fallback_suppressed_by_batch_transport: this.#batchTransport === 'SUPPORTED',
+   566→        batch_fastlane_configured: this.#batchFastlane != null,
+   567→        batch_fastlane_mode: this.#batchFastlane?.mode || 'DISABLED',
+   568→        batch_fastlane_suspends_on_notify_wake: true,
+   569→        one_steady_state_lease_loop: true,
+   570→        transport_delivery_is_authority: false,
+   571→        automatic_effect_retry_allowed: false,
+   572→        authority_effect: false,
+   573→      },
+   574→      continuous_service: {
+   575→        terminal_requires_external_stop: true,
+   576→        startup_scheduler_armed_before_enrollment: true,
+   577→        cycle_errors_terminal: false,
+   578→        runtime_control: structuredClone(this.#runtimeControl),
+   579→        authoritative_admission_required: true,
+   580→        actuation_allowed: devosRuntimeControlAllowsContinuousService(this.#runtimeControl),
+   581→        authority_effect: false,
+   582→      },
+   583→      result_receipt_reconciliation: {
+   584→        enabled: this.#resultDeliveryAdapter != null,
+   585→        same_receipt_transport_only: true,
+   586→        independent_terminal_readback_required: true,
+   587→        candidate_effect_executor_exposed: false,
+   588→        physical_effect_replay_allowed: false,
+   589→        automatic_effect_retry_allowed: false,
+   590→        authority_effect: false,
+   591→      },
+   592→      developer_emergency_update: {
+   593→        configured: this.#developerEmergencyUpdate != null,
+   594→        signed_lease_precedes_handler: true,
+   595→        bypasses_program_policy: true,
+   596→        bypasses_transport_authentication: false,
+   597→        authority_effect: false,
+   598→      },
+   599→      arbitrary_eval: false,
+   600→      os_shell_authority: false,
+   601→    };
+   602→  }
+   603→
+   604→  async #persistSessionContinuity(app, receipt) {
+   605→    // P0 repair (point 6) — pre-persist barrier, inseparable from capsule
+   606→    // creation:
+   607→    //   1. metadata-only pre-install auth readback (the capsule's pre-auth
+   608→    //      evidence for Qualification V2; no cookie values, no storage reads);
+   609→    //   2. session.flushStorageData() on the persistent user-space partition
+   610→    //      so unwritten DOMStorage is flushed before the process hands off.
+   611→    //      The flush is hardening, NOT proof of ChatGPT cookie persistence —
+   612→    //      the pre/post auth readback comparison is the actual evidence.
+   613→    const preAuthReadback = await this.#capturePreInstallAuthReadback();
+   614→    await NativeSupervisorClientFlushUserSpaceStorage(app);
+   615→    const state = await this.#getState();
+   616→    const lifecycle = this.#lifecycle?.snapshot() || null;
+   617→    const tabs = (state?.tabs || []).map((tab) => ({ ...tab, generation_state: generationStateForTab(lifecycle, tab?.tab_id) }));
+   618→    const selectedTabId = state?.active_tab?.tab_id || tabs.find((tab) => tab?.selected === true)?.tab_id || null;
+   619→    const row = buildSelfUpdateSessionContinuity({ currentVersion: this.#version, targetVersion: receipt?.version, tabsSnapshot: { tabs, selected_tab_id: selectedTabId }, lifecycleSnapshot: lifecycle, preAuthReadback });
+   620→    await persistSelfUpdateSessionContinuity(app.getPath('userData'), row);
+   621→    this.#continuityStatus = { state: 'PERSISTED', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version, had_generating_tabs: row.tabs.some((tab) => tab?.generation_state === 'GENERATING'), user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false };
+   622→  }
+   623→
+   624→  async #capturePreInstallAuthReadback() {
+   625→    try {
+   626→      const state = await this.#getState();
+   627→      return classifyChatAuthReadbackFromTabs(state?.tabs || []);
+   628→    } catch {
+   629→      return Object.freeze({
+   630→        auth_state: 'UNKNOWN', chatgpt_tab_count: 0, auth_redirect_tab_count: 0, authenticated_tab_count: 0,
+   631→        metadata_only: true, cookie_values_read: false,
+   632→      });
+   633→    }
+   634→  }
+   635→
+   636→  async #restoreSessionContinuity() {
+   637→    const { app } = await import('electron');
+   638→    const userData = app.getPath('userData');
+   639→    // P0 repair (point 2) — ONE-SHOT FENCE: the capsule is claimed by a durable
+   640→    // rename BEFORE any NEW_TAB is issued. A process that crashes mid-restore,
+   641→    // and every successor process, will find the canonical path absent: the
+   642→    // 7 -> 14 -> 21 -> 28 -> 32 replay amplifier of the 2026-09-17 incident is
+   643→    // structurally impossible with this fence in place.
+   644→    const attempt = await beginSelfUpdateSessionContinuityRestoreAttempt(userData);
+   645→    if (!attempt) {
+   646→      this.#continuityStatus = { state: 'NONE', restored_tabs: 0, target_version: null, user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false };
+   647→      return null;
+   648→    }
+   649→    const { row } = attempt;
+   650→    this.#continuityStatus = { state: 'FOUND', restored_tabs: 0, tab_count: row.tabs.length, target_version: row.target_version || null, user_session_continuity: null, tab_cardinality_continuity: null, authority_effect: false };
+   651→    if (row.target_version && String(row.target_version) !== this.#version) {
+   652→      this.#continuityStatus.state = 'TARGET_VERSION_MISMATCH';
+   653→      return row;
+   654→    }
+   655→
+   656→    // P0 repair (points 2+3): the module-level restore is auth-aware and
+   657→    // one-shot. The first restored /c/ tab observed on /auth/login latches
+   658→    // AUTH_REQUIRED as a TERMINAL state — remaining ChatGPT tabs are skipped
+   659→    // (no login-page multiplication), non-ChatGPT tabs still restore, and the
+   660→    // capsule is already fenced so no process will ever replay it.
+   661→    const restore = await restoreSelfUpdateSessionContinuity({
+   662→      row,
+   663→      currentVersion: this.#version,
+   664→      getState: this.#getState,
+   665→      executeCommand: this.#executeCommand,
+   666→    });
+   667→
+   668→    // P0 repair (point 4) — cleanup by proof only: close tabs whose
+   669→    // created_by_continuity_id matches THIS attempt beyond the capsule's own
+   670→    // tab count. Tabs without the stamp (including the 32 legacy live tabs
+   671→    // of the incident) are never touched.
+   672→    let closedExtraTabs = 0;
+   673→    try {
+   674→      const postRestoreState = await this.#getState();
+   675→      const cleanup = planPostRestoreDuplicateTabCleanup({ continuityRow: row, currentTabs: postRestoreState?.tabs || [] });
+   676→      for (const tabId of cleanup.close_tab_ids) {
+   677→        await this.#executeCommand({ action: 'CLOSE_TAB', payload: { tab_id: tabId }, platform: null });
+   678→        closedExtraTabs += 1;
+   679→      }
+   680→    } catch {
+   681→      // Best-effort: un-closed duplicates remain observable via census.
+   682→    }
+   683→
+   684→    let reconcile = { schema: 'metaengine.self-update-chat-reconcile.v1', tabs: [], ambiguous_count: 0, unresolved_count: 0, authority_effect: false };
+   685→    if (restore.state === 'RESTORED' && restore.bindings.some((binding) => binding.generation_state === 'GENERATING')) {
+   686→      reconcile = await reconcileRestoredGeneratingChats({
+   687→        bindings: restore.bindings,
+   688→        captureTab: async (tabId) => this.#executeCommand({ action: 'CAPTURE', payload: { tab_id: String(tabId) }, platform: AGENT_PLATFORM_ID }),
+   689→        clickControl: async (tabId, control) => this.#executeCommand({
+   690→          action: 'TYPED_CLICK',
+   691→          payload: {
+   692→            tab_id: String(tabId),
+   693→            role: 'button',
+   694→            accessible_name: String(control?.name || ''),
+   695→            semantic_ref: control?.semantic_ref,
+   696→          },
+   697→          platform: AGENT_PLATFORM_ID,
+   698→        }),
+   699→      });
+   700→    }
+   701→
+   702→    const failedTabs = restore.failed_tabs + Number(reconcile.unresolved_count || 0);
+   703→    let stateLabel = restore.state;
+   704→    if (stateLabel === 'RESTORED' && failedTabs > 0) stateLabel = 'PARTIAL';
+   705→    this.#continuityStatus = {
+   706→      state: stateLabel, restored_tabs: restore.restored_tabs, closed_extra_tabs: closedExtraTabs, failed_tabs: failedTabs,
+   707→      skipped_auth_required_tabs: restore.skipped_auth_required_tabs,
+   708→      tab_count: restore.tab_count, target_version: restore.target_version || null, had_generating_tabs: restore.had_generating_tabs,
+   709→      lifecycle_resume_present: restore.lifecycle_resume_present, reconciled_generating_tabs: reconcile.tabs.length,
+   710→      reconcile_ambiguous_count: reconcile.ambiguous_count, reconcile_unresolved_count: reconcile.unresolved_count,
+   711→      reconcile_authority_effect: reconcile.authority_effect === true,
+   712→      // Qualification V2 evidence (metadata-only, P0 repair point 5).
+   713→      continuity_id: restore.continuity_id,
+   714→      auth_readback_state: restore.auth_readback?.auth_state ?? null,
+   715→      auth_redirect_tab_count: restore.auth_readback?.auth_redirect_tab_count ?? null,
+   716→      user_session_continuity: restore.user_session_continuity,
+   717→      tab_cardinality_continuity: restore.tab_cardinality?.state ?? null,
+   718→      tab_cardinality_pre_tab_count: restore.tab_cardinality?.pre_tab_count ?? null,
+   719→      tab_cardinality_post_tab_count: restore.tab_cardinality?.post_tab_count ?? null,
+   720→      authority_effect: false,
+   721→    };
+   722→    return row;
+   723→  }
+   724→
+   725→  async #restoreControlState() {
+   726→    if (this.#controlStateLoaded) return this.snapshot();
+   727→    this.#controlStateLoaded = true;
+   728→    if (!this.#controlStatePath) return this.snapshot();
+   729→    const restored = await loadNativeSupervisorControlState(this.#controlStatePath);
+   730→    if (restored) {
+   731→      this.#supervisorMode = 'CONTROL';
+   732→      this.#armed = true;
+   733→      if (restored.recovered_fail_closed === true) this.#controlStatePersistenceError = restored.recovery_reason || 'CONTROL_STATE_RECOVERED_FAIL_CLOSED';
+   734→    }
+   735→    return this.snapshot();
+   736→  }
+   737→
+   738→  async #persistControlState() {
+   739→    if (!this.#controlStatePath) return null;
+   740→    try {
+   741→      const saved = await persistNativeSupervisorControlState(this.#controlStatePath, { supervisor_mode: this.#supervisorMode, armed: this.#armed });
+   742→      this.#controlStatePersistenceError = null;
+   743→      return saved;
+   744→    } catch (error) {
+   745→      this.#controlStatePersistenceError = `control_state_persistence:${clipError(error)}`;
+   746→      throw error;
+   747→    }
+   748→  }
+   749→
+   750→  async start() {
+   751→    if (this.#running) { this.#schedule(); return this.snapshot(); }
+   752→    await this.#restoreControlState();
+   753→    this.#supervisorMode = 'CONTROL';
+   754→    this.#armed = true;
+   755→    this.#running = true;
+   756→    this.#startedAt = new Date().toISOString();
+   757→    this.#schedule();
+   758→    this.#commandFastlane?.start();
+   759→    this.#batchFastlane?.start();
+   760→    try {
+   761→      await this.#identity.ensure();
+   762→      // Obtain the authoritative DB-backed admission projection before the first
+   763→      // lifecycle cycle. Unknown/missing readback leaves continuous service fenced;
+   764→      // self-update and Sentinel startup remain independent below.
+   765→      await this.#heartbeat().catch((error) => {
+   766→        this.#lastError = `startup_heartbeat:${clipError(error)}`;
+   767→      });
+   768→      await this.#restoreSessionContinuity().catch((error) => {
+   769→        this.#lastError = `continuity_restore:${clipError(error)}`;
+   770→        this.#continuityStatus = { ...this.#continuityStatus, state: 'ERROR', error: clipError(error), authority_effect: false };
+   771→      });
+   772→      const lifecycleSnapshot = await this.#lifecycle.start().catch((error) => {
+   773→        this.#lastError = `lifecycle_start:${clipError(error)}`;
+   774→        return null;
+   775→      });
+   776→      this.#synchronizeRuntimeControlFromLifecycle(lifecycleSnapshot, 'LIFECYCLE_START_FAILED');
+   777→      await this.#mesh.start().catch((error) => { this.#lastError = `mesh_start:${clipError(error)}`; });
+   778→      await this.#selfUpdate.start().catch((error) => { this.#lastError = `self_update_start:${clipError(error)}`; });
+   779→      await this.cycle().catch(() => {});
+   780→    } catch (error) {
+   781→      this.#lastError = `startup:${clipError(error)}`;
+   782→      throw error;
+   783→    } finally {
+   784→      if (this.#running) this.#schedule();
+   785→    }
+   786→    return this.snapshot();
+   787→  }
+   788→
+   789→  stop() {
+   790→    this.#running = false;
+   791→    this.#mesh?.stop?.();
+   792→    this.#lifecycle?.stop?.();
+   793→    this.#commandFastlane?.stop();
+   794→    this.#batchFastlane?.stop();
+   795→    if (this.#timer) clearTimeout(this.#timer);
+   796→    this.#timer = null;
+   797→  }
+   798→
+   799→  // T2-5 Unified Work Graph item 3: operator shell commands reach the edge
+   800→  // through the same device-signed rail as every other supervisor action.
+   801→  // Both methods are thin transport — all validation/CAS lives in the edge
+   802→  // routes and the SQL beneath them; neither grants any authority here.
+   803→  async devosResumeAdmission({ expected_generation_floor = null } = {}) {
+   804→    const payload = { confirm: true };
+   805→    if (expected_generation_floor != null) {
+   806→      const floor = Number(expected_generation_floor);
+   807→      if (!Number.isSafeInteger(floor) || floor < 0) throw new Error('native_supervisor_devos_resume_floor_invalid');
+   808→      payload.expected_generation_floor = floor;
+   809→    }
+   810→    const response = await this.#signedRequest('/v1/devos/resume-admission', { payload });
+   811→    const body = await response.json().catch(() => ({}));
+   812→    if (!response.ok) throw new Error(`native_supervisor_devos_resume_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+   813→    return body;
+   814→  }
+   815→
+   816→  async metaObjectiveSet({ roadmap_id = null, objective, nodes = null } = {}) {
+   817→    const payload = { objective: String(objective ?? '') };
+   818→    if (roadmap_id != null) payload.roadmap_id = String(roadmap_id);
+   819→    if (Array.isArray(nodes)) payload.nodes = nodes;
+   820→    const response = await this.#signedRequest('/v1/meta/objective', { payload });
+   821→    const body = await response.json().catch(() => ({}));
+   822→    if (!response.ok) throw new Error(`native_supervisor_meta_objective_http_${response.status}:${String(body?.error || 'unknown').slice(0, 160)}`);
+   823→    return body;
+   824→  }
+   825→
+   826→  setControlState({ mode, armed } = {}) {
+   827→    if (mode !== undefined && String(mode).trim().toUpperCase() !== 'CONTROL') {
+   828→      const error = new Error(ALWAYS_ON_CONTROL_ERROR);
+   829→      error.code = ALWAYS_ON_CONTROL_ERROR;
+   830→      throw error;
+   831→    }
+   832→    if (armed !== undefined && armed !== true) {
+   833→      const error = new Error(ALWAYS_ON_CONTROL_ERROR);
+   834→      error.code = ALWAYS_ON_CONTROL_ERROR;
+   835→      throw error;
+   836→    }
+   837→    this.#supervisorMode = 'CONTROL';
+   838→    this.#armed = true;
+   839→    void this.#persistControlState().catch(() => {});
+   840→    return this.snapshot();
+   841→  }
+   842→
+   843→  #schedule() {
+   844→    if (!this.#running || this.#timer) return;
+   845→    // A supported wait-batch request is itself the idle wait. Schedule the next
+   846→    // cycle immediately so there is no extra client timer after the held request.
+   847→    const delay = this.#batchTransport === 'SUPPORTED' ? 0 : this.#intervalMs;
+   848→    this.#timer = setTimeout(() => {
+   849→      this.#timer = null;
+   850→      this.cycle().catch(() => {}).finally(() => this.#schedule());
+   851→    }, delay);
+   852→    this.#timer.unref?.();
+   853→  }
+   854→
+   855→  async #enrollmentRequest(path, payload) {
+   856→    const bodyText = JSON.stringify(payload);
+   857→    const headers = await this.#identity.enrollmentHeaders(bodyText);
+   858→    return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, { method: 'POST', headers, body: bodyText, cache: 'no-store' });
+   859→  }
+   860→
+   861→  async #signedRequest(path, { method = 'POST', payload = null, signal = null } = {}) {
+   862→    const bodyText = method === 'GET' ? '' : JSON.stringify(payload ?? {});
+   863→    const requestPath = `${NATIVE_SUPERVISOR_RUNTIME_PATH}${path}`;
+   864→    const headers = await this.#identity.deviceHeaders(method, requestPath, bodyText);
+   865→    const init = { method, headers, cache: 'no-store' };
+   866→    if (method !== 'GET') init.body = bodyText;
+   867→    if (signal) init.signal = signal;
+   868→    return this.#fetch(`${NATIVE_SUPERVISOR_BASE}${path}`, init);
+   869→  }
+   870→
+   871→  async ensureEnrollment() {
+   872→    const identity = await this.#identity.ensure();
+   873→    if (identity.device_id) { this.#enrollmentStatus = 'ENROLLED'; return identity; }
+   874→    if (!identity.enrollment_request_id) {
+   875→      const payload = { profile: SUPERVISOR_DEVICE_PROFILE, public_jwk: identity.public_jwk, key_fingerprint_sha256: identity.key_fingerprint_sha256, metadata: { shell_version: this.#version } };
+   876→      const response = await this.#enrollmentRequest('/v1/device/enrollment/request', payload);
+   877→      const body = await response.json().catch(() => ({}));
+   878→      if (![200, 202].includes(response.status) || !body?.request_id) throw new Error(`native_supervisor_enrollment_request_http_${response.status}:${body?.reason || body?.error || 'unknown'}`);
+   879→      await this.#identity.bindEnrollmentRequest(body.request_id);
+   880→      this.#enrollmentStatus = String(body.status || 'PENDING');
+   881→      return this.#identity.snapshot();
+   882→    }
+   883→    const payload = { request_id: identity.enrollment_request_id, profile: SUPERVISOR_DEVICE_PROFILE, public_jwk: identity.public_jwk, key_fingerprint_sha256: identity.key_fingerprint_sha256 };
+   884→    const response = await this.#enrollmentRequest('/v1/device/enrollment/status', payload);
+   885→    const body = await response.json().catch(() => ({}));
+   886→    if (response.status === 200 && body?.accepted === true && body?.device_id) {
+   887→      await this.#identity.bindDevice(body.device_id); this.#enrollmentStatus = 'ENROLLED'; return this.#identity.snapshot();
+   888→    }
+   889→    if (response.status === 202) { this.#enrollmentStatus = 'PENDING_APPROVAL'; return this.#identity.snapshot(); }
+   890→    const reason = String(body?.reason || body?.error || 'unknown');
+   891→    if (response.status === 409 && /EXPIRED|REJECTED|NOT_FOUND/.test(reason.toUpperCase())) {
+   892→      await this.#identity.clearEnrollmentRequest(); this.#enrollmentStatus = 'RETRY_REQUIRED'; return this.#identity.snapshot();
+   893→    }
+   894→    throw new Error(`native_supervisor_enrollment_status_http_${response.status}:${reason}`);
+   895→  }
+   896→
+   897→  async #heartbeat() {
+   898→    const state = nativeSupervisorTransportState(await this.#getState());
+   899→    const lifecycleStatus = this.#lifecycle?.statusSnapshot?.() || this.#lifecycle?.snapshot() || null;
+   900→    const devosRuntime = state?.supervisor_lifecycle?.devos_runtime || null;
+   901→    const supervisorLifecycle = lifecycleStatus && typeof lifecycleStatus === 'object'
+   902→      ? { ...lifecycleStatus, ...(devosRuntime ? { devos_runtime: structuredClone(devosRuntime) } : {}) }
+   903→      : (devosRuntime ? { devos_runtime: structuredClone(devosRuntime) } : null);
+   904→    const payload = {
+   905→      state: {
+   906→        ...state, shell_version: this.#version, supervisor_mode: 'CONTROL', armed: true,
+   907→        operator_mode: 'CONTROL', started_at: this.#startedAt, last_error: this.#lastError,
+   908→        supervisor_lifecycle: supervisorLifecycle,
+   909→        self_update: this.#selfUpdate?.snapshot() || null,
+   910→        self_update_session_continuity: structuredClone(this.#continuityStatus),
+   911→      },
+   912→      last_command_id: this.#lastCommandId, last_command_status: this.#lastCommandStatus,
+   913→    };
+   914→    const response = await this.#signedRequest('/v1/state', { payload });
+   915→    if (response.status !== 202) throw new Error(`native_supervisor_state_http_${response.status}`);
+   916→    const body = await response.json().catch(() => ({}));
+   917→    const observedControl = normalizeDevosRuntimeControl(body?.runtime_control, { workspaceId: NATIVE_SUPERVISOR_WORKSPACE_ID });
+   918→    const lifecycleSnapshot = await this.#lifecycle?.applyRuntimeControl?.(observedControl);
+   919→    this.#synchronizeRuntimeControlFromLifecycle(lifecycleSnapshot, observedControl.reason || 'LIFECYCLE_READBACK_UNAVAILABLE');
+   920→    this.#lastHeartbeatAt = new Date().toISOString();
+   921→  }
+   922→
+   923→  #synchronizeRuntimeControlFromLifecycle(snapshot, fallbackReason) {
+   924→    const applied = snapshot?.continuous_service?.runtime_control;
+   925→    this.#runtimeControl = applied?.authoritative === true
+   926→      ? normalizeDevosRuntimeControl(applied, { workspaceId: NATIVE_SUPERVISOR_WORKSPACE_ID })
+   927→      : unavailableDevosRuntimeControl(applied?.reason || fallbackReason || 'LIFECYCLE_READBACK_UNAVAILABLE');
+   928→    return this.#runtimeControl;
+   929→  }
+   930→
+   931→  #kickHeartbeat() {
+   932→    if (this.#heartbeatPromise) return this.#heartbeatPromise;
+   933→    this.#heartbeatPromise = this.#heartbeat()
+   934→      .catch((error) => { this.#lastError = `heartbeat:${clipError(error)}`; })
+   935→      .finally(() => { this.#heartbeatPromise = null; });
+   936→    return this.#heartbeatPromise;
+   937→  }
+   938→
+   939→  #kickMaintenance() {
+   940→    if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
+   941→    const now = Date.now();
+   942→    if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
+   943→    this.#lastMaintenanceAtMs = now;
+   944→    this.#maintenancePromise = (async () => {
+   945→      // Mesh startup is a recoverable local initialization step. A one-shot
+   946→      // filesystem/runtime failure must not leave CONTROL healthy while the mesh
+   947→      // stays permanently absent from signed state (which fences transport
+   948→      // promotion forever). Retry only in the existing idle maintenance lane;
+   949→      // this creates no second scheduler and replays no browser effect.
+   950→      if (this.#mesh?.snapshot?.()?.running !== true) {
+   951→        await this.#mesh?.start().catch((error) => { this.#lastError = `mesh_start_recovery:${clipError(error)}`; });
+   952→      }
+   953→      await this.#mesh?.reconcile().catch((error) => { this.#lastError = `mesh:${clipError(error)}`; });
+   954→      await this.#lifecycle?.cycle().catch((error) => { this.#lastError = `lifecycle:${clipError(error)}`; });
+   955→      await this.#mesh?.dispatchRecoveryIfNeeded().catch((error) => { this.#lastError = `mesh_recovery:${clipError(error)}`; });
+   956→      // D-Q1 liveness repair: the boot-time AUTH_REQUIRED classification is
+   957→      // latched into the continuity projection forever, so a user who logs back
+   958→      // in is never reflected and a quarantined self-update transaction can
+   959→      // never re-qualify. Refresh the classification here (bounded, read-only,
+   960→      // metadata-only) so healed evidence becomes observable to the heartbeat
+   961→      // qualification hook. No tab restore, no navigation, no effect.
+   962→      if (
+   963→        this.#continuityStatus
+   964→        && (this.#continuityStatus.state === 'AUTH_REQUIRED'
+   965→          || this.#continuityStatus.auth_readback_state === 'AUTH_REQUIRED')
+   966→      ) {
+   967→        const refreshed = await this.#capturePreInstallAuthReadback().catch(() => null);
+   968→        this.#continuityStatus = applyQuarantineAuthHealToContinuityStatus(this.#continuityStatus, refreshed);
+   969→      }
+   970→      await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
+   971→    })().finally(() => { this.#maintenancePromise = null; });
+   972→    return this.#maintenancePromise;
+   973→  }
+   974→
+   975→  async #nextCommand() {
+   976→    const response = await this.#signedRequest('/v1/commands/next', { payload: { supervisor_mode: this.#supervisorMode } });
+   977→    const body = await response.json().catch(() => ({}));
+   978→    if (!response.ok) throw new Error(`native_supervisor_next_http_${response.status}`);
+   979→    return body?.command || null;
+   980→  }
+   981→
+   982→  async #pickupAndRunLegacyFastlaneCommand() {
+   983→    if (!this.#legacySingleLeaseFallback || this.#batchTransport === 'SUPPORTED' || this.#legacyFastlaneBusy || this.#cyclePromise) return null;
+   984→    this.#legacyFastlaneBusy = true;
+   985→    try {
+   986→      const command = await this.#nextCommand();
+   987→      if (command) await this.#runCommand(command);
+   988→      return command || null;
+   989→    } finally {
+   990→      this.#legacyFastlaneBusy = false;
+   991→    }
+   992→  }
+   993→
+   994→  // Batch fastlane pickup. Unlike the legacy fastlane this runs WHILE the
+   995→  // supervisor cycle is parked inside its held wait-batch request — that idle
+   996→  // window is exactly what it accelerates on a bounded DB poll edge. Mutual
+   997→  // exclusion stays owned by the in-flight command slot plus the
+   998→  // transactional DB lease (a PENDING command flips to LEASED exactly once).
+   999→  async #pickupAndRunBatchFastlaneCommand() {
+  1000→    if (this.#batchFastlaneBusy || this.#legacyFastlaneBusy) return null;
+  1001→    this.#batchFastlaneBusy = true;
+  1002→    try {
+  1003→      const command = await this.#nextCommand();
+  1004→      if (command) await this.#runCommand(command);
+  1005→      return command || null;
+  1006→    } finally {
+  1007→      this.#batchFastlaneBusy = false;
+  1008→    }
+  1009→  }
+  1010→
+  1011→  async #nextCommands() {
+  1012→    if (this.#batchTransport !== 'UNAVAILABLE') {
+  1013→      const waitStartedAt = Date.now();
+  1014→      const response = await this.#signedRequest('/v1/commands/wait-batch', {
+  1015→        payload: {
+  1016→          supervisor_mode: this.#supervisorMode,
+  1017→          max_batch: this.#maxBatch,
+  1018→          max_tab_mutations: this.#maxTabMutations,
+  1019→          wait_ms: this.#batchWaitMs,
+  1020→        },
+  1021→      });
+  1022→      if ([404, 405, 501].includes(response.status)) {
+  1023→        this.#lastBatchWakeReason = `HTTP_${response.status}_UNSUPPORTED`;
+  1024→        this.#lastBatchWaitElapsedMs = Math.max(0, Date.now() - waitStartedAt);
+  1025→        this.#lastBatchResponseAt = new Date().toISOString();
+  1026→        this.#batchFastlane?.stop();
+  1027→        if (this.#legacySingleLeaseFallback) {
+  1028→          this.#batchTransport = 'UNAVAILABLE';
+  1029→          this.#commandFastlane?.start();
+  1030→        } else {
+  1031→          this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+  1032→          this.#commandFastlane?.stop();
+  1033→          this.#lastBatchCount = 0;
+  1034→          throw new Error(`native_supervisor_batch_transport_required:http_${response.status}`);
+  1035→        }
+  1036→      } else {
+  1037→        const body = await response.json().catch(() => ({}));
+  1038→        this.#lastBatchWakeReason = String(body?.wake_reason || 'UNKNOWN').slice(0, 120);
+  1039→        this.#lastBatchWaitElapsedMs = Math.max(0, Date.now() - waitStartedAt);
+  1040→        this.#lastBatchResponseAt = new Date().toISOString();
+  1041→        if (!response.ok || !Array.isArray(body?.commands)) {
+  1042→          throw new Error(`native_supervisor_batch_next_http_${response.status}:${body?.error || 'invalid_batch'}`);
+  1043→        }
+  1044→        this.#batchTransport = 'SUPPORTED';
+  1045→        this.#commandFastlane?.stop();
+  1046→        this.#batchFastlane?.observeWake(this.#lastBatchWakeReason);
+  1047→        this.#lastBatchCount = body.commands.length;
+  1048→        return body.commands;
+  1049→      }
+  1050→    }
+  1051→    if (!this.#legacySingleLeaseFallback) {
+  1052→      this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+  1053→      this.#lastBatchCount = 0;
+  1054→      throw new Error('native_supervisor_batch_transport_required');
+  1055→    }
+  1056→    const command = await this.#nextCommand();
+  1057→    this.#lastBatchCount = command ? 1 : 0;
+  1058→    return command ? [command] : [];
+  1059→  }
+  1060→
+  1061→  // Bounded, idempotent redelivery for command-result transport. The browser
+  1062→  // effect has already happened when a receipt is posted; dropping the receipt
+  1063→  // on a single transient transport failure turned completed commands into
+  1064→  // EXPIRED lease_timeout_no_retry (observed live). Re-POSTing the immutable
+  1065→  // receipt is safe — the completion RPC is atomic and idempotent per
+  1066→  // command_id — and it never re-executes any browser effect. 4xx responses are
+  1067→  // contract violations and are surfaced immediately without retry.
+  1068→  static #retryableResultDeliveryFailure(status) {
+  1069→    return Number(status) >= 500 || !Number.isFinite(Number(status));
+  1070→  }
+  1071→
+  1072→  async #deliverResultWithRetry(path, payload) {
+  1073→    let lastError = null;
+  1074→    for (let attempt = 1; attempt <= this.#resultDeliveryAttempts; attempt += 1) {
+  1075→      let response;
+  1076→      try {
+  1077→        response = await this.#signedRequest(path, { payload });
+  1078→      } catch (error) {
+  1079→        lastError = error;
+  1080→        response = null;
+  1081→      }
+  1082→      if (response && response.ok) return response;
+  1083→      if (response && !NativeSupervisorClient.#retryableResultDeliveryFailure(response.status)) {
+  1084→        throw new Error(`native_supervisor_result_http_${response.status}`);
+  1085→      }
+  1086→      if (response) lastError = new Error(`native_supervisor_result_http_${response.status}`);
+  1087→      if (attempt < this.#resultDeliveryAttempts) {
+  1088→        const backoff = this.#resultDeliveryBackoffMs[Math.min(attempt - 1, this.#resultDeliveryBackoffMs.length - 1)] || 0;
+  1089→        if (backoff > 0) await new Promise((resolve) => setTimeout(resolve, backoff));
+  1090→      }
+  1091→    }
+  1092→    throw lastError || new Error('native_supervisor_result_delivery_failed');
+  1093→  }
+  1094→
+  1095→  #assertRsiResultDeliveryOutcome(outcome, commandId) {
+  1096→    const state = String(outcome?.state || '').toUpperCase();
+  1097→    if (state === 'DELIVERED' || state === 'RECONCILED') return outcome;
+  1098→    const detail = String(outcome?.error || state || 'UNKNOWN').slice(0, 240);
+  1099→    const error = new Error(state === 'REJECTED'
+  1100→      ? `native_supervisor_result_rejected:${commandId}:${detail}`
+  1101→      : `native_supervisor_result_delivery_ambiguous:${commandId}:${detail}`);
+  1102→    error.code = state === 'REJECTED' ? 'NATIVE_RESULT_DELIVERY_REJECTED' : 'NATIVE_RESULT_DELIVERY_AMBIGUOUS';
+  1103→    throw error;
+  1104→  }
+  1105→
+  1106→  #scheduleRsiOutcomeReadback(command, payload) {
+  1107→    if (!this.#resultDeliveryAdapter || typeof this.#onRsiOutcomeReadback !== 'function') return false;
+  1108→    const commandId = String(command?.command_id || payload?.receipt?.command_id || '').trim();
+  1109→    if (!commandId) return false;
+  1110→    const binding = Object.freeze({
+  1111→      command_id: commandId,
+  1112→      action: String(command?.action || payload?.receipt?.action || '').trim().toUpperCase(),
+  1113→      platform: command?.platform == null && payload?.receipt?.platform == null
+  1114→        ? null
+  1115→        : String(command?.platform || payload?.receipt?.platform || '').trim().toUpperCase(),
+  1116→      effect_key: command?.effect_key || payload?.receipt?.effect_key || null,
+  1117→      authority_effect: false,
+  1118→    });
+  1119→    void this.#resultDeliveryAdapter.readStoredReceipt({ commandId, payload })
+  1120→      .then(async (readback) => {
+  1121→        if (!readback) {
+  1122→          this.#rsiOutcomeReadbackDropped += 1;
+  1123→          return;
+  1124→        }
+  1125→        await this.#onRsiOutcomeReadback({ command: binding, readback });
+  1126→        this.#rsiOutcomeReadbackObserved += 1;
+  1127→        this.#lastRsiOutcomeReadbackAt = new Date().toISOString();
+  1128→      })
+  1129→      .catch(() => { this.#rsiOutcomeReadbackDropped += 1; });
+  1130→    return true;
+  1131→  }
+  1132→
+  1133→  async #postResult(command, ok, result, error = null, effectOutcome = null) {
+  1134→    const receiptDescriptor = classifyNativeSupervisorCommand(command);
+  1135→    const payload = { ok, receipt: { schema: 'metaengine.native-supervisor.command-receipt.v2', command_id: command.command_id, action: command.action, platform: command.platform || null, result: result ?? null, effect_outcome: effectOutcome, lane: receiptDescriptor.lane, effect_key: receiptDescriptor.effect_key, recorded_at: new Date().toISOString(), authority_effect: false }, error };
+  1136→    if (this.#resultDeliveryAdapter) {
+  1137→      const outcome = await this.#resultDeliveryAdapter.deliver({
+  1138→        commandId: command.command_id,
+  1139→        effectKey: command.effect_key || null,
+  1140→        payload,
+  1141→      });
+  1142→      const accepted = this.#assertRsiResultDeliveryOutcome(outcome, command.command_id);
+  1143→      this.#scheduleRsiOutcomeReadback(command, payload);
+  1144→      return accepted;
+  1145→    }
+  1146→    await this.#deliverResultWithRetry(`/v1/commands/${encodeURIComponent(command.command_id)}/result`, payload);
+  1147→    return null;
+  1148→  }
+  1149→
+  1150→  async #postBatchResults(rows) {
+  1151→    const results = rows.map((row) => ({
+  1152→      command_id: row.command.command_id,
+  1153→      ok: row.ok,
+  1154→      receipt: {
+  1155→        schema: 'metaengine.native-supervisor.command-receipt.v2',
+  1156→        command_id: row.command.command_id,
+  1157→        action: row.command.action,
+  1158→        platform: row.command.platform || null,
+  1159→        result: row.result ?? null,
+  1160→        effect_outcome: row.effect_outcome,
+  1161→        lane: row.descriptor.lane,
+  1162→        effect_key: row.descriptor.effect_key,
+  1163→        execution_ms: row.execution_ms,
+  1164→        recorded_at: new Date().toISOString(),
+  1165→        authority_effect: false,
+  1166→      },
+  1167→      error: row.ok ? null : row.error,
+  1168→      authority_effect: false,
+  1169→    }));
+  1170→    const chunks = partitionNativeSupervisorBatchResults(results);
+  1171→    const acknowledgements = [];
+  1172→    for (const chunk of chunks) {
+  1173→      if (!this.#resultDeliveryAdapter) {
+  1174→        const response = await this.#deliverResultWithRetry('/v1/commands/result-batch', { results: chunk });
+  1175→        const body = await response.json().catch(() => ({}));
+  1176→        if (!response.ok) throw new Error(`native_supervisor_batch_result_http_${response.status}:${body?.error || 'unknown'}`);
+  1177→        acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+  1178→        continue;
+  1179→      }
+  1180→
+  1181→      let batchResponse = null;
+  1182→      try {
+  1183→        batchResponse = await this.#signedRequest('/v1/commands/result-batch', { payload: { results: chunk } });
+  1184→      } catch {}
+  1185→      if (batchResponse?.ok === true) {
+  1186→        const body = await batchResponse.json().catch(() => ({}));
+  1187→        acknowledgements.push(...assertNativeSupervisorBatchCompletion(body, chunk));
+  1188→        for (const row of chunk) {
+  1189→          const payload = { ok: row.ok === true, receipt: row.receipt, error: row.ok === true ? null : row.error };
+  1190→          this.#scheduleRsiOutcomeReadback(row, payload);
+  1191→        }
+  1192→        continue;
+  1193→      }
+  1194→      if (batchResponse && !NativeSupervisorClient.#retryableResultDeliveryFailure(batchResponse.status)) {
+  1195→        const body = await batchResponse.json().catch(() => ({}));
+  1196→        throw new Error(`native_supervisor_batch_result_http_${batchResponse.status}:${body?.error || 'unknown'}`);
+  1197→      }
+  1198→
+  1199→      // Ambiguous batch delivery is transport ambiguity only. The physical Browser
+  1200→      // effect has already happened at most once; reconcile immutable receipts and
+  1201→      // never route this path back into the effect executor.
+  1202→      for (const row of chunk) {
+  1203→        const payload = { ok: row.ok === true, receipt: row.receipt, error: row.ok === true ? null : row.error };
+  1204→        const outcome = await this.#resultDeliveryAdapter.deliver({
+  1205→          commandId: row.command_id,
+  1206→          effectKey: row.effect_key || row.receipt?.effect_key || null,
+  1207→          payload,
+  1208→          readbackBeforeReplay: true,
+  1209→        });
+  1210→        this.#assertRsiResultDeliveryOutcome(outcome, row.command_id);
+  1211→        this.#scheduleRsiOutcomeReadback(row, payload);
+  1212→        acknowledgements.push(Object.freeze({
+  1213→          command_id: String(row.command_id).toLowerCase(),
+  1214→          accepted: true,
+  1215→          status: row.ok === true ? 'COMPLETED' : 'FAILED',
+  1216→          reconciled_after_batch_ambiguity: true,
+  1217→        }));
+  1218→      }
+  1219→    }
+  1220→    return Object.freeze({
+  1221→      schema: 'metaengine.native-supervisor.batch-result-delivery.v1',
+  1222→      chunk_count: chunks.length,
+  1223→      result_count: acknowledgements.length,
+  1224→      results: Object.freeze(acknowledgements),
+  1225→      transport_delivery_is_authority: false,
+  1226→      automatic_effect_retry_allowed: false,
+  1227→      authority_effect: false,
+  1228→    });
+  1229→  }
+  1230→
+  1231→  async #executeLocalOrRemote(command) {
+  1232→    const action = String(command?.action || '').toUpperCase();
+  1233→    // This is the only program-policy bypass. The command has already traversed
+  1234→    // enrollment + device-signed lease transport before reaching this function.
+  1235→    // The injected handler must independently prove developer owner/device binding,
+  1236→    // immutable release authority and the Guardian durable effect journal.
+  1237→    if (action === DEVELOPER_EMERGENCY_UPDATE_ACTION) {
+  1238→      if (!this.#developerEmergencyUpdate) {
+  1239→        return Object.freeze({
+  1240→          schema: 'metaengine.developer-emergency-update-runtime.v1',
+  1241→          state: 'HOLD',
+  1242→          reason: 'DEVELOPER_EMERGENCY_UPDATE_HANDLER_UNAVAILABLE',
+  1243→          physical_dispatch_count: 0,
+  1244→          effect_outcome: 'NO_EFFECT_PROVEN',
+  1245→          automatic_retry_allowed: false,
+  1246→          bypass_program_policy: true,
+  1247→          arbitrary_url_allowed: false,
+  1248→          arbitrary_executable_allowed: false,
+  1249→          arbitrary_shell_allowed: false,
+  1250→          authority_effect: false,
+  1251→        });
+  1252→      }
+  1253→      return this.#developerEmergencyUpdate(structuredClone(command));
+  1254→    }
+  1255→    if (ROOT_POLICY_ACTIONS.has(action)) return this.#executeCommand(command);
+  1256→    if (action === 'ARM') {
+  1257→      this.#supervisorMode = 'CONTROL';
+  1258→      this.#armed = true;
+  1259→      await this.#persistControlState();
+  1260→      return { armed: true, supervisor_mode: 'CONTROL', authority_effect: true };
+  1261→    }
+  1262→    if (action === 'DISARM') {
+  1263→      const error = new Error(ALWAYS_ON_CONTROL_ERROR);
+  1264→      error.code = ALWAYS_ON_CONTROL_ERROR;
+  1265→      throw error;
+  1266→    }
+  1267→    if (action === 'SET_SUPERVISOR_MODE') {
+  1268→      const next = String(command?.payload?.mode || '').trim().toUpperCase();
+  1269→      if (next !== 'CONTROL') {
+  1270→        const error = new Error(ALWAYS_ON_CONTROL_ERROR);
+  1271→        error.code = ALWAYS_ON_CONTROL_ERROR;
+  1272→        throw error;
+  1273→      }
+  1274→      this.#supervisorMode = 'CONTROL';
+  1275→      this.#armed = true;
+  1276→      await this.#persistControlState();
+  1277→      return { supervisor_mode: 'CONTROL', armed: true, authority_effect: true };
+  1278→    }
+  1279→    if (action === 'SET_MODE') {
+  1280→      const requestedMode = String(command?.payload?.mode || command?.payload?.operator_mode || '').trim().toUpperCase();
+  1281→      // SET_MODE is a legacy wire compatibility surface. OBSERVE and GATE_SEND no
+  1282→      // longer represent runtime authority states; they canonicalize to the sole
+  1283→      // supported always-on state instead of weakening setControlState().
+  1284→      if (!['CONTROL','OBSERVE','GATE_SEND'].includes(requestedMode)) {
+  1285→        const error = new Error(ALWAYS_ON_CONTROL_ERROR);
+  1286→        error.code = ALWAYS_ON_CONTROL_ERROR;
+  1287→        throw error;
+  1288→      }
+  1289→      this.#supervisorMode = 'CONTROL';
+  1290→      this.#armed = true;
+  1291→      await this.#persistControlState();
+  1292→      return { operator_mode: 'CONTROL', supervisor_mode: 'CONTROL', armed: true, authority_effect: true };
+  1293→    }
+  1294→    if (action === 'CONTROL_CAPABILITIES') return browserControlCapabilities();
+  1295→    if (action === 'SELF_UPDATE_STATUS') return this.#selfUpdate?.snapshot() || null;
+  1296→    if (action === 'SELF_UPDATE_CHECK') {
+  1297→      if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+  1298→      if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
+  1299→      return this.#selfUpdate?.checkNow();
+  1300→    }
+  1301→    if (action === 'SELF_UPDATE_APPLY') {
+  1302→      if (!controlModeAllows(this.#supervisorMode)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+  1303→      if (!armedAllows(this.#armed)) throw new Error('native_supervisor_disarmed');
+  1304→      return this.#selfUpdate?.applyWhenSafe();
+  1305→    }
+  1306→    if (!controlModeAllows(this.#supervisorMode) && !READ_ONLY_ACTIONS.has(action)) throw new Error(`native_supervisor_control_required:${this.#supervisorMode}`);
+  1307→    if (!armedAllows(this.#armed) && !READ_ONLY_ACTIONS.has(action)) throw new Error('native_supervisor_disarmed');
+  1308→    return this.#executeCommand(command);
+  1309→  }
+  1310→
+  1311→  #trackCommandStart(command) {
+  1312→    const projection = stableCurrentCommand(command);
+  1313→    this.#currentCommands.set(String(command.command_id), projection);
+  1314→    this.#commandStartsAtMs.set(String(command.command_id), Date.now());
+  1315→    if (!this.#currentCommand) this.#currentCommand = projection;
+  1316→  }
+  1317→
+  1318→  #trackCommandEnd(command) {
+  1319→    this.#currentCommands.delete(String(command.command_id));
+  1320→    this.#commandStartsAtMs.delete(String(command.command_id));
+  1321→    this.#currentCommand = this.#currentCommands.values().next().value || null;
+  1322→  }
+  1323→
+  1324→  async #effectOutcome(command, result, descriptor, { beforeState = null } = {}) {
+  1325→    if (descriptor.read_only) return null;
+  1326→    const action = String(command?.action || '').toUpperCase();
+  1327→    if (action === 'DOWNLOAD_FILE') {
+  1328→      return verifiedDownloadReceiptConfirmsRequest(command?.payload, result) ? 'CONFIRMED' : 'AMBIGUOUS';
+  1329→    }
+  1330→    const explicit = String(result?.effect_outcome || '').toUpperCase();
+  1331→    if (TERMINAL_EFFECT_OUTCOMES.has(explicit)) return explicit;
+  1332→    const state = String(result?.effect_state || '').toUpperCase();
+  1333→    if (PROVEN_EFFECT_STATES.has(state)) return 'CONFIRMED';
+  1334→    if (state.startsWith('AMBIGUOUS')) return 'AMBIGUOUS';
+  1335→
+  1336→    if (['ARM','SET_SUPERVISOR_MODE','SET_MODE'].includes(action)) return 'CONFIRMED';
+  1337→    if (action === 'NEW_TAB' && result?.tab_id) return 'CONFIRMED';
+  1338→    if (['FLEET_SET_PROFILE','GATE_DISABLE','GATE_DISABLE_ALL','GATE_ENABLE','GATE_ENABLE_ALL'].includes(action) && result) return 'CONFIRMED';
+  1339→    // D-U1 (2026-09-19, live recon): TYPED_CLICK and PRESS_KEY receipts carry
+  1340→    // the effect-runtime-bound target they dispatched to (bounded click point
+  1341→    // / whitelisted key on an exact semantic target). That dispatch proof is
+  1342→    // the strongest available evidence for these operator-recon lanes —
+  1343→    // without a classifier they ALWAYS landed in the AMBIGUOUS quarantine
+  1344→    // (observed live: postcondition_not_confirmed:AMBIGUOUS on every recon
+  1345→    // click/keypress even when the effect ran), which made operator-driven UI
+  1346→    // exploration needlessly opaque. Confirmed = the bounded input reached the
+  1347→    // bound target; NO_EFFECT_PROVEN stays reserved for explicit no-ops.
+  1348→    if ((action === 'TYPED_CLICK' || action === 'PRESS_KEY')
+  1349→      && result?.target && (result?.point || result?.key)) return 'CONFIRMED';
+  1350→
+  1351→    if (action === 'FLEET_RECONCILE') {
+  1352→      const before = fleetSnapshotFrom(beforeState);
+  1353→      const returned = fleetSnapshotFrom(result);
+  1354→      const afterState = await this.#getState().catch(() => null);
+  1355→      const after = fleetSnapshotFrom(afterState);
+  1356→      const ambiguousAgent = Array.isArray(result?.agents)
+  1357→        && result.agents.some((agent) => String(agent?.lifecycle_state || '') === 'PROVISIONING_AMBIGUOUS');
+  1358→      if (!before || !returned || !after || ambiguousAgent
+  1359→        || !sameValue(projectFleetReconcileSemantics(returned), projectFleetReconcileSemantics(after))) return 'AMBIGUOUS';
+  1360→      const explicitPhysicalChange = (Array.isArray(result?.elastic_retired) && result.elastic_retired.length > 0)
+  1361→        || (Array.isArray(result?.orphan_fleet_tabs_swept) && result.orphan_fleet_tabs_swept.length > 0);
+  1362→      if (explicitPhysicalChange) return 'CONFIRMED';
+  1363→      return classifyFleetReconcileOutcome({
+  1364→        before,
+  1365→        after,
+  1366→        active: command?.payload?.active === true,
+  1367→        target_agents: command?.payload?.target_agents ?? null,
+  1368→      }).effect_outcome;
+  1369→    }
+  1370→
+  1371→    if (['CLOSE_TAB','SELECT_TAB','NAVIGATE'].includes(action)) {
+  1372→      const stateReadback = await this.#getState().catch(() => null);
+  1373→      const tabId = String(command?.payload?.tab_id || result?.tab_id || '');
+  1374→      const tabs = Array.isArray(stateReadback?.tabs) ? stateReadback.tabs : [];
+  1375→      if (action === 'CLOSE_TAB') return tabId && !tabs.some((tab) => String(tab?.tab_id || '') === tabId) ? 'CONFIRMED' : 'AMBIGUOUS';
+  1376→      if (action === 'SELECT_TAB') return tabId && String(stateReadback?.active_tab?.tab_id || '') === tabId ? 'CONFIRMED' : 'AMBIGUOUS';
+  1377→      if (action === 'NAVIGATE') {
+  1378→        const row = tabs.find((tab) => String(tab?.tab_id || '') === tabId);
+  1379→        return row && result?.url && String(row.url || '') === String(result.url) ? 'CONFIRMED' : 'AMBIGUOUS';
+  1380→      }
+  1381→    }
+  1382→
+  1383→    // D-L2: model legitimate no-op completions explicitly instead of quarantining
+  1384→    // them as AMBIGUOUS (observed live as FAILED postcondition_not_confirmed on
+  1385→    // healthy commands: BACK/FORWARD at history boundary, SCROLL at scroll
+  1386→    // boundary, SELF_UPDATE_CHECK while CURRENT, RELOAD initiation).
+  1387→    const noOpOutcome = classifyNoOpEffectOutcome(action, result);
+  1388→    if (noOpOutcome) return noOpOutcome;
+  1389→
+  1390→    // Dispatch success is not post-condition proof. Unsupported effect types are
+  1391→    // quarantined instead of being mislabeled COMPLETED and are never auto-retried.
+  1392→    return 'AMBIGUOUS';
+  1393→  }
+  1394→
+  1395→  async #executeForLane(command, descriptor) {
+  1396→    if (!descriptor.read_only && this.#maintenancePromise) await this.#maintenancePromise;
+  1397→    this.#trackCommandStart(command);
+  1398→    const started = Date.now();
+  1399→    try {
+  1400→      const beforeState = String(command?.action || '').toUpperCase() === 'FLEET_RECONCILE'
+  1401→        ? await this.#getState().catch(() => null)
+  1402→        : null;
+  1403→      const result = await this.#executeLocalOrRemote(command);
+  1404→      const effectOutcome = await this.#effectOutcome(command, result, descriptor, { beforeState });
+  1405→      return { result, effect_outcome: effectOutcome, execution_ms: Date.now() - started };
+  1406→    } finally {
+  1407→      this.#trackCommandEnd(command);
+  1408→    }
+  1409→  }
+  1410→
+  1411→  async #runCommand(command) {
+  1412→    const descriptor = classifyNativeSupervisorCommand(command);
+  1413→    let result = null;
+  1414→    let effectOutcome = descriptor.read_only ? null : 'AMBIGUOUS';
+  1415→    try {
+  1416→      const execution = await this.#executeForLane(command, descriptor);
+  1417→      result = execution.result;
+  1418→      effectOutcome = execution.effect_outcome;
+  1419→      await this.#postResult(command, true, result, null, effectOutcome);
+  1420→      this.#lastCommandId = command.command_id;
+  1421→      this.#lastCommandStatus = descriptor.read_only || ['CONFIRMED','NO_EFFECT_PROVEN'].includes(effectOutcome) ? 'COMPLETED' : 'AMBIGUOUS';
+  1422→      return result;
+  1423→    } catch (error) {
+  1424→      if (String(error?.code || '').startsWith('NATIVE_RESULT_DELIVERY_')) {
+  1425→        // The command/effect already ran and the immutable receipt is unresolved.
+  1426→        // Never manufacture a second failure receipt and never re-execute the effect.
+  1427→        this.#lastCommandId = command.command_id;
+  1428→        this.#lastCommandStatus = 'AMBIGUOUS';
+  1429→        throw error;
+  1430→      }
+  1431→      const message = clipError(error);
+  1432→      effectOutcome = failedCommandEffectOutcome(command, descriptor, error);
+  1433→      await this.#postResult(command, false, result, message, effectOutcome).catch(() => {});
+  1434→      this.#lastCommandId = command.command_id;
+  1435→      this.#lastCommandStatus = 'FAILED';
+  1436→      throw error;
+  1437→    }
+  1438→  }
+  1439→
+  1440→  async #runCommandBatch(commands) {
+  1441→    const execution = await this.#commandLane.drain(commands, async (command, descriptor) => {
+  1442→      const out = await this.#executeForLane(command, descriptor);
+  1443→      return { command, descriptor, ...out };
+  1444→    });
+  1445→    const rows = execution.map((row, index) => {
+  1446→      const nested = row.result || {};
+  1447→      const descriptor = classifyNativeSupervisorCommand(commands[index]);
+  1448→      return {
+  1449→        command: commands[index],
+  1450→        descriptor,
+  1451→        ok: row.ok,
+  1452→        result: row.ok ? nested.result ?? null : null,
+  1453→        effect_outcome: row.ok
+  1454→          ? nested.effect_outcome ?? null
+  1455→          : failedCommandEffectOutcome(commands[index], descriptor, row.error, { schedulerRejected: row.scheduler_rejected === true }),
+  1456→        execution_ms: row.ok ? nested.execution_ms ?? row.execution_ms : row.execution_ms,
+  1457→        error: row.error,
+  1458→      };
+  1459→    });
+  1460→    await this.#postBatchResults(rows);
+  1461→    const last = rows.at(-1) || null;
+  1462→    if (last) {
+  1463→      this.#lastCommandId = last.command.command_id;
+  1464→      this.#lastCommandStatus = last.ok
+  1465→        ? (last.descriptor.read_only || ['CONFIRMED','NO_EFFECT_PROVEN'].includes(last.effect_outcome) ? 'COMPLETED' : 'AMBIGUOUS')
+  1466→        : 'FAILED';
+  1467→    }
+  1468→    return rows;
+  1469→  }
+  1470→
+  1471→  async cycle() {
+  1472→    if (this.#legacyFastlaneBusy) return this.snapshot();
+  1473→    if (this.#cyclePromise) {
+  1474→      // F-L1c: a healthy cycle is bounded by the CDP/result deadlines; a cycle
+  1475→      // older than the stall guard means an execution path the bounds did not
+  1476→      // reach. Surface it instead of waiting silently (the heartbeat stays alive
+  1477→      // in parallel, which previously masked the wedge completely).
+  1478→      const cycleAgeMs = this.#cycleStartedAtMs > 0 ? Date.now() - this.#cycleStartedAtMs : 0;
+  1479→      if (cycleAgeMs > COMMAND_CYCLE_STALL_GUARD_MS) {
+  1480→        this.#lastError = `command_cycle_stall:${cycleAgeMs}ms`;
+  1481→      }
+  1482→      return this.#cyclePromise;
+  1483→    }
+  1484→    this.#cycleStartedAtMs = Date.now();
+  1485→    this.#cyclePromise = (async () => {
+  1486→      try {
+  1487→        const identity = await this.ensureEnrollment();
+  1488→        if (!identity?.device_id) return this.snapshot();
+  1489→
+  1490→        // Heartbeat is kept alive independently, but it never sits in front of the
+  1491→        // command lease. Its state collection may be expensive (perception, fleet,
+  1492→        // mesh), so the fast lane is allowed to proceed while the heartbeat is sent.
+  1493→        this.#kickHeartbeat();
+  1494→
+  1495→        const commands = await this.#nextCommands();
+  1496→        if (commands.length > 0) {
+  1497→          if (this.#batchTransport === 'SUPPORTED') await this.#runCommandBatch(commands);
+  1498→          else await this.#runCommand(commands[0]);
+  1499→        } else {
+  1500→          // Heavy reconciler work only starts in an idle window. A later mutation
+  1501→          // waits for an already-running maintenance pass instead of racing it.
+  1502→          this.#kickMaintenance();
+  1503→        }
+  1504→        this.#lastError = null;
+  1505→        return this.snapshot();
+  1506→      } catch (error) {
+  1507→        this.#lastError = clipError(error);
+  1508→        throw error;
+  1509→      }
+  1510→    })().finally(() => { this.#cyclePromise = null; });
+  1511→    return this.#cyclePromise;
+  1512→  }
+  1513→}
+  1514→

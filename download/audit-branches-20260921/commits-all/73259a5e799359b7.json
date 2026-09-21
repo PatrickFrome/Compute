@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "636cb9b36f9f11fe644fc34d049e8d3ab3a38978",
+    "node_id": "C_kwDOT_OzB9oAKDYzNmNiOWIzNmY5ZjExZmU2NDRmYzM0ZDA0OWU4ZDNhYjNhMzg5Nzg",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-03T16:00:04Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-03T16:00:04Z"
+      },
+      "message": "Merge pull request #264 from PatrickFrome/work/browser-guardian-effect-journal-v1\n\nfeat(browser): add durable guardian process-effect journal",
+      "tree": {
+        "sha": "4742775911cd7eaa929bf0b34db510bf62019b23",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/4742775911cd7eaa929bf0b34db510bf62019b23"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/636cb9b36f9f11fe644fc34d049e8d3ab3a38978",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqmZmECRC1aQ7uu5UhlAAAQBEQACbmYTxEYAm0OYFq6Urs1lnX\nHkpX2IcbTN7dKE+gx1zO46EoxP9mmhi+7og6Y6t771gS4Sl7TxCMh19TLNDlXsKT\nMS+W9VGrwgjeMH8DSMg1JclDeTdP5nAqRrunjiGLDdTjvwu4rXATiclgefjeaPeC\nc9k1uPj2fL1P6AKN+7yGi1nRJAWraTLm4eoOfgEQ7DRynDYcORpWl9/tYBn0G1+C\nz7phG8tcWBCk9u7JqTCPE7Oogh5wCnuBMYDcNsfoH9kB4YZxjM5+htJFRuDeoXa2\nuIXxcEFjppHRm4mV5vJ6JpXohWiQz5fTrPm/fp2tpGwF1GVhQuZZY8Q0HOCOuhke\nfXCEywMC7AXqeaetwz2qkHi4V6oEHRnKLXGFx1Hk+Wffz8mp2/rtgJnYNPcrmyTK\nRoyw/vU+fRBkRfxEDBw9attZauZiZtdLTja8EIKCDr69NhCurqwqnGrNfwoFRWOa\noH8H2P97sWoS0NDghq4vN8ZNmAmy82FlxCtyN7QFl7Lskfys91SoUkObX/B+DU6y\nVwmLBvpmiOHyaDY811LbKS++4ks5nXtxSTcd5i0QDHqHsTPYUD5cbOxUmsghv1p0\nFvptTMQT8Q2vEKscqsu4Qt9hro6cPXcXIqT/rM2I0DiULbmV87GyYqCxtFsTqQ0T\ndWB6QzLKizaTt2D9BhlI\n=vG5p\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 4742775911cd7eaa929bf0b34db510bf62019b23\nparent 40de5272e4a511e3f8f586e36686e4239a316cb0\nparent 4987357b805a2c6a168248a0c30803429343a137\nauthor PatrickFrome <igradolius@gmail.com> 1788451204 +0300\ncommitter GitHub <noreply@github.com> 1788451204 +0300\n\nMerge pull request #264 from PatrickFrome/work/browser-guardian-effect-journal-v1\n\nfeat(browser): add durable guardian process-effect journal",
+        "verified_at": "2026-09-03T16:00:05Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/636cb9b36f9f11fe644fc34d049e8d3ab3a38978",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/636cb9b36f9f11fe644fc34d049e8d3ab3a38978",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/636cb9b36f9f11fe644fc34d049e8d3ab3a38978/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "40de5272e4a511e3f8f586e36686e4239a316cb0",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/40de5272e4a511e3f8f586e36686e4239a316cb0",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/40de5272e4a511e3f8f586e36686e4239a316cb0"
+      },
+      {
+        "sha": "4987357b805a2c6a168248a0c30803429343a137",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4987357b805a2c6a168248a0c30803429343a137",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/4987357b805a2c6a168248a0c30803429343a137"
+      }
+    ]
+  }
+]

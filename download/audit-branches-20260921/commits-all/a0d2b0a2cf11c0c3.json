@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "e6edc50eba364cc520c54f64e267c64d351d2ffe",
+    "node_id": "C_kwDOT_OzB9oAKGU2ZWRjNTBlYmEzNjRjYzUyMGM1NGY2NGUyNjdjNjRkMzUxZDJmZmU",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T12:55:48Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T12:55:48Z"
+      },
+      "message": "fix(browser): click-select replace for key-ignoring task composers + task-config DB-wait contract (D-M3)\n\nLive-proven (2026-09-19): the agent-task composer on the PRECONVERSATION_ROOT\nsurface ignores synthetic editing keys entirely - a targeted Backspace was a\nno-op and Ctrl+A+Delete never cleared a 26.7k-char account-synced draft of\naccumulated fleet task prompts (the CRITIC agent's dispatches kept appending,\nnever submitting). Enter still submits from that surface (three live\ntransport proofs).\n\n- SEMANTIC_TYPE verified replace now orders two gestures per surface:\n  CLICK_SELECT (native triple-click select-all + one insertText replacing\n  the selection) first on the root task surface; KEY_ATOMIC (proven\n  Ctrl+A+Delete+insertText) first on conversations\n- fail-fast rule: a gesture that neither verifies nor provably no-ops stops\n  the sequence - no double-append; a preexisting exact match needs no\n  gesture (resume path); an empty composer skips the click entirely so the\n  fresh-dispatch zero-geometry contract is preserved\n- click-select is self-healing: it replaces a poisoned draft wholesale\n- clickBackendNode gains bounded clickCount (1..3); receipts carry\n  replace_gesture (CLICK_SELECT / KEY_ATOMIC / PREEXISTING_MATCH)\n- new agent-platform-task-config.mjs: New Task control contract (Full-Stack,\n  Long-running Tasks, Databases section) + resolveTaskConfigControls +\n  waitForAgentPlatformDatabaseVisibility - the bounded perception-only poll\n  for the operator note that NEW AGENTS DO NOT SEE ALL DATABASES RIGHT AWAY\n  (the DB list populates asynchronously; provisioning must poll, not assume)\n- tests: 7 D-M3 gesture contracts + 11 task-config contracts; D-K2 harness\n  aligned with the real surface split (Send a Message = conversation URL)\n\nFull suite: 2441 tests / 2434 pass / 5 pre-existing electron-harness fails /\n2 skips. npm run check clean.",
+      "tree": {
+        "sha": "ec7de9d9aa34218078533daa3523792d2706a570",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/ec7de9d9aa34218078533daa3523792d2706a570"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/e6edc50eba364cc520c54f64e267c64d351d2ffe",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e6edc50eba364cc520c54f64e267c64d351d2ffe",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/e6edc50eba364cc520c54f64e267c64d351d2ffe",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e6edc50eba364cc520c54f64e267c64d351d2ffe/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "f5a279717dabaa4ef280219799d8faf28255be2d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f5a279717dabaa4ef280219799d8faf28255be2d",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/f5a279717dabaa4ef280219799d8faf28255be2d"
+      }
+    ]
+  }
+]

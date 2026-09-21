@@ -5539,3 +5539,83 @@ Stage Summary:
 - Артефакты: src/lib/{pg,edge}.ts, src/app/api/{overview,commands,enrollment,fleet,roadmap,wake-test,e2e}/route.ts, src/components/mc/* (7 файлов), скриншоты download/qa-mc-01..12.
 - Следующие шаги: (a) emergency-lane панель через edge wait-emergency с device-подписью (T8 — требует service_role issuer эмуляции в UI); (b) cognitive-delta роуты через edge (T9/T10); (c) стрим E2E-вывода через SSE/WebSocket вместо ожидания; (d) при появлении дампа оператора — паритет ДАННЫХ (storage 1831, эпизоды, крон-задачи); (e) соединить консоль с live-браузером оператора (вариант A: 3 pinned-URL → локальный edge).
 - Риски: crон-агент может снова столкнуться с мёртвым dev-server (лечится setsid-перезапуском, задокументировано); панель Fleet останется пустой до живого браузера (T6/T7) — это корректные empty states, не баг.
+---
+Task ID: CLOUD-AUDIT-20260921-006
+Agent: main (Super Z, раунд по крону + запрос оператора)
+Task: Оператор выдал service_role JWT + JWT secret (Supabase ref xpeibufgzjknrhbhpffp = METAENGINE_H205F22_RECOVERY) и GitHub PAT → подключиться к Supabase и GitHub проекта, сделать аудит.
+
+Work Log:
+- Креды сохранены в ~/.a2/supabase-cloud.env и ~/.a2/ghtoken (0600; в worklog НЕ логируются).
+- Supabase cloud: REST OpenAPI 200 (322KB): 15 открытых таблиц public + 243 RPC в schema cache. Row counts: команды 1537, enrollment 3150, устройства 3 (живые браузеры!), nonce 764, checkpoints 38, mesh 13, peer_health 0. Gate: 0 PENDING.
+- Подтверждён tightened ACL: cognitive_cursor + workspace_binding → 403 42501 даже для service_role (SELECT отозван; доступ только через definer-RPC edge). RPC через PostgREST → PGRST202 (норма, edge зовёт DIRECT_POSTGRES).
+- ГЛАВНОЕ: когнитивный акцептор h205f22_a2_browser_cognitive_accept_v1 существует в облаке; сигнатура из OpenAPI (8 параметров); хранение = КУРСОРНАЯ таблица compute_fabric_a2_browser_cognitive_cursor_h205f22 (accepted_through_sequence/accepted_batches/accepted_events/first_seen_at/last_seen_at) — дельты НЕ персистятся. Это точный контракт для локальной реконструкции (bootstrap/08 этого раунда).
+- Edge облака живой: ok=true, DIRECT_POSTGRES, command_wait_batch=BOUNDED_DB_POLL (realtime-ключи не заданы — тот же фолбэк, что локально).
+- Storage: 1 приватный бакет computefabric-parallel-glm. Командная плоскость облака активна: READ_ONLY=793, EMERGENCY=18, DEV_EMERG=0; последние команды SYSTEM_TELEMETRY/GLM_LIVETEST probes 2026-09-20.
+- GitHub: login PatrickFrome (полный admin-scope). 1154 ветки, 587 открытых PR, 14 issues. Rail release/self-update-ambiguity-live-v2 @ 6bf173c7 = v0.7.0-dev.35532004761.1 (published 2026-09-20T19:33:37Z), CI по rail 12/12 success. ⚠️ main дивергировал: ahead=7 (6× ci(operator) коммитов Aug 26-27 + merge #821 не перенесены в rail), behind=2973.
+- Артефакт: download/CLOUD_AUDIT_20260921.md (+ сырьё в download/audit-cloud-20260921/: rest-openapi.json, списки таблиц/RPC, gh-*.json).
+
+Stage Summary:
+- Облако доступно и живо; локальная реконструкция получила канонические контракты из первоисточника (когнитивный курсор вместо выдуманной схемы — имя/колонки/сигнатура RPC взяты из облака).
+- Риск №1: main↔rail расхождение (7 коммитов) — вынести оператору.
+- Секреты вне репо; PGRST202/42501 — каноничное поведение, не баги.
+---
+Task ID: 2-b
+Agent: general-purpose (browser mechanics audit)
+Task: Глубокий READ-ONLY аудит всех механик браузера METAENGINE на рельсе 6bf173c7: 11 областей (табы, супервизоры, DevOS-цикл, командная плоскость, enrollment, когниция, RSI, самообновление, наблюдаемость), проверка замкнутого контура и локация pinned Supabase-конфига.
+Work Log:
+- Прочитан worklog (контекст раундов 002-006); подтверждён checkout рельсы 6bf173c7 (Merge PR #938 closed-loop-audit-fixes-v1), инвентаризовано 353 src/*.mjs + 17 edge-файлов + 91 RSI-модуль.
+- Табы: TabRegistry FLEET_TAB_CEILING=28 (4..64)/MAX_TABS=48 (8..128) + env-tunables + census() (tab-registry.mjs:15-16,116-142); elastic governor A2_FLEET_MAX_TARGET_AGENTS=24, backlog-driven, capacity_backpressure — вердикт РАБОТАЕТ.
+- Супервизоры: 4 слоя перезапуска (keepalive wake 60с / rollover c D-C5..D-S1 фиксами / browser-sentinel crash / guardian C++ SCM); ROLLOVER_DEFERRED_AUTO_RELEASE=15мин (supervisor-lifecycle-runtime-core.mjs:25,1266-1284) компенсирует мёртвый approveRollover (D-K8); mesh ≤16 + fenced reservation + MESH_SYNC_RPC — РАБОТАЕТ.
+- DevOS-цикл прослежен end-to-end: enqueue → admission-fence (devos_environment_state_v1) → /v1/devos/cycle (reconcile→snapshot→lease ≤16, role-fair) → mark-running (proof sha256×2) → observeRunning (tool-issue allowlist) → complete → readback-восстановление; advanceTaskOutcomeFor (devos-native-task-cycle-core.mjs:1169/1242) — мост в эпизодическую память; РАБОТАЕТ.
+- Командная плоскость: 4 лейна (EMERGENCY prio0 exclusive: DISARM/DEVELOPER_EMERGENCY_UPDATE/SET_MODE OFF; READ_ONLY 20 действий; TAB_MUTATION serial per-tab; GLOBAL_MUTATION exclusive), lease_batch_v1/wait-batch held-request/result-batch/receipts/effect-intent sealing; wake = POSTGRES_NOTIFY glm_browser_pulse (триггер glm_pulse_command — облачный ad-hoc артефакт, bootstrap/07); Realtime-ветка = ДЕКОР (sb_secret_* не JWT → вечный NOTIFY-прокси).
+- Enrollment/безопасность: P-256 ECDSA ieee-p1363, приватный ключ в Electron safeStorage, nonce через consume_nonce_v2, pairing-token одноразовый, zero-authority гейты сквозные; edge без Authorization-заголовков — только device-подписи; РАБОТАЕТ.
+- Когниция: delta-bus PROCESS/SEMANTIC/METRICS/SYSTEM (P0-P3, кольцо 4096) → /v1/cognitive/deltas → курсорная таблица (дельты НЕ персистятся); episodic memory гибридный retrieval (лексика+hash-vector cosine) питает промпты; РАБОТАЕТ с оговоркой (память in-process JSON).
+- RSI: 91 модуль, RsiRuntimeService в main.mjs:730-761 реально стартует (trust-root ~40 снапшотов, ledger jsonl), Outcome River (tool-команда=эпизод); Phase36/exposure-release/lineage-contamination — работающие верификаторы в коде (не планы), но прод-вход только из тестов/консоли; promotion — за оператор-гейтом (zero-authority дизайн).
+- Самообновление: hint(15мин)→exact discovery(8с singleflight, trusted-dev-release-resolver GitHub rail)→write-ahead install-barrier→old-parent watchdog (SUCCESSOR_BOOTED)→successor qualification→guardian ROLLBACK; verified-self-update-manifest.json собирается verify-installed-guardian-native-staging.ps1:67, потребляется browser-guardian-update-intake.mjs:114; РАБОТАЕТ.
+- Замкнутый контур: построена схема (fleet→табы→DevOS→командная плоскость→edge/PG→wake→receipts→память→self-update); вечный цикл существует (held wait-batch→lease→эффект→receipt→эпизод→следующий промпт + rollover/sentinel/guardian/self-update); топ-разрывы: R1 realtime-wake декор, R2 ad-hoc wake-триггеры в облаке (умирают при пересоздании таблиц), R3 нет браузерного enqueue задач, R5 pinned URL дублирован без env, R6 память/RSI-ledger локальные.
+- PINNED SUPABASE: src/native-supervisor-endpoints.mjs:1 и src/native-supervisor-client-base.mjs:37 = https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1 (ref xpeibufgzjknrhbhpffp — уже cloud-first); ключей anon/service в клиенте НЕТ (только device-подписи); workspace 2de9f84b-7c0a-4091-911c-894ff1d6eaf4 (edge index.ts:22).
+- Отчёт: download/BROWSER_DEEP_AUDIT_20260921.md (11 разделов, таблицы вердиктов, схема контура, 11 разрывов R1-R11). Репозиторий не изменялся.
+Stage Summary:
+- Из ~25 каталогизированных механик: 21 РАБОТАЕТ, 1 ДЕКОР (Supabase Realtime wake, с рабочим NOTIFY-фолбэком), 3 с оговорками (wait-emergency для внешних тулов, RSI Phase36 библиотечные верификаторы, память in-process). Ни одна механика не изолирована от контура.
+- Главные разрывы контура: (1) wake-триггеры glm_pulse_* — облачный ad-hoc артефакт вне миграций; (2) нет браузерного enqueue DevOS-задач (пустой roadmap = idle-флот, но цикл живой); (3) pinned URL дублирован в 2 файлах без env-переопределения — смена облака = пересборка; (4) когнитивная память/RSI-ledger — локальные JSON (не в PG); (5) lease-дедлоки исключены (timeout 120с + CAS + readback), при падении PG контур деградирует в bounded-поллинг без потери authority.
+- Вечный цикл подтверждён по коду: wait-batch(held)→lease→proof→receipt→memory→prompt + 4 слоя перезапуска; терминальные точки — только оператор-гейты (admission fence, DISARM, promotion).
+- Pinned Supabase URL: src/native-supervisor-endpoints.mjs:1 + src/native-supervisor-client-base.mjs:37 → xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1; подключение установленного браузера к облаку уже встроено (cloud-first), авторизация P-256 device-подписи.
+---
+Task ID: 2-a
+Agent: general-purpose (branches audit)
+Task: Глубокий READ-ONLY аудит всех веток репо PatrickFrome/Compute (1154 ветки, 587 PR): группы, активность, несмерженное, судьба 7 main-коммитов, вердикт по rail.
+Work Log:
+- Скачаны все 1154 ветки (12 страниц /branches, branches-all.json) и все 587 открытых PR (6 страниц, prs-all.json) за 18 запросов.
+- Группировка: work/browser-final-2026-* 96, work/metaengine-rsi-* 274, work/* прочие 650 (домены: main-roadmap-accelerators 16, same-point-duel 13…), fix/* 45, repair/* 31, ops/* 16, integration/* 11, release/* 8, tmp* 8, perf 3, scratch 3, analysis 2, одиночные 7 (main, browser-dev-channel, update/browser-dev-channel…).
+- Активность: последний коммит КАЖДОЙ из 1154 веток (1154 запроса, commits-all/) → относительно 2026-09-20T19:33:38Z: ≤24ч 20, ≤7д 442, ≤30д 684, ≤90д 8, старше — 0; rsi-фабрика 100% ≤7д, work-прочие 90% в окне 8–30д.
+- Rail подтверждена: release/self-update-ambiguity-live-v2 head = 6bf173c7 (merge #938, 19:20:52Z); релиз v0.7.0-dev.35532004761.1 (19:33:37Z, target 6bf173c7, 7 ассетов) — глобальный фронтир: единственный коммит новее = d567da2d (авто-bump dev-hint, тот же номер версии).
+- Compare rail…<branch> для 17 веток (15 свежайших work/* + dev-channel + main): 11 work/* полностью слиты (ahead=0), 4 не слиты: r14-graduation-effect (ahead=161), r8d-…-sol (59), browser-ci-latest-head-concurrency-v1 (12), …-v2 (13); dev-channel ahead=125 = 7 main-коммитов + ~118 авто-bump dev-hint (кода нет).
+- Локальная верификация на full-clone (git cherry / reverse-apply на 6bf173c7): r14 — 82/154 патчей уже на rail, 72 нет (Phase34B admission closure, Phase37A graduation certificate, crash-aware durability); r8d-sol — 7/59, 52 нет (lineage contamination gate; ветка = head draft PR #917 со стековой base r8c-…-gpt); файлы r14: 1359/1464 идентичны rail, новых файлов вне rail 0.
+- Судьба 7 main-коммитов (dd4b9509, b08638c5, 4de680ee, 0e067c9b, 0f8206cf, 0d1c074c + merge #821): первые 6 меняют только 2 файла workflows (chat-control-plane-contract.yml +241; a2-browser-operator-runtime-canary.yml +117+3+2+2+18/-9) — на rail ОБА файла побайтно идентичны main (diff пуст) → операторские CI-механики НЕ потеряны; merge #821 = 1428 файлов, на rail 1301 идентичен, 0 отсутствует, 127 расходятся (main-уникально ~+998 строк, rail эволюционировал дальше: −6768 в обратную сторону).
+- Найдена единственная реальная CI-недостача: cancel-superseded concurrency отсутствует на rail в 4 workflow (metaengine-browser-shell-v1, browser-windows-package-smoke, browser-windows-installed-chat-qualification, browser-final-runtime-activation-v1); в governance-preview механика есть и совпадает (d1d292b1 учтён).
+- PR: 587 открытых (564 черновика, 23 готовых); группы заголовков: feat(rsi) 180, без-conventional 163, perf(browser) 90, feat(browser) 41, fix(browser) 32, fix(rsi) 25; браузерной тематики 353; топ-20 свежих браузерных PR (все стековые черновики 19.09: #917 lineage contamination, #913 transition proof, #909 one-attempt release, #903/#901 Phase36 certificate, #902 R5-R8 converge…) сохранены в browser-prs.json.
+- Отчёт: download/audit-branches-20260921/BRANCHES_AUDIT_20260921.md (+ branches-all.json, prs-all.json, activity-all.json, compares/ 17, commit-files/ 7, commits-all/ 1154, browser-prs.json). Токен не логировался; ничего не мержилось и не пушилось.
+Stage Summary:
+- Rail 6bf173c7 — ВАЛИДНЫЙ И АКТУАЛЬНЫЙ базис релиза: поглотила 11/15 свежайших work-веток, ≥91% файлов merge #821, оба операторских CI-workflow побайтно; релиз v0.7.0-dev.35532004761.1 — фронтир версий, ничего новее нет.
+- Риск №1: RSI-долг вне rail — 72 патча r14 (Phase34B/Phase37A/crash-aware durability) + 52 патча r8d-sol (lineage contamination, head draft PR #917) — требуют трёхстороннего ревью или сознательного решения об эквивалентности.
+- Риск №2: main↔rail — 127 файлов с main-уникальными строками (~998); main целесообразно свести к rail или объявить архивом.
+- Риск №3 (дёшево закрывается): 4 workflows без cancel-superseded concurrency (4-строчные cherry-pick).
+- Гигиена: 59% веток остыли 8–30 дней, 96% PR — черновики; нужен регламент авто-архивации (workflow branch-lineage-audit-v1 уже в репо) и зачистка tmp*/placeholder.
+- В финальном ответе мне: краткая сводка (10-15 строк) — группы веток, активность, топ-5 свежих браузерных PR, вердикт по rail, риски.
+---
+Task ID: DEEP-AUDIT-SYNTH-20260921-008
+Agent: main (Super Z) + субагенты 2-a (branches) / 2-b (mechanics)
+Task: Оператор: Supabase — приоритет; глубокий аудит всех веток браузера, критический анализ всех механик/контрактов/модулей, проверка замкнутого контура и готовности к вечной автономной разработке флотом; собрать наилучший релиз и дать ссылку.
+
+Work Log:
+- Релиз подтверждён: v0.7.0-dev.35532004761.1 @ 6bf173c7 (rail), CI 12/12 success, 7 ассетов; главный установщик METAENGINE-Browser-Test-Setup-...-x64.exe (121MB). Ссылки в DEEP_AUDIT_SYNTHESIS_20260921.md.
+- Субагент 2-a (ветки): 1154 = browser-final 96 / rsi 274 / work 650 / fix 45 / repair 31 / ops 16 / integration 11 / release 8 / tmp 8; активность ≤7д 442, ≤30д 684; rail = глобальный фронтир; несмерженное: r14-graduation-effect (72 патча), r8d-sol (52, PR #917); 6× ci(operator) main-коммитов побайтно идентичны на rail (не потеряны), #821: 127 файлов расходятся; вердикт: rail достаточна.
+- Субагент 2-b (механики): 353 модуля src + 17 edge + 91 RSI + Guardian C++ + ~350 тестов; ~25 механик: 21 РАБОТАЕТ / 1 декор (Realtime wake → фолбэк POSTGRES_NOTIFY работает) / 3 оговорки; вечный цикл подтверждён (wait-batch→lease→эффект→receipt→память→retrieval); 4 слоя перезапуска + self-update; разрывы R1-R6 (главный: R3 браузер не умеет сам enqueue DevOS-задач — пустой roadmap = idle-флот).
+- CLOUD-FIRST ПОДТВЕРЖДЁН КОДОМ: pinned https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1 вшит в src/native-supervisor-endpoints.mjs:1 и src/native-supervisor-client-base.mjs:37; ключи клиенту не нужны (P-256 device signatures).
+- Консоль (раунд 006-007) дожата: ScrollArea overflow fix; T8 Emergency Lane (probe-устройство через канонический enrollment; issue→IMMEDIATE lease 13ms; cleanup); T9/T10 Cognitive Bus (bootstrap/08 курсор+акцептор по облачному контракту; 202 ACK, watermark из БД); E2E SSE-стриминг + hotkeys Alt+1..8; QA-скриншоты qa2-07..09; финальный E2E 10/10 PASS 1.8s; lint чистый.
+- Найдены и исправлены баги: lease_count→leased_by; 40-символьный sha в issue RPC; client "seen" (heartbeat перед issue); batch fence input_values_exposed; дрейф стрим-счётчика → watermark из БД; snake→camelCase маппинг курсора.
+
+Stage Summary:
+- ОПЕРАТОРУ: ссылка на релиз дана, cloud-first встроен, вечный цикл и контур подтверждены, блокеров нет. После установки: enrollment-гейт → heartbeat → наполнение roadmap (R3) → live-тесты T1-T12.
+- Артефакты: DEEP_AUDIT_SYNTHESIS_20260921.md (сводный вердикт), BROWSER_DEEP_AUDIT_20260921.md, audit-branches-20260921/BRANCHES_AUDIT_20260921.md, CLOUD_AUDIT_20260921.md, qa2-01..11 скриншоты, infra/pigsty/bootstrap/08-cognitive-delta-cursor.sql.
+- Следующее: (1) после установки браузера — облачный enrollment-гейт; (2) R3: enqueue-роут для DevOS-задач; (3) R2: проверить glm_pulse_* триггеры в облаке; (4) RSI-долг r14/r8d → следующий merge в rail; (5) R5: pinned URL → env.

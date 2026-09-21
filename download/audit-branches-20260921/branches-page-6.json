@@ -1,0 +1,2102 @@
+[
+  {
+    "name": "work/browser-guardian-session-broker-effect-gate-current-v1",
+    "commit": {
+      "sha": "cc9ee19ec5d343bb46e0b740c3e2a04f9f828c4e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cc9ee19ec5d343bb46e0b740c3e2a04f9f828c4e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-session-broker-effect-gate-current-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-session-broker-effect-gate-v1",
+    "commit": {
+      "sha": "c4835c2e28df577bf91c520fa15ac50c6f4a176d",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c4835c2e28df577bf91c520fa15ac50c6f4a176d"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-session-broker-effect-gate-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-session-broker-effect-journal-v1",
+    "commit": {
+      "sha": "8bde2f75396fc4ba7d97fc457af950fe3a740306",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/8bde2f75396fc4ba7d97fc457af950fe3a740306"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-session-broker-effect-journal-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-session-broker-wts-executor-current-v1",
+    "commit": {
+      "sha": "da2a57f764274a16f6536fbb471bcfc11577e7cb",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/da2a57f764274a16f6536fbb471bcfc11577e7cb"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-session-broker-wts-executor-current-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-session-broker-wts-executor-v1",
+    "commit": {
+      "sha": "b29873952fdd2ab848d446c0a65ccd3bb6a625fd",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b29873952fdd2ab848d446c0a65ccd3bb6a625fd"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-session-broker-wts-executor-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-session-one-attempt-journal-v1",
+    "commit": {
+      "sha": "0439ca2d0bea58b4c79300b147ed60c4843773a6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0439ca2d0bea58b4c79300b147ed60c4843773a6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-session-one-attempt-journal-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-start-executor-v1",
+    "commit": {
+      "sha": "5f8cf5136369f2cbdae3ae36d649a28cc9d40ac6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5f8cf5136369f2cbdae3ae36d649a28cc9d40ac6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-start-executor-v1/protection"
+  },
+  {
+    "name": "work/browser-guardian-supervision-v1",
+    "commit": {
+      "sha": "37058b9ad4fba262f9398983adcad692cefb97b9",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/37058b9ad4fba262f9398983adcad692cefb97b9"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-guardian-supervision-v1/protection"
+  },
+  {
+    "name": "work/browser-heartbeat-coherence-v1",
+    "commit": {
+      "sha": "07538234f843041457398606ad8bd797f748ad9f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/07538234f843041457398606ad8bd797f748ad9f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-heartbeat-coherence-v1/protection"
+  },
+  {
+    "name": "work/browser-host-agent-p0-dp-fast-stage",
+    "commit": {
+      "sha": "3b2d214c6f6e6900116000d91b2b88fcfb0afd87",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3b2d214c6f6e6900116000d91b2b88fcfb0afd87"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-p0-dp-fast-stage/protection"
+  },
+  {
+    "name": "work/browser-host-agent-p0-evidence-stage",
+    "commit": {
+      "sha": "33f16a9d0821fccc03318eb890f720324f5639ab",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/33f16a9d0821fccc03318eb890f720324f5639ab"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-p0-evidence-stage/protection"
+  },
+  {
+    "name": "work/browser-host-agent-p0-gateway-fast-stage",
+    "commit": {
+      "sha": "00ed8249b42f3d4eb5f5fabe379761bcdb354693",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/00ed8249b42f3d4eb5f5fabe379761bcdb354693"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-p0-gateway-fast-stage/protection"
+  },
+  {
+    "name": "work/browser-host-agent-p0-incremental-stage",
+    "commit": {
+      "sha": "a9acb8cb91f586695a5d12b15f3f354bbec98409",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a9acb8cb91f586695a5d12b15f3f354bbec98409"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-p0-incremental-stage/protection"
+  },
+  {
+    "name": "work/browser-host-agent-p0-provider-fast-stage",
+    "commit": {
+      "sha": "786d6aadb6f1535f3baaac6ae197791cd1d0f6a0",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/786d6aadb6f1535f3baaac6ae197791cd1d0f6a0"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-p0-provider-fast-stage/protection"
+  },
+  {
+    "name": "work/browser-host-agent-p0",
+    "commit": {
+      "sha": "00ed8249b42f3d4eb5f5fabe379761bcdb354693",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/00ed8249b42f3d4eb5f5fabe379761bcdb354693"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-p0/protection"
+  },
+  {
+    "name": "work/browser-host-agent-replay-fence-v1",
+    "commit": {
+      "sha": "66c2ae3eb9281b614e61b0ff993de1f12ffc68d7",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/66c2ae3eb9281b614e61b0ff993de1f12ffc68d7"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-replay-fence-v1/protection"
+  },
+  {
+    "name": "work/browser-host-agent-replay-fence-v2",
+    "commit": {
+      "sha": "6dc34da146a798a2e86e99f2418d0a5a939d8588",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6dc34da146a798a2e86e99f2418d0a5a939d8588"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-host-agent-replay-fence-v2/protection"
+  },
+  {
+    "name": "work/browser-human-takeover-v1",
+    "commit": {
+      "sha": "379b83d682a157451145a643c1e885a9535e35a1",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/379b83d682a157451145a643c1e885a9535e35a1"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-human-takeover-v1/protection"
+  },
+  {
+    "name": "work/browser-immutable-emergency-trust-root-v1",
+    "commit": {
+      "sha": "1298f338df13069a295924542f79180fc255c5a4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1298f338df13069a295924542f79180fc255c5a4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-immutable-emergency-trust-root-v1/protection"
+  },
+  {
+    "name": "work/browser-installed-20260831143001-base",
+    "commit": {
+      "sha": "e0a44cddd5cc526bb2c1a856c871417ceddfa78b",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e0a44cddd5cc526bb2c1a856c871417ceddfa78b"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-installed-20260831143001-base/protection"
+  },
+  {
+    "name": "work/browser-live-check-observability-v1",
+    "commit": {
+      "sha": "fded0ab4925604dec172497f7559115b89acefb8",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fded0ab4925604dec172497f7559115b89acefb8"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-live-check-observability-v1/protection"
+  },
+  {
+    "name": "work/browser-live-control-recovery-v1",
+    "commit": {
+      "sha": "f68bb00c8e0b369a1d00eec84579294055d6b8f6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f68bb00c8e0b369a1d00eec84579294055d6b8f6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-live-control-recovery-v1/protection"
+  },
+  {
+    "name": "work/browser-mesh-continuity-guard-convergence-v1",
+    "commit": {
+      "sha": "2afe886e199f4cf4957fedf2d3841e85a2569e70",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2afe886e199f4cf4957fedf2d3841e85a2569e70"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-mesh-continuity-guard-convergence-v1/protection"
+  },
+  {
+    "name": "work/browser-mesh-foreground-send-v1",
+    "commit": {
+      "sha": "6e0a2fea0f7ed52a1186ab8fcb1754e1013aebd6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6e0a2fea0f7ed52a1186ab8fcb1754e1013aebd6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-mesh-foreground-send-v1/protection"
+  },
+  {
+    "name": "work/browser-mesh-wake-convergence-v1",
+    "commit": {
+      "sha": "2127341e107a3255012eb0ecc620f4bbf1f884b8",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2127341e107a3255012eb0ecc620f4bbf1f884b8"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-mesh-wake-convergence-v1/protection"
+  },
+  {
+    "name": "work/browser-meta-orchestrator-v1",
+    "commit": {
+      "sha": "c0e3d3c277c4e36d3802448dfa6db78ab68f3981",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c0e3d3c277c4e36d3802448dfa6db78ab68f3981"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-meta-orchestrator-v1/protection"
+  },
+  {
+    "name": "work/browser-native-command-fastlane-v1",
+    "commit": {
+      "sha": "32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-native-command-fastlane-v1/protection"
+  },
+  {
+    "name": "work/browser-native-split-view-v1-stacked",
+    "commit": {
+      "sha": "8a2c42f88578d43ff04ad9638fa1e8e394273355",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/8a2c42f88578d43ff04ad9638fa1e8e394273355"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-native-split-view-v1-stacked/protection"
+  },
+  {
+    "name": "work/browser-native-split-view-v1",
+    "commit": {
+      "sha": "636cb9b36f9f11fe644fc34d049e8d3ab3a38978",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/636cb9b36f9f11fe644fc34d049e8d3ab3a38978"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-native-split-view-v1/protection"
+  },
+  {
+    "name": "work/browser-orchestra-hotfix-convergence-v1",
+    "commit": {
+      "sha": "d91e94b307ed60e890aabc53a2678a8ae9c6a79d",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d91e94b307ed60e890aabc53a2678a8ae9c6a79d"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-orchestra-hotfix-convergence-v1/protection"
+  },
+  {
+    "name": "work/browser-postgres-notify-command-wake-v1",
+    "commit": {
+      "sha": "26f2ce27b8b0703a444e806c40ea53aece63446c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/26f2ce27b8b0703a444e806c40ea53aece63446c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-postgres-notify-command-wake-v1/protection"
+  },
+  {
+    "name": "work/browser-postgres-notify-command-wake-v2",
+    "commit": {
+      "sha": "b8d06a58184d10a92dac9fc8c505172214ca40f5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b8d06a58184d10a92dac9fc8c505172214ca40f5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-postgres-notify-command-wake-v2/protection"
+  },
+  {
+    "name": "work/browser-realtime-full-control-v1",
+    "commit": {
+      "sha": "ffc09824d26202770446118ebb98f0dec961cb47",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ffc09824d26202770446118ebb98f0dec961cb47"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-realtime-full-control-v1/protection"
+  },
+  {
+    "name": "work/browser-realtime-state-mesh-continuity-v1",
+    "commit": {
+      "sha": "245e3d5bc94164d81e097bf32e1763ce49c013ed",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/245e3d5bc94164d81e097bf32e1763ce49c013ed"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-realtime-state-mesh-continuity-v1/protection"
+  },
+  {
+    "name": "work/browser-release-workflow-auth-preflight-v1",
+    "commit": {
+      "sha": "391fff83410fe4702ed26fbdcb4e9cc09266ac7f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/391fff83410fe4702ed26fbdcb4e9cc09266ac7f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-release-workflow-auth-preflight-v1/protection"
+  },
+  {
+    "name": "work/browser-release-workflow-auth-preflight-wiring-v1",
+    "commit": {
+      "sha": "a50e00546ad254556c0644ec069e2a3c68ab642c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a50e00546ad254556c0644ec069e2a3c68ab642c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-release-workflow-auth-preflight-wiring-v1/protection"
+  },
+  {
+    "name": "work/browser-runtime-capability-health-route-v1",
+    "commit": {
+      "sha": "75a46585cddb51b923a5e3d5fe1b978cadc0ddac",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/75a46585cddb51b923a5e3d5fe1b978cadc0ddac"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-capability-health-route-v1/protection"
+  },
+  {
+    "name": "work/browser-runtime-capability-health-v1",
+    "commit": {
+      "sha": "38523855574b2a7860fb03576b9adb7872ac3bb1",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/38523855574b2a7860fb03576b9adb7872ac3bb1"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-capability-health-v1/protection"
+  },
+  {
+    "name": "work/browser-runtime-capability-health-v2",
+    "commit": {
+      "sha": "c9c1cffc65ef713642da743c35d189203a21e46a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c9c1cffc65ef713642da743c35d189203a21e46a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-capability-health-v2/protection"
+  },
+  {
+    "name": "work/browser-runtime-compatibility-dp-provenance-v1",
+    "commit": {
+      "sha": "da5f2d7b05e50a978d815cee026f07a0186c450e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/da5f2d7b05e50a978d815cee026f07a0186c450e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-compatibility-dp-provenance-v1/protection"
+  },
+  {
+    "name": "work/browser-runtime-compatibility-v1",
+    "commit": {
+      "sha": "4b5a5c973ee41a2233be01876b651da385f25a6e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4b5a5c973ee41a2233be01876b651da385f25a6e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-compatibility-v1/protection"
+  },
+  {
+    "name": "work/browser-runtime-compatibility-v2",
+    "commit": {
+      "sha": "59883c59814712e61f50f748b4b7c9dde1e90552",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/59883c59814712e61f50f748b4b7c9dde1e90552"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-compatibility-v2/protection"
+  },
+  {
+    "name": "work/browser-runtime-compatibility-v3",
+    "commit": {
+      "sha": "04bfcc4d2511b52d6eb90b970a63af19efb706dd",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/04bfcc4d2511b52d6eb90b970a63af19efb706dd"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-compatibility-v3/protection"
+  },
+  {
+    "name": "work/browser-runtime-compatibility-v4",
+    "commit": {
+      "sha": "5a3ccbca476efbaf13467f425a966acd4bad8cec",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5a3ccbca476efbaf13467f425a966acd4bad8cec"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-runtime-compatibility-v4/protection"
+  },
+  {
+    "name": "work/browser-self-update-bootstrap-recovery-current-v1",
+    "commit": {
+      "sha": "db94f39878514edfb285bb4b17af1743ed058010",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/db94f39878514edfb285bb4b17af1743ed058010"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-self-update-bootstrap-recovery-current-v1/protection"
+  },
+  {
+    "name": "work/browser-self-update-double-handoff-recovery-v1",
+    "commit": {
+      "sha": "cb0269d13018ee327524a5416a738bad4191a881",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cb0269d13018ee327524a5416a738bad4191a881"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-self-update-double-handoff-recovery-v1/protection"
+  },
+  {
+    "name": "work/browser-self-update-heartbeat-liveness-v2",
+    "commit": {
+      "sha": "f0da6fb15423bed4201bf0b3174071bdd6befede",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f0da6fb15423bed4201bf0b3174071bdd6befede"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-self-update-heartbeat-liveness-v2/protection"
+  },
+  {
+    "name": "work/browser-self-update-installed-exe-digest-v1",
+    "commit": {
+      "sha": "5e7f85db90bd251a8a3b91965a5be9146516e659",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5e7f85db90bd251a8a3b91965a5be9146516e659"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-self-update-installed-exe-digest-v1/protection"
+  },
+  {
+    "name": "work/browser-self-update-successor-recovery-v1",
+    "commit": {
+      "sha": "72321beb0b8a35336724d6c689b1cdea5cc1f18f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/72321beb0b8a35336724d6c689b1cdea5cc1f18f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-self-update-successor-recovery-v1/protection"
+  },
+  {
+    "name": "work/browser-self-update-successor-recovery-v2",
+    "commit": {
+      "sha": "83b362c4d082b8f857bb9fde61f7980ab3eeae88",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/83b362c4d082b8f857bb9fde61f7980ab3eeae88"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-self-update-successor-recovery-v2/protection"
+  },
+  {
+    "name": "work/browser-semantic-ref-revision-v1",
+    "commit": {
+      "sha": "0b5db29f9a104a9436d062569dfb834259a42ab6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0b5db29f9a104a9436d062569dfb834259a42ab6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-semantic-ref-revision-v1/protection"
+  },
+  {
+    "name": "work/browser-sentinel-windows-rename-recovery-v1",
+    "commit": {
+      "sha": "9934bff19a24a56d41196aee07abe90a7e45c1eb",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/9934bff19a24a56d41196aee07abe90a7e45c1eb"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-sentinel-windows-rename-recovery-v1/protection"
+  },
+  {
+    "name": "work/browser-sentinel-worker-asar-unpack-v1",
+    "commit": {
+      "sha": "3dc510ad66202d075a924dae78628da55690c5f9",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3dc510ad66202d075a924dae78628da55690c5f9"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-sentinel-worker-asar-unpack-v1/protection"
+  },
+  {
+    "name": "work/browser-shell-design-system-v1",
+    "commit": {
+      "sha": "a482ff79131724a9c45460e4e6fcd3880bcb49e7",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a482ff79131724a9c45460e4e6fcd3880bcb49e7"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-shell-design-system-v1/protection"
+  },
+  {
+    "name": "work/browser-shell-quantum-console-v1",
+    "commit": {
+      "sha": "d1c0de553f42137025f3b52d5c926887021088bc",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d1c0de553f42137025f3b52d5c926887021088bc"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-shell-quantum-console-v1/protection"
+  },
+  {
+    "name": "work/browser-shell-telegram-brain-v2",
+    "commit": {
+      "sha": "ecd9e39723f3a99b4cd68d95c33be4e1a6784e96",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ecd9e39723f3a99b4cd68d95c33be4e1a6784e96"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-shell-telegram-brain-v2/protection"
+  },
+  {
+    "name": "work/browser-sovereign-fabric-convergence-hardening-v1",
+    "commit": {
+      "sha": "c510e10e98a4d6fe3800e074a9eb0a9d04cb5c86",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c510e10e98a4d6fe3800e074a9eb0a9d04cb5c86"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-sovereign-fabric-convergence-hardening-v1/protection"
+  },
+  {
+    "name": "work/browser-sovereign-fabric-foundation-v1",
+    "commit": {
+      "sha": "f622b66449ba40efc15dc25c48ef99d6f453c13d",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f622b66449ba40efc15dc25c48ef99d6f453c13d"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-sovereign-fabric-foundation-v1/protection"
+  },
+  {
+    "name": "work/browser-sovereign-fabric-hardening-v1",
+    "commit": {
+      "sha": "fc40ae8a4bf5879a07b68f949eb4794e529cf35f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fc40ae8a4bf5879a07b68f949eb4794e529cf35f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-sovereign-fabric-hardening-v1/protection"
+  },
+  {
+    "name": "work/browser-startup-retry-authority-contract-v1",
+    "commit": {
+      "sha": "4c7f76241a1351d8dbfedd84b946eed40382b4cf",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4c7f76241a1351d8dbfedd84b946eed40382b4cf"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-startup-retry-authority-contract-v1/protection"
+  },
+  {
+    "name": "work/browser-successor-batch-receipt-bounds-v1",
+    "commit": {
+      "sha": "e0f3dd983338c096bbfb249b436fa2f6479a7f98",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e0f3dd983338c096bbfb249b436fa2f6479a7f98"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-successor-batch-receipt-bounds-v1/protection"
+  },
+  {
+    "name": "work/browser-successor-convergence-all-fixes-v1",
+    "commit": {
+      "sha": "4df132c410f31f8c3fb93895f2ccfbefc1e9a8c5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4df132c410f31f8c3fb93895f2ccfbefc1e9a8c5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-successor-convergence-all-fixes-v1/protection"
+  },
+  {
+    "name": "work/browser-successor-recovery-sentinel-v1",
+    "commit": {
+      "sha": "933eadb215e96a75a8573d8fb209b6e3f523a9e5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/933eadb215e96a75a8573d8fb209b6e3f523a9e5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-successor-recovery-sentinel-v1/protection"
+  },
+  {
+    "name": "work/browser-supervisor-convergence-audit-v2",
+    "commit": {
+      "sha": "61865a9298412946ec89e6dda371be3c73dcbe2a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/61865a9298412946ec89e6dda371be3c73dcbe2a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-convergence-audit-v2/protection"
+  },
+  {
+    "name": "work/browser-supervisor-eternal-wake-v1",
+    "commit": {
+      "sha": "93e66135d529646af5a5b5ae4c2e62e92d76ce28",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/93e66135d529646af5a5b5ae4c2e62e92d76ce28"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-eternal-wake-v1/protection"
+  },
+  {
+    "name": "work/browser-supervisor-existing-successor-v1",
+    "commit": {
+      "sha": "bb00dbb891e2d659099d3505dbb56f8da9e47ec4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bb00dbb891e2d659099d3505dbb56f8da9e47ec4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-existing-successor-v1/protection"
+  },
+  {
+    "name": "work/browser-supervisor-mesh-start-recovery-v1",
+    "commit": {
+      "sha": "ce2988023e14cf211058830ef740b1da13bd7537",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ce2988023e14cf211058830ef740b1da13bd7537"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-mesh-start-recovery-v1/protection"
+  },
+  {
+    "name": "work/browser-supervisor-rebuild-fixed-v1",
+    "commit": {
+      "sha": "210e057fb682e10ec9a2880a48c056b815ccba92",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/210e057fb682e10ec9a2880a48c056b815ccba92"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-rebuild-fixed-v1/protection"
+  },
+  {
+    "name": "work/browser-supervisor-send-and-update-liveness-v1",
+    "commit": {
+      "sha": "5037e2a96b0743d03639ffa5db4f7a82bcca6cb4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5037e2a96b0743d03639ffa5db4f7a82bcca6cb4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-send-and-update-liveness-v1/protection"
+  },
+  {
+    "name": "work/browser-supervisor-send-positive-readback-v1",
+    "commit": {
+      "sha": "301cfafa6d1b74293e4cff0a0519a2c61cd6f341",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/301cfafa6d1b74293e4cff0a0519a2c61cd6f341"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-supervisor-send-positive-readback-v1/protection"
+  },
+  {
+    "name": "work/browser-tier1-closed-loop-wave1-v1",
+    "commit": {
+      "sha": "57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/57f132f31a87d8c30cf37c26bd89cd56f9cc0d2f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-tier1-closed-loop-wave1-v1/protection"
+  },
+  {
+    "name": "work/browser-trusted-release-pagination-v1",
+    "commit": {
+      "sha": "86f8da911482932dcfab02348183288002e6a8df",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/86f8da911482932dcfab02348183288002e6a8df"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-trusted-release-pagination-v1/protection"
+  },
+  {
+    "name": "work/browser-typed-workspaces-v1",
+    "commit": {
+      "sha": "9f0dec20a74767a6619a24de938e53eb7079b676",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/9f0dec20a74767a6619a24de938e53eb7079b676"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-typed-workspaces-v1/protection"
+  },
+  {
+    "name": "work/browser-watchdog-heartbeat-coalescing-v1",
+    "commit": {
+      "sha": "59883c59814712e61f50f748b4b7c9dde1e90552",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/59883c59814712e61f50f748b4b7c9dde1e90552"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-watchdog-heartbeat-coalescing-v1/protection"
+  },
+  {
+    "name": "work/browser-watchdog-heartbeat-coalescing-v2",
+    "commit": {
+      "sha": "e35daf1ed6dbc212d61fa9ad1642403e9afe6ab2",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e35daf1ed6dbc212d61fa9ad1642403e9afe6ab2"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-watchdog-heartbeat-coalescing-v2/protection"
+  },
+  {
+    "name": "work/browser-windows-sentinel-continuity-v1",
+    "commit": {
+      "sha": "edb4d80c4992ad3860ea5b19ba59e3e61b107b7c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/edb4d80c4992ad3860ea5b19ba59e3e61b107b7c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-windows-sentinel-continuity-v1/protection"
+  },
+  {
+    "name": "work/browser-windows-soak-optimization-v1",
+    "commit": {
+      "sha": "739ba8196f0e37f8c0dca1f863ee60aa606bbedc",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/739ba8196f0e37f8c0dca1f863ee60aa606bbedc"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-windows-soak-optimization-v1/protection"
+  },
+  {
+    "name": "work/browser-work-graph-unified-v1",
+    "commit": {
+      "sha": "1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-work-graph-unified-v1/protection"
+  },
+  {
+    "name": "work/browser-workbench-layout-v2",
+    "commit": {
+      "sha": "23d2ea1545f28fb3ca1ea44a9541d78c5c06da75",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/23d2ea1545f28fb3ca1ea44a9541d78c5c06da75"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-workbench-layout-v2/protection"
+  },
+  {
+    "name": "work/browser-workspace-reincarnation-v1",
+    "commit": {
+      "sha": "74961c5a3aacf0d02e2410f18f6820309349b37c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/74961c5a3aacf0d02e2410f18f6820309349b37c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/browser-workspace-reincarnation-v1/protection"
+  },
+  {
+    "name": "work/c0-integration-provenance-fence-v1",
+    "commit": {
+      "sha": "62bb2edc088bbfa8437b177ada3495ebc312cc2a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/62bb2edc088bbfa8437b177ada3495ebc312cc2a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-integration-provenance-fence-v1/protection"
+  },
+  {
+    "name": "work/c0-post-successor-continuity-persistence-v1",
+    "commit": {
+      "sha": "bf00dc64a909a815b16010a48753304c697ea09a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bf00dc64a909a815b16010a48753304c697ea09a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-post-successor-continuity-persistence-v1/protection"
+  },
+  {
+    "name": "work/c0-post-successor-continuity-readback-v1",
+    "commit": {
+      "sha": "fcafa16592ac6697040473f1c42b521579fdd38b",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fcafa16592ac6697040473f1c42b521579fdd38b"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-post-successor-continuity-readback-v1/protection"
+  },
+  {
+    "name": "work/c0-post-successor-continuity-readback-v2",
+    "commit": {
+      "sha": "33f90339ff87d82c038b632065d5bdccaccc87e1",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/33f90339ff87d82c038b632065d5bdccaccc87e1"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-post-successor-continuity-readback-v2/protection"
+  },
+  {
+    "name": "work/c0-recovery-admission-gate-v1",
+    "commit": {
+      "sha": "708b4c677cef4ea2585638cf8b68c4918daaa615",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/708b4c677cef4ea2585638cf8b68c4918daaa615"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-admission-gate-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-admission-proof-persistence-v1",
+    "commit": {
+      "sha": "ee17748f5a525db314f926f87d796bb9a1425632",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ee17748f5a525db314f926f87d796bb9a1425632"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-admission-proof-persistence-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-admission-proof-readback-v1",
+    "commit": {
+      "sha": "948b3453c1c92f41f49fcf03acfd54254de180df",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/948b3453c1c92f41f49fcf03acfd54254de180df"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-admission-proof-readback-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-effect-intent-proof-persistence-v1",
+    "commit": {
+      "sha": "0eba456f8a37b927feb094fb9ee4d5db3de04fcf",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0eba456f8a37b927feb094fb9ee4d5db3de04fcf"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-effect-intent-proof-persistence-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-effect-intent-proof-readback-v1",
+    "commit": {
+      "sha": "1084595289866af70f86965d436114d8397219fe",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1084595289866af70f86965d436114d8397219fe"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-effect-intent-proof-readback-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-effect-intent-v1",
+    "commit": {
+      "sha": "fce356e6797cced5c5313278b4c3620ba22bb755",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fce356e6797cced5c5313278b4c3620ba22bb755"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-effect-intent-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-final-admission-v1",
+    "commit": {
+      "sha": "4cdb05c0819bcd677d3783687a3c4a342e93a869",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4cdb05c0819bcd677d3783687a3c4a342e93a869"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-final-admission-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-precondition-proof-persistence-v1",
+    "commit": {
+      "sha": "fb98c3b8c73163456ac6bff520f5bd665e75b05f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fb98c3b8c73163456ac6bff520f5bd665e75b05f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-precondition-proof-persistence-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-precondition-proof-readback-v1",
+    "commit": {
+      "sha": "bb48e38f55dcf656c1a5168858fb7bb3fd2195d1",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bb48e38f55dcf656c1a5168858fb7bb3fd2195d1"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-precondition-proof-readback-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-restart-precondition-v1",
+    "commit": {
+      "sha": "0320fe96bfd484300263e539238abed3397f0223",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0320fe96bfd484300263e539238abed3397f0223"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-restart-precondition-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-resume-gate-v1",
+    "commit": {
+      "sha": "94747799756154e7f94e979700944d1c3446bdb7",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/94747799756154e7f94e979700944d1c3446bdb7"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-resume-gate-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-resume-proof-persistence-v1",
+    "commit": {
+      "sha": "b8e45fd08f7aea5d81fe42ff0e1c3377e4964780",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b8e45fd08f7aea5d81fe42ff0e1c3377e4964780"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-resume-proof-persistence-v1/protection"
+  },
+  {
+    "name": "work/c0-recovery-resume-proof-readback-v1",
+    "commit": {
+      "sha": "01a1feacfdb4b371309d7dab44432ce09e34d40e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/01a1feacfdb4b371309d7dab44432ce09e34d40e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-recovery-resume-proof-readback-v1/protection"
+  },
+  {
+    "name": "work/c0-restart-actuator-precondition-v1",
+    "commit": {
+      "sha": "5afd8ad4a027edc27469fe246ac97ef996ce60f1",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5afd8ad4a027edc27469fe246ac97ef996ce60f1"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-restart-actuator-precondition-v1/protection"
+  },
+  {
+    "name": "work/c0-restart-effect-receipt-persistence-v1",
+    "commit": {
+      "sha": "c64006525e4a2cd15d467f05c2bc5d266f935363",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c64006525e4a2cd15d467f05c2bc5d266f935363"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-restart-effect-receipt-persistence-v1/protection"
+  },
+  {
+    "name": "work/c0-restart-effect-receipt-readback-v1",
+    "commit": {
+      "sha": "6623e51020fe747f0740c51efdf50cccb31ce2d4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6623e51020fe747f0740c51efdf50cccb31ce2d4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/c0-restart-effect-receipt-readback-v1/protection"
+  }
+]

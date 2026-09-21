@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "bce84d5c1b6a1851798878fcc37dd8590761c047",
+    "node_id": "C_kwDOT_OzB9oAKGJjZTg0ZDVjMWI2YTE4NTE3OTg4NzhmY2MzN2RkODU5MDc2MWMwNDc",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T00:46:09Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-20T00:46:09Z"
+      },
+      "message": "Merge pull request #926 from PatrickFrome/work/browser-final-2026-convergence-rsi-r14-graduation-effect-v1\n\nfeat(rsi): add Phase37B one-attempt graduation effect",
+      "tree": {
+        "sha": "aeab0f1c8395c8548d4454d4a9d6c17d29b9c687",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/aeab0f1c8395c8548d4454d4a9d6c17d29b9c687"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/bce84d5c1b6a1851798878fcc37dd8590761c047",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqryzRCRC1aQ7uu5UhlAAA6XcQAEPHKG0Nu1KxVspAxqw1u/ui\nFQNfJixK5pE7WrmZA92vqFkfw2fCnJcEOTNduw1HJo8vR7OqCiHSIza+mFjJMKBJ\nK2efisN+I7LQh0JlZMeysO24XkAVchx1Yuokpi16wpgZoZFVZA8dkphpLSOkIX1h\n7Sw/RzJE0ehc1sPyNprknhacrx5RePEF7YaHU+h3DXfi6qTUn0AHiHygamGNicmK\ningnQA4PPI8oTnHTlRvreGjhqdmXz5Zhp9K3xeuFXJjgvLNcbCw8mvvcal2ziUL0\nLaHli3pnC2jq5mOPVunxfoRPq3Lnvrvh4bS0+pvGpiBhsa/vWMQMxMx2tCRUSyXf\nYTFKsbaBO3bg4p/whg50udNJ5FWyMm5LtmdqVSs0GDBWw/fl/voBGm9nX/zOKNlJ\nzZ6COACTb7LDwuorKE2e3fy7ZFHD7DZu7zaXfmnO3mLI+SKxI9FvQwrqI4FZtIOK\nGfsrbX3mTGyJtKHCVbnbGnv9Yd5y+K6Uqy0obrT0kj22jDM/tYzDQdf2y/BHqOSa\nIT1zWW2UDW4nBv5j0jYloGwOE7Id2FdMoKTrGhSzoYO1zF7dGQeGtYwzGdqOJVAo\nvYdhuBEdlthPEDfDxzvFXvm1u/Fy/GUhukPMLccb0vqDiPpIUIR+vOU8mXj3qETt\nihDcwNpgOK/0pZZp4CY+\n=VV1/\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree aeab0f1c8395c8548d4454d4a9d6c17d29b9c687\nparent ecfe03b77d742e77b0f551aa61cc340a5874040a\nparent 5d9f6cdebb2198325cc3a9261fb97b7203f593bf\nauthor PatrickFrome <igradolius@gmail.com> 1789865169 +0300\ncommitter GitHub <noreply@github.com> 1789865169 +0300\n\nMerge pull request #926 from PatrickFrome/work/browser-final-2026-convergence-rsi-r14-graduation-effect-v1\n\nfeat(rsi): add Phase37B one-attempt graduation effect",
+        "verified_at": "2026-09-20T00:46:09Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bce84d5c1b6a1851798878fcc37dd8590761c047",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/bce84d5c1b6a1851798878fcc37dd8590761c047",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bce84d5c1b6a1851798878fcc37dd8590761c047/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "ecfe03b77d742e77b0f551aa61cc340a5874040a",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ecfe03b77d742e77b0f551aa61cc340a5874040a",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/ecfe03b77d742e77b0f551aa61cc340a5874040a"
+      },
+      {
+        "sha": "5d9f6cdebb2198325cc3a9261fb97b7203f593bf",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5d9f6cdebb2198325cc3a9261fb97b7203f593bf",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/5d9f6cdebb2198325cc3a9261fb97b7203f593bf"
+      }
+    ]
+  }
+]

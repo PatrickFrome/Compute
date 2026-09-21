@@ -1,0 +1,101 @@
+{
+  "sha": "0e067c9be46e688a7789e47097f220b88764879d",
+  "node_id": "C_kwDOT_OzB9oAKDBlMDY3YzliZTQ2ZTY4OGE3Nzg5ZTQ3MDk3ZjIyMGI4ODc2NDg3OWQ",
+  "commit": {
+    "author": {
+      "name": "PatrickFrome",
+      "email": "igradolius@gmail.com",
+      "date": "2026-08-27T04:41:37Z"
+    },
+    "committer": {
+      "name": "PatrickFrome",
+      "email": "igradolius@gmail.com",
+      "date": "2026-08-27T04:41:37Z"
+    },
+    "message": "ci(operator): execute supervisor board DOM contract",
+    "tree": {
+      "sha": "1437174bea86aae0a93097e24adc186c68a56254",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/1437174bea86aae0a93097e24adc186c68a56254"
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/0e067c9be46e688a7789e47097f220b88764879d",
+    "comment_count": 0,
+    "verification": {
+      "verified": false,
+      "reason": "unsigned",
+      "signature": null,
+      "payload": null,
+      "verified_at": null
+    }
+  },
+  "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0e067c9be46e688a7789e47097f220b88764879d",
+  "html_url": "https://github.com/PatrickFrome/Compute/commit/0e067c9be46e688a7789e47097f220b88764879d",
+  "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0e067c9be46e688a7789e47097f220b88764879d/comments",
+  "author": {
+    "login": "PatrickFrome",
+    "id": 20597814,
+    "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+    "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/PatrickFrome",
+    "html_url": "https://github.com/PatrickFrome",
+    "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+    "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+    "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+    "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+    "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+    "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "committer": {
+    "login": "PatrickFrome",
+    "id": 20597814,
+    "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+    "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+    "gravatar_id": "",
+    "url": "https://api.github.com/users/PatrickFrome",
+    "html_url": "https://github.com/PatrickFrome",
+    "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+    "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+    "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+    "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+    "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+    "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+    "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+    "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+    "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+    "type": "User",
+    "user_view_type": "public",
+    "site_admin": false
+  },
+  "parents": [
+    {
+      "sha": "4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4de680ee26a07dddfa51ee8eee3de9cd63643d8a",
+      "html_url": "https://github.com/PatrickFrome/Compute/commit/4de680ee26a07dddfa51ee8eee3de9cd63643d8a"
+    }
+  ],
+  "stats": {
+    "total": 2,
+    "additions": 2,
+    "deletions": 0
+  },
+  "files": [
+    {
+      "sha": "a1fa8c0325f6c26a5af693c28c224ec80377d5e3",
+      "filename": ".github/workflows/a2-browser-operator-runtime-canary.yml",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "changes": 2,
+      "blob_url": "https://github.com/PatrickFrome/Compute/blob/0e067c9be46e688a7789e47097f220b88764879d/.github%2Fworkflows%2Fa2-browser-operator-runtime-canary.yml",
+      "raw_url": "https://github.com/PatrickFrome/Compute/raw/0e067c9be46e688a7789e47097f220b88764879d/.github%2Fworkflows%2Fa2-browser-operator-runtime-canary.yml",
+      "contents_url": "https://api.github.com/repos/PatrickFrome/Compute/contents/.github%2Fworkflows%2Fa2-browser-operator-runtime-canary.yml?ref=0e067c9be46e688a7789e47097f220b88764879d",
+      "patch": "@@ -38,6 +38,7 @@ jobs:\n             tests/a2_v060_operator_actions_lab.mjs \\\n             tests/a2_v060_semantic_actions_lab.mjs \\\n             tests/a2_v060_supervisor_control_lab.mjs \\\n+            tests/a2_v060_sidepanel_board_lab.mjs \\\n             tests/a2_v060_update_manager_lab.mjs \\\n             tests/a2_v060_compat_config_lab.mjs; do\n             test -f \"$f\"\n@@ -97,6 +98,7 @@ jobs:\n             'semantic_ax_actions':True,\n             'supervisor_board_v1':True,\n             'chat_supervisor_typed_commands':True,\n+            'sidepanel_board_contract':True,\n             'debugger_broker_v2':True,\n             'oopif_flat_sessions':True,\n             'prompt_gate':True,"
+    }
+  ]
+}

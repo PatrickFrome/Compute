@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "a84a6cec0bc143932438b8b86741ac3b6920dc0c",
+    "node_id": "C_kwDOT_OzB9oAKGE4NGE2Y2VjMGJjMTQzOTMyNDM4YjhiODY3NDFhYzNiNjkyMGRjMGM",
+    "commit": {
+      "author": {
+        "name": "GLM (parallel implementer)",
+        "email": "glm@operator.local",
+        "date": "2026-08-23T16:08:22Z"
+      },
+      "committer": {
+        "name": "GLM (parallel implementer)",
+        "email": "glm@operator.local",
+        "date": "2026-08-23T16:08:22Z"
+      },
+      "message": "feat(f1): credential separation — close circular trust (DEV-CYCLE-001)\n\nMigration 20260823163000_f1_signature_verification_credential_separation_v1:\n- f1_verifier_writer NOLOGIN role: the only writer identity for signature\n  verification receipts (granted ONLY through supervisor-tier verifier\n  activation; NEVER statically to service_role)\n- h205f22_record_signature_verification_guarded_v1: wraps the recorder —\n  active-verifier row check + pg_has_role(f1_verifier_writer) caller check;\n  service_role without the writer role fails 42501 EVEN WITH an active\n  verifier (the negative canary case — kills the create-then-read-own-proof\n  circular trust identified by GPT review + GLM structural confirmation)\n- revoke insert/update/delete on the trust plane (provider_signature_\n  verification + signature_verifier_registry) from service_role —\n  same proven pattern as W1 migration 20260823141025\n- reader path unchanged: service_role readback RPC stays read-only\n\nTests: tests/f1/test_credential_separation.py — 7/7 PASS (mocked-role model\nof the SQL semantics for CI; live canary runs post-apply in supervisor\nchannel). PREPARE_ONLY: versioned for supervisor apply; no authority grant,\nno evidence rows.\n\nAddresses GPT CHANGES_REQUIRED verdict (reader/forger separation).\nDomains: federation/provider/signature. authority_effect=false.",
+      "tree": {
+        "sha": "e9eaa757cd5bfda26bffcb0cd0059a7f15b01c9b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/e9eaa757cd5bfda26bffcb0cd0059a7f15b01c9b"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/a84a6cec0bc143932438b8b86741ac3b6920dc0c",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a84a6cec0bc143932438b8b86741ac3b6920dc0c",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/a84a6cec0bc143932438b8b86741ac3b6920dc0c",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a84a6cec0bc143932438b8b86741ac3b6920dc0c/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "98581cad81bd78d3fec262889e69cb1b27f66380",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/98581cad81bd78d3fec262889e69cb1b27f66380",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/98581cad81bd78d3fec262889e69cb1b27f66380"
+      }
+    ]
+  }
+]

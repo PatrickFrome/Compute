@@ -1,0 +1,2102 @@
+[
+  {
+    "name": "work/metaengine-rsi-async-island-portfolio-v1",
+    "commit": {
+      "sha": "85be3089f1d8215f7e5d74645aae3f28f4ad4a97",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/85be3089f1d8215f7e5d74645aae3f28f4ad4a97"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-async-island-portfolio-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-autonomous-episode-controller-v1",
+    "commit": {
+      "sha": "c6327a9619e06accf92394146c47b2d3cb772893",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c6327a9619e06accf92394146c47b2d3cb772893"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-autonomous-episode-controller-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-benchmark-coevolution-admission-v1",
+    "commit": {
+      "sha": "d2071646dbd6fa0a8302b8cd9ff44f4b99c5df5e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d2071646dbd6fa0a8302b8cd9ff44f4b99c5df5e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-benchmark-coevolution-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-benchmark-coevolution-durable-v1",
+    "commit": {
+      "sha": "18e6ed0fcd714e09740fefa90adb69ea2b5c37a3",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/18e6ed0fcd714e09740fefa90adb69ea2b5c37a3"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-benchmark-coevolution-durable-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-benchmark-provenance-v1",
+    "commit": {
+      "sha": "0558334a3eb4d4dae480c759331083ce88f62513",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0558334a3eb4d4dae480c759331083ce88f62513"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-benchmark-provenance-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-canary-admission-v1",
+    "commit": {
+      "sha": "ae98a7f0d1a5bfb302c654001220b9e21208c518",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ae98a7f0d1a5bfb302c654001220b9e21208c518"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-canary-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-canary-review-v1",
+    "commit": {
+      "sha": "ee299359c1fbbc81a52919811ddb62a40bda9601",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ee299359c1fbbc81a52919811ddb62a40bda9601"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-canary-review-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-canary-review-v2-gpt",
+    "commit": {
+      "sha": "f3d9b623779b5c87b57640ad8c1d48f40e01df0a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f3d9b623779b5c87b57640ad8c1d48f40e01df0a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-canary-review-v2-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-memory-utility-v1-gpt",
+    "commit": {
+      "sha": "a639b1525ca46d1c33818cbaca8fd6453ce763af",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a639b1525ca46d1c33818cbaca8fd6453ce763af"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-memory-utility-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-revision-devos-bridge-v1",
+    "commit": {
+      "sha": "ac38556059f488b8dcc29fd30f2ccd5381faeeea",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ac38556059f488b8dcc29fd30f2ccd5381faeeea"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-revision-devos-bridge-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-revision-proposal-convergence-v1",
+    "commit": {
+      "sha": "31631fddd4ed7c3047c58e4dd95be9651e64a740",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/31631fddd4ed7c3047c58e4dd95be9651e64a740"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-revision-proposal-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-revision-proposal-durable-v1",
+    "commit": {
+      "sha": "0cd42ecc19100cc28b7565c402286b10e174e0e5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0cd42ecc19100cc28b7565c402286b10e174e0e5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-revision-proposal-durable-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-revision-proposal-v1",
+    "commit": {
+      "sha": "d0e9ac5046e397d29bf5633b2bd718e46baa89aa",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d0e9ac5046e397d29bf5633b2bd718e46baa89aa"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-revision-proposal-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-bounded-shadow-canary-admission-v1",
+    "commit": {
+      "sha": "240679aef0011465e0f125af30757e23ba9eb743",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/240679aef0011465e0f125af30757e23ba9eb743"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-bounded-shadow-canary-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-observation-feed-v1",
+    "commit": {
+      "sha": "ea1d3514703641f9d2ab81b34c3cb264d533f5a0",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ea1d3514703641f9d2ab81b34c3cb264d533f5a0"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-observation-feed-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-outcome-ingest-v1",
+    "commit": {
+      "sha": "2e4675a38d71ade71a7737d72787083b49ca5878",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2e4675a38d71ade71a7737d72787083b49ca5878"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-outcome-ingest-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-outcome-ingest-v2",
+    "commit": {
+      "sha": "1861f5bb79da30b31928b3ed8b31223aa813d608",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1861f5bb79da30b31928b3ed8b31223aa813d608"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-outcome-ingest-v2/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-outcome-wiring-v1",
+    "commit": {
+      "sha": "fda801e724b83f1857fbf0a4404c5a1ca7df2e34",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fda801e724b83f1857fbf0a4404c5a1ca7df2e34"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-outcome-wiring-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-release-sync-v1",
+    "commit": {
+      "sha": "273963cd2b92ced10b6c10c6a44eee75981ee3fa",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/273963cd2b92ced10b6c10c6a44eee75981ee3fa"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-release-sync-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-runtime-convergence-v1",
+    "commit": {
+      "sha": "a8981b7e3b825fde24f50490c229afa93809ef05",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a8981b7e3b825fde24f50490c229afa93809ef05"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-runtime-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-runtime-convergence-v2",
+    "commit": {
+      "sha": "01bd7088b9765d90d9b69b358840933fe415db9e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/01bd7088b9765d90d9b69b358840933fe415db9e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-runtime-convergence-v2/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-browser-runtime-convergence-v3",
+    "commit": {
+      "sha": "71f1756d0da2f33025f97a1497d0496bbec3e527",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/71f1756d0da2f33025f97a1497d0496bbec3e527"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-browser-runtime-convergence-v3/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-canary-external-verifier-v1",
+    "commit": {
+      "sha": "ecc06260157a1944a7c98180af05d7129ab6171d",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ecc06260157a1944a7c98180af05d7129ab6171d"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-canary-external-verifier-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-canary-review-gate-v1",
+    "commit": {
+      "sha": "d64896f347de72b8bdd80f76483288d34c7c0fa4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d64896f347de72b8bdd80f76483288d34c7c0fa4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-canary-review-gate-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-candidate-experiment-durable-v1",
+    "commit": {
+      "sha": "75b423bdb4a223cd85a4dba2635664ceab431a75",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/75b423bdb4a223cd85a4dba2635664ceab431a75"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-candidate-experiment-durable-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-causal-exploration-memory-v1",
+    "commit": {
+      "sha": "11e57eff851116d444031b40b42191901ce424b3",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/11e57eff851116d444031b40b42191901ce424b3"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-causal-exploration-memory-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-clade-metaproductivity-v1",
+    "commit": {
+      "sha": "3e9a0cfe6c69393f94bc75d25db5e2d949c48ac2",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3e9a0cfe6c69393f94bc75d25db5e2d949c48ac2"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-clade-metaproductivity-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-coalition-aware-skill-audit-v1",
+    "commit": {
+      "sha": "18a732a6433b939cd89d3c9622f97f8b6c842973",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/18a732a6433b939cd89d3c9622f97f8b6c842973"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-coalition-aware-skill-audit-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-command-attribution-v1",
+    "commit": {
+      "sha": "de55b05ae7ea97974d1587d3868704a65b7219e9",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/de55b05ae7ea97974d1587d3868704a65b7219e9"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-command-attribution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-comparative-lineage-v1",
+    "commit": {
+      "sha": "076c8ee34582b1a43e682b3eb026ed0794ab5773",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/076c8ee34582b1a43e682b3eb026ed0794ab5773"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-comparative-lineage-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-component-attribution-v1",
+    "commit": {
+      "sha": "ca074ed51ab2bfe1428609e27638b46b7f9fe0a7",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ca074ed51ab2bfe1428609e27638b46b7f9fe0a7"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-component-attribution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-context-aware-candidate-synthesis-v1-gpt",
+    "commit": {
+      "sha": "72465901943906f99fe3f37d5cd1ec9c476a9f56",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/72465901943906f99fe3f37d5cd1ec9c476a9f56"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-context-aware-candidate-synthesis-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-context-synthesis-convergence-v1",
+    "commit": {
+      "sha": "1ecb9d59ee29032afb7df296c1d72743ec3213c1",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1ecb9d59ee29032afb7df296c1d72743ec3213c1"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-context-synthesis-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-contextual-skill-router-v1",
+    "commit": {
+      "sha": "17f9ec31da22a3b7a95046b5e18e2368cf8064b6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/17f9ec31da22a3b7a95046b5e18e2368cf8064b6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-contextual-skill-router-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-contrastive-reliability-v1",
+    "commit": {
+      "sha": "835a31eb36efb76b392f264b92b536da4a14c9a9",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/835a31eb36efb76b392f264b92b536da4a14c9a9"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-contrastive-reliability-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-correction-retrieval-bridge-v1-gpt",
+    "commit": {
+      "sha": "3d5e1592bf50bc72619bccfa26b31977c40295ec",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3d5e1592bf50bc72619bccfa26b31977c40295ec"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-correction-retrieval-bridge-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-credit-experience-adapter-v1-gpt",
+    "commit": {
+      "sha": "7c93bdfffa49f546e9182e5790ba37ce44add2f4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7c93bdfffa49f546e9182e5790ba37ce44add2f4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-credit-experience-adapter-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-credit-experience-v1",
+    "commit": {
+      "sha": "3333b47dc91c6518b9e680d689ade7ebd5d3b433",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3333b47dc91c6518b9e680d689ade7ebd5d3b433"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-credit-experience-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-credited-skill-lifecycle-v1",
+    "commit": {
+      "sha": "82380ef37e142b5b350559dde9ac81609b228e77",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/82380ef37e142b5b350559dde9ac81609b228e77"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-credited-skill-lifecycle-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-devos-admission-v1",
+    "commit": {
+      "sha": "5c446ef5e4006859e4592e5c57025db0fca157b5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5c446ef5e4006859e4592e5c57025db0fca157b5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-devos-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-devos-materialization-handoff-v1-gpt",
+    "commit": {
+      "sha": "72b51b4a01092cfe294541d7b007774a275400bb",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/72b51b4a01092cfe294541d7b007774a275400bb"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-devos-materialization-handoff-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-disagreement-acquisition-v1",
+    "commit": {
+      "sha": "892f272d464816f23ae17702e5dfadc772d2553f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/892f272d464816f23ae17702e5dfadc772d2553f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-disagreement-acquisition-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-effect-result-reconciliation-v1-gpt",
+    "commit": {
+      "sha": "9e853366aef857446406f19ed39129fc7ef1d7fc",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/9e853366aef857446406f19ed39129fc7ef1d7fc"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-effect-result-reconciliation-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-episode-devos-bridge-v1",
+    "commit": {
+      "sha": "35d1042f34b7deee8c6262494ef0e697d8bcf04c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/35d1042f34b7deee8c6262494ef0e697d8bcf04c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-episode-devos-bridge-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-episode-evaluation-ingest-v1",
+    "commit": {
+      "sha": "b0246b32ce9642d7770973b93e97a960b808bf7f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b0246b32ce9642d7770973b93e97a960b808bf7f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-episode-evaluation-ingest-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-episode-orchestrator-v1",
+    "commit": {
+      "sha": "8c9f1facb5cbbb073a621b557aa3dbbc3dc3bd52",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/8c9f1facb5cbbb073a621b557aa3dbbc3dc3bd52"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-episode-orchestrator-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-evaluation-budget-durable-convergence-v1",
+    "commit": {
+      "sha": "fa77f7e8098668419d09108d9dd3f16c5f047fc7",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fa77f7e8098668419d09108d9dd3f16c5f047fc7"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-evaluation-budget-durable-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-evaluation-budget-durable-v1",
+    "commit": {
+      "sha": "b3e19b81e796a3ff318a0aaa16fec39ed137844a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b3e19b81e796a3ff318a0aaa16fec39ed137844a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-evaluation-budget-durable-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-evaluation-budget-router-v1",
+    "commit": {
+      "sha": "0ff69dbc242c975e1829573d5fa9fc1721dca5df",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0ff69dbc242c975e1829573d5fa9fc1721dca5df"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-evaluation-budget-router-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-evaluation-economy-v1",
+    "commit": {
+      "sha": "ee67e79b7202ae3dcd980072215dbbd35c5c2973",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ee67e79b7202ae3dcd980072215dbbd35c5c2973"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-evaluation-economy-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-evaluation-integrity-v1",
+    "commit": {
+      "sha": "2d35fc058bb0f6c094a7fac26d74deadc941e958",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2d35fc058bb0f6c094a7fac26d74deadc941e958"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-evaluation-integrity-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-evidence-grounded-group-experience-bus-v1",
+    "commit": {
+      "sha": "1a46261595e3d6af1cc5af91aec012d6b58b700e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1a46261595e3d6af1cc5af91aec012d6b58b700e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-evidence-grounded-group-experience-bus-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-context-ablation-attribution-v1",
+    "commit": {
+      "sha": "3fb34192b0323e91ebb487267b2a771de4f500a9",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3fb34192b0323e91ebb487267b2a771de4f500a9"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-context-ablation-attribution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-context-coalition-attribution-v1",
+    "commit": {
+      "sha": "846eeb515c83430c4016d73fd0c7aec9de4cd3bb",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/846eeb515c83430c4016d73fd0c7aec9de4cd3bb"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-context-coalition-attribution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-context-planner-v1-gpt",
+    "commit": {
+      "sha": "37f30ec45ab4edc99249285f1457d4e3e6158e40",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/37f30ec45ab4edc99249285f1457d4e3e6158e40"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-context-planner-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-graph-source-unification-v1",
+    "commit": {
+      "sha": "64e91c196ea5ef679f18df1754e062681a2f52b5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/64e91c196ea5ef679f18df1754e062681a2f52b5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-graph-source-unification-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-graph-v1",
+    "commit": {
+      "sha": "1241705b5f0fd092a0ef5d94d08e2aa1c5a512b5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1241705b5f0fd092a0ef5d94d08e2aa1c5a512b5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-graph-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-guided-autonomous-cycle-v1",
+    "commit": {
+      "sha": "c8f7299758fd3d6fab2ce368e6632393e14f2d1c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c8f7299758fd3d6fab2ce368e6632393e14f2d1c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-guided-autonomous-cycle-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-utility-feedback-v1",
+    "commit": {
+      "sha": "e5f618272457dc6bfffd1beaeeb2f01e87912601",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e5f618272457dc6bfffd1beaeeb2f01e87912601"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-utility-feedback-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-experience-utility-feedback-v2",
+    "commit": {
+      "sha": "5ab0f81cae93aeb8248eef9a335b64d4bde4e8c3",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5ab0f81cae93aeb8248eef9a335b64d4bde4e8c3"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-experience-utility-feedback-v2/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-external-evidence-ingest-v1-gpt",
+    "commit": {
+      "sha": "4cf3b9d176a3a22891848c260d4859681406e9ac",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4cf3b9d176a3a22891848c260d4859681406e9ac"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-external-evidence-ingest-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-external-library-admission-v1",
+    "commit": {
+      "sha": "59b729aa73f990a5934fc5e7f9764b6f9cc48955",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/59b729aa73f990a5934fc5e7f9764b6f9cc48955"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-external-library-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-external-promotion-review-v1-gpt",
+    "commit": {
+      "sha": "f791872e9e6ab8c63d3f01aa4c7f63cdc8287f9d",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f791872e9e6ab8c63d3f01aa4c7f63cdc8287f9d"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-external-promotion-review-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-external-readonly-canary-controller-v1",
+    "commit": {
+      "sha": "d74464f79cd12dc2b950baca270d4f0f585d97cf",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d74464f79cd12dc2b950baca270d4f0f585d97cf"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-external-readonly-canary-controller-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-external-release-handoff-v1",
+    "commit": {
+      "sha": "f1482089a36c2ab966b1f0fee82d2aea3f70364f",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f1482089a36c2ab966b1f0fee82d2aea3f70364f"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-external-release-handoff-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-final-apply-readback-v1",
+    "commit": {
+      "sha": "3645bd3e3ac01660531296ff5448ad45c9149e15",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3645bd3e3ac01660531296ff5448ad45c9149e15"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-final-apply-readback-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-final-install-cycle-admission-v1",
+    "commit": {
+      "sha": "7938b29302d9a85faf1d5e29e694d03479b6e133",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7938b29302d9a85faf1d5e29e694d03479b6e133"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-final-install-cycle-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-fixed-skeleton-mutation-v1",
+    "commit": {
+      "sha": "f8bab9abbc36449f8ca82bfa5a6224cf667c2027",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f8bab9abbc36449f8ca82bfa5a6224cf667c2027"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-fixed-skeleton-mutation-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-frontier-coevolution-v1",
+    "commit": {
+      "sha": "1d97e5336b8b75e51d8081b81b50ad99da7ad9a4",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1d97e5336b8b75e51d8081b81b50ad99da7ad9a4"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-frontier-coevolution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-group-experience-v1",
+    "commit": {
+      "sha": "3f7388861701b0857f4b8ac9aea2df72eb04be86",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3f7388861701b0857f4b8ac9aea2df72eb04be86"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-group-experience-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-harness-evidence-runtime-v1",
+    "commit": {
+      "sha": "30c86ff54d3f5acd8e515f587624152988ce9d52",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/30c86ff54d3f5acd8e515f587624152988ce9d52"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-harness-evidence-runtime-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-harness-repair-controller-v1",
+    "commit": {
+      "sha": "51a2c461c92d8af532b1c76ccc8d45a980d21859",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/51a2c461c92d8af532b1c76ccc8d45a980d21859"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-harness-repair-controller-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-hierarchical-evaluation-economy-v1",
+    "commit": {
+      "sha": "f347d4519c0de2124ab8be131e0e1ab007211f50",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f347d4519c0de2124ab8be131e0e1ab007211f50"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-hierarchical-evaluation-economy-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-integrity-bound-reliability-v1",
+    "commit": {
+      "sha": "a1c4b501e7aec02660bbb8eed98561c384718432",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a1c4b501e7aec02660bbb8eed98561c384718432"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-integrity-bound-reliability-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-mastery-throttled-benchmark-coevolution-v1",
+    "commit": {
+      "sha": "d79570620e6da79a295168898fa9b6a57c466164",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d79570620e6da79a295168898fa9b6a57c466164"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-mastery-throttled-benchmark-coevolution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-materialization-convergence-v1",
+    "commit": {
+      "sha": "cde61d4730e4a96419fe035ad900b9095684cee9",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cde61d4730e4a96419fe035ad900b9095684cee9"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-materialization-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-materialization-evaluation-loop-v1",
+    "commit": {
+      "sha": "ac38556059f488b8dcc29fd30f2ccd5381faeeea",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ac38556059f488b8dcc29fd30f2ccd5381faeeea"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-materialization-evaluation-loop-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-memory-dependency-fence-v1-gpt",
+    "commit": {
+      "sha": "69806dda5701bbe762d2e008be0a6e49fe1c9dac",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/69806dda5701bbe762d2e008be0a6e49fe1c9dac"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-memory-dependency-fence-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-memory-governance-v1",
+    "commit": {
+      "sha": "2631fdcd60f72b3de46e9274c14f5722ea9bf742",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2631fdcd60f72b3de46e9274c14f5722ea9bf742"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-memory-governance-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-memory-rehabilitation-margin-v1-gpt",
+    "commit": {
+      "sha": "aabff455c911fe96c42b4e227d8ba5a8fdb0c61c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/aabff455c911fe96c42b4e227d8ba5a8fdb0c61c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-memory-rehabilitation-margin-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-memory-reliability-tier-v1-gpt",
+    "commit": {
+      "sha": "50b442fadb5ac88b41754395030b1f9e29728341",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/50b442fadb5ac88b41754395030b1f9e29728341"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-memory-reliability-tier-v1-gpt/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-mesh-capacity-convergence-v1",
+    "commit": {
+      "sha": "ec63cbc1e75a042215bce6f7991debfdb5ae7dce",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/ec63cbc1e75a042215bce6f7991debfdb5ae7dce"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-mesh-capacity-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-mesh-start-recovery-forwardport-v1",
+    "commit": {
+      "sha": "35c4832ff49b5f0c9acbfa30d6da60537e78e623",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/35c4832ff49b5f0c9acbfa30d6da60537e78e623"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-mesh-start-recovery-forwardport-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-meta-profile-admission-v1",
+    "commit": {
+      "sha": "e42108001684089493b650bd3c81cd668d22429e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e42108001684089493b650bd3c81cd668d22429e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-meta-profile-admission-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-meta-profile-qualification-v1",
+    "commit": {
+      "sha": "b49bb861b3eacf708246794465d8fc3cccf697ff",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b49bb861b3eacf708246794465d8fc3cccf697ff"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-meta-profile-qualification-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-meta-profile-shadow-selection-v1",
+    "commit": {
+      "sha": "f1af3d055b6fca179f129aa1c74e9d65d60442d5",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f1af3d055b6fca179f129aa1c74e9d65d60442d5"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-meta-profile-shadow-selection-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-meta-skill-evolution-v1",
+    "commit": {
+      "sha": "2b8d104550510ecee3fe87de233ff40ccc668bb8",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2b8d104550510ecee3fe87de233ff40ccc668bb8"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-meta-skill-evolution-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-operational-distillation-v1",
+    "commit": {
+      "sha": "1aadb1833628aeeb8ea803751190c39b68ea6d10",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1aadb1833628aeeb8ea803751190c39b68ea6d10"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-operational-distillation-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-paired-candidate-experiment-ledger-v1",
+    "commit": {
+      "sha": "5d6f227bd8d97e9eb333d35a5ad66489a80361bf",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5d6f227bd8d97e9eb333d35a5ad66489a80361bf"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-paired-candidate-experiment-ledger-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase23-durability-convergence-v1",
+    "commit": {
+      "sha": "28328f4c1cb92ea902bbc79975c8c6f159746bc6",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/28328f4c1cb92ea902bbc79975c8c6f159746bc6"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase23-durability-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase24-durability-convergence-v1",
+    "commit": {
+      "sha": "5fa856d105b8969e645cd3cf6ea32621dee5640a",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5fa856d105b8969e645cd3cf6ea32621dee5640a"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase24-durability-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase25-durability-safety-convergence-v1",
+    "commit": {
+      "sha": "0c6996808a86e186b6e44db3e26de995118c6083",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0c6996808a86e186b6e44db3e26de995118c6083"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase25-durability-safety-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase26-durable-convergence-v1",
+    "commit": {
+      "sha": "6d1fc6104b1f47c4c711f4153e30601fd932f772",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6d1fc6104b1f47c4c711f4153e30601fd932f772"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase26-durable-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase26-strongest-convergence-v1",
+    "commit": {
+      "sha": "f4ce9f8406626d9737a65bf6ab98bdbb7508114e",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/f4ce9f8406626d9737a65bf6ab98bdbb7508114e"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase26-strongest-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase27-bounded-revision-convergence-v1",
+    "commit": {
+      "sha": "053833f4a8233a393f76cf6ec248fc86235dad65",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/053833f4a8233a393f76cf6ec248fc86235dad65"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase27-bounded-revision-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase27-replay-integrity-hardening-v1",
+    "commit": {
+      "sha": "a2f0e20dad7cc82416e9ee633359a9ed35c4db91",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a2f0e20dad7cc82416e9ee633359a9ed35c4db91"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase27-replay-integrity-hardening-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase27-selected-integrity-v2",
+    "commit": {
+      "sha": "426718804694aa494e27487ab4fb48471bb377be",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/426718804694aa494e27487ab4fb48471bb377be"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase27-selected-integrity-v2/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase27-strongest-convergence-v1",
+    "commit": {
+      "sha": "4559264563d1f3a32d633abb8ff693d483611538",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4559264563d1f3a32d633abb8ff693d483611538"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase27-strongest-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase27-strongest-durable-convergence-v1",
+    "commit": {
+      "sha": "e8e17fc002a3db703e8d6e1e9eaabfa2ee358c5c",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e8e17fc002a3db703e8d6e1e9eaabfa2ee358c5c"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase27-strongest-durable-convergence-v1/protection"
+  },
+  {
+    "name": "work/metaengine-rsi-phase28-provenance-convergence-v1",
+    "commit": {
+      "sha": "97c5ee2790e5da788dacb5a6846572c9dfd39971",
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/97c5ee2790e5da788dacb5a6846572c9dfd39971"
+    },
+    "protected": false,
+    "protection": {
+      "enabled": false,
+      "required_status_checks": {
+        "enforcement_level": "off",
+        "contexts": [
+
+        ],
+        "checks": [
+
+        ]
+      }
+    },
+    "protection_url": "https://api.github.com/repos/PatrickFrome/Compute/branches/work/metaengine-rsi-phase28-provenance-convergence-v1/protection"
+  }
+]

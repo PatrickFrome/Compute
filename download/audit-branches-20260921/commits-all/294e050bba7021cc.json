@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "65a0b1e9974d470849fe75d601b66eedacf19d8e",
+    "node_id": "C_kwDOT_OzB9oAKDY1YTBiMWU5OTc0ZDQ3MDg0OWZlNzVkNjAxYjY2ZWVkYWNmMTlkOGU",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T21:26:46Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T21:26:58Z"
+      },
+      "message": "fix(browser): rollover tab-leak reclaim + hydrating-composer wait (D-C7)\n\nLive defect chain (2026-09-19, fleet 35465340423.1): every failed #rollover()\nleaked its NEW_TAB at the preconversation root forever. Combined with the D-C5\nfresh-tab re-request the registry hit the 32-tab wall — live evidence:\ntotal_at_wall=true, capacity_backpressure TAB_CAPACITY_EXCEEDED_PRE_EFFECT,\nkeepalive frozen at cycle_seq 1185, rollover_reason escalating\nTYPE_EFFECT_AMBIGUOUS -> supervisor_composer_not_unique -> tab_capacity_exceeded.\n\n- Leaked-rollover-tab ledger (#rolloverLeakedTabIds) with close-by-proof\n  reclaim: registry-exists, not selected, not fleet-bound, not the keepalive\n  tab, CAPTURE still at the preconversation ROOT. A tab that drifted to a\n  conversation URL is never closed (the ambiguous send may have landed;\n  reconciliation owns that surface).\n- Drain points: top of #rollover() (before any NEW_TAB) and opportunistic in\n  the ROLLOVER_AMBIGUOUS no-progress branch; bounded 3 closes per drain.\n  Wedged CLOSE_TAB stays in the ledger and is retried — the retry loop is\n  tab-neutral.\n- D-C5 escape now reclaims the superseded attempt tab by proof and records\n  reclaimed_tab_id in the recovery diagnostic.\n- #typeAndSend composer wait: a fresh root tab hydrates asynchronously (first\n  CAPTURE transiently shows zero/Several textboxes); bounded recapture\n  (4 x 1.2s) before declaring supervisor_composer_not_unique. Healthy\n  conversation tabs resolve on the first capture and never pay the wait.\n\nTests: rollover-tab-leak-reclaim.test.mjs (5) — same-cycle/next-cycle reclaim,\nwedged-close retry ordering (drain BEFORE the next NEW_TAB), composer-wait\nrescue, conversation-drift never closed, selected/fleet/keepalive obligations.\nFull suite: 2465 tests, 2463 pass, 0 fail, 2 Windows-only skips. npm run check clean.",
+      "tree": {
+        "sha": "38189e65651fded98e6e64dda747fec49a0baac4",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/38189e65651fded98e6e64dda747fec49a0baac4"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/65a0b1e9974d470849fe75d601b66eedacf19d8e",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/65a0b1e9974d470849fe75d601b66eedacf19d8e",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/65a0b1e9974d470849fe75d601b66eedacf19d8e",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/65a0b1e9974d470849fe75d601b66eedacf19d8e/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "e00b8ed416f722b6d5086e87582dea5ab2417535",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e00b8ed416f722b6d5086e87582dea5ab2417535",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/e00b8ed416f722b6d5086e87582dea5ab2417535"
+      }
+    ]
+  }
+]

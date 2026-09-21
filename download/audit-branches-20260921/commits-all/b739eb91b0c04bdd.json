@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "11f10b38ecbcc966237c418e3aa0f4cad724fd7d",
+    "node_id": "C_kwDOT_OzB9oAKDExZjEwYjM4ZWNiY2M5NjYyMzdjNDE4ZTNhYTBmNGNhZDcyNGZkN2Q",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-29T04:17:19Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-29T04:17:19Z"
+      },
+      "message": "feat(a2): prepare Gemini Pro advisory observation plane\n\nPREPARE_ONLY Gemini UI peer slice on the v0.6.7 Browser Operator lineage.\n\n- add minimum gemini.google.com host permission\n- add Gemini-only advisory DOM observer with current semantic selectors\n- validate sender origin in trusted background before storing snapshot\n- keep snapshots in trusted extension-local storage only\n- hard-code advisory_only=true and authority_effect=false\n- keep actuation and remote dispatch disabled\n- preserve existing ChatGPT/GLM ordering and unsupported-platform fail-closed gate\n- add contract tests and research provenance\n\nNo trusted Gemini send path is claimed: current Gemini UI requires real keyboard/paste semantics rather than synthetic DOM insertion for reliable framework state.\n\nauthority_effect=false\nremote_dispatch_enabled=false\nactuation_enabled=false\nddl_applied=false\nsupabase_contract_changed=false\nlive_canary_performed=false",
+      "tree": {
+        "sha": "5918a23d46f81497f586a8635a1c2968d196a1d2",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/5918a23d46f81497f586a8635a1c2968d196a1d2"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/11f10b38ecbcc966237c418e3aa0f4cad724fd7d",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/11f10b38ecbcc966237c418e3aa0f4cad724fd7d",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/11f10b38ecbcc966237c418e3aa0f4cad724fd7d",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/11f10b38ecbcc966237c418e3aa0f4cad724fd7d/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "e362cd6f52eead9b849b4b40de8665e274a3b59d",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e362cd6f52eead9b849b4b40de8665e274a3b59d",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/e362cd6f52eead9b849b4b40de8665e274a3b59d"
+      }
+    ]
+  }
+]

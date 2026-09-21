@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "c64c38bb3e5b6a33c8b9234735b5368471244cd2",
+    "node_id": "C_kwDOT_OzB9oAKGM2NGMzOGJiM2U1YjZhMzNjOGI5MjM0NzM1YjUzNjg0NzEyNDRjZDI",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "noreply@users.noreply.github.com",
+        "date": "2026-08-29T04:30:08Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "noreply@users.noreply.github.com",
+        "date": "2026-08-29T04:30:08Z"
+      },
+      "message": "test(browser-supervisor): concurrency race probes + post-research\n\nExtends the SQL canary with Phase G: three genuine multi-session races\nagainst the real PostgreSQL 17 server, asserted deterministically.\n\n- race A: 20 concurrent enqueues of one idempotency key -> exactly one\n  fresh insert, 19 replay readbacks, identical command id, one row\n  (ON CONFLICT speculative-insert wait under READ COMMITTED)\n- race B: 10 concurrent clients contend for one broadcast command ->\n  exactly one lease holder (FOR UPDATE SKIP LOCKED)\n- race C: 10 commands drained by 10 concurrent clients -> every command\n  leased exactly once, no double-lease\n\nRace A's command is isolated to a non-leasing client so the races stay\nindependent (caught by the first local run). Racer SQL parenthesizes\njsonb extractions: ->> and || share precedence and left-associate.\n3/3 stable local passes on real PG 17.11 before push.\n\nPost-research records the jsonb NULL operator lessons, the corrected\nlane topology (lease_v3 is now the budget-guarded lane; lease_v2 routes\nto lease_control_v4), and the remaining weaknesses.",
+      "tree": {
+        "sha": "76b2969366728b20e5c15c6715a2cba38c815124",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/76b2969366728b20e5c15c6715a2cba38c815124"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/c64c38bb3e5b6a33c8b9234735b5368471244cd2",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c64c38bb3e5b6a33c8b9234735b5368471244cd2",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/c64c38bb3e5b6a33c8b9234735b5368471244cd2",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/c64c38bb3e5b6a33c8b9234735b5368471244cd2/comments",
+    "author": {
+      "login": "noreply",
+      "id": 1239515,
+      "node_id": "MDQ6VXNlcjEyMzk1MTU=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1239515?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/noreply",
+      "html_url": "https://github.com/noreply",
+      "followers_url": "https://api.github.com/users/noreply/followers",
+      "following_url": "https://api.github.com/users/noreply/following{/other_user}",
+      "gists_url": "https://api.github.com/users/noreply/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/noreply/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/noreply/subscriptions",
+      "organizations_url": "https://api.github.com/users/noreply/orgs",
+      "repos_url": "https://api.github.com/users/noreply/repos",
+      "events_url": "https://api.github.com/users/noreply/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/noreply/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "noreply",
+      "id": 1239515,
+      "node_id": "MDQ6VXNlcjEyMzk1MTU=",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1239515?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/noreply",
+      "html_url": "https://github.com/noreply",
+      "followers_url": "https://api.github.com/users/noreply/followers",
+      "following_url": "https://api.github.com/users/noreply/following{/other_user}",
+      "gists_url": "https://api.github.com/users/noreply/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/noreply/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/noreply/subscriptions",
+      "organizations_url": "https://api.github.com/users/noreply/orgs",
+      "repos_url": "https://api.github.com/users/noreply/repos",
+      "events_url": "https://api.github.com/users/noreply/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/noreply/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "bbcc8c00088d9b7d0f0ff10356944405b2afd66f",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/bbcc8c00088d9b7d0f0ff10356944405b2afd66f",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/bbcc8c00088d9b7d0f0ff10356944405b2afd66f"
+      }
+    ]
+  }
+]

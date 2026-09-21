@@ -1,0 +1,17 @@
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-closed-loop-audit-fixes-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/t3-delta-bus-mission-control-rpc-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/pigsty-db-integration-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-fleet-experience-driven-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-live-check-observability-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-work-graph-unified-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-shell-quantum-console-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-tier1-closed-loop-wave1-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/jscpd-gate-rsi-recalibration-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-live-integration-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-r14-graduation-effect-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-ci-latest-head-concurrency-v2
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-r8d-lineage-contamination-gate-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-ci-latest-head-concurrency-v1
+6bf173c71dc3026b02171085d956625ef9526378...work/browser-supervisor-mesh-start-recovery-v1
+6bf173c71dc3026b02171085d956625ef9526378...update/browser-dev-channel
+6bf173c71dc3026b02171085d956625ef9526378...main

@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "0391dba2fafa5887f7ddf5e6dcf487aa7996be2d",
+    "node_id": "C_kwDOT_OzB9oAKDAzOTFkYmEyZmFmYTU4ODdmN2RkZjVlNmRjZjQ4N2FhNzk5NmJlMmQ",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T07:31:07Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T07:31:07Z"
+      },
+      "message": "fix(browser): self-release system-detected rollovers (D-K8 dead approveRollover)\n\nLive follow-up (2026-09-19, build 35427727041.1): the D-K7\nCOMPOSER_UNCLEARABLE rollover fired correctly but parked forever in\nROLLOVER_DEFERRED — approveRollover, the only DEFERRED -> REQUIRED\ntransition, has NO caller anywhere in the codebase. Every rollover\nrequest was a terminal parking state.\n\nrequestRollover now accepts { autoRelease } and goes straight to\nROLLOVER_REQUIRED with a recorded release timestamp. ONLY the\nsystem-detected COMPOSER_UNCLEARABLE_DK7 reason passes autoRelease —\nits evidence is our own command-outcome stream (trusted class), not\npage text. The page-derived CHATGPT_CONVERSATION_LIMIT_HINT path\nexplicitly KEEPS the deferred posture: page text never auto-authorizes\nan effect (supervisor-single-authority + unbounded-source contract\ntests pin this invariant and pass unchanged).\n\nTests: D-K8 unit contract added (auto-release executes\nbeginRolloverAttempt; operator-class rollovers stay deferred). Full\nsuite 2403 pass / 0 fail / 2 skip. npm run check clean.",
+      "tree": {
+        "sha": "ed5d0c0e2bcec57e452b8bc6455d0b80c4efe927",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/ed5d0c0e2bcec57e452b8bc6455d0b80c4efe927"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/0391dba2fafa5887f7ddf5e6dcf487aa7996be2d",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0391dba2fafa5887f7ddf5e6dcf487aa7996be2d",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/0391dba2fafa5887f7ddf5e6dcf487aa7996be2d",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0391dba2fafa5887f7ddf5e6dcf487aa7996be2d/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "fc6d8331b2666e0844967497ae81f9f5fed7c633",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fc6d8331b2666e0844967497ae81f9f5fed7c633",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/fc6d8331b2666e0844967497ae81f9f5fed7c633"
+      }
+    ]
+  }
+]

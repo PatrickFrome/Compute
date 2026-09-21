@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "df3903fddd302a0c9e78cb8813eb0006a607aa13",
+    "node_id": "C_kwDOT_OzB9oAKGRmMzkwM2ZkZGQzMDJhMGM5ZTc4Y2I4ODEzZWIwMDA2YTYwN2FhMTM",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T01:09:02Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T01:09:02Z"
+      },
+      "message": "feat(rsi): wire RSI runtime into live release line (selective integration)\n\nSelective reconstruction step 2: port the RSI integration hunks onto the\nrelease-line versions of four shared files. main.mjs gains the RsiRuntimeService\nstartup step, state projection, outcome attribution helper, and the\nonRsiOutcomeReadback ingest hook. native-supervisor-client-base.mjs gains the\nimmutable result-delivery adapter path with batch ambiguity reconciliation,\nthe outcome readback sidecar, and the transport-ambiguity fence that never\nmanufactures a second FAILED receipt. The supervisor edge gains the\n/v1/commands/:id/receipt readback route with capability projection, and the\ngovernance preview gains per-ref concurrency cancellation.\n\nAll other pre-existing files remain byte-identical to the live release line\n(release/self-update-ambiguity-live-v2 at 322be784). Full Browser Node suite:\n3216 pass / 0 fail / 2 platform skips.",
+      "tree": {
+        "sha": "0bd042b7f4e6be2f474dee8f26d9a107d7fd3729",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/0bd042b7f4e6be2f474dee8f26d9a107d7fd3729"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/df3903fddd302a0c9e78cb8813eb0006a607aa13",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/df3903fddd302a0c9e78cb8813eb0006a607aa13",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/df3903fddd302a0c9e78cb8813eb0006a607aa13",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/df3903fddd302a0c9e78cb8813eb0006a607aa13/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "d09d5516bf22966cc872b05e9f7d142dbb52f72b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d09d5516bf22966cc872b05e9f7d142dbb52f72b",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/d09d5516bf22966cc872b05e9f7d142dbb52f72b"
+      }
+    ]
+  }
+]

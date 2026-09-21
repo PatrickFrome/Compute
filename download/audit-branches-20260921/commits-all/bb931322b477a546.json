@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "fc6d8331b2666e0844967497ae81f9f5fed7c633",
+    "node_id": "C_kwDOT_OzB9oAKGZjNmQ4MzMxYjI2NjZlMDg0NDk2NzQ5N2FlODFmOWY1ZmVkN2M2MzM",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T06:36:46Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-19T06:36:46Z"
+      },
+      "message": "fix(browser): throttle unsent-wake retry storms, atomic clear-and-type, composer-uncleanable rollover\n\nLive follow-up to #827 (2026-09-19, build 35424833345.1, session paprika1):\n\nD-K5 — unsent-wake retry storm. A wake that was prepared but provably\nnot sent (pre-effect throw: replace unverified, stale ref, composer\nunresolvable) was re-prepared on the very next monitor tick, and the\nCONTINUE_DEVELOPMENT reason bypasses the wake interval entirely — a\npermanent pre-effect failure became a ~2s retry storm that raced the\npage's draft-sync and appended ~3k chars of wake text per minute to\nthe composer (live: the supervisor composer grew 12k -> 33k in minutes;\nthe site itself reset it, then re-restored a 12k draft and the loop\nkept appending). resolveAmbiguous({observed_sent:false}) now records\nlast_unsent_attempt_at; canWake charges the wake interval for every\nunsent attempt regardless of reason; confirmWakeSent clears it.\n\nD-K6 — atomic clear-and-type. Live probes proved the D-K2 escalation\nretry NEVER ran (the first insert's own DOM mutation invalidated the\nsemantic ref, attempt 2 threw native_semantic_ref_stale BEFORE the\nDelete) while each attempt left an appended copy — a post-effect\nexception with an unreported physical mutation. The verified replace\nis now ONE atomic gesture: Ctrl+A, Delete (honors the selection;\nno-op when the site prevents selection), insertText, then AX-value\nreadback verification. Deliberately NO second attempt: re-typing after\na mutated attempt would append a second copy of the prompt.\n\nD-K7 — bounded rollover on a provably unusable composer. Three\nconsecutive composer-blocking send failures (TYPE_EFFECT_AMBIGUOUS,\nreplace_unverified, ref stale, composer not unique) now request a\nrollover to a FRESH conversation — a new surface has an empty composer\nwhere a verified replace is trivial — instead of retrying into the\nsame site-re-restored poisoned draft forever.\n\nTest-harness truth fixed along the way: the continuity fake lacked\nmarkGenerationStarted, so every 'successful' send threw post-effect\nand the old always-retry canWake silently masked it; the over-specific\nmessage assertion now accepts both documented wake variants.\n\nTests: glm-composer-resolution-verified-type-repair.test.mjs grows to\n16 contract tests (atomic-gesture verified/append/unprovable paths,\nsingle-insertText invariant, D-K5 throttle unit, D-K7 rollover e2e).\nFull suite: 2402 pass / 0 fail / 2 skip. npm run check clean.",
+      "tree": {
+        "sha": "442f4d25071a239c1282697408ae72b02994edd5",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/442f4d25071a239c1282697408ae72b02994edd5"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/fc6d8331b2666e0844967497ae81f9f5fed7c633",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fc6d8331b2666e0844967497ae81f9f5fed7c633",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/fc6d8331b2666e0844967497ae81f9f5fed7c633",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/fc6d8331b2666e0844967497ae81f9f5fed7c633/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "800aea42592281c1cc8e7fc4f0c3c4d00aba15a9",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/800aea42592281c1cc8e7fc4f0c3c4d00aba15a9",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/800aea42592281c1cc8e7fc4f0c3c4d00aba15a9"
+      }
+    ]
+  }
+]

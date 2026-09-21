@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "14b4997eb4b406542b87ae6db7961d9f2212af3c",
+    "node_id": "C_kwDOT_OzB9oAKDE0YjQ5OTdlYjRiNDA2NTQyYjg3YWU2ZGI3OTYxZDlmMjIxMmFmM2M",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-09-03T18:25:17Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "PatrickFrome@users.noreply.github.com",
+        "date": "2026-09-03T18:36:12Z"
+      },
+      "message": "feat(browser): W3+W4 headroom contracts — per-role tab quota, read-only census probe, orphan sweep, bounded running-observation fan-out\n\n- tab-registry v2: immutable USER/FLEET role per tab; FLEET ceiling 16 of the\n  shared 32-tab wall (user reservation 16); read-only census() probe with\n  per-role/per-kind counts, headroom, fleet tab ids; census embedded in every\n  published snapshot; TAB_CENSUS shell command (never createTab)\n- fleet-provisioner-core v1.5.0: optional read-only census dependency; census\n  gate blocks provisioning at ceiling/wall WITHOUT doomed createTab attempts\n  (same deterministic no-effect posture, same release contract); RETIRED\n  history bounded to 64 rows on restart (ambiguous evidence never pruned)\n- fleet-elastic-governor v1.1.0: census-grounded physical_worker_tabs; shrink\n  surplus computed from the TRUE physical pool; execution boundary unchanged\n- main: role wiring for fleet tabs, bounded orphan FLEET-tab sweep (4/cycle),\n  census in supervisor state\n- devos cycle core: running-observation fan-out 1->4 per heartbeat with\n  per-task failure isolation (result_ready_batch); all-failed error surface\n  preserved; census fed to the elastic plan\n- 17 new contract tests; full suite 839/839; npm run check green; version\n  0.6.6-dev.10.1",
+      "tree": {
+        "sha": "7fb5e872d7343e27c8c6ef1dfc4f5f8f08ccf663",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/7fb5e872d7343e27c8c6ef1dfc4f5f8f08ccf663"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/14b4997eb4b406542b87ae6db7961d9f2212af3c",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/14b4997eb4b406542b87ae6db7961d9f2212af3c",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/14b4997eb4b406542b87ae6db7961d9f2212af3c",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/14b4997eb4b406542b87ae6db7961d9f2212af3c/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "804d196b61b4a04549e0f19ae0760f13376082dd",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/804d196b61b4a04549e0f19ae0760f13376082dd",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/804d196b61b4a04549e0f19ae0760f13376082dd"
+      }
+    ]
+  }
+]

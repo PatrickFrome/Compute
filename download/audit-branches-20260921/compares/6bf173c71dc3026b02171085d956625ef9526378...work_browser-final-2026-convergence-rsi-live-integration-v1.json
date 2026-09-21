@@ -1,0 +1,186 @@
+{
+  "url": "https://api.github.com/repos/PatrickFrome/Compute/compare/6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-live-integration-v1",
+  "html_url": "https://github.com/PatrickFrome/Compute/compare/6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-live-integration-v1",
+  "permalink_url": "https://github.com/PatrickFrome/Compute/compare/PatrickFrome:6bf173c...PatrickFrome:df3903f",
+  "diff_url": "https://github.com/PatrickFrome/Compute/compare/6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-live-integration-v1.diff",
+  "patch_url": "https://github.com/PatrickFrome/Compute/compare/6bf173c71dc3026b02171085d956625ef9526378...work/browser-final-2026-convergence-rsi-live-integration-v1.patch",
+  "base_commit": {
+    "sha": "6bf173c71dc3026b02171085d956625ef9526378",
+    "node_id": "C_kwDOT_OzB9oAKDZiZjE3M2M3MWRjMzAyNmIwMjE3MTA4NWQ5NTY2MjVlZjk1MjYzNzg",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T19:20:52Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-20T19:20:52Z"
+      },
+      "message": "Merge pull request #938 from PatrickFrome/work/browser-closed-loop-audit-fixes-v1\n\nfix(browser): closed-loop audit — memory loop, emergency transport, deferred-rollover escape, fleet scale, Mission Control work graph",
+      "tree": {
+        "sha": "14f33bdea69f48ff43b9ef759409a4edad67a575",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/14f33bdea69f48ff43b9ef759409a4edad67a575"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/6bf173c71dc3026b02171085d956625ef9526378",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqsDIUCRC1aQ7uu5UhlAAAXJIQAHrmdNicvMNh0F9wMzAwWi2f\nYghrm6xeaOs5fgXFoBKW/QR/i/SBih7anhEcvR6ScY1W8f7Fob12KtnELB8L8CXf\nrOkBUfi2d2SQw4/+2c5u8TPtxDOSuSlFC69E6SNxU55lkdzeMmxIvVYZg18OMPo3\nh7V56UyAzmfLy2rv06Qk0G25nSF6mxOKIqHouo+dz8Wu4auBjIUsxewlLH0t7oO2\naKxUZrAlAnHuZ+CeAaJtKk6OLgc8Jof8DbRoRcr0OdwwAnAksGS5mtyI92TX84jz\n8fRzsv7jfIBORQaTWEPBrZ4LQsmKl0MWbixLu+f4g9gZYwrDFNzUUfubtUNR61CO\nc9jZtRq/luO175Be23xEx19nbtvvNdPrcaa2FvQ/3zV+Bn1Mc6s1OMDsaKvOc43x\nZVVQ/VbG5wxuO3wa966S1JptMEEEQGmNCK+C86H7/DQwssfIIqpKOUvZWrgD70aA\n2k93hcomcRvp4sfzILex+b0adPm/ejonleo4mwlRmMpjhtY1sTJL8/yJzs9v0JJC\n8MTW6XHSPKnBuaPsUtrQQmwoJqBQxTWleL0J9mc+vtaG7kY7ZjD8B3L+Ezb9ABfy\nERnPuUnPudeW0WopvefsNJ7vH9tJVDnAhMiylIriN1+W5+99DPp3d2VcxVx+MIYB\nYmxk33FXZsPT1SJalP0m\n=xrMe\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree 14f33bdea69f48ff43b9ef759409a4edad67a575\nparent 2e50ed1212edd294f1d90d23b265d31ead672fa3\nparent a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2\nauthor PatrickFrome <igradolius@gmail.com> 1789932052 +0300\ncommitter GitHub <noreply@github.com> 1789932052 +0300\n\nMerge pull request #938 from PatrickFrome/work/browser-closed-loop-audit-fixes-v1\n\nfix(browser): closed-loop audit — memory loop, emergency transport, deferred-rollover escape, fleet scale, Mission Control work graph",
+        "verified_at": "2026-09-20T19:20:53Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6bf173c71dc3026b02171085d956625ef9526378",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/6bf173c71dc3026b02171085d956625ef9526378",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6bf173c71dc3026b02171085d956625ef9526378/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "2e50ed1212edd294f1d90d23b265d31ead672fa3",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2e50ed1212edd294f1d90d23b265d31ead672fa3",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/2e50ed1212edd294f1d90d23b265d31ead672fa3"
+      },
+      {
+        "sha": "a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/a5db15a3adae97eb01596a9a26a5ef43fbb8bcb2"
+      }
+    ]
+  },
+  "merge_base_commit": {
+    "sha": "df3903fddd302a0c9e78cb8813eb0006a607aa13",
+    "node_id": "C_kwDOT_OzB9oAKGRmMzkwM2ZkZGQzMDJhMGM5ZTc4Y2I4ODEzZWIwMDA2YTYwN2FhMTM",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T01:09:02Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T01:09:02Z"
+      },
+      "message": "feat(rsi): wire RSI runtime into live release line (selective integration)\n\nSelective reconstruction step 2: port the RSI integration hunks onto the\nrelease-line versions of four shared files. main.mjs gains the RsiRuntimeService\nstartup step, state projection, outcome attribution helper, and the\nonRsiOutcomeReadback ingest hook. native-supervisor-client-base.mjs gains the\nimmutable result-delivery adapter path with batch ambiguity reconciliation,\nthe outcome readback sidecar, and the transport-ambiguity fence that never\nmanufactures a second FAILED receipt. The supervisor edge gains the\n/v1/commands/:id/receipt readback route with capability projection, and the\ngovernance preview gains per-ref concurrency cancellation.\n\nAll other pre-existing files remain byte-identical to the live release line\n(release/self-update-ambiguity-live-v2 at 322be784). Full Browser Node suite:\n3216 pass / 0 fail / 2 platform skips.",
+      "tree": {
+        "sha": "0bd042b7f4e6be2f474dee8f26d9a107d7fd3729",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/0bd042b7f4e6be2f474dee8f26d9a107d7fd3729"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/df3903fddd302a0c9e78cb8813eb0006a607aa13",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/df3903fddd302a0c9e78cb8813eb0006a607aa13",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/df3903fddd302a0c9e78cb8813eb0006a607aa13",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/df3903fddd302a0c9e78cb8813eb0006a607aa13/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "d09d5516bf22966cc872b05e9f7d142dbb52f72b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d09d5516bf22966cc872b05e9f7d142dbb52f72b",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/d09d5516bf22966cc872b05e9f7d142dbb52f72b"
+      }
+    ]
+  },
+  "status": "behind",
+  "ahead_by": 0,
+  "behind_by": 32,
+  "total_commits": 0,
+  "commits": [
+
+  ],
+  "files": [
+
+  ]
+}

@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f",
+    "node_id": "C_kwDOT_OzB9oAKDY1YjBhOGQyNGZmNDE4YmZiYzJlYmRlYzhkMjcwMGY4ZjI1M2IyMmY",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-29T06:16:33Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-29T06:16:33Z"
+      },
+      "message": "docs(browser): record R15 graceful-drain hardening",
+      "tree": {
+        "sha": "70218110acbe8cf29e7622d4cd69b9058ee8722a",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/70218110acbe8cf29e7622d4cd69b9058ee8722a"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/65b0a8d24ff418bfbc2ebdec8d2700f8f253b22f/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "cc29635bad4115923d284de63a62b7cdf8371c7c",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/cc29635bad4115923d284de63a62b7cdf8371c7c",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/cc29635bad4115923d284de63a62b7cdf8371c7c"
+      }
+    ]
+  }
+]

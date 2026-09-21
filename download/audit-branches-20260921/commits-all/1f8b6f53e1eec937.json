@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "d0df13420e5425f2f6c033951a60cf6ed009fd9f",
+    "node_id": "C_kwDOT_OzB9oAKGQwZGYxMzQyMGU1NDI1ZjJmNmMwMzM5NTFhNjBjZjZlZDAwOWZkOWY",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-18T20:25:19Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-18T20:25:19Z"
+      },
+      "message": "ci(browser): assert the GLM agent platform origin in the installed chat qualification\n\nThe clean-genesis preconnect arms AGENT_PLATFORM_HOME_URL (chat.z.ai) after the\nGLM 5.3 agent platform migration; the Windows installed chat qualification\nstill required the chatgpt.com origin, so the release evidence gate failed.\nAlign the qualification assertion and proof origin with the migrated platform.",
+      "tree": {
+        "sha": "41c069a33852625b2c3a257d695be7901dcfef3e",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/41c069a33852625b2c3a257d695be7901dcfef3e"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/d0df13420e5425f2f6c033951a60cf6ed009fd9f",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d0df13420e5425f2f6c033951a60cf6ed009fd9f",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/d0df13420e5425f2f6c033951a60cf6ed009fd9f",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d0df13420e5425f2f6c033951a60cf6ed009fd9f/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "581ac788cee0c6656fb5f1d3b6dd3f273feaec5c",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/581ac788cee0c6656fb5f1d3b6dd3f273feaec5c",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/581ac788cee0c6656fb5f1d3b6dd3f273feaec5c"
+      }
+    ]
+  }
+]

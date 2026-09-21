@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "e7f8acd3b40c02be323b94a7e5f82a3010cc615f",
+    "node_id": "C_kwDOT_OzB9oAKGU3ZjhhY2QzYjQwYzAyYmUzMjNiOTRhN2U1ZjgyYTMwMTBjYzYxNWY",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-24T08:44:06Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-08-24T08:44:06Z"
+      },
+      "message": "docs(v4): document two-agent peer relay mode",
+      "tree": {
+        "sha": "26446d67902bd386d41b3aac2ca445777846b2f3",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/26446d67902bd386d41b3aac2ca445777846b2f3"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/e7f8acd3b40c02be323b94a7e5f82a3010cc615f",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e7f8acd3b40c02be323b94a7e5f82a3010cc615f",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/e7f8acd3b40c02be323b94a7e5f82a3010cc615f",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/e7f8acd3b40c02be323b94a7e5f82a3010cc615f/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "91e32a616a1afaa204b92deb12f6fc4ace655032",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/91e32a616a1afaa204b92deb12f6fc4ace655032",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/91e32a616a1afaa204b92deb12f6fc4ace655032"
+      }
+    ]
+  }
+]

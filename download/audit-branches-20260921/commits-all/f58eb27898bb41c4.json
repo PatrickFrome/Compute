@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "7f1a4e04bba30884d16c633c54123ac71c3f9564",
+    "node_id": "C_kwDOT_OzB9oAKDdmMWE0ZTA0YmJhMzA4ODRkMTZjNjMzYzU0MTIzYWM3MWMzZjk1NjQ",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-19T15:37:38Z"
+      },
+      "committer": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-19T15:37:38Z"
+      },
+      "message": "fix(rsi): reconverge Phase35 pre-effect readback",
+      "tree": {
+        "sha": "a9d2cdadc3bb5fad6208a4652f069e90baf10986",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/a9d2cdadc3bb5fad6208a4652f069e90baf10986"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/7f1a4e04bba30884d16c633c54123ac71c3f9564",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7f1a4e04bba30884d16c633c54123ac71c3f9564",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/7f1a4e04bba30884d16c633c54123ac71c3f9564",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7f1a4e04bba30884d16c633c54123ac71c3f9564/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "d6ecbeef5771728d0dc3d9cb5968ba2d99811e52",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d6ecbeef5771728d0dc3d9cb5968ba2d99811e52",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/d6ecbeef5771728d0dc3d9cb5968ba2d99811e52"
+      }
+    ]
+  }
+]

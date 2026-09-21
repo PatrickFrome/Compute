@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "5dadb946dc28b07cf0c7d9dfd85d2dd7228d1f45",
+    "node_id": "C_kwDOT_OzB9oAKDVkYWRiOTQ2ZGMyOGIwN2NmMGM3ZDlkZmQ4NWQyZGQ3MjI4ZDFmNDU",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T16:20:38Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T16:20:38Z"
+      },
+      "message": "feat(infra): Pigsty DB integration — rootless PG17 appliance + Supabase evacuation restore kit\n\n- conf/: canonical pigsty-tuning.conf (cron.use_background_workers=on for the\n  no-IPv4-localhost sandbox, wal_level=logical for supabase_realtime) + pg_hba\n- bin/: pg-start/stop/restart/status + env.sh (PIGSTY_ROOT-overridable)\n- bootstrap/: 01 rootless PG17 from Debian debs, 02 pgmq/pg_net/supabase_vault\n  builds, 03 restore (dump or sql) with live-learned post-fixes, 04 manifest\n  row-count verify\n- smoke.sh: 13-point cluster health check\n- APP-INTEGRATION.md: edge DB_URL switch + client-constants A/B runbook\n- RESTORE-REPORT-20260920.md: 264-table diff (256 exact, 8 forward-drift on\n  hot tables), storage 1831/1831, cron fix record",
+      "tree": {
+        "sha": "f156c341c86750686d5c6cc27fac55c5744bb073",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/f156c341c86750686d5c6cc27fac55c5744bb073"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/5dadb946dc28b07cf0c7d9dfd85d2dd7228d1f45",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5dadb946dc28b07cf0c7d9dfd85d2dd7228d1f45",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/5dadb946dc28b07cf0c7d9dfd85d2dd7228d1f45",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5dadb946dc28b07cf0c7d9dfd85d2dd7228d1f45/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "7ea17c6544f34aadc2bbb5f68f23130b3984cb78",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/7ea17c6544f34aadc2bbb5f68f23130b3984cb78",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/7ea17c6544f34aadc2bbb5f68f23130b3984cb78"
+      }
+    ]
+  }
+]

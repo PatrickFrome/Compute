@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+    "node_id": "C_kwDOT_OzB9oAKDMyZTFkZWQxZThlYzlhMDBiM2U4NmQ2Y2MxNDE0MmI5NzE3MGZjM2U",
+    "commit": {
+      "author": {
+        "name": "GLM DevOS",
+        "email": "glm@metaengine.dev",
+        "date": "2026-09-05T11:47:38Z"
+      },
+      "committer": {
+        "name": "GLM DevOS",
+        "email": "glm@metaengine.dev",
+        "date": "2026-09-05T11:47:38Z"
+      },
+      "message": "feat(browser): native supervisor command fastlane — sub-second command pickup\n\nLive-host measurement (2026-09-05): command pickup was cycle-bound at\n7.8-336 s (one lease per full supervisor cycle of ~20-40 s) while execution\nitself is a stable ~2.4 s. The chat/supervisor control plane could not act\nwithout multi-second-to-minute delays.\n\n- NEW src/native-supervisor-command-fastlane.mjs: transport-only command\n  pickup loop on the same signed /v1/commands/next lease endpoint\n  (750 ms cadence, bounded exponential backoff 1.5s->8s, reset on success,\n  stop-on-self-update, no polling while unenrolled).\n- native-supervisor-client-base.mjs: unified #pickupAndRunCommand guarded by\n  a local command slot shared by the supervisor cycle and the fastlane;\n  start()/stop() lifecycle; command_fastlane snapshot telemetry with explicit\n  invariant flags (command_pickup_transport_only, scheduler_authority false,\n  command_execution_exclusive local_slot_plus_db_lease_transactional).\n- main.mjs opts the shell in (commandFastlane: true, 750 ms).\n- Opt-in default-off: zero behavior change for existing consumers.\n- Version 0.6.6-dev.16.1. Tests: 9 new (cadence pickup, slot deferral,\n  backoff, stop, cycle-pickup regression, wiring contracts); full suite\n  1056/1056 green; npm run check green.\n- docs/browser-command-fastlane-v1.md: measured problem, invariant amendment\n  analysis, brain-side NOTIFY companion channel, follow-ups (issue-gate\n  freshness vs heartbeat cadence).",
+      "tree": {
+        "sha": "0129c9e7377d31fa64b7caba795243521059a1a7",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/0129c9e7377d31fa64b7caba795243521059a1a7"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/32e1ded1e8ec9a00b3e86d6cc14142b97170fc3e/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "6ab6d0186adf3fa8cd8c75a987b934223a0067ca",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/6ab6d0186adf3fa8cd8c75a987b934223a0067ca",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/6ab6d0186adf3fa8cd8c75a987b934223a0067ca"
+      }
+    ]
+  }
+]

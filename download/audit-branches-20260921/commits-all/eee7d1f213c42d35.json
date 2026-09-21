@@ -1,0 +1,84 @@
+[
+  {
+    "sha": "0ceedb4470e53d7dd944473bd7aeac71e7e8c222",
+    "node_id": "C_kwDOT_OzB9oAKDBjZWVkYjQ0NzBlNTNkN2RkOTQ0NDczYmQ3YWVhYzcxZTdlOGMyMjI",
+    "commit": {
+      "author": {
+        "name": "github-actions[bot]",
+        "email": "41898282+github-actions[bot]@users.noreply.github.com",
+        "date": "2026-09-08T10:59:32Z"
+      },
+      "committer": {
+        "name": "github-actions[bot]",
+        "email": "41898282+github-actions[bot]@users.noreply.github.com",
+        "date": "2026-09-08T10:59:32Z"
+      },
+      "message": "fix(browser): finalize dark workspace contracts",
+      "tree": {
+        "sha": "3eae4a04105cdf849c3f00eeb7c27eddddeb368b",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/3eae4a04105cdf849c3f00eeb7c27eddddeb368b"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/0ceedb4470e53d7dd944473bd7aeac71e7e8c222",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0ceedb4470e53d7dd944473bd7aeac71e7e8c222",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/0ceedb4470e53d7dd944473bd7aeac71e7e8c222",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/0ceedb4470e53d7dd944473bd7aeac71e7e8c222/comments",
+    "author": {
+      "login": "github-actions[bot]",
+      "id": 41898282,
+      "node_id": "MDM6Qm90NDE4OTgyODI=",
+      "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+      "html_url": "https://github.com/apps/github-actions",
+      "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "github-actions[bot]",
+      "id": 41898282,
+      "node_id": "MDM6Qm90NDE4OTgyODI=",
+      "avatar_url": "https://avatars.githubusercontent.com/in/15368?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/github-actions%5Bbot%5D",
+      "html_url": "https://github.com/apps/github-actions",
+      "followers_url": "https://api.github.com/users/github-actions%5Bbot%5D/followers",
+      "following_url": "https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}",
+      "gists_url": "https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/github-actions%5Bbot%5D/subscriptions",
+      "organizations_url": "https://api.github.com/users/github-actions%5Bbot%5D/orgs",
+      "repos_url": "https://api.github.com/users/github-actions%5Bbot%5D/repos",
+      "events_url": "https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/github-actions%5Bbot%5D/received_events",
+      "type": "Bot",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "2f8d3e09ba41ceac7f4fd49d86640b501e011731",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/2f8d3e09ba41ceac7f4fd49d86640b501e011731",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/2f8d3e09ba41ceac7f4fd49d86640b501e011731"
+      }
+    ]
+  }
+]

@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "b63eba3c26fccf0d429b666d37efa5c6fc1c12f0",
+    "node_id": "C_kwDOT_OzB9oAKGI2M2ViYTNjMjZmY2NmMGQ0MjliNjY2ZDM3ZWZhNWM2ZmMxYzEyZjA",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T00:07:10Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-20T00:07:10Z"
+      },
+      "message": "Merge pull request #921 from PatrickFrome/work/browser-final-2026-convergence-rsi-r10-runtime-exposure-preview-v1\n\nfeat(rsi): add zero-effect runtime exposure governance preview",
+      "tree": {
+        "sha": "f11a2065ddfd52d2c62553dbb028d9e6be3aea3e",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/f11a2065ddfd52d2c62553dbb028d9e6be3aea3e"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/b63eba3c26fccf0d429b666d37efa5c6fc1c12f0",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqryOuCRC1aQ7uu5UhlAAAyncQAA4JDv9M2v5VQ+yrHmNZk+UF\niOdV8iUeHCJma7u6c17R0GTSfGhdYLXt4/1VyovbigKxtKJdhMTW6ZIvtqiS/qCp\n194Sqb2Mxv6n0wTWE/bcLeU3A/LfElIOUXeOe3H3XoNbgS1f/wWtNs/Qp1IkG1mz\neBsY4Uz4Ni8w4VNeyLLN4Prk26quYnJChn6WkHmppU61QK3kulj+rBlPi4sJfMzf\nBBTkMYz2D71lCM8VigNWRhHRkR4buzrRQ9bSpysx3wYby0A1DEQ3i9LPuKJb6Ilp\nrkEL90C6tFT8WtSASs4LN7B9IC4RuVZogEkLWLTpGdqN9UfD8ZPHmdYwVXqRD5y7\nr2UsjhjopBAIPqeJtksrKS1EmjapnqjVO6LFgUlSpbgNGNEW724RpbFYbfER1rwr\nyGW3Rac5BvSktSfMnwmL54ftqOHfek2PwvwVimL6OvGhVY5TYex4EATplV4dL5y3\n9y36zUwQkOVeos/8Gn6Vap6bdUSxOKiH5QQVmDla5DdJj0dVReytz/gQBiC2M1ey\nfS/5YXFmRviqNtz72fp8mR/g0j8yrFQISWC//uFcynQg/HaZJIJjc+jpOaetB9BI\nsJZ8ZdGWmXgHkpb1hPMXPhpCclo63UxoorLr+qyXe3CoDyO6c46J8pyfu0nbNAhO\n6FZb1p+E67z139nTQQN8\n=f1I9\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree f11a2065ddfd52d2c62553dbb028d9e6be3aea3e\nparent 13f90afc6698e32d1629aa39b5b8ffca0413b1cf\nparent 5e142d364e2dd9cb9167fe9830cdad9b4b6f476a\nauthor PatrickFrome <igradolius@gmail.com> 1789862830 +0300\ncommitter GitHub <noreply@github.com> 1789862830 +0300\n\nMerge pull request #921 from PatrickFrome/work/browser-final-2026-convergence-rsi-r10-runtime-exposure-preview-v1\n\nfeat(rsi): add zero-effect runtime exposure governance preview",
+        "verified_at": "2026-09-20T00:07:11Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b63eba3c26fccf0d429b666d37efa5c6fc1c12f0",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/b63eba3c26fccf0d429b666d37efa5c6fc1c12f0",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b63eba3c26fccf0d429b666d37efa5c6fc1c12f0/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "13f90afc6698e32d1629aa39b5b8ffca0413b1cf",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/13f90afc6698e32d1629aa39b5b8ffca0413b1cf",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/13f90afc6698e32d1629aa39b5b8ffca0413b1cf"
+      },
+      {
+        "sha": "5e142d364e2dd9cb9167fe9830cdad9b4b6f476a",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/5e142d364e2dd9cb9167fe9830cdad9b4b6f476a",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/5e142d364e2dd9cb9167fe9830cdad9b4b6f476a"
+      }
+    ]
+  }
+]

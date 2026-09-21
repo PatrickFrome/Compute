@@ -1,0 +1,44 @@
+[
+  {
+    "sha": "1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a",
+    "node_id": "C_kwDOT_OzB9oAKDFlNDNhZDhlOWEzOGEyMmUxZGM1M2E2OTNkZGFmNDM0MGE1MDNkMWE",
+    "commit": {
+      "author": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T11:27:51Z"
+      },
+      "committer": {
+        "name": "Z User",
+        "email": "z@container",
+        "date": "2026-09-20T11:27:51Z"
+      },
+      "message": "feat(browser): unified Work Graph — objective activation, admission resume, cross-plane projection (T2-5)\n\nCloses the last two Closed Production Loop coordination breaks (work->execution\nand coordination->unification) with four operator-facing pieces:\n\n1. Edge POST /v1/devos/resume-admission -> devos_environment_resume_v1: the\n   designed exit from the fail-closed admission fence. Operator-confirmed,\n   generation-floor CAS is the authority (SQL), stale floor -> 409, before/\n   after readback in the response.\n2. Edge POST /v1/meta/objective -> compileMetaObjectivePlan (NEW\n   src/meta-objective-compiler.mjs) + meta_orchestrator_plan_activate_v1: the\n   operator door the disabled superstep activatePlan stub was waiting for.\n   Compiles the objective against the CURRENT roadmap authority (baseline\n   binding, alignment epoch, plan_generation CAS, companion-suffix rejection,\n   dependency DAG validation with cycle detection, recursive scheduler-\n   identity key scan mirroring the SQL jsonb_path_exists guards, string-only\n   constraints/capabilities).\n3. Shell commands DEVOS_RESUME / DEVOS_OBJECTIVE_SET via two new public\n   client methods (devosResumeAdmission / metaObjectiveSet) on the same\n   device-signed supervisor rail.\n4. Unified Work Graph projection: the browser stamps its cross-plane epochs\n   (fleet generation epochs, supervisor mesh epoch, cognitive causal-stream\n   cursor) on the /v1/devos/cycle body; the edge composes the Objective->\n   Milestone->Task->Claim->Effect view model (one bounded plan-snapshot read,\n   leader-independent, never gates the cycle) and the cycle record carries it\n   into the supervisor snapshot for the shell.\n\nTests: NEW test/devos-work-graph.test.mjs (15 tests: compiler contracts,\nobjective route happy/400/409, resume CAS happy/confirm/mismatch, work-graph\nprojection composition + degradation, cycle response carry, client transport,\nshell wiring pins). Full suite: 3279 pass / 0 fail / 2 skipped. npm run check\ngreen (compiler + meta-routes added to the chain).",
+      "tree": {
+        "sha": "a84ab0384e5b11bd70fb7c37c6a7b95ce6378877",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/a84ab0384e5b11bd70fb7c37c6a7b95ce6378877"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a",
+      "comment_count": 0,
+      "verification": {
+        "verified": false,
+        "reason": "unsigned",
+        "signature": null,
+        "payload": null,
+        "verified_at": null
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/1e43ad8e9a38a22e1dc53a693ddaf4340a503d1a/comments",
+    "author": null,
+    "committer": null,
+    "parents": [
+      {
+        "sha": "d1c0de553f42137025f3b52d5c926887021088bc",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/d1c0de553f42137025f3b52d5c926887021088bc",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/d1c0de553f42137025f3b52d5c926887021088bc"
+      }
+    ]
+  }
+]

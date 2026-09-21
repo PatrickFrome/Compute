@@ -1,0 +1,89 @@
+[
+  {
+    "sha": "4d3e9831b37b7fc619b410a9ea6183ee7c541245",
+    "node_id": "C_kwDOT_OzB9oAKDRkM2U5ODMxYjM3YjdmYzYxOWI0MTBhOWVhNjE4M2VlN2M1NDEyNDU",
+    "commit": {
+      "author": {
+        "name": "PatrickFrome",
+        "email": "igradolius@gmail.com",
+        "date": "2026-09-20T00:07:24Z"
+      },
+      "committer": {
+        "name": "GitHub",
+        "email": "noreply@github.com",
+        "date": "2026-09-20T00:07:24Z"
+      },
+      "message": "Merge pull request #920 from PatrickFrome/work/browser-final-2026-convergence-rsi-r9-deterministic-lineage-v1\n\nfeat(rsi): converge deterministic provenance, graduation hold, and durability",
+      "tree": {
+        "sha": "f11a2065ddfd52d2c62553dbb028d9e6be3aea3e",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/git/trees/f11a2065ddfd52d2c62553dbb028d9e6be3aea3e"
+      },
+      "url": "https://api.github.com/repos/PatrickFrome/Compute/git/commits/4d3e9831b37b7fc619b410a9ea6183ee7c541245",
+      "comment_count": 0,
+      "verification": {
+        "verified": true,
+        "reason": "valid",
+        "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJqryO8CRC1aQ7uu5UhlAAAmmwQAHPvQ5hIyn3kLK6vogHqxMKP\nvOw6FB+bjGI8WKpFwCpsvUizbC5dtAVR9GA1PmeeF9iZzO9qezUU+1BTCghtBi0e\nXVj1xFGgd2o3kbdUJa6kvie4BkepvsrOG32z6cSZFKsmNV+R/X+frcCUC4AI5TmY\nRafpcTgzHVJH7QrDdfwpXRKJUF23mRQzW81FtjjqTSbafziXzbPfivmhk2LhKsaJ\n8WlOT/IZgnQMa4bYVQubYokqGQEWZqzlFr1mb5UaJ4Klu9Mr5j6YfRtmJn+ftO6C\nAsPW1B1s1WfzHWG8hUmSgcc8few5se5e26vICJWy2gZxRbSBFoKUyk82DQaOhfCx\nQ41UaP/K+idBBsioymMaAcRtbSMPZAFN4vPZOoa40w4lj3gzSs+3k+MPZO+gkBlG\nk/C4JP9poGdqXTfYesPaUtDnmkNbv/n//yt/rLQrTJG34wZPvQcI6S6C7zfvwkgQ\n29g3wc0dPBJ/G9ceH+toos+Ju2cnKZ6/h9N0Lremn54ilwsSihLByEZ3TrFA9giB\nJ7vCZdUJtSw3GnOD8eHVJt+tvsc5wB8YM36LFAoGAZzQR4Ln8MpdBDu48eDAKy61\n0sd77Xvx46PFJI+t5kBkOHnUJVUsZWOIn4jr36bzv3pWF1SI/hPUzIMSUSxcZsFC\nkSFGU7ad8fDWh0hozon5\n=SLkj\n-----END PGP SIGNATURE-----\n",
+        "payload": "tree f11a2065ddfd52d2c62553dbb028d9e6be3aea3e\nparent 3a4ddceb2c211d9edd45f51139b84fbcbbee9d80\nparent b63eba3c26fccf0d429b666d37efa5c6fc1c12f0\nauthor PatrickFrome <igradolius@gmail.com> 1789862844 +0300\ncommitter GitHub <noreply@github.com> 1789862844 +0300\n\nMerge pull request #920 from PatrickFrome/work/browser-final-2026-convergence-rsi-r9-deterministic-lineage-v1\n\nfeat(rsi): converge deterministic provenance, graduation hold, and durability",
+        "verified_at": "2026-09-20T00:07:24Z"
+      }
+    },
+    "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4d3e9831b37b7fc619b410a9ea6183ee7c541245",
+    "html_url": "https://github.com/PatrickFrome/Compute/commit/4d3e9831b37b7fc619b410a9ea6183ee7c541245",
+    "comments_url": "https://api.github.com/repos/PatrickFrome/Compute/commits/4d3e9831b37b7fc619b410a9ea6183ee7c541245/comments",
+    "author": {
+      "login": "PatrickFrome",
+      "id": 20597814,
+      "node_id": "MDQ6VXNlcjIwNTk3ODE0",
+      "avatar_url": "https://avatars.githubusercontent.com/u/20597814?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/PatrickFrome",
+      "html_url": "https://github.com/PatrickFrome",
+      "followers_url": "https://api.github.com/users/PatrickFrome/followers",
+      "following_url": "https://api.github.com/users/PatrickFrome/following{/other_user}",
+      "gists_url": "https://api.github.com/users/PatrickFrome/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/PatrickFrome/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/PatrickFrome/subscriptions",
+      "organizations_url": "https://api.github.com/users/PatrickFrome/orgs",
+      "repos_url": "https://api.github.com/users/PatrickFrome/repos",
+      "events_url": "https://api.github.com/users/PatrickFrome/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/PatrickFrome/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "committer": {
+      "login": "web-flow",
+      "id": 19864447,
+      "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+      "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/web-flow",
+      "html_url": "https://github.com/web-flow",
+      "followers_url": "https://api.github.com/users/web-flow/followers",
+      "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+      "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+      "organizations_url": "https://api.github.com/users/web-flow/orgs",
+      "repos_url": "https://api.github.com/users/web-flow/repos",
+      "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/web-flow/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "parents": [
+      {
+        "sha": "3a4ddceb2c211d9edd45f51139b84fbcbbee9d80",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/3a4ddceb2c211d9edd45f51139b84fbcbbee9d80",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/3a4ddceb2c211d9edd45f51139b84fbcbbee9d80"
+      },
+      {
+        "sha": "b63eba3c26fccf0d429b666d37efa5c6fc1c12f0",
+        "url": "https://api.github.com/repos/PatrickFrome/Compute/commits/b63eba3c26fccf0d429b666d37efa5c6fc1c12f0",
+        "html_url": "https://github.com/PatrickFrome/Compute/commit/b63eba3c26fccf0d429b666d37efa5c6fc1c12f0"
+      }
+    ]
+  }
+]
