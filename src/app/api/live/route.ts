@@ -1,10 +1,15 @@
 import { cloudConfigured, cloudLatestState } from "@/lib/cloud";
+import { getLiveSnapshot, setLiveSnapshot } from "@/lib/live-cache";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/live — live browser supervisor snapshot (cloud plane).
  * Read-only: latest state row → normalized heartbeat / self-update / fleet / tabs.
+ *
+ * Resilience: on cloud failure the last-known-good snapshot is served with
+ * `stale: true` + `staleMs` instead of a bare 502 — the browser itself is
+ * almost always healthier than the network path to the cloud.
  */
 export async function GET() {
   if (!cloudConfigured()) {
@@ -54,9 +59,10 @@ export async function GET() {
       byKind[k] = (byKind[k] ?? 0) + 1;
     }
 
-    return Response.json({
+    const payload = {
       ok: true,
       configured: true,
+      stale: false,
       live: {
         clientId: row.client_id,
         lastSeenAt: row.last_seen_at,
@@ -97,8 +103,20 @@ export async function GET() {
         },
       },
       at: new Date().toISOString(),
-    });
+    };
+    setLiveSnapshot(payload);
+    return Response.json(payload);
   } catch (e) {
+    const cached = getLiveSnapshot();
+    if (cached.snapshot && !cached.tooOld) {
+      return Response.json({
+        ...cached.snapshot,
+        stale: true,
+        staleMs: cached.staleMs,
+        staleAt: cached.fetchedAt,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
     return Response.json(
       { ok: false, configured: true, error: e instanceof Error ? e.message : String(e) },
       { status: 502 },

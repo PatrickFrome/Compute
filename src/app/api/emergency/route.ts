@@ -54,7 +54,19 @@ export async function GET() {
         revokedAt: deviceActive.rows[0]?.revoked_at ?? null,
         enrolledAt: deviceActive.rows[0]?.enrolled_at ?? null,
       },
-      emergencyCommands: emergencyRows.rows,
+      emergencyCommands: emergencyRows.rows.map((r) => ({
+        commandId: r.command_id != null ? String(r.command_id) : null,
+        action: r.action != null ? String(r.action) : "",
+        status: r.status != null ? String(r.status) : "",
+        commandLane: r.command_lane != null ? String(r.command_lane) : null,
+        targetClientId: r.target_client_id != null ? String(r.target_client_id) : null,
+        issuedBy: r.issued_by != null ? String(r.issued_by) : "",
+        issuedAt: r.issued_at != null ? new Date(String(r.issued_at)).toISOString() : null,
+        completedAt: r.completed_at != null ? new Date(String(r.completed_at)).toISOString() : null,
+        expiresAt: r.expires_at != null ? new Date(String(r.expires_at)).toISOString() : null,
+        leasedBy: r.leased_by != null ? String(r.leased_by) : null,
+        error: r.error != null ? String(r.error) : null,
+      })),
       runs: globalForEmergency.__mcEmergencyLog ?? [],
     });
   } catch (e) {

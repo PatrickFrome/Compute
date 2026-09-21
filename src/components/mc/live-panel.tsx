@@ -64,6 +64,9 @@ interface LivePayload {
   live: LiveSnapshot | null;
   error?: string;
   at?: string;
+  stale?: boolean;
+  staleMs?: number;
+  staleAt?: string;
 }
 
 interface CmdResult {
@@ -169,6 +172,16 @@ export function LivePanel({ poll }: { poll: PollState<LivePayload> }) {
                 <LiveDot ok={hb.dot} pulse={hb.dot} />
                 <span className={`font-mono text-xs font-bold tracking-[0.18em] ${hb.cls}`}>{hb.label}</span>
                 <span className="font-mono text-[10px] text-zinc-600">heartbeat {formatMs(live!.heartbeatMs)} ago</span>
+                {d?.stale && (
+                  <Badge
+                    variant="outline"
+                    title={`last-known-good snapshot from cloud, cached ${d.staleMs != null ? formatMs(d.staleMs) : "?"} ago${d.error ? ` · last error: ${d.error}` : ""}`}
+                    className="border-amber-800/60 bg-amber-500/10 font-mono text-[9px] text-amber-300"
+                    data-testid="live-stale-badge"
+                  >
+                    CACHED (cloud unreachable)
+                  </Badge>
+                )}
               </>
             ) : (
               <span className="font-mono text-xs text-zinc-500">{poll.loading ? "loading…" : d?.error ?? "no state row"}</span>

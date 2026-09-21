@@ -31,6 +31,13 @@ const STATUS_STYLES: Record<string, string> = {
   CANCELLED: "border-zinc-500/40 bg-zinc-500/10 text-zinc-400",
   REVOKED: "border-rose-500/40 bg-rose-500/10 text-rose-300",
   PLANNED: "border-zinc-500/40 bg-zinc-500/10 text-zinc-400",
+  IN_PROGRESS: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  DONE: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  BLOCKED: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+  QUEUED: "border-zinc-500/40 bg-zinc-500/10 text-zinc-400",
+  READY: "border-teal-500/40 bg-teal-500/10 text-teal-300",
+  RESULT_READY: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  AMBIGUOUS: "border-amber-500/40 bg-amber-500/10 text-amber-300",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {

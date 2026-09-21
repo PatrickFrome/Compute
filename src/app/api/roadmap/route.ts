@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [milestones, releases] = await Promise.all([
+    const [milestones, releases, fleetTasks] = await Promise.all([
       query(
         `select roadmap_id, milestone_key, status, phase_order, priority, updated_at,
                 verified_checkpoint_id
@@ -16,7 +16,43 @@ export async function GET() {
          from destruktion_meta.compute_fabric_canonical_roadmap_release_h205f22
          order by created_at desc limit 10`,
       ),
+      query(
+        `select task_id, point_id, role, state, priority, created_at, updated_at, finished_at,
+                left(coalesce(task_spec->>'objective',''), 160) as objective
+         from destruktion_meta.devos_fleet_task_h205f22
+         where point_id like 'roadmap.%'
+         order by created_at desc
+         limit 200`,
+      ).catch(() => ({ rows: [], rowCount: 0 })),
     ]);
+
+    // latest fleet task per milestone (point_id = 'roadmap.<milestone_key>')
+    interface MilestoneTask {
+      taskId: string;
+      milestoneKey: string;
+      role: string;
+      state: string;
+      priority: number;
+      createdAt: string | null;
+      updatedAt: string | null;
+      finishedAt: string | null;
+      objective: string | null;
+    }
+    const tasks: MilestoneTask[] = fleetTasks.rows.map((r) => ({
+      taskId: String(r.task_id ?? ""),
+      milestoneKey: String(r.point_id ?? "").replace(/^roadmap\./, ""),
+      role: String(r.role ?? ""),
+      state: String(r.state ?? "?"),
+      priority: r.priority === null ? null : Number(r.priority),
+      createdAt: r.created_at ? new Date(String(r.created_at)).toISOString() : null,
+      updatedAt: r.updated_at ? new Date(String(r.updated_at)).toISOString() : null,
+      finishedAt: r.finished_at ? new Date(String(r.finished_at)).toISOString() : null,
+      objective: r.objective ? String(r.objective) : null,
+    }));
+    const latestByMilestone = new Map<string, MilestoneTask>();
+    for (const t of tasks) {
+      if (!latestByMilestone.has(t.milestoneKey)) latestByMilestone.set(t.milestoneKey, t);
+    }
 
     const byStatus: Record<string, number> = {};
     for (const m of milestones.rows) {
@@ -26,14 +62,30 @@ export async function GET() {
 
     return Response.json({
       ok: true,
-      milestones: milestones.rows.map((r) => ({
-        key: String(r.milestone_key),
-        status: String(r.status ?? "UNKNOWN"),
-        phase: r.phase_order === null ? null : Number(r.phase_order),
-        priority: r.priority === null ? null : String(r.priority),
-        updatedAt: r.updated_at ? new Date(String(r.updated_at)).toISOString() : null,
-      })),
+      milestones: milestones.rows.map((r) => {
+        const key = String(r.milestone_key);
+        const t = latestByMilestone.get(key) ?? null;
+        return {
+          key,
+          status: String(r.status ?? "UNKNOWN"),
+          phase: r.phase_order === null ? null : Number(r.phase_order),
+          priority: r.priority === null ? null : String(r.priority),
+          updatedAt: r.updated_at ? new Date(String(r.updated_at)).toISOString() : null,
+          verifiedCheckpointId: r.verified_checkpoint_id ? String(r.verified_checkpoint_id) : null,
+          task: t
+            ? {
+                taskId: t.taskId,
+                role: t.role,
+                state: t.state,
+                priority: t.priority,
+                updatedAt: t.updatedAt,
+                finishedAt: t.finishedAt,
+              }
+            : null,
+        };
+      }),
       statusSummary: byStatus,
+      tasks,
       releases: releases.rows.map((r) => ({
         roadmapKey: String(r.roadmap_key ?? ""),
         version: r.version === null ? null : String(r.version),

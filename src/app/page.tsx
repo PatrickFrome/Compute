@@ -77,7 +77,7 @@ export default function Home() {
   const fleet = usePoll("/api/fleet", interval ?? 15000);
   const live = usePoll<LivePayload>("/api/live", interval ?? 15000);
   const mechanics = usePoll<MechanicsData>("/api/mechanics", null);
-  const roadmap = usePoll("/api/roadmap", null);
+  const roadmap = usePoll("/api/roadmap", interval ?? 15000);
   const fallback = usePoll<FallbackData>("/api/fallback", interval ?? 15000);
 
   // Alt+1..8 — quick tab navigation (hint in footer)
