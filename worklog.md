@@ -5656,3 +5656,22 @@ Work Log:
 Stage Summary:
 - Полный цикл выполнен: релиз со всеми изменениями → тесты (3347 green) → live self-update ×2 изнутри → старые агенты удалены терминально → 10 новых на GLM-5.3-Flash с дефолтным доступом к БД/контексту.
 - Извлечённые уроки: (1) retire-гонка = единственный способ дренировать self-healing fleet; (2) environment reset непроходим при живом браузере (mesh heartbeat); (3) concurrency-коллизии CI на рельсе лечатся реранами; (4) desired_agents не переживает рестарт — после каждого self-update флот нужно дорастать командой FLEET_RECONCILE.
+
+---
+Task ID: CRON-ROUND-20260921-0630
+Agent: main (Super Z, крон-раунд)
+Task: Оценка состояния, agent-browser/API QA, приоритетный фикс или фича, worklog.
+
+Work Log:
+- QA-находка #1: 6 агентов застряли в BOUND_UNVERIFIED ~40 мин после капсульного рестарта (вкладки, созданные 8-бурстом в окно qualification, не давали фреймов для transport proof; RELOAD не помог). Лечение: CLOSE_TAB (полные tab_id! первая попытка с обрезанными id промахнулась) → LOST → операторский FLEET_RECONCILE {active:true,target_agents:10} → re-provision свежими вкладками → 9/10 ACTIVE (последний дозревал). Урок: при demand=0 план governor'а сам опускает desired до live — восстанавливать флот надо активным reconcile с явным таргетом.
+- ФИЧА (главный результат раунда): operator fleet target persistence — boot_fleet_target.
+  * Боль: каждый self-update рестарт сбрасывал desired_agents в 0 (startup policy), флот сжимался до demand, оператор вручную дорастал флот после каждого релиза.
+  * Механика: normalizePolicy носит boot_fleet_target (clamp [0,64], мусор→0); setOperatorFleetTarget() вызывается ТОЛЬКО для операторских FLEET_RECONCILE payload'ов (main.mjs отличает их от плана governor'а по маркеру schema=metaengine.browser.fleet-elastic-plan.v1 — demand-планы никогда не захватывают boot seed); sanitizeLoadedState поднимает startup desired из загруженного seed; boot делает ОДИН активный reconcile при target>0 (restart-stale LOST не занимают слоты → спавнится свежий флот).
+  * Governor остаётся live-authority: desired перезаписывается планом каждый цикл, ACTIVE никогда не форс-ретайрятся.
+  * Тесты: persistence suite 6/6; полный сьют 3353:3351 pass/0 fail/2 skipped.
+- Релиз-цикл: PR #942 merged → rail db5c83db → CI 36/36 (без коллизий) → релиз v0.7.0-dev.35566784091.1 опубликован 06:14Z → live браузер сам обновился (hint 2с) → операторский FLEET_RECONCILE {target_agents:10} на новой версии → boot_fleet_target=10 ПЕРСИСТИРОВАН (проверено в state.policy) → флот 10/10 ACTIVE.
+
+Stage Summary:
+- ПРОД-СОСТОЯНИЕ: браузер v0.7.0-dev.35566784091.1, флот 10/10 ACTIVE на GLM-5.3-Flash, капсула доступа в каждом dispatch-промпте, boot_fleet_target=10 персистентен — следующий self-update восстановит флот АВТОМАТИЧЕСКИ.
+- Все 3 релиза за сессию (35558710582.1 / 35563167437.1 / 35566784091.1) прошли полный контур: PR → CI 36/36 → publish → автономный self-update → верификация в cloud state.
+- Риски/следующее: (1) EXPIRED-receipt при спавне >TTL — брать TTL 300+ для больших спавнов или фоновый job-паттерн; (2) RSI-долг r14/r8d (124 патча) всё ещё вне rail; (3) валидировать восстановление флота при СЛЕДУЮЩЕМ self-update (естественный тест фичи); (4) консоль: добавить Fleet-панель поверх boot_fleet_target/desired (кнопка "Set target" через командную плоскость).
