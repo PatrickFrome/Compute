@@ -120,3 +120,47 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── METAENGINE Mission Control additions ─────────────────────── */
+
+.mc-scroll::-webkit-scrollbar,
+.mc-terminal::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.mc-scroll::-webkit-scrollbar-track,
+.mc-terminal::-webkit-scrollbar-track {
+  background: rgba(39, 39, 42, 0.5);
+  border-radius: 8px;
+}
+.mc-scroll::-webkit-scrollbar-thumb,
+.mc-terminal::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.45);
+  border-radius: 8px;
+  border: 1px solid rgba(39, 39, 42, 0.8);
+}
+.mc-scroll::-webkit-scrollbar-thumb:hover,
+.mc-terminal::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.55);
+}
+.mc-scroll::-webkit-scrollbar-corner,
+.mc-terminal::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* terminal scanline + glow */
+.mc-terminal {
+  background-image: linear-gradient(rgba(16, 185, 129, 0.025) 1px, transparent 1px);
+  background-size: 100% 2px;
+  text-shadow: 0 0 6px rgba(16, 185, 129, 0.25);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* header subtle grid backdrop */
+.mc-header-grid {
+  background-image:
+    linear-gradient(rgba(113, 113, 122, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(113, 113, 122, 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
