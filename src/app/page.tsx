@@ -10,6 +10,7 @@ import { CommandsPanel } from "@/components/mc/commands-panel";
 import { EmergencyLanePanel } from "@/components/mc/emergency-panel";
 import { CognitiveBusPanel } from "@/components/mc/cognitive-panel";
 import { FleetPanel } from "@/components/mc/fleet-panel";
+import { MechanicsPanel } from "@/components/mc/mechanics-panel";
 import { RoadmapPanel } from "@/components/mc/roadmap-panel";
 import { E2ePanel } from "@/components/mc/e2e-panel";
 import { usePoll, timeAgo, formatMs } from "@/components/mc/use-poll";
@@ -23,7 +24,7 @@ const REFRESH_OPTIONS = [
 ];
 
 const TAB_ORDER = [
-  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "roadmap", "lab",
+  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "mechanics", "roadmap", "lab",
 ] as const;
 
 interface OverviewData {
@@ -34,6 +35,20 @@ interface OverviewData {
 }
 interface EnrollmentData {
   requests: { requestId: string; status: string }[];
+}
+interface MechanicsData {
+  ok: boolean;
+  contour: {
+    db_h205f22_objects: number;
+    rpc: { core_rpcs?: number; h205f22_rpcs?: number; devos_rpcs?: number };
+    wake_triggers: string[];
+    runtime_control: Record<string, unknown>;
+    probe_device: Record<string, unknown>;
+    edge: Record<string, unknown>;
+  };
+  mechanics: { id: string; name: string; verdict: string; probe: string; source: string }[];
+  gaps: { id: string; title: string; severity: string; status: string; closure: string }[];
+  generatedAt: string;
 }
 
 export default function Home() {
@@ -47,6 +62,7 @@ export default function Home() {
   const emergency = usePoll("/api/emergency", interval ?? 15000);
   const cognitive = usePoll("/api/cognitive", interval ?? 15000);
   const fleet = usePoll("/api/fleet", interval ?? 15000);
+  const mechanics = usePoll<MechanicsData>("/api/mechanics", null);
   const roadmap = usePoll("/api/roadmap", null);
 
   // Alt+1..8 — quick tab navigation (hint in footer)
@@ -54,7 +70,7 @@ export default function Home() {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey) return;
       const n = Number(e.key);
-      if (Number.isInteger(n) && n >= 1 && n <= TAB_ORDER.length) {
+      if (Number.isInteger(n) && n >= 1 && n <= 9) {
         e.preventDefault();
         setTab(TAB_ORDER[n - 1]);
       }
@@ -163,6 +179,7 @@ export default function Home() {
               Cognitive Bus
             </TabsTrigger>
             <TabsTrigger value="fleet" className="font-mono text-[11px] data-[state=active]:bg-teal-500/15 data-[state=active]:text-teal-300">DevOS Fleet</TabsTrigger>
+            <TabsTrigger value="mechanics" data-testid="tab-mechanics" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">Mechanics</TabsTrigger>
             <TabsTrigger value="roadmap" className="font-mono text-[11px] data-[state=active]:bg-zinc-700 data-[state=active]:text-zinc-200">Roadmap</TabsTrigger>
             <TabsTrigger value="lab" data-testid="tab-lab" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">E2E Lab</TabsTrigger>
           </TabsList>
@@ -185,6 +202,9 @@ export default function Home() {
           <TabsContent value="fleet" className="mt-0 outline-none">
             <FleetPanel poll={fleet as unknown as Parameters<typeof FleetPanel>[0]["poll"]} />
           </TabsContent>
+          <TabsContent value="mechanics" className="mt-0 outline-none">
+            <MechanicsPanel poll={mechanics as unknown as Parameters<typeof MechanicsPanel>[0]["poll"]} />
+          </TabsContent>
           <TabsContent value="roadmap" className="mt-0 outline-none">
             <RoadmapPanel poll={roadmap as unknown as Parameters<typeof RoadmapPanel>[0]["poll"]} />
           </TabsContent>
@@ -201,9 +221,9 @@ export default function Home() {
             <span className="text-zinc-500">Compute rsi-contour</span> · rail release/self-update-ambiguity-live-v2 @ 6bf173c7 · release v0.7.0-dev.35532004761.1
           </p>
           <p className="flex items-center gap-3 font-mono text-[10px] text-zinc-600" data-testid="footer-status">
-            <span className="hidden sm:inline text-zinc-700">Alt+1..8 tabs</span>
+            <span className="hidden sm:inline text-zinc-700">Alt+1..9 tabs</span>
             <span className="hidden sm:inline text-zinc-800">│</span>
-            <span>schema 103/103 + cursor</span>
+            <span>schema 103/103 + cursor + fleet v9</span>
             <span className="text-zinc-800">│</span>
             <span>E2E 10/10 (last audit)</span>
             <span className="text-zinc-800">│</span>
