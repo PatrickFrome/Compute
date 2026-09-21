@@ -56,8 +56,7 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
     { tab_id: 'fleet_tab', url: FLEET_URL, selected: false },
   ];
   let bootstrapCreated = 0;
-  let semanticSubmit = 0;
-  let typed = '';
+  const submits = [];
   let bootstrapGenerating = false;
 
   const getState = async () => ({
@@ -76,7 +75,11 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
     if (action === 'CAPTURE') {
       if (tabId === 'fleet_tab') return idleFrame(FLEET_URL);
       if (tabId.startsWith('bootstrap_')) {
-        return bootstrapGenerating ? generatingFrame(BOOTSTRAP_URL, typed) : idleFrame(ROOT_URL, typed);
+        // Mirror the real surface: the capture reflects the tab's CURRENT URL
+        // (the seed submit navigates root → conversation).
+        const row = tabs.find((tab) => tab.tab_id === tabId);
+        const url = row?.url ?? ROOT_URL;
+        return bootstrapGenerating ? generatingFrame(url, submits.at(-1) ?? '') : idleFrame(url, submits.at(-1) ?? '');
       }
       if (tabId === 'user_root') return idleFrame(ROOT_URL);
       throw new Error(`unexpected_capture:${tabId}`);
@@ -84,16 +87,19 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
     if (action === 'SEMANTIC_TYPE') {
       assert.equal(tabId, 'bootstrap_1');
       assert.equal(command.payload?.submit_after_type, true);
-      semanticSubmit += 1;
-      typed = String(command.payload?.text || '');
-      bootstrapGenerating = true;
+      const text = String(command.payload?.text || '');
+      submits.push(text);
+      // R-SUP-SEED: the tiny conversation seed's READY reply settles quickly
+      // (the runtime drains generation before the real send); the full wake
+      // reply keeps the surface generating for the session monitor.
+      bootstrapGenerating = text.length >= 1000;
       const tab = tabs.find((row) => row.tab_id === tabId);
       tab.url = BOOTSTRAP_URL;
       return {
         effect_state: 'PROVEN_NEW_CONVERSATION',
         event_driven_readback: true,
         url: BOOTSTRAP_URL,
-        text_excerpt: typed,
+        text_excerpt: text,
         semantic_targets: [{ role: 'button', name: 'Stop generating' }],
         authority_effect: true,
       };
@@ -116,8 +122,13 @@ test('authoritative OPEN bootstraps one dedicated root into the first bound supe
 
   const snap = runtime.snapshot();
   assert.equal(bootstrapCreated, 1);
-  assert.equal(semanticSubmit, 1);
-  assert.match(typed, /METAENGINE_SUPERVISOR_WAKE_V1/);
+  // R-SUP-SEED: the root surface is proven with the tiny conversation seed
+  // FIRST, then the real wake types into the proven conversation.
+  assert.equal(submits.length, 2);
+  assert.ok(submits[0].includes('SUPERVISOR CONVERSATION SEED'), 'the seed proves the root conversation first');
+  assert.ok(submits[0].length < 1000, 'the seed stays far below any site-side oversize refusal threshold');
+  assert.match(submits[1], /METAENGINE_SUPERVISOR_WAKE_V1/);
+  assert.match(submits.at(-1), /METAENGINE_SUPERVISOR_WAKE_V1/);
   assert.equal(snap.keepalive.conversation_url, BOOTSTRAP_URL);
   assert.equal(snap.keepalive.tab_id, 'bootstrap_1');
   assert.equal(snap.keepalive.state, 'ACTIVE');
@@ -134,7 +145,7 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
   const { dir, statePath } = await tempStatePath('metaengine-bootstrap-ambiguous-');
   const tabs = [{ tab_id: 'user_root', url: ROOT_URL, selected: true }];
   let bootstrapCreated = 0;
-  let semanticSubmit = 0;
+  const submits = [];
 
   const getState = async () => ({ tabs: structuredClone(tabs), fleet: { agents: [] } });
   const executeCommand = async (command) => {
@@ -148,7 +159,7 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
     }
     if (action === 'CAPTURE') return idleFrame(ROOT_URL);
     if (action === 'SEMANTIC_TYPE') {
-      semanticSubmit += 1;
+      submits.push(String(command.payload?.text || ''));
       return { suppressed: true, reason: 'TYPE_EFFECT_AMBIGUOUS', authority_effect: false };
     }
     if (action === 'TYPED_CLICK') throw new Error('ambiguous semantic submit must never fall through to a second click');
@@ -175,7 +186,8 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
   // retirement is a bounded superstep: state RECOVERING, no pending wake.
   const snap = runtime.snapshot();
   assert.equal(bootstrapCreated, 1);
-  assert.equal(semanticSubmit, 1);
+  assert.equal(submits.length, 1, 'the suppressed seed is the only submit — the wake is never typed');
+  assert.ok(submits[0].includes('SUPERVISOR CONVERSATION SEED'), 'the seed gate fences the wake behind a proven conversation');
   assert.equal(snap.keepalive.state, 'RECOVERING');
   assert.equal(snap.keepalive.pending_wake, null, 'the fenced wake was retired by proof');
   assert.equal(snap.keepalive.conversation_url, null);
@@ -188,7 +200,7 @@ test('ambiguous bootstrap is fenced after one submit and cannot create a second 
   await runtime.cycle({ force: true });
   const snap2 = runtime.snapshot();
   assert.equal(bootstrapCreated, 2, 'one fresh root after proof-based retirement');
-  assert.equal(semanticSubmit, 2, 'one submit per wake, no blind retry');
+  assert.equal(submits.length, 2, 'one seed submit per wake, no blind retry');
   assert.notEqual(snap2.keepalive.pending_wake?.wake_id, retiredWakeId,
     'a fresh wake replaced the retired one');
   assert.equal(snap2.keepalive.pending_wake?.automatic_retry_allowed, false);

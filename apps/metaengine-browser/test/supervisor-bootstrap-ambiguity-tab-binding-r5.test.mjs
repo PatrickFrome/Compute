@@ -146,13 +146,17 @@ async function makeRuntime({ seed = null, tabs = [], frames = {}, onSubmit = nul
   return { runtime, actions, statePath, liveTabs };
 }
 
-test('bootstrap ambiguity durably records its own tab (BOOTSTRAP_WITHOUT_CONVERSATION_BINDING)', async () => {
+test('bootstrap ambiguity durably records its own tab (seed-unproven pre-binding)', async () => {
   const { runtime, statePath } = await makeRuntime({
     tabs: [{ tab_id: 'user_root', url: ROOT_URL, selected: true }],
     frames: { user_root: rootFrame({}) },
-    // boot_* tabs get the default root frame: the submit is proven but the
-    // surface never navigates to /c/<id> and the transcript never shows the
-    // marker — the live deadlock entry conditions.
+    // boot_* tabs get the default root frame: the submit reports proven but
+    // the surface never navigates to /c/<id> — with the R-SUP-SEED medicine
+    // the SEED's conversation-URL readback now fails first, so the wake is
+    // never typed and the ambiguity is recorded as ROOT_SEED_CONVERSATION_
+    // NOT_PROVEN (conservatively ambiguous, clicked=true — the seed DID
+    // submit). The durable contract under test is unchanged: the ambiguity
+    // records its OWN continuation tab so recovery can observe it.
   });
   const snap = await runtime.start();
   // The bootstrap must have run (fresh state, research wake queued) and gone
@@ -160,7 +164,7 @@ test('bootstrap ambiguity durably records its own tab (BOOTSTRAP_WITHOUT_CONVERS
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
   assert.equal(snap.keepalive.state, 'WAKE_AMBIGUOUS');
   assert.ok(durable.pending_wake, 'pending wake exists');
-  assert.equal(durable.pending_wake.ambiguous_reason, 'BOOTSTRAP_WITHOUT_CONVERSATION_BINDING');
+  assert.equal(durable.pending_wake.ambiguous_reason, 'ROOT_SEED_CONVERSATION_NOT_PROVEN');
   assert.equal(typeof durable.pending_wake.ambiguity_continuation_tab_id, 'string');
   assert.ok(durable.pending_wake.ambiguity_continuation_tab_id.startsWith('boot_'),
     `continuation tab recorded, got: ${durable.pending_wake.ambiguity_continuation_tab_id}`);
@@ -271,7 +275,10 @@ test('failed continuation with the exact dead draft retires the wake and closes 
   assert.equal(snap.keepalive.pending_wake, null, 'seeded wake retired');
   snap = await runtime.cycle({ force: true });
   assert.notEqual(snap.keepalive.pending_wake?.wake_id, WAKE_ID, 'fresh wake bound instead');
-  assert.equal(submits, 1, 'only the fresh bootstrap submit, no blind retry of the dead wake');
+  // R-SUP-SEED: the fresh bootstrap now submits TWO commands — the tiny
+  // conversation seed (which proves the root surface: the boot_ frames flip
+  // to the conversation after the first submit) and the real wake message.
+  assert.equal(submits, 2, 'seed proves the root surface, then the fresh bootstrap wake — no blind retry of the dead wake');
   assert.ok(actions.includes('CLOSE_TAB'), 'the dead draft tab was closed by proof');
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
   const retired = (durable.ambiguous_history || []).find((row) => row.wake_id === WAKE_ID);

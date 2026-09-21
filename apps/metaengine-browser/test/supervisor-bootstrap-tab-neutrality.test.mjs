@@ -43,14 +43,14 @@ function rootFrame() {
     semantic_targets: [{ role: 'textbox', name: 'Message ChatGPT', semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'r'.repeat(64) }, backend_node_id: 11 }],
   };
 }
-function convFrame() {
+function convFrame({ generating = true } = {}) {
   return {
     url: CONV_URL,
     title: 'ChatGPT',
     text_excerpt: '',
     semantic_targets: [
       { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + '1'.repeat(64) }, backend_node_id: 3 },
-      { role: 'button', name: 'Stop generating' },
+      ...(generating ? [{ role: 'button', name: 'Stop generating' }] : []),
     ],
   };
 }
@@ -277,6 +277,7 @@ test('successful bootstrap clears the stale supervisor_bootstrap pre-effect erro
   const statePath = path.join(dir, 'keepalive.json');
   await writeDurableState(statePath);
   const reg = makeRegistry();
+  const convCaptures = new Map();
   let sessionLive = false;
   const getState = async () => ({ tabs: reg.tabs.map((t) => ({ ...t })), fleet: { agents: [] } });
   const executeCommand = async (command) => {
@@ -287,7 +288,12 @@ test('successful bootstrap clears the stale supervisor_bootstrap pre-effect erro
       const url = tab?.url || '';
       if (url === AUTH_URL) return authFrame();
       if (url === ROOT_URL) return rootFrame();
-      return convFrame();
+      // R-SUP-SEED: the conversation surface settles its seed reply after the
+      // first observed capture — the runtime's bounded generation drain must
+      // see an idle surface before typing the real message.
+      const n = (convCaptures.get(tab.tab_id) || 0) + 1;
+      convCaptures.set(tab.tab_id, n);
+      return convFrame({ generating: n < 2 });
     }
     if (command.action === 'SEMANTIC_TYPE') {
       reg.setUrl(String(command.payload?.tab_id || ''), CONV_URL);

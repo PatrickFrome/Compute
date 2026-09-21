@@ -105,7 +105,7 @@ test('process-boundary bootstrap ambiguity retires predecessor and reuses one cl
   assert.equal(snap.keepalive.ambiguous_history[0].wake_id, OLD_WAKE);
   assert.equal(snap.keepalive.ambiguous_history[0].retired_reason, 'PROCESS_BOUNDARY_ORIGINAL_BOOTSTRAP_TARGET_LOST');
   assert.equal(snap.keepalive.ambiguous_history[0].automatic_retry_allowed, false);
-  assert.equal(typed(), 1);
+  assert.equal(typed(), 2, "R-SUP-SEED: seed submit proves the root, then the wake submits into it");
   assert.equal(actions.includes('NEW_TAB'), false);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
   assert.equal(durable.pending_wake, null);
@@ -147,7 +147,7 @@ test('multi-hop process restarts retain a durable wake-local fence and recover w
   assert.equal(snap.keepalive.ambiguous_history[0].wake_id, OLD_WAKE);
   assert.ok(snap.keepalive.ambiguous_history[0].process_boundary_fenced_at);
   assert.equal(snap.keepalive.ambiguous_history[0].automatic_retry_allowed, false);
-  assert.equal(typed(), 1);
+  assert.equal(typed(), 2, "R-SUP-SEED: seed submit proves the root, then the wake submits into it");
   assert.equal(actions.includes('NEW_TAB'), false);
   const durable = JSON.parse(await fs.readFile(statePath, 'utf8'));
   assert.equal(durable.pending_wake, null);
