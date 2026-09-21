@@ -1,3 +1,7 @@
-2026/09/21-20:48:39.022 74f9 Reusing MANIFEST /home/z/my-project/mini-services/agent-factory/browser-data/Default/Local Storage/leveldb/MANIFEST-000001
-2026/09/21-20:48:39.029 74f9 Recovering log #4
-2026/09/21-20:48:39.029 74f9 Reusing old log /home/z/my-project/mini-services/agent-factory/browser-data/Default/Local Storage/leveldb/000004.log 
+2026/09/21-22:03:50.639 1b21 Reusing MANIFEST /home/z/my-project/mini-services/agent-factory/browser-data/Default/Local Storage/leveldb/MANIFEST-000001
+2026/09/21-22:03:50.647 1b21 Recovering log #7
+2026/09/21-22:03:50.648 1b21 Level-0 table #9: started
+2026/09/21-22:03:50.649 1b21 Level-0 table #9: 6130 bytes OK
+2026/09/21-22:03:50.649 1b21 Recovering log #9
+2026/09/21-22:03:50.649 1b21 Reusing old log /home/z/my-project/mini-services/agent-factory/browser-data/Default/Local Storage/leveldb/000009.log 
+2026/09/21-22:03:50.649 1b21 Delete type=0 #7
