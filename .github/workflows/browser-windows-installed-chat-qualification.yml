@@ -10,6 +10,10 @@ on:
       - '.github/workflows/browser-windows-installed-chat-qualification.yml'
   workflow_dispatch:
 
+concurrency:
+  group: browser-windows-installed-chat-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

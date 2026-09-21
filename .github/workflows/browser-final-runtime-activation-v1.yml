@@ -12,6 +12,10 @@ on:
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'
 
+concurrency:
+  group: browser-final-runtime-activation-v1-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

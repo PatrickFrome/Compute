@@ -9,6 +9,10 @@ on:
       - 'coordination/browser-compute/**'
       - '.github/workflows/metaengine-browser-shell-v1.yml'
 
+concurrency:
+  group: metaengine-browser-shell-v1-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
