@@ -6092,3 +6092,20 @@ Work Log:
 Stage Summary:
 - Решение за оператором: вариант A/B/C пересборки. Рекомендовано: B→C→A (сначала убрать вкладок-агентов через API-провайдеры, затем TUI/CLI, затем Tauri-оболочка).
 - Аналоги (запрошено через запятую): Claude Code, Aider, Kilo Code, Cursor, GitHub Copilot, Windsurf, Cline, Continue, Ollama, OpenCode, Codex, Kiro, Roo Code, Pi, Kodik.
+
+---
+Task ID: REBUILD-2-BLUEPRINT-20260922
+Agent: main (Super Z)
+Task: Уточнение оператора — «отойти от Electron в пользу чего-то лучшего, проанализируй браузер и все механики и повтори, полностью пересобрать на другой оболочке с другим дизайном и архитектурой, глубокий ресёрч аналогов 2026».
+
+Work Log:
+- Полный код-аудит hostsrc/Compute-rel через Explore-агента (very thorough): 108,158 строк src (323 файла), Electron 44, 1 BaseWindow + N WebContentsView, CDP через webContents.debugger, 47 действий / 4 полосы, supervisor cycle 2s + wait-batch 4s + fastlane 600ms, fleet planBacklogCapacity, DevOS task cycle 1,483 ln, keepalive 11 состояний, mesh, self-update 3,641 ln, RSI 42,930 ln, UI vanilla 3,388 ln (snapshot-pump + command-channel), транспорт Supabase edge + ECDSA P-256.
+- Ключевой вывод аудита: ~95% кода — чистый Node без import electron; Electron-обязательны только WebContentsView-композиция, safeStorage, app.relaunch/self-update, utilityProcess, protocol.handle.
+- 6 свежих веб-поисков (s15–s20): browser-agent фреймворки 2026 (Browser Use 21k★/89% WebVoyager, Stagehand, Skyvern, Playwright MCP), Tauri 2 зрелость (96% меньше, −75% RAM, дефолт 2026), КРИТИЧЕСКАЯ НАХОДКА: Tauri WebView не имеет CDP на Linux → управляемый браузер обязан быть отдельным Chromium; Rust CDP-клиенты (chromiumoxide №1, cdpkit), agent-console дизайн-референсы (Codex Desktop, Mission Control builderz-labs), fleet-архитектуры (event-driven, task event logs).
+- Финальный blueprint: research/2026/METAENGINE-2-BLUEPRINT.md — (1) полный инвентарь механик; (2) матрица переноса 1:1 (15 строк: пернос/переписывание/отбрасывание); (3) решение по оболочке: Tauri 2 + ME2 daemon (bun sidecar → Rust) + отдельный Chromium --remote-debugging-pipe (паттерн уже есть в coordination/browser-compute); (4) архитектура daemon+консоль, 5 принципов (агент≠вкладка, один владелец состояния, спека вместо чатов, горячий путь локален, минимальное ядро); (5) новый дизайн Mission Control (3 колонки, скринкаст через CDP, ⌘K на 47 действий); (6) роадмап M1–M6, ~2 недели до десктопа без Electron.
+- PURGE: census показал 423 задач (416 AMBIGUOUS, 2 LEASED до 23:00/23:04, 3 RESULT_READY, 2 READY). phase3-reset перезапущен detached (setsid, PID 11552, /tmp/phase3-retry.log): attempt 1 на 22:53 отказал по live mesh/claims (fence поставлен), луп 14×45s должен пройти после 23:04.
+
+Stage Summary:
+- Деливерабл: research/2026/METAENGINE-2-BLUEPRINT.md (+ предыдущий METAENGINE-REBUILD-RESEARCH.md).
+- Решение: Tauri 2 (консоль) + ME2 daemon + Chromium-via-CDP; все браузерные механики воспроизводятся 1:1 (AX-perception, Input-actuation, semantic frames, outcome-latch, вкладки, fleet, DevOS); облако деградирует до evidence-plane.
+- Риск: lease/claims дожимаются только к ~23:04; сброс на 22:53 подтвержден по fence.
