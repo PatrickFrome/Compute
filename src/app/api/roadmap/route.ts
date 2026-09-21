@@ -46,6 +46,8 @@ export async function GET() {
       finishedAt: string | null;
       objective: string | null;
       plane: "cloud" | "local";
+      generation?: number | null;
+      leaseAgentId?: string | null;
     }
 
     const tasks: MilestoneTask[] = [];
@@ -71,6 +73,8 @@ export async function GET() {
             finishedAt: t.finished_at ? new Date(String(t.finished_at)).toISOString() : null,
             objective: null,
             plane: "cloud",
+            generation: Number.isFinite(Number(t.lease_generation)) ? Number(t.lease_generation) : null,
+            leaseAgentId: t.lease_agent_id ? String(t.lease_agent_id) : null,
           });
         }
         for (const e of snap.recent_events ?? []) {
@@ -93,6 +97,8 @@ export async function GET() {
             finishedAt: e.created_at ? new Date(String(e.created_at)).toISOString() : null,
             objective: null,
             plane: "cloud",
+            generation: Number.isFinite(Number(e.lease_generation)) ? Number(e.lease_generation) : null,
+            leaseAgentId: null,
           });
         }
       } catch (e) {
@@ -125,6 +131,24 @@ export async function GET() {
       if (!latestByMilestone.has(k)) latestByMilestone.set(k, t);
     }
 
+    // per-milestone generation trail (execution history for the runner UI)
+    const historyByMilestone = new Map<string, MilestoneTask[]>();
+    for (const t of tasks) {
+      const k = t.milestoneKey.toLowerCase();
+      const arr = historyByMilestone.get(k) ?? [];
+      arr.push(t);
+      historyByMilestone.set(k, arr);
+    }
+    for (const arr of historyByMilestone.values()) {
+      arr.sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+      // collapse duplicates (the same task appears in active_tasks AND as a
+      // terminal recent_event) — the last readback in chronological order wins
+      const byTask = new Map<string, MilestoneTask>();
+      for (const t of arr) byTask.set(t.taskId, t);
+      arr.length = 0;
+      arr.push(...byTask.values());
+    }
+
     const byStatus: Record<string, number> = {};
     for (const m of milestones.rows) {
       const s = String(m.status ?? "UNKNOWN");
@@ -137,7 +161,24 @@ export async function GET() {
       cloudError,
       milestones: milestones.rows.map((r) => {
         const key = String(r.milestone_key);
-        const t = latestByMilestone.get(key.toLowerCase()) ?? null;
+        const k = key.toLowerCase();
+        const t = latestByMilestone.get(k) ?? null;
+        const trail = (historyByMilestone.get(k) ?? []).map((h) => ({
+          taskId: h.taskId,
+          state: h.state,
+          generation: h.generation ?? null,
+          leaseAgentId: h.leaseAgentId ?? null,
+          updatedAt: h.updatedAt,
+          finishedAt: h.finishedAt,
+        }));
+        const ambiguousStreak = (() => {
+          let n = 0;
+          for (let i = trail.length - 1; i >= 0; i--) {
+            if (trail[i].state === "AMBIGUOUS") n++;
+            else break;
+          }
+          return n;
+        })();
         return {
           key,
           status: String(r.status ?? "UNKNOWN"),
@@ -156,6 +197,8 @@ export async function GET() {
                 plane: t.plane,
               }
             : null,
+          trail,
+          ambiguousStreak,
         };
       }),
       statusSummary: byStatus,

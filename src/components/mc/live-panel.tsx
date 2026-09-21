@@ -56,6 +56,17 @@ export interface LiveSnapshot {
     agents: LiveAgent[];
   };
   tabs: { total: number; byKind: Record<string, number>; items: LiveTab[] };
+  devos?: {
+    lastError: string | null;
+    idleLastError: string | null;
+    idleLastAt: string | null;
+    idleInFlight: boolean;
+    executionMode: string | null;
+    admissionState: string | null;
+    actuationAllowed: boolean;
+    generationFloor: number | null;
+    toolbeltRequests: number | null;
+  };
 }
 
 interface LivePayload {
@@ -208,6 +219,16 @@ export function LivePanel({ poll }: { poll: PollState<LivePayload> }) {
                   className={`font-mono text-[10px] ${live.selfUpdate.startupRecovery.state === "QUALIFIED" ? "border-emerald-800/60 text-emerald-300" : "border-amber-800/60 text-amber-300"}`}
                 >
                   recovery {live.selfUpdate.startupRecovery.state}
+                </Badge>
+              )}
+              {live.devos && (
+                <Badge
+                  variant="outline"
+                  title={`devos admission=${live.devos.admissionState ?? "?"} actuation=${live.devos.actuationAllowed ? "allowed" : "fenced"} floor=${live.devos.generationFloor ?? "?"} mode=${live.devos.executionMode ?? "?"}${live.devos.lastError ? ` · last error: ${live.devos.lastError}` : ""}${live.devos.idleLastError ? ` · idle error: ${live.devos.idleLastError}` : ""}`}
+                  className={`font-mono text-[10px] ${live.devos.idleLastError || live.devos.lastError ? "border-rose-800/60 text-rose-300" : live.devos.actuationAllowed ? "border-emerald-800/60 text-emerald-300" : "border-amber-800/60 text-amber-300"}`}
+                  data-testid="devos-admission-badge"
+                >
+                  devos {live.devos.actuationAllowed ? "OPEN" : "FENCED"}{live.devos.idleLastError || live.devos.lastError ? " ⚠" : ""}
                 </Badge>
               )}
             </>

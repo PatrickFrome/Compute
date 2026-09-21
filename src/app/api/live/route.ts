@@ -59,6 +59,14 @@ export async function GET() {
       byKind[k] = (byKind[k] ?? 0) + 1;
     }
 
+    // DevOS runtime diagnostics (supervisor_lifecycle.devos_runtime) —
+    // surfaces the browser-side dispatch/cycle error for the last idle kick.
+    const sl = (s.supervisor_lifecycle ?? {}) as Record<string, unknown>;
+    const dr = (sl.devos_runtime ?? {}) as Record<string, unknown>;
+    const drIdle = (dr.idle ?? {}) as Record<string, unknown>;
+    const drAdmission = (dr.admission ?? {}) as Record<string, unknown>;
+    const drToolbelt = (dr.agent_toolbelt ?? {}) as Record<string, unknown>;
+
     const payload = {
       ok: true,
       configured: true,
@@ -100,6 +108,17 @@ export async function GET() {
             title: t.title ? String(t.title) : null,
             url: t.url ? String(t.url) : null,
           })),
+        },
+        devos: {
+          lastError: dr.last_error ? String(dr.last_error) : null,
+          idleLastError: drIdle.last_error ? String(drIdle.last_error) : null,
+          idleLastAt: drIdle.last_at ? String(drIdle.last_at) : null,
+          idleInFlight: drIdle.in_flight === true,
+          executionMode: dr.execution_mode ? String(dr.execution_mode) : null,
+          admissionState: drAdmission.runtime_control_state ? String(drAdmission.runtime_control_state) : null,
+          actuationAllowed: drAdmission.actuation_allowed === true,
+          generationFloor: Number.isFinite(Number(drAdmission.generation_floor)) ? Number(drAdmission.generation_floor) : null,
+          toolbeltRequests: Number.isFinite(Number(drToolbelt.requests_issued)) ? Number(drToolbelt.requests_issued) : null,
         },
       },
       at: new Date().toISOString(),

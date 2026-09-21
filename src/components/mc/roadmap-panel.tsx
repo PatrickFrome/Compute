@@ -23,6 +23,15 @@ interface MilestoneTask {
   plane?: string;
 }
 
+interface TaskTrailEntry {
+  taskId: string;
+  state: string;
+  generation: number | null;
+  leaseAgentId: string | null;
+  updatedAt: string | null;
+  finishedAt: string | null;
+}
+
 interface RoadmapData {
   ok: boolean;
   plane?: "cloud" | "local";
@@ -30,6 +39,7 @@ interface RoadmapData {
   milestones: {
     key: string; status: string; phase: number | null; priority: string | null;
     updatedAt: string | null; verifiedCheckpointId: string | null; task: MilestoneTask | null;
+    trail?: TaskTrailEntry[]; ambiguousStreak?: number;
   }[];
   statusSummary: Record<string, number>;
   tasks: { taskId: string; milestoneKey: string; role: string; state: string; priority: number | null; createdAt: string | null }[];
@@ -271,9 +281,36 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
                         <p className="truncate font-mono text-[11px] text-zinc-300 group-hover:text-emerald-300">{m.key}</p>
                         <p className="font-mono text-[9px] text-zinc-600">
                           phase {m.phase ?? "—"}
-                          {m.task ? ` · ${m.task.role.toLowerCase()} · ${m.task.state.toLowerCase()}` : " · no fleet task"}
-                          {m.task?.updatedAt ? ` · ${timeAgo(m.task.updatedAt)}` : ""}
+                          {m.task ? ` · ${m.task.role.toLowerCase()} · ${m.task.state.toLowerCase()} · ${timeAgo(m.task.updatedAt)}` : " · no fleet task"}
                         </p>
+                        {/* generation trail + ambiguity streak diagnostics */}
+                        {(m.trail && m.trail.length > 0) || (m.ambiguousStreak ?? 0) >= 2 ? (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1" title="per-generation task execution trail (cloud plane)">
+                            {(m.trail ?? []).slice(-5).map((h, i, all) => (
+                              <span
+                                key={`${h.taskId}-${i}`}
+                                title={`task ${h.taskId.slice(0, 8)} · ${h.state}${h.leaseAgentId ? ` · ${h.leaseAgentId.slice(0, 16)}` : ""}`}
+                                className={`rounded border px-1 py-px font-mono text-[8px] ${
+                                  h.state === "AMBIGUOUS" || h.state === "FAILED" || h.state === "BLOCKED"
+                                    ? "border-rose-900/60 bg-rose-500/10 text-rose-300"
+                                    : h.state === "COMPLETED" || h.state === "RESULT_READY" || h.state === "DONE"
+                                      ? "border-emerald-900/60 bg-emerald-500/10 text-emerald-300"
+                                      : "border-teal-900/60 bg-teal-500/10 text-teal-300"
+                                }`}
+                              >
+                                #{Math.max(1, all.length - Math.min(all.length, 5) + i + 1)}:{h.state.toLowerCase().slice(0, 8)}
+                              </span>
+                            ))}
+                            {(m.ambiguousStreak ?? 0) >= 2 && (
+                              <span
+                                className="rounded border border-amber-900/60 bg-amber-500/10 px-1 py-px font-mono text-[8px] text-amber-300"
+                                title={`${m.ambiguousStreak} consecutive ambiguous generations — dispatch never physically completed. Check the browser effect journal (device storage) and composer draft state on the agent tabs; re-dispatch re-runs with a fresh generation.`}
+                              >
+                                ⚠ {m.ambiguousStreak}×ambiguous — dispatch not completing
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
                         <StatusBadge status={m.status} />

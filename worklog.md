@@ -5738,3 +5738,27 @@ Stage Summary:
 - ЗАМКНУТ ПОЛНЫЙ ЦИКЛ ИСПОЛНЕНИЯ: Roadmap milestone → (console dispatch) → CLOUD очередь → browser supervisor cycle → fair-share lease → dispatch-промпт GLM-агенту (с access capsule) → исполнение → TASK_RESULT → auto-sync → milestone DONE/IN_PROGRESS. Вечный цикл наконец накормлен задачами.
 - Инвариант зафиксирован: ЛОКАЛЬНЫЙ PG = rehearsal/наблюдение (console fleet tab, Drive full cycle); ОБЛАКО = исполнение (browser leases here). Любой операторский enqueue с ожиданием реального исполнения обязан идти в облако.
 - Риски/следующее: (1) OOM 4GB — next-server периодически убивается (2 раза за сессию), стоит ограничить память/рестартовать; (2) milestone-статусы обновляются только в ЛОКАЛЬНОМ roadmap store — облако (meta_orchestrator_plan_snapshot_v1) всё ещё видит 28 PLANNED; нужен RPC-мост обновления облачных milestones (или expose destruktion_meta в PostgREST); (3) agent_toolbelt: requests_issued=0 — агенты пока не используют TOOL_REQUEST элевацию; (4) monitored: ждём TASK_RESULT_COMPLETED от 3 агентов → auto-sync должен flip'нуть B0/A1/C10 в DONE (естественный тест auto-sync); (5) RSI-долг r14/r8d вне rail.
+---
+Task ID: CRON-ROUND-20260921-1238
+Agent: main (Super Z, крон-раунд)
+Task: Оценка состояния, agent-browser QA, приоритетный фикс или фича, worklog.
+
+Work Log:
+- ИСХОД: 3 арендованных задачи не завершились. B0: LEASE_EXPIRED_AMBIGUOUS (TTL 900s истёк без эффекта) → sync честно перевернул milestone в BLOCKED; A1/C10 ушли в AMBIGUOUS следом → BLOCKED.
+- РАССЛЕДОВАНИЕ (клиентская слепая зона обойдена high-frequency polling'ом облачного state):
+  * Все 10 fleet-вкладок стояли на chat.z.ai/ ROOT — ни одного нового разговора: физический эффект (ввод промпта) НЕ ПРОИЗОШЁЛ ни разу.
+  * Re-dispatch B0 gen2 + polling каждые 6с ПОЙМАЛ ошибку в devos_runtime.last_error: "fleet_task_root_draft_over_flush_limit:37921" — первый dispatch ВВЁЛ промпт (~38К символов с капсулой) в composer, Enter-сабмит не сработал/не был доказан → промпт ОСТАЛСЯ черновиком в composer; повторный dispatch упирается в flush-guard (лимит 32000, GLM_ROOT_DRAFT_FLUSH_MAX_CHARS) и падает fail-closed.
+  * dev-server третий раз убит OOM — перезапущен.
+- ВОССТАНОВЛЕНИЕ ФЛОТА: RELOAD_TAB отклонён облачным issue-RPC (native_supervisor_action_invalid — allowlist облачной БД уже локального кода); CLOSE_TAB из консоли сработал (3 команды COMPLETED) → governor поднял desired → 2 вкладки перепровижинены (BOUND_UNVERIFIED→ACTIVE, новые чистые composer'ы). FLEET_RECONCILE {target:10} довёл флот до 10/10 ACTIVE.
+- Re-dispatch B0 gen3 на ЧИСТОЙ вкладке: задача LEASED агентом agent_289331d6 (новая вкладка tab_22a666c8), но за 3 мин наблюдения — снова ни разговора, ни ошибки. Инвариент: dispatch-пайплайн браузера между lease и физическим SEMANTIC_TYPE не завершает эффект и молчит (dispatch-состояние НЕ проецируется в devos_runtime observability — слепая зона).
+- ФИЧИ РАУНДА (консоль видит то, что раньше было невидимо):
+  * /api/live: добавлен блок devos (last_error/idle_error/admission/actuation/floor/toolbelt) из supervisor_lifecycle.devos_runtime; Live-панель — бейдж "devos OPEN/FENCED ⚠" с тултипом (стал красным при любой dispatch-ошибке).
+  * /api/roadmap GET: per-milestone TASK TRAIL — полная линейка поколений задач из облачного snapshot (active_tasks + TASK_RESULT_* события, дедуп по task_id, chronological) + ambiguousStreak (подряд идущие AMBIGUOUS).
+  * Roadmap-панель: trail-чипы (#1:ambiguous #2:ambiguous #3:leased с цветовой градацией rose/emerald/teal) + диагностический варнинг "⚠ Nx ambiguous — dispatch not completing" с тултипом-руководством (effect journal в device storage, draft state вкладок, re-dispatch = новое поколение).
+- QA: qa6-01 (trail на Milestone Runner), qa6-02 (devos-бейдж на Live); 0 console errors; lint чист.
+
+Stage Summary:
+- СФОРМУЛИРОВАН И ЗАФИКСИРОВАН ГЛАВНЫЙ БЛОКЕР R3-ЦИКЛА (браузерная сторона): dispatch lease→effect обрывается молча; промпт ~38К вводится в composer, но Enter-сабмит не доказывается → SEND_EFFECT_NOT_PROVEN/AMBIGUOUS; повторные dispatch блокируются flush-guard'ом (37921>32000). Нужен релиз браузера: (1) проецировать dispatch-результат в devos_runtime observability; (2) распознавать СВОЙ отравленный черновик (hash промпта в composer) и безопасно чистить; (3) расширить окно conversation readback (6×700ms мало) / доказывать сабмит по очистке composer'а.
+- Консоль теперь честно показывает исполнение: trail-чипы, ambiguousStreak, devos-бейдж — оператор видит цикл "lease→ambiguity" без копания в БД.
+- Флот восстановлен после дренажа: 10/10 ACTIVE (2 новые вкладки), boot_target=10 персистит.
+- Риски/следующее: (1) РЕЛИЗ БРАУЗЕРА с dispatch-observability + draft self-healing — приоритет #1; (2) облачный issue-RPC allowlist старше локального кода (RELOAD_TAB недоступен) — синхронизировать миграции; (3) OOM 4GB — третий kill за сессию; (4) gen3 B0 (c19d8fb8) в полёте — наблюдать; (5) milestone-статусы в ОБЛАКЕ не обновляются (только локальный store) — RPC-мост.
