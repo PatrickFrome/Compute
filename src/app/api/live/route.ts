@@ -92,7 +92,68 @@ function buildPayload(
   // last lease→effect bootstrap/dispatch outcome + bounded counters. Lets
   // the console show WHY a leased task is (not) producing conversations.
   const drDispatch = (dr.dispatch ?? {}) as Record<string, unknown>;
+  // CP-W1 (2026-09-21 live incident): heartbeat liveness is NOT control-plane
+  // liveness — a wedged cycle keeps the 2s watchdog heartbeat alive while the
+  // command lease / maintenance / self-update stay dead for hours. The browser
+  // (release with CP-W1) publishes a control_plane projection in its state;
+  // the console derives a pump-health verdict from it (null = legacy shell).
+  const cp = (s.control_plane ?? null) as Record<string, unknown> | null;
   const intOrNull = (v: unknown) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Number(v) : null);
+  const isoOrNull = (v: unknown) => (v ? String(v) : null);
+
+  let controlPlane: {
+    schema: string;
+    batchTransport: string | null;
+    leaseLastAttemptAt: string | null;
+    leaseLastOkAt: string | null;
+    leaseConsecutiveFailures: number | null;
+    leaseLastError: string | null;
+    cycleRunning: boolean | null;
+    cycleAgeMs: number | null;
+    schedulerWatchdogRearmCount: number | null;
+    wedgeEscalation: { reason: string; at: string | null } | null;
+    /** "ok" | "stalled" | "failing" | null (null = pre-CP-W1 shell, unknown) */
+    pumpHealth: "ok" | "stalled" | "failing" | null;
+    pumpNote: string | null;
+  } | null = null;
+  if (cp && typeof cp === "object") {
+    const leaseOkAt = isoOrNull(cp.lease_last_ok_at);
+    const leaseOkAgeMs = leaseOkAt ? Math.max(0, now - new Date(leaseOkAt).getTime()) : null;
+    const wedge = (cp.wedge_escalation ?? null) as Record<string, unknown> | null;
+    const cycleRunning = cp.cycle_running === true;
+    const cycleAgeMs = intOrNull(cp.cycle_age_ms);
+    let pumpHealth: "ok" | "stalled" | "failing" | null = "ok";
+    let pumpNote: string | null = null;
+    if (wedge) {
+      pumpHealth = "stalled";
+      pumpNote = `wedge escalation: ${String(wedge.reason ?? "?")}`;
+    } else if (leaseOkAgeMs !== null && leaseOkAgeMs > 90000 && heartbeatMs < 15000) {
+      // heartbeat fresh but zero successful lease RPC for 90s+ → the zombie
+      // divergence exactly as observed live 2026-09-21 14:42→17:40 UTC
+      pumpHealth = "stalled";
+      pumpNote = `heartbeat alive (${Math.round(heartbeatMs)}ms) but lease silent ${Math.round(leaseOkAgeMs / 1000)}s — control-plane wedge`;
+    } else if (intOrNull(cp.lease_consecutive_failures) !== null && Number(cp.lease_consecutive_failures) >= 3) {
+      pumpHealth = "failing";
+      pumpNote = `lease failing ×${Number(cp.lease_consecutive_failures)}: ${String(cp.lease_last_error ?? "")}`.slice(0, 200);
+    } else if (cycleRunning && cycleAgeMs !== null && cycleAgeMs > 120000) {
+      pumpHealth = "stalled";
+      pumpNote = `cycle in flight ${Math.round(cycleAgeMs / 1000)}s — past every bounded path`;
+    }
+    controlPlane = {
+      schema: String(cp.schema ?? "metaengine.native-supervisor.control-plane.v1"),
+      batchTransport: cp.batch_transport ? String(cp.batch_transport) : null,
+      leaseLastAttemptAt: isoOrNull(cp.lease_last_attempt_at),
+      leaseLastOkAt: leaseOkAt,
+      leaseConsecutiveFailures: intOrNull(cp.lease_consecutive_failures),
+      leaseLastError: cp.lease_last_error ? String(cp.lease_last_error) : null,
+      cycleRunning,
+      cycleAgeMs,
+      schedulerWatchdogRearmCount: intOrNull(cp.scheduler_watchdog_rearm_count),
+      wedgeEscalation: wedge ? { reason: String(wedge.reason ?? "?"), at: wedge.at ? String(wedge.at) : null } : null,
+      pumpHealth,
+      pumpNote,
+    };
+  }
 
   const payload = {
     ok: true,
@@ -107,6 +168,7 @@ function buildPayload(
       shellVersion: s.shell_version ? String(s.shell_version) : null,
       armed: s.armed === true,
       supervisorMode: s.supervisor_mode ? String(s.supervisor_mode) : null,
+      controlPlane,
       selfUpdate: {
         state: su.state ? String(su.state) : null,
         startupRecovery: sr

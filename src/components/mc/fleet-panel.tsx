@@ -126,9 +126,12 @@ export function FleetPanel({ poll }: { poll: PollState<FleetData> }) {
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.18em] text-zinc-400">
               <PackagePlus className="h-3.5 w-3.5 text-emerald-400" aria-hidden /> Operator Enqueue (R3)
+              <Badge variant="outline" className="border-amber-800/60 bg-amber-500/10 font-mono text-[9px] text-amber-300" title="эта очередь — локальный репетиционный контур; боевые задачи флоту отправляйте через Roadmap Runner (plane-aware)">
+                REHEARSAL PLANE
+              </Badge>
             </CardTitle>
             <CardDescription className="font-mono text-[10px] text-zinc-600">
-              canonical RPC devos_fleet_enqueue_v1 → admission fence → READY/QUEUED
+              canonical RPC devos_fleet_enqueue_v1 → admission fence → READY/QUEUED · local Pigsty rehearsal only
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2.5">

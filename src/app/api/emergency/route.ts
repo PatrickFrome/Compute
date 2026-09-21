@@ -89,14 +89,14 @@ export async function POST(req: Request) {
       const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(24))).toString("base64url");
       const sha = typeof body.expected_git_sha === "string" && /^[0-9a-f]{40}$/i.test(body.expected_git_sha.trim())
         ? body.expected_git_sha.trim().toLowerCase()
-        : "6bf173c71dc3026b02171085d956625ef9526378"; // release v0.7.0-dev.35532004761.1 (rail tip)
+        : "175c86ce5e24edce2f08a8bc2e4977b337042740"; // rail tip (merge PR #945)
       const ttl = Math.max(60, Math.min(900, Number(body.ttl_seconds) || 300));
       const identity = await getProbeDevice();
       // The issue RPC requires the target client to be "seen" — send a signed
       // heartbeat first so the probe registers in supervisor_state (canonical /v1/state).
       const hb = await edgeDevicePost("/v1/state", {
         state: {
-          shell_version: "0.7.0-dev.35532004761.1",
+          shell_version: "0.7.0-dev.35625473710.1",
           supervisor_mode: "CONTROL",
           armed: true,
           operator_mode: "MC_CONSOLE_PROBE",

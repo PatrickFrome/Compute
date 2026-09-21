@@ -1,0 +1,641 @@
+     1→import crypto from 'node:crypto';
+     2→import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
+     3→import { ChatGptServiceThrottleGate } from './chatgpt-service-throttle.mjs';
+     4→import { SupervisorLifecycleRuntime as CoreSupervisorLifecycleRuntime } from './supervisor-lifecycle-runtime-core.mjs';
+     5→
+     6→const NATIVE_FRAME_SCHEMA = 'metaengine.native-browser.perception.v1';
+     7→const CHAT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/c\/[a-z0-9-]+/i;
+     8→const CHAT_ROOT_RE = /^https:\/\/(?:www\.)?chatgpt\.com\/?$/i;
+     9→const SERVICE_THROTTLE_BLOCKED_ACTIONS = new Set([
+    10→  'NEW_TAB', 'NAVIGATE', 'RELOAD', 'SEMANTIC_TYPE', 'TYPED_CLICK', 'STOP_GENERATION',
+    11→]);
+    12→const TERMINAL_FLEET_STATES = new Set(['LOST', 'RETIRED', 'PROVISIONING_AMBIGUOUS']);
+    13→const DEFAULT_WORKER_OBSERVATION_CONCURRENCY = 4;
+    14→const TRANSPORT_WAKE_HISTORY_LIMIT = 4;
+    15→const TRANSPORT_SESSION_TAB_LIMIT = 32;
+    16→const TRANSPORT_WORKER_SIGNAL_LIMIT = 32;
+    17→const clip = (value, max = 180) => String(value ?? '').slice(0, max);
+    18→
+    19→function isNativeFrame(frame) {
+    20→  return String(frame?.schema || '') === NATIVE_FRAME_SCHEMA;
+    21→}
+    22→
+    23→function isGenerating(frame) {
+    24→  return Boolean(frame?.semantic_targets?.some((row) => row?.role === 'button' && chatGptControlMatches('STOP', row?.name)));
+    25→}
+    26→
+    27→function exactSelectedTab(state, tabId) {
+    28→  const selected = (state?.tabs || []).filter((row) => row?.selected === true);
+    29→  return selected.length === 1 && String(selected[0]?.tab_id || '') === String(tabId || '');
+    30→}
+    31→
+    32→function positiveViewport(frame) {
+    33→  return Number(frame?.viewport?.width || 0) > 0 && Number(frame?.viewport?.height || 0) > 0;
+    34→}
+    35→
+    36→function exactSemanticTarget(frame, roleRaw, nameRaw) {
+    37→  const role = String(roleRaw || '').trim().toLowerCase();
+    38→  const name = String(nameRaw || '').trim();
+    39→  const rows = (frame?.semantic_targets || []).filter((row) => (
+    40→    String(row?.role || '').trim().toLowerCase() === role
+    41→    && String(row?.name || '').trim() === name
+    42→  ));
+    43→  return rows.length === 1 ? rows[0] : null;
+    44→}
+    45→
+    46→function exactIncarnation(before, after, tabId) {
+    47→  const expectedTabId = String(tabId || '');
+    48→  const beforeProcess = String(before?.process_incarnation_id || '');
+    49→  const afterProcess = String(after?.process_incarnation_id || '');
+    50→  const beforeTarget = String(before?.target_id || '');
+    51→  const afterTarget = String(after?.target_id || '');
+    52→  if (!expectedTabId || String(before?.tab_id || '') !== expectedTabId || String(after?.tab_id || '') !== expectedTabId) return false;
+    53→  if (!beforeProcess || beforeProcess !== afterProcess) return false;
+    54→  if (!beforeTarget || beforeTarget !== afterTarget) return false;
+    55→  return String(before?.url || '') === String(after?.url || '');
+    56→}
+    57→
+    58→function promptSha(text) {
+    59→  return crypto.createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
+    60→}
+    61→
+    62→function promptMarker(text) {
+    63→  const match = /(?:^|\n)wake_id=([^\s\n]+)/i.exec(String(text || ''));
+    64→  return match ? String(match[1]) : null;
+    65→}
+    66→
+    67→function suppressed(action, reason, frame = null) {
+    68→  return Object.freeze({
+    69→    action,
+    70→    suppressed: true,
+    71→    reason: String(reason),
+    72→    tab_id: frame?.tab_id ? String(frame.tab_id) : null,
+    73→    automatic_retry_allowed: false,
+    74→    authority_effect: false,
+    75→  });
+    76→}
+    77→
+    78→function failClosedReadbackFrame(fallback, tabId, error) {
+    79→  return {
+    80→    schema: NATIVE_FRAME_SCHEMA,
+    81→    captured_at: new Date().toISOString(),
+    82→    tab_id: String(tabId || fallback?.tab_id || ''),
+    83→    process_incarnation_id: fallback?.process_incarnation_id || null,
+    84→    target_id: fallback?.target_id || null,
+    85→    url: String(fallback?.url || ''),
+    86→    title: String(fallback?.title || ''),
+    87→    semantic_targets: [],
+    88→    text_excerpt: '',
+    89→    viewport: fallback?.viewport ? { ...fallback.viewport } : null,
+    90→    perception_error: `SEND_READBACK_UNAVAILABLE:${clip(error?.message || error)}`,
+    91→    automatic_retry_allowed: false,
+    92→    authority_effect: false,
+    93→  };
+    94→}
+    95→
+    96→function positiveReadback(frame, fence) {
+    97→  if (!fence || !isNativeFrame(frame)) return false;
+    98→  if (isGenerating(frame)) return true;
+    99→  if (fence.marker && String(frame?.text_excerpt || '').includes(fence.marker)) return true;
+   100→  return CHAT_ROOT_RE.test(String(fence.pre_url || '')) && CHAT_RE.test(String(frame?.url || ''));
+   101→}
+   102→
+   103→function observationConcurrency(value) {
+   104→  const parsed = Number(value);
+   105→  return Number.isSafeInteger(parsed)
+   106→    ? Math.max(1, Math.min(16, parsed))
+   107→    : DEFAULT_WORKER_OBSERVATION_CONCURRENCY;
+   108→}
+   109→
+   110→function wakeSummary(row) {
+   111→  if (!row || typeof row !== 'object') return null;
+   112→  return Object.freeze({
+   113→    wake_id: row.wake_id ? clip(row.wake_id, 96) : null,
+   114→    reason: row.reason ? clip(row.reason, 80) : null,
+   115→    queue_key: row.queue_key ? clip(row.queue_key, 240) : null,
+   116→    supervisor_epoch: Number.isSafeInteger(Number(row.supervisor_epoch)) ? Number(row.supervisor_epoch) : null,
+   117→    cycle_seq: Number.isSafeInteger(Number(row.cycle_seq)) ? Number(row.cycle_seq) : null,
+   118→    process_incarnation_id: row.process_incarnation_id ? clip(row.process_incarnation_id, 160) : null,
+   119→    origin_process_incarnation_id: row.origin_process_incarnation_id ? clip(row.origin_process_incarnation_id, 160) : null,
+   120→    prepared_at: row.prepared_at || null,
+   121→    confirmed_at: row.confirmed_at || null,
+   122→    ambiguous_at: row.ambiguous_at || null,
+   123→    ambiguous_reason: row.ambiguous_reason ? clip(row.ambiguous_reason, 160) : null,
+   124→    retired_at: row.retired_at || null,
+   125→    retired_reason: row.retired_reason ? clip(row.retired_reason, 160) : null,
+   126→    terminal_generation_epoch: Number.isSafeInteger(Number(row.terminal_generation_epoch)) ? Number(row.terminal_generation_epoch) : null,
+   127→    automatic_retry_allowed: false,
+   128→    authority_effect: false,
+   129→  });
+   130→}
+   131→
+   132→function queuedWakeSummary(row) {
+   133→  if (!row || typeof row !== 'object') return null;
+   134→  const agentIds = Array.isArray(row.metadata?.agent_ids) ? row.metadata.agent_ids : [];
+   135→  return Object.freeze({
+   136→    key: row.key ? clip(row.key, 240) : null,
+   137→    reason: row.reason ? clip(row.reason, 80) : null,
+   138→    queued_at: row.queued_at || null,
+   139→    process_incarnation_id: row.process_incarnation_id ? clip(row.process_incarnation_id, 160) : null,
+   140→    agent_id: row.metadata?.agent_id ? clip(row.metadata.agent_id, 80) : null,
+   141→    agent_count: agentIds.length,
+   142→    authority_effect: false,
+   143→  });
+   144→}
+   145→
+   146→function scalarProjection(source, keys, max = 240) {
+   147→  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+   148→  const projected = {};
+   149→  for (const key of keys) {
+   150→    const value = source[key];
+   151→    if (value == null || typeof value === 'boolean' || typeof value === 'number') projected[key] = value ?? null;
+   152→    else if (typeof value === 'string') projected[key] = clip(value, max);
+   153→  }
+   154→  return projected;
+   155→}
+   156→
+   157→function sessionRowSummary(row) {
+   158→  if (!row || typeof row !== 'object') return null;
+   159→  return Object.freeze({
+   160→    tab_id: row.tab_id ? clip(row.tab_id, 80) : null,
+   161→    state: clip(row.state || 'UNKNOWN', 48),
+   162→    state_since: row.state_since || null,
+   163→    generation_epoch: Math.max(0, Number(row.generation_epoch) || 0),
+   164→    generation_started_at: row.generation_started_at || null,
+   165→    last_progress_at: row.last_progress_at || null,
+   166→    last_progress_source: row.last_progress_source ? clip(row.last_progress_source, 64) : null,
+   167→    recovery_attempts: Math.max(0, Number(row.recovery_attempts) || 0),
+   168→    physical_health: clip(row.physical_health || 'UNKNOWN', 48),
+   169→    controls: row.controls && typeof row.controls === 'object' ? {
+   170→      stop: Math.max(0, Number(row.controls.stop) || 0),
+   171→      continue: Math.max(0, Number(row.controls.continue) || 0),
+   172→      retry: Math.max(0, Number(row.controls.retry) || 0),
+   173→      send: Math.max(0, Number(row.controls.send) || 0),
+   174→    } : null,
+   175→    progress_age_ms: Number.isFinite(Number(row.progress_age_ms)) ? Math.max(0, Number(row.progress_age_ms)) : null,
+   176→    soft_stall: row.soft_stall === true,
+   177→    hard_stall: row.hard_stall === true,
+   178→    terminal_ready: row.terminal_ready === true,
+   179→    last_observed_at: row.last_observed_at || null,
+   180→    authority_effect: false,
+   181→  });
+   182→}
+   183→
+   184→export function buildSupervisorLifecycleStatusSnapshot(snapshot = {}) {
+   185→  const keepalive = snapshot?.keepalive && typeof snapshot.keepalive === 'object' ? snapshot.keepalive : null;
+   186→  const session = snapshot?.supervisor_session && typeof snapshot.supervisor_session === 'object' ? snapshot.supervisor_session : null;
+   187→  const ambiguousHistory = Array.isArray(keepalive?.ambiguous_history) ? keepalive.ambiguous_history : [];
+   188→  const predecessorHistory = Array.isArray(keepalive?.predecessor_wake_history) ? keepalive.predecessor_wake_history : [];
+   189→  const queuedWakes = Array.isArray(keepalive?.queued_wakes) ? keepalive.queued_wakes : [];
+   190→  const workerGeneration = keepalive?.previous_worker_generation && typeof keepalive.previous_worker_generation === 'object'
+   191→    ? Object.entries(keepalive.previous_worker_generation)
+   192→    : [];
+   193→  const sessionRows = Array.isArray(session?.tabs) ? session.tabs : [];
+   194→  const sessionSummaries = sessionRows.slice(-TRANSPORT_SESSION_TAB_LIMIT).map(sessionRowSummary).filter(Boolean);
+   195→  const stateCounts = {};
+   196→  for (const row of sessionSummaries) stateCounts[row.state] = Number(stateCounts[row.state] || 0) + 1;
+   197→  const workerSignals = (Array.isArray(snapshot?.worker_signals) ? snapshot.worker_signals : []).slice(-TRANSPORT_WORKER_SIGNAL_LIMIT).map((row) => ({
+   198→    agent_id: row?.agent_id ? clip(row.agent_id, 80) : null,
+   199→    lifecycle_state: clip(row?.lifecycle_state || 'UNKNOWN', 48),
+   200→    generation_state: clip(row?.generation_state || 'UNKNOWN', 48),
+   201→    authority_effect: false,
+   202→  }));
+   203→
+   204→  const continuousService = scalarProjection(snapshot?.continuous_service, [
+   205→    'enabled', 'monitor_ms', 'auto_rollover_cycles', 'work_cycle_limit',
+   206→    'admission_state', 'authoritative_admission_required',
+   207→    'automatic_rollover_cycle_limit_enabled', 'external_confirmation_required_for_continuation',
+   208→    'terminal_requires_user_message', 'restart_resumable', 'restart_pending_wake_reconciliation',
+   209→    'restart_rollover_reconciliation', 'prompt_plaintext_persisted', 'orphaned_stall_stop_only',
+   210→    'ambiguous_terminal_retirement', 'active_wake_terminal_retirement', 'ambiguous_same_wake_retry',
+   211→    'wake_send_transport', 'service_throttle_backpressure', 'worker_observation_prefetch',
+   212→    'worker_observation_concurrency', 'authority_effect',
+   213→  ]);
+   214→  const runtimeControl = scalarProjection(snapshot?.continuous_service?.runtime_control, [
+   215→    'schema', 'state', 'reason', 'workspace_id', 'generation_floor', 'refill_enabled',
+   216→    'supervisor_admission_enabled', 'continuous_service_allowed', 'authoritative',
+   217→    'automatic_retry_allowed', 'authority_effect',
+   218→  ]);
+   219→  const activeRequest = scalarProjection(snapshot?.active_request, [
+   220→    'wake_id', 'tab_id', 'retry_attempt', 'same_chat_retry_attempt', 'blocked_ambiguous',
+   221→    'restored_from_durable_keepalive', 'trusted_prompt_persisted', 'effect_class',
+   222→  ]);
+   223→  const lastRecovery = scalarProjection(snapshot?.last_recovery, [
+   224→    'action', 'reason', 'wake_id', 'tab_id', 'prior_request_tab_id', 'generation_epoch',
+   225→    'supervisor_epoch', 'rollover_attempt_id', 'retry_attempt', 'proof', 'prompt_retyped',
+   226→    'confirmed', 'ambiguous', 'automatic_retry_allowed', 'at', 'observed_stopped_at',
+   227→    'terminal_confirmed_at', 'authority_effect',
+   228→  ]);
+   229→  // D-K3: durable wake-send failure diagnostics — a silent pre-effect retry
+   230→  // loop (composer not unique, replace unverified, ...) must be visible in
+   231→  // the state row instead of presenting as idle WAITING.
+   232→  const lastSendError = scalarProjection(snapshot?.last_send_error, [
+   233→    'at', 'wake_id', 'reason', 'clicked', 'failure_count', 'authority_effect',
+   234→  ]);
+   235→  const workerPrefetch = scalarProjection(snapshot?.worker_observation_prefetch, [
+   236→    'captured_count', 'failed_count', 'concurrency', 'elapsed_ms', 'error', 'read_only', 'authority_effect',
+   237→  ]);
+   238→  const serviceThrottle = scalarProjection(snapshot?.service_throttle, [
+   239→    'schema', 'state', 'reason', 'source_tab_id', 'first_observed_at', 'last_observed_at',
+   240→    'automatic_retry_allowed', 'authority_effect',
+   241→  ]);
+   242→  const rolloverAttempt = scalarProjection(keepalive?.rollover_attempt, [
+   243→    'attempt_id', 'supervisor_epoch', 'previous_conversation', 'started_at', 'tab_id', 'tab_bound_at',
+   244→    'ambiguous_at', 'ambiguous_reason', 'restart_recovered_at', 'automatic_retry_allowed',
+   245→  ], 1200);
+   246→
+   247→  return Object.freeze({
+   248→    schema: clip(snapshot?.schema || 'metaengine.supervisor-lifecycle-runtime.v4', 96),
+   249→    keepalive: keepalive ? {
+   250→      schema: clip(keepalive.schema || 'metaengine.supervisor-keepalive.state.v1', 96),
+   251→      version: keepalive.version ? clip(keepalive.version, 48) : null,
+   252→      supervisor_id: keepalive.supervisor_id ? clip(keepalive.supervisor_id, 96) : null,
+   253→      supervisor_epoch: Math.max(0, Number(keepalive.supervisor_epoch) || 0),
+   254→      cycle_seq: Math.max(0, Number(keepalive.cycle_seq) || 0),
+   255→      state: clip(keepalive.state || 'UNKNOWN', 48),
+   256→      conversation_url: keepalive.conversation_url ? clip(keepalive.conversation_url, 1200) : null,
+   257→      tab_id: keepalive.tab_id ? clip(keepalive.tab_id, 80) : null,
+   258→      paused: keepalive.paused === true,
+   259→      paused_from_state: keepalive.paused_from_state ? clip(keepalive.paused_from_state, 48) : null,
+   260→      process_incarnation_id: keepalive.process_incarnation_id ? clip(keepalive.process_incarnation_id, 160) : null,
+   261→      process_incarnation_started_at: keepalive.process_incarnation_started_at || null,
+   262→      predecessor_process_incarnation_id: keepalive.predecessor_process_incarnation_id ? clip(keepalive.predecessor_process_incarnation_id, 160) : null,
+   263→      predecessor_fenced_at: keepalive.predecessor_fenced_at || null,
+   264→      predecessor_queued_wake_count: Math.max(0, Number(keepalive.predecessor_queued_wake_count) || 0),
+   265→      admission_state: keepalive.admission_state ? clip(keepalive.admission_state, 32) : 'UNKNOWN',
+   266→      admission_reason: keepalive.admission_reason ? clip(keepalive.admission_reason, 160) : null,
+   267→      admission_generation_floor: typeof keepalive.admission_generation_floor === 'number' && Number.isSafeInteger(keepalive.admission_generation_floor) ? keepalive.admission_generation_floor : null,
+   268→      admission_refill_enabled: typeof keepalive.admission_refill_enabled === 'boolean' ? keepalive.admission_refill_enabled : null,
+   269→      admission_supervisor_enabled: typeof keepalive.admission_supervisor_enabled === 'boolean' ? keepalive.admission_supervisor_enabled : null,
+   270→      admission_observed_at: keepalive.admission_observed_at || null,
+   271→      parked_at: keepalive.parked_at || null,
+   272→      parked_reason: keepalive.parked_reason ? clip(keepalive.parked_reason, 160) : null,
+   273→      parked_queued_wake_count: Math.max(0, Number(keepalive.parked_queued_wake_count) || 0),
+   274→      parked_wake_reasons: Array.isArray(keepalive.parked_wake_reasons) ? keepalive.parked_wake_reasons.slice(-32).map((reason) => clip(reason, 80)) : [],
+   275→      suppressed_wake_count: Math.max(0, Number(keepalive.suppressed_wake_count) || 0),
+   276→      last_suppressed_wake_at: keepalive.last_suppressed_wake_at || null,
+   277→      last_suppressed_wake_reason: keepalive.last_suppressed_wake_reason ? clip(keepalive.last_suppressed_wake_reason, 80) : null,
+   278→      queued_wakes: queuedWakes.slice(-TRANSPORT_WAKE_HISTORY_LIMIT).map(queuedWakeSummary).filter(Boolean),
+   279→      queued_wake_count: queuedWakes.length,
+   280→      pending_wake: wakeSummary(keepalive.pending_wake),
+   281→      active_wake: wakeSummary(keepalive.active_wake),
+   282→      ambiguous_history: ambiguousHistory.slice(-TRANSPORT_WAKE_HISTORY_LIMIT).map(wakeSummary).filter(Boolean),
+   283→      ambiguous_history_count: ambiguousHistory.length,
+   284→      predecessor_wake_history: predecessorHistory.slice(-TRANSPORT_WAKE_HISTORY_LIMIT).map(wakeSummary).filter(Boolean),
+   285→      predecessor_wake_history_count: predecessorHistory.length,
+   286→      previous_worker_generation: Object.fromEntries(workerGeneration.slice(-32).map(([key, value]) => [clip(key, 80), clip(value, 48)])),
+   287→      previous_worker_generation_count: workerGeneration.length,
+   288→      last_wake_at: keepalive.last_wake_at || null,
+   289→      last_wake_reason: keepalive.last_wake_reason ? clip(keepalive.last_wake_reason, 80) : null,
+   290→      last_completed_cycle_at: keepalive.last_completed_cycle_at || null,
+   291→      last_research_wake_at: keepalive.last_research_wake_at || null,
+   292→      rollover_reason: keepalive.rollover_reason ? clip(keepalive.rollover_reason, 160) : null,
+   293→      rollover_release_at: keepalive.rollover_release_at || null,
+   294→      rollover_attempt: rolloverAttempt,
+   295→      updated_at: keepalive.updated_at || null,
+   296→      work_cycle_limit: Number.isFinite(Number(keepalive.work_cycle_limit)) ? Number(keepalive.work_cycle_limit) : null,
+   297→      worker_generation_memory_limit: Number.isFinite(Number(keepalive.worker_generation_memory_limit)) ? Number(keepalive.worker_generation_memory_limit) : null,
+   298→      automatic_rollover_cycle_limit_enabled: keepalive.automatic_rollover_cycle_limit_enabled === true,
+   299→      external_confirmation_required_for_continuation: keepalive.external_confirmation_required_for_continuation === true,
+   300→      transport_history_limit: TRANSPORT_WAKE_HISTORY_LIMIT,
+   301→      transport_worker_generation_limit: 32,
+   302→      authority_effect: false,
+   303→    } : null,
+   304→    supervisor_generation: snapshot?.supervisor_generation ? clip(snapshot.supervisor_generation, 48) : null,
+   305→    supervisor_session: session ? {
+   306→      schema: session.schema || 'metaengine.agent-session-monitor.snapshot.v1',
+   307→      version: session.version || null,
+   308→      tabs: sessionSummaries,
+   309→      tab_count: sessionRows.length,
+   310→      state_counts: stateCounts,
+   311→      persisted_response_text: false,
+   312→      full_frame_digests_included: false,
+   313→      recent_generation_samples_included: false,
+   314→      authority_effect: false,
+   315→    } : null,
+   316→    worker_signals: workerSignals,
+   317→    worker_signal_count: Array.isArray(snapshot?.worker_signals) ? snapshot.worker_signals.length : 0,
+   318→    continuous_service: continuousService ? { ...continuousService, runtime_control: runtimeControl } : null,
+   319→    active_request: activeRequest,
+   320→    last_recovery: lastRecovery,
+   321→    last_send_error: lastSendError,
+   322→    wake_send_failure_count: Math.max(0, Number(snapshot?.wake_send_failure_count) || 0),
+   323→    worker_observation_prefetch: workerPrefetch,
+   324→    service_throttle: serviceThrottle,
+   325→    quiescent: snapshot?.quiescent === true,
+   326→    actuation_enabled: snapshot?.actuation_enabled === true,
+   327→    last_error: snapshot?.last_error ? clip(snapshot.last_error, 240) : null,
+   328→    transport_session_tab_limit: TRANSPORT_SESSION_TAB_LIMIT,
+   329→    transport_worker_signal_limit: TRANSPORT_WORKER_SIGNAL_LIMIT,
+   330→    heartbeat_payload_bounded: true,
+   331→    full_history_retained_locally: true,
+   332→    authority_effect: false,
+   333→  });
+   334→}
+   335→
+   336→export async function prefetchFleetWorkerFrames({ state, executeCommand, concurrency = DEFAULT_WORKER_OBSERVATION_CONCURRENCY } = {}) {
+   337→  if (typeof executeCommand !== 'function') throw new Error('supervisor_worker_prefetch_executor_required');
+   338→  const limit = observationConcurrency(concurrency);
+   339→  const candidates = (state?.fleet?.agents || [])
+   340→    .filter((agent) => agent?.tab_id && !TERMINAL_FLEET_STATES.has(String(agent?.lifecycle_state || '').toUpperCase()))
+   341→    .map((agent) => ({ agent_id: String(agent?.agent_id || ''), tab_id: String(agent.tab_id) }));
+   342→  const frames = new Map();
+   343→  let failures = 0;
+   344→  const started = Date.now();
+   345→
+   346→  for (let offset = 0; offset < candidates.length; offset += limit) {
+   347→    const batch = candidates.slice(offset, offset + limit);
+   348→    const settled = await Promise.all(batch.map(async (agent) => {
+   349→      try {
+   350→        const frame = await executeCommand({ action: 'CAPTURE', payload: { tab_id: agent.tab_id }, platform: null });
+   351→        return { ...agent, frame, error: null };
+   352→      } catch (error) {
+   353→        return { ...agent, frame: null, error: clip(error) };
+   354→      }
+   355→    }));
+   356→    for (const row of settled) {
+   357→      if (row.frame) frames.set(row.tab_id, row.frame);
+   358→      else failures += 1;
+   359→    }
+   360→  }
+   361→
+   362→  return {
+   363→    schema: 'metaengine.supervisor-worker-observation-prefetch.v1',
+   364→    candidate_count: candidates.length,
+   365→    captured_count: frames.size,
+   366→    failed_count: failures,
+   367→    concurrency: limit,
+   368→    elapsed_ms: Math.max(0, Date.now() - started),
+   369→    frames,
+   370→    read_only: true,
+   371→    authority_effect: false,
+   372→  };
+   373→}
+   374→
+   375→export function createSupervisorSendBoundaryExecutor({ getState, executeCommand, throttleGate = null } = {}) {
+   376→  if (typeof getState !== 'function' || typeof executeCommand !== 'function') throw new Error('supervisor_send_boundary_dependencies_required');
+   377→  if (throttleGate != null && (typeof throttleGate.observe !== 'function' || typeof throttleGate.active !== 'function')) {
+   378→    throw new Error('supervisor_service_throttle_gate_invalid');
+   379→  }
+   380→  const lastNativeFrame = new Map();
+   381→  const promptFence = new Map();
+   382→  const readbackFence = new Map();
+   383→
+   384→  const rememberFrame = (tabId, frame) => {
+   385→    const id = String(tabId || frame?.tab_id || '');
+   386→    if (!id || !isNativeFrame(frame)) return;
+   387→    lastNativeFrame.set(id, frame);
+   388→    throttleGate?.observe(id, frame);
+   389→    const fence = promptFence.get(id);
+   390→    if (positiveReadback(frame, fence)) {
+   391→      promptFence.delete(id);
+   392→      readbackFence.delete(id);
+   393→    }
+   394→  };
+   395→
+   396→  const capture = async (command) => {
+   397→    const tabId = String(command?.payload?.tab_id || '');
+   398→    try {
+   399→      const frame = await executeCommand(command);
+   400→      rememberFrame(tabId, frame);
+   401→      const readback = readbackFence.get(tabId);
+   402→      if (readback) {
+   403→        readback.remaining -= 1;
+   404→        if (readback.remaining <= 0 || positiveReadback(frame, promptFence.get(tabId))) readbackFence.delete(tabId);
+   405→      }
+   406→      return frame;
+   407→    } catch (error) {
+   408→      const fence = promptFence.get(tabId);
+   409→      const readback = readbackFence.get(tabId);
+   410→      if (!fence || !readback) throw error;
+   411→      readback.remaining -= 1;
+   412→      if (readback.remaining <= 0) readbackFence.delete(tabId);
+   413→      return failClosedReadbackFrame(readback.fallback || lastNativeFrame.get(tabId), tabId, error);
+   414→    }
+   415→  };
+   416→
+   417→  return async function executeWithSupervisorSendBoundary(command) {
+   418→    const action = String(command?.action || '');
+   419→    const tabId = String(command?.payload?.tab_id || '');
+   420→
+   421→    if (action === 'CAPTURE') return capture(command);
+   422→
+   423→    if (throttleGate?.active() && SERVICE_THROTTLE_BLOCKED_ACTIONS.has(action)) {
+   424→      return suppressed(action, 'CHATGPT_SERVICE_THROTTLED', lastNativeFrame.get(tabId) || null);
+   425→    }
+   426→
+   427→    if (action === 'SEMANTIC_TYPE') {
+   428→      const baseline = lastNativeFrame.get(tabId);
+   429→      if (!isNativeFrame(baseline)) return executeCommand(command);
+   430→      const semanticTarget = exactSemanticTarget(baseline, command?.payload?.role, command?.payload?.accessible_name);
+   431→      if (!semanticTarget?.semantic_ref && baseline.semantic_ref_context_complete !== undefined) {
+   432→        return suppressed(action, 'SEMANTIC_REF_REOBSERVE_REQUIRED', baseline);
+   433→      }
+   434→      const text = String(command?.payload?.text ?? '');
+   435→      const sha = promptSha(text);
+   436→      const prior = promptFence.get(tabId);
+   437→      if (prior?.prompt_sha256 === sha) {
+   438→        return suppressed(action, 'DUPLICATE_PROMPT_TYPE_SUPPRESSED', baseline);
+   439→      }
+   440→      const fence = {
+   441→        prompt_sha256: sha,
+   442→        marker: promptMarker(text),
+   443→        pre_url: String(baseline?.url || ''),
+   444→        phase: 'TYPE_ATTEMPTED',
+   445→        attempted_at: new Date().toISOString(),
+   446→      };
+   447→      promptFence.set(tabId, fence);
+   448→      try {
+   449→        const result = await executeCommand({
+   450→          ...command,
+   451→          payload: semanticTarget?.semantic_ref
+   452→            ? { ...command.payload, semantic_ref: semanticTarget.semantic_ref }
+   453→            : command.payload,
+   454→        });
+   455→        fence.phase = 'TYPED';
+   456→        return result;
+   457→      } catch (error) {
+   458→        fence.phase = 'TYPE_EFFECT_AMBIGUOUS';
+   459→        fence.error = clip(error?.message || error);
+   460→        return suppressed(action, 'TYPE_EFFECT_AMBIGUOUS', baseline);
+   461→      }
+   462→    }
+   463→
+   464→    const isSendClick = action === 'TYPED_CLICK'
+   465→      && String(command?.payload?.role || '').toLowerCase() === 'button'
+   466→      && chatGptControlMatches('SEND', command?.payload?.accessible_name);
+   467→    if (!isSendClick) return executeCommand(command);
+   468→
+   469→    const fence = promptFence.get(tabId);
+   470→    if (fence?.phase === 'CLICK_ATTEMPTED') {
+   471→      return suppressed(action, 'SEND_CLICK_ALREADY_ATTEMPTED', lastNativeFrame.get(tabId));
+   472→    }
+   473→
+   474→    let before = null;
+   475→    let activated = null;
+   476→    const block = (reason, error = null) => {
+   477→      if (fence) {
+   478→        fence.phase = 'PRECLICK_BLOCKED';
+   479→        if (error) fence.error = clip(error?.message || error);
+   480→      }
+   481→      const fallback = activated || before || lastNativeFrame.get(tabId) || null;
+   482→      readbackFence.set(tabId, { remaining: 6, fallback });
+   483→      return suppressed(action, reason, fallback);
+   484→    };
+   485→
+   486→    try {
+   487→      before = await executeCommand({ action: 'CAPTURE', payload: { tab_id: tabId }, platform: command?.platform ?? null });
+   488→      rememberFrame(tabId, before);
+   489→      // Non-native executors are test/model adapters and retain the proven core path.
+   490→      // The installed Electron path always exposes metaengine.native-browser.perception.v1.
+   491→      if (!isNativeFrame(before)) return executeCommand(command);
+   492→      if (throttleGate?.active()) return block('CHATGPT_SERVICE_THROTTLED');
+   493→
+   494→      await executeCommand({ action: 'SELECT_TAB', payload: { tab_id: tabId }, platform: command?.platform ?? null });
+   495→      const state = await getState();
+   496→      if (!exactSelectedTab(state, tabId)) return block('SUPERVISOR_TAB_NOT_EXACTLY_SELECTED');
+   497→
+   498→      activated = await executeCommand({ action: 'CAPTURE', payload: { tab_id: tabId }, platform: command?.platform ?? null });
+   499→      rememberFrame(tabId, activated);
+   500→      if (!isNativeFrame(activated)) return block('SUPERVISOR_NATIVE_FRAME_LOST');
+   501→      if (throttleGate?.active()) return block('CHATGPT_SERVICE_THROTTLED');
+   502→      if (!exactIncarnation(before, activated, tabId)) return block('SUPERVISOR_TARGET_INCARNATION_CHANGED');
+   503→      if (!positiveViewport(activated)) return block('SUPERVISOR_VIEWPORT_NOT_VISIBLE');
+   504→
+   505→      const send = uniqueChatGptControl(activated, 'SEND');
+   506→      if (!send) return block('SUPERVISOR_SEND_NOT_UNIQUE_AFTER_SELECT');
+   507→      if (String(send.name || '') !== String(command?.payload?.accessible_name || '')) return block('SUPERVISOR_SEND_CONTROL_CHANGED');
+   508→      if (!send.semantic_ref && activated.semantic_ref_context_complete !== undefined) {
+   509→        return block('SEMANTIC_REF_REOBSERVE_REQUIRED');
+   510→      }
+   511→
+   512→      if (fence) fence.phase = 'CLICK_ATTEMPTED';
+   513→      readbackFence.set(tabId, { remaining: 6, fallback: activated });
+   514→      try {
+   515→        return await executeCommand({
+   516→          ...command,
+   517→          payload: send.semantic_ref
+   518→            ? { ...command.payload, semantic_ref: send.semantic_ref }
+   519→            : command.payload,
+   520→        });
+   521→      } catch (error) {
+   522→        if (fence) fence.error = clip(error?.message || error);
+   523→        return suppressed(action, 'SEND_CLICK_EFFECT_AMBIGUOUS', activated);
+   524→      }
+   525→    } catch (error) {
+   526→      return block('SUPERVISOR_SEND_BOUNDARY_REVALIDATION_FAILED', error);
+   527→    }
+   528→  };
+   529→}
+   530→
+   531→// Static continuity markers retained because the implementation itself remains in
+   532→// supervisor-lifecycle-runtime-core.mjs: CHATGPT_CONVERSATION_LIMIT_HINT and
+   533→// reason.startsWith('MAX_CYCLES_PER_EPOCH'). The wrapper adds no page authority.
+   534→export class SupervisorLifecycleRuntime extends CoreSupervisorLifecycleRuntime {
+   535→  #serviceThrottleGate;
+   536→  #sourceGetState;
+   537→  #sourceExecute;
+   538→  #workerCaptureCache;
+   539→  #workerObservationConcurrency;
+   540→  #lastWorkerPrefetch = null;
+   541→
+   542→  constructor(options = {}) {
+   543→    const serviceThrottleGate = options.serviceThrottleGate || new ChatGptServiceThrottleGate();
+   544→    if (typeof serviceThrottleGate.active !== 'function' || typeof serviceThrottleGate.snapshot !== 'function') {
+   545→      throw new Error('supervisor_service_throttle_gate_invalid');
+   546→    }
+   547→    if (typeof options.getState !== 'function' || typeof options.executeCommand !== 'function') {
+   548→      throw new Error('supervisor_lifecycle_dependencies_required');
+   549→    }
+   550→    const baseCanActuate = typeof options.canActuate === 'function' ? options.canActuate : () => true;
+   551→    const workerCaptureCache = new Map();
+   552→    const sourceExecute = options.executeCommand;
+   553→    const cachedExecute = async (command) => {
+   554→      if (String(command?.action || '') === 'CAPTURE') {
+   555→        const tabId = String(command?.payload?.tab_id || '');
+   556→        if (tabId && workerCaptureCache.has(tabId)) {
+   557→          const frame = workerCaptureCache.get(tabId);
+   558→          workerCaptureCache.delete(tabId);
+   559→          return frame;
+   560→        }
+   561→      }
+   562→      return sourceExecute(command);
+   563→    };
+   564→    const guardedExecute = createSupervisorSendBoundaryExecutor({
+   565→      getState: options.getState,
+   566→      executeCommand: cachedExecute,
+   567→      throttleGate: serviceThrottleGate,
+   568→    });
+   569→    super({
+   570→      ...options,
+   571→      canActuate: () => baseCanActuate() === true && serviceThrottleGate.active() !== true,
+   572→      executeCommand: guardedExecute,
+   573→    });
+   574→    this.#serviceThrottleGate = serviceThrottleGate;
+   575→    this.#sourceGetState = options.getState;
+   576→    this.#sourceExecute = sourceExecute;
+   577→    this.#workerCaptureCache = workerCaptureCache;
+   578→    this.#workerObservationConcurrency = observationConcurrency(options.workerObservationConcurrency ?? options.workerObservationBudget);
+   579→  }
+   580→
+   581→  async cycle(options = {}) {
+   582→    this.#workerCaptureCache.clear();
+   583→    try {
+   584→      const state = await this.#sourceGetState();
+   585→      const prefetched = await prefetchFleetWorkerFrames({
+   586→        state,
+   587→        executeCommand: this.#sourceExecute,
+   588→        concurrency: this.#workerObservationConcurrency,
+   589→      });
+   590→      for (const [tabId, frame] of prefetched.frames.entries()) this.#workerCaptureCache.set(tabId, frame);
+   591→      this.#lastWorkerPrefetch = Object.freeze({
+   592→        schema: prefetched.schema,
+   593→        candidate_count: prefetched.candidate_count,
+   594→        captured_count: prefetched.captured_count,
+   595→        failed_count: prefetched.failed_count,
+   596→        concurrency: prefetched.concurrency,
+   597→        elapsed_ms: prefetched.elapsed_ms,
+   598→        read_only: true,
+   599→        authority_effect: false,
+   600→      });
+   601→    } catch (error) {
+   602→      this.#lastWorkerPrefetch = Object.freeze({
+   603→        schema: 'metaengine.supervisor-worker-observation-prefetch.v1',
+   604→        candidate_count: null,
+   605→        captured_count: 0,
+   606→        failed_count: null,
+   607→        concurrency: this.#workerObservationConcurrency,
+   608→        elapsed_ms: null,
+   609→        error: clip(error),
+   610→        read_only: true,
+   611→        authority_effect: false,
+   612→      });
+   613→    }
+   614→    try {
+   615→      return await super.cycle(options);
+   616→    } finally {
+   617→      this.#workerCaptureCache.clear();
+   618→    }
+   619→  }
+   620→
+   621→  snapshot() {
+   622→    const base = super.snapshot();
+   623→    return {
+   624→      ...base,
+   625→      continuous_service: {
+   626→        ...(base.continuous_service || {}),
+   627→        service_throttle_backpressure: 'UI_READBACK_GATE_V1',
+   628→        worker_observation_prefetch: 'BOUNDED_PARALLEL_READ_ONLY_V1',
+   629→        worker_observation_concurrency: this.#workerObservationConcurrency,
+   630→      },
+   631→      worker_observation_prefetch: this.#lastWorkerPrefetch ? structuredClone(this.#lastWorkerPrefetch) : null,
+   632→      service_throttle: this.#serviceThrottleGate.snapshot(),
+   633→      authority_effect: false,
+   634→    };
+   635→  }
+   636→
+   637→  statusSnapshot() {
+   638→    return buildSupervisorLifecycleStatusSnapshot(this.snapshot());
+   639→  }
+   640→}
+   641→

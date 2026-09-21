@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     const nowIso = new Date().toISOString();
     const conversationUrlSha = await sha256(`https://local-reheural/mc-drive/${run.id}/${agentId}`);
     const stateBody = {
-      shell_version: "0.7.0-dev.35532004761.1",
+      shell_version: "0.7.0-dev.35625473710.1",
       // MONITOR + !armed ⇒ persisted authority_effect=false, which the claim
       // admission trigger requires (it only reads non-authoritative rows)
       supervisor_mode: "MONITOR",

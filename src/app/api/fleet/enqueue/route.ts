@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const role = String(body.role ?? "").trim().toUpperCase();
     const claimClass = String(body.claimClass ?? "TASK").trim().toUpperCase() || "TASK";
     const priority = Number.isFinite(Number(body.priority)) ? Math.min(99, Math.max(1, Math.trunc(Number(body.priority)))) : 50;
-    const baseSha = String(body.baseSha ?? "6bf173c7").trim().toLowerCase();
+    const baseSha = String(body.baseSha ?? "175c86ce").trim().toLowerCase();
     const branch = String(body.branch ?? "").trim();
     const enqueueKey = String(body.enqueueKey ?? "").trim() || `mc-${crypto.randomUUID()}`;
     const objective = String(body.objective ?? "").trim().slice(0, 400);

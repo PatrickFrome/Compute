@@ -93,7 +93,7 @@ async function enqueueFleet(m: MilestoneRow): Promise<{
       workspace: CLOUD_FLEET_WORKSPACE,
       point: `${POINT_PREFIX}${m.milestone_key}`,
       role: deriveRole(m.milestone_key),
-      base: "db5c83db806197b38b37338cdaff1ce69b825c08",
+      base: "175c86ce5e24edce2f08a8bc2e4977b337042740", // rail tip (merge PR #945)
       spec,
       key: enqueueKey,
       priority: Math.min(99, Math.max(1, m.priority || 50)),

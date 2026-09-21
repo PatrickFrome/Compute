@@ -40,6 +40,20 @@ export interface LiveSnapshot {
   shellVersion: string | null;
   armed: boolean;
   supervisorMode: string | null;
+  controlPlane?: {
+    schema: string;
+    batchTransport: string | null;
+    leaseLastAttemptAt: string | null;
+    leaseLastOkAt: string | null;
+    leaseConsecutiveFailures: number | null;
+    leaseLastError: string | null;
+    cycleRunning: boolean | null;
+    cycleAgeMs: number | null;
+    schedulerWatchdogRearmCount: number | null;
+    wedgeEscalation: { reason: string; at: string | null } | null;
+    pumpHealth: "ok" | "stalled" | "failing" | null;
+    pumpNote: string | null;
+  } | null;
   selfUpdate: {
     state: string | null;
     startupRecovery: { state: string; reason: string | null; targetGitSha: string | null } | null;
@@ -189,9 +203,32 @@ export function LivePanel({ poll }: { poll: PollState<LivePayload> }) {
   }
 
   const f = live?.fleet;
+  const cp = live?.controlPlane ?? null;
 
   return (
     <div className="space-y-4" data-testid="live-panel">
+      {/* CP-W1 control-plane divergence banner: heartbeat alive is NOT pump alive */}
+      {cp && (cp.pumpHealth === "stalled" || cp.pumpHealth === "failing") && (
+        <Card
+          className={`border bg-zinc-900/60 ${cp.pumpHealth === "stalled" ? "border-red-800/70" : "border-amber-800/70"}`}
+          data-testid="control-plane-banner"
+        >
+          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
+            <span className={`font-mono text-xs font-bold tracking-[0.18em] ${cp.pumpHealth === "stalled" ? "text-red-400" : "text-amber-400"}`}>
+              {cp.pumpHealth === "stalled" ? "CONTROL PLANE STALLED" : "LEASE PUMP DEGRADED"}
+            </span>
+            <span className="font-mono text-[11px] text-zinc-400">{cp.pumpNote}</span>
+            {cp.wedgeEscalation && (
+              <Badge variant="outline" className="border-red-800/60 bg-red-500/10 font-mono text-[9px] text-red-300">
+                ESCALATION {cp.wedgeEscalation.reason}
+              </Badge>
+            )}
+            <span className="font-mono text-[10px] text-zinc-600">
+              transport={cp.batchTransport ?? "?"} · failures={cp.leaseConsecutiveFailures ?? "?"} · rearm={cp.schedulerWatchdogRearmCount ?? "?"}
+            </span>
+          </CardContent>
+        </Card>
+      )}
       {/* heartbeat strip */}
       <Card className="border-zinc-800 bg-zinc-900/50">
         <CardContent className="flex flex-wrap items-center gap-x-5 gap-y-2 py-3">

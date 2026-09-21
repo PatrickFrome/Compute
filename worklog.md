@@ -5975,3 +5975,65 @@ Work Log:
 Stage Summary:
 - Релиз с R-SUP-SEED + B-SH1 в проде; браузер обновится в собственном цикле (self-update hint→discovery→barrier) или по emergency-команде.
 - Ждём: shell 0.7.0-dev.35625473710.1 в стейте → rollover освобождается seed-first → keepalive возвращается в цикл → командная lane оживает → FLEET_RECONCILE(4) сводит флот → обучение 4 агентов через /api/agent-factory/provision.
+---
+Task ID: CPW1-AUDIT-20260921-1800
+Agent: main (Super Z)
+Task: Детальный критический аудит всех механик/контрактов/модулей; закрытие найденной архитектурной дыры (CP-W1); подготовка разблокировки браузера; релиз; live-тесты.
+
+## 1. Аудит (два параллельных Explore-агента: рельса браузера + консоль)
+
+ДИАГНОЗ LIVE-СОСТОЯНИЯ (17:26–17:47 UTC):
+- Браузер ЖИВ: heartbeat 0.4–1.5s, sentinel ACTIVE, development_plane READY (PID 16448), armed, CONTROL.
+- НО: shell 0.7.0-dev.35590377280.1 (= #944, БЕЗ фиксов R-SUP-SEED/B-SH1 из #945) — self-update не произошёл.
+- keepalive: ROLLOVER_AMBIGUOUS, cycle_seq 2332 заморожен с 14:40:54, rollover_reason=TYPE_EFFECT_AMBIGUOUS, queued_wakes=3 (не обрабатываются), last_recovery=ROLLOVER_AMBIGUOUS_NO_PROGRESS_REREQUEST.
+- КОМАНДНЫЙ НАСОС МЁРТВ: 5× DEVELOPER_EMERGENCY_UPDATE (16:46→17:38) висят PENDING, не даже EXPIRED → НОЛЬ lease-RPC в БД с ~14:57 (sweep истечения живёт в lease-вызове). Self-update check заморожен на 14:35 (hint_interval 2s/5min не тикают).
+- dev-hint.json УЖЕ опубликован на 175c86ce (автопайплайн 16:39) — но браузер не может его увидеть: hint-check живёт в maintenance-lane мёртвого цикла.
+
+КОРНЕВАЯ АРХИТЕКТУРНАЯ ДЫРА (найдена и доказана кодом):
+`#schedule()` → `cycle().catch(()=>{}).finally(() => this.#schedule())` — если внутренний cycle-promise НИКОГДА не разрешается (висящий await), `.finally` не срабатывает и ВЕСЬ планировщик умирает навсегда. При этом: (а) heartbeat бьётся ДО лизинга + 2s watchdog-насос — «живой» сигнал врёт; (б) Sentinel меряет event-loop progress (5s EVENT_LOOP_HEARTBEAT) — async-клин невидим; (в) консоль/облако не могут отличить «живой» от «мёртвый насос». Ровно это случилось в 14:42 (после COMPLETED FLEET_RECONCILE). Тройной дедлок: ролловер-чёрн требует #945, #945 требует self-update, self-update требует живого насоса.
+
+АУДИТ КОНСОЛИ (22 API-роута, 12 панелей, edge :3031, Pigsty, облако):
+- Контур СВЯЗАН end-to-end: console→cloud (state/commands/fleet) ✓ live; console→edge→Pigsty (репетиция T6/T7/T8/T9/T10) ✓ healthy.
+- Механики: 17 (M1..M17) — 14 WORKS / 1 DECOR (M6 realtime JWT) / 2 CAVEAT (M13 память in-process, M14 RSI за гейтом).
+- Список разрывов: stale «25 механик»-клеймы; 2 релиза позади hardcode sha/version в emergency/drive/enqueue; REHEARSAL-план enqueue без бейджа; dead /api/e2e POST + EDGE_ROUTES + prisma db.ts; 401 AMBIGUOUS в облачной очереди (hygiene-долг); RELOAD_TAB в allowlist консоли, но не в облачном issue-RPC.
+
+## 2. Закрытие дыры CP-W1 (рельса, PR #946, merge a452e3ee → release/self-update-ambiguity-live-v2)
+- Scheduler watchdog (5s, out-of-band): если running && нет timer && нет cyclePromise → re-arm цепочки (лечит смерть цепочки мгновенно, считает rearm'ы).
+- Cycle hard deadline (300s дефолт, инъекция для тестов, floor 1s): cycle в полёте дольше всех bounded-путей = доказуемо мёртв → escalation: маркер в control_plane + флаш heartbeat + exit(2) через 2.5s → Sentinel ре-спаунит процесс (путь проверен в бою). Окно self-update (DOWNLOADING/READY_RESTART/…) → один postpone.
+- Lease liveness телеметрия: attempt/ok/fail/error счётчики в snapshot().control_plane + в /v1/state heartbeat → консоль отличает «heartbeat жив» от «насос жив».
+- Тесты: +5 контрактных (wedge-hardening): liveness-трекинг, heartbeat-пейлоад, отсутствие ложной эскалации на здоровых циклах, exit(2) на клине, clamp дедлайна. Полный сьют: 3370 / 3368 pass / 0 fail / 2 skipped. Коммит a452e3ee запушен в rail; PR #946; CI 14 воркфлоу запущено 18:10 UTC.
+
+## 3. Консоль ( companion-изменения)
+- /api/live: извлечение control_plane из state → live.controlPlane {batchTransport, leaseLastOkAt, failures, cycleAge, wedgeEscalation, pumpHealth: ok|stalled|failing|null(легаси)}; вердикт pumpHealth: heartbeat<15s + lease-тишина>90s → stalled («зомби-дивергенция» как в бою); failures>=3 → failing; cycle>120s → stalled.
+- Live-панель: красный/янтарный баннер CONTROL PLANE STALLED / LEASE PUMP DEGRADED (data-testid=control-plane-banner), transport/failures/rearm.
+- Гигиена: «25 механик»→18 (M1..M18, M18=CP-W1 WORKS); sha/версии обновлены: dispatch base → 175c86ce, emergency sha → 175c86ce, shell_version → 0.7.0-dev.35625473710.1 (emergency+drive), enqueue baseSha default → 175c86ce; Fleet-панель: REHEARSAL PLANE бейдж на Operator Enqueue с подсказкой «боевые задачи — через Roadmap Runner».
+- QA: lint чист; /api/live отдаёт controlPlane=null на легаси-шелле (обратно-совместимо); /api/mechanics → 18 механик.
+
+## 4. Нерешённое / приоритеты
+1. CI на a452e3ee (14 воркфлоу, 18:10 UTC старт) → релиз vX.Y.Z-dev.{RUN_ID}.1 + dev-hint.json → БРАУЗЕР: единственный разблокирующий шаг — рестарт приложения оператором (зомби-клин DB-записью не лечится; sentinel слеп к async-клину). После рестарта: старый бинарь поднимает свежий насос → hint (2s probe) видит релиз → download → install → рестарт в новый бинарь (R-SUP-SEED+B-SH1+CP-W1) → settlement ролловера → seed-first привязка → fleet reconcile(4) → обучение.
+2. Перед рестартом: выдать свежий DEVELOPER_EMERGENCY_UPDATE (TTL 600, expected_git_sha=a452e3ee) — fast-path мимо hint-дисковери.
+3. После оживления: наблюдать control_plane.pumpHealth=ok в /api/live; dispatch_effect.seed_proven>=1; trail задач LEASED→RUNNING.
+4. Hygiene-долг: 401 AMBIGUOUS ретирамба; dead-code (/api/e2e POST, EDGE_ROUTES, prisma db.ts); RELOAD_TAB allowlist в облаке; R6 (память в Supabase).
+
+---
+Task ID: CPW1-AUDIT-20260921-1800 (продолжение: CI-инцидент, релиз, разблокировка)
+Agent: main (Super Z)
+
+## CI-инцидент и релиз
+- Первая CI-прогонка на a452e3ee: Bootstrap Autostart E2E (Windows) упал на моём CP-W1 тесте 1 — на медленном раннере selfUpdate.start() занимает ~3с (реальная сеть), к моменту поллинга consecutive-failures уже сброшен успешным лизингом. Фикс: детерминированный sawtooth (каждый нечётный wait-batch падает) → любой observation-window ловит пик. Коммит 3d2d0659.
+- ПОЛНЫЙ CI ЗЕЛЁНЫЙ на 3d2d0659: 14/14 воркфлоу (включая физический Windows Self-Update E2E, Evidence Gate, Fast Verified Dev Release).
+- РЕЛИЗ ОПУБЛИКОВАН: v0.7.0-dev.35637609965.1 (18:32:45 UTC, target 3d2d0659), 7 assets.
+- ССЫЛКА: https://github.com/PatrickFrome/Compute/releases/download/v0.7.0-dev.35637609965.1/METAENGINE-Browser-Test-Setup-0.7.0-dev.35637609965.1-x64.exe (115.5 MB)
+- dev-hint.json автоматически перепубликован → 3d2d0659 (18:32:46).
+
+## Обнаружено дополнительно (аудит RPC)
+- Облачный RPC: h205f22_a2_browser_supervisor_issue_developer_emergency_update_ (trailing underscore, БЕЗ _v1) — v1-варианта в облаке НЕТ (PGRST202); локальный Pigsty имеет underscore-вариант — консольный /api/emergency корректен на обеих плоскостях.
+- ISSUE: emergency-команда на 3d2d0659 выдана в облако: command_id c830eed6, expires 18:44:24, release_mode LATEST_TRUSTED, issued_by MISSION_CONTROL_CONSOLE.
+
+## Разблокировка (ожидание)
+Единственный ручной шаг — РЕСТАРТ METAENGINE Browser оператором (async-клин DB-записью не лечится; Sentinel слеп к нему — именно это и закрыл CP-W1 в новом бинаре). Автоцепочка после рестарта:
+1. Старый бинарь: свежий lease-насос → emergency-команда (или hint-check 2s) → download v0.7.0-dev.35637609965.1 → install → restart.
+2. Новый бинарь (R-SUP-SEED + B-SH1 + CP-W1): settlement ролловера → seed-first привязка root-разговора → keepalive в цикл → devos cycle → FLEET_RECONCILE(4).
+3. Консоль: /api/live покажет control_plane.pumpHealth=ok + shell 0.7.0-dev.35637609965.1; затем провижин/обучение 4 агентов через /api/agent-factory/provision.
+
+QA: консоль 12 вкладок, 0 console errors, M18=WORKS в Mechanics, скриншоты cpw1-01..04 в download/.

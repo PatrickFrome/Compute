@@ -95,7 +95,7 @@ export function MechanicsPanel({ poll }: { poll: PollState<MechanicsData> }) {
           <div>
             <CardTitle className="font-mono text-xs uppercase tracking-[0.18em] text-zinc-400">Mechanics Matrix — live вердикты</CardTitle>
             <CardDescription className="mt-1 font-mono text-[10px] text-zinc-600">
-              25 механик из BROWSER_DEEP_AUDIT_20260921; LIVE = проверено через консоль в этом контуре
+              18 механик M1..M18 (реестр 2026-09-21); LIVE = проверено через консоль в этом контуре
             </CardDescription>
           </div>
           <Button size="sm" variant="outline" onClick={() => poll.refresh()} className="h-7 w-7 shrink-0 self-start p-0 text-zinc-400 hover:bg-zinc-800" aria-label="refresh mechanics">

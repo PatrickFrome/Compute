@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * Mechanics Matrix — live probes for every catalogued browser mechanic
- * (deep audit 2026-09-21: 25 mechanics → 21 work / 1 decor / 3 caveats)
+ * (live registry: 18 mechanics M1..M18 → 15 work / 1 decor / 2 caveats)
  * plus the R1-R11 gap registry with closure status.
  * Every check below runs against the REAL local contour (Pigsty + edge).
  */
@@ -65,6 +65,7 @@ export async function GET() {
       { id: "M15", name: "Self-update (hint→discovery→barrier→rollback)", verdict: "WORKS", probe: "code-audit; rail v0.7.0-dev.35532004761.1", source: "BROWSER_DEEP_AUDIT §16" },
       { id: "M16", name: "Supervisor root seed-first send (R-SUP-SEED)", verdict: "WORKS", probe: "rail 95cb4e15: #typeAndSend доказывает разговор сидом (6×700ms readback) до полного сообщения; тесты rollover/bootstrap", source: "RELEASE-ROUND-20260921" },
       { id: "M17", name: "Poisoned agent tab self-heal (B-SH1)", verdict: "WORKS", probe: "rail 95cb4e15: OVER_LIMIT_REPLACE_SEED_FAILED → re-capture → CLOSE_TAB по доказательству → governor re-provision", source: "RELEASE-ROUND-20260921" },
+      { id: "M18", name: "Control-plane wedge hardening (CP-W1)", verdict: "WORKS", probe: "rail a452e3ee: scheduler watchdog re-arm + cycle hard-deadline exit(2)→Sentinel resurrect + lease liveness в /v1/state; консоль: divergence banner в Live", source: "CP-W1-ROUND-20260921" },
     ];
 
     const gaps = [
