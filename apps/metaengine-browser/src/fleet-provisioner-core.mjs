@@ -70,6 +70,13 @@ function normalizePolicy(policy = {}) {
   const desiredAgents = nonNegativeInteger(policy.desired_agents, DEFAULT_SEED_AGENTS, 'desired_agents');
   const spawnBurstLimit = burstLimit(policy.spawn_burst_limit, DEFAULT_SPAWN_BURST_LIMIT);
   if (warmAgents > desiredAgents) throw new Error('fleet_capacity_order_invalid');
+  // Operator fleet target persistence (2026-09-21 operator directive): the last
+  // OPERATOR-set FLEET_RECONCILE target survives restarts. The elastic governor
+  // keeps live authority over desired_agents (demand-driven, overwritten every
+  // cycle); this field only seeds the STARTUP fleet so a self-update restart
+  // restores the operator's fleet instead of silently shrinking it to demand.
+  // Invalid values clamp to 0 (fail-safe: no auto-grow), never throw.
+  const bootFleetTarget = Math.min(64, Math.max(0, Math.floor(Number(policy.boot_fleet_target)) || 0));
   // Closed-loop audit fix (fleet scale): the elastic live-agent ceiling flows
   // through the persisted fleet policy (the governor reads
   // policy.elastic_max_target_agents; before this key was normalized away and
@@ -85,6 +92,7 @@ function normalizePolicy(policy = {}) {
     warm_agents: warmAgents,
     desired_agents: desiredAgents,
     ...(elasticMaxTargetAgents != null ? { elastic_max_target_agents: elasticMaxTargetAgents } : {}),
+    boot_fleet_target: bootFleetTarget,
     elastic: true,
     hard_agent_cap: null,
     max_agents: null,
@@ -134,7 +142,17 @@ function normalizeConversationUrl(value) {
 }
 
 function sanitizeLoadedState(input, policy) {
-  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return freshState(policy);
+  // Operator fleet target persistence: the loaded file's boot_fleet_target is
+  // the ONLY policy field that survives the startup-policy replacement. It
+  // lifts the startup desired_agents so the first active reconcile can restore
+  // the operator's fleet after a restart (self-update, crash, reboot).
+  const operatorBootTarget = Math.min(64, Math.max(0, Math.floor(Number(input?.policy?.boot_fleet_target)) || 0));
+  const startupPolicy = normalizePolicy({
+    ...policy,
+    boot_fleet_target: operatorBootTarget,
+    desired_agents: Math.max(Number(policy?.desired_agents ?? 0) || 0, operatorBootTarget),
+  });
+  if (!input || input.schema !== 'metaengine.browser.fleet-state.v1' || !Array.isArray(input.agents)) return freshState(startupPolicy);
   const agents = [];
   const seen = new Set();
   for (const row of input.agents) {
@@ -180,7 +198,7 @@ function sanitizeLoadedState(input, policy) {
   return {
     schema: 'metaengine.browser.fleet-state.v1',
     version: FLEET_PROVISIONER_VERSION,
-    policy: clone(policy),
+    policy: clone(startupPolicy),
     agents,
     updated_at: input.updated_at || null,
   };
@@ -294,6 +312,25 @@ export class FleetProvisioner {
       const target = nonNegativeInteger(targetAgents, this.#state.policy.desired_agents, 'desired_agents');
       if (target < this.#state.policy.warm_agents) throw new Error('fleet_capacity_order_invalid');
       this.#state.policy = clone(normalizePolicy({ ...this.#state.policy, desired_agents: target }));
+      await this.#persist();
+      return this.snapshot();
+    });
+  }
+
+  // Operator fleet target persistence (2026-09-21): the OPERATOR's explicit
+  // FLEET_RECONCILE target is recorded as boot_fleet_target and survives
+  // restarts. Called ONLY for operator-issued commands (main.mjs distinguishes
+  // them from the DevOS elastic governor's plan payloads by the plan schema
+  // marker), so demand-driven plan targets never capture the boot seed.
+  async setOperatorFleetTarget(targetAgents) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const target = Math.min(64, Math.max(0, Math.floor(Number(targetAgents)) || 0));
+      this.#state.policy = clone(normalizePolicy({
+        ...this.#state.policy,
+        boot_fleet_target: target,
+        desired_agents: Math.max(this.#state.policy.desired_agents, target),
+      }));
       await this.#persist();
       return this.snapshot();
     });
