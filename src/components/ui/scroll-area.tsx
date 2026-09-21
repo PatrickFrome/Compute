@@ -13,7 +13,10 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      // overflow-hidden is REQUIRED: Radix Viewport resolves h-full against an
+      // auto-height parent, so without it content visually spills past max-h-*
+      // caps (QA round MC-WEB-CONSOLE-20260921-006 found rows escaping cards).
+      className={cn("relative overflow-hidden", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
