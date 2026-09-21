@@ -1128,6 +1128,48 @@ export class SupervisorLifecycleRuntime {
     return true;
   }
 
+  // Proof-based settlement of a pending ambiguous wake that blocks the
+  // rollover (see settleRolloverBlockedAmbiguousWake in supervisor-keepalive).
+  // No action without positive evidence: still-generating or unobservable
+  // surfaces are left untouched for the next tick.
+  async #settleRolloverBlockedAmbiguousWake(supervisor, observed) {
+    const ks = this.#keepalive.snapshot();
+    const pending = ks.pending_wake;
+    if (!pending?.ambiguous_at) return false;
+    let frame = observed?.frame || null;
+    if (!frame) {
+      try { frame = await this.#capture(supervisor.tab_id); } catch { return false; }
+    }
+    const markerObserved = String(frame?.text_excerpt || '').includes(String(pending.wake_id || ''));
+    if (markerObserved) {
+      await this.#keepalive.settleRolloverBlockedAmbiguousWake({ observed_sent: true });
+      this.#lastRecovery = {
+        action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_CONFIRMED', wake_id: pending.wake_id,
+        tab_id: String(supervisor.tab_id || ''), proof: 'WAKE_MARKER_IN_TRANSCRIPT',
+        confirmed: true, ambiguous: false, at: new Date().toISOString(), authority_effect: false,
+      };
+      return true;
+    }
+    const row = observed?.row || null;
+    if (row?.terminal_ready !== true) return false;
+    const composer = composerTarget(frame);
+    const message = buildSupervisorWakeMessage({
+      supervisorEpoch: pending.supervisor_epoch,
+      cycleSeq: pending.cycle_seq,
+      wakeId: pending.wake_id,
+      reason: pending.reason,
+    });
+    const unsentProven = Boolean(composer) && composer.value_sha256 === sha256(message);
+    await this.#keepalive.settleRolloverBlockedAmbiguousWake({ observed_sent: false });
+    this.#lastRecovery = {
+      action: 'ROLLOVER_BLOCKED_AMBIGUOUS_WAKE_DROPPED', wake_id: pending.wake_id,
+      tab_id: String(supervisor.tab_id || ''),
+      proof: unsentProven ? 'COMPOSER_STILL_HOLDS_EXACT_MESSAGE' : 'TERMINAL_READY_WITHOUT_WAKE_MARKER',
+      confirmed: false, ambiguous: false, at: new Date().toISOString(), authority_effect: false,
+    };
+    return true;
+  }
+
   async #rollover() {
     if (this.#canActuate() !== true) return false;
     const before = this.#keepalive.snapshot();
@@ -1381,7 +1423,17 @@ export class SupervisorLifecycleRuntime {
         const observed = await this.#observeSupervisor(supervisor, state);
         if (this.#canActuate() === true) {
           const ks = this.#keepalive.snapshot();
-          if (ks.state === 'ROLLOVER_REQUIRED') await this.#rollover();
+          if (ks.state === 'ROLLOVER_REQUIRED') {
+            // LIVE 2026-09-21: settle a pending ambiguous wake (e.g. cut by the
+            // self-update restart window) BEFORE the rollover — otherwise the
+            // rollover retire paths (WAKE_AMBIGUOUS-only) deadlock against it
+            // and the devos task cycle is starved indefinitely.
+            if (ks.pending_wake?.ambiguous_at) {
+              await this.#settleRolloverBlockedAmbiguousWake(supervisor, observed);
+            }
+            keepalive = this.#keepalive.snapshot();
+            if (keepalive.state === 'ROLLOVER_REQUIRED') await this.#rollover();
+          }
           else if (['STALLED','INTERRUPTED'].includes(observed.row.state)) {
             if (this.#activeRequest && this.#activeRequest.blocked_ambiguous !== true) await this.#recoverSupervisor(supervisor, observed.frame, observed.row);
             else if (observed.row.state === 'STALLED') await this.#recoverOrphanedSupervisor(supervisor, observed.frame, observed.row);
