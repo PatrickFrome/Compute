@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isChatAuthRedirectUrl } from './chatgpt-auth-readback.mjs';
 import { AgentSessionMonitor } from './agent-session-monitor.mjs';
-import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_HOME_URL, AGENT_PLATFORM_ID, classifyAgentPlatformSurface, isAgentPlatformConversationUrl, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import { chatGptControlMatches, uniqueChatGptControl } from './chatgpt-ui-controls.mjs';
 import { classifyRetryDecision, REQUEST_EFFECT_CLASS } from './chatgpt-retry-policy.mjs';
 import { buildSupervisorRolloverMessage, buildSupervisorWakeMessage } from './supervisor-keepalive.mjs';
@@ -23,6 +23,15 @@ const CONTINUOUS_WAKE_REASON = 'CONTINUE_DEVELOPMENT';
 // generous operator window before the lifecycle self-releases an operator-
 // class rollover that approveRollover (no caller, D-K8) would park forever.
 const DEFERRED_ROLLOVER_AUTO_RELEASE_MS = 15 * 60 * 1000;
+// R-SUP-SEED (live 2026-09-21): tiny deterministic seed that proves a
+// PRECONVERSATION_ROOT surface before the supervisor sends the real (large)
+// message. Same medicine as the fleet dispatch root bootstrap (B0/A1/C10,
+// PR #943): the root composer silently refuses Enter on oversized prompts,
+// so the seed — far below any site-side refusal threshold — creates the
+// conversation, and the real message types into it afterwards. The live
+// rollover black hole was exactly this class: fresh root tab → full
+// rollover message → TYPE_EFFECT_AMBIGUOUS → no-progress rerequest loop.
+const GLM_SUPERVISOR_CONVERSATION_SEED = 'METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
@@ -468,8 +477,28 @@ export class SupervisorLifecycleRuntime {
       before = await this.#capture(tabId);
     }
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
-    const box = composerTarget(before);
+    let box = composerTarget(before);
     if (!box) throw new Error('supervisor_composer_not_unique');
+    // R-SUP-SEED (live 2026-09-21): a PRECONVERSATION_ROOT surface (fresh
+    // rollover tab, RECOVERING bootstrap) silently refuses Enter on oversized
+    // prompts — the exact failure class the fleet dispatcher fixed with the
+    // tiny conversation seed. The rollover message carries the full keepalive
+    // summary, so typing it straight into the root composer produced the live
+    // black hole: TYPE_EFFECT_AMBIGUOUS → markRolloverAmbiguous → no-progress
+    // rerequest → fresh tab → repeat. Medicine: prove the conversation FIRST
+    // with the tiny deterministic seed, then type the real message on the
+    // conversation surface where replace+Enter are live-proven. Established
+    // conversation surfaces never pay the seed cost.
+    if (classifyAgentPlatformSurface(before?.url)?.stage === 'PRECONVERSATION_ROOT') {
+      const seed = await this.#seedRootConversation(tabId, box);
+      if (!seed.ok) {
+        this.#lastError = `supervisor_root_seed:${seed.reason}`;
+        return { ok: false, reason: seed.reason, clicked: seed.clicked === true, event_driven_readback: true };
+      }
+      before = seed.frame || before;
+      const conversationBox = composerTarget(before);
+      if (conversationBox) box = conversationBox;
+    }
     // Persisted wake intent already fences this logical effect. Submit through the
     // semantic command's CDP event latch so type + send has one physical boundary
     // and one positive readback path. Once submit dispatch starts, any exception is
@@ -521,6 +550,52 @@ export class SupervisorLifecycleRuntime {
     });
     const readback = await this.#observeSendReadback(tabId, positiveMarker);
     return readback.ok ? { ok: true, clicked, observed: readback.observed } : { ok: false, reason: 'SEND_WITHOUT_POSITIVE_READBACK', clicked };
+  }
+
+  // R-SUP-SEED: root-surface conversation bootstrap (see #typeAndSend).
+  // One SEMANTIC_TYPE (submit_after_type) with the tiny seed, bounded
+  // conversation-URL readback (6×700ms — the dispatch readback contract; the
+  // 2s command latch alone can miss the async SPA navigation), then a bounded
+  // generation drain — the real submit is only safe on an idle surface.
+  // Fail-closed: an unproven seed is a NOT-OK with clicked=true (the seed
+  // WAS submitted — conservatively ambiguous, never a second click); a
+  // suppressed seed mirrors the real-submit suppression semantics
+  // (#typeAndSend): a provably pre-effect reason is a clean abort
+  // (clicked=false), anything else stays conservatively ambiguous
+  // (clicked=true) so the D-S1 proof-based retirement bounds the retry.
+  async #seedRootConversation(tabId, box) {
+    const submitted = await this.#execute({
+      action: 'SEMANTIC_TYPE',
+      payload: {
+        tab_id: tabId,
+        role: 'textbox',
+        accessible_name: box.name,
+        semantic_ref: box.semantic_ref,
+        text: GLM_SUPERVISOR_CONVERSATION_SEED,
+        replace_existing: true,
+        submit_after_type: true,
+      },
+      platform: AGENT_PLATFORM_ID,
+    });
+    if (submitted?.suppressed === true) {
+      const reason = String(submitted.reason || 'SEMANTIC_SUBMIT_SUPPRESSED');
+      const preEffect = ['SEMANTIC_REF_REOBSERVE_REQUIRED', 'CHATGPT_SERVICE_THROTTLED'].includes(reason);
+      return { ok: false, clicked: !preEffect, reason, frame: null };
+    }
+    let frame = null;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await sleep(700);
+      try { frame = await this.#capture(tabId); } catch { frame = null; }
+      if (frame && isAgentPlatformConversationUrl(String(frame?.url || ''))) break;
+      frame = null;
+    }
+    if (!frame) return { ok: false, clicked: true, reason: 'ROOT_SEED_CONVERSATION_NOT_PROVEN', frame: null };
+    for (let attempt = 0; attempt < 10 && generating(frame); attempt += 1) {
+      await sleep(1200);
+      try { frame = await this.#capture(tabId); } catch { frame = null; break; }
+    }
+    if (!frame || generating(frame)) return { ok: false, clicked: true, reason: 'ROOT_SEED_GENERATION_STILL_ACTIVE', frame: null };
+    return { ok: true, clicked: true, reason: null, frame };
   }
 
   // D-K7: pre-effect wake-send failure reasons that mean the composer itself

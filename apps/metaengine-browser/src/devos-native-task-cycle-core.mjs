@@ -970,6 +970,29 @@ export class DevOsNativeTaskCycle {
       if (!boot?.normalizedUrl) {
         this.#dispatchEffectCounters.flush_over_limit += 1;
         this.#noteDispatchEffect({ stage: 'SEED', state: 'OVER_LIMIT_REPLACE_SEED_FAILED', composer_chars_before: draftLength, effect_state: boot?.submitted?.effect_state || null, task_id: lease.task_id, agent_id: lease.agent_id });
+        // B-SH1 (live 2026-09-21): a replace-seed failure used to leave the
+        // poisoned tab alive forever — the same 37921-char draft dead-ended
+        // every later lease (flush_over_limit=5 live) and the per-(agent,
+        // epoch) guard blocked re-attempts. Proof-based self-healing, same
+        // discipline as the supervisor's #closeFailedBootstrapTab: re-capture
+        // FIRST and close only a STILL-poisoned (or composer-unresolvable)
+        // tab — a draft that provably cleared (or a surface that moved on)
+        // is preserved. The elastic governor re-provisions the closed
+        // agent's tab on the next reconcile, so the heal is self-completing.
+        let recheck = null;
+        try { recheck = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id } }); } catch { recheck = null; }
+        const recheckComposer = resolveAgentPlatformComposer(recheck);
+        const recheckRawLength = recheckComposer?.value_length;
+        const recheckLength = (recheckRawLength === null || recheckRawLength === undefined)
+          ? null
+          : (Number.isFinite(Number(recheckRawLength)) ? Number(recheckRawLength) : null);
+        const stillPoisoned = recheckLength === null || recheckLength > GLM_ROOT_DRAFT_FLUSH_MAX_CHARS;
+        if (stillPoisoned) {
+          await this.#executeCommand({ action: 'CLOSE_TAB', platform: null, payload: { tab_id: lease.tab_id } }).catch(() => {});
+          this.#noteDispatchEffect({ stage: 'SEED', state: 'POISONED_AGENT_TAB_CLOSED', composer_chars_before: draftLength, recheck_chars: recheckLength, task_id: lease.task_id, agent_id: lease.agent_id });
+        } else {
+          this.#noteDispatchEffect({ stage: 'SEED', state: 'POISONED_AGENT_TAB_PRESERVED_DRAFT_CLEARED', composer_chars_before: draftLength, recheck_chars: recheckLength, task_id: lease.task_id, agent_id: lease.agent_id });
+        }
         const error = new Error(`fleet_task_root_draft_over_flush_limit:${draftLength}`);
         error.automatic_retry_allowed = false;
         throw error;
