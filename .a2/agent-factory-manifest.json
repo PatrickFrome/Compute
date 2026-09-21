@@ -1,4 +1,77 @@
 {
-  "agents": [],
-  "updatedAt": "2026-09-21T14:52:31.873Z"
+  "agents": [
+    {
+      "role": "PLANNER",
+      "agentId": "mcagent_117e56bf",
+      "tabId": "tab_117e56bf-8388-473e-8c08-b3c0b0f1f8ef",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:42:56.906Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_PERCEPTION"
+    },
+    {
+      "role": "RESEARCHER",
+      "agentId": "mcagent_e6feb5cd",
+      "tabId": "tab_e6feb5cd-a764-4d6e-bfb2-3b9695f38070",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:43:38.568Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_PERCEPTION"
+    },
+    {
+      "role": "IMPLEMENTER",
+      "agentId": "mcagent_c7c9a256",
+      "tabId": "tab_c7c9a256-e8f4-4d2b-9c54-9667db4a00e3",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:44:18.573Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_TARGET"
+    },
+    {
+      "role": "PLANNER",
+      "agentId": "mcagent_5403f012",
+      "tabId": "tab_5403f012-f473-4779-a37f-474376e5ee8c",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:48:03.524Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_TARGET"
+    },
+    {
+      "role": "IMPLEMENTER",
+      "agentId": "mcagent_2524a169",
+      "tabId": "tab_2524a169-01ed-4009-b688-ca486d128c60",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:50:14.557Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_TARGET"
+    },
+    {
+      "role": "CRITIC",
+      "agentId": "mcagent_c1e43f33",
+      "tabId": "tab_c1e43f33-1a3b-4f48-8c40-715367128224",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:52:06.600Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_TARGET"
+    },
+    {
+      "role": "PLANNER",
+      "agentId": "mcagent_77f09765",
+      "tabId": "tab_77f09765-a020-47b9-9123-c27e0d8ec0ff",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:52:42.108Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_TARGET"
+    },
+    {
+      "role": "CRITIC",
+      "agentId": "mcagent_f985dd29",
+      "tabId": "tab_f985dd29-45f5-4f9a-a867-c2236f06be0e",
+      "kind": "AGENT_TASK",
+      "trainedAt": "2026-09-21T21:53:01.413Z",
+      "bootstrapVerified": false,
+      "typeStatus": "NO_TARGET"
+    }
+  ],
+  "updatedAt": "2026-09-21T21:53:09.336Z"
 }

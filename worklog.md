@@ -6037,3 +6037,24 @@ Agent: main (Super Z)
 3. Консоль: /api/live покажет control_plane.pumpHealth=ok + shell 0.7.0-dev.35637609965.1; затем провижин/обучение 4 агентов через /api/agent-factory/provision.
 
 QA: консоль 12 вкладок, 0 console errors, M18=WORKS в Mechanics, скриншоты cpw1-01..04 в download/.
+
+---
+Task ID: AGENTMODE-20260921-2040
+Agent: main (Super Z)
+Task: Рестарт оператора → разблокировка; главный приоритет — научить браузер создавать/обучать/ставить задачи правильных (agent-mode) агентов.
+
+Work Log:
+- РЕСТАРТ ОПЕРАТОРА СРАБОТАЛ: насос ожил (heartbeat 1s), self-update прошёл цепочку UNINITIALIZED → RESTART_GRACE → новый shell 0.7.0-dev.35637609965.1 (R-SUP-SEED + B-SH1 + CP-W1), rec: QUALIFIED. FLEET_RECONCILE(4) COMPLETED — флот сведён (было 6 ACTIVE при target 4).
+- НОВЫЙ БЛОКЕР РОЛЛОВЕРА: fresh attempt → ROLLOVER_ERROR:supervisor_composer_not_unique (гидратация root-вкладки > 4×1200ms бюджета recapture).
+- LIVE-РАЗВЕДКА AGENT-MODE (CAPTURE/TYPED_CLICK через облако): на root-поверхности есть кнопки-чипы "Chat"/"Agent"; TYPED_CLICK "Agent" переключает композер ("How can I help you today?" → "Send a Message", появляется "New Task") — agent-режим (full stack + long running tasks) доступен семантически, без геометрии.
+- НАЙДЕН КОРЕНЬ НЕИСПРАВНОСТИ SUBMIT'ОВ: 48k (48182→48286 растёт) ПОisoned draft супервайзера синхронится в localStorage["chat-input-"] и ВОССТАНАВЛИВАЕТСЯ в каждом новом табе. Ошибки: native_semantic_submit_requires_exact_chatgpt_composer (лечится p_platform=GLM_ZAI — отдельный параметр RPC, НЕ в payload), затем native_semantic_type_replace_unverified.
+- FACTORY-РАЗВЕДКА (Playwright, guest): draft = client-side localStorage (chat-input-, JSON prompt); восстанавливается в новых табах и после reload; тройной клик в текущем редакторе выделяет ОДНУ строку (201/48286) — CLICK_SELECT частично заменяет → fail-fast; quadruple-click тоже строка; НО Ctrl+A через CDP-клавиши при ФОКУСЕ выделяет ВСЁ (selectionStart=0, selEnd=len) и Delete очищает. D-M3 «игнор клавиш» = keys без фокуса (падали на <body>).
+- RAIL PATCH R-DRAFT-FOCUS + R-ROOT-HYDRATION: (1) KEY_ATOMIC теперь DOM.focus композера перед клавишами; (2) KEY_ATOMIC первый на ВСЕХ поверхностях, CLICK_SELECT — fallback; (3) recapture-бюджет 4×1200ms → 8×1800ms (свежие root-гидрации ~5-10s). agent-platform-task-config snapshot обновлён (composer_ignores_synthetic_editing_keys: false, replace_gesture_root_surface: KEY_ATOMIC). Тесты контракта обновлены (glm-task-composer-click-select-replace: root focused-key-atomic wholesale replace, empty composer, fail-fast bounds) — затронутые файлы 22/22 + 35/35 зелёные.
+- CLOUD RPC-ГРАНИЦЫ: action-allowlist валидируется в облаке (новый action без SQL-миграции оператора НЕВОЗМОЖЕН); emergency-функция требует p_idempotency_key + nonce ≥32 [A-Za-z0-9_-]; p_platform — отдельный параметр issue_native_v1 (CHATGPT|GLM_ZAI).
+- CONSOLE: browser-tools/cloud прокинули platform в issueCommand/batchIssue/typeInto (p_platform); provision v2 (mode:"agent" default): NEW_TAB → TYPED_CLICK чип Agent (3 retry) → SEMANTIC_TYPE bootstrap (GLM_ZAI) → READ_TRANSCRIPT verify → manifest с kind=AGENT_TASK; НОВЫЙ /api/agent-factory/task — постановка задач агентам (tasks[]/role/all, параллельный dispatch, bounded verify-свип). Линт чист; оба роута живы (200).
+- ИНЦИДЕНТ: dev-server тихо умер во время работы (пустой стек), перезапущен setsid + heap-cap 1024MB; фоновый сьют рельсы тоже убит — перезапущен с --test-concurrency=4.
+
+Stage Summary:
+- Разблокирован agent-mode для флота: семантический чип Agent + GLM_ZAI submit + kind=AGENT_TASK в манифесте; задача-роут готов.
+- Рельса ждёт: полный сьют → PR → CI → релиз → self-update → draft-poison снимется, rollover + seed-first + провижин новых агентов оживут.
+- Следующее: дождаться сьюта, закоммитить/PR/CI, затем LIVE провижин 4 agent-агентов + обучение + задачи.

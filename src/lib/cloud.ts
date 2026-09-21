@@ -95,6 +95,7 @@ export async function cloudIssueCommand(opts: {
   ttlSeconds?: number;
   issuedBy?: string;
   idempotencyKey: string;
+  platform?: string;
 }): Promise<IssuedCommand> {
   const body = {
     p_client_id: opts.clientId ?? LIVE_BROWSER_CLIENT_ID,
@@ -103,6 +104,7 @@ export async function cloudIssueCommand(opts: {
     p_ttl_seconds: opts.ttlSeconds ?? 90,
     p_issued_by: opts.issuedBy ?? "MISSION_CONTROL_CONSOLE",
     p_idempotency_key: opts.idempotencyKey,
+    ...(opts.platform ? { p_platform: opts.platform } : {}),
   };
   const res = await cloudFetch(`/${CLOUD_ISSUE_RPC}`, {
     method: "POST",

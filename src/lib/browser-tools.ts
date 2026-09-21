@@ -99,6 +99,7 @@ export async function issueCommand(opts: {
   issuedBy?: string;
   waitMs?: number;
   idempotencyKey?: string;
+  platform?: string;
 }): Promise<IssueResult> {
   const idempotencyKey =
     opts.idempotencyKey ??
@@ -109,6 +110,7 @@ export async function issueCommand(opts: {
     ttlSeconds: opts.ttlSeconds ?? 90,
     issuedBy: opts.issuedBy ?? "MISSION_CONTROL_CONSOLE",
     idempotencyKey,
+    platform: opts.platform,
   });
   const commandId = String(issued.command_id ?? "");
   if (!commandId) {
@@ -133,7 +135,7 @@ export async function issueCommand(opts: {
 
 /** Fire many commands at once (scheduler max_batch=64), collect receipts in parallel. */
 export async function batchIssue(
-  commands: { action: string; payload: Record<string, unknown> }[],
+  commands: { action: string; payload: Record<string, unknown>; platform?: string }[],
   opts: { ttlSeconds?: number; issuedBy?: string; waitMs?: number } = {},
 ): Promise<IssueResult[]> {
   const issued = await Promise.all(
@@ -144,6 +146,7 @@ export async function batchIssue(
         ttlSeconds: opts.ttlSeconds ?? 120,
         issuedBy: opts.issuedBy ?? "MISSION_CONTROL_CONSOLE",
         idempotencyKey: `mc-batch:${c.action.toLowerCase()}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+        platform: c.platform,
       }).catch((e) => ({ command_id: "", __error: String(e) })),
     ),
   );
@@ -229,6 +232,43 @@ function semrefPayload(t: SemanticTarget, tabId: string, extra: Record<string, u
   };
 }
 
+/**
+ * CAPTURE the tab directly (READ_ONLY command) and return its semantic frame.
+ * The realtime perception push only refreshes for the selected tab on a slow
+ * cadence — freshly provisioned tabs never showed up in time, so all factory
+ * addressing now goes through on-demand CAPTURE (same payload shape).
+ */
+export async function captureFrame(
+  tabId: string,
+  waitMs = 20000,
+): Promise<{ url?: string; semantic_targets: SemanticTarget[] } | null> {
+  const r = await issueCommand({ action: "CAPTURE", payload: { tab_id: tabId }, waitMs });
+  const res = r.result as { url?: string; semantic_targets?: SemanticTarget[] } | null;
+  if (!res?.semantic_targets?.length) return null;
+  return { url: res.url, semantic_targets: res.semantic_targets };
+}
+
+/** SELECT_TAB, then resolve a semantic target by name/role from a fresh CAPTURE (perception push as fallback). */
+async function selectTabAndFindTarget(
+  tabId: string,
+  match: { name?: string | RegExp; role?: string },
+  waitMs = 3500,
+): Promise<{ target: SemanticTarget | null; url?: string }> {
+  const sel = await issueCommand({ action: "SELECT_TAB", payload: { tab_id: tabId }, waitMs: 12000 });
+  if (!sel.ok) return { target: null };
+  // the select lands fast; give the surface a beat to settle, then capture
+  await new Promise((r) => setTimeout(r, Math.min(waitMs, 1500)));
+  let frame = await captureFrame(tabId);
+  let t = frame ? findSemanticTarget(frame as unknown as Perception, match) : null;
+  // bounded retry — fresh tabs hydrate asynchronously
+  for (let attempt = 0; attempt < 3 && (!t || t.disabled); attempt += 1) {
+    await new Promise((r) => setTimeout(r, 2000));
+    frame = await captureFrame(tabId);
+    t = frame ? findSemanticTarget(frame as unknown as Perception, match) : null;
+  }
+  return { target: t ?? null, url: frame?.url };
+}
+
 /** Type text into a semantic target (finds it fresh, then SEMANTIC_TYPE). */
 export async function typeInto(opts: {
   tabId: string;
@@ -237,12 +277,11 @@ export async function typeInto(opts: {
   replaceExisting?: boolean;
   submitAfterType?: boolean;
   issuedBy?: string;
+  platform?: string;
 }): Promise<IssueResult & { perceptionUrl?: string }> {
-  const p = await selectTabAndWaitPerception(opts.tabId);
-  if (!p) return { ok: false, action: "SEMANTIC_TYPE", commandId: "", status: "NO_PERCEPTION", result: null, receipt: null, error: "perception_unavailable" };
-  const t = findSemanticTarget(p, opts.match);
+  const { target: t, url } = await selectTabAndFindTarget(opts.tabId, opts.match);
   if (!t || !t.semantic_ref) {
-    return { ok: false, action: "SEMANTIC_TYPE", commandId: "", status: "NO_TARGET", result: null, receipt: null, error: `target_not_found:${String(opts.match.name)}`, resultNote: p.text_excerpt?.slice(0, 120) } as IssueResult & { resultNote?: string };
+    return { ok: false, action: "SEMANTIC_TYPE", commandId: "", status: "NO_TARGET", result: null, receipt: null, error: `target_not_found:${String(opts.match.name)}` };
   }
   const payload = semrefPayload(t, opts.tabId, {
     text: opts.text,
@@ -254,19 +293,18 @@ export async function typeInto(opts: {
     payload,
     issuedBy: opts.issuedBy ?? "AGENT_FACTORY",
     waitMs: 20000,
+    platform: opts.platform,
   });
-  return { ...r, perceptionUrl: p.url };
+  return { ...r, perceptionUrl: url };
 }
 
-/** Click a semantic target by accessible name/role. */
+/** Click a semantic target by accessible name/role (CAPTURE-addressed). */
 export async function clickByName(opts: {
   tabId: string;
   match: { name?: string | RegExp; role?: string };
   issuedBy?: string;
 }): Promise<IssueResult> {
-  const p = await selectTabAndWaitPerception(opts.tabId);
-  if (!p) return { ok: false, action: "TYPED_CLICK", commandId: "", status: "NO_PERCEPTION", result: null, receipt: null, error: "perception_unavailable" };
-  const t = findSemanticTarget(p, opts.match);
+  const { target: t } = await selectTabAndFindTarget(opts.tabId, opts.match);
   if (!t || !t.semantic_ref) {
     return { ok: false, action: "TYPED_CLICK", commandId: "", status: "NO_TARGET", result: null, receipt: null, error: `target_not_found:${String(opts.match.name)}` };
   }
