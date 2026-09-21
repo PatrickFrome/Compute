@@ -136,3 +136,50 @@ export async function cloudCommandReceipt(commandId: string): Promise<CommandRec
   const r = rows[0];
   return r ? { command_id: r.command_id, status: r.status, receipt: r.receipt, completed_at: r.completed_at } : null;
 }
+
+/** DevOS fleet execution plane (cloud) — the plane the live browser leases from. */
+export const CLOUD_FLEET_WORKSPACE = "2de9f84b-7c0a-4091-911c-894ff1d6eaf4";
+
+export interface CloudFleetSnapshot {
+  schema?: string;
+  workspace_id?: string;
+  active_tasks?: Record<string, unknown>[];
+  active_claims?: Record<string, unknown>[];
+  recent_events?: Record<string, unknown>[];
+  authority_effect?: boolean;
+}
+
+/**
+ * Call a PostgREST RPC on the cloud database (service_role, server-side ONLY).
+ * The live browser is cloud-first: its supervisor cycle leases DevOS tasks
+ * from THIS database, not from the local Pigsty contour — any operator-side
+ * enqueue that wants real fleet execution MUST land here.
+ */
+export async function cloudRpc<T = Record<string, unknown>>(
+  name: string,
+  body: Record<string, unknown>,
+  timeoutMs = 10000,
+): Promise<T> {
+  const res = await cloudFetch(
+    `/rpc/${encodeURIComponent(name)}`,
+    { method: "POST", headers: headers(true), body: JSON.stringify(body) },
+    timeoutMs,
+  );
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text.slice(0, 200);
+    try {
+      const parsed = JSON.parse(text) as { message?: string; code?: string };
+      detail = `${parsed.code ?? res.status}: ${parsed.message ?? detail}`;
+    } catch { /* keep raw detail */ }
+    throw new Error(`cloud rpc ${name} failed — ${detail}`);
+  }
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+/** Cloud DevOS fleet snapshot (active tasks/claims + recent events). */
+export async function cloudFleetSnapshot(
+  workspace = CLOUD_FLEET_WORKSPACE,
+): Promise<CloudFleetSnapshot> {
+  return cloudRpc<CloudFleetSnapshot>("devos_fleet_snapshot_v1", { p_workspace: workspace });
+}

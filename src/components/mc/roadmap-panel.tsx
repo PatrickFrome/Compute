@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,7 +10,7 @@ import { StatusBadge } from "@/components/mc/badges";
 import { shortId, timeAgo } from "@/components/mc/use-poll";
 import type { PollState } from "@/components/mc/use-poll";
 import {
-  Milestone, GitCommitHorizontal, Stamp as Seal, Rocket, RefreshCw, Search, ListChecks, Loader2,
+  Milestone, GitCommitHorizontal, Stamp as Seal, Rocket, RefreshCw, Search, ListChecks, Loader2, Cloud, HardDrive, Repeat,
 } from "lucide-react";
 
 interface MilestoneTask {
@@ -20,9 +20,13 @@ interface MilestoneTask {
   priority: number | null;
   updatedAt: string | null;
   finishedAt: string | null;
+  plane?: string;
 }
 
 interface RoadmapData {
+  ok: boolean;
+  plane?: "cloud" | "local";
+  cloudError?: string | null;
   milestones: {
     key: string; status: string; phase: number | null; priority: string | null;
     updatedAt: string | null; verifiedCheckpointId: string | null; task: MilestoneTask | null;
@@ -49,6 +53,30 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
   const [filter, setFilter] = useState<(typeof STATUS_FILTERS)[number]>("ALL");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<"" | "dispatch-all" | "sync">("");
+  const [autoSync, setAutoSync] = useState(true);
+  const autoRef = useRef(autoSync);
+  autoRef.current = autoSync;
+
+  // Auto-sync: cloud task states advance asynchronously (the browser leases
+  // and completes tasks on its own heartbeat) — pull transitions every 60s.
+  useEffect(() => {
+    if (!autoSync) return;
+    const t = setInterval(() => {
+      if (!autoRef.current || bulkBusy) return;
+      void (async () => {
+        try {
+          const res = await fetch("/api/roadmap/dispatch", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "sync" }),
+          });
+          const json = (await res.json()) as { ok?: boolean; changedCount?: number };
+          if (json.ok && (json.changedCount ?? 0) > 0) void poll.refresh();
+        } catch { /* auto-sync is best-effort */ }
+      })();
+    }, 60_000);
+    return () => clearInterval(t);
+  }, [autoSync, bulkBusy]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -65,6 +93,8 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
   const inProgress = summary["IN_PROGRESS"] ?? 0;
   const blocked = summary["BLOCKED"] ?? 0;
   const planned = summary["PLANNED"] ?? 0;
+  const plane = d?.plane ?? "local";
+  const cloudLive = plane === "cloud";
 
   async function post(action: string, extra: Record<string, unknown> = {}) {
     const res = await fetch("/api/roadmap/dispatch", {
@@ -83,7 +113,7 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
         const state = String(json.state ?? "?");
         const dup = json.duplicate === true;
         toast[dup ? "info" : "success"](`Milestone ${key} ${dup ? "already enqueued" : "dispatched"}`, {
-          description: `task ${shortId(String(json.taskId ?? ""), 8)} · ${state} · point roadmap.${key}`,
+          description: `task ${shortId(String(json.taskId ?? ""), 8)} · ${state} · cloud execution plane`,
         });
         void poll.refresh();
       } else {
@@ -157,8 +187,25 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
                 {filtered.length}/{total} milestones
               </span>
             </CardTitle>
-            <CardDescription className="font-mono text-[10px] text-zinc-600">
-              compute_fabric_roadmap_milestone_h205f22 · dispatch via devos_fleet_enqueue_v1 · sync task → milestone
+            <CardDescription className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-zinc-600">
+              <span>compute_fabric_roadmap_milestone_h205f22 · dispatch via cloud devos_fleet_enqueue_v1 · sync task → milestone</span>
+              <span
+                className={`inline-flex items-center gap-1 rounded border px-1.5 py-px ${cloudLive ? "border-teal-800/60 bg-teal-500/10 text-teal-300" : "border-amber-800/60 bg-amber-500/10 text-amber-300"}`}
+                title={cloudLive ? "tasks dispatch to the cloud database — the plane the live browser leases from" : `cloud unreachable — showing local rehearsal rows${d?.cloudError ? ` · ${d.cloudError}` : ""}`}
+                data-testid="roadmap-plane-badge"
+              >
+                {cloudLive ? <Cloud className="h-3 w-3" aria-hidden /> : <HardDrive className="h-3 w-3" aria-hidden />}
+                {cloudLive ? "cloud execution plane" : "local rehearsal plane"}
+              </span>
+              <button
+                onClick={() => setAutoSync((v) => !v)}
+                className={`inline-flex items-center gap-1 rounded border px-1.5 py-px transition-colors ${autoSync ? "border-emerald-800/60 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
+                title={autoSync ? "auto-sync on: milestone statuses track cloud task transitions every 60s" : "auto-sync off"}
+                data-testid="roadmap-autosync-toggle"
+              >
+                <Repeat className={`h-3 w-3 ${autoSync ? "animate-pulse" : ""}`} aria-hidden />
+                auto-sync {autoSync ? "on" : "off"}
+              </button>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
