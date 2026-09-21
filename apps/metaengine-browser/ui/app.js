@@ -760,6 +760,7 @@ function renderOps(next) {
   for (const button of opsNav.querySelectorAll('button[data-section]')) button.classList.toggle('active', button.dataset.section === opsSection);
   let content;
   if (opsSection === 'mission') content = renderMissionControl(next);
+  else if (opsSection === 'fallback') content = renderFallbackConsole(next);
   else if (opsSection === 'workspaces') content = renderWorkspaces(next);
   else if (opsSection === 'fleet') content = renderFleet(next);
   else if (opsSection === 'supervisor') content = renderSupervisor(next);
@@ -1366,7 +1367,7 @@ function workbenchCommandTarget(token) {
     attention: ['agentic', 'attention'], activity: ['agentic', 'activity'], context: ['agentic', 'context'], sessions: ['agentic', 'sessions'], skills: ['agentic', 'skills'],
     fleet: ['core', 'fleet'], workspaces: ['core', 'workspaces'], supervisor: ['core', 'supervisor'], devos: ['core', 'devos'],
     runtime: ['core', 'runtime'], safety: ['core', 'safety'], commands: ['core', 'commands'], overview: ['core', 'overview'],
-    mechanisms: ['core', 'mechanisms'],
+    mechanisms: ['core', 'mechanisms'], fallback: ['core', 'fallback'],
   });
   return aliases[normalized] || null;
 }
@@ -1704,6 +1705,118 @@ function renderMissionControl(next) {
   return fragment;
 }
 
+// Fallback Console (operator directive 2026-09-21): embedded reserve control
+// plane. LOCKED while the pinned Supabase edge is healthy; UNLOCKED only when
+// the sentinel flipped the browser to the local reserve edge because the cloud
+// was unresponsive or degraded. Read-only drill stays available at all times
+// so reserve readiness is verifiable without unlocking anything.
+function renderFallbackConsole(next) {
+  const fragment = document.createDocumentFragment();
+  const fb = next?.fallback_console || null;
+  if (!fb || fb.schema !== 'metaengine.fallback-console.v1') {
+    fragment.append(hero('Fallback Console', 'Reserve control plane embedded in the browser. Projection appears once the supervisor runtime initializes.', 'unavailable'));
+    const unavailable = section('Fallback Console', 'projection unavailable');
+    unavailable.list.append(
+      kvRow('State', text(fb?.state, 'NOT_INITIALIZED'), 'muted'),
+      kvRow('Authority effect', 'NONE', 'good'),
+    );
+    fragment.append(unavailable.wrap);
+    return fragment;
+  }
+  const gate = fb.gate || {};
+  const sentinel = fb.sentinel || {};
+  const cloud = sentinel.targets?.cloud || {};
+  const local = sentinel.targets?.local || null;
+  const locked = gate.locked === true;
+  const degradedLatency = sentinel.failover?.degraded_latency_ms || 1200;
+
+  fragment.append(hero(
+    'Fallback Console',
+    'Reserve control plane embedded in the browser. Usable only while Supabase is unresponsive or performing worse than the local reserve edge — otherwise it stays locked as a standby, never a rival control plane.',
+    locked ? 'LOCKED · standby' : 'UNLOCKED · reserve active',
+  ));
+
+  const grid = el('div', 'opsGrid');
+  grid.append(
+    metric('Cloud', text(cloud.state, 'UNKNOWN'), cloud.state === 'HEALTHY' ? 'good' : (cloud.state === 'UNKNOWN' ? 'neutral' : 'warn')),
+    metric('Reserve edge', local ? text(local.state, 'UNKNOWN') : 'NOT CONFIGURED', local ? (local.state === 'HEALTHY' ? 'good' : (local.state === 'UNKNOWN' ? 'neutral' : 'warn')) : 'muted'),
+    metric('Mode', text(sentinel.mode, 'CLOUD_AUTHORITY'), sentinel.mode === 'LOCAL_FALLBACK' ? 'warn' : 'good'),
+    metric('Probes', sentinel.counters?.probes_total ?? 0, 'neutral'),
+  );
+  fragment.append(grid);
+
+  const gateSection = section('Gate', locked ? 'reserve locked — cloud supervisor is authoritative' : 'reserve mode — local edge is the active supervisor');
+  gateSection.list.append(
+    kvRow('Gate', locked ? 'LOCKED' : 'UNLOCKED', locked ? 'good' : 'warn'),
+    kvRow('Locked reason', text(gate.locked_reason, '—'), locked ? 'neutral' : 'warn'),
+    kvRow('Mode reason', text(sentinel.mode_reason, '—'), 'neutral'),
+    kvRow('Failover', fb.failover?.enabled ? 'ENABLED' : (fb.failover?.base_pinned_by_env ? 'DISABLED · base pinned by env' : 'DISABLED · no reserve base'), fb.failover?.enabled ? 'good' : 'muted'),
+    kvRow('Active supervisor base', compact(fb.failover?.active_base || '—', 46), 'neutral'),
+    kvRow('Hand-back rule', text(gate.lock_rule, '—'), 'neutral'),
+  );
+  fragment.append(gateSection.wrap);
+
+  const healthSection = section('Supabase health', 'unauthenticated GET /health · both edges');
+  healthSection.list.append(
+    kvRow('Cloud latency', cloud.latency_ms != null ? `${cloud.latency_ms} ms` : '—', (cloud.latency_ms ?? 0) > degradedLatency ? 'warn' : 'good'),
+    kvRow('Cloud streaks', `ok ${cloud.ok_streak ?? 0} · fail ${cloud.fail_streak ?? 0}`, 'neutral'),
+    kvRow('Cloud last error', text(cloud.last_error, 'NONE'), cloud.last_error ? 'warn' : 'good'),
+  );
+  if (local) {
+    healthSection.list.append(
+      kvRow('Reserve latency', local.latency_ms != null ? `${local.latency_ms} ms` : '—', (local.latency_ms ?? 0) > degradedLatency ? 'warn' : 'good'),
+      kvRow('Reserve streaks', `ok ${local.ok_streak ?? 0} · fail ${local.fail_streak ?? 0}`, 'neutral'),
+      kvRow('Reserve last error', text(local.last_error, 'NONE'), local.last_error ? 'warn' : 'good'),
+    );
+  }
+  for (const probe of (sentinel.probes || []).slice(-6).reverse()) {
+    healthSection.list.append(kvRow(
+      `${probe.name === 'cloud' ? 'CLOUD' : 'RESERVE'} ${probe.ok ? 'OK' : 'FAIL'}`,
+      `${probe.status || '—'} · ${probe.latency_ms ?? '—'} ms · ${String(probe.at || '').slice(11, 19)}`,
+      probe.ok ? 'good' : 'warn',
+    ));
+  }
+  fragment.append(healthSection.wrap);
+
+  const transitionSection = section('Mode transitions', `${sentinel.counters?.transitions_total ?? 0} total · newest first`);
+  const transitionRows = (sentinel.transitions || []).slice(-8).reverse();
+  for (const row of transitionRows) {
+    transitionSection.list.append(kvRow(
+      `${row.from} → ${row.to}`,
+      `${text(row.reason, '—')} · ${String(row.at || '').slice(11, 19)}`,
+      row.to === 'LOCAL_FALLBACK' ? 'warn' : 'good',
+    ));
+  }
+  if (!transitionRows.length) transitionSection.list.append(kvRow('Transitions', 'NONE RECORDED', 'muted'));
+  fragment.append(transitionSection.wrap);
+
+  const drill = fb.drill?.last || null;
+  const drillSection = section('Readiness drill', 'read-only GET /health against the reserve edge — verifies the fallback path without unlocking it');
+  drillSection.list.append(
+    kvRow('Last drill', drill ? (drill.ok ? `READY · ${drill.latency_ms} ms · ${String(drill.at || '').slice(11, 19)}` : `${text(drill.reason, 'FAILED')} · ${text(drill.error, '')}`) : 'NOT RUN', drill ? (drill.ok ? 'good' : 'warn') : 'muted'),
+    kvRow('Reserve base', compact(fb.failover?.local_base || 'NOT CONFIGURED', 46), fb.failover?.local_base ? 'neutral' : 'muted'),
+  );
+  const drillActions = el('div', 'opsGrid');
+  drillActions.append(
+    commandButton('Run reserve drill', 'read-only probe · always available', () => { api.command('FALLBACK_CONSOLE_DRILL', {}).catch(() => {}); }),
+    commandButton('Probe now', 'sentinel tick + gate re-evaluation', () => { api.command('FALLBACK_CONSOLE_PROBE', {}).catch(() => {}); }),
+  );
+  drillSection.wrap.append(drillActions);
+  fragment.append(drillSection.wrap);
+
+  if (!locked) {
+    const reserveSection = section('Reserve authority', 'the whole device-signed command plane is served by the local edge');
+    reserveSection.list.append(
+      kvRow('Command plane', 'LOCAL EDGE · lease/wait/receipts contracts unchanged', 'warn'),
+      kvRow('Base swaps', `${fb.counters?.base_swaps_total ?? 0} recorded this session`, 'neutral'),
+      kvRow('In-flight lease safety', 'hand-back waits >= one lease timeout of residency', 'good'),
+    );
+    fragment.append(reserveSection.wrap);
+  }
+
+  return fragment;
+}
+
 function renderMechanisms(next) {
   const fragment = document.createDocumentFragment();
   fragment.append(hero(
@@ -1904,6 +2017,19 @@ function installMechanismNav() {
   else opsNav.append(button);
 }
 
+function installFallbackNav() {
+  if (opsNav.querySelector('button[data-section="fallback"]')) return;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.section = 'fallback';
+  button.textContent = 'Fallback';
+  const anchor = opsNav.querySelector('button[data-section="mechanisms"]')
+    || opsNav.querySelector('button[data-section="overview"]')
+    || opsNav.querySelector('button[data-section="commands"]');
+  if (anchor) anchor.before(button);
+  else opsNav.append(button);
+}
+
 /* ── Keyed rail reconciliation ── preserves scroll position and DOM identity
    across snapshots without ever emptying the container. Presentation only. */
 function reconcileKeyedChildren(container, nodes, keyOf) {
@@ -1929,7 +2055,7 @@ function reconcileKeyedChildren(container, nodes, keyOf) {
 const WORKBENCH_COMMAND_HINTS = Object.freeze([
   ['attention', 'Attention'], ['sessions', 'Sessions'], ['activity', 'Activity'], ['context', 'Context Set'],
   ['fleet', 'Fleet'], ['workspaces', 'Workspaces'], ['supervisor', 'Supervisor'], ['devos', 'DevOS cycle'],
-  ['mission', 'Mission Control'], ['runtime', 'Runtime'], ['safety', 'Safety'], ['mechanisms', 'Mechanisms'], ['skills', 'Skills'],
+  ['mission', 'Mission Control'], ['fallback', 'Fallback Console'], ['runtime', 'Runtime'], ['safety', 'Safety'], ['mechanisms', 'Mechanisms'], ['skills', 'Skills'],
   ['commands', 'Actions'], ['overview', 'System'],
 ]);
 const WORKBENCH_SKILL_HINTS = Object.freeze([
@@ -2017,6 +2143,7 @@ function cycleOmniboxHint(delta) {
 }
 
 installMechanismNav();
+installFallbackNav();
 if (rsiStatusEl) {
   rsiStatusEl.addEventListener('click', () => { openCoreOpsSection('mechanisms').catch(() => {}); });
   rsiStatusEl.addEventListener('keydown', (event) => {
