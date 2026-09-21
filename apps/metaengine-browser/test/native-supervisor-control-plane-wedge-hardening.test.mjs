@@ -36,11 +36,15 @@ function baseClientOptions({ fetchImpl, ...extra } = {}) {
 }
 
 test('CP-W1: control_plane tracks lease liveness across ok and failed lease attempts', async () => {
+  // Every odd wait-batch call fails: a deterministic sawtooth so ANY observation
+  // window catches a consecutive-failure peak regardless of runner speed
+  // (start()'s self-update probe can take seconds on slow CI runners, by which
+  // time a one-shot failure would already be reset by a successful lease).
   let waitBatchCalls = 0;
   const fetchImpl = async (url) => {
     if (String(url).includes('/v1/commands/wait-batch')) {
       waitBatchCalls += 1;
-      if (waitBatchCalls === 1) throw new Error('transient_lease_failure');
+      if (waitBatchCalls % 2 === 1) throw new Error('transient_lease_failure');
       return { status: 200, ok: true, json: async () => ({ commands: [] }) };
     }
     return { status: 202, ok: true, json: async () => ({}) };
@@ -61,6 +65,7 @@ test('CP-W1: control_plane tracks lease liveness across ok and failed lease atte
   assert.equal(cp.batch_transport, 'SUPPORTED');
   assert.ok(cp.lease_last_attempt_at, 'lease attempts must be recorded');
   assert.ok(cp.lease_last_ok_at, 'a successful lease RPC must be recorded');
+  assert.ok(waitBatchCalls >= 2, `the lease sequence must have run (got ${waitBatchCalls})`);
   assert.ok(maxFailuresSeen >= 1, 'the transient failure must be counted (consecutive window)');
   assert.ok(sawFailureError, 'the lease error must be surfaced in the control-plane projection');
   assert.equal(cp.authority_effect, false);
