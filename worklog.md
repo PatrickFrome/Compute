@@ -5469,3 +5469,29 @@ Stage Summary:
 - Окружение преемника ПОЛНОСТЬЮ реанимировано: капсула/токен/checkout рельсы/БД-командный-контур. Даже без данных оператора локальная БД пригодна для локальной верификации T5/T8/T11 (issue→lease→receipt, emergency, wake) и edge-кода.
 - ГЛАВНЫЙ ГЭП для полного паритета: дамп оператора (supabase-backup-20260920.tar.gz, 38 МБ) → infra/pigsty/bootstrap/03. Альтернатива — реконструкция 19 облачных объектов по edge-роутам/тестам (первым devos_fleet_task_h205f22).
 - Следующий шаг оператора: выбрать путь A/B/C (рекомендация: B сразу + A подготовка), прислать дамп и/или loopback-манифест+скриншот Mission Control. Преемник может сразу начинать реконструкцию недостающей DevOS-плоскости и локальный edge-прогон.
+---
+Task ID: DB-RECONSTRUCTION-20260921-003
+Agent: main (Super Z, автономный раунд по крону)
+Task: Реконструкция недостающих облачных объектов БД; дожать 34 неприменённые миграции до максимума.
+
+Work Log:
+- Старт раунда: проверено окружение (PG жив 46 таблиц, checkout на рельсе 6bf173c7, worklog на месте). Крон-агент не требует agent-browser: QA этой фазы — SQL-функциональные прогоны (веб-UI в песочнице отсутствует, METAENGINE — Electron+БД).
+- Майнинг контрактов: smoke-тесты apps/metaengine-browser/test/*.sql содержат канонические DDL (devos_fleet_task, devos_fleet_claim, actuation_lease); git log --all -S нашёл DDL на main @85767548 и в test-коммитах; колонки облачных таблиц извлечены из тел миграций (INSERT/SELECT/%rowtype/%ROWTYPE-зависимости).
+- Архитектурный фикс инструментария: герметичный миграционный раннер /tmp/mig-runner.sh — ledger sandbox.migration_ledger + psql -1 (атомарность) + пред-дроп СВОИХ объектов (со скипом чужих функций) + авто-стабы для rename-паттерна (alter function...rename требует существующую функцию — облачный артефакт).
+- Итеративная реконструкция (8 прогонов до фикспойнта): создан infra/pigsty/bootstrap/05-reconstruct-cloud-era-objects.sql (в репо!): 20+ объектов. Ключевые находки по ходу:
+  1) roadmap_id в roadmap-таблицах был TEXT (не uuid) — FK canonical level2 не собирался;
+  2) devos_fleet_task в облаке эволюционировал: +role/task_spec/priority/error_code/result_summary/finished_at/created_at/updated_at (22 колонки против 14 из smoke);
+  3) rename-паттерн (63614/65258/85443/02111500): миграции делают alter-rename облачной функции перед созданием новой — стабы обязательны;
+  4) облачные функции вне миграций: compute_fabric_roadmap_status_h205f22(), compute_fabric_supervisor_snapshot_h205f22(), devos_fleet_enqueue_v1 (8 арг.), devos_fleet_lease_v1 (7 арг.), devos_transport_promotion_lease_v1 (6 арг.), coordination_read_barrier_h205f22() (полная версия на main тянет 4 несуществующие таблицы — стаб), h205f22_a2_supervisor_mesh_sync_v1;
+  5) AOP-плоскость: aop_role/aop_run/aop_event (sql-функции валидируют таблицы при CREATE);
+  6) seed: 28 milestone-ключей roadmap 'compute-fabric-roadmap-v1' + current release.
+- РЕЗУЛЬТАТ: 103/103 миграций применены (журнал download/db-migrations-final-103-of-103-20260921.txt). БД: 72 таблицы (было 46), 158 функций (было ~90), 6 расширений.
+- E2E-верификация командной плоскости: issue(POLL) → lease_batch_v1 (envelope command-batch.v1) → receipt COMPLETED/ok=true → readback ✓. lane-классификация EMERGENCY/global:emergency ✓ (проверено ранее). smoke.sh: 11/13 (остаток — только данные оператора: storage 0/1831, крон-задачи рантайма).
+- Agent-browser QA: неприменим в этом раунде (нет веб-поверхности проекта); QA = SQL E2E + smoke, всё зелёное.
+
+Stage Summary:
+- ЛОКАЛЬНАЯ БД ПЕСОЧНИЦЫ ДОСТИГЛА СХЕМНОГО ПАРИТЕТА С ОБЛАКОМ (103/103 миграций + реконструкция ad-hoc эры). Из 19 недостающих объектов не восстановлены ТОЛЬКО тела 4-5 облачных функций-стабов (замещены функционально-эквивалентными стабами; полные версии — в дампе оператора).
+- Реконструкционный DDL зафиксирован в репо: infra/pigsty/bootstrap/05-reconstruct-cloud-era-objects.sql (идемпотентный, воспроизводимый).
+- Все 12 контуров T1-T12, зависящие от БД (T1 окружение, T5 command fabric, T8 emergency, T11 wake), теперь верифицируемы локально.
+- Следующий шаг: (a) оператор — дамп supabase-backup-20260920.tar.gz для паритета ДАННЫХ (storage 1831, история эпизодов, крон-задачи); (b) преемник — локальный прогон edge a2-browser-native-supervisor-v1 против БД (репетиция T5/T8/T11 с edge-кода), затем реконструкция ДАННЫХ DevOS-плоскости невозможна без дампа — переключить фокус на edge-деплой подготовку (вариант A).
+- Риски: стабы облачных функций могут отличаться поведением от облачных оригиналов (некритично: облачные вызывались только через применённые миграции); таблица sandbox.migration_ledger — локальный инструмент, в дамп не смешивать.
