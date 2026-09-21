@@ -23,7 +23,7 @@ import {
 } from './native-semantic-ref.mjs';
 import { resolveExactWebContentsView } from './browser-webcontents-tab-index.mjs';
 import { withTemporaryDetachedCaptureSurface } from './browser-detached-capture-surface.mjs';
-import { classifyAgentPlatformSurface, isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-agent-platform.mjs';
+import { isAgentPlatformConversationUrl, isAgentPlatformHost } from './browser-agent-platform.mjs';
 
 const SAFE_ROLES = new Set(['textbox','searchbox','combobox','button','checkbox','radio','switch','tab','menuitem','link']);
 const TEXT_INPUT_ROLES = new Set(['textbox','searchbox','combobox']);
@@ -924,10 +924,18 @@ export async function executeSemanticCommand(webContents, command) {
           // so no double-append can occur. A preexisting exact match needs no
           // gesture at all (resume path: a previous type succeeded but the
           // submit did not dispatch).
-          const surfaceStage = classifyAgentPlatformSurface(preUrl)?.stage || null;
-          const gestureOrder = surfaceStage === 'PRECONVERSATION_ROOT'
-            ? ['CLICK_SELECT', 'KEY_ATOMIC']
-            : ['KEY_ATOMIC', 'CLICK_SELECT'];
+          // R-DRAFT-FOCUS (live 2026-09-21): the chat.z.ai composer regressed
+          // to a line-selecting triple-click (live-proven: a 48286-char draft
+          // selected exactly 201 chars — one line), so CLICK_SELECT can only
+          // PARTIALLY replace an oversized draft and its fail-fast blocked the
+          // proven KEY_ATOMIC path behind it on PRECONVERSATION_ROOT. Meanwhile
+          // Ctrl+A+Delete through CDP key events DO select-all+clear the whole
+          // textarea (live-proven selectionStart=0/selectionEnd=len) when the
+          // element is focused. Fixes: (1) KEY_ATOMIC now DOM.focuses the
+          // composer first — keys without focus landed on <body> and were the
+          // real D-M3 "ignored keys" mechanism; (2) KEY_ATOMIC runs FIRST on
+          // every surface, CLICK_SELECT is the fallback.
+          const gestureOrder = ['KEY_ATOMIC', 'CLICK_SELECT'];
           let valueAfter = valueBefore;
           if (valueBefore === text) {
             replaceVerified = true;
@@ -946,6 +954,12 @@ export async function executeSemanticCommand(webContents, command) {
                   await clickBackendNode(dbg, target.backend_node_id, null, { clickCount: 3 });
                 }
               } else {
+                // R-DRAFT-FOCUS: focus the exact composer backend node before
+                // dispatching editing keys. Without focus the Ctrl+A/Delete
+                // sequence selected nothing (keys reached <body>), insertText
+                // appended at the site-restored cursor, and the whole gesture
+                // degenerated into draft growth. DOM.focus is geometry-free.
+                await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
                 // D-U1 fix (2026-09-19): the Ctrl+A dispatch carried no
                 // windowsVirtualKeyCode — Chromium synthesizes keyCode 0 for
                 // it, and editors keying on keyCode treat the select-all as a

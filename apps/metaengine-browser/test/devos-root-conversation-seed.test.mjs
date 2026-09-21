@@ -192,7 +192,7 @@ test('an over-limit poisoned root draft is REPLACED with the seed instead of the
     clearFleetRuntime(runtime);
   }
   assert.equal(snapshot.dispatch.state, 'RUNNING');
-  assert.equal(types[0].replace, true, 'the over-limit draft path must REPLACE (CLICK_SELECT wholesale), never append');
+  assert.equal(types[0].replace, true, 'the over-limit draft path must REPLACE (KEY_ATOMIC wholesale), never append');
   assert.ok(types[0].text.length < 1000);
   assert.equal(snapshot.dispatch_effect.last.composer_chars_before, 40000);
   assert.equal(snapshot.dispatch_effect.counters.flush_over_limit, 0, 'no over_flush_limit dead end when the replace verifies');

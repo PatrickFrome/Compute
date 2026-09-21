@@ -181,8 +181,10 @@ test('database visibility: empty required set completes on the first readable sn
 test('task-config snapshot documents the async DB visibility requirement', () => {
   const snap = agentPlatformTaskConfigSnapshot();
   assert.equal(snap.database_visibility, 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED');
-  assert.equal(snap.composer_ignores_synthetic_editing_keys, true);
+  // R-DRAFT-FOCUS (2026-09-21): keys are honored when the composer is focused;
+  // the root replace gesture is the focused KEY_ATOMIC path.
+  assert.equal(snap.composer_ignores_synthetic_editing_keys, false);
   assert.equal(snap.composer_enter_submits, true);
-  assert.equal(snap.replace_gesture_root_surface, 'CLICK_SELECT');
+  assert.equal(snap.replace_gesture_root_surface, 'KEY_ATOMIC');
   assert.equal(snap.authority_effect, false);
 });

@@ -471,9 +471,15 @@ export class SupervisorLifecycleRuntime {
     // attempt. Bounded recapture: give the surface a few seconds to settle
     // before declaring the composer unresolvable. Healthy conversation tabs
     // resolve on the first capture and never pay the wait.
+    // R-ROOT-HYDRATION (live 2026-09-21, shell .35637609965.1): the fresh-root
+    // budget was still too small — the live rollover attempt of 20:29Z burned
+    // all 4×1200ms recaptures on a not-yet-hydrated root and threw
+    // supervisor_composer_not_unique (ROLLOVER_ERROR). chat.z.ai hydration
+    // (SPA bundle + account draft sync) measures ~5-10s cold. 8×1800ms = 14.4s
+    // worst case, still bounded; healthy tabs keep resolving on first capture.
     let before = await this.#capture(tabId);
-    for (let attempt = 0; attempt < 4 && !generating(before) && !composerTarget(before); attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+    for (let attempt = 0; attempt < 8 && !generating(before) && !composerTarget(before); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1800));
       before = await this.#capture(tabId);
     }
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
