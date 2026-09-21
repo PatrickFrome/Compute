@@ -18,7 +18,12 @@ test('lifecycle does not synthesize trusted rollover authority from a deferred p
   assert.doesNotMatch(source, /autoReleaseDeterministicRollover/);
   assert.doesNotMatch(source, /approveRollover\(/);
   assert.match(source, /LIMIT_RE\.test[\s\S]*?requestRollover\('CHATGPT_CONVERSATION_LIMIT_HINT'\)/);
-  assert.match(source, /if \(ks\.state === 'ROLLOVER_REQUIRED'\) await this\.#rollover\(\)/);
+  // LIVE 2026-09-21: a pending ambiguous wake (e.g. cut by the self-update
+  // restart window) is settled proof-based BEFORE the rollover, and the
+  // rollover itself only fires when the state is STILL ROLLOVER_REQUIRED —
+  // never from ROLLOVER_DEFERRED or any page-derived authority.
+  assert.match(source, /if \(ks\.pending_wake\?\.ambiguous_at\) \{[\s\S]*?#settleRolloverBlockedAmbiguousWake/);
+  assert.match(source, /if \(keepalive\.state === 'ROLLOVER_REQUIRED'\) await this\.#rollover\(\)/);
 });
 
 test('terminal continuation remains autonomous but effect retries stay fenced elsewhere', () => {

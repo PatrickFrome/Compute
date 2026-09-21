@@ -860,6 +860,36 @@ export class SupervisorKeepalive {
     throw new Error('keepalive_ambiguous_resolution_requires_observation');
   }
 
+  // LIVE 2026-09-21 (self-update restart window): a wake that went
+  // TYPE_EFFECT_AMBIGUOUS exactly across the successor boot can fence the
+  // rollover FOREVER — the lifecycle's rollover retire paths only accept a
+  // pending wake in WAKE_AMBIGUOUS, so ROLLOVER_REQUIRED + pending-ambiguous
+  // deadlocks the lifecycle (keepalive_no_ambiguous_wake on every tick) and
+  // the idle maintenance window never idles, which starves the devos task
+  // cycle (no leases). This settlement is proof-based, from ROLLOVER_REQUIRED:
+  //   observed_sent === true  → the marker is provably in the transcript:
+  //                             confirm the wake (resume normal processing).
+  //   observed_sent === false → the wake provably did not cross (composer
+  //                             still holds the exact message / terminal and
+  //                             no marker): drop it; postWakeSettlementState
+  //                             PRESERVES the ROLLOVER_* state so the
+  //                             rollover proceeds on a clean ledger, and the
+  //                             wake re-prepares later at the wake-interval
+  //                             price (D-K5 anti-storm).
+  async settleRolloverBlockedAmbiguousWake({ observed_sent } = {}) {
+    const pending = this.#state.pending_wake;
+    if (this.#state.state !== 'ROLLOVER_REQUIRED' || !pending?.ambiguous_at) throw new Error('keepalive_no_rollover_blocked_ambiguous_wake');
+    if (observed_sent === true) return this.confirmWakeSent(pending.wake_id);
+    if (observed_sent === false) {
+      this.#state.last_unsent_attempt_at = iso(this.#clock);
+      this.#state.pending_wake = null;
+      this.#state.state = this.#postWakeSettlementState();
+      await this.#persist();
+      return this.snapshot();
+    }
+    throw new Error('keepalive_ambiguous_resolution_requires_observation');
+  }
+
   async #persist() {
     this.#state.version = SUPERVISOR_KEEPALIVE_VERSION;
     this.#state.updated_at = iso(this.#clock);
