@@ -33,8 +33,12 @@ import {
 } from './devos-runtime-control.mjs';
 import { classifyFleetReconcileOutcome, projectFleetReconcileSemantics } from './fleet-provisioner.mjs';
 import { createSupervisorRsiResultDeliveryAdapter } from './supervisor-rsi-result-delivery-adapter.mjs';
-
-export const NATIVE_SUPERVISOR_BASE = 'https://xpeibufgzjknrhbhpffp.supabase.co/functions/v1/a2-browser-native-supervisor-v1';
+// R5 closure (ops audit 2026-09-21): NATIVE_SUPERVISOR_BASE is now resolved in
+// native-supervisor-endpoints.mjs (single source of truth, optional
+// METAENGINE_SUPERVISOR_BASE_URL env override). Re-exported here for backwards
+// compatibility with existing importers and tests.
+import { NATIVE_SUPERVISOR_BASE } from './native-supervisor-endpoints.mjs';
+export { NATIVE_SUPERVISOR_BASE };
 export const NATIVE_SUPERVISOR_RUNTIME_PATH = '/a2-browser-native-supervisor-v1';
 export const NATIVE_SUPERVISOR_WORKSPACE_ID = '2de9f84b-7c0a-4091-911c-894ff1d6eaf4';
 

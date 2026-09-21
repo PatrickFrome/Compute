@@ -19,6 +19,10 @@ on:
       - 'apps/metaengine-browser/electron-builder.test.json'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
+concurrency:
+  group: browser-windows-package-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
