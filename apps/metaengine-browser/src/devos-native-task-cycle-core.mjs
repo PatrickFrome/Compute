@@ -127,7 +127,7 @@ function readinessOrThrow({ frame, lease, selected_tab_id, phase }) {
   return readiness;
 }
 
-export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null, team_memory = null } = {}) {
+export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, context_briefing = null, tool_results = null, tool_protocol = null, team_memory = null, access_capsule = null } = {}) {
   const taskSpec = jsonObject(lease.task_spec, 'task_spec');
   const objective = clip(taskSpec.objective ?? taskSpec.goal, 12000).trim();
   if (!objective) throw new Error('devos_task_objective_missing');
@@ -160,6 +160,12 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   // fleet has no relevant history yet (fresh installs).
   const teamMemoryBlock = clip(String(team_memory || ''), 1400).trim();
   if (teamMemoryBlock) lines.push('', teamMemoryBlock);
+  // Agent Access Capsule (2026-09-21 operator directive): agents are created
+  // EMPTY — the capsule gives every dispatch the default infrastructure/DB
+  // map + credential policy + context sources. Bounded and loaded once per
+  // boot, so the prompt hash stays deterministic within a lease.
+  const accessCapsuleBlock = clip(String(access_capsule || ''), 2000).trim();
+  if (accessCapsuleBlock) lines.push('', accessCapsuleBlock);
   // D-C1 (2026-09-19 operator directive): GLM agents have NO shared context —
   // every chat.z.ai Task conversation starts blank. The briefing trains each
   // agent individually (identity token, mission, fleet roster, coordination
@@ -312,6 +318,9 @@ export class DevOsNativeTaskCycle {
   // retriever (recent verified team experience → agent prompts).
   #advanceTaskOutcome = null;
   #retrieveMemory = null;
+  // Agent Access Capsule (2026-09-21): default infrastructure/DB/context map
+  // rendered once per shell boot and appended to every dispatched prompt.
+  #accessCapsuleBlock = null;
   // Per-lease memory block cache: one retrieval per (task, lease_generation)
   // keeps the rendered prompt — and its effect-journal hash — deterministic
   // within a lease (same contract as the telemetry digest cache).
@@ -324,7 +333,8 @@ export class DevOsNativeTaskCycle {
   // cycle snapshot so operators and tests can audit the scaling.
   #lastObservationBudget = RUNNING_OBSERVATION_BUDGET_FLOOR;
 
-  constructor({ getState, executeCommand, signedRequest, effectJournal = null, identity = null, recordArtifact = null, advanceTaskOutcome = null, retrieveMemory = null } = {}) {
+  constructor(rawOptions = {}) {
+    const { getState, executeCommand, signedRequest, effectJournal = null, identity = null, recordArtifact = null, advanceTaskOutcome = null, retrieveMemory = null } = rawOptions;
     if (typeof getState !== 'function' || typeof executeCommand !== 'function' || typeof signedRequest !== 'function') throw new Error('devos_cycle_dependencies_invalid');
     if (recordArtifact != null && typeof recordArtifact !== 'function') throw new Error('devos_cycle_artifact_recorder_invalid');
     if (advanceTaskOutcome != null && typeof advanceTaskOutcome !== 'function') throw new Error('devos_cycle_task_outcome_advancer_invalid');
@@ -355,6 +365,11 @@ export class DevOsNativeTaskCycle {
     // tests; the live client always provides it once the plane is running.
     this.#recordArtifact = recordArtifact;
     this.#advanceTaskOutcome = advanceTaskOutcome;
+    // Agent Access Capsule (2026-09-21): resolved ONCE at construction so the
+    // rendered block (and therefore the journal prompt hash) is deterministic
+    // for the lifetime of the shell. Optional; tests without a capsule are
+    // byte-identical to the pre-capsule prompts.
+    this.#accessCapsuleBlock = clip(String(rawOptions?.access_capsule || ''), 2000).trim() || null;
     this.#retrieveMemory = retrieveMemory;
   }
 
@@ -946,7 +961,7 @@ export class DevOsNativeTaskCycle {
     const toolProtocol = renderAgentToolProtocol({ tab_id: lease.tab_id });
     const toolResults = this.#toolbelt.resultsForAgent(lease.agent_id);
     const teamMemory = await this.#memoryBlockFor(lease);
-    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol, team_memory: teamMemory });
+    const prompt = renderDevosTaskPrompt(lease, { telemetry_digest: telemetryDigest, context_briefing: contextBriefing, tool_results: toolResults, tool_protocol: toolProtocol, team_memory: teamMemory, access_capsule: this.#accessCapsuleBlock });
     const promptHash = sha256(prompt);
     const effectBinding = journalBinding(lease, promptHash);
     const journal = await this.#ensureJournal();
