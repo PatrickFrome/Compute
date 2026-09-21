@@ -172,9 +172,15 @@ export function agentPlatformTaskConfigSnapshot() {
     schema: AGENT_PLATFORM_TASK_CONFIG_SCHEMA,
     platform: 'GLM_ZAI',
     task_creation_surface: 'PRECONVERSATION_ROOT',
-    composer_ignores_synthetic_editing_keys: true,
+    // R-DRAFT-FOCUS (live 2026-09-21): the composer honors CDP key events when
+    // the element is FOCUSED (Ctrl+A+Delete select-all+clear proven live on a
+    // 48286-char draft) — the historical "ignores synthetic keys" observation
+    // was unfocused keys landing on <body>. KEY_ATOMIC (focus → Ctrl+A →
+    // Delete → insertText) is the root replace gesture; triple-click only
+    // selects one line on the current editor.
+    composer_ignores_synthetic_editing_keys: false,
     composer_enter_submits: true,
-    replace_gesture_root_surface: 'CLICK_SELECT',
+    replace_gesture_root_surface: 'KEY_ATOMIC',
     database_visibility: 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED',
     controls: TASK_CONFIG_CONTROLS,
     authority_effect: false,

@@ -2,15 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { captureSemanticFrame, executeSemanticCommand } from '../src/native-browser-control.mjs';
 
-// D-M3 contract: the agent-task composer on the PRECONVERSATION_ROOT surface
-// ignores synthetic key events (live-proven 2026-09-19: targeted Backspace was
-// a no-op; Ctrl+A+Delete never cleared a 26.7k account-synced draft; plain
-// insertText appended). The replace is therefore gesture-ordered per surface:
-// CLICK_SELECT (triple-click native select-all + one insertText that replaces
-// the selection) first on the root task surface, KEY_ATOMIC first on
-// conversations. A gesture that neither verifies nor provably no-ops stops the
-// sequence so no double-append can occur. A preexisting exact match needs no
-// gesture (resume path).
+// R-DRAFT-FOCUS contract (live 2026-09-21): the chat.z.ai composer regressed to
+// a line-selecting triple-click (a 48286-char draft selected exactly 201 chars
+// — one line), so CLICK_SELECT can only PARTIALLY replace an oversized draft.
+// Meanwhile Ctrl+A+Delete through CDP key events DO select-all+clear the whole
+// textarea when the element is FOCUSED — the historical D-M3 "ignored keys"
+// were keys landing on <body> because the gesture never focused the composer.
+// The replace is therefore KEY_ATOMIC-first on EVERY surface (DOM.focus →
+// Ctrl+A → Delete → insertText), with CLICK_SELECT (triple-click + insertText)
+// as the fallback. A gesture that neither verifies nor provably no-ops stops
+// the sequence so no double-append can occur. A preexisting exact match needs
+// no gesture (resume path).
 
 function ax(role, name, id, value = null) {
   const node = {
@@ -154,36 +156,46 @@ function composerRefOf(frame) {
   return composer;
 }
 
-test('root task surface: click-select replaces a poisoned draft wholesale and submits', async () => {
-  const h = fakeTaskSurface({ initialDraft: 'POISONED DRAFT x 26763 chars' });
+test('root task surface: focused key-atomic replaces an oversized account-synced draft wholesale and submits', async () => {
+  // Live scenario (2026-09-21): a 48k account-synced draft poisoned every root
+  // composer; the focused Ctrl+A+Delete gesture clears it wholesale.
+  const h = fakeTaskSurface({ initialDraft: 'POISONED DRAFT x 26763 chars', keysHonored: true });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'CLICK_SELECT');
+  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.equal(result.value_length_before, 'POISONED DRAFT x 26763 chars'.length);
   assert.equal(result.value_length_after, 'D-M3 TASK PROMPT'.length);
-  assert.equal(h.counts().tripleClicks, 1);
+  assert.equal(h.counts().tripleClicks, 0);
   assert.equal(h.counts().insertCount, 1);
   assert.equal(h.counts().enterCount, 1);
+  // R-DRAFT-FOCUS: the composer backend node is focused BEFORE the editing
+  // keys are dispatched — unfocused keys landed on <body> and were the real
+  // D-M3 no-op mechanism.
+  const focusCalls = h.calls.filter(([m, p]) => m === 'DOM.focus' && p?.backendNodeId != null);
+  assert.ok(focusCalls.length >= 1, 'DOM.focus on the composer expected before KEY_ATOMIC');
 });
 
-test('root task surface: an empty composer goes through the same verified click-select', async () => {
+test('root task surface: an empty composer types through the key-atomic path without clicks', async () => {
   const h = fakeTaskSurface({ initialDraft: '' });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
   const result = await dispatchTask(h, composer.semantic_ref);
   assert.equal(result.replace_verified, true);
-  assert.equal(result.replace_gesture, 'CLICK_SELECT');
+  assert.equal(result.replace_gesture, 'KEY_ATOMIC');
   assert.equal(result.effect_state, 'PROVEN_COMPOSER_CLEARED');
   assert.equal(h.counts().insertCount, 1);
+  assert.equal(h.counts().tripleClicks, 0);
 });
 
-test('root task surface: keys-only fallback still lands when click-select is a provable no-op', async () => {
-  // clickSelectWorks=false models an editor that drops the mouse selection
-  // before the insert; insertText then appends -> readback differs from both
-  // the text and the before-value -> fail fast, no second gesture.
+test('root task surface: ignored keys mutate the draft and fail fast before click-select', async () => {
+  // keysHonored=false models the unfocused/editor-ignores-keys regression;
+  // insertText then appends -> readback differs from both the text and the
+  // before-value -> fail fast, no second gesture. (R-DRAFT-FOCUS: KEY_ATOMIC
+  // now runs first on the root too, so the append damage is bounded to a
+  // single prompt and CLICK_SELECT is never reached after a mutation.)
   const h = fakeTaskSurface({ initialDraft: 'OLD', clickSelectWorks: false });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
