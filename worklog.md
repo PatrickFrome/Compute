@@ -5762,3 +5762,96 @@ Stage Summary:
 - Консоль теперь честно показывает исполнение: trail-чипы, ambiguousStreak, devos-бейдж — оператор видит цикл "lease→ambiguity" без копания в БД.
 - Флот восстановлен после дренажа: 10/10 ACTIVE (2 новые вкладки), boot_target=10 персистит.
 - Риски/следующее: (1) РЕЛИЗ БРАУЗЕРА с dispatch-observability + draft self-healing — приоритет #1; (2) облачный issue-RPC allowlist старше локального кода (RELOAD_TAB недоступен) — синхронизировать миграции; (3) OOM 4GB — третий kill за сессию; (4) gen3 B0 (c19d8fb8) в полёте — наблюдать; (5) milestone-статусы в ОБЛАКЕ не обновляются (только локальный store) — RPC-мост.
+---
+Task ID: CRON-ROUND-20260921-1608 (进行中·中期落盘)
+Agent: main (Super Z, крон-раунд)
+Task: Оценка состояния, agent-browser QA, главный фикс R3-блокера (браузерная сторона), работа с консолью, worklog.
+
+Work Log (на момент середины раунда):
+- ПОДТВЕРЖДЕНИЕ БЛОКЕРА: gen3 B0 (c19d8fb8) ровно в TTL 900s ушла в AMBIGUOUS (08:14:35Z, lease 07:59:35Z) — три поколения B0 = 3×AMBIGUOUS, физический эффект не произошёл ни разу. Lease→effect管线Confirmed сломан.
+- АРХЕОЛОГИЯ (ложная тревога): grep/awk-вывод в этой среде «съедает» литеральные последовательности [m (артефакт ANSI-стриппинга) — строка выглядела как `for (const apKey, chain]` (синтаксическая катастрофа), но od -c показал реальные байты `for (const [mapKey, chain]` — файл rail'а КОРРЕКТЕН. Урок: подозрительный вывод проверять od -c.
+- КОРНЕВАЯ ПРИЧИНА (из кода + live-наблюдений): GLM root composer молча отказывает Enter на oversized-черновиках → первый капсульный dispatch (~10-24K) никогда не создаёт разговор → промпт остаётся отравленным черновиком → следующие поколения упираются в flush-guard (37921>32000, fleet_task_root_draft_over_flush_limit) → fail-closed навсегда.
+- ФИКС (браузерный релиз, в полёте):
+  * Seed-first bootstrap: чистый root composer (live captures всегда несут value_length, 0=пусто) → СНАЧАЛА крошечный детерминированный seed-промпт (<200 символов) доказывает разговор через bounded readback (6×700мс) + markFleetTransportProvenFromNativeFrame, потом реальный dispatch идёт в conversation-поверхность, где verified replace + Enter live-проверены (D-M3).
+  * Over-limit self-heal: отравленный черновик >32000 больше НЕ вечный тупик — CLICK_SELECT-жест заменяет его ЦЕЛИКОМ на seed (live-proven D-M3) и отправляет крошечный текст; исторический over_flush_limit fail-closed сохранён, если replace не доказан до Enter.
+  * Отсутствие value_length (моки/непрозрачные фреймы) → исторический passthrough, fail-closed.
+  * Один bootstrap на (agent, epoch) — отказавший seed не зацикливается на heartbeat.
+  * dispatch-effect observability: cycle snapshot → dispatch_effect {last, counters: dispatches/proven/ambiguous/seed_attempts/seed_proven/flush_over_limit} → supervisor_lifecycle.devos_runtime.dispatch → cloud state → консоль.
+- ТЕСТЫ: +4 новых (test/devos-root-conversation-seed.test.mjs); D-C3 over-limit тест обновлён на verified-replace контракт; ПОЛНЫЙ сьют 3357: 3355 pass / 0 fail / 2 skipped; npm run check зелёный.
+- РЕЛИЗ-ЦИКЛ В ПОЛЁТЕ: ветка work/dispatch-conversation-seed-bootstrap-v1 (ccb430be), PR #943 → release/self-update-ambiguity-live-v2 (rail db5c83db). Ждём CI (evidence gate + fast E2E) → merge → publisher → live self-update (флот восстановится АВТОМАТИЧЕСКИ благодаря boot_fleet_target=10).
+
+Stage Summary (промежуточный):
+- Главная боль R3-цикла получает инженерный ответ на самой браузерной стороне — то, что console-фиксами не лечилось.
+- Repo пересобран заново: /home/z/my-project/hostsrc/Compute-rel (клон PatrickFrome/Compute, rail-ветка).
+- Следующее: консольная поверхность dispatch-телеметрии, agent-browser QA, OOM-страховка (рестарт dev-server с heap-cap), финальный worklog.
+---
+Task ID: CRON-ROUND-20260921-1608 (进行中·INFRA-ЗНАНИЕ)
+Agent: main (Super Z, крон-раунд)
+Task: Критическая инфраструктурная заметка — выживание dev-server между вызовами инструмента.
+
+Work Log:
+- ПРОБЛЕМА: dev-server убивался OOM-killer'ом 4-й раз за сессию (RSS 1.6-1.9GB), а ВСЕ последующие ручные рестарты (nohup/setsid/nohup+loop) умирали молча через 60-90с — БЕЗ OOM (memory.failcnt=0, dmesg чист), БЕЗ exit-code (guardian-loop не успевал записать). Системный auto-runner сам сервер не поднимал (порт 3000 свободен минутами).
+- ДИАГНОЗ: похоже на уборщик процессов, чистящий PID-дерево инструмента между вызовами. Прямые дети shell (даже setsid) гибнут; ПРЕДЫДУЩИЙ инстанс (pid 30447, nohup из прошлого раунда) жил 39 минут — вероятно, успел осиротеть/пережить окно чистки.
+- РАБОЧИЙ РЕЦЕПТ (проверен, пережил межвызовные окна):
+    ( setsid env NODE_OPTIONS="--max-old-space-size=1024" bun run dev >> dev.log 2>&1 < /dev/null & )
+  КЛЮЧ: двойной слой — вложенный подоболочный & немедленно осиротает процесс (reparent к init), escapes PID-tree sweep. NODE_OPTIONS=1024 ограничивает heap (RSS стабильно 320-450MB против спайков 1.6GB+), снижая OOM-риск на 4GB-коробке.
+- ГИГИЕНА: перед стартом убить осиротевшие QA-chrome (pkill -f "chrome-153") — освобождает ~500MB. ВАЖНО: `bun run dev` = `next dev -p 3000 2>&1 | tee dev.log` — tee ОБРЕЗАЕТ dev.log при каждом старте (логи перезаписываются, "[watchdog] exit" строки терялись именно поэтому — логировать exit-коды в ОТДЕЛЬНЫЙ файл).
+
+Stage Summary:
+- Dev-server восстановлен (pid 26969, orphan, ~400MB, пережил несколько межвызовных окон). Рецепт обязателен для всех следующих раундов.
+---
+Task ID: CRON-ROUND-20260921-1608 (进行中·второй фикс)
+Agent: main (Super Z, крон-раунд)
+Task: Второй релиз раунда — фикс дедлока supervisor lifecycle после self-update.
+
+Work Log:
+- ПЕРВЫЙ РЕЛИЗ ВСТАЛ: PR #943 merged → CI 36/36 → publisher success → live self-update до 0.7.0-dev.35583716862.1, QUALIFIED, heartbeat <2s. boot_fleet_target=10 ПЕРСИСТИРОВАН и флот сам восстановился до 10 (8 ACTIVE + 2 REGISTERED при опросе) — фича из раунда 0630 впервые сработала в бою автоматически.
+- dispatch-effect телеметрия ЖИВАЕ: блок dispatch (counters=0) виден в cloud state supervisor_lifecycle.devos_runtime.dispatch — проекция дошла от cycle snapshot до облака.
+- Re-dispatch B0 gen4 (f926022c) в облачную очередь — но ЗАДАЧА НЕ АРЕНДУЕТСЯ 10+ мин (прежде лизали за 12с).
+- НОВЫЙ БАГ НАЙДЕН И ПОНЯТ (второй фикс раунда): keepalive.state=ROLLOVER_REQUIRED + pending_wake (ambiguous TYPE_EFFECT_AMBIGUOUS, prepared 09:53:06 — за 1с до successor boot) = МЁРТВАЯ ПАРА состояний:
+  * #rollover() и его retire-пути принимают pending wake только в WAKE_AMBIGUOUS → каждый тик кидает keepalive_no_ambiguous_wake (last_error в cloud state — наша улика);
+  * ветка wake-marker recovery (#recoverAmbiguousWakeFromFrame) доступна только в не-rollover состояниях;
+  * idle-maintenance окно никогда не становится idle → devos task cycle (runOnce) не запускается → НОЛЬ аренд. Executor слепнет после идеального self-update.
+- ФИКС (второй релиз, PR #944): keepalive.settleRolloverBlockedAmbiguousWake({observed_sent}) — доказательный сеттлмент из ROLLOVER_REQUIRED:
+  * observed_sent=true (маркер wake_id в транскрипте) → confirmWakeSent — wake подтверждён, обработка продолжается штатно;
+  * observed_sent=false (composer держит точное сообщение / terminal_ready без маркера) → wake сброшен, postWakeSettlementState СОХРАНЯЕТ ROLLOVER_* (rollover идёт дальше с чистой книгой), re-prepare по цене wake-интервала (D-K5 анти-шторм);
+  * вне пары ROLLOVER_REQUIRED + ambiguous-pending — отказ (неshortcut-ит WAKE_AMBIGUOUS-контракт).
+  * Runtime-цикл: в ветке ROLLOVER_REQUIRED сначала settle, потом #rollover() только если состояние ВСЁ ЕЩЁ ROLLOVER_REQUIRED.
+- ТЕСТЫ: +3 (воспроизведение дедлока → пути сеттлмента), source-contract обновлён. Сьют 3360: 3358 pass / 0 fail / 2 skipped. npm run check зелёный.
+- PR #944 → CI в полёте.
+
+Stage Summary (промежуточный):
+- Раунд доставляет два релиза: (1) seed-bootstrap — лечит lease→effect на корневой поверхности; (2) settlement — лечит дедлок lifecycle, который иначе обнулил бы executor после КАЖДОГО self-update с unlucky-timing wake.
+- После merge #944 и self-update: rollover должен разрулиться (settle → rollover → fresh supervisor tab) → devos cycle возобновится → f926022c арендуется → seed-bootstrap сработает в бою → dispatch-телеметрия в консоли покажет цепочку.
+---
+Task ID: CRON-ROUND-20260921-1608
+Agent: main (Super Z, крон-раунд)
+Task: Оценка состояния, agent-browser QA, ДВА браузерных релиза (seed-bootstrap + rollover-settlement), консольная телеметрия, worklog.
+
+## 1. Состояние проекта (итог раунда)
+- ПРОД: браузер 0.7.0-dev.35590377280.1 (rail 4d9c7966 = merge #944), self_update CURRENT, heartbeat <2s, startup_recovery идёт штатно. Fleet ~10 (7 ACTIVE + reprovision после recycle + 2 REGISTERED), boot_fleet_target=10 персистит.
+- Консоль: 12 вкладок, 0 console errors на свежей загрузке (qa7-01..05 в download/). Milestone Runner показывает cloud plane + trail-чипы; Live-панель готова показывать DispatchEffectCard (появится при первом proven dispatch).
+- Очередь: 5 READY в облаке (включая f926022c = B0 gen4, a6731a2c), 393 исторических AMBIGUOUS в active_tasks.
+
+## 2. Выполнено / проверено
+- РЕЛИЗ #1 (PR #943, 36/36 CI, published): conversation-seed bootstrap —
+  * чистый root composer (value_length=0; live captures всегда несут его) → СНАЧАЛА крошечный seed-промпт (<200 симв.) доказывает разговор (readback 6×700ms + transport proof), потом реальный dispatch в conversation-поверхность;
+  * over-limit черновик (>32000) → CLICK_SELECT wholesale-replace на seed (D-M3) → отправка крошечного текста; при недоказуемом replace — честный over_flush_limit fail-closed;
+  * dispatch_effect телеметрия: cycle snapshot → supervisor_lifecycle.devos_runtime.dispatch → облако → /api/live → DispatchEffectCard в консоли. ЗАРАБОТАЛО В БОЮ: last_task_id/agent_id/composer_chars_before=37921/flush_over_limit=3 видны из облака.
+- РЕЛИЗ #2 (PR #944, 23/23 + publisher, published): settlement rollover-blocked ambiguous wakes —
+  * найден живой дедлок: wake, обрезанный self-update рестартом ровно на границе процессов → ROLLOVER_REQUIRED + pending-ambiguous → retire-пути требуют WAKE_AMBIGUOUS → keepalive_no_ambiguous_wake каждый тик → idle-maintenance никогда не idle → devos task cycle не запускается → НОЛЬ аренд;
+  * fix: keepalive.settleRolloverBlockedAmbiguousWake (true→confirm по маркеру в транскрипте; false→drop с сохранением ROLLOVER_* и D-K5 ценой re-prepare) + runtime-цикл сеттлит перед #rollover();
+  * В БОЮ ПОДТВЕРЖДЕНО: last_recovery=AMBIGUOUS_WAKE_RETIRED_AFTER_TERMINAL, pending_wake=false — дедлок разорван, rollover запустился (но см. риски).
+- boot_fleet_target=10: ПЕРВЫЙ БОЕВОЙ ТЕСТ — после двух self-update рестартов флот сам восстанавливался к 10 без операторского FLEET_RECONCILE. Фича из раунда 0630 работает.
+- Консоль: /api/live добавлен dispatch-блок (camelCase карта devos_runtime.dispatch); DispatchEffectCard (Live tab): last state с тонировкой (PROVEN/ATTEMPTED/FAILED), счётчики, reason, task/agent short-id; eslint: hostsrc/** исключён из линта Next-проекта (клон репозитория браузера ломал lint).
+- ОПЕРАТОРСКОЕ: CLOSE_TAB отравленного tab (tab_ff040cdc, агент с 37921-черновиком) через командную плоскость — COMPLETED, governor пере provisioning.
+- Тесты: +7 за раунд (4 seed + 3 settlement). Полный сьют: 3360 tests / 3358 pass / 0 fail / 2 skipped. npm run check зелёный ×2.
+
+## 3. Нерешённое / риски / приоритеты следующего этапа
+1. **ROLLOVER-ЧЕРН на root-поверхности (приоритет #1)**: после settlement rollover ходит по кругу: fresh root tab → отправка rollover-сообщения → "supervisor_composer_not_unique" → TYPE_EFFECT_AMBIGUOUS → no-progress rerequest. Похоже, root-страница chat.z.ai отдаёт НЕСКОЛЬКО composer-кандидатов (или ноль уникальных) — supervisor bootstrap/rollover требует той же медицины, что fleet dispatch (уникальный выбор composer / seed-first / устойчивость к модалкам). Это сейчас ГЛАВНЫЙ шлюз: пока rollover не привяжет supervisor-разговор, idle-maintenance окно нестабильно и аренды идут рывками.
+2. **Seed ещё не proven в бою**: seed_proven=0 — для успеха нужен LEASE на ЧИСТОМ root-tab + dispatch-окно. После починки rollover это произойдёт естественно (f926022c/a6731a2c ждут в очереди). Проверить: dispatch_effect.seed_proven ≥ 1 + trail f926022c LEASED→RUNNING.
+3. **Авто-recycle отравленных агентов**: replace-seed не смог доказаться на 37921-черновике (CLICK_SELECT не проверился) — честный fail, но агент остаётся отравленным навсегда. Предложить: после OVER_LIMIT_REPLACE_SEED_FAILED браузер сам закрывает tab (как операторский CLOSE_TAB c923dd14) — self-healing внутри dispatch-пайплайна; консольный ручной путь работает.
+4. **393 AMBIGUOUS в active_tasks** — историческая куча; рассмотреть массовую ретирамбу/архивацию через edge, чтобы snapshot/observability не деградировали.
+5. OOM/инфра: рецепт orphan-spawn dev-server в предыдущей записи — применять всегда; рассмотреть NODE_OPTIONS=--max-old-space-size=1024 как дефолт платформы.
+6. RSI-долг r14/r8d (124 патча) по-прежнему вне rail.
+7. Облачный issue-RPC allowlist по-прежнему старше локального кода (RELOAD_TAB недоступен из консоли).

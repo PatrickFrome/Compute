@@ -66,6 +66,11 @@ export async function GET() {
     const drIdle = (dr.idle ?? {}) as Record<string, unknown>;
     const drAdmission = (dr.admission ?? {}) as Record<string, unknown>;
     const drToolbelt = (dr.agent_toolbelt ?? {}) as Record<string, unknown>;
+    // Root-surface dispatch-effect telemetry (browser 2026-09-21 release):
+    // last lease→effect bootstrap/dispatch outcome + bounded counters. Lets
+    // the console show WHY a leased task is (not) producing conversations.
+    const drDispatch = (dr.dispatch ?? {}) as Record<string, unknown>;
+    const intOrNull = (v: unknown) => (Number.isFinite(Number(v)) && v !== null && v !== "" ? Number(v) : null);
 
     const payload = {
       ok: true,
@@ -119,6 +124,24 @@ export async function GET() {
           actuationAllowed: drAdmission.actuation_allowed === true,
           generationFloor: Number.isFinite(Number(drAdmission.generation_floor)) ? Number(drAdmission.generation_floor) : null,
           toolbeltRequests: Number.isFinite(Number(drToolbelt.requests_issued)) ? Number(drToolbelt.requests_issued) : null,
+          dispatch: drDispatch.last_state
+            ? {
+                lastState: String(drDispatch.last_state),
+                lastStage: drDispatch.last_stage ? String(drDispatch.last_stage) : null,
+                lastEffectState: drDispatch.last_effect_state ? String(drDispatch.last_effect_state) : null,
+                lastReason: drDispatch.last_reason ? String(drDispatch.last_reason) : null,
+                lastTaskId: drDispatch.last_task_id ? String(drDispatch.last_task_id) : null,
+                lastAgentId: drDispatch.last_agent_id ? String(drDispatch.last_agent_id) : null,
+                lastAt: drDispatch.last_at ? String(drDispatch.last_at) : null,
+                lastComposerChars: intOrNull(drDispatch.last_composer_chars_before),
+                dispatches: intOrNull(drDispatch.dispatches),
+                proven: intOrNull(drDispatch.proven),
+                ambiguous: intOrNull(drDispatch.ambiguous),
+                seedAttempts: intOrNull(drDispatch.seed_attempts),
+                seedProven: intOrNull(drDispatch.seed_proven),
+                flushOverLimit: intOrNull(drDispatch.flush_over_limit),
+              }
+            : null,
         },
       },
       at: new Date().toISOString(),

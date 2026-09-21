@@ -66,6 +66,22 @@ export interface LiveSnapshot {
     actuationAllowed: boolean;
     generationFloor: number | null;
     toolbeltRequests: number | null;
+    dispatch?: {
+      lastState: string;
+      lastStage: string | null;
+      lastEffectState: string | null;
+      lastReason: string | null;
+      lastTaskId: string | null;
+      lastAgentId: string | null;
+      lastAt: string | null;
+      lastComposerChars: number | null;
+      dispatches: number | null;
+      proven: number | null;
+      ambiguous: number | null;
+      seedAttempts: number | null;
+      seedProven: number | null;
+      flushOverLimit: number | null;
+    } | null;
   };
 }
 
@@ -238,6 +254,8 @@ export function LivePanel({ poll }: { poll: PollState<LivePayload> }) {
           </button>
         </CardContent>
       </Card>
+
+      {live?.devos?.dispatch && <DispatchEffectCard dispatch={live.devos.dispatch} />}
 
       {!poll.loading && !live && (
         <div className="rounded-md border border-zinc-800 bg-zinc-900/40 px-4 py-6 text-center font-mono text-xs text-zinc-500">
@@ -413,5 +431,78 @@ export function LivePanel({ poll }: { poll: PollState<LivePayload> }) {
         </>
       )}
     </div>
+  );
+}
+
+// Root-surface dispatch-effect diagnostics (browser 2026-09-21 release):
+// the last lease→effect bootstrap/dispatch outcome and bounded counters, as
+// projected from supervisor_lifecycle.devos_runtime.dispatch via /api/live.
+type DispatchEffect = NonNullable<NonNullable<LiveSnapshot["devos"]>["dispatch"]>;
+
+function dispatchStateTone(state: string): string {
+  const s = state.toUpperCase();
+  if (s.endsWith("_PROVEN") || s === "PROVEN") return "border-emerald-800/60 bg-emerald-950/40 text-emerald-300";
+  if (s.endsWith("_ATTEMPTED")) return "border-teal-800/60 bg-teal-950/40 text-teal-300";
+  if (s.includes("REFUSED") || s.includes("FAILED") || s.includes("AMBIGUOUS")) return "border-rose-800/60 bg-rose-950/40 text-rose-300";
+  return "border-zinc-700 bg-zinc-900 text-zinc-300";
+}
+
+function DispatchEffectCard({ dispatch }: { dispatch: DispatchEffect }) {
+  const counters: Array<[string, number | null]> = [
+    ["dispatched", dispatch.dispatches],
+    ["proven", dispatch.proven],
+    ["ambiguous", dispatch.ambiguous],
+    ["seeds", dispatch.seedAttempts],
+    ["seed proven", dispatch.seedProven],
+    ["over-limit", dispatch.flushOverLimit],
+  ];
+  const chain = [
+    dispatch.lastStage ? dispatch.lastStage.toLowerCase() : null,
+    dispatch.lastEffectState ? dispatch.lastEffectState.toLowerCase() : null,
+    dispatch.lastComposerChars != null ? `draft ${dispatch.lastComposerChars} chars` : null,
+  ].filter(Boolean).join(" · ");
+  return (
+    <Card className="border-zinc-800 bg-zinc-900/50" data-testid="dispatch-effect-card">
+      <CardHeader className="pb-2">
+        <CardDescription className="font-mono text-[11px] uppercase tracking-wider text-zinc-500">
+          dispatch effect · lease→bootstrap→send
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded border px-2 py-0.5 font-mono text-[10px] ${dispatchStateTone(dispatch.lastState)}`}
+            title={dispatch.lastReason ?? dispatch.lastState}
+          >
+            {dispatch.lastState}
+          </span>
+          {chain && <span className="font-mono text-[10px] text-zinc-500">{chain}</span>}
+          <span className="ml-auto font-mono text-[10px] text-zinc-600" title={dispatch.lastAt ?? undefined}>
+            {dispatch.lastAt ? timeAgo(dispatch.lastAt) : ""}
+          </span>
+        </div>
+        {dispatch.lastReason && (
+          <div className="font-mono text-[10px] leading-relaxed text-rose-400/90" data-testid="dispatch-effect-reason">
+            {dispatch.lastReason}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {counters.map(([label, value]) => (
+            <span
+              key={label}
+              className="rounded border border-zinc-800 bg-zinc-950/60 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
+              title={`${label}: ${value ?? "n/a"}`}
+            >
+              {label} <span className={value != null && value > 0 && label === "ambiguous" ? "text-rose-300" : "text-zinc-200"}>{value ?? "–"}</span>
+            </span>
+          ))}
+        </div>
+        {(dispatch.lastTaskId || dispatch.lastAgentId) && (
+          <div className="font-mono text-[10px] text-zinc-600">
+            {dispatch.lastTaskId ? `task ${shortId(dispatch.lastTaskId)}` : ""}{dispatch.lastTaskId && dispatch.lastAgentId ? " · " : ""}{dispatch.lastAgentId ? `agent ${shortId(dispatch.lastAgentId)}` : ""}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
