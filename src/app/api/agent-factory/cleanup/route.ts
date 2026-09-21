@@ -2,15 +2,19 @@
  * POST /api/agent-factory/cleanup — operator hygiene on the live browser.
  * Body: { targetAgents?: number; closeExtraTabs?: boolean }
  *  - FLEET_RECONCILE {target_agents} (browser may keep its persisted profile — reported honestly)
- *  - CLOSE_TAB batch for every tab not in the protected set
- *    (manifest agent tabs + rollover supervisor tab).
+ *  - CLOSE_TAB batch for every tab not in the PROTECTED set.
+ *
+ * Architecture note (2026-09-21 audit): the protected set is DERIVED from the
+ * live state — never hard-coded. A stale tab-id constant here once risked
+ * closing the supervisor's own rollover surface. Protected (in priority
+ * order): the keepalive-bound conversation tab, the in-flight rollover
+ * attempt tab, the currently selected tab, and manifest agent tabs.
  */
 import { closeExtraTabs, fleetReconcile, readSupervisorState } from "@/lib/browser-tools";
+import fs from "node:fs";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
-
-const ROLLOVER_TAB = "tab_1bf77894-e092-4936-a381-f50b463ebeec";
 
 export async function POST(request: Request) {
   let body: { targetAgents?: number; closeExtraTabs?: boolean } = {};
@@ -32,10 +36,10 @@ export async function POST(request: Request) {
     push(`FLEET_RECONCILE(target=${targetAgents}): ${rec.status} (browser may keep its persisted profile)`);
 
     if (doClose) {
-      const manifestAgents = await readManifestTabIds();
-      const keep = [...new Set([...manifestAgents, ROLLOVER_TAB])];
-      const closed = await closeExtraTabs({ keepTabIds: keep });
-      push(`closed ${closed.closed} extra tabs (kept ${keep.length})`);
+      const keep = protectedTabIds(st0);
+      push(`protected: ${keep.size} tabs (keepalive/rollover/selected/manifest)`);
+      const closed = await closeExtraTabs({ keepTabIds: [...keep] });
+      push(`closed ${closed.closed} extra tabs (kept ${keep.size})`);
     }
 
     await new Promise((r) => setTimeout(r, 2500));
@@ -54,12 +58,34 @@ export async function POST(request: Request) {
   }
 }
 
-async function readManifestTabIds(): Promise<string[]> {
-  try {
-    const fs = await import("node:fs");
-    const m = JSON.parse(fs.readFileSync("/home/z/my-project/.a2/agent-factory-manifest.json", "utf8")) as { agents: { tabId: string }[] };
-    return m.agents.map((a) => a.tabId);
-  } catch {
-    return [];
+/**
+ * The tabs the supervisor lifecycle depends on. Derived from the LIVE state
+ * each call — the audit finding was that a hard-coded rollover tab id went
+ * stale across rollovers and would have classified the supervisor's own
+ * surface as "extra".
+ */
+function protectedTabIds(st: Awaited<ReturnType<typeof readSupervisorState>>): Set<string> {
+  const keep = new Set<string>();
+  const lc = (st?.supervisor_lifecycle ?? {}) as Record<string, unknown>;
+  const keepalive = (lc.keepalive ?? {}) as Record<string, unknown>;
+  // 1. the keepalive-bound supervisor conversation
+  const boundTabId = String(keepalive.tab_id ?? "");
+  if (boundTabId) keep.add(boundTabId);
+  // 2. the in-flight rollover attempt tab (the fresh surface being bound)
+  const attempt = (keepalive.rollover_attempt ?? null) as { tab_id?: string } | null;
+  if (attempt?.tab_id) keep.add(String(attempt.tab_id));
+  // 3. the supervisor's bound conversation URL tab (by URL match)
+  const boundUrl = String(keepalive.conversation_url ?? "");
+  if (boundUrl) {
+    for (const t of st?.tabs ?? []) if (t.url === boundUrl) keep.add(t.tab_id);
   }
+  // 4. the currently selected tab (operator surface — never close blindly)
+  if (st?.active_tab?.tab_id) keep.add(st.active_tab.tab_id);
+  for (const t of st?.tabs ?? []) if (t.selected) keep.add(t.tab_id);
+  // 5. manifest agent tabs (factory-trained conversations)
+  try {
+    const m = JSON.parse(fs.readFileSync("/home/z/my-project/.a2/agent-factory-manifest.json", "utf8")) as { agents: { tabId: string }[] };
+    for (const a of m.agents) if (a.tabId) keep.add(a.tabId);
+  } catch { /* no manifest — fine */ }
+  return keep;
 }

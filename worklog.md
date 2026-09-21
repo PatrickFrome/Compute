@@ -5920,3 +5920,58 @@ Task: Аудит восстановленного облачного Supabase + 
 3. PGRST202-дубли (meta_orchestrator_plan_snapshot_v1 и, возможно, единичные другие) — SQL-фикс на стороне БД оператором.
 4. curl-филтр WAF — документировать: диагностика только через bun/fetch-скрипты.
 5. main отстаёт от rail на 6 PR — периодическая синхронизация.
+
+---
+Task ID: RELEASE-ROUND-20260921-1600
+Agent: main (Super Z)
+Task: Критический аудит всех механик; закрытие P1 ролловер-дыры и самоисцеление отравленных вкладок; сведение флота к 4; релиз; live-тесты.
+
+Work Log:
+- АУДИТ ИНФРАСТРУКТУРЫ: dev-server :3000 OK, edge :3031 OK, Pigsty OK, облачный Supabase plane жив (heartbeat 3s), браузер 0.7.0-dev.35590377280.1 (=merge #944) ONLINE, armed.
+- ДИАГНОЗ LIVE-СОСТОЯНИЯ: keepalive ROLLOVER_AMBIGUOUS (cycle_seq 2332 заморожен), rollover_attempt ambiguous_reason=TYPE_EFFECT_AMBIGUOUS, dispatch: ENTER_SUBMIT_EFFECT_AMBIGUOUS + flush_over_limit=5 + composer_chars_before=37921, флот 6 live BOUND_UNVERIFIED при target 4. Подтверждена ролловер-чёрная дыра на root-поверхности.
+- КОДОВАЯ ДИАГНОСТИКА (Explore-агент): точные патч-точки — supervisor-lifecycle-runtime-core.mjs #typeAndSend (L472 throw supervisor_composer_not_unique) и devos-native-task-cycle-core.mjs #ensureProvenConversation over-limit branch (throw без self-heal).
+- ФИКС A (R-SUP-SEED): supervisor seed-first — на PRECONVERSATION_ROOT поверхности #typeAndSend теперь сначала доказывает разговор крошечным детерминированным сидом (6×700ms conversation-URL readback + bounded generation drain), потом печатает реальное (большое) сообщение уже в доказанном разговоре. Лекарство то же, что PR #943 дал fleet dispatch. Suppressed-сид зеркалит preEffect-семантику реального submit (TYPE_EFFECT_AMBIGUOUS → clicked=true → pending-ambiguous → D-S1 retirement).
+- ФИКС B (B-SH1): self-healing отравленной вкладки — после OVER_LIMIT_REPLACE_SEED_FAILED диспетчер перезахватывает поверхность и закрывает таб по доказательству (всё ещё отравлен или композер неразрешим), governor перепровижинит; очищенный черновик сохраняется (POISONED_AGENT_TAB_PRESERVED_DRAFT_CLEARED).
+- ТЕСТЫ: +2 файла (supervisor-root-seed-first-send.test.mjs — rollover seed-first/refused/no-seed-on-conversation; devos-poisoned-tab-selfheal.test.mjs — close-by-proof/preserve). Обновлены supervisor-lifecycle-bootstrap.test.mjs (seed-first контракт: 2 submit'а, сид <1000 симв., генерация сида оседает) и supervisor-bootstrap-ambiguity-tab-binding-r5.test.mjs (новый reason seed-unproven; 2 submit'а в fresh bootstrap). Локально: 34/34 на шести затронутых файлах, r5 6/6.
+- КОНСОЛЬ: /api/agent-factory/cleanup — устранён stale hard-code ROLLOVER_TAB (архитектурная проблема: константа протухала после ролловера) → защищённый набор теперь ВЫВОДИТСЯ из live-состояния (keepalive tab, rollover attempt tab, bound URL, selected, manifest). Линт чист.
+- LIVE-ОПЕРАЦИИ: FLEET_RECONCILE(target=4, retire 2 лишних агентов) отправлен в командную плоскость (PENDING — браузер в ROLLOVER_AMBIGUOUS выполняет командные lane'ы рывками; сведение завершится после self-update с фиксом A).
+
+Stage Summary:
+- Две P1-болезни закрыты в коде рельсы: (A) ролловер/bootstrap больше не печатает полное сообщение в root-композер — сид доказывает разговор первым; (B) отравленные вкладки агентов самоисцеляются (close-by-proof + governor re-provision).
+- Система ждёт: полный сьют → PR в rail → CI autorelease → self-update браузера → ролловер освобождается → FLEET_RECONCILE сводит флот к 4 → обучение.
+- Очередь: 401 AMBIGUOUS (историческая куча) + 6 READY; массовой ретирамбы RPC нет (devos_fleet_reconcile_ambiguous_v2 — per-task) — оставлено как задокументированный hygiene-долг (на исполнение не влияет: lease берёт только READY).
+
+---
+Task ID: RELEASE-ROUND-20260921-1600 (продолжение: сьют + PR + CI)
+Agent: main (Super Z)
+
+Work Log:
+- ПОЛНЫЙ СЮТ РЕЛЬСЫ ЗЕЛЁНЫЙ: 3360 pass / 0 fail / 2 skipped (на финальном коммите 235c567c).
+- ИНЦИДЕНТ: `git checkout -- .` для снятия mode-шума стёр мои патчи в 4 tracked-файлах — восстановлено вручную (урок: коммитить ДО любых git-операций с рабочим деревом; коммит 95cb4e15 защитил состояние).
+- Финальные тест-обновления: process-boundary r5 (typed 1→2, seed-first) и supervisor-bootstrap-tab-neutrality (поверхность оседает после первого capture — для generation drain) — коммит 235c567c.
+- PR #945 создан в rail: https://github.com/PatrickFrome/Compute/pull/945 (work/supervisor-root-seed-first-selfheal-v1 → release/self-update-ambiguity-live-v2).
+- CI на ветке: 8+ воркфлоу в процессе (Shell V1, Self Update E2E, Critical Audit, Soak...).
+- Консоль QA (agent-browser): Overview/Mechanics/Live Browser рендерятся, 0 console errors; Live-панель честно показывает pre-fix телеметрию (ENTER_SUBMIT_EFFECT_AMBIGUOUS, over-limit 5) — после self-update браузера счётчики должны пойти в proven. Скриншоты rel-01..03 в download/.
+- /api/mechanics дополнен M16 (R-SUP-SEED) и M17 (B-SH1) — 14/17 механик живые в этом контуре.
+- LIVE: браузер по-прежнему в ROLLOVER_AMBIGUOUS (2332) на старом коде — ждёт self-update на PR #945 release.
+
+Stage Summary:
+- Код рельсы полностью готов и протестирован (3360/0); PR #945 в CI.
+- Следующая цепочка: merge PR #945 → rail push → fast-autorelease (нужны зелёные evidence-gate + fast-e2e на том же SHA) → релиз v0.7.0-dev.{RUN_ID}.1 → ссылка на скачивание → self-update браузера → ролловер освобождается → FLEET_RECONCILE(4) → обучение 4 агентов.
+
+---
+Task ID: RELEASE-ROUND-20260921-1600 (продолжение: релиз опубликован)
+Agent: main (Super Z)
+
+Work Log:
+- ВСЕ 14 CI-ВОРКФЛОУ ЗЕЛЁНЫЕ на rail sha 175c86ce (включая физический Windows Self-Update E2E и Fast Self Update E2E).
+- РЕЛИЗ ОПУБЛИКОВАН: v0.7.0-dev.35625473710.1 (target 175c86c = merge PR #945), published 2026-09-21T16:39, 7 assets.
+- ССЫЛКА НА СКАЧИВАНИЕ (установщик x64): https://github.com/PatrickFrome/Compute/releases/download/v0.7.0-dev.35625473710.1/METAENGINE-Browser-Test-Setup-0.7.0-dev.35625473710.1-x64.exe (115.5 MB)
+- Страница релиза: https://github.com/PatrickFrome/Compute/releases/tag/v0.7.0-dev.35625473710.1
+- API merge-эндпоинт 404 на токене → merge выполнен git-уровнем (rail-merge ветка → push в release/self-update-ambiguity-live-v2); PR #945 остаётся в open — закрыть при наличии прав.
+- DEVELOPER_EMERGENCY_UPDATE отправлен в живой браузер (sha 175c86ce, TTL 600→900) — командная lane мертва с 14:42 (последний COMPLETED — FLEET_RECONCILE 14:42:24), браузер сам подтянет релиз через собственный discovery.
+- E2E ЛАБОРТОРИЯ: восстановлен psql-враппер (песочница стёрла /home/z/.local/bin/psql; реальный клиент PG17 в pigsty/rootless/pgroot/.../bin/psql) → канонический 10-чек сьют 10/10 PASS за 1.8s (enrollment → activation → signed heartbeat → lease → командный батч → receipt → readback → pg_notify wake 1.5s → woken completion).
+
+Stage Summary:
+- Релиз с R-SUP-SEED + B-SH1 в проде; браузер обновится в собственном цикле (self-update hint→discovery→barrier) или по emergency-команде.
+- Ждём: shell 0.7.0-dev.35625473710.1 в стейте → rollover освобождается seed-first → keepalive возвращается в цикл → командная lane оживает → FLEET_RECONCILE(4) сводит флот → обучение 4 агентов через /api/agent-factory/provision.

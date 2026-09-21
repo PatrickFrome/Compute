@@ -63,6 +63,8 @@ export async function GET() {
       { id: "M13", name: "Episodic memory → промпты", verdict: "CAVEAT", probe: "in-process JSON (R6)", source: "BROWSER_DEEP_AUDIT §14" },
       { id: "M14", name: "RSI runtime (91 модулей, trust-root)", verdict: "CAVEAT", probe: "прод-вход из тестов/консоли; promotion за оператор-гейтом (R9)", source: "BROWSER_DEEP_AUDIT §15" },
       { id: "M15", name: "Self-update (hint→discovery→barrier→rollback)", verdict: "WORKS", probe: "code-audit; rail v0.7.0-dev.35532004761.1", source: "BROWSER_DEEP_AUDIT §16" },
+      { id: "M16", name: "Supervisor root seed-first send (R-SUP-SEED)", verdict: "WORKS", probe: "rail 95cb4e15: #typeAndSend доказывает разговор сидом (6×700ms readback) до полного сообщения; тесты rollover/bootstrap", source: "RELEASE-ROUND-20260921" },
+      { id: "M17", name: "Poisoned agent tab self-heal (B-SH1)", verdict: "WORKS", probe: "rail 95cb4e15: OVER_LIMIT_REPLACE_SEED_FAILED → re-capture → CLOSE_TAB по доказательству → governor re-provision", source: "RELEASE-ROUND-20260921" },
     ];
 
     const gaps = [
