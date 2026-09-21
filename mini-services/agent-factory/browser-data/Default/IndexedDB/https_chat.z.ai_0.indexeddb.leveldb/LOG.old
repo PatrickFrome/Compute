@@ -1,14 +1,14 @@
-2026/09/21-14:21:36.048 2d75 Reusing MANIFEST /home/z/my-project/mini-services/agent-factory/browser-data/Default/IndexedDB/https_chat.z.ai_0.indexeddb.leveldb/MANIFEST-000001
-2026/09/21-14:21:36.048 2d75 Recovering log #14
-2026/09/21-14:21:36.050 2d75 Reusing old log /home/z/my-project/mini-services/agent-factory/browser-data/Default/IndexedDB/https_chat.z.ai_0.indexeddb.leveldb/000014.log 
-2026/09/21-14:21:36.050 2d75 Delete type=2 #12
-2026/09/21-14:21:37.238 2d79 Level-0 table #19: started
-2026/09/21-14:21:37.239 2d79 Level-0 table #19: 1047 bytes OK
-2026/09/21-14:21:37.241 2d79 Delete type=0 #14
-2026/09/21-14:21:37.241 2d79 Manual compaction at level-0 from '\x00\x05\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x06\x00\x00\x00' @ 0 : 0; will stop at '\x00\x05\x00\x00\xc8\x04\x00d\x00a\x00t\x00a' @ 276 : 1
-2026/09/21-14:21:37.241 2d79 Compacting 1@0 + 1@1 files
-2026/09/21-14:21:37.241 2d79 Generated table #20@0: 22 keys, 644 bytes
-2026/09/21-14:21:37.241 2d79 Compacted 1@0 + 1@1 files => 644 bytes
-2026/09/21-14:21:37.241 2d79 compacted to: files[ 0 1 1 0 0 0 0 ]
-2026/09/21-14:21:37.241 2d79 Delete type=2 #19
-2026/09/21-14:21:37.241 2d79 Manual compaction at level-0 from '\x00\x05\x00\x00\xc8\x04\x00d\x00a\x00t\x00a' @ 276 : 1 .. '\x00\x06\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/09/21-14:22:10.784 2def Reusing MANIFEST /home/z/my-project/mini-services/agent-factory/browser-data/Default/IndexedDB/https_chat.z.ai_0.indexeddb.leveldb/MANIFEST-000001
+2026/09/21-14:22:10.785 2def Recovering log #18
+2026/09/21-14:22:10.787 2def Reusing old log /home/z/my-project/mini-services/agent-factory/browser-data/Default/IndexedDB/https_chat.z.ai_0.indexeddb.leveldb/000018.log 
+2026/09/21-14:22:10.787 2def Delete type=2 #16
+2026/09/21-14:22:11.851 2def Level-0 table #23: started
+2026/09/21-14:22:11.852 2def Level-0 table #23: 1056 bytes OK
+2026/09/21-14:22:11.853 2def Delete type=0 #18
+2026/09/21-14:22:11.853 2def Manual compaction at level-0 from '\x00\x06\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x07\x00\x00\x00' @ 0 : 0; will stop at '\x00\x06\x00\x00\xc8\x04\x00d\x00a\x00t\x00a' @ 340 : 1
+2026/09/21-14:22:11.853 2def Compacting 1@0 + 1@1 files
+2026/09/21-14:22:11.853 2def Generated table #24@0: 23 keys, 664 bytes
+2026/09/21-14:22:11.853 2def Compacted 1@0 + 1@1 files => 664 bytes
+2026/09/21-14:22:11.853 2def compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/09/21-14:22:11.853 2def Delete type=2 #23
+2026/09/21-14:22:11.854 2def Manual compaction at level-0 from '\x00\x06\x00\x00\xc8\x04\x00d\x00a\x00t\x00a' @ 340 : 1 .. '\x00\x07\x00\x00\x00' @ 0 : 0; will stop at (end)

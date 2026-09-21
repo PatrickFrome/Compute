@@ -15,6 +15,7 @@ import { MechanicsPanel } from "@/components/mc/mechanics-panel";
 import { RoadmapPanel } from "@/components/mc/roadmap-panel";
 import { E2ePanel } from "@/components/mc/e2e-panel";
 import { FallbackPanel } from "@/components/mc/fallback-panel";
+import { AgentFactoryPanel } from "@/components/mc/agent-factory-panel";
 import { usePoll, timeAgo, formatMs } from "@/components/mc/use-poll";
 import { RefreshCw, RadioTower, Database, Hexagon, ChevronLast, ShieldAlert, MonitorSmartphone } from "lucide-react";
 
@@ -26,7 +27,7 @@ const REFRESH_OPTIONS = [
 ];
 
 const TAB_ORDER = [
-  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "live", "fallback", "mechanics", "roadmap", "lab",
+  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "live", "factory", "fallback", "mechanics", "roadmap", "lab",
 ] as const;
 
 interface FallbackData {
@@ -79,6 +80,7 @@ export default function Home() {
   const mechanics = usePoll<MechanicsData>("/api/mechanics", null);
   const roadmap = usePoll("/api/roadmap", interval ?? 15000);
   const fallback = usePoll<FallbackData>("/api/fallback", interval ?? 15000);
+  const factory = usePoll("/api/agent-factory/fleet", interval ?? 15000);
 
   // Alt+1..8 — quick tab navigation (hint in footer)
   useEffect(() => {
@@ -223,6 +225,9 @@ export default function Home() {
             <TabsTrigger value="live" data-testid="tab-live" className="font-mono text-[11px] data-[state=active]:bg-teal-500/15 data-[state=active]:text-teal-300">
               Live Browser{browserShortVersion ? ` · ${browserShortVersion}` : ""}
             </TabsTrigger>
+            <TabsTrigger value="factory" data-testid="tab-factory" className="font-mono text-[11px] data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-300">
+              Agent Factory
+            </TabsTrigger>
             <TabsTrigger value="fallback" data-testid="tab-fallback" className="font-mono text-[11px] data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
               Fallback Console
             </TabsTrigger>
@@ -251,6 +256,9 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="live" className="mt-0 outline-none">
             <LivePanel poll={live as unknown as Parameters<typeof LivePanel>[0]["poll"]} />
+          </TabsContent>
+          <TabsContent value="factory" className="mt-0 outline-none">
+            <AgentFactoryPanel poll={factory as unknown as Parameters<typeof AgentFactoryPanel>[0]["poll"]} />
           </TabsContent>
           <TabsContent value="fallback" className="mt-0 outline-none">
             <FallbackPanel poll={fallback as unknown as Parameters<typeof FallbackPanel>[0]["poll"]} />
