@@ -223,6 +223,24 @@ function stableCurrentCommand(command) {
 // silent "alive heartbeat / dead command plane" zombie state observed live.
 const COMMAND_CYCLE_STALL_GUARD_MS = 900000;
 
+// CP-W1 (control-plane wedge hardening): the live 2026-09-21 incident proved the
+// remaining zombie class — one wedged cycle await kills the `#schedule()` chain
+// (`cycle().finally(#schedule)` never fires), while the 2s watchdog heartbeat
+// pump keeps beating, so the process looks alive to Sentinel and the cloud while
+// the command lease, maintenance lane and self-update discovery stay dead for
+// hours. Two defenses, both independent of the wedged await:
+//   1. An out-of-band scheduler watchdog re-arms the chain whenever the client is
+//      running with no timer and no in-flight cycle (instant self-heal), and a
+//      cycle hard deadline escalates a provably-dead cycle to process exit so the
+//      host-resilience Sentinel resurrects a fresh process.
+//   2. The heartbeat payload carries a control_plane projection so the console
+//      can distinguish "heartbeat alive" from "lease pump alive" instead of
+//      trusting heartbeats as proof of control-plane health.
+const COMMAND_CYCLE_HARD_DEADLINE_MS = 300000;
+const SCHEDULER_WATCHDOG_INTERVAL_MS = 5000;
+const WEDGE_EXIT_GRACE_MS = 2500;
+const MIN_COMMAND_CYCLE_HARD_DEADLINE_MS = 1000;
+
 // D-L2: pure classification of legitimate no-op completions. Exported for
 // contract tests; returns null when the action still requires the generic
 // postcondition readback path.
@@ -339,6 +357,18 @@ export class NativeSupervisorClient {
   #rsiOutcomeReadbackObserved = 0;
   #rsiOutcomeReadbackDropped = 0;
   #lastRsiOutcomeReadbackAt = null;
+  // CP-W1 control-plane wedge hardening state.
+  #schedulerWatchdogTimer = null;
+  #schedulerRearmCount = 0;
+  #leaseLastAttemptAt = null;
+  #leaseLastOkAt = null;
+  #leaseConsecutiveFailures = 0;
+  #leaseLastError = null;
+  #cycleHardDeadlineTimer = null;
+  #wedgeEscalation = null;
+  #commandCycleHardDeadlineMs;
+  #schedulerWatchdogIntervalMs;
+  #wedgeExitImpl;
 
   constructor({
     identity,
@@ -355,6 +385,9 @@ export class NativeSupervisorClient {
     commandMutationConcurrency = 8,
     commandBatchWaitMs = DEFAULT_BATCH_WAIT_MS,
     maintenanceIntervalMs = DEFAULT_MAINTENANCE_INTERVAL_MS,
+    commandCycleHardDeadlineMs = COMMAND_CYCLE_HARD_DEADLINE_MS,
+    schedulerWatchdogIntervalMs = SCHEDULER_WATCHDOG_INTERVAL_MS,
+    wedgeExitImpl = null,
     legacySingleLeaseFallback = true,
     commandFastlane = false,
     commandFastlaneIntervalMs = 750,
@@ -385,6 +418,12 @@ export class NativeSupervisorClient {
     this.#maxBatch = Math.max(1, Math.min(64, Number(commandBatchSize) || 64));
     this.#maxTabMutations = Math.max(1, Math.min(16, Number(commandMutationConcurrency) || 8));
     this.#maintenanceIntervalMs = Math.max(1000, Math.min(60000, Number(maintenanceIntervalMs) || DEFAULT_MAINTENANCE_INTERVAL_MS));
+    this.#commandCycleHardDeadlineMs = Math.max(
+      MIN_COMMAND_CYCLE_HARD_DEADLINE_MS,
+      Number(commandCycleHardDeadlineMs) || COMMAND_CYCLE_HARD_DEADLINE_MS,
+    );
+    this.#schedulerWatchdogIntervalMs = Math.max(250, Number(schedulerWatchdogIntervalMs) || SCHEDULER_WATCHDOG_INTERVAL_MS);
+    this.#wedgeExitImpl = typeof wedgeExitImpl === 'function' ? wedgeExitImpl : ((code) => process.exit(code));
     this.#controlStatePath = controlStatePath ? String(controlStatePath) : null;
     this.#legacySingleLeaseFallback = legacySingleLeaseFallback !== false;
     this.#resultDeliveryAttempts = Math.max(1, Math.min(6, Number(resultDeliveryAttempts) || 3));
@@ -498,6 +537,7 @@ export class NativeSupervisorClient {
       heartbeat_interval_ms: this.#intervalMs,
       last_heartbeat_at: this.#lastHeartbeatAt,
       last_error: this.#lastError,
+      control_plane: this.controlPlaneSnapshot(),
       last_command_id: this.#lastCommandId,
       last_command_status: this.#lastCommandStatus,
       rsi_outcome_readback: Object.freeze({
@@ -759,6 +799,7 @@ export class NativeSupervisorClient {
     this.#running = true;
     this.#startedAt = new Date().toISOString();
     this.#schedule();
+    this.#startSchedulerWatchdog();
     this.#commandFastlane?.start();
     this.#batchFastlane?.start();
     try {
@@ -792,6 +833,8 @@ export class NativeSupervisorClient {
 
   stop() {
     this.#running = false;
+    this.#stopSchedulerWatchdog();
+    this.#disarmCycleHardDeadline();
     this.#mesh?.stop?.();
     this.#lifecycle?.stop?.();
     this.#commandFastlane?.stop();
@@ -856,6 +899,100 @@ export class NativeSupervisorClient {
     this.#timer.unref?.();
   }
 
+  // CP-W1: out-of-band watchdog that does not depend on the schedule chain
+  // settling. If the chain dies without a wedge (a bug in a future refactor,
+  // an unhandled synchronous throw between cycles), re-arm it immediately.
+  // If a cycle wedges, the hard-deadline escalation handles it (see cycle()).
+  #startSchedulerWatchdog() {
+    if (this.#schedulerWatchdogTimer) return;
+    this.#schedulerWatchdogTimer = setInterval(() => {
+      if (!this.#running) return;
+      if (this.#timer || this.#cyclePromise || this.#legacyFastlaneBusy) return;
+      this.#schedulerRearmCount += 1;
+      this.#schedule();
+    }, this.#schedulerWatchdogIntervalMs);
+    this.#schedulerWatchdogTimer.unref?.();
+  }
+
+  #stopSchedulerWatchdog() {
+    if (this.#schedulerWatchdogTimer) clearInterval(this.#schedulerWatchdogTimer);
+    this.#schedulerWatchdogTimer = null;
+  }
+
+  controlPlaneSnapshot() {
+    const cycleRunning = this.#cyclePromise != null;
+    const cycleAgeMs = cycleRunning && this.#cycleStartedAtMs > 0 ? Date.now() - this.#cycleStartedAtMs : 0;
+    return {
+      schema: 'metaengine.native-supervisor.control-plane.v1',
+      lease_last_attempt_at: this.#leaseLastAttemptAt,
+      lease_last_ok_at: this.#leaseLastOkAt,
+      lease_consecutive_failures: this.#leaseConsecutiveFailures,
+      lease_last_error: this.#leaseLastError,
+      batch_transport: this.#batchTransport,
+      cycle_running: cycleRunning,
+      cycle_started_at: this.#cycleStartedAtMs > 0 ? new Date(this.#cycleStartedAtMs).toISOString() : null,
+      cycle_age_ms: cycleAgeMs,
+      scheduler_watchdog_rearm_count: this.#schedulerRearmCount,
+      wedge_escalation: this.#wedgeEscalation,
+      authority_effect: false,
+    };
+  }
+
+  #markLeaseAttempt() {
+    this.#leaseLastAttemptAt = new Date().toISOString();
+  }
+
+  #markLeaseOk() {
+    this.#leaseLastOkAt = new Date().toISOString();
+    this.#leaseConsecutiveFailures = 0;
+    this.#leaseLastError = null;
+  }
+
+  #markLeaseFailure(error) {
+    this.#leaseConsecutiveFailures += 1;
+    this.#leaseLastError = clipError(error);
+  }
+
+  // CP-W1: a cycle past the hard deadline is provably dead (every bounded path
+  // finishes far earlier). No in-process cancel exists for an unknown await, so
+  // escalate to process exit and let the host-resilience Sentinel resurrect a
+  // fresh process. An in-flight self-update restart path is given one postpone
+  // window first — its own restart will land anyway; if it does not, the next
+  // deadline breach escalates regardless.
+  #armCycleHardDeadline() {
+    this.#disarmCycleHardDeadline();
+    this.#cycleHardDeadlineTimer = setTimeout(() => {
+      this.#cycleHardDeadlineTimer = null;
+      if (!this.#running || !this.#cyclePromise) return;
+      if (Date.now() - this.#cycleStartedAtMs < this.#commandCycleHardDeadlineMs) return;
+      const updateState = String(this.#selfUpdate?.snapshot?.()?.state || '').toUpperCase();
+      if (['DOWNLOADING', 'DOWNLOADED', 'READY_RESTART', 'PENDING_RESTART', 'INSTALLING'].includes(updateState)
+        && !this.#wedgeEscalation) {
+        this.#wedgeEscalation = { reason: 'CYCLE_HARD_DEADLINE_POSTPONED_FOR_SELF_UPDATE', update_state: updateState, at: new Date().toISOString(), authority_effect: false };
+        this.#armCycleHardDeadline();
+        return;
+      }
+      this.#wedgeEscalation = {
+        reason: 'CYCLE_HARD_DEADLINE_EXIT_ESCALATION',
+        cycle_age_ms: Date.now() - this.#cycleStartedAtMs,
+        update_state: updateState || null,
+        at: new Date().toISOString(),
+        authority_effect: false,
+      };
+      this.#lastError = `command_cycle_hard_deadline:${Date.now() - this.#cycleStartedAtMs}ms:exit_escalation`;
+      // Flush one last heartbeat with the escalation marker, then exit so the
+      // Sentinel relaunches a clean process (relaunch path is proven in production).
+      void this.#kickHeartbeat().catch(() => {});
+      setTimeout(() => { try { this.#wedgeExitImpl(2); } catch { /* best effort */ } }, WEDGE_EXIT_GRACE_MS);
+    }, this.#commandCycleHardDeadlineMs);
+    this.#cycleHardDeadlineTimer.unref?.();
+  }
+
+  #disarmCycleHardDeadline() {
+    if (this.#cycleHardDeadlineTimer) clearTimeout(this.#cycleHardDeadlineTimer);
+    this.#cycleHardDeadlineTimer = null;
+  }
+
   async #enrollmentRequest(path, payload) {
     const bodyText = JSON.stringify(payload);
     const headers = await this.#identity.enrollmentHeaders(bodyText);
@@ -910,6 +1047,7 @@ export class NativeSupervisorClient {
         ...state, shell_version: this.#version, supervisor_mode: 'CONTROL', armed: true,
         operator_mode: 'CONTROL', started_at: this.#startedAt, last_error: this.#lastError,
         supervisor_lifecycle: supervisorLifecycle,
+        control_plane: this.controlPlaneSnapshot(),
         self_update: this.#selfUpdate?.snapshot() || null,
         self_update_session_continuity: structuredClone(this.#continuityStatus),
       },
@@ -1013,6 +1151,30 @@ export class NativeSupervisorClient {
   }
 
   async #nextCommands() {
+    if (this.#batchTransport !== 'UNAVAILABLE') {
+      this.#markLeaseAttempt();
+      const waitStartedAt = Date.now();
+      let leaseResult = null;
+      try {
+        leaseResult = await this.#leaseWaitBatchOrLegacy();
+        this.#markLeaseOk();
+        return leaseResult;
+      } catch (error) {
+        this.#markLeaseFailure(error);
+        throw error;
+      }
+    }
+    if (!this.#legacySingleLeaseFallback) {
+      this.#batchTransport = 'REQUIRED_UNAVAILABLE';
+      this.#lastBatchCount = 0;
+      throw new Error('native_supervisor_batch_transport_required');
+    }
+    const command = await this.#nextCommand();
+    this.#lastBatchCount = command ? 1 : 0;
+    return command ? [command] : [];
+  }
+
+  async #leaseWaitBatchOrLegacy() {
     if (this.#batchTransport !== 'UNAVAILABLE') {
       const waitStartedAt = Date.now();
       const response = await this.#signedRequest('/v1/commands/wait-batch', {
@@ -1486,6 +1648,7 @@ export class NativeSupervisorClient {
       return this.#cyclePromise;
     }
     this.#cycleStartedAtMs = Date.now();
+    this.#armCycleHardDeadline();
     this.#cyclePromise = (async () => {
       try {
         const identity = await this.ensureEnrollment();
@@ -1511,7 +1674,10 @@ export class NativeSupervisorClient {
         this.#lastError = clipError(error);
         throw error;
       }
-    })().finally(() => { this.#cyclePromise = null; });
+    })().finally(() => {
+      this.#cyclePromise = null;
+      this.#disarmCycleHardDeadline();
+    });
     return this.#cyclePromise;
   }
 }
