@@ -2,6 +2,12 @@ import { BoundedWorkerObserver } from './bounded-worker-observer.mjs';
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
 import { DevOsNativeTaskCycle } from './devos-native-task-cycle.mjs';
 import {
+  ensureAgentAccessCapsuleFile,
+  loadAgentAccessCapsule,
+  renderAgentAccessCapsuleBlock,
+} from './agent-access-capsule.mjs';
+import { supervisorDeviceStorageDirectory } from './supervisor-device-identity.mjs';
+import {
   assertNativeEffectBindingMatches,
   buildNativeEffectBinding,
   nativeActionRequiresEffectBinding,
@@ -390,7 +396,21 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     // D-C1: the enrolled device identity flows into the devos task cycle so
     // every dispatched prompt carries a per-agent signed context token
     // (GLM agents have no shared context — each one is trained individually).
-    devosRef = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest, identity });
+    // Agent Access Capsule (2026-09-21): agents are created EMPTY — the capsule
+    // gives every dispatch the default infrastructure/DB map + credential
+    // policy + context sources. Resolved once here: the shipped default is
+    // materialized into the device storage dir on first boot (operator can
+    // override by editing that file; it is never overwritten again). Tests
+    // without a storage dir get no capsule and byte-identical prompts.
+    let accessCapsuleBlock = null;
+    try {
+      const capsuleDir = supervisorDeviceStorageDirectory();
+      if (capsuleDir) {
+        ensureAgentAccessCapsuleFile(capsuleDir);
+        accessCapsuleBlock = renderAgentAccessCapsuleBlock(loadAgentAccessCapsule({ storage_dir: capsuleDir })) || null;
+      }
+    } catch { /* capsule is additive; never blocks the cycle */ }
+    devosRef = new DevOsNativeTaskCycle({ getState, executeCommand, signedRequest, identity, access_capsule: accessCapsuleBlock });
     this.#devosTaskCycle = devosRef;
   }
 
