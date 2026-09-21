@@ -5675,3 +5675,25 @@ Stage Summary:
 - ПРОД-СОСТОЯНИЕ: браузер v0.7.0-dev.35566784091.1, флот 10/10 ACTIVE на GLM-5.3-Flash, капсула доступа в каждом dispatch-промпте, boot_fleet_target=10 персистентен — следующий self-update восстановит флот АВТОМАТИЧЕСКИ.
 - Все 3 релиза за сессию (35558710582.1 / 35563167437.1 / 35566784091.1) прошли полный контур: PR → CI 36/36 → publish → автономный self-update → верификация в cloud state.
 - Риски/следующее: (1) EXPIRED-receipt при спавне >TTL — брать TTL 300+ для больших спавнов или фоновый job-паттерн; (2) RSI-долг r14/r8d (124 патча) всё ещё вне rail; (3) валидировать восстановление флота при СЛЕДУЮЩЕМ self-update (естественный тест фичи); (4) консоль: добавить Fleet-панель поверх boot_fleet_target/desired (кнопка "Set target" через командную плоскость).
+---
+Task ID: CRON-ROUND-20260921-1423
+Agent: main (Super Z, крон-раунд)
+Task: Оценка состояния, agent-browser QA, приоритетный фикс или фича, worklog.
+
+Work Log:
+- Состояние прод-контура верифицировано из облака: браузер ЖИВ (heartbeat 2-3с), shell 0.7.0-dev.35566784091.1, armed/CONTROL, self_update.state=CURRENT, startup_recovery=QUALIFIED (квалификация прошлого self-update завершилась штатно). Флот 10/10 ACTIVE на GLM-5.3-Flash (PLANNER×2/RESEARCHER×2/IMPLEMENTER×2/CRITIC×2/FALSIFIER/SYNTHESIZER), fleet.policy.boot_fleet_target=10 персистит (desired дрейфовал 4→3 под demand — governor живой).
+- agent-browser QA консоли (qa3-01..10): все 10 вкладок рендерятся без ошибок; RESERVE MODE ACTIVE в хедере — честный вердикт сентинела (Supabase cloud probe ~1700ms > порога 1200ms при 0 fail → LOCAL_FALLBACK по гистерезису; restore-правило 5 здоровых проб + ≥120с резерва видно в transitions). Это working-as-designed, НЕ залипшая симуляция.
+- ФИЧА (главный результат раунда): Live Browser панель — облачный флот в консоли (незакрытый пункт прошлого раунда «Fleet-панель поверх boot_fleet_target/desired»).
+  * src/lib/cloud.ts — серверный клиент облака: creds из /home/z/.a2/supabase-cloud.env (или process.env), state readback (compute_fabric_a2_browser_supervisor_state_h205f22), issue RPC (h205f22_a2_browser_supervisor_issue_native_v1), receipt polling. service_role НИКОГДА не покидает сервер.
+  * GET /api/live — нормализованный снапшот: heartbeatMs/shell_version/armed/mode, self_update + startup_recovery, fleet (boot target / desired / live / byLifecycle / byRole / agents c transport proof), tabs census.
+  * POST /api/live/command — операторский лейн с allowlist (FLEET_RECONCILE / CLOSE_TAB / RELOAD_TAB), валидацией payload (target 0..28, agent_/tab_ id regex), idempotency_key mc-console:<action>:<nonce>, bounded wait receipt (≤25с).
+  * src/components/mc/live-panel.tsx — heartbeat strip (LIVE/STALE/OFFLINE? цвет по возрасту), badges версии/armed/mode/recovery, Fleet Governance card (boot/desired/live счётчики + Set fleet target → FLEET_RECONCILE), Live Fleet Agents (роли-цвета, lifecycle-тоны, proof age), Tab Census с двухшаговым CLOSE_TAB (X → confirm).
+  * page.tsx: вкладка «Live Browser · dev.<ver>», индикатор Browser в хедере (dot по heartbeat + короткая версия), футер теперь динамический: live shell из облака (fallback на статическую релизную строку); rail @ db5c83db.
+- Баги по пути: (1) PostgREST RPC требует префикс /rpc/ — первый POST дал PGRST205, исправлено, end-to-end COMPLETED; (2) parse a2-env: строки без export-префикса — regex расширен.
+- E2E через UI: Apply target=10 → FLEET_RECONCILE e882e1f0… COMPLETED, receipt с agents[]/counts/policy отрендерен, DESIRED в облаке поднялся 3→10, флот 10/10 ACTIVE подтверждён readback. Прямой POST: counts {ACTIVE:10, LOST:0, RETIRED:0, ...}.
+- Lint чистый ×2, dev.log без ошибок; /api/live ~0.5-0.65s (облачный fetch, приемлемо для 5s poll).
+
+Stage Summary:
+- ПРОД: браузер 0.7.0-dev.35566784091.1 QUALIFIED, флот 10/10 ACTIVE GLM-5.3-Flash, boot target 10 персистентен, консоль теперь видит live-флот И может им управлять (reconcile/close-tab) через каноническую командную плоскость с zero-authority receipts.
+- Консоль: 11 вкладок (новая Live Browser), QA-скриншоты qa3-01..10 в download/.
+- Риски/следующее: (1) close-tab из UI — разрушительное действие, стоит добавить владельческий guard/audit-строку; (2) /api/live при недоступном облаке даёт 502 — в UI обработано (OFFLINE?), но можно добавить кэш last-known-good; (3) sentinel держит консоль в LOCAL_FALLBACK из-за медленного облака — не баг, но стоит следить за порогом 1200ms при росте RTT; (4) RSI-долг r14/r8d (124 патча) по-прежнему вне rail; (5) EXPIRED-receipt при больших спавнах — TTL 300+ для target > 12.

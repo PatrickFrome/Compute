@@ -10,12 +10,13 @@ import { CommandsPanel } from "@/components/mc/commands-panel";
 import { EmergencyLanePanel } from "@/components/mc/emergency-panel";
 import { CognitiveBusPanel } from "@/components/mc/cognitive-panel";
 import { FleetPanel } from "@/components/mc/fleet-panel";
+import { LivePanel, type LivePayload } from "@/components/mc/live-panel";
 import { MechanicsPanel } from "@/components/mc/mechanics-panel";
 import { RoadmapPanel } from "@/components/mc/roadmap-panel";
 import { E2ePanel } from "@/components/mc/e2e-panel";
 import { FallbackPanel } from "@/components/mc/fallback-panel";
 import { usePoll, timeAgo, formatMs } from "@/components/mc/use-poll";
-import { RefreshCw, RadioTower, Database, Hexagon, ChevronLast, ShieldAlert } from "lucide-react";
+import { RefreshCw, RadioTower, Database, Hexagon, ChevronLast, ShieldAlert, MonitorSmartphone } from "lucide-react";
 
 const REFRESH_OPTIONS = [
   { label: "2s", ms: 2000 },
@@ -25,7 +26,7 @@ const REFRESH_OPTIONS = [
 ];
 
 const TAB_ORDER = [
-  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "fallback", "mechanics", "roadmap", "lab",
+  "overview", "gate", "commands", "emergency", "cognitive", "fleet", "live", "fallback", "mechanics", "roadmap", "lab",
 ] as const;
 
 interface FallbackData {
@@ -74,6 +75,7 @@ export default function Home() {
   const emergency = usePoll("/api/emergency", interval ?? 15000);
   const cognitive = usePoll("/api/cognitive", interval ?? 15000);
   const fleet = usePoll("/api/fleet", interval ?? 15000);
+  const live = usePoll<LivePayload>("/api/live", interval ?? 15000);
   const mechanics = usePoll<MechanicsData>("/api/mechanics", null);
   const roadmap = usePoll("/api/roadmap", null);
   const fallback = usePoll<FallbackData>("/api/fallback", interval ?? 15000);
@@ -97,6 +99,9 @@ export default function Home() {
   const edgeOk = overview.data?.edge.ok === true;
   const reserveActive = fallback.data?.snapshot?.mode === "LOCAL_FALLBACK";
   const simActive = fallback.data?.snapshot?.simulation?.active === true;
+  const liveSnap = live.data?.live ?? null;
+  const browserOnline = liveSnap != null && liveSnap.heartbeatMs < 30_000;
+  const browserShortVersion = liveSnap?.shellVersion ? liveSnap.shellVersion.replace(/^0\.7\.0-dev\./, "dev.") : null;
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100">
@@ -133,6 +138,18 @@ export default function Home() {
               <span className="font-mono text-[10px] text-zinc-400">Edge :3031</span>
               {edgeOk && overview.data && <span className="font-mono text-[9px] text-zinc-600">{overview.data.edge.ms}ms</span>}
             </div>
+            {(live.data?.ok || live.data?.configured) && (
+              <div
+                className="flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-1"
+                data-testid="browser-indicator"
+                title={liveSnap ? `heartbeat ${liveSnap.heartbeatMs}ms ago · ${liveSnap.shellVersion ?? "?"}` : "no live state"}
+              >
+                <MonitorSmartphone className="h-3 w-3 text-zinc-500" aria-hidden />
+                <LiveDot ok={browserOnline} pulse={browserOnline} />
+                <span className="font-mono text-[10px] text-zinc-400">Browser</span>
+                {browserShortVersion && <span className="font-mono text-[9px] text-zinc-600">{browserShortVersion}</span>}
+              </div>
+            )}
             {pendingCount > 0 && (
               <span
                 data-testid="pending-gate-alert"
@@ -203,6 +220,9 @@ export default function Home() {
               Cognitive Bus
             </TabsTrigger>
             <TabsTrigger value="fleet" className="font-mono text-[11px] data-[state=active]:bg-teal-500/15 data-[state=active]:text-teal-300">DevOS Fleet</TabsTrigger>
+            <TabsTrigger value="live" data-testid="tab-live" className="font-mono text-[11px] data-[state=active]:bg-teal-500/15 data-[state=active]:text-teal-300">
+              Live Browser{browserShortVersion ? ` · ${browserShortVersion}` : ""}
+            </TabsTrigger>
             <TabsTrigger value="fallback" data-testid="tab-fallback" className="font-mono text-[11px] data-[state=active]:bg-amber-500/15 data-[state=active]:text-amber-300">
               Fallback Console
             </TabsTrigger>
@@ -229,6 +249,9 @@ export default function Home() {
           <TabsContent value="fleet" className="mt-0 outline-none">
             <FleetPanel poll={fleet as unknown as Parameters<typeof FleetPanel>[0]["poll"]} />
           </TabsContent>
+          <TabsContent value="live" className="mt-0 outline-none">
+            <LivePanel poll={live as unknown as Parameters<typeof LivePanel>[0]["poll"]} />
+          </TabsContent>
           <TabsContent value="fallback" className="mt-0 outline-none">
             <FallbackPanel poll={fallback as unknown as Parameters<typeof FallbackPanel>[0]["poll"]} />
           </TabsContent>
@@ -248,7 +271,7 @@ export default function Home() {
       <footer className="mt-auto border-t border-zinc-800 bg-zinc-950">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5 sm:px-6 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
           <p className="font-mono text-[10px] text-zinc-600">
-            <span className="text-zinc-500">Compute rsi-contour</span> · rail release/self-update-ambiguity-live-v2 @ 6bf173c7 · release v0.7.0-dev.35532004761.1
+            <span className="text-zinc-500">Compute rsi-contour</span> · rail release/self-update-ambiguity-live-v2 @ db5c83db · {browserShortVersion ? `live shell ${liveSnap?.shellVersion}` : "release v0.7.0-dev.35566784091.1"}
           </p>
           <p className="flex items-center gap-3 font-mono text-[10px] text-zinc-600" data-testid="footer-status">
             <span className="hidden sm:inline text-zinc-700">Alt+1..9 tabs</span>
