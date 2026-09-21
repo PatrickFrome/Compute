@@ -41,6 +41,13 @@ import { projectDevOSDevelopmentSources } from './metaengine-devos-development-s
 import { projectMissionControl } from './metaengine-mission-control-projection.mjs';
 import { SupervisorLoopbackRpcServer } from './supervisor-loopback-rpc-server.mjs';
 import { publishComputeBridgeHealth, publishFleetAgentLifecycle, publishSupervisorCommand } from './browser-cognitive-system-deltas.mjs';
+// Fallback Console (operator directive 2026-09-21): embedded reserve control
+// plane. Probes the pinned cloud edge + the local reserve edge, re-points the
+// live supervisor client ONLY while the cloud is unresponsive/degraded, and
+// re-locks the console once the cloud proves stable again.
+import { createSupabaseHealthSentinel } from './supabase-health-sentinel.mjs';
+import { createFallbackConsoleRuntime } from './fallback-console-runtime.mjs';
+import { NATIVE_SUPERVISOR_DEFAULT_BASE, resolveNativeSupervisorBase } from './native-supervisor-endpoints.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(__dirname, '..');
@@ -71,6 +78,7 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+let fallbackConsole = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
 const devosPresentationFocus = createDevOSPresentationFocusState();
@@ -390,6 +398,10 @@ async function shellSnapshot() {
       // nowhere while the screen claimed to be the unified work graph.
       work_graph: supervisor?.devos_task_cycle?.work_graph || null,
     }),
+    // Fallback Console projection: gate (LOCKED while cloud healthy), health
+    // of both edges, transition log, drill history. Read-only; fails to null
+    // before first init — never a fabricated reserve state.
+    fallback_console: fallbackConsole ? fallbackConsole.snapshot() : null,
     layout: shellLayoutPlan ? structuredClone(shellLayoutPlan) : null,
     surface_grid: devosSurfaceGridPlan ? structuredClone(devosSurfaceGridPlan) : null,
     session_layouts: structuredClone(sessionLayouts),
@@ -693,7 +705,13 @@ async function initFleet() {
     policy: { profile: 'BALANCED', warm_agents: 0, desired_agents: 0, spawn_burst_limit: 8, elastic_max_target_agents: fleetElasticMaxTargetAgents() },
   });
   await fleet.init();
-  await fleet.reconcile({ active: false });
+  // Operator fleet target persistence: honor the persisted boot_fleet_target
+  // (>0) with ONE active reconcile so the operator's fleet is restored after a
+  // restart (self-update, crash, reboot). Restart-stale LOST rows occupy no
+  // slots, so the pass spawns fresh agents up to the recorded target. A target
+  // of 0 keeps the historical fail-safe boot posture (no auto-grow).
+  const bootFleetTarget = Math.min(64, Math.max(0, Math.floor(Number(fleet?.snapshot?.()?.policy?.boot_fleet_target)) || 0));
+  await fleet.reconcile({ active: bootFleetTarget > 0, target_agents: bootFleetTarget > 0 ? bootFleetTarget : null });
 }
 
 function developmentPlaneRepoRoot() {
@@ -827,6 +845,18 @@ async function handleCommand(command, payload = {}) {
   }
   if (command === 'TAKEOVER_PAUSE') return executeHumanTakeover('PAUSE');
   if (command === 'TAKEOVER_RESUME') return executeHumanTakeover('RESUME');
+  // Fallback Console: probe (sentinel tick + mode apply) and the read-only
+  // reserve-path drill. Both are safe in any mode; neither issues commands.
+  if (command === 'FALLBACK_CONSOLE_PROBE') {
+    if (!fallbackConsole) throw new Error('fallback_console_unavailable');
+    return fallbackConsole.probe();
+  }
+  if (command === 'FALLBACK_CONSOLE_DRILL') {
+    if (!fallbackConsole) throw new Error('fallback_console_unavailable');
+    const drill = await fallbackConsole.drill();
+    await publishSnapshot().catch(() => {});
+    return drill;
+  }
   // RSI operator console — the single operator surface over the shadow
   // runtime. Read-mostly; ledger-writing actions (promotion nomination,
   // steering nominate/approve) grant nothing without their external gates;
@@ -868,6 +898,15 @@ async function handleCommand(command, payload = {}) {
   if (command === 'FLEET_STATUS') return fleet?.snapshot() || null;
   if (command === 'FLEET_RECONCILE') {
     const before = fleet?.snapshot() || null;
+    // Operator fleet target persistence (2026-09-21): an operator-issued
+    // explicit target is recorded as boot_fleet_target and survives restarts.
+    // The DevOS elastic governor's plan payload carries its schema marker and
+    // is NEVER captured as the boot seed — demand-driven targets stay
+    // ephemeral by design.
+    const isGovernorPlan = payload?.schema === 'metaengine.browser.fleet-elastic-plan.v1' || payload?.governor != null;
+    if (!isGovernorPlan && payload?.target_agents != null && typeof fleet?.setOperatorFleetTarget === 'function') {
+      await fleet.setOperatorFleetTarget(payload.target_agents);
+    }
     const retired = await retireFleetSurplus(payload?.retire_agent_ids);
     const sweptOrphans = await sweepOrphanFleetTabs();
     const physicalCleanupCount = retired.length + sweptOrphans.length;
@@ -1289,6 +1328,34 @@ async function initNativeSupervisor() {
     });
   }
   if (nativeSupervisor.snapshot()?.running !== true) await nativeSupervisor.start();
+  // Fallback Console (operator directive 2026-09-21): reserve control plane
+  // embedded in the browser. The console stays LOCKED while the pinned cloud
+  // edge is healthy. When the cloud is unresponsive/degraded for degrade_streak
+  // probes and METAENGINE_FALLBACK_SUPERVISOR_BASE_URL is configured + reachable,
+  // the whole device-signed supervisor client is re-pointed at the local edge
+  // (live binding swap — no rebuild) and the console unlocks. Authority hands
+  // back only after restore_streak healthy probes AND >= one lease timeout of
+  // fallback residency, so in-flight local leases expire before the switch —
+  // no dual-authority window. If METAENGINE_SUPERVISOR_BASE_URL pins the base,
+  // swapping is disabled (explicit operator decision wins) but probing/drill
+  // stay active.
+  if (!fallbackConsole) {
+    const rawLocalBase = String(process.env.METAENGINE_FALLBACK_SUPERVISOR_BASE_URL || '').trim();
+    const localReserveBase = rawLocalBase ? resolveNativeSupervisorBase(rawLocalBase) : null;
+    const reserveSentinel = createSupabaseHealthSentinel({
+      cloud_base: NATIVE_SUPERVISOR_DEFAULT_BASE,
+      local_base: localReserveBase,
+      failover_enabled: localReserveBase != null,
+      degraded_latency_ms: Number(process.env.METAENGINE_FALLBACK_DEGRADED_LATENCY_MS || 0) || undefined,
+    });
+    fallbackConsole = createFallbackConsoleRuntime({
+      sentinel: reserveSentinel,
+      local_base: localReserveBase,
+      cloud_default_base: NATIVE_SUPERVISOR_DEFAULT_BASE,
+      base_pinned_by_env: Boolean(String(process.env.METAENGINE_SUPERVISOR_BASE_URL || '').trim()),
+    });
+    fallbackConsole.start({ on_mode_change: () => { void publishSnapshot().catch(() => {}); } });
+  }
   // T3-11 supervisor loopback RPC primary: local callers get the SAME fenced
   // executor over a loopback-only HTTP endpoint; the chat -> edge -> DB-lease
   // path stays as the remote fallback (native-supervisor-runtime-transport).
@@ -1312,6 +1379,8 @@ function destroyWindowContents() {
   supervisorLoopbackRpc?.stop().catch(() => {});
   supervisorLoopbackRpc = null;
   nativeSupervisor?.stop();
+  fallbackConsole?.stop();
+  fallbackConsole = null;
   downloads?.close?.().catch(() => {});
   downloads = null;
   userSessionConfigured = false;

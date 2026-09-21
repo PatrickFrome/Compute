@@ -1,25 +1,24 @@
 import { query } from "@/lib/pg";
-import { cloudConfigured, cloudFleetSnapshot, cloudRpc, CLOUD_FLEET_WORKSPACE } from "@/lib/cloud";
+import { CLOUD_FLEET_WORKSPACE } from "@/lib/cloud";
+import { fleetEnqueue, fleetSnapshot, type FleetPlane } from "@/lib/fleet-plane";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Milestone Runner — Roadmap → Fleet execution bridge (R3 closure, operator side).
  *
- * EXECUTION PLANE (2026-09-21 fix): the live browser is CLOUD-FIRST — its
- * supervisor cycle leases DevOS tasks from the CLOUD database (Supabase),
- * not from the local Pigsty contour. Milestone tasks enqueued into local PG
- * sat READY forever (zero lease attempts in 5h) while an identical task
- * enqueued into the cloud was LEASED within ~12s by a live GLM agent tab.
- * Therefore dispatch/sync below target the CLOUD plane as the single
- * authority; the local contour remains a rehearsal plane (Drive full cycle).
+ * EXECUTION PLANE (2026-09-21 pivot): the cloud Supabase project was DELETED
+ * (DNS dead); the operator's backup lives in the local Pigsty replica with the
+ * SAME devos_fleet_* RPC surface. Dispatch/sync therefore go through the
+ * plane-aware fleet module: cloud (if ever re-provisioned) → local Pigsty.
+ * The UI badges which plane actually served each call.
  *
- *   dispatch        milestone → cloud devos_fleet_enqueue_v1
- *                   (point_id = 'roadmap.<key>', cloud lowercases it)
+ *   dispatch        milestone → devos_fleet_enqueue_v1 (plane-aware)
+ *                   (point_id = 'roadmap.<key>', plane lowercases it)
  *                   idempotent via enqueue_key 'mc-milestone:<key>';
  *                   a deliberate re-run after DONE/BLOCKED stamps a fresh key
  *   dispatch-phase  bulk dispatch every PLANNED milestone of a phase
- *   sync            cloud task state → milestone status transition
+ *   sync            fleet task state → milestone status transition
  *                   (in-flight → IN_PROGRESS, COMPLETED/RESULT_READY → DONE,
  *                    FAILED/BLOCKED/AMBIGUOUS → BLOCKED)
  *   set-status      manual operator override (console-local roadmap store)
@@ -64,13 +63,14 @@ async function loadMilestone(key: string): Promise<MilestoneRow | null> {
   return (res.rows[0] as MilestoneRow) ?? null;
 }
 
-/** Cloud enqueue — the plane the live browser actually leases from. */
-async function enqueueCloud(m: MilestoneRow): Promise<{
+/** Fleet enqueue — plane-aware (cloud if configured, else local Pigsty replica). */
+async function enqueueFleet(m: MilestoneRow): Promise<{
   accepted: boolean;
   taskId: string | null;
   state: string | null;
   duplicate: boolean;
   enqueueKey: string;
+  plane: FleetPlane;
   error?: string;
 }> {
   // Idempotency: bare key for the first run; a deliberate re-run after a
@@ -89,14 +89,14 @@ async function enqueueCloud(m: MilestoneRow): Promise<{
     roadmap_id: m.roadmap_id,
   };
   try {
-    const result = await cloudRpc<Record<string, unknown>>("devos_fleet_enqueue_v1", {
-      p_workspace: CLOUD_FLEET_WORKSPACE,
-      p_point: `${POINT_PREFIX}${m.milestone_key}`,
-      p_role: deriveRole(m.milestone_key),
-      p_base: "db5c83db806197b38b37338cdaff1ce69b825c08",
-      p_spec: spec,
-      p_key: enqueueKey,
-      p_priority: Math.min(99, Math.max(1, m.priority || 50)),
+    const { plane, result } = await fleetEnqueue({
+      workspace: CLOUD_FLEET_WORKSPACE,
+      point: `${POINT_PREFIX}${m.milestone_key}`,
+      role: deriveRole(m.milestone_key),
+      base: "db5c83db806197b38b37338cdaff1ce69b825c08",
+      spec,
+      key: enqueueKey,
+      priority: Math.min(99, Math.max(1, m.priority || 50)),
     });
     return {
       accepted: result.task_id != null,
@@ -104,10 +104,16 @@ async function enqueueCloud(m: MilestoneRow): Promise<{
       state: result.state ? String(result.state) : null,
       duplicate: result.duplicate === true,
       enqueueKey,
+      plane,
     };
   } catch (e) {
-    return { accepted: false, taskId: null, state: null, duplicate: false, enqueueKey, error: e instanceof Error ? e.message : String(e) };
+    return { accepted: false, taskId: null, state: null, duplicate: false, enqueueKey, plane: cloudConfiguredFallbackPlane(), error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** When enqueue itself throws before a plane was chosen, report the fallback plane. */
+function cloudConfiguredFallbackPlane(): FleetPlane {
+  return "local-pigsty";
 }
 
 interface CloudTaskView {
@@ -118,9 +124,9 @@ interface CloudTaskView {
   updatedAt: string | null;
 }
 
-/** Latest cloud task state per roadmap milestone (active rows + terminal events). */
-async function cloudTaskStates(): Promise<Map<string, CloudTaskView>> {
-  const snap = await cloudFleetSnapshot();
+/** Latest fleet task state per roadmap milestone (active rows + terminal events). */
+async function fleetTaskStates(): Promise<{ plane: FleetPlane; states: Map<string, CloudTaskView> }> {
+  const { plane, snap } = await fleetSnapshot();
   const latest = new Map<string, CloudTaskView>();
 
   const touch = (rawPoint: unknown, taskId: unknown, state: string, role: unknown, at: unknown, priority: unknown) => {
@@ -152,14 +158,15 @@ async function cloudTaskStates(): Promise<Map<string, CloudTaskView>> {
     if (!terminal) continue;
     touch(e.point_id, e.task_id, terminal.toUpperCase(), e.role, e.created_at, null);
   }
-  return latest;
+  return { plane, states: latest };
 }
 
-async function syncMilestones(): Promise<{ changed: { key: string; from: string; to: string; taskId: string | null }[] }> {
-  const [milestonesRes, states] = await Promise.all([
+async function syncMilestones(): Promise<{ plane: FleetPlane; changed: { key: string; from: string; to: string; taskId: string | null }[] }> {
+  const [milestonesRes, fleet] = await Promise.all([
     query(`select milestone_key, status from ${MILESTONE_TABLE}`),
-    cloudTaskStates(),
+    fleetTaskStates(),
   ]);
+  const states = fleet.states;
 
   const changed: { key: string; from: string; to: string; taskId: string | null }[] = [];
   for (const m of milestonesRes.rows) {
@@ -182,14 +189,11 @@ async function syncMilestones(): Promise<{ changed: { key: string; from: string;
     );
     changed.push({ key, from, to, taskId: t.taskId });
   }
-  return { changed };
+  return { plane: fleet.plane, changed };
 }
 
 export async function POST(req: Request) {
   try {
-    if (!cloudConfigured()) {
-      return Response.json({ ok: false, error: "cloud creds unavailable — dispatch targets the CLOUD execution plane" }, { status: 503 });
-    }
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const action = String(body.action ?? "").trim();
 
@@ -198,13 +202,13 @@ export async function POST(req: Request) {
       if (!key) return Response.json({ ok: false, error: "key_required" }, { status: 400 });
       const m = await loadMilestone(key);
       if (!m) return Response.json({ ok: false, error: "milestone_not_found" }, { status: 404 });
-      const r = await enqueueCloud(m);
+      const r = await enqueueFleet(m);
       if (!r.accepted) {
         return Response.json({ ok: false, error: r.error ?? "enqueue_rejected", result: r }, { status: 502 });
       }
       // milestone stays PLANNED here — sync flips it to IN_PROGRESS once the
-      // cloud lease materializes (single source of truth = execution plane)
-      return Response.json({ ok: true, action, milestone: key, taskId: r.taskId, state: r.state, duplicate: r.duplicate, enqueueKey: r.enqueueKey, plane: "cloud" });
+      // fleet lease materializes (single source of truth = execution plane)
+      return Response.json({ ok: true, action, milestone: key, taskId: r.taskId, state: r.state, duplicate: r.duplicate, enqueueKey: r.enqueueKey, plane: r.plane });
     }
 
     if (action === "dispatch-phase") {
@@ -219,17 +223,19 @@ export async function POST(req: Request) {
       );
       const dispatched: { key: string; taskId: string | null }[] = [];
       const failed: { key: string; error: string }[] = [];
+      let plane: FleetPlane = "local-pigsty";
       for (const row of res.rows as MilestoneRow[]) {
-        const r = await enqueueCloud(row);
+        const r = await enqueueFleet(row);
+        plane = r.plane;
         if (r.accepted) dispatched.push({ key: row.milestone_key, taskId: r.taskId });
         else failed.push({ key: row.milestone_key, error: r.error ?? "enqueue_rejected" });
       }
-      return Response.json({ ok: failed.length === 0, action, phase, dispatchedCount: dispatched.length, dispatched, failed, plane: "cloud" });
+      return Response.json({ ok: failed.length === 0, action, phase, dispatchedCount: dispatched.length, dispatched, failed, plane });
     }
 
     if (action === "sync") {
-      const { changed } = await syncMilestones();
-      return Response.json({ ok: true, action, changedCount: changed.length, changed, plane: "cloud" });
+      const { plane, changed } = await syncMilestones();
+      return Response.json({ ok: true, action, changedCount: changed.length, changed, plane });
     }
 
     if (action === "set-status") {

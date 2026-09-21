@@ -76,6 +76,23 @@ async function enrollFresh(): Promise<ProbeIdentity> {
   };
   const fingerprint = await sha256(JSON.stringify(publicJwk));
   const clientId = `mc-console-probe`;
+
+  // Self-heal: a previous probe identity may still own the ACTIVE device slot
+  // for this client (e.g. after a sandbox reset lost the identity file while
+  // the Pigsty replica kept the row). Revoke stale ACTIVE devices for the
+  // client so the per-client unique active-device index accepts the fresh
+  // enrollment. Console-side revocation is legitimate here: the console is
+  // the operator-gate executor on the local contour anyway.
+  try {
+    await query(
+      `update public.compute_fabric_a2_browser_device_h205f22
+          set active=false, revoked_at=now()
+        where client_id=$1 and active=true and revoked_at is null`,
+      [clientId],
+    );
+  } catch {
+    // best effort — proceed to enrollment; the edge will fail loudly if not
+  }
   const privateJwk = (await crypto.subtle.exportKey("jwk", kp.privateKey)) as unknown as Record<
     string,
     string
@@ -104,6 +121,7 @@ async function enrollFresh(): Promise<ProbeIdentity> {
   let ts = new Date().toISOString();
   let nonce = b64u(crypto.getRandomValues(new Uint8Array(24)));
   let res = await fetch(`${EDGE}${MARKER}/v1/device/enrollment/request`, {
+    signal: AbortSignal.timeout(6_000),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -138,6 +156,7 @@ async function enrollFresh(): Promise<ProbeIdentity> {
   ts = new Date().toISOString();
   nonce = b64u(crypto.getRandomValues(new Uint8Array(24)));
   res = await fetch(`${EDGE}${MARKER}/v1/device/enrollment/status`, {
+    signal: AbortSignal.timeout(6_000),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -278,7 +297,7 @@ export async function edgeDevicePost(
   const bodyText = JSON.stringify(body);
   const headers = await signDeviceRequest(identity, routePath, bodyText);
   const t0 = Date.now();
-  const res = await fetch(`${EDGE}${MARKER}${routePath}`, { method: "POST", headers, body: bodyText });
+  const res = await fetch(`${EDGE}${MARKER}${routePath}`, { signal: AbortSignal.timeout(8_000), method: "POST", headers, body: bodyText });
   let json: Record<string, unknown>;
   try {
     json = (await res.json()) as Record<string, unknown>;

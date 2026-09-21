@@ -123,7 +123,7 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
         const state = String(json.state ?? "?");
         const dup = json.duplicate === true;
         toast[dup ? "info" : "success"](`Milestone ${key} ${dup ? "already enqueued" : "dispatched"}`, {
-          description: `task ${shortId(String(json.taskId ?? ""), 8)} · ${state} · cloud execution plane`,
+          description: `task ${shortId(String(json.taskId ?? ""), 8)} · ${state} · ${json.plane === "cloud" ? "cloud" : "local Pigsty"} execution plane`,
         });
         void poll.refresh();
       } else {
@@ -198,14 +198,14 @@ export function RoadmapPanel({ poll }: { poll: PollState<RoadmapData> }) {
               </span>
             </CardTitle>
             <CardDescription className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-zinc-600">
-              <span>compute_fabric_roadmap_milestone_h205f22 · dispatch via cloud devos_fleet_enqueue_v1 · sync task → milestone</span>
+              <span>compute_fabric_roadmap_milestone_h205f22 · dispatch via devos_fleet_enqueue_v1 (plane-aware) · sync task → milestone</span>
               <span
                 className={`inline-flex items-center gap-1 rounded border px-1.5 py-px ${cloudLive ? "border-teal-800/60 bg-teal-500/10 text-teal-300" : "border-amber-800/60 bg-amber-500/10 text-amber-300"}`}
-                title={cloudLive ? "tasks dispatch to the cloud database — the plane the live browser leases from" : `cloud unreachable — showing local rehearsal rows${d?.cloudError ? ` · ${d.cloudError}` : ""}`}
+                title={cloudLive ? "tasks dispatch to the cloud database — the plane the live browser leases from" : `cloud unreachable/dead — dispatch and sync serve from the local Pigsty replica (127.0.0.1:55432)${d?.cloudError ? ` · ${d.cloudError}` : ""}`}
                 data-testid="roadmap-plane-badge"
               >
                 {cloudLive ? <Cloud className="h-3 w-3" aria-hidden /> : <HardDrive className="h-3 w-3" aria-hidden />}
-                {cloudLive ? "cloud execution plane" : "local rehearsal plane"}
+                {cloudLive ? "cloud execution plane" : "local Pigsty plane"}
               </span>
               <button
                 onClick={() => setAutoSync((v) => !v)}

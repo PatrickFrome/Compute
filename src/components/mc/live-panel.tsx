@@ -88,6 +88,8 @@ export interface LiveSnapshot {
 interface LivePayload {
   ok: boolean;
   configured?: boolean;
+  plane?: "cloud" | "local-pigsty";
+  planeNote?: string;
   live: LiveSnapshot | null;
   error?: string;
   at?: string;
@@ -199,14 +201,34 @@ export function LivePanel({ poll }: { poll: PollState<LivePayload> }) {
                 <LiveDot ok={hb.dot} pulse={hb.dot} />
                 <span className={`font-mono text-xs font-bold tracking-[0.18em] ${hb.cls}`}>{hb.label}</span>
                 <span className="font-mono text-[10px] text-zinc-600">heartbeat {formatMs(live!.heartbeatMs)} ago</span>
+                {d?.plane === "local-pigsty" && (
+                  <Badge
+                    variant="outline"
+                    title={d?.planeNote ?? "supervisor state served from the local Pigsty replica (127.0.0.1:55432)"}
+                    className="border-amber-800/60 bg-amber-500/10 font-mono text-[9px] text-amber-300"
+                    data-testid="live-plane-badge"
+                  >
+                    LOCAL PIGSTY
+                  </Badge>
+                )}
+                {d?.plane === "cloud" && (
+                  <Badge
+                    variant="outline"
+                    title="supervisor state served from the cloud plane"
+                    className="border-emerald-800/60 bg-emerald-500/10 font-mono text-[9px] text-emerald-300"
+                    data-testid="live-plane-badge"
+                  >
+                    CLOUD
+                  </Badge>
+                )}
                 {d?.stale && (
                   <Badge
                     variant="outline"
-                    title={`last-known-good snapshot from cloud, cached ${d.staleMs != null ? formatMs(d.staleMs) : "?"} ago${d.error ? ` · last error: ${d.error}` : ""}`}
+                    title={`last-known-good snapshot, cached ${d.staleMs != null ? formatMs(d.staleMs) : "?"} ago${d.error ? ` · last error: ${d.error}` : ""}`}
                     className="border-amber-800/60 bg-amber-500/10 font-mono text-[9px] text-amber-300"
                     data-testid="live-stale-badge"
                   >
-                    CACHED (cloud unreachable)
+                    CACHED (plane unreachable)
                   </Badge>
                 )}
               </>

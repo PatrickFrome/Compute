@@ -5855,3 +5855,30 @@ Task: Оценка состояния, agent-browser QA, ДВА браузерн
 5. OOM/инфра: рецепт orphan-spawn dev-server в предыдущей записи — применять всегда; рассмотреть NODE_OPTIONS=--max-old-space-size=1024 как дефолт платформы.
 6. RSI-долг r14/r8d (124 патча) по-прежнему вне rail.
 7. Облачный issue-RPC allowlist по-прежнему старше локального кода (RELOAD_TAB недоступен из консоли).
+---
+Task ID: CRON-ROUND-20260921-1252
+Agent: main (Super Z, крон-раунд + операторский запрос отчёта)
+Task: Отчёт оператору; восстановление после СБРОСА песочницы 12:40 UTC; репатриация консоли на локальный Pigsty-контур; worklog.
+
+## 1. Состояние проекта (диагностика на входе)
+- ПЕСОЧНИЦА ПЕРЕСОБРАНА 2026-09-21 ~12:40 UTC: /home/z вычищен (кроме my-project), dev-server перезапущен платформой, /home/z/.a2/supabase-cloud.env УТЕРЯН, локальный PG остановлен (runtime-каталоги PGDATA вычищены).
+- Революционный факт из .a2-creds-01.md (документ оператора от 2026-09-21): ОБЛАЧНЫЙ SUPABASE ПРОЕКТ УДАЛЁН (DNS мёртв с 2026-09-20). «Облако» всех прошлых раундов больше не существует. Выживший контур — ЛОКАЛЬНЫЙ PIGSTY (rootless PG17, 127.0.0.1:55432), восстановленный 2026-09-20 из дампа оператора (restore report: 256/264 таблиц сверены, RPC-поверхность h205f22_*/devos_* сохранена).
+- Консоль на входе: /api/roadmap 500 (PG down), /api/live 503 (creds unavailable), /api/emergency ЗАВИСАЛ 10-30с (edge :3031 заклинило после простоя PG + fetch без таймаутов).
+
+## 2. Выполнено / проверено
+- PG ВОССТАНОВЛЕН: chmod 700 PGDATA + пересоздание runtime-каталогов (pg_notify, pg_tblspc, pg_stat_tmp, pg_wal/archive_status, ...). Данные ЦЕЛЫ: 28 milestone (25 PLANNED / 3 BLOCKED), все devos/h205f22 RPC на месте. Рецепт: infra/pigsty/bin/pg-start после восстановления каталогов.
+- EDGE :3031 перезапущен (после простоя PG принимал соединения, но не отвечал) — orphan-spawn `( setsid bun run dev ... & )`.
+- /api/live — ПЛОСКОСТНО-УСТОЙЧИВЫЙ: цепочка cloud (если настроен) → LOCAL PIGSTY (последняя строка supervisor_state из локальной PG) → stale-кэш. Ответ несёт plane/planeNote. Live-панель: бейджи LOCAL PIGSTY (amber) / CLOUD (emerald), data-testid=live-plane-badge.
+- /api/emergency: fetch'и probe-device получили AbortSignal.timeout (6s/6s/8s) — никаких вечных зависаний; edge-клин устранён рестартом.
+- ФИКС САМОЛЕЧЕНИЯ probe-устройства: после сброса identity-файл mc-probe-device.json потерян, а в локальной PG осталась ACTIVE-строка устройства mc-console-probe → уникальный индекс отклонял перерегистрацию (duplicate key ..._active_client_uidx). enrollFresh() теперь предварительно отзывает устаревшие ACTIVE-устройства клиента. Emergency: 500/зависание → 200 за ~80мс.
+- ПЛОСКОСТНО-НЕЗАВИСИМЫЙ FLEET-МОДУЛЬ src/lib/fleet-plane.ts: fleetSnapshot() и fleetEnqueue() — cloud (если настроен) → локальный Pigsty (те же RPC devos_fleet_snapshot_v1 / devos_fleet_enqueue_v1 через прямой SQL). Оба RPC возвращают jsonb идентичной формы.
+- /api/roadmap/dispatch: убран жёсткий gate «только облако»; dispatch/dispatch-phase/sync работают через plane-aware модуль и ОТЧИТЫВАЮТ фактическую плоскость в ответе; Roadmap-панель: бейдж «local Pigsty plane», тосты называют фактическую плоскость.
+- E2E НА ЛОКАЛЬНОЙ ПЛОСКОСТИ: dispatch ACC1_BASE_ACCELERATORS → task be4c0688 (READY, plane local-pigsty) → sync → ACC1 PLANNED→IN_PROGRESS → set-status → PLANNED. Мост Roadmap→Fleet снова полностью работоспособен — теперь на выжившем контуре.
+- QA agent-browser: Roadmap (25 PLANNED, dispatch all, auto-sync on, бейдж «local Pigsty plane»), Live (LOCAL PIGSTY, честный OFFLINE? по heartbeat 5.7ч — последний стейт до сброса), 0 console errors. Скриншоты qa8-01..03 в download/. Линт чист.
+
+## 3. Нерешённое / риски / приоритеты
+1. НЕТ ЖИВОГО БРАУЗЕРА-ИСПОЛНИТЕЛЯ на локальном контуре: браузер оператора пушит стейт в мёртвый Supabase; задачи в локальной очереди (включая 5 исторических READY) никто не арендует. Варианты: (a) оператор репоинтит браузер на новый REST/edge-эндпоинт; (b) новый облачный проект Supabase от оператора; (c) туннель до локального Pigsty. Требуется операторское решение.
+2. /home/z/.a2/supabase-cloud.env НЕ восстановлен (проект мёртв — восстанавливать некуда). При появлении нового облака — просто записать SUPABASE_URL + SUPABASE_SERVICE_ROLE_JWT в тот путь: все консольные пути сами вернутся на cloud-plane.
+3. OOM-гигиена: рецепт orphan-spawn в логе обязателен; next-server сейчас ~1GB RSS — следить.
+4. RSI-долг r14/r8d (124 патча) вне rail — без изменений.
+5. Панель DevOS Fleet/Command Plane могут всё ещё ходить в облако напрямую — аудит и перевод на fleet-plane.ts в следующем раунде.
