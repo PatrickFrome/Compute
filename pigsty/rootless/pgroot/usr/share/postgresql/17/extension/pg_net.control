@@ -1,4 +1,0 @@
-comment = 'Async HTTP'
-default_version = '0.20.4'
-relocatable = false
-module_pathname = '$libdir/pg_net'

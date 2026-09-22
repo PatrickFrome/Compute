@@ -1,7 +1,5 @@
 // Sample payload/receipt shapes for key geometry-independent actions.
-const SB = "https://xpeibufgzjknrhbhpffp.supabase.co";
-const KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwZWlidWZnemprbnJoYmhwZmZwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzE5MDAxMiwiZXhwIjoyMTAyNzY2MDEyfQ.GwPUwfFLebOQFDKJWl_NmExp_Pgww4x8xsVsgxiO8Gc";
+import { SB, KEY } from "./sb-env";
 const CMD = "compute_fabric_a2_browser_supervisor_command_h205f22";
 
 async function j(url) {

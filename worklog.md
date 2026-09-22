@@ -4612,7 +4612,7 @@ Stage Summary:
 ---
 Task ID: B-SEAL-20260829
 Agent: GLM 5.3 (B-line continuation, IM-GLM mode)
-Task: Operator provided the Supabase DB password ("пароль бд - 87rehefiS!!") and directed: seal the blocked B-line checkpoint + record all changes to GitHub.
+Task: Operator provided the Supabase DB password ("пароль бд - <REDACTED-DB-PW>") and directed: seal the blocked B-line checkpoint + record all changes to GitHub.
 
 Work Log:
 - Located the blocked seal context: REST/service_role INSERT on compute_fabric_a2_browser_architecture_checkpoint_h205f22 was 403 (no INSERT grant); payload + seal script ready from previous session.

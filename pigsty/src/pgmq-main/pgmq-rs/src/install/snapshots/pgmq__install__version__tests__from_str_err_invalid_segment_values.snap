@@ -1,9 +1,0 @@
----
-source: src/install/version.rs
-expression: version
----
-Err(
-    InstallationError(
-        "Invalid version: 'a.b.c'",
-    ),
-)

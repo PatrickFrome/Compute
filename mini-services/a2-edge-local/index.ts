@@ -84,7 +84,14 @@ if (!g.Deno) {
 process.env.SUPABASE_DB_URL ??= 'postgres://postgres:postgres@127.0.0.1:55432/postgres';
 // JWT-форменный ключ НЕ задаём намеренно: приватные Realtime-каналы остаются
 // выключенными, wake работает через POSTGRES_NOTIFY (канонический локальный путь).
-process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'sb_secret_local-reconstructed-service-role';
+process.env.SUPABASE_SERVICE_ROLE_KEY ??= await (async () => {
+  try {
+    const { readFileSync } = await import('node:fs');
+    const txt = readFileSync('/home/z/.a2/supabase-cloud.env', 'utf8');
+    const line = txt.split('\n').find((l) => l.startsWith('SUPABASE_SERVICE_ROLE_KEY='));
+    return line ? line.slice('SUPABASE_SERVICE_ROLE_KEY='.length).trim() : '';
+  } catch { return ''; }
+})();
 process.env.SUPABASE_URL ??= '';
 
 // --- 5. Запуск ---
