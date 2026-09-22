@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://www.pluralsight.com",
+    "name": "Resilient Concurrency and Rate-Limiting for LLM Callbacks",
+    "snippet": "In this Code Lab, you'll build a rate - limited concurrency system for handling thousands of LLM API callbacks. You'll implement queue-based concurrency ... Read more",
+    "host_name": "www.pluralsight.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://truto.one",
+    "name": "Best Practices for Handling API Rate Limits and Retries",
+    "snippet": "Standardize API rate limits with exponential backoff , jitter , circuit breakers, and per-account semaphores - critical for giving AI agents live NetSuite access ... Read more",
+    "host_name": "truto.one",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.alibabacloud.com",
+    "name": "Best practices for handling rate limiting",
+    "snippet": "Sep 2, 2026 — No rate limit on outgoing requests. Only triggers exponential backoff retry with random jitter on 429 or 5xx errors. No proactive traffic ... Read more",
+    "host_name": "www.alibabacloud.com",
+    "rank": 2,
+    "date": "Sep 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.promptfoo.dev",
+    "name": "Rate Limits",
+    "snippet": "1 day ago — Configure automatic rate limit handling with exponential backoff , header-aware delays, and adaptive concurrency for LLM provider APIs.",
+    "host_name": "www.promptfoo.dev",
+    "rank": 3,
+    "date": "Sep 21, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.nylas.com",
+    "name": "Handle 429 rate limit errors | Docs",
+    "snippet": "Jun 20, 2026 — This recipe is the handling playbook: how to detect a 429 , how to read the Retry-After header, and how to back off with exponential delay and ... Read more",
+    "host_name": "developer.nylas.com",
+    "rank": 4,
+    "date": "Jun 20, 2026",
+    "favicon": ""
+  }
+]

@@ -6,8 +6,50 @@
  * Пустой суффикс = дефолт провайдера.
  */
 import ZAI from "z-ai-web-dev-sdk";
+import { emit } from "./store";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+// ── R14: устойчивость к 429 (живой инцидент R13: 2 ретрая + авто-рефлексия = 3 параллельных
+// LLM-потока → провайдер ответил 429, задача упала). Ресёрч 2026 (r14-429.json): пер-аккаунтный
+// семафор + exponential backoff с random jitter — стандарт индустрии.
+const LLM_MAX = Math.max(1, Number(process.env.ME2_LLM_MAX_CONCURRENCY ?? 2));
+let llmInFlight = 0;
+const llmQueue: (() => void)[] = [];
+/** Глобальный слот LLM-конкурентности: очередь FIFO, потолок ME2_LLM_MAX_CONCURRENCY (default 2). */
+export async function llmSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (llmInFlight >= LLM_MAX) await new Promise<void>((res) => llmQueue.push(res));
+  llmInFlight++;
+  try {
+    return await fn();
+  } finally {
+    llmInFlight--;
+    llmQueue.shift()?.();
+  }
+}
+
+const RETRYABLE = /\b(429|500|502|503|504)\b|too many requests|rate limit/i;
+const RETRY_AFTER = /retry-after:\s*(\d+)s/i;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Retry с экспоненциальным backoff + jitter; Retry-After из текста ошибки усиливает задержку. */
+export async function llmRetry<T>(fn: (attempt: number) => Promise<T>, attempts = 4, tag = ""): Promise<T> {
+  let lastErr: unknown;
+  for (let a = 0; a < attempts; a++) {
+    try {
+      return await fn(a);
+    } catch (e) {
+      lastErr = e;
+      const m = String(e);
+      if (!RETRYABLE.test(m) || a === attempts - 1) throw e;
+      const ra = Number(RETRY_AFTER.exec(m)?.[1] ?? 0);
+      const delay = Math.max(800 * 2 ** a, ra * 1000) + Math.floor(Math.random() * 400);
+      console.log(`[providers] ${tag} 429/5xx → backoff ${delay}ms (attempt ${a + 1}/${attempts})`);
+      emit("LLM_BACKOFF", { model: tag, attempt: a + 1, delay_ms: delay }, null, null);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
 
 // ── Vercel AI Gateway key (секрет лежит в Supabase — подтверждено 2026-09-21) ──
 let gatewayKey: string | null = null;
@@ -59,8 +101,12 @@ export async function listProviders(): Promise<Record<string, { ready: boolean; 
   };
 }
 
-/** Единая точка вызова LLM. Возвращает текст ответа. */
+/** Единая точка вызова LLM. Возвращает текст ответа. Семафор + 429-backoff (R14). */
 export async function chat(model: string, messages: ChatMessage[], opts: { temperature?: number } = {}): Promise<string> {
+  return llmSlot(() => llmRetry((attempt) => chatOnce(model, messages, opts, attempt), 4, model));
+}
+
+async function chatOnce(model: string, messages: ChatMessage[], opts: { temperature?: number }, attempt: number): Promise<string> {
   const sep = model.indexOf(":");
   const provider = sep === -1 ? "zai" : model.slice(0, sep);
   const modelId = sep === -1 ? "" : model.slice(sep + 1);
@@ -79,7 +125,10 @@ export async function chat(model: string, messages: ChatMessage[], opts: { tempe
       }),
       signal: AbortSignal.timeout(120_000),
     });
-    if (!r.ok) throw new Error(`gateway HTTP ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    if (!r.ok) {
+      const ra = r.headers.get("retry-after");
+      throw new Error(`gateway HTTP ${r.status}${ra ? ` (retry-after: ${parseInt(ra, 10) || 1}s)` : ""}: ${(await r.text()).slice(0, 300)}`);
+    }
     const j = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return j.choices?.[0]?.message?.content ?? "";
   }
