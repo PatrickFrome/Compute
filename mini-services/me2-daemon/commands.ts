@@ -5,7 +5,8 @@
  */
 import {
   db, emit, nowIso, snapshot, createTask, cancelTask, createAgent, deleteAgent,
-  tailEvents, upsertWorker, listAgents, type CommandRow,
+  tailEvents, eventsByTask, upsertWorker, listAgents, getTask, updateTask,
+  type CommandRow, type TaskRow,
 } from "./store";
 
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -34,6 +35,37 @@ const handlers: Record<string, Handler> = {
     cancelTask(id);
     emit("TASK_CANCELLED", { id }, null, id);
     return { id };
+  },
+
+  TASK_RETRY: (p) => {
+    const id = String(p.id ?? "");
+    const orig = getTask(id);
+    if (!orig) throw new Error(`task_not_found_${id}`);
+    if (orig.status !== "FAILED" && orig.status !== "CANCELLED") {
+      throw new Error(`retry_allowed_only_for_FAILED_or_CANCELLED (now ${orig.status})`);
+    }
+    // политика ретрая: +2 шага (parse-retry и осмотр могут съесть бюджет)
+    const maxSteps = Math.min(orig.max_steps + 2, 24);
+    const task = createTask({
+      id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      title: `${orig.title.slice(0, 180)} ·retry`,
+      spec: orig.spec, role: orig.role, max_steps: maxSteps,
+    });
+    emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps }, null, task.id);
+    return { task };
+  },
+
+  BUDGET_FLUSH: () => {
+    const r = db.query(`UPDATE commands SET status='REJECTED', error='budget_flushed_by_operator', completed_at=? WHERE status='PENDING'`)
+      .run(nowIso());
+    const flushed = Number(r.changes);
+    emit("BUDGET_FLUSHED", { flushed, by: "operator" }, null, null);
+    return { flushed };
+  },
+
+  EVENTS_EXPORT: (p) => {
+    const limit = Math.min(Math.max(Number(p.limit ?? 500), 1), 1000);
+    return { exported_at: nowIso(), count: limit, events: tailEvents(0, limit) };
   },
 
   AGENT_SPAWN: (p) => {

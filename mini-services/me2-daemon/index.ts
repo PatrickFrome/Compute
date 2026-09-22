@@ -12,7 +12,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Server } from "socket.io";
 import {
-  listAgents, listTasks, getTask, tailEvents, db, emit, snapshot,
+  listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
   enqueueCommand, budgetWindow, listCommands, listWorkers, upsertWorker,
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
   createAgent, createTask, nowIso,
@@ -25,7 +25,7 @@ const WS_PORT = 3040;
 const REST_PORT = 3041;
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
-setMeta("version", "0.2.0");
+setMeta("version", "0.3.0");
 
 // ── seed (однократно) ─────────────────────────────────────────────
 function seed() {
@@ -38,7 +38,7 @@ function seed() {
   const t1 = createTask({
     id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     title: "ME2 smoke: осмотреть workspace, создать hello.txt с версией daemon",
-    spec: "Это smoke-задача рантайма ME2. Шаги: 1) list_dir . 2) write_file hello.txt с текстом 'ME2 daemon v0.2.0 live at <текущая дата>' 3) finish с результатом.",
+    spec: "Это smoke-задача рантайма ME2. Шаги: 1) list_dir . 2) write_file hello.txt с текстом 'ME2 daemon v0.3.0 live at <текущая дата>' 3) finish с результатом.",
     role: "IMPLEMENTER", max_steps: 4,
   });
   const t2 = createTask({
@@ -83,7 +83,7 @@ const restServer = createServer(async (req, res) => {
   try {
     if (path === "/health") {
       return json(res, 200, {
-        ok: true, service: "me2-daemon", version: "0.2.0", boot: BOOT_TS,
+        ok: true, service: "me2-daemon", version: "0.3.0", boot: BOOT_TS,
         last_seq: lastSeq(), ts: nowIso(),
       });
     }
@@ -167,7 +167,8 @@ const restServer = createServer(async (req, res) => {
     if (path === "/events" && req.method === "GET") {
       const since = Number(url.searchParams.get("since") ?? 0);
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
-      return json(res, 200, { ok: true, events: tailEvents(since, limit) });
+      const task = url.searchParams.get("task");
+      return json(res, 200, { ok: true, events: task ? eventsByTask(task, limit) : tailEvents(since, limit) });
     }
     if (path === "/reset" && req.method === "POST") {
       const r = enqueueCommand({ action: "ENVIRONMENT_RESET", lane: "EMERGENCY", payload: { by: "operator" } });
@@ -239,6 +240,6 @@ setInterval(() => {
 }, 30_000);
 
 startMasterLoop();
-wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v0.2.0 WS on :${WS_PORT} (path '/')`));
-restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v0.2.0 REST on :${REST_PORT}`));
+wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v0.3.0 WS on :${WS_PORT} (path '/')`));
+restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v0.3.0 REST on :${REST_PORT}`));
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

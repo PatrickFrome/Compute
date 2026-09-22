@@ -6146,3 +6146,23 @@ Stage Summary:
 - Консоль LIVE: полный golden path подтверждён браузером (создание→исполнение→результат).
 - Издержка радиации: skeleton-store.ts экспортирует nextPendingCommands/setCommandStatus — не используются (commands.ts имеет свои запросы), не критично.
 - Следующее: M2 расширение (скринкаст CDP, реестр 47 действий), M3 Tauri-оболочка, M5 ingest-RPC в Supabase (ключи уже на диске).
+
+---
+Task ID: M2-V2-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task» — Раунд 2: консоль-пульт (13 действий, live-хроника, retry-политика), долгие задачи.
+
+Work Log:
+- DAEMON: +3 действия (TASK_RETRY / BUDGET_FLUSH / EVENTS_EXPORT → всего 13); /events?task= фильтр + индекс idx_events_task; версия 0.3.0.
+- RETRY-ПОЛИТИКА: retry наследует spec/role и даёт max_steps+2 (parse-retry и осмотр съедают бюджет); inferLane: _RETRY→MUTATION, _FLUSH→EMERGENCY (cost 2 подтверждён событием 99).
+- WORKER: write_file авто-создаёт родительские каталоги (mkdirSync dirname recursive) — корневая причина двух провалов (ENOENT + сгоревшие шаги); инцидент «dirname is not defined» (импорт забыт) → найден по хронике, исправлен, верифицирован.
+- WORKERS GC: reapStaleWorkers удаляет OFFLINE-воркеров старше 30 минут (список перестал расти бесконечно; 15 накопившихся будут зачищены).
+- КОНСОЛЬ v2: спарклайн активности (12×10s окна) в хедере; lane-чипы фильтра лога (все/задачи/инструменты/шаги/флот/шина); live-хроника шагов задачи в Sheet (/events?task= + live-append по task_id); live-синхронизация статуса детали со снапшотом; retry-кнопка на FAILED/CANCELLED; dropdown спавна агентов (3 роли); BUDGET_FLUSH + EVENTS_EXPORT (скачивание JSON) в ⌘K; kbd-хинты ⌘K/N в футере; горячая клавиша N; фикс StrictMode-зомби (cancelled-флаг); TDZ-фикс (openDetail объявлен до retryTask).
+- ИНЦИДЕНТ: dev-сервер вновь молча умер (000/502) — перезапущен setsid nohup bun run dev; белый экран = sandbox-сплеш при перекомпиляции.
+- ВЕРИФИКАЦИЯ agent-browser: retry-флоу ×4 итерации доведён до COMPLETED (tk_muc65mda: 3/6 шагов, оба файла созданы, хроника 11 событий живая); TASK_RETRY виден в шине как MUTATION cost 2; статус-бар 4 done/5 fail; бюджет 2/24=8%. Линт 0/0.
+
+Stage Summary:
+- Консоль = полноценный операторский пульт: создание/отмена/ретрай задач, спавн флота, дренаж шины, экспорт журнала, live-хроника — всё через command bus (single-writer).
+- ME2 v0.3.0: 13/47 действий; SQLite-персистентность переживает рестарты (last_seq сохраняется).
+- Инструмент write_file теперь идемпотентен по каталогам — агент больше не тратит шаги на mkdir.
+- Следующее: стрим результата задачи (token-поток), реестр 47 действий + permission-плитка, скринкаст CDP, M3 Tauri.

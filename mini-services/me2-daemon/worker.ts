@@ -5,7 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { resolve, join, normalize } from "node:path";
+import { resolve, join, normalize, dirname } from "node:path";
 import ZAI from "z-ai-web-dev-sdk";
 import {
   listAgents, nextReadyTask, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
@@ -59,6 +59,7 @@ async function execTool(name: string, args: Record<string, unknown>, taskId: str
       case "write_file": {
         const p = safeJoin(cwd, String(args.path ?? ""));
         const content = String(args.content ?? "");
+        mkdirSync(dirname(p), { recursive: true }); // авто-создание родительских каталогов
         writeFileSync(p, content);
         return `OK: wrote ${p} (${content.length} bytes)`;
       }

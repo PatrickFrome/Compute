@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status, lane, created_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_events_seq ON events(seq);
+CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
 `);
 
 // миграция: старая events-таблица без hash-колонок
@@ -169,6 +170,9 @@ export function emit(type: string, data: Record<string, unknown>, agentId?: stri
 }
 export function tailEvents(since = 0, limit = 200): EventRow[] {
   return db.query(`SELECT * FROM events WHERE seq>? ORDER BY seq ASC LIMIT ?`).all(since, limit) as EventRow[];
+}
+export function eventsByTask(taskId: string, limit = 300): EventRow[] {
+  return db.query(`SELECT * FROM events WHERE task_id=? ORDER BY seq ASC LIMIT ?`).all(taskId, limit) as EventRow[];
 }
 
 // ── agents ────────────────────────────────────────────────────────
@@ -287,9 +291,9 @@ function insertCommand(c: {
 }
 
 function inferLane(action: string): Lane {
-  if (action.endsWith("_RESET") || action.startsWith("FLUSH") || action.startsWith("FENCE")) return "EMERGENCY";
+  if (action.endsWith("_RESET") || action.startsWith("FLUSH") || action.endsWith("_FLUSH") || action.startsWith("FENCE")) return "EMERGENCY";
   if (action.endsWith("_CANCEL") || action.endsWith("_RETIRE") || action.endsWith("_PAUSE") || action.endsWith("_RESUME")) return "CONTROL";
-  if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
+  if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_RETRY") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
   return "READ_ONLY";
 }
 
@@ -332,10 +336,13 @@ export function upsertWorker(w: { id?: string; role: string; kind: string; state
 export function listWorkers(): WorkerRow[] {
   return db.query(`SELECT * FROM workers ORDER BY created_at`).all() as WorkerRow[];
 }
-/** workers без heartbeat > 90s считаются OFFLINE (как mesh 45s ×2 в старой системе) */
+/** workers без heartbeat > 90s считаются OFFLINE (как mesh 45s ×2 в старой системе);
+ *  OFFLINE-воркеры старше 30 минут удаляются совсем, чтобы список не рос бесконечно. */
 export function reapStaleWorkers(): number {
   const cutoff = new Date(Date.now() - 90_000).toISOString();
   const r = db.query(`UPDATE workers SET state='OFFLINE' WHERE state!='OFFLINE' AND heartbeat_at<?`).run(cutoff);
+  const gcCutoff = new Date(Date.now() - 30 * 60_000).toISOString();
+  db.query(`DELETE FROM workers WHERE state='OFFLINE' AND heartbeat_at<?`).run(gcCutoff);
   return Number(r.changes);
 }
 
