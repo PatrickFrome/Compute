@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://daily.dev",
+    "name": "Cursor vs VS Code vs Windsurf: 2026 Comparison",
+    "snippet": "Mar 26, 2026 — Cursor, a specialized fork of VS Code , has gained traction for its AI-first design. By 2026, it reached a staggering $29.3 billion valuation . Read more",
+    "host_name": "daily.dev",
+    "rank": 0,
+    "date": "Mar 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://devopstales.github.io",
+    "name": "The Best AI Coding IDEs in 2026: VS Code, Cursor, Windsurf",
+    "snippet": "Mar 19, 2026 — Cursor is a fork of VS Code , meaning all your favorite themes and extensions work out of the box. being the first to deeply integrate “Composer ...",
+    "host_name": "devopstales.github.io",
+    "rank": 1,
+    "date": "Mar 19, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://aidevme.com",
+    "name": "VS Code vs Windsurf vs Cursor: Which to Choose",
+    "snippet": "Apr 27, 2026 — The fundamental architectural differences between VS Code's extension model, Cursor's optimized fork , and Windsurf's integrated agent approach— ... Read more",
+    "host_name": "aidevme.com",
+    "rank": 2,
+    "date": "Apr 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.codecademy.com",
+    "name": "Agentic IDE Comparison: Cursor vs Windsurf vs Antigravity",
+    "snippet": "Cursor is an AI-native IDE that is built on top of VS Code and it prioritizes developer flow. No fork required, works in standard VS Code Agent mode. VS Code ...",
+    "host_name": "www.codecademy.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.ayautomate.com",
+    "name": "Windsurf vs Cursor vs Claude Code (2026): Which to Pick",
+    "snippet": "Jun 8, 2026 — Cursor was the first AI-native IDE that crossed into mainstream developer adoption . It is also a VS Code fork, built by Anysphere, and its core ... Read more",
+    "host_name": "www.ayautomate.com",
+    "rank": 4,
+    "date": "Jun 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://tech-insider.org",
+    "name": "Cursor vs Windsurf: 7 Tests, 1 Clear Winner [2026] - Tech Insider",
+    "snippet": "Apr 3, 2026 — Cursor optimizes for developer control and precision , while Windsurf optimizes for speed, breadth, and autonomous action.",
+    "host_name": "tech-insider.org",
+    "rank": 5,
+    "date": "Apr 3, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://visualstudiomagazine.com",
+    "name": "What a Difference a VS Code Fork Makes: Antigravity",
+    "snippet": "Jan 26, 2026 — Cursor , Windsurf , and Google Antigravity all start from the same foundation: a fork of VS Code , paired with large language models (LLMs) that ... Read more",
+    "host_name": "visualstudiomagazine.com",
+    "rank": 6,
+    "date": "Jan 26, 2026",
+    "favicon": ""
+  }
+]

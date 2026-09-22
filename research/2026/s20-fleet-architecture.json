@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://www.confluent.io",
+    "name": "Autonomous Agentic Event-Driven Systems Architecture",
+    "snippet": "May 25, 2026 — Layered architecture showing how events flow from producers through streaming, stateful processing, agent decisioning, orchestration , and back ... Read more",
+    "host_name": "www.confluent.io",
+    "rank": 0,
+    "date": "May 25, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://tyk.io",
+    "name": "AI agent orchestration: A complete enterprise guide",
+    "snippet": "Jun 4, 2026 — A scalable and governable orchestration system is built on four key architectural pillars. Each component serves a distinct purpose in managing ... Read more",
+    "host_name": "tyk.io",
+    "rank": 1,
+    "date": "Jun 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.augmentcode.com",
+    "name": "7 Multi-Agent Orchestration Platforms: Build vs Buy in 2026",
+    "snippet": "May 4, 2026 — Multi - agent orchestration platforms split into open-source frameworks for full control, managed platforms for speed, and hybrid combinations",
+    "host_name": "www.augmentcode.com",
+    "rank": 2,
+    "date": "May 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org",
+    "name": "The Orchestration of Multi-Agent Systems: Architectures,",
+    "snippet": "Jan 20, 2026 — This architecture enables specialization and the emergence of collective behaviors that a single agent cannot achieve. Recent examples include ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 3,
+    "date": "Jan 20, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.elementum.ai",
+    "name": "AI Agent Orchestration Architecture for Enterprises",
+    "snippet": "Jul 20, 2026 — Learn how a deterministic backbone reduces cost, controls governance, and scales AI agents reliably across enterprise workflows.",
+    "host_name": "www.elementum.ai",
+    "rank": 4,
+    "date": "Jul 20, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.vectara.com",
+    "name": "How to Architect Robust On-Premise AI Agent Orchestration",
+    "snippet": "Jan 15, 2026 — From pilot to production: The ultimate guide to on-premise AI agent orchestration . Secure your data, reduce latency, and scale your AI ...",
+    "host_name": "www.vectara.com",
+    "rank": 5,
+    "date": "Jan 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.bairesdev.com",
+    "name": "AI Agent Orchestration: When a Multi-Agent Approach",
+    "snippet": "Jul 13, 2026 — Best practices , like architectural design hygiene and extensive, detailed logging , should be implemented to accelerate the strengths of multi - ...",
+    "host_name": "www.bairesdev.com",
+    "rank": 6,
+    "date": "Jul 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Feature: Multi-Agent Architecture — Orchestration",
+    "snippet": "Mar 3, 2026 — Every task has a complete event log (created → claimed → spawned → heartbeat → completed), plus a task_runs table tracking each ... Read more",
+    "host_name": "github.com",
+    "rank": 7,
+    "date": "Mar 3, 2026",
+    "favicon": ""
+  }
+]

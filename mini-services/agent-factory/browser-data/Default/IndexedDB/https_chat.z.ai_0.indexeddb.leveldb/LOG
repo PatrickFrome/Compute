@@ -1,0 +1,14 @@
+2026/09/21-15:03:44.420 3bb1 Reusing MANIFEST /home/z/my-project/mini-services/agent-factory/browser-data/Default/IndexedDB/https_chat.z.ai_0.indexeddb.leveldb/MANIFEST-000001
+2026/09/21-15:03:44.421 3bb1 Recovering log #22
+2026/09/21-15:03:44.421 3bb1 Reusing old log /home/z/my-project/mini-services/agent-factory/browser-data/Default/IndexedDB/https_chat.z.ai_0.indexeddb.leveldb/000022.log 
+2026/09/21-15:03:44.421 3bb1 Delete type=2 #20
+2026/09/21-15:03:44.452 3bb1 Level-0 table #27: started
+2026/09/21-15:03:44.452 3bb1 Level-0 table #27: 1058 bytes OK
+2026/09/21-15:03:44.452 3bb1 Delete type=0 #22
+2026/09/21-15:03:44.452 3bb8 Manual compaction at level-0 from '\x00\x07\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x08\x00\x00\x00' @ 0 : 0; will stop at '\x00\x07\x00\x00\xc8\x04\x00d\x00a\x00t\x00a' @ 404 : 1
+2026/09/21-15:03:44.452 3bb8 Compacting 1@0 + 1@1 files
+2026/09/21-15:03:44.453 3bb8 Generated table #28@0: 24 keys, 679 bytes
+2026/09/21-15:03:44.453 3bb8 Compacted 1@0 + 1@1 files => 679 bytes
+2026/09/21-15:03:44.453 3bb8 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/09/21-15:03:44.453 3bb8 Delete type=2 #27
+2026/09/21-15:03:44.453 3bb1 Manual compaction at level-0 from '\x00\x07\x00\x00\xc8\x04\x00d\x00a\x00t\x00a' @ 404 : 1 .. '\x00\x08\x00\x00\x00' @ 0 : 0; will stop at (end)

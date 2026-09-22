@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://pub.towardsai.net",
+    "name": "The AI Agent Stack Is Becoming Rust-Powered — Here's",
+    "snippet": "Aug 30, 2026 — Rust compiles directly to a single static binary with zero runtime dependencies. Shipping an agent runtime to any operating system or CPU ... Read more",
+    "host_name": "pub.towardsai.net",
+    "rank": 0,
+    "date": "Aug 30, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "awakenworks/awaken: AI agent runtime for Rust — type-",
+    "snippet": "Build agent capability in Rust . Tune prompts, models, permissions, skills, and eval loops live. One backend serves many clients. a Rust backend for AI agents ...",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://users.rust-lang.org",
+    "name": "AutoAgents — Rust runtime for safe, production AI agents",
+    "snippet": "Feb 5, 2026 — So I built AutoAgents: a Rust -native agent runtime focused on safety, modularity, and production-grade performance — designed to run on both ... Read more",
+    "host_name": "users.rust-lang.org",
+    "rank": 2,
+    "date": "Feb 5, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://crates.io",
+    "name": "agent-browser - crates.io: Rust Package Registry",
+    "snippet": "Mar 13, 2026 — Architecture. agent-browser uses a client-daemon architecture : Rust CLI - Parses commands, communicates with daemon; Rust Daemon - Pure Rust ... Read more",
+    "host_name": "crates.io",
+    "rank": 3,
+    "date": "Mar 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.invisiblefriends.net",
+    "name": "Building a Local-First Agent Framework in Rust (Part 21)",
+    "snippet": "The plan is to keep the agent local and split the bridge into a few clear pieces: A Rust daemon that runs on the local machine. A WebSocket endpoint, A  ...",
+    "host_name": "www.invisiblefriends.net",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ossinsight.io",
+    "name": "How GitHub's AI Agent Infrastructure Changed Languages",
+    "snippet": "Apr 3, 2026 — In Q1 2026 , a pattern emerged across GitHub's fastest-growing AI agent repos: they're written in Rust . Not Python. Not TypeScript. Rust .",
+    "host_name": "ossinsight.io",
+    "rank": 5,
+    "date": "Apr 3, 2026",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://www.browserless.io",
+    "name": "Headless Chrome Explained: Puppeteer, Playwright, and",
+    "snippet": "Apr 22, 2026 — Everything developers need to know about headless Chrome , from Puppeteer and Playwright basics to why self-hosting fails at scale and how ...",
+    "host_name": "www.browserless.io",
+    "rank": 0,
+    "date": "Apr 22, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://browser-use.com",
+    "name": "Closer to the Metal: Leaving Playwright for CDP",
+    "snippet": "Aug 20, 2025 — Why we dropped Playwright and switched to raw CDP for faster, more capable browser automation.",
+    "host_name": "browser-use.com",
+    "rank": 1,
+    "date": "Aug 20, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://dev.to",
+    "name": "Scaling Headless Browsers: Managing Contexts vs.",
+    "snippet": "Jan 7, 2026 — In the Playwright architecture, this is facilitated by the Chrome DevTools Protocol ( CDP ) or its Firefox/WebKit equivalents. Playwright ...",
+    "host_name": "dev.to",
+    "rank": 2,
+    "date": "Jan 7, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://currents.dev",
+    "name": "When Tests Should Run Headless vs Headed in Playwright",
+    "snippet": "Feb 25, 2026 — When should you run tests in headless vs headed mode in Playwright? Learn the differences between the two modes and when to use each.",
+    "host_name": "currents.dev",
+    "rank": 3,
+    "date": "Feb 25, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://lightpanda.io",
+    "name": "CDP vs Playwright vs Puppeteer: Is This the Wrong",
+    "snippet": "Nov 7, 2025 — In our testing with identical scraping tasks, Puppeteer consistently runs 15-20% faster than Playwright when both target Chromium. The ...",
+    "host_name": "lightpanda.io",
+    "rank": 4,
+    "date": "Nov 7, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://datawookie.dev",
+    "name": "Playwright Browser Footprint",
+    "snippet": "Jun 6, 2025 — Trim Playwright's resource usage on small machines by launching lean browsers, disabling extras and tuning browser contexts.",
+    "host_name": "datawookie.dev",
+    "rank": 5,
+    "date": "Jun 6, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.browserstack.com",
+    "name": "How to Run Tests in Playwright Headless Chrome? [2026]",
+    "snippet": "Best Practices for Running Playwright Tests in Headless Chrome · Optimize Resource Usage : Limit the number of concurrent contexts and pages to avoid memory or ...",
+    "host_name": "www.browserstack.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  }
+]

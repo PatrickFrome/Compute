@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://www.openlayer.com",
+    "name": "Multi-agent system architecture: a comparison guide + best",
+    "snippet": "Mar 9, 2026 — This guide covers supervisor , hierarchical, peer-to-peer, blackboard , and swarm patterns with the exact task characteristics that make each one ... Read more",
+    "host_name": "www.openlayer.com",
+    "rank": 0,
+    "date": "Mar 9, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.digitalapplied.com",
+    "name": "Agent Architecture Patterns: 2026 Taxonomy Guide",
+    "snippet": "Apr 30, 2026 — Hierarchical ( supervisor - worker ) and graph topologies are the two multi - agent patterns that earn their cost in production.Swarm and blackboard ... Read more",
+    "host_name": "www.digitalapplied.com",
+    "rank": 1,
+    "date": "Apr 30, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://apptad.com",
+    "name": "Multi-Agent Orchestration: Architecture Patterns for",
+    "snippet": "Jun 28, 2026 — A practical guide to multi-agent orchestration in 2026 — the four core patterns, how agents collide over shared state, and the mechanisms that ...",
+    "host_name": "apptad.com",
+    "rank": 2,
+    "date": "Jun 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.confluent.io",
+    "name": "Four Design Patterns for Event-Driven, Multi-Agent Systems",
+    "snippet": "Feb 19, 2025 — The following explores four key patterns: orchestrator-worker, hierarchical agent, blackboard , and market-based.",
+    "host_name": "www.confluent.io",
+    "rank": 3,
+    "date": "Feb 19, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://harnessengineering.academy",
+    "name": "Multi-Agent Orchestration Systems: Design Patterns Guide",
+    "snippet": "May 4, 2026 — In this guide, you will learn the four foundational design patterns for building multi - agent orchestration systems: the Supervisor pattern ,",
+    "host_name": "harnessengineering.academy",
+    "rank": 4,
+    "date": "May 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://learn.microsoft.com",
+    "name": "AI Agent Orchestration Patterns - Azure Architecture Center",
+    "snippet": "Feb 12, 2026 — This guide covers fundamental orchestration patterns for multiagent architectures and helps you choose the approach that fits your specific ...",
+    "host_name": "learn.microsoft.com",
+    "rank": 5,
+    "date": "Feb 12, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://beam.ai",
+    "name": "6 Multi-Agent Orchestration Patterns for Production (2026)",
+    "snippet": "Apr 15, 2026 — Six proven multi-agent orchestration patterns with real failure modes, cost tradeoffs, and when to use each. Based on production deployments ...",
+    "host_name": "beam.ai",
+    "rank": 6,
+    "date": "Apr 15, 2026",
+    "favicon": ""
+  }
+]
