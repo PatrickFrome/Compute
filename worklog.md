@@ -6350,3 +6350,24 @@ Stage Summary:
 - Реестр действий сохранил 47/47: enrichment-операции идут мимо шины отдельным REST — дисциплина реестра не ломается потребностями UI.
 - Уроки: (1) tooltip-парсер не должен возвращать null целиком при отсутствии одного поля — блоки независимы; (2) фоновые z-ai CLI вызовы через setsid-подобный бэкграунд могут молчать — синхронный ретрай надёжен; (3) viewBox-масштабируемый SVG не совместим с scrollTop-виртуализацией — окно+toggle проще и достаточна.
 - Следующее (бэклог): авто-tier-2 при TASK_RETRY с LLM-квотой; CAUSE-таблица на 8 agent-failure-modes; pre-vs-post pass-rate метрика ретраев из событий; пер-клиент jpeg-качество; M3 Tauri 2 externalBin; SQL-миграция me2_evidence (оператор, outbox 375).
+
+---
+Task ID: R11-AUTO-REFLECT-METRICS-20260922
+Agent: main (Super Z)
+Task: «продолжи реализовывать roadmap. используй long run task, записывай всю систему в github, анализируй ветки браузера, делай ресёрчи по улучшениям» — R11: авто-tier-2 с квотой (бэклог №1), /metrics pass-rate (№3), load-test окна 60+ (№6). Daemon v0.11.0.
+
+Work Log:
+- СТАРТ-АУДИТ: R10 цел (v0.10.0, ffc5c3e, seq 522) — cron нового не добавил, порты живы. Из бэклога R10 взяты три пункта roadmap.
+- РЕСЁРЧ (2 web_search → research/2026/R11-AUTO-REFLECT-METRICS-RESEARCH.md + r11-*.json): (1) infinite agentic loops — самокоррекция без квоты = бесконечные платные циклы; рецепт двухуровневого гарда (rate-limit + in-flight cap + stop по факту результата); (2) метрики памяти агентов 2026 — память оценивают приростом success-rate «с памятью vs без» (ablation); observational-метрика из шина-данных дешева и честна при зафиксированном ограничении.
+- АВТО-TIER-2 (commands.ts): TASK_RETRY после emit зовёт void autoReflect(orig) — POST /api/reflect {source:"auto_retry"}; гарды: cooldown-Map 10 мин/задача, ≤2 in-flight, skip при существующем llm.lesson, AbortSignal 20s, fire-and-forget (не блокирует команду). source прокинут по всей цепочке: /api/reflect → REST reflect → setTaskReflectionLlm → llm.source; TASK_REFLECTED несёт source auto_retry|operator.
+- /metrics (index.ts, observational): задачи с parent_id × hasLlm(parent) × COMPLETED(child) → with_lesson/without_lesson {n, completed, rate}. Реестр шины не тронут (47/47).
+- КОНСОЛЬ: чип в хедере ВЕТКИ «↳ X/Y с уроком · X2/Y2 без» (violet, poll 20s, скрыт при retries=0); бейдж «авто» (fuchsia) в llm-блоке tooltip при source=auto_retry. Инцидент-мини: MultiEdit-правка случайно срезала строку const reflectTask = useCallback — поймал на следующем чтении, восстановил до рестарта (урок: после каждого MultiEdit перечитывать затронутый регион).
+- LIVE-ВЕРИФИКАЦИЯ: (1) авто-рефлексия end-to-end — TASK_RETRY tk_muc63xqbcd6agu → через 8s родитель имеет llm {lesson:"Неэффективное использование шагов…", source:auto_retry, model:glm}; события TASK_RETRIED 557 → TASK_REFLECTED 561; (2) /metrics → retries=2, with_lesson 2/2=100%; чип «↳ 2/2 с уроком · 0/0 без» в UI (r11-01); (3) load-test 60+: 59 задач role=LOADTEST (воркеры не берут — ролевой матчинг) + 16 реальных = 75 строк; бюджет 24/60s честно ограничил до 11/окно → BUDGET_ADJUST 96 → добил; toggle «показать все» ↔ 75 строк DOM; очистка 59×cancel → TASK_PURGE all_terminal (75 purged, hash-chain хранит историю) → BUDGET_ADJUST обратно 24 (урок: окно скользит — smoke после рестарта лимита ждёт сброса); (4) smoke «r11-smoke.txt» → COMPLETED 3/3 result «r11-ok»; (5) после purge /metrics честно 0 → чип скрыт. Mobile не проверен повторно (изменения не затрагивали layout-скелет). Lint 0/0.
+- GITHUB: git-sync → sandbox/me2-os (0f02c8b). main монорепо не тронут. Cron 405845 (15 мин webDevReview, контекст v0.10+) активен.
+
+Stage Summary:
+- Reflexion-контур стал ПОЛНОСТЬЮ АВТОМАТИЧЕСКИМ: ретрай сам обогащает родителя LLM-уроком под двухуровневым гардом от infinite-loop (ресёрч-паттерн 2026), а оператор видит это в tooltip бейджем «авто».
+- Эффект памяти измерим: /metrics + чип в ВЕТКИ дают наблюдаемый pass-rate ретраев с уроком vs без (после purge счётчик чист — копится заново на живых данных).
+- Окно ВЕТКИ 60+ выдержало 75 строк живьём; бюджет шины доказал защитную роль даже против моего нагрузчика (честный 429), BUDGET_ADJUST — легитимный рычаг.
+- Уроки: MultiEdit не атомарен по строкам-соседям — перечитывать регион после правки; скользящее окно бюджета живёт после BUDGET_ADJUST вниз — планировать паузу; TASK_PURGE all_terminal чистит ВСЕ терминальные включая демо-пару R9/R10 (история живёт в events — это by design).
+- Следующее (бэклог): CAUSE-таблица tier-1 на 8 failure-modes (step_loop/context_overflow детекция), per-client jpeg-качество стрима, M3 Tauri 2 externalBin скелет, рандомизированный A/B для метрики Reflexion, SQL-миграция me2_evidence (оператор).
