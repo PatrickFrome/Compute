@@ -254,3 +254,24 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
   border-color: rgba(82, 82, 91, 0.9);
 }
+
+/* v0.7.0: retry-merge-линии ВЕТКИ (parent_id → родитель) + tooltip ветки */
+.branch-merge {
+  stroke-dasharray: 4 4;
+  opacity: 0.75;
+  animation: branchMergeFlow 1.4s linear infinite;
+}
+@keyframes branchMergeFlow {
+  to { stroke-dashoffset: -16; }
+}
+.branch-tooltip {
+  animation: branchTipIn 0.16s ease-out;
+}
+@keyframes branchTipIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .branch-merge { animation: none; }
+  .branch-tooltip { animation: none; }
+}

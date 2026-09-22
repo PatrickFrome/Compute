@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +41,7 @@ import {
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
 type Agent = { id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string };
 type Task = {
-  id: string; title: string; spec: string; role: string | null; status: string;
+  id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
   error: string | null; created_at: string; updated_at: string;
 };
@@ -206,58 +207,130 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
   );
 }
 
-/** Git-подобный граф ветвей: рейка таймлайна, каждая задача — ветвь с точкой статуса. */
+/** Git-подобный граф ветвей: рейка таймлайна, каждая задача — ветвь с точкой статуса.
+ *  v0.7.0: retry-линии (parent_id → merge-дуга к родителю) + hover-tooltip через portal
+ *  (fixed-позиция, не обрезается скролл-контейнером панели). */
 function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => void }) {
   const ROW_H = 30, W = 340, RAIL_X = 16, FORK_X = 46, DOT_X = 208, TEXT_X = 220, STEPS_X = 334;
+  const [hover, setHover] = useState<{ t: Task; top: number; left: number } | null>(null);
   const h = Math.max(40, tasks.length * ROW_H + 26);
+  // merge-линии: дочерняя задача (parent_id) тянется дугой к родителю (TASK_RETRY lineage)
+  const links = useMemo(() => {
+    const idx = new Map(tasks.map((t, i) => [t.id, i] as const));
+    const out: { fromY: number; toY: number }[] = [];
+    tasks.forEach((t, i) => {
+      const pi = t.parent_id ? idx.get(t.parent_id) : undefined;
+      if (pi === undefined) return;
+      out.push({ fromY: 20 + pi * ROW_H, toY: 20 + i * ROW_H });
+    });
+    return out;
+  }, [tasks]);
+  const track = (t: Task) => (e: React.MouseEvent | React.FocusEvent) => {
+    const r = (e.currentTarget as Element).getBoundingClientRect();
+    setHover({ t, top: r.top, left: r.left });
+  };
+  const clr = (id: string) => setHover((cur) => (cur?.t.id === id ? null : cur));
   return (
-    <svg
-      viewBox={`0 0 ${W} ${h}`}
-      className="h-auto w-full"
-      role="img"
-      aria-label="Граф ветвей задач"
-      preserveAspectRatio="xMidYMin meet"
-    >
-      <line x1={RAIL_X} y1={6} x2={RAIL_X} y2={h - 8} stroke="#3f3f46" strokeWidth={2.5} strokeLinecap="round" />
-      {tasks.map((t, i) => {
-        const y = 20 + i * ROW_H;
-        const color = BRANCH_COLOR[t.status] ?? "#a1a1aa";
-        const d = `M ${RAIL_X} 10 C ${RAIL_X} ${y - 16}, ${RAIL_X + 9} ${y}, ${FORK_X} ${y} L ${DOT_X} ${y}`;
-        const title = t.title.length > 15 ? `${t.title.slice(0, 13)}…` : t.title;
-        const delay = Math.min(i, 12) * 0.07;
-        return (
-          <g
-            key={t.id}
-            className="branch-row"
-            onClick={() => onOpen(t)}
-            role="button"
-            tabIndex={0}
-            aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов`}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(t); } }}
-          >
-            <rect className="branch-hover" x={4} y={y - ROW_H / 2 + 2} width={W - 8} height={ROW_H - 4} rx={6} fill="#ffffff" />
-            <title>{`${t.title} · ${t.status} · ${t.steps}/${t.max_steps}`}</title>
-            <path
-              className="branch-line branch-draw"
-              d={d}
-              fill="none"
-              stroke={color}
-              strokeWidth={2.2}
-              strokeLinecap="round"
-              pathLength={1}
-              style={{ animationDelay: `${delay}s` }}
-            />
-            <BranchDot status={t.status} x={DOT_X} y={y} color={color} />
-            <text x={TEXT_X} y={y + 3.6} fontSize={10} className="branch-dot fill-zinc-200 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
-              {title}
-            </text>
-            <text x={STEPS_X} y={y + 3.6} fontSize={9} textAnchor="end" className="branch-dot fill-zinc-500 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
-              {t.steps}/{t.max_steps}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${W} ${h}`}
+        className="h-auto w-full"
+        role="img"
+        aria-label="Граф ветвей задач"
+        preserveAspectRatio="xMidYMin meet"
+      >
+        <line x1={RAIL_X} y1={6} x2={RAIL_X} y2={h - 8} stroke="#3f3f46" strokeWidth={2.5} strokeLinecap="round" />
+        {links.map((l, i) => (
+          <path
+            key={`m${i}`}
+            className="branch-merge"
+            d={`M ${DOT_X + 3} ${l.fromY} C ${DOT_X + 30} ${l.fromY}, ${FORK_X - 30} ${l.toY}, ${FORK_X} ${l.toY}`}
+            fill="none"
+            stroke="#f59e0b"
+            strokeWidth={1.4}
+          />
+        ))}
+        {tasks.map((t, i) => {
+          const y = 20 + i * ROW_H;
+          const color = BRANCH_COLOR[t.status] ?? "#a1a1aa";
+          const d = `M ${RAIL_X} 10 C ${RAIL_X} ${y - 16}, ${RAIL_X + 9} ${y}, ${FORK_X} ${y} L ${DOT_X} ${y}`;
+          const title = t.title.length > 15 ? `${t.title.slice(0, 13)}…` : t.title;
+          const delay = Math.min(i, 12) * 0.07;
+          const set = track(t);
+          const clearThis = () => clr(t.id);
+          return (
+            <g
+              key={t.id}
+              className="branch-row"
+              onClick={() => onOpen(t)}
+              onMouseEnter={set}
+              onMouseLeave={clearThis}
+              onFocus={set}
+              onBlur={clearThis}
+              role="button"
+              tabIndex={0}
+              aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов`}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(t); } }}
+            >
+              <rect className="branch-hover" x={4} y={y - ROW_H / 2 + 2} width={W - 8} height={ROW_H - 4} rx={6} fill="#ffffff" />
+              <title>{`${t.title} · ${t.status} · ${t.steps}/${t.max_steps}`}</title>
+              <path
+                className="branch-line branch-draw"
+                d={d}
+                fill="none"
+                stroke={color}
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                pathLength={1}
+                style={{ animationDelay: `${delay}s` }}
+              />
+              <BranchDot status={t.status} x={DOT_X} y={y} color={color} />
+              <text x={TEXT_X} y={y + 3.6} fontSize={10} className="branch-dot fill-zinc-200 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
+                {title}
+              </text>
+              <text x={STEPS_X} y={y + 3.6} fontSize={9} textAnchor="end" className="branch-dot fill-zinc-500 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
+                {t.steps}/{t.max_steps}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {hover && typeof document !== "undefined"
+        ? createPortal(
+            (() => {
+              const color = BRANCH_COLOR[hover.t.status] ?? "#a1a1aa";
+              const kids = tasks.filter((x) => x.parent_id === hover.t.id).length;
+              const above = hover.top > 110;
+              return (
+                <div
+                  role="tooltip"
+                  className="branch-tooltip pointer-events-none fixed z-50 w-max max-w-[300px] rounded-md border border-zinc-700 bg-zinc-950/95 px-2.5 py-1.5 shadow-xl shadow-black/50"
+                  style={{
+                    left: Math.max(8, Math.min(hover.left + 26, (typeof window !== "undefined" ? window.innerWidth : 1024) - 312)),
+                    ...(above
+                      ? { bottom: (typeof window !== "undefined" ? window.innerHeight : 800) - hover.top + 8 }
+                      : { top: hover.top + 34 }),
+                  }}
+                >
+                  <div className="font-sans text-[11px] font-semibold leading-snug text-zinc-100">{hover.t.title}</div>
+                  <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px]">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
+                    <span style={{ color }}>{hover.t.status}</span>
+                    <span className="text-zinc-500">· шаги {hover.t.steps}/{hover.t.max_steps}</span>
+                    {kids > 0 && <span className="text-amber-400">· ↳ {kids} retry</span>}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[9px] text-zinc-500">
+                    {hover.t.id.slice(0, 18)} · создана {age(hover.t.created_at)} назад
+                    {hover.t.parent_id ? <span className="text-amber-400/90"> · ветвь от {hover.t.parent_id.slice(0, 16)}</span> : null}
+                  </div>
+                  {hover.t.error ? <div className="mt-1 max-w-[280px] truncate font-mono text-[9px] text-rose-400">⚠ {hover.t.error}</div> : null}
+                </div>
+              );
+            })(),
+            document.body,
+          )
+        : null}
+    </div>
   );
 }
 

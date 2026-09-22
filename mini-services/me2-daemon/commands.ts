@@ -11,8 +11,8 @@ import {
   LANES, LANE_OF, COST_OF, type CommandRow, type TaskRow, type Lane,
 } from "./store";
 import { WORKSPACE_ROOT } from "./worker";
-import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
 
 // ── agent-browser CLI (ветки браузера как часть шины, v0.6.0) ──────────
@@ -82,6 +82,7 @@ const handlers: Record<string, Handler> = {
       id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
       title: `${orig.title.slice(0, 180)} ·retry`,
       spec: orig.spec, role: orig.role, max_steps: maxSteps,
+      parent_id: orig.id,
     });
     emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps }, null, task.id);
     return { task };
@@ -298,6 +299,155 @@ const handlers: Record<string, Handler> = {
     return { closed: tab, remaining: tabs.length, tabs };
   },
 
+  // ── v0.7.0: браузерная навигация/actuation + workspace (финиш реестра 47/47) ──
+
+  BROWSER_NAVIGATE: async (p) => {
+    const url = String(p.url ?? "").trim();
+    if (!/^https?:\/\//.test(url)) throw new Error("url_required_http_s");
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["open", url]);
+    if (r.code !== 0) throw new Error(`navigate_failed_code_${r.code}: ${r.out.slice(0, 120)}`);
+    const tabs = await browserTabs();
+    emit("BROWSER_NAVIGATED", { url, tab }, null, null);
+    return { navigated: url, tab: tab ?? "active", tabs };
+  },
+
+  BROWSER_BACK: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["back"]);
+    if (r.code !== 0) throw new Error(`back_failed_code_${r.code}: ${r.out.slice(0, 120)}`);
+    emit("BROWSER_HISTORY_MOVED", { dir: "back", tab }, null, null);
+    return { moved: "back", tab: tab ?? "active" };
+  },
+
+  BROWSER_FORWARD: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["forward"]);
+    if (r.code !== 0) throw new Error(`forward_failed_code_${r.code}: ${r.out.slice(0, 120)}`);
+    emit("BROWSER_HISTORY_MOVED", { dir: "forward", tab }, null, null);
+    return { moved: "forward", tab: tab ?? "active" };
+  },
+
+  BROWSER_RELOAD: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["reload"]);
+    if (r.code !== 0) throw new Error(`reload_failed_code_${r.code}: ${r.out.slice(0, 120)}`);
+    emit("BROWSER_RELOADED", { tab }, null, null);
+    return { reloaded: true, tab: tab ?? "active" };
+  },
+
+  BROWSER_CLICK: async (p) => {
+    const sel = String(p.selector ?? p.sel ?? "").trim();
+    if (!sel) throw new Error("selector_required");
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["click", sel]);
+    if (r.code !== 0) throw new Error(`click_failed_code_${r.code}: ${r.out.slice(0, 160)}`);
+    emit("BROWSER_CLICKED", { selector: sel, tab }, null, null);
+    return { clicked: sel, tab: tab ?? "active", out: r.out.slice(0, 500) };
+  },
+
+  BROWSER_TYPE: async (p) => {
+    const sel = String(p.selector ?? "").trim();
+    const text = String(p.text ?? "").slice(0, 2000);
+    if (!sel || !text) throw new Error("selector_and_text_required");
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["fill", sel, text]);
+    if (r.code !== 0) throw new Error(`type_failed_code_${r.code}: ${r.out.slice(0, 160)}`);
+    emit("BROWSER_TYPED", { selector: sel, len: text.length, tab }, null, null);
+    return { typed: sel, len: text.length, tab: tab ?? "active" };
+  },
+
+  BROWSER_PRESS: async (p) => {
+    const key = String(p.key ?? "").trim();
+    if (!key) throw new Error("key_required (Enter/Tab/Control+a/...)");
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["press", key]);
+    if (r.code !== 0) throw new Error(`press_failed_code_${r.code}: ${r.out.slice(0, 160)}`);
+    emit("BROWSER_PRESSED", { key, tab }, null, null);
+    return { pressed: key, tab: tab ?? "active" };
+  },
+
+  BROWSER_SCROLL: async (p) => {
+    const dir = ["up", "down", "left", "right"].includes(String(p.dir)) ? String(p.dir) : "down";
+    const px = Number.isFinite(Number(p.px)) && Number(p.px) > 0 ? Math.round(Number(p.px)) : null;
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    await ab(px ? ["scroll", dir, String(px)] : ["scroll", dir]);
+    emit("BROWSER_SCROLLED", { dir, px, tab }, null, null);
+    return { scrolled: dir, px, tab: tab ?? "active" };
+  },
+
+  BROWSER_SELECT_TAB: async (p) => {
+    const tab = String(p.tab ?? "").trim();
+    if (!tab) throw new Error("tab_required");
+    const r = await ab(["tab", tab]);
+    if (r.code !== 0) throw new Error(`tab_select_failed_code_${r.code}: ${r.out.slice(0, 120)}`);
+    const tabs = await browserTabs();
+    emit("BROWSER_TAB_SELECTED", { tab }, null, null);
+    return { selected: tab, tabs };
+  },
+
+  BROWSER_URL: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["get", "url"]);
+    const url = r.out.trim().split("\n").pop()?.trim() ?? "";
+    emit("BROWSER_PAGE_READ", { what: "url", tab }, null, null);
+    return { url, tab: tab ?? "active" };
+  },
+
+  BROWSER_TITLE: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["get", "title"]);
+    const title = r.out.trim().split("\n").pop()?.trim() ?? "";
+    emit("BROWSER_PAGE_READ", { what: "title", tab }, null, null);
+    return { title, tab: tab ?? "active" };
+  },
+
+  BROWSER_TEXT: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["read"]);
+    if (r.code !== 0 && !r.out) throw new Error(`read_failed_code_${r.code}`);
+    const text = r.out.slice(0, 8000);
+    emit("BROWSER_PAGE_READ", { what: "text", chars: text.length, tab }, null, null);
+    return { truncated: r.out.length > 8000, chars: text.length, text, tab: tab ?? "active" };
+  },
+
+  WORKSPACE_READ: (p) => {
+    const rel = String(p.path ?? "").replace(/^\/+/, "").trim();
+    if (!rel || rel.includes("..")) throw new Error("path_required_no_dotdot");
+    const full = join(WORKSPACE_ROOT, rel);
+    if (!full.startsWith(WORKSPACE_ROOT)) throw new Error("path_escape_blocked");
+    const st = statSync(full); // бросит, если файла нет — это честная ошибка
+    if (st.isDirectory()) throw new Error("is_directory_use_workspace_snapshot");
+    const raw = readFileSync(full, "utf8");
+    emit("WORKSPACE_FILE_READ", { path: rel, bytes: st.size }, null, null);
+    return { path: rel, bytes: st.size, truncated: raw.length > 8000, content: raw.slice(0, 8000) };
+  },
+
+  WORKSPACE_WRITE: (p) => {
+    const rel = String(p.path ?? "").replace(/^\/+/, "").trim();
+    const content = String(p.content ?? "").slice(0, 20000);
+    if (!rel || rel.includes("..")) throw new Error("path_required_no_dotdot");
+    if (!content) throw new Error("content_required");
+    const full = join(WORKSPACE_ROOT, rel);
+    if (!full.startsWith(WORKSPACE_ROOT)) throw new Error("path_escape_blocked");
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content, "utf8");
+    const bytes = statSync(full).size;
+    emit("WORKSPACE_FILE_WRITTEN", { path: rel, bytes }, null, null);
+    return { path: rel, bytes };
+  },
+
   WORKER_REAP: () => {
     const reaped = reapStaleWorkers();
     emit("WORKERS_REAPPED", { reaped, by: "operator" }, null, null);
@@ -397,6 +547,20 @@ const DESC: Record<string, string> = {
   BROWSER_SNAPSHOT: "a11y-снимок активной вкладки",
   BROWSER_SCREENSHOT: "скриншот активной вкладки в download/",
   BROWSER_CLOSE: "закрыть вкладку (id | all)",
+  BROWSER_NAVIGATE: "навигация вкладки на URL",
+  BROWSER_BACK: "назад в истории вкладки",
+  BROWSER_FORWARD: "вперёд в истории вкладки",
+  BROWSER_RELOAD: "перезагрузить вкладку",
+  BROWSER_CLICK: "клик по селектору/@ref",
+  BROWSER_TYPE: "ввести текст в поле (fill)",
+  BROWSER_PRESS: "нажать клавишу (Enter/Tab/…)",
+  BROWSER_SCROLL: "прокрутка (dir, px)",
+  BROWSER_SELECT_TAB: "сделать вкладку активной",
+  BROWSER_URL: "текущий URL активной вкладки",
+  BROWSER_TITLE: "заголовок активной вкладки",
+  BROWSER_TEXT: "текст страницы для агента (read)",
+  WORKSPACE_READ: "прочитать файл workspace",
+  WORKSPACE_WRITE: "записать файл в workspace",
   WORKER_REAP: "принудительный reap протухших workers",
   DB_STATS: "статистика SQLite (таблицы/байты)",
   TASK_PURGE: "удалить ARCHIVED (или все терминальные) задачи",
@@ -409,6 +573,10 @@ const GROUP_OF: Record<string, string> = {
   AGENT_RETIRE: "Флот", AGENT_PAUSE: "Флот", AGENT_RESUME: "Флот", FLEET_RECONCILE: "Флот", AGENT_MODEL: "Флот",
   COMMAND_CANCEL: "Шина", BUDGET_ADJUST: "Шина",
   BROWSER_TABS: "Браузер", BROWSER_OPEN: "Браузер", BROWSER_SNAPSHOT: "Браузер", BROWSER_SCREENSHOT: "Браузер", BROWSER_CLOSE: "Браузер",
+  BROWSER_NAVIGATE: "Браузер", BROWSER_BACK: "Браузер", BROWSER_FORWARD: "Браузер", BROWSER_RELOAD: "Браузер",
+  BROWSER_CLICK: "Браузер", BROWSER_TYPE: "Браузер", BROWSER_PRESS: "Браузер", BROWSER_SCROLL: "Браузер",
+  BROWSER_SELECT_TAB: "Браузер", BROWSER_URL: "Браузер", BROWSER_TITLE: "Браузер", BROWSER_TEXT: "Браузер",
+  WORKSPACE_READ: "Workspace", WORKSPACE_WRITE: "Workspace",
   WORKER_REAP: "Диагностика", DB_STATS: "Диагностика",
   BUDGET_FLUSH: "Опасная зона", ENVIRONMENT_RESET: "Опасная зона", TASK_PURGE: "Опасная зона",
 };

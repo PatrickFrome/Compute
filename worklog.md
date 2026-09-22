@@ -6246,3 +6246,23 @@ Stage Summary:
 - Ветки браузера теперь первоклассная часть шины ME2: оператор видит/открывает/закрывает вкладки прямо из Mission Control, daemon может давать задачи агентам с браузерным контекстом (фундамент для browser-группы действий к 47).
 - Инфра-замечание: MultiEdit в этом окружении НЕ атомарен — при фейле части правок применяются; проверять состояние после каждого фейла.
 - Следующее: +14 действий к 47 (агентские tool-фактуры, workspace-операции), CDP-screencast через BROWSER_*-базу, M3 Tauri-скелет, миграция me2_evidence оператором (PGRST205, буфер 245+).
+
+---
+Task ID: R6-REGISTRY-47-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task, записывай всю систему в github, анализируй ветки браузера» — финиш реестра: 47/47 действий, retry-merge-линии ВЕТКИ, portal-tooltip.
+
+Work Log:
+- СТАРТ-АУДИТ: cron 405291 автономно закрыл R5 (daemon v0.6.0, 33/47, BROWSER_*-группа, dev-watchdog, ede5c54) — зафиксировал как факт, не дублировал. Все порты живы (:81/:3000/:3040/:3041).
+- DAEMON v0.7.0 (+14 → 47/47, РЕЕСТР ПОЛОН): Браузер +12 — BROWSER_NAVIGATE (open на активной/выбранной вкладке), BROWSER_BACK/FORWARD/RELOAD, BROWSER_CLICK (selector|@ref), BROWSER_TYPE (fill, cap 2000), BROWSER_PRESS (Enter/Control+a/…), BROWSER_SCROLL (dir+px), BROWSER_SELECT_TAB (CONTROL), BROWSER_URL/BROWSER_TITLE (get), BROWSER_TEXT (read, cap 8000+truncated); Workspace +2 — WORKSPACE_READ/WORKSPACE_WRITE (механика: sanitize без «..», startsWith(WORKSPACE_ROOT), mkdir -p, honest-ошибки). store.ts: LANE_OF/COST_OF +14 (CLICK/TYPE/TEXT/WRITE = cost 2, rest 1), DESC/GROUP_OF (новая группа «Workspace»).
+- LINEAGE: tasks.parent_id TEXT (CREATE TABLE + ALTER-миграция по паттерну PRAGMA table_info); TASK_RETRY теперь ставит parent_id=orig.id → проверено живьём: retry от tk_mucgkzhw1alsb2 → tk_mucgkzjeo1h0ez (parent записан).
+- ЖИВАЯ ВЕРИФИКАЦИЯ REST (все COMPLETED): URL (:81) → TITLE → NAVIGATE t1→example.com → TEXT (131 chars) → BACK (вернулся на :81) → FORWARD → CLICK «text=Learn more» ЧЕСТНЫЙ ФЕЙЛ (Element not found — селектор неверен, ошибка всплыла в результат команды) → CLICK «a» → iana.org/help/example-domains → SCROLL down 300 → PRESS End → OPEN lite.ddg (t4) → TYPE input[name=q] «me2 os browser branches» → PRESS Enter → TITLE «DuckDuckGo» → SELECT_TAB t1 → RELOAD; WORKSPACE_WRITE r6/notes.md (70b) → WORKSPACE_READ roundtrip → WORKSPACE_READ ../../.a2/.github.env ЗАБЛОКИРОВАН (path_required_no_dotdot); BROWSER_CLOSE t4 → remaining 1.
+- КОНСОЛЬ (page.tsx + globals.css): BranchGraph v0.7.0 — (1) retry-merge-линии: амберная пунктирная дуга (branch-merge, stroke-dashoffset flow-анимация 1.4s, reduced-motion off) от потомка к родителю по parent_id; (2) tooltip ветки ЧЕРЕЗ createPortal в document.body (fixed-позиция от getBoundingClientRect строки; above/below по viewport) — устранена обрезка tooltip-а скролл-контейнером max-h-40 overflow-y-auto; (3) tooltip = title, статус-точка+цвет, шаги, «↳ N retry» у родителя, «ветвь от <id>» у потомка, возраст, ⚠error; keyboard onFocus/onBlur паритет; (4) Task type + parent_id.
+- GOLDEN PATHS (agent-browser :81): бейдж 47/47 в шапке И футере; ВЕТКИ(14) с БРАУЗЕР-стрипом 2 вкладок; hover row → tooltip в viewport fullyInViewport=true (r6-07); скролл панели → merge-дуга родитель(0/4,CANCELLED)→потомок(3/6,FAILED) видна (r6-08); ⌘K группа «Реестр действий шины · 47/47» с новыми действиями; mobile 390: scrollWidth=390 без переполнения; скриншоты r6-01..09. Lint 0/0.
+- GITHUB: git-sync → sandbox/me2-os (ветка main монорепо не тронута).
+
+Stage Summary:
+- РЕЕСТР 47/47 ПОЛОН: шина ME2 покрывает весь canonical-набор blueprint (диагностика/задачи/флот/шина/опасная зона/браузер/workspace). Дальнейшие действия — только по потребности агентов, не «для счётчика».
+- Ветки браузера замкнуты в контур: оператор видит вкладки, навигирует, кликает, читает текст/URL/тайтл, вводит — всё через бюджетные полосы с идемпотентностью и event-журналом; retry-родословная задач рисуется merge-дугами.
+- Инфра-уроки: tooltip внутри overflow-контейнера = обрезка → portal+fixed; честные ошибки BROWSER_* (Element not found) всплывают в command.result.error — агент может сам исправить селектор.
+- Следующее: CDP-screencast панель (Page.startScreencast управляемого Chromium → canvas в ВЕТКИ), M3 Tauri 2 скелет, SQL-миграция me2_evidence оператором (PGRST205, outbox буфер), OFFLINE worker GC агрессивнее.

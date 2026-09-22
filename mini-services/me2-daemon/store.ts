@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   title TEXT NOT NULL,
   spec TEXT NOT NULL,
   role TEXT,
+  parent_id TEXT,
   status TEXT NOT NULL DEFAULT 'READY',
   agent_id TEXT,
   max_steps INTEGER NOT NULL DEFAULT 8,
@@ -98,12 +99,15 @@ const agentCols = (db.query(`PRAGMA table_info(agents)`).all() as Array<{ name: 
 if (!agentCols.includes("paused")) db.exec(`ALTER TABLE agents ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
 const cmdCols = (db.query(`PRAGMA table_info(commands)`).all() as Array<{ name: string }>).map((c) => c.name);
 if (!cmdCols.includes("run_after")) db.exec(`ALTER TABLE commands ADD COLUMN run_after INTEGER`);
+// v0.7.0: lineage задач для merge-линий ВЕТКИ (TASK_RETRY ставит parent_id)
+const taskCols = (db.query(`PRAGMA table_info(tasks)`).all() as Array<{ name: string }>).map((c) => c.name);
+if (!taskCols.includes("parent_id")) db.exec(`ALTER TABLE tasks ADD COLUMN parent_id TEXT`);
 
 export type AgentRow = {
   id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
 };
 export type TaskRow = {
-  id: string; title: string; spec: string; role: string | null; status: string;
+  id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
   error: string | null; created_at: string; updated_at: string;
 };
@@ -149,6 +153,21 @@ export const LANE_OF: Record<string, Lane> = {
   WORKER_REAP: "CONTROL",
   DB_STATS: "READ_ONLY",
   TASK_PURGE: "EMERGENCY",
+  // v0.7.0: браузерная навигация/актuation + workspace-операции (финиш 47/47)
+  BROWSER_NAVIGATE: "MUTATION",
+  BROWSER_BACK: "MUTATION",
+  BROWSER_FORWARD: "MUTATION",
+  BROWSER_RELOAD: "MUTATION",
+  BROWSER_CLICK: "MUTATION",
+  BROWSER_TYPE: "MUTATION",
+  BROWSER_PRESS: "MUTATION",
+  BROWSER_SCROLL: "MUTATION",
+  BROWSER_SELECT_TAB: "CONTROL",
+  BROWSER_URL: "READ_ONLY",
+  BROWSER_TITLE: "READ_ONLY",
+  BROWSER_TEXT: "READ_ONLY",
+  WORKSPACE_READ: "READ_ONLY",
+  WORKSPACE_WRITE: "MUTATION",
 };
 /** Индивидуальные cost для действий, чей тариф отличается от дефолта полосы (spec R4). */
 export const COST_OF: Record<string, number> = {
@@ -161,6 +180,10 @@ export const COST_OF: Record<string, number> = {
   BROWSER_SCREENSHOT: 1,
   BROWSER_CLOSE: 1,
   WORKER_REAP: 1,
+  BROWSER_CLICK: 2,
+  BROWSER_TYPE: 2,
+  BROWSER_TEXT: 2,
+  WORKSPACE_WRITE: 2,
 };
 
 /** Лимит бюджета шины — оператор настраивает через BUDGET_ADJUST (meta: budget_limit, clamp 6..96). */
@@ -242,11 +265,12 @@ export function deleteAgent(id: string) {
 }
 
 // ── tasks ─────────────────────────────────────────────────────────
-export function createTask(t: Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "created_at" | "updated_at">): TaskRow {
-  const row: TaskRow = { ...t, status: "READY", agent_id: null, steps: 0, result: null, error: null, created_at: nowIso(), updated_at: nowIso() };
-  db.query(`INSERT INTO tasks (id,title,spec,role,status,agent_id,max_steps,steps,result,error,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(row.id, row.title, row.spec, row.role, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.created_at, row.updated_at);
+export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "created_at" | "updated_at" | "parent_id"> & { parent_id?: string | null };
+export function createTask(t: NewTask): TaskRow {
+  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, created_at: nowIso(), updated_at: nowIso() };
+  db.query(`INSERT INTO tasks (id,title,spec,role,parent_id,status,agent_id,max_steps,steps,result,error,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(row.id, row.title, row.spec, row.role, row.parent_id, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.created_at, row.updated_at);
   return row;
 }
 export function listTasks(opts: { includeArchived?: boolean } = {}): TaskRow[] {
