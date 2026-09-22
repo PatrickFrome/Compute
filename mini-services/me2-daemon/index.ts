@@ -29,10 +29,18 @@ import {
   listSandboxes, listSnapshots, createSandbox, execInSandbox, snapshotSandbox, restoreSnapshot, destroySandbox, sandboxCaps,
 } from "./src/sandbox";
 import { roadmapVerdict } from "./src/roadmap";
+import {
+  memSearch, memWrite, memDelete, memoryStatus, memBlock, onMemoryEvent,
+} from "./src/memory";
+import { brainThink, brainStatus } from "./src/brain";
+import { fleetList, fleetBeat, fleetSelfTick, fleetGc } from "./src/fleet";
+import { suCheck, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
+import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
+import { mechanicsMatrix } from "./src/mechanics";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.18.0";
+const VERSION = "0.19.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);
@@ -160,6 +168,96 @@ const restServer = createServer(async (req, res) => {
         catch { return { seq: e.seq, task_id: e.task_id, at: e.ts, raw: e.data.slice(0, 200) }; }
       });
       return json(res, 200, { ok: true, count: verdicts.length, verdicts });
+    }
+
+    // ── R19: ME4 MEMORY (порт M13, теперь с persistence) ──
+    if (path === "/memory" && req.method === "GET") {
+      const q = url.searchParams.get("q") ?? undefined;
+      const kind = url.searchParams.get("kind") ?? undefined;
+      const limit = Number(url.searchParams.get("limit") ?? 12);
+      const rows = memSearch({ q, kind, limit });
+      return json(res, 200, { ok: true, rows, status: memoryStatus() });
+    }
+    if (path === "/memory/block" && req.method === "GET") {
+      const n = Number(url.searchParams.get("n") ?? 5);
+      const budget = Number(url.searchParams.get("budget") ?? 1400);
+      return json(res, 200, { ok: true, ...memBlock(n, budget) });
+    }
+    if (path === "/memory" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "write");
+      try {
+        if (op === "write") {
+          const row = memWrite({
+            kind: String(body.kind ?? "semantic") as "episodic" | "semantic" | "procedural",
+            key: String(body.key ?? ""), content: String(body.content ?? ""),
+            tags: Array.isArray(body.tags) ? body.tags.map(String) : [],
+            importance: body.importance !== undefined ? Number(body.importance) : undefined,
+          });
+          return json(res, 201, { ok: true, row });
+        }
+        if (op === "delete") return json(res, 200, { ok: true, deleted: memDelete(Number(body.id)) });
+        return json(res, 400, { ok: false, error: "op_required: write|delete" });
+      } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
+    }
+
+    // ── R19: ME5 BRAIN ──
+    if (path === "/brain" && req.method === "GET") return json(res, 200, brainStatus());
+    if (path === "/brain/think" && req.method === "POST") {
+      const body = await readBody(req);
+      try {
+        const thought = await brainThink(String(body.goal ?? ""));
+        return json(res, 200, { ok: true, thought });
+      } catch (e) {
+        return json(res, (e as Error).message === "goal_required" ? 400 : 502, { ok: false, error: (e as Error).message });
+      }
+    }
+
+    // ── R19: ME6 FLEET ──
+    if (path === "/fleet" && req.method === "GET") return json(res, 200, fleetList());
+    if (path === "/fleet/beat" && req.method === "POST") {
+      const body = await readBody(req);
+      try {
+        const node = fleetBeat({
+          id: String(body.id ?? ""), kind: body.kind ? String(body.kind) : undefined,
+          caps: (body.caps ?? {}) as Record<string, unknown>, meta: (body.meta ?? {}) as Record<string, unknown>,
+          proof: body.proof ? String(body.proof) : undefined,
+        });
+        return json(res, 200, { ok: true, node });
+      } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
+    }
+
+    // ── R19: ME7 SELF-UPDATE (барьеры: dirty/diverged → отказ, ff-only) ──
+    if (path === "/selfupdate" && req.method === "GET") return json(res, 200, selfupdateStatus(VERSION));
+    if (path === "/selfupdate" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "check");
+      try {
+        if (op === "check") return json(res, 200, { ok: true, check: suCheck(VERSION, true) });
+        if (op === "apply") return json(res, 200, suApply(VERSION));
+        return json(res, 400, { ok: false, error: "op_required: check|apply" });
+      } catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
+    }
+
+    // ── R19: ME8 RSI (propose авто/оператор; adopt/reject/rollback — только оператор) ──
+    if (path === "/rsi" && req.method === "GET") return json(res, 200, rsiList());
+    if (path === "/rsi" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "propose");
+      try {
+        if (op === "propose") return json(res, 201, { ok: true, proposal: await rsiPropose({ auto: body.auto !== false, hint: body.hint ? String(body.hint) : undefined }) });
+        if (op === "adopt") return json(res, 200, { ok: true, proposal: rsiAdopt(String(body.id ?? "")) });
+        if (op === "reject") return json(res, 200, { ok: true, proposal: rsiReject(String(body.id ?? "")) });
+        if (op === "rollback") return json(res, 200, { ok: true, proposal: rsiRollback(String(body.id ?? "")) });
+        return json(res, 400, { ok: false, error: "op_required: propose|adopt|reject|rollback" });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: (e as Error).message });
+      }
+    }
+
+    // ── R19: ME-матрица (порт реестра механик M1–M18 старой системы) ──
+    if (path === "/mechanics" && req.method === "GET") {
+      return json(res, 200, mechanicsMatrix(VERSION, suCached()));
     }
 
     // ── command bus: единственная точка мутаций ──
@@ -318,6 +416,18 @@ const io = new Server(wsHttpServer, {
 onEvent((e) => {
   io.emit("event", e);
   try { onDaemonEvent(e.type, e.data ? (JSON.parse(e.data) as Record<string, unknown>) : {}, e.task_id); } catch { /* телеметрия не ломает шину */ }
+  // R19: авто-материализация памяти из шины (TASK_DONE/FAILED/REWARD_HACK/REFLECTED)
+  try {
+    onMemoryEvent(e.type, e.data ? (JSON.parse(e.data) as Record<string, unknown>) : {}, e.task_id, {
+      title: (id) => getTask(id)?.title ?? null,
+      lesson: (id) => {
+        const t = getTask(id);
+        if (!t?.reflection) return null;
+        try { return (JSON.parse(t.reflection) as { llm?: { lesson?: string } })?.llm?.lesson ?? null; }
+        catch { return null; }
+      },
+    });
+  } catch (me) { console.error(`[memory-hook] ${e.type}: ${String(me)}`); }
 });
 
 io.on("connection", (socket) => {
@@ -366,6 +476,12 @@ setInterval(() => {
 setInterval(() => {
   try { reapStaleWorkers(); } catch { /* noop */ }
 }, 30_000);
+// R19: self-node в fleet (liveness-проекция, урок CP-W1) + GC LOST-нод раз в час
+fleetSelfTick(VERSION);
+setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_000);
+setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
+// R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
+setTimeout(() => { try { suCheck(VERSION); } catch { /* noop */ } }, 4_000);
 
 startMasterLoop();
 initEvidence();

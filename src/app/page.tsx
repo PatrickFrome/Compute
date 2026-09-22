@@ -34,9 +34,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
-  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, Search, Sparkles, Terminal, Trash2, X, Zap,
+  Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
+  Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
+  Radar, RefreshCw, RotateCcw, Rocket, Search, Server, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -56,6 +56,16 @@ type WorktreeData = { ok: boolean; head: string; branch: string; worktrees: { wo
 type RoadmapData = { ok: boolean; verdict: string; done: number; total: number; closedAt: string | null; milestones: { key: string; title: string; status: string; evidence: string; checks: { name: string; pass: boolean }[]; verifiedAt: string }[] };
 type SandboxData = { ok: boolean; sandboxes: { id: string; status: string; provider: string; createdAt: string; head: string; cmds: number; lastCmd: string | null; lastExit: number | null; diskKb?: number }[]; providers: Record<string, string>; snapshots: { file: string; sandboxId: string; bytes: number; sha256: string; createdAt: string }[] };
 type SandboxRun = { id: string; cmd: string; exitCode: number; ok: boolean; ms: number; stdout: string; stderr: string; truncated: boolean; limit: string };
+// R19: МЕХАНИКИ (порт старых механик A2 → ME2)
+type MemRowT = { id: number; kind: string; key: string; content: string; tags: string; importance: number; hits: number; score?: number };
+type MemData = { ok: boolean; rows: MemRowT[]; status: { rows: number; by_kind: Record<string, number>; db_bytes: number } };
+type BrainData = { ok: boolean; thoughts: { key: string; content: string; at: number }[]; probe: { eventloop_ms: number; db_probe_ms: number; memory_rows: number } };
+type ThoughtT = { goal: string; summary: string; steps: string[]; risks: string[]; ms: number; memory_used: number[] };
+type FleetData = { ok: boolean; nodes: { id: string; kind: string; state: string; freshness: string; verified: boolean; beats: number; age_s: number }[]; capacity: { active: number; stale: number; lost: number; ceiling: number; verified: number }; backlog: { ready: number; running: number } };
+type SuData = { ok: boolean; check: { ok: boolean; verdict: string; local_head: string | null; remote_head: string | null; behind: number | null; ahead: number | null; dirty_files: number; version: string; error?: string }; journal: { id: number; op: string; from_sha: string | null; to_sha: string | null; result: string; detail: string | null; at: number }[] };
+type RsiP = { id: string; title: string; status: string; source: string; artifact: string | null; evidence: string; created_at: number };
+type RsiData = { ok: boolean; proposals: RsiP[]; stats: { total: number; proposed: number; adopted: number; rejected: number; rolled_back: number }; artifacts: number };
+type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id: string; name: string; old_ref: string; verdict: string; evidence: string }[]; gaps: { id: string; title: string; status: string; closure: string }[] };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1132,6 +1142,67 @@ export default function MissionControl() {
     }
   }, [sbOpen, loadSb]);
 
+  // ── R19: панель МЕХАНИКИ (порт старых механик A2: memory/brain/fleet/self-update/rsi) ──
+  const [mcxOpen, setMcxOpen] = useState(false);
+  const [mem, setMem] = useState<MemData | null>(null);
+  const [brain, setBrain] = useState<BrainData | null>(null);
+  const [fleet, setFleet] = useState<FleetData | null>(null);
+  const [su, setSu] = useState<SuData | null>(null);
+  const [rsi, setRsi] = useState<RsiData | null>(null);
+  const [mech, setMech] = useState<MechData | null>(null);
+  const [mcxBusy, setMcxBusy] = useState(false);
+  const [memQ, setMemQ] = useState("");
+  const [memKind, setMemKind] = useState<string>("");
+  const [memWrite_, setMemWrite_] = useState("");
+  const [brainGoal, setBrainGoal] = useState("");
+  const [thought, setThought] = useState<ThoughtT | null>(null);
+
+  const loadMech = useCallback(async () => {
+    try { const r = await fetch("/mechanics?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setMech(r as MechData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadMem = useCallback(async (q = "", kind = "") => {
+    try { const r = await fetch(`/memory?XTransformPort=3041&limit=8${q ? `&q=${encodeURIComponent(q)}` : ""}${kind ? `&kind=${kind}` : ""}`, { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setMem(r as MemData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadBrain = useCallback(async () => {
+    try { const r = await fetch("/brain?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setBrain(r as BrainData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadFleet = useCallback(async () => {
+    try { const r = await fetch("/fleet?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setFleet(r as FleetData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadSu = useCallback(async () => {
+    try { const r = await fetch("/selfupdate?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setSu(r as SuData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadRsi = useCallback(async () => {
+    try { const r = await fetch("/rsi?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setRsi(r as RsiData); } catch { /* daemon недоступен */ }
+  }, []);
+
+  const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
+    setMcxBusy(true);
+    try {
+      const res = await fetch(`/${path}?XTransformPort=3041`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json());
+      if (res?.ok !== false) {
+        toast({ title: okMsg });
+        await after();
+        return res as Record<string, unknown>;
+      }
+      toast({ title: `${path} ✗`, description: String(res?.error ?? "ошибка"), variant: "destructive" });
+    } catch {
+      toast({ title: `${path} ✗`, description: "daemon недоступен", variant: "destructive" });
+    } finally { setMcxBusy(false); }
+    return null;
+  }, [toast]);
+
+  useEffect(() => {
+    if (mcxOpen) {
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi();
+      const iv = setInterval(() => void loadFleet(), 15_000);
+      return () => clearInterval(iv);
+    }
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi]);
+
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
   }, [sendCommand]);
@@ -1889,6 +1960,199 @@ export default function MissionControl() {
             )}
           </Card>
 
+          {/* R19: МЕХАНИКИ — порт старых механик A2 (browser/brain/memory/rsi/self-update/fleet) → ME2 */}
+          <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
+            <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+              <button
+                type="button"
+                onClick={() => setMcxOpen((o) => !o)}
+                aria-expanded={mcxOpen}
+                aria-controls="mechanics-body"
+                className="flex min-w-0 items-center gap-2 text-left"
+              >
+                <Network className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+                <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                  МЕХАНИКИ{mech ? ` · ${mech.verdict}` : ""}
+                </span>
+              </button>
+              <span className="flex shrink-0 items-center gap-2">
+                {mech && (
+                  <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="порт механик старой системы M1–M18 в ME2 daemon v0.19+">
+                    v{mech.version}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); }}
+                  title="Обновить все механики"
+                  aria-label="Обновить все механики"
+                  className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden />
+                </button>
+                <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${mcxOpen ? "" : "-rotate-90"}`} aria-hidden />
+              </span>
+            </CardHeader>
+            {mcxOpen && (
+              <div id="mechanics-body" className="space-y-3 p-3">
+
+                {/* ME-матрица: живые пробы 16 механик */}
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[9px] uppercase tracking-wider text-zinc-600">матрица механик · порт M1–M18</span>
+                    {mech && <span className={`font-mono text-[9px] ${mech.mechanics.every((m) => m.verdict === "WORKS") ? "text-emerald-400" : "text-amber-400"}`}>{mech.verdict}</span>}
+                  </div>
+                  <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Реестр механик ME1–ME16">
+                    {(mech?.mechanics ?? []).map((m) => (
+                      <div key={m.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]" title={`${m.name} — ${m.evidence}`}>
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.verdict === "WORKS" ? "bg-emerald-400" : m.verdict === "CAVEAT" ? "bg-amber-400" : "bg-zinc-600"}`} aria-hidden />
+                        <span className="w-8 shrink-0 font-semibold text-zinc-400">{m.id}</span>
+                        <span className="min-w-0 flex-1 truncate text-zinc-500">{m.name}</span>
+                        <span className="hidden shrink-0 text-zinc-700 md:inline" title="старая механика">← {m.old_ref}</span>
+                      </div>
+                    ))}
+                    {!mech && (
+                      <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка матрицы…</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ME4 MEMORY */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500"><Database className="h-3 w-3 text-cyan-400" aria-hidden /> MEMORY{mem ? ` · ${mem.status.rows}` : ""}</span>
+                    <span className="font-mono text-[9px] text-zinc-600" title="SQLite WAL — переживает рестарт (исправление CAVEAT M13/R6)">{mem ? `epi ${mem.status.by_kind.episodic ?? 0} · sem ${mem.status.by_kind.semantic ?? 0} · proc ${mem.status.by_kind.procedural ?? 0}` : ""}</span>
+                  </div>
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); void (async () => { if (memWrite_.trim()) { await mcxOp("memory", { op: "write", kind: "semantic", key: `op:${Date.now().toString(36)}`, content: memWrite_.trim(), tags: ["operator"], importance: 0.8 }, "запись в память добавлена", async () => { await loadMem(memQ, memKind); }); setMemWrite_(""); } })(); }}
+                    className="mb-1.5 flex gap-1.5"
+                  >
+                    <Input value={memWrite_} onChange={(e) => setMemWrite_(e.target.value)} placeholder="записать факт/урок в память (semantic)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Новая запись в память" />
+                    <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]"><Plus className="mr-1 h-3 w-3" aria-hidden /> зап</Button>
+                  </form>
+                  <div className="mb-1.5 flex gap-1.5">
+                    <Input value={memQ} onChange={(e) => { setMemQ(e.target.value); void loadMem(e.target.value, memKind); }} placeholder="поиск по памяти (score: важность×свежесть×hits)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Поиск в памяти" />
+                    {(["", "episodic", "semantic", "procedural"] as const).map((k) => (
+                      <button key={k || "all"} type="button" onClick={() => { setMemKind(k); void loadMem(memQ, k); }} aria-pressed={memKind === k} title={k || "все слои"} className={`rounded border px-1.5 py-0.5 font-mono text-[9px] transition ${memKind === k ? "border-cyan-700 bg-cyan-950/40 text-cyan-300" : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"}`}>
+                        {k ? k.slice(0, 3) : "всё"}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="max-h-32 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Записи памяти">
+                    {(mem?.rows ?? []).map((r) => (
+                      <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`${r.key} · важность ${r.importance} · hits ${r.hits}`}>
+                        <span className={`shrink-0 rounded px-1 text-[8px] ${r.kind === "episodic" ? "bg-cyan-950/60 text-cyan-400" : r.kind === "semantic" ? "bg-violet-950/60 text-violet-300" : "bg-amber-950/60 text-amber-300"}`}>{r.kind.slice(0, 4)}</span>
+                        <span className="min-w-0 flex-1 truncate text-zinc-400">{r.content}</span>
+                        {typeof r.score === "number" && <span className="shrink-0 text-zinc-600">{r.score.toFixed(2)}</span>}
+                        <button type="button" onClick={() => { void mcxOp("memory", { op: "delete", id: r.id }, "запись удалена", async () => { await loadMem(memQ, memKind); }); }} disabled={mcxBusy} aria-label={`Удалить запись ${r.key}`} className="shrink-0 text-zinc-600 transition hover:text-rose-400">✕</button>
+                      </div>
+                    ))}
+                    {mem && mem.rows.length === 0 && (
+                      <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">пусто — эпизоды появятся после выполнения задач</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ME5 BRAIN */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500"><Brain className="h-3 w-3 text-fuchsia-400" aria-hidden /> BRAIN{brain ? ` · мыслей ${brain.thoughts.length}` : ""}</span>
+                    <span className="font-mono text-[9px] text-zinc-600" title="self-probe: латентность event-loop + БД (аналог wake-probe старой системы)">{brain ? `loop ${brain.probe.eventloop_ms}мс · db ${brain.probe.db_probe_ms}мс` : ""}</span>
+                  </div>
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); void (async () => { const goal = brainGoal.trim(); if (!goal) return; const r = await mcxOp("brain/think", { goal }, "мысль зафиксирована в памяти", async () => { await loadBrain(); }); if (r?.thought) setThought(r.thought as ThoughtT); setBrainGoal(""); })(); }}
+                    className="mb-1.5 flex gap-1.5"
+                  >
+                    <Input value={brainGoal} onChange={(e) => setBrainGoal(e.target.value)} placeholder="цель для brain: план с учётом памяти…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Цель для brain" />
+                    <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]"><Sparkles className="mr-1 h-3 w-3" aria-hidden /> думать</Button>
+                  </form>
+                  {thought && (
+                    <div className="mb-1.5 rounded border border-fuchsia-900/40 bg-fuchsia-950/20 p-1.5 font-mono text-[9px]" aria-live="polite">
+                      <div className="mb-0.5 text-zinc-400" title={thought.goal}>{thought.summary}</div>
+                      {thought.steps.slice(0, 4).map((s, i) => (
+                        <div key={i} className="flex gap-1 text-zinc-500"><span className="shrink-0 text-fuchsia-400/70">{i + 1}.</span><span className="min-w-0 flex-1 truncate">{s}</span></div>
+                      ))}
+                      <div className="mt-0.5 text-zinc-600">{thought.ms}мс · памяти использовано: {thought.memory_used.length}</div>
+                    </div>
+                  )}
+                  <div className="max-h-16 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                    {(brain?.thoughts ?? []).slice(0, 4).map((t) => (
+                      <div key={t.key} className="truncate rounded bg-zinc-900/50 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500" title={t.content}>{t.content}</div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ME6 FLEET */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500"><Server className="h-3 w-3 text-emerald-400" aria-hidden /> FLEET{fleet ? ` · ${fleet.capacity.active}/${fleet.capacity.ceiling}` : ""}</span>
+                    <span className="font-mono text-[9px] text-zinc-600" title="freshness от last_seen: ACTIVE<45s, STALE<300s, LOST≥300s (порт 45s-контракта; heartbeat≠liveness)">{fleet ? `stale ${fleet.capacity.stale} · lost ${fleet.capacity.lost} · backlog ${fleet.backlog.ready}` : ""}</span>
+                  </div>
+                  <div className="max-h-20 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Ноды флота">
+                    {(fleet?.nodes ?? []).map((n) => (
+                      <div key={n.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`${n.id} · beats ${n.beats} · proof ${n.verified ? "есть" : "нет"}`}>
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${n.freshness === "ACTIVE" ? "bg-emerald-400" : n.freshness === "STALE" ? "bg-amber-400" : "bg-rose-500"}`} aria-hidden />
+                        <span className="min-w-0 flex-1 truncate text-zinc-400">{n.id}</span>
+                        <span className="shrink-0 text-zinc-600">{n.kind}</span>
+                        {n.verified && <span className="shrink-0 text-emerald-400/80" title="transport-proof: BOUND→ACTIVE">✓</span>}
+                        <span className="w-10 shrink-0 text-right text-zinc-600">{n.age_s}с</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ME7 SELF-UPDATE */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500"><GitMerge className="h-3 w-3 text-orange-400" aria-hidden /> SELF-UPDATE</span>
+                    {su && (
+                      <span className={`font-mono text-[9px] ${su.check.verdict === "UP_TO_DATE" ? "text-emerald-400" : su.check.verdict === "BEHIND" ? "text-amber-400" : "text-rose-400"}`} title={su.check.error ?? `local ${su.check.local_head?.slice(0, 8)} · remote ${su.check.remote_head?.slice(0, 8)}`}>
+                        {su.check.verdict}{su.check.behind ? ` · behind ${su.check.behind}` : ""}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button type="button" onClick={() => { void (async () => { await mcxOp("selfupdate", { op: "check" }, "проверка обновлений выполнена", loadSu); })(); }} disabled={mcxBusy} className="rounded border border-zinc-700 px-2 py-1 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40" title="git ls-remote + fetch + rev-list">check</button>
+                    <button type="button" onClick={() => { if (confirm("Применить fast-forward обновление из sandbox/me2-os? После — рестарт daemon (start.sh).")) void mcxOp("selfupdate", { op: "apply" }, "ff-only применён — рестартуйте daemon", loadSu); }} disabled={mcxBusy} className="rounded border border-orange-800/60 px-2 py-1 font-mono text-[9px] text-orange-300/90 transition hover:bg-zinc-800 disabled:opacity-40" title="барьеры: dirty-tree/diverged → отказ; ff-only">apply ff</button>
+                    <span className="ml-auto self-center font-mono text-[9px] text-zinc-600" title="журнал обновлений (порт transactional journal v8)">{su ? `journal: ${su.journal.length}` : ""}</span>
+                  </div>
+                </div>
+
+                {/* ME8 RSI */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500"><Radar className="h-3 w-3 text-violet-300" aria-hidden /> RSI{rsi ? ` · ${rsi.stats.proposed} на голосе` : ""}</span>
+                    <span className="font-mono text-[9px] text-zinc-600" title="adopt/reject — только оператор (zero-authority, порт M14)">{rsi ? `adopted ${rsi.stats.adopted} · rollback ${rsi.stats.rolled_back} · артефактов ${rsi.artifacts}` : ""}</span>
+                  </div>
+                  <button type="button" onClick={() => { void mcxOp("rsi", { op: "propose" }, "предложение подготовлено (LLM по урокам памяти)", async () => { await loadRsi(); }); }} disabled={mcxBusy} className="mb-1.5 w-full rounded border border-violet-800/50 px-2 py-1 font-mono text-[9px] text-violet-300/90 transition hover:bg-zinc-800 disabled:opacity-40" title="evidence: уроки памяти + RH-вердикты → черновик улучшения">
+                    + предложить улучшение (по урокам памяти)
+                  </button>
+                  <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Предложения RSI">
+                    {(rsi?.proposals ?? []).slice(0, 6).map((p) => (
+                      <div key={p.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`${p.id} · источник ${p.source} · ${p.evidence}`}>
+                        <span className={`shrink-0 rounded px-1 text-[8px] ${p.status === "PROPOSED" ? "bg-violet-950/60 text-violet-300" : p.status === "ADOPTED" ? "bg-emerald-950/60 text-emerald-400" : p.status === "ROLLED_BACK" ? "bg-zinc-800 text-zinc-500" : "bg-rose-950/60 text-rose-400"}`}>{p.status.slice(0, 4)}</span>
+                        <span className="min-w-0 flex-1 truncate text-zinc-400">{p.title}</span>
+                        {p.status === "PROPOSED" && (
+                          <>
+                            <button type="button" onClick={() => { void mcxOp("rsi", { op: "adopt", id: p.id }, "предложение принято → skills/rsi/", async () => { await loadRsi(); }); }} disabled={mcxBusy} className="shrink-0 text-emerald-400/80 transition hover:text-emerald-300" aria-label={`Принять ${p.id}`}>✓</button>
+                            <button type="button" onClick={() => { void mcxOp("rsi", { op: "reject", id: p.id }, "предложение отклонено", async () => { await loadRsi(); }); }} disabled={mcxBusy} className="shrink-0 text-zinc-600 transition hover:text-rose-400" aria-label={`Отклонить ${p.id}`}>✕</button>
+                          </>
+                        )}
+                        {p.status === "ADOPTED" && (
+                          <button type="button" onClick={() => { void mcxOp("rsi", { op: "rollback", id: p.id }, "откат — артефакт удалён", async () => { await loadRsi(); }); }} disabled={mcxBusy} className="shrink-0 text-amber-400/80 transition hover:text-amber-300" aria-label={`Откатить ${p.id}`}>↩</button>
+                        )}
+                      </div>
+                    ))}
+                    {rsi && rsi.proposals.length === 0 && (
+                      <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">предложений нет — сгенерируйте из уроков памяти</div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </Card>
+
         </section>
 
         {/* Колонка 2: ОЧЕРЕДЬ + ВЕТКИ */}
@@ -1929,8 +2193,15 @@ export default function MissionControl() {
             </CardHeader>
             {branchesOpen && (
               <div id="branch-panel-body" className="flex min-h-0 flex-col">
-                {/* вкладки в стиле браузера */}
-                <div className="flex shrink-0 items-end gap-1 overflow-x-auto border-b border-zinc-800 px-3 pt-2" role="tablist" aria-label="Фильтр ветвей">
+                {/* вкладки в стиле браузере — контейнер relative: на узких экранах tab-полоса
+                    скроллится, правый градиент (pointer-events:none — урок №1) показывает это */}
+                <div className="relative shrink-0">
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-zinc-900 to-transparent md:hidden"
+                    data-testid="branch-tabs-fade"
+                  />
+                  <div className="flex items-end gap-1 overflow-x-auto border-b border-zinc-800 px-3 pt-2 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="tablist" aria-label="Фильтр ветвей">
                   {BRANCH_TABS.map((tb) => {
                     const active = branchTab === tb.key;
                     return (
@@ -1951,6 +2222,7 @@ export default function MissionControl() {
                       </button>
                     );
                   })}
+                  </div>
                 </div>
                 {/* ветки браузера: живые вкладки agent-browser (v0.6.0) */}
                 <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-800/60 bg-black/20 px-3 py-1.5" aria-label="Ветки браузера">
