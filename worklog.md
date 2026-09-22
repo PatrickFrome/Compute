@@ -6228,3 +6228,21 @@ Stage Summary:
 - Секретная гигиена: дерево репо чистое (JWT/sb_secret/vck_/пароли — ноль), секреты живут в /home/z/.a2/ (T1, T2-admin, sandbox-токен, Supabase JWT) и в тексте чата.
 - Инцидент-паттерн подтверждён: Next dev умирает молча между вызовами — лечится перезапуском; рассмотреть watchdog для :3000 аналогично me2-daemon.
 - Следующее: +22 действия к 47, CDP-screencast, M3 Tauri-скелет, SQL-миграция me2_evidence оператором (PGRST205), watchdog для Next dev.
+
+---
+Task ID: R5-BROWSER-BRANCHES-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task, записывай всю систему в github, анализируй ветки браузера» — группа BROWSER_* в шине (ветки браузера как часть системы), 33/47, dev-watchdog.
+
+Work Log:
+- DAEMON v0.6.0 (+8 → 33/47): BROWSER_TABS/OPEN/SNAPSHOT/SCREENSHOT/CLOSE — daemon спавнит agent-browser CLI (ab() c 20s timeout + kill), парсер tab-list («→ [t1] title - url»); WORKER_REAP (принудительный reap), DB_STATS (counts+page_count+journal_mode), TASK_PURGE (EMERGENCY: ARCHIVED, или all_terminal=true). store.ts: LANE_OF/COST_OF +8. Версия 0.6.0, /actions 33/47 (⌘K-реестр подхватил автоматически). Инцидент по пути: MultiEdit случайно выкинул import { join } → поймал до рестарта, восстановил (учебка: bun build не ловит отсутствующие импорты-значения).
+- ЖИВАЯ ПРОВЕРКА ШИНЫ: BROWSER_TABS → t1 распарсен; BROWSER_OPEN example.com → t2 (0.29s, 201); BROWSER_SNAPSHOT t2 → a11y-дерево «Example Domain» (222 chars); BROWSER_SCREENSHOT → download/br-*.png 18002 bytes; BROWSER_CLOSE t2 → remaining 1; DB_STATS (tasks 15, events 402, commands 59); WORKER_REAP OK; TASK_PURGE → purged 3 (архив R4).
+- КОНСОЛЬ: БРАУЗЕР-стрип в панели ВЕТКИ — живые вкладки agent-browser пилюлями (active = приподнята + sky-точка, truncate 26, title=full), авто-загрузка при раскрытии панели, refresh-кнопка (spin), WS-автообновление на BROWSER_TAB_OPENED/CLOSED (через browserRefreshRef; BROWSER_TABS_LISTED сознательно НЕ в триггерах — иначе цикл). Импорт AppWindow.
+- GOLDEN PATH (agent-browser :81): стрип отрисовал t1 при открытии; BROWSER_OPEN из REST → стрип САМ добавил example.com (WS-событие, без reload); BROWSER_CLOSE → стрип сам сжался до t1. Бейдж 33/47 в хедере и футере. Нюанс обнаружен: BROWSER_OPEN переключает активную вкладку общего браузера (daemon и консоль делят одну сессию agent-browser) — задокументировано как ожидаемое поведение automation-браузера.
+- НАДЁЖНОСТЬ: scripts/dev-watchdog.sh — single-instance lock /tmp/dev-watchdog.lock, curl :3000 каждые 15s, при падении pkill next + detached-restart с heap-cap 1024MB + recovery-лог dev-watchdog.log; запущен, жив. Линт 0/0; мобильная 390 scrollWidth=390; скриншоты r5-01, r5-02.
+- GITHUB: git-sync → sandbox/me2-os (ede5c54). Ветки GitHub: 2820 рефов монорепо, наша ветка отдельная.
+
+Stage Summary:
+- Ветки браузера теперь первоклассная часть шины ME2: оператор видит/открывает/закрывает вкладки прямо из Mission Control, daemon может давать задачи агентам с браузерным контекстом (фундамент для browser-группы действий к 47).
+- Инфра-замечание: MultiEdit в этом окружении НЕ атомарен — при фейле части правок применяются; проверять состояние после каждого фейла.
+- Следующее: +14 действий к 47 (агентские tool-фактуры, workspace-операции), CDP-screencast через BROWSER_*-базу, M3 Tauri-скелет, миграция me2_evidence оператором (PGRST205, буфер 245+).
