@@ -51,6 +51,7 @@ type RetryMetrics = { retries: number; with_lesson: { n: number; completed: numb
 type CGData = { ok: boolean; tier: string; generatedAt: string; scanMs: number; files: number; symbols: number; edges: number; externalImports: number; orphans: string[]; topFanIn: { path: string; inbound: number }[]; topFanOut: { path: string; outbound: number }[]; externalTop: { pkg: string; n: number }[]; truncated: boolean };
 type CGImpact = { ok: boolean; file: string; found: boolean; direct: string[]; transitive: string[]; inboundRoot: number; note?: string };
 type OtelData = { ok: boolean; spans: number; dropped: number; ringCap: number; stats: { name: string; n: number; err: number; avgMs: number; maxMs: number }[] };
+type VDData = { ok: boolean; count: number; verdicts: { seq: number; task_id: string | null; at: string; reasons?: string[] }[] };
 type WorktreeData = { ok: boolean; head: string; branch: string; worktrees: { worktrees: { name: string; branch: string; head: string; managed: boolean }[] }; rerere: { enabled: boolean | null; autoUpdate: boolean; cacheEntries: number; inConflict: boolean; remaining: string[] } };
 type RoadmapData = { ok: boolean; verdict: string; done: number; total: number; closedAt: string | null; milestones: { key: string; title: string; status: string; evidence: string; checks: { name: string; pass: boolean }[]; verifiedAt: string }[] };
 type SandboxData = { ok: boolean; sandboxes: { id: string; status: string; provider: string; createdAt: string; head: string; cmds: number; lastCmd: string | null; lastExit: number | null; diskKb?: number }[]; providers: Record<string, string>; snapshots: { file: string; sandboxId: string; bytes: number; sha256: string; createdAt: string }[] };
@@ -1028,6 +1029,7 @@ export default function MissionControl() {
   const [cgOpen, setCgOpen] = useState(false);
   const [cg, setCg] = useState<CGData | null>(null);
   const [otel, setOtel] = useState<OtelData | null>(null);
+  const [vd, setVd] = useState<VDData | null>(null);
   const [wt, setWt] = useState<WorktreeData | null>(null);
   const [cgQuery, setCgQuery] = useState("");
   const [cgImpact, setCgImpact] = useState<CGImpact | null>(null);
@@ -1038,12 +1040,14 @@ export default function MissionControl() {
     try {
       const g = await fetch(`/codegraph?XTransformPort=3041${force ? "&force=1" : ""}`, { cache: "no-store" }).then((r) => r.json());
       if (g?.ok) setCg(g as CGData);
-      const [o, w] = await Promise.all([
+      const [o, w, v] = await Promise.all([
         fetch("/spans?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
         fetch("/worktrees?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch("/verdicts?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
       ]);
       if (o?.ok) setOtel(o as OtelData);
       if (w?.ok) setWt(w as WorktreeData);
+      if (v?.ok) setVd(v as VDData);
     } catch { /* daemon недоступен — панель просто без данных */ }
     finally { setCgBusy(false); }
   }, []);
@@ -1638,6 +1642,14 @@ export default function MissionControl() {
                   >
                     <span className="uppercase tracking-wider text-zinc-600">otel-lite</span>
                     <span>спанов {otel.spans}/{otel.ringCap}</span>
+                    {vd && (
+                      <span
+                        className={vd.count > 0 ? "text-rose-400/90" : "text-zinc-600"}
+                        title="Reward-hacking вердикты (tier-1): finish без реальной работы — no_writes_on_creation_task / instant_finish / empty_result. Подозрение не меняет статус задачи — решает оператор (/verdicts)"
+                      >
+                        вердиктов RH: {vd.count}
+                      </span>
+                    )}
                     {(otel.stats ?? []).slice(0, 3).map((s) => (
                       <span key={s.name} className={s.err ? "text-rose-400/80" : ""}>
                         {s.name} ×{s.n} · ⌀{s.avgMs}ms{s.err ? ` · err ${s.err}` : ""}

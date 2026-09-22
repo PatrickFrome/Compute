@@ -32,7 +32,7 @@ import { roadmapVerdict } from "./src/roadmap";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.17.0";
+const VERSION = "0.18.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);
@@ -151,6 +151,16 @@ const restServer = createServer(async (req, res) => {
 
     // ── R17: LIVE Roadmap M1–M7 (вердикт из реального состояния, evidence в каждой фазе) ──
     if (path === "/roadmap" && req.method === "GET") return json(res, 200, roadmapVerdict());
+
+    // ── R18: reward-hacking вердикты (tier-1: finish без реальной работы) ──
+    if (path === "/verdicts" && req.method === "GET") {
+      const evs = tailEvents(0, 500).filter((e) => e.type === "TASK_REWARD_HACK");
+      const verdicts = evs.slice(-50).map((e) => {
+        try { return { seq: e.seq, task_id: e.task_id, at: e.ts, ...(JSON.parse(e.data) as Record<string, unknown>) }; }
+        catch { return { seq: e.seq, task_id: e.task_id, at: e.ts, raw: e.data.slice(0, 200) }; }
+      });
+      return json(res, 200, { ok: true, count: verdicts.length, verdicts });
+    }
 
     // ── command bus: единственная точка мутаций ──
     if (path === "/commands" && req.method === "POST") {

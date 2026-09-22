@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://arxiv.org",
+    "name": "Benchmarking Reward Hack Detection in Code",
+    "snippet": "Jan 27, 2026 — To study the reward hacking detection behaviors of modern LLMs, We introduced TRACE, a benchmark containing 517 human-verified trajectories ...",
+    "host_name": "arxiv.org",
+    "rank": 0,
+    "date": "Jan 27, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Awesome Reward Hacking in the Era of Large Models",
+    "snippet": "We further synthesize detection , diagnosis, and mitigation strategies across the model lifecycle, and survey reward hacking in LLMs, MLLMs, visual generative ... Read more",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://metr.org",
+    "name": "Recent Frontier Models Are Reward Hacking",
+    "snippet": "Jun 5, 2025 — One challenge with using an LLM to identify reward hacking is that what behavior actually constitutes reward hacking can be surprisingly ...",
+    "host_name": "metr.org",
+    "rank": 2,
+    "date": "Jun 5, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://futuretech.mit.edu",
+    "name": "EvilGenie: A Reward Hacking Benchmark",
+    "snippet": "We measure reward hacking in three ways: held out unit tests, LLM judges, and test file edit detection . We verify these methods against human review and ... Read more",
+    "host_name": "futuretech.mit.edu",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.lesswrong.com",
+    "name": "Quickly Assessing Reward Hacking-like Behavior in LLMs",
+    "snippet": "Jun 4, 2025 — We present a simple eval set of 4 scenarios where we evaluate Anthropic and OpenAI frontier models. We find various degrees of reward ... Read more",
+    "host_name": "www.lesswrong.com",
+    "rank": 4,
+    "date": "Jun 4, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://openreview.net",
+    "name": "Reward Hacking Benchmark: Measuring Exploits in LLM",
+    "snippet": "by K Thaman · Cited by 17 — We introduce the Reward Hacking Benchmark (RHB), a suite of multi-step tasks requiring sequential tool operations with naturalistic shortcut ... Read more",
+    "host_name": "openreview.net",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

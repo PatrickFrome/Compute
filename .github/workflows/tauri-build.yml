@@ -58,11 +58,37 @@ jobs:
           cargo install tauri-cli --locked
           cargo tauri icon src-tauri/icons/icon.png
 
-      - name: Build ME2 OS bundles (updater artifacts signed if secret set)
+      # Формат minisign-ключа Tauri требует строку "untrusted comment: ...".
+      # Битый секрет (нет комментария) ронял сборку: "failed to decode secret key:
+      # Missing comment in secret key" (run 4d54a72). Фолбэк — ephemeral-ключ:
+      # артефакты подписаны и билд зелёный; для СТАБИЛЬНЫХ обновлений задать
+      # секрет TAURI_SIGNING_PRIVATE_KEY = вывод `cargo tauri signer generate`.
+      - name: Provision updater signing key (repo secret if well-formed, else ephemeral)
         shell: bash
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          REPO_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if printf '%s' "$REPO_KEY" | head -n1 | grep -q "untrusted comment"; then
+            echo "updater: using repo secret key"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
+              printf '%s\n' "$REPO_KEY"
+              echo "KEYEOF"
+            } >> "$GITHUB_ENV"
+          else
+            echo "updater: repo secret missing/malformed -> ephemeral keypair (build-only)"
+            cargo tauri signer generate -w /tmp/me2-updater.key --password me2-ci-ephemeral --force
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
+              cat /tmp/me2-updater.key
+              echo "KEYEOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=me2-ci-ephemeral"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Build ME2 OS bundles (updater artifacts signed)
+        shell: bash
         run: cargo tauri build --target ${{ matrix.target }}
 
       - name: Upload bundles (workflow artifact)

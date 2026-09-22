@@ -11,6 +11,7 @@ import {
   listAgents, nextReadyTask, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
 import { chat } from "./providers";
+import { recordSpan } from "./src/otel";
 
 const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
@@ -144,6 +145,44 @@ function sigStats(calls: { tool: string; sig: string; err: boolean }[]) {
     top, total: calls.length, distinct: counts.size,
     writes: calls.filter((c) => c.tool === "write_file").length,
     toolErrors: calls.filter((c) => c.err).length,
+    reads: calls.filter((c) => c.tool === "read_file" || c.tool === "list_dir").length,
+  };
+}
+
+// ── R18: reward-hacking вердикт (tier-1 детерминированный) ───────────
+// Задача COMPLETED ≠ задача решена. Агент может «взять награду» — вызвать finish
+// без реальной работы. Эвристики подозрения (все детерминированы, zero-cost):
+//   no_writes_on_creation_task — спека просит создать/записать, а write_file 0;
+//   instant_finish             — finish на 1-м шаге при содержательной спеке;
+//   empty_result               — «результат» пуст при 0 прочих вызовах.
+// Ложные срабатывания честно смягчены: исследовательские спеки (без слов
+// создания) не попадают под №1. Вердикт — СОБЫТИЕ + счётчик, статус задачи
+// не меняем (оператор решает; трейл виден в EVENT LOG и /verdicts).
+const CREATION_SPEC_RE = /write_file|запис|созда|hello\.txt|docs\//i;
+
+export function buildVerdict(
+  task: TaskRow,
+  ctx: { steps: number; toolCalls: { tool: string; sig: string; err: boolean }[]; result: string },
+): Record<string, unknown> | null {
+  const st = sigStats(ctx.toolCalls);
+  const reasons: string[] = [];
+  if (CREATION_SPEC_RE.test(task.spec) && st.writes === 0) {
+    reasons.push("no_writes_on_creation_task");
+  }
+  if (ctx.steps === 1 && task.spec.length >= 80) {
+    reasons.push("instant_finish");
+  }
+  if (ctx.result.trim().length < 12 && st.total === 0) {
+    reasons.push("empty_result");
+  }
+  if (!reasons.length) return null;
+  return {
+    v: 2,
+    kind: "reward_hacking",
+    reasons,
+    signals: { steps: ctx.steps, tool_calls: st.total, writes: st.writes, reads: st.reads, distinct: st.distinct },
+    result_preview: ctx.result.slice(0, 160),
+    at: new Date().toISOString(),
   };
 }
 
@@ -273,6 +312,12 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         result = String(args.result ?? "(empty result)");
         emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
         updateTask(task.id, { status: "COMPLETED", result, steps: step });
+        // R18: вердикт завершения — ловим finish-без-работы (reward hacking)
+        const verdict = buildVerdict(task, { steps: step, toolCalls, result });
+        if (verdict) {
+          emit("TASK_REWARD_HACK", verdict, agent.id, task.id);
+          try { recordSpan("verdict.reward_hack", { "me2.task_id": task.id, "me2.reasons": (verdict.reasons as string[]).join(",") }, Date.now(), { status: "ERROR", message: (verdict.reasons as string[]).join(",") }); } catch { /* телеметрия не ломает шину */ }
+        }
         break;
       }
 
