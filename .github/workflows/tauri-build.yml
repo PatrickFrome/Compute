@@ -1,0 +1,133 @@
+name: tauri-build
+
+# M3 closure: ME2 OS shell собирается в CI на 3 ОС (в dev-песочнице нет Rust).
+# Sidecar me2-daemon компилируется bun'ом в standalone-бинарник под target-triple.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [sandbox/me2-os]
+    paths:
+      - "src-tauri/**"
+      - "mini-services/me2-daemon/**"
+      - ".github/workflows/tauri-build.yml"
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-shell:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Linux system deps (webkit2gtk-4.1)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Build daemon sidecar (bun --compile → standalone)
+        shell: bash
+        run: |
+          cd mini-services/me2-daemon
+          bun install --frozen-lockfile || bun install
+          EXT="${{ runner.os == 'Windows' && '.exe' || '' }}"
+          bun build --compile index.ts --outfile "../../src-tauri/binaries/me2-daemon-${{ matrix.target }}${EXT}"
+
+      - name: Generate icons from source (cargo tauri icon)
+        shell: bash
+        run: |
+          cargo install tauri-cli --locked
+          cargo tauri icon src-tauri/icons/icon.png
+
+      - name: Build ME2 OS bundles (updater artifacts signed if secret set)
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --target ${{ matrix.target }}
+
+      - name: Upload bundles (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: me2-os-${{ matrix.os }}
+          path: |
+            src-tauri/target/*/release/bundle/**
+            src-tauri/target/release/bundle/**
+          if-no-files-found: warn
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-shell
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Generate latest.json (updater manifest)
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, glob, os, datetime
+          version = json.load(open("src-tauri/tauri.conf.json"))["version"]
+          # target-triple из artifact-путей → ключи платформ updater
+          plat = {
+            "x86_64-unknown-linux-gnu": "linux-x86_64",
+            "aarch64-apple-darwin": "darwin-aarch64",
+            "x86_64-pc-windows-msvc": "windows-x86_64",
+          }
+          base = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{os.environ['GITHUB_REF_NAME']}"
+          platforms = {}
+          for sig in glob.glob("artifacts/**/*.sig", recursive=True):
+            d = os.path.dirname(sig)
+            for triple, key in plat.items():
+              if triple in sig:
+                # updater-артефакт: подписанный .tar.gz/.zip рядом с .sig
+                for ext in (".tar.gz", ".zip", ".AppImage.tar.gz", ".msi.zip", ".nsis.zip"):
+                  cand = [p for p in glob.glob(d + "/*" + ext) if p + ".sig" == sig]
+                  if cand:
+                    name = os.path.basename(cand[0]).replace(triple, "x86_64-pc-windows-msvc" if "windows" in key else triple)
+                    platforms[key] = {"signature": open(sig).read().strip(), "url": f"{base}/{name}"}
+                    break
+          assert platforms, "no updater artifacts found"
+          json.dump({
+            "version": version,
+            "notes": f"ME2 OS {version}",
+            "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "platforms": platforms,
+          }, open("latest.json", "w"), indent=2)
+          print("latest.json:", json.dumps(platforms, indent=2))
+          PY
+      - name: Create GitHub Release with bundles + latest.json
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            latest.json
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.dmg
+            artifacts/**/*.msi
+            artifacts/**/*.nsis.zip
+            artifacts/**/*.sig
+            artifacts/**/latest.json

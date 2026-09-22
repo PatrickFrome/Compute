@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "```json\n{\n  \"pass\": true,\n  \"findings\": [\n    \"Текст полностью в пределах экрана, отступы слева/справа достаточны (≈16-20px)\",\n    \"Вёрстка строго одноколоночная, ширина контента адаптирована под 390px, горизонтальный скролл отсутствует\",\n    \"Панели (агенты, CDP, превью) имеют читаемый контраст, иерархия заголовков/меток сохранена, статусные бейджи (IDLE) различимы\"\n  ]\n}\n```",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790091353,
+  "id": "20260922233551e470508c443142fb",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260922233551e470508c443142fb",
+  "usage": {
+    "completion_tokens": 132,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 468,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 600
+  }
+}

@@ -1,0 +1,29 @@
+[package]
+name = "me2-shell"
+version = "0.17.0"
+description = "ME2 OS — Tauri 2 shell: управляемое окно Mission Control + sidecar me2-daemon + self-update"
+authors = ["ME2 OS"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# Tauri 2 требует lib-таргет (mobile-ready паттерн); desktop использует run() из lib
+[lib]
+name = "me2_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"            # sidecar me2-daemon (externalBin)
+tauri-plugin-updater = "2"          # A/B self-update — заменяет ~7400 строк Resilience Plane
+tauri-plugin-single-instance = "2"  # один экземпляр шелла
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

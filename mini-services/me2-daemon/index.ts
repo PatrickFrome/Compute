@@ -23,13 +23,18 @@ import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from ".
 import { initEvidence, evidenceStatus } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
-import { otelStatus, toOtlp, onDaemonEvent } from "./src/otel";
+import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
 import { listWorktrees, repoHead, rerereStatus, rerereEnable, rerereRemaining } from "./src/worktrees";
+import {
+  listSandboxes, listSnapshots, createSandbox, execInSandbox, snapshotSandbox, restoreSnapshot, destroySandbox, sandboxCaps,
+} from "./src/sandbox";
+import { roadmapVerdict } from "./src/roadmap";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.16.0";
+const VERSION = "0.17.0";
 const BOOT_TS = nowIso();
+const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
 
@@ -124,6 +129,28 @@ const restServer = createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
       return res.end(JSON.stringify(toOtlp(limit)));
     }
+
+    // ── R17: M5 Sandbox Plane (create/exec/snapshot/restore/destroy — op-switch) ──
+    if (path === "/sandboxes" && req.method === "GET") {
+      return json(res, 200, { ok: true, ...listSandboxes(), snapshots: listSnapshots().snapshots });
+    }
+    if (path === "/sandbox" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      try {
+        if (op === "create") return json(res, 201, { ok: true, sandbox: createSandbox(String(body.id ?? "")) });
+        if (op === "exec") return json(res, 200, { ok: true, run: execInSandbox(String(body.id ?? ""), String(body.cmd ?? ""), Number(body.timeoutSec ?? 30)) });
+        if (op === "snapshot") return json(res, 200, { ok: true, snapshot: snapshotSandbox(String(body.id ?? "")) });
+        if (op === "restore") return json(res, 201, { ok: true, sandbox: restoreSnapshot(String(body.snapshotFile ?? ""), body.newId ? String(body.newId) : undefined) });
+        if (op === "destroy") return json(res, 200, { ok: true, ...destroySandbox(String(body.id ?? "")) });
+        return json(res, 400, { ok: false, error: "op_required: create|exec|snapshot|restore|destroy" });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: (e as Error).message });
+      }
+    }
+
+    // ── R17: LIVE Roadmap M1–M7 (вердикт из реального состояния, evidence в каждой фазе) ──
+    if (path === "/roadmap" && req.method === "GET") return json(res, 200, roadmapVerdict());
 
     // ── command bus: единственная точка мутаций ──
     if (path === "/commands" && req.method === "POST") {
@@ -332,6 +359,8 @@ setInterval(() => {
 
 startMasterLoop();
 initEvidence();
+// boot-span: телеметрия холодного старта (M7-проверка «ring живой» перестаёт быть ложной после рестарта)
+try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-daemon" }, BOOT_T0); } catch { /* телеметрия не ломает старт */ }
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`));

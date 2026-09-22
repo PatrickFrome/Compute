@@ -52,6 +52,9 @@ type CGData = { ok: boolean; tier: string; generatedAt: string; scanMs: number; 
 type CGImpact = { ok: boolean; file: string; found: boolean; direct: string[]; transitive: string[]; inboundRoot: number; note?: string };
 type OtelData = { ok: boolean; spans: number; dropped: number; ringCap: number; stats: { name: string; n: number; err: number; avgMs: number; maxMs: number }[] };
 type WorktreeData = { ok: boolean; head: string; branch: string; worktrees: { worktrees: { name: string; branch: string; head: string; managed: boolean }[] }; rerere: { enabled: boolean | null; autoUpdate: boolean; cacheEntries: number; inConflict: boolean; remaining: string[] } };
+type RoadmapData = { ok: boolean; verdict: string; done: number; total: number; closedAt: string | null; milestones: { key: string; title: string; status: string; evidence: string; checks: { name: string; pass: boolean }[]; verifiedAt: string }[] };
+type SandboxData = { ok: boolean; sandboxes: { id: string; status: string; provider: string; createdAt: string; head: string; cmds: number; lastCmd: string | null; lastExit: number | null; diskKb?: number }[]; providers: Record<string, string>; snapshots: { file: string; sandboxId: string; bytes: number; sha256: string; createdAt: string }[] };
+type SandboxRun = { id: string; cmd: string; exitCode: number; ok: boolean; ms: number; stdout: string; stderr: string; truncated: boolean; limit: string };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1072,6 +1075,59 @@ export default function MissionControl() {
 
   useEffect(() => { if (cgOpen) void loadCg(); }, [cgOpen, loadCg]);
 
+  // R17: LIVE Roadmap M1–M7 (evidence-вердикт из реального состояния) + Sandbox Plane (M5)
+  const [rmOpen, setRmOpen] = useState(true);
+  const [rm, setRm] = useState<RoadmapData | null>(null);
+  const [rmBusy, setRmBusy] = useState(false);
+  const loadRm = useCallback(async () => {
+    setRmBusy(true);
+    try {
+      const r = await fetch("/roadmap?XTransformPort=3041", { cache: "no-store" }).then((res) => res.json());
+      if (r?.ok) setRm(r as RoadmapData);
+    } catch { /* daemon недоступен — панель без данных */ }
+    finally { setRmBusy(false); }
+  }, []);
+
+  const [sbOpen, setSbOpen] = useState(false);
+  const [sb, setSb] = useState<SandboxData | null>(null);
+  const [sbBusy, setSbBusy] = useState(false);
+  const [sbId, setSbId] = useState("");
+  const [sbCmd, setSbCmd] = useState("");
+  const [sbRun, setSbRun] = useState<SandboxRun | null>(null);
+  const loadSb = useCallback(async () => {
+    try {
+      const r = await fetch("/sandboxes?XTransformPort=3041", { cache: "no-store" }).then((res) => res.json());
+      if (r?.ok) setSb(r as SandboxData);
+    } catch { /* daemon недоступен */ }
+  }, []);
+  const sbOp = useCallback(async (op: string, extra: Record<string, unknown> = {}, okMsg?: string) => {
+    setSbBusy(true);
+    try {
+      const res = await fetch("/sandbox?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op, ...extra }),
+      }).then((r) => r.json());
+      if (res?.ok) {
+        if (op === "exec" && res.run) setSbRun(res.run as SandboxRun);
+        if (okMsg) toast({ title: okMsg });
+      } else {
+        toast({ title: `sandbox ${op} ✗`, description: String(res?.error ?? "ошибка"), variant: "destructive" });
+      }
+      await loadSb();
+    } catch {
+      toast({ title: "sandbox ✗", description: "daemon недоступен", variant: "destructive" });
+    } finally { setSbBusy(false); }
+  }, [loadSb, toast]);
+
+  useEffect(() => { if (rmOpen) void loadRm(); }, [rmOpen, loadRm]);
+  useEffect(() => {
+    if (sbOpen) {
+      void loadSb();
+      const iv = setInterval(() => void loadSb(), 10_000);
+      return () => clearInterval(iv);
+    }
+  }, [sbOpen, loadSb]);
+
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
   }, [sendCommand]);
@@ -1586,6 +1642,234 @@ export default function MissionControl() {
                       <span key={s.name} className={s.err ? "text-rose-400/80" : ""}>
                         {s.name} ×{s.n} · ⌀{s.avgMs}ms{s.err ? ` · err ${s.err}` : ""}
                       </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* R17: РОАДМАП M1–M7 — live-вердикт из реального состояния (evidence в каждой фазе) */}
+          <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
+            <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+              <button
+                type="button"
+                onClick={() => setRmOpen((o) => !o)}
+                aria-expanded={rmOpen}
+                aria-controls="roadmap-body"
+                className="flex min-w-0 items-center gap-2 text-left"
+              >
+                <ListChecks className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+                <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                  РОАДМАП M1–M7{rm ? ` · ${rm.done}/${rm.total}` : ""}
+                </span>
+              </button>
+              <span className="flex shrink-0 items-center gap-2">
+                {rm && (
+                  <span
+                    className={`font-mono text-[10px] ${rm.done === rm.total ? "text-emerald-400" : "text-amber-400/90"}`}
+                    title="Вердикт вычисляется из живых подсистем (bus/codegraph/src-tauri/rerere/sandbox/worker/otel)"
+                  >
+                    {rm.done === rm.total ? "ЗАКРЫТ" : "в работе"}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void loadRm()}
+                  disabled={rmBusy}
+                  title="Перевычислить вердикт"
+                  aria-label="Перевычислить вердикт роадмапа"
+                  className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${rmBusy ? "animate-spin" : ""}`} aria-hidden />
+                </button>
+                <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${rmOpen ? "" : "-rotate-90"}`} aria-hidden />
+              </span>
+            </CardHeader>
+            {rmOpen && (
+              <div id="roadmap-body" className="space-y-1.5 p-3" role="list" aria-label="Фазы роадмапа M1–M7">
+                {(rm?.milestones ?? []).map((m) => (
+                  <div key={m.key} className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5" role="listitem">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.status === "DONE" ? "bg-emerald-400" : m.status === "PARTIAL" ? "bg-amber-400" : "bg-rose-500"}`}
+                        aria-hidden
+                      />
+                      <span className="shrink-0 font-mono text-[10px] font-semibold text-zinc-300">{m.key}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-400" title={m.title}>{m.title}</span>
+                      <span
+                        className={`shrink-0 font-mono text-[9px] uppercase ${m.status === "DONE" ? "text-emerald-500/90" : m.status === "PARTIAL" ? "text-amber-500/90" : "text-rose-400"}`}
+                      >
+                        {m.status}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 pl-3.5 font-mono text-[9px] leading-relaxed text-zinc-600" title={m.evidence}>
+                      {m.evidence}
+                    </div>
+                  </div>
+                ))}
+                {!rm && (
+                  <div className="px-2 py-3 text-center font-mono text-[10px] text-zinc-600">
+                    {rmBusy ? "вычисляю вердикт…" : "daemon недоступен"}
+                  </div>
+                )}
+                {rm?.closedAt && (
+                  <div className="rounded-md border border-emerald-900/60 bg-emerald-950/30 px-2 py-1.5 text-center font-mono text-[10px] text-emerald-400">
+                    ✓ РОАДМАП ЗАКРЫТ · {new Date(rm.closedAt).toLocaleString("ru-RU")}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          {/* R17: САНДБОКС (M5) — изолированные среды: create/exec/snapshot/restore/destroy */}
+          <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
+            <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+              <button
+                type="button"
+                onClick={() => setSbOpen((o) => !o)}
+                aria-expanded={sbOpen}
+                aria-controls="sandbox-body"
+                className="flex min-w-0 items-center gap-2 text-left"
+              >
+                <Boxes className="h-4 w-4 shrink-0 text-cyan-400" aria-hidden />
+                <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                  САНДБОКС{sb ? ` · ${sb.sandboxes.length}` : ""}
+                </span>
+              </button>
+              <span className="flex shrink-0 items-center gap-2">
+                {sb && (
+                  <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="local: git worktree + prlimit + tar.gz sha256 · vercel: нужен SANDBOX_VERCEL_TOKEN">
+                    local:{sb.providers.local === "READY" ? "✓" : "?"}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void loadSb()}
+                  title="Обновить список песочниц"
+                  aria-label="Обновить список песочниц"
+                  className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${sbBusy ? "animate-spin" : ""}`} aria-hidden />
+                </button>
+                <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${sbOpen ? "" : "-rotate-90"}`} aria-hidden />
+              </span>
+            </CardHeader>
+            {sbOpen && (
+              <div id="sandbox-body" className="space-y-3 p-3">
+                <form
+                  onSubmit={(e) => { e.preventDefault(); const id = sbId.trim().toLowerCase(); if (id) void sbOp("create", { id }, `песочница ${id} создана`); }}
+                  className="flex gap-2"
+                >
+                  <Input
+                    value={sbId}
+                    onChange={(e) => setSbId(e.target.value)}
+                    placeholder="имя: r18-fix (a-z0-9._-)"
+                    className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]"
+                    aria-label="Имя новой песочницы"
+                  />
+                  <Button type="submit" size="sm" variant="outline" disabled={sbBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]">
+                    <Plus className="mr-1 h-3 w-3" aria-hidden /> создать
+                  </Button>
+                </form>
+
+                <div className="space-y-1.5" aria-label="Активные песочницы">
+                  {(sb?.sandboxes ?? []).map((s) => (
+                    <div key={s.id} className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5">
+                      <div className="flex items-center gap-2 font-mono text-[10px]">
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.status === "READY" ? "bg-emerald-400" : s.status === "RESTORED" ? "bg-cyan-400" : "bg-rose-500"}`} aria-hidden />
+                        <span className="shrink-0 font-semibold text-zinc-300">{s.id}</span>
+                        <span className="text-zinc-600" title={`HEAD ${s.head} · ${s.status}`}>{s.head}</span>
+                        <span className="text-zinc-600">· cmds {s.cmds}</span>
+                        {typeof s.diskKb === "number" && <span className="text-zinc-600">· {(s.diskKb / 1024).toFixed(1)} МБ</span>}
+                        <span className="ml-auto flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void sbOp("snapshot", { id: s.id }, `снапшот ${s.id} готов`)}
+                            disabled={sbBusy}
+                            title="tar.gz + sha256 (без .git/node_modules)"
+                            aria-label={`Снапшот песочницы ${s.id}`}
+                            className="rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40"
+                          >
+                            снап
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { if (confirm(`Уничтожить песочницу ${s.id}? Снапшоты останутся.`)) void sbOp("destroy", { id: s.id }, `песочница ${s.id} уничтожена`); }}
+                            disabled={sbBusy}
+                            title="git worktree remove (снапшоты остаются)"
+                            aria-label={`Уничтожить песочницу ${s.id}`}
+                            className="rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-rose-400/90 transition hover:bg-zinc-800 disabled:opacity-40"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                  {sb && sb.sandboxes.length === 0 && (
+                    <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">
+                      пусто — создайте песочницу для изолированного запуска команд
+                    </div>
+                  )}
+                </div>
+
+                {(sb?.sandboxes.length ?? 0) > 0 && (
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); const id = sb.sandboxes[0]?.id; const cmd = sbCmd.trim(); if (id && cmd) { void sbOp("exec", { id, cmd, timeoutSec: 30 }); setSbCmd(""); } }}
+                    className="flex gap-2"
+                  >
+                    <Input
+                      value={sbCmd}
+                      onChange={(e) => setSbCmd(e.target.value)}
+                      placeholder={`exec в ${sb.sandboxes[0].id}: bun run lint | git status | …`}
+                      className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]"
+                      aria-label="Команда для исполнения в первой песочнице"
+                    />
+                    <Button type="submit" size="sm" variant="outline" disabled={sbBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]">
+                      <Play className="mr-1 h-3 w-3" aria-hidden /> run
+                    </Button>
+                  </form>
+                )}
+
+                {sbRun && (
+                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 font-mono text-[10px]" aria-live="polite">
+                    <div className="mb-1 flex items-center gap-2 text-zinc-400">
+                      <span className={sbRun.ok ? "text-emerald-400" : "text-rose-400"}>exit {sbRun.exitCode}</span>
+                      <span className="text-zinc-600">· {sbRun.ms}мс · {sbRun.limit}</span>
+                    </div>
+                    <div className="max-h-28 overflow-y-auto whitespace-pre-wrap text-zinc-500 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                      {sbRun.stdout || "(stdout пуст)"}
+                      {sbRun.stderr && <div className="mt-1 text-rose-400/70">{sbRun.stderr}</div>}
+                    </div>
+                  </div>
+                )}
+
+                {(sb?.snapshots.length ?? 0) > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[9px] uppercase tracking-wider text-zinc-600">снапшоты (durable)</div>
+                    {(sb?.snapshots ?? []).slice(0, 4).map((sn) => (
+                      <div key={sn.file} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px] text-zinc-500">
+                        <span className="min-w-0 flex-1 truncate" title={sn.file}>{sn.file.split("/").pop()}</span>
+                        <span className="shrink-0 text-zinc-600">{(sn.bytes / 1048576).toFixed(1)} МБ</span>
+                        <button
+                          type="button"
+                          onClick={() => void sbOp("restore", { snapshotFile: sn.file }, `восстановлено в новую песочницу`)}
+                          disabled={sbBusy}
+                          title="Распаковать в новую песочницу (plain copy)"
+                          className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40"
+                        >
+                          restore
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {sb && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-zinc-600" title="Провайдеры плоскости">
+                    {Object.entries(sb.providers).map(([k, v]) => (
+                      <span key={k}><span className="text-zinc-500">{k}</span> = {v}</span>
                     ))}
                   </div>
                 )}
