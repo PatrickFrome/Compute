@@ -46,7 +46,7 @@ type Task = {
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
   error: string | null; reflection: string | null; created_at: string; updated_at: string;
 };
-type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; source?: string; at?: string } };
+type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; source?: string; at?: string }; signals?: { loop_top?: number; tool_calls?: number; distinct?: number; writes?: number; tool_errors?: number; parse_fails?: number } };
 type RetryMetrics = { retries: number; with_lesson: { n: number; completed: number; rate: number | null }; without_lesson: { n: number; completed: number; rate: number | null } };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
@@ -397,7 +397,17 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
             (() => {
               const color = BRANCH_COLOR[hover.t.status] ?? "#a1a1aa";
               const kids = tasks.filter((x) => x.parent_id === hover.t.id).length;
-              const above = hover.top > 110;
+              // R12: адаптивный порог above — большие tooltip-ы (рефлексия+сигналы+llm-блок) обрезались
+              // вверху вьюпорта при фиксированном пороге 110; оцениваем фактическую высоту контента
+              let estH = 96;
+              if (hover.t.reflection) {
+                try {
+                  const rr = JSON.parse(hover.t.reflection) as Reflection;
+                  if (rr.cause) estH += 100;
+                  if (rr.llm?.lesson) estH += 88;
+                } catch { /* без оценки — базовый порог */ }
+              }
+              const above = hover.top > estH + 16;
               return (
                 <div
                   role="tooltip"
@@ -433,6 +443,9 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
                       workspace_path: "путь workspace",
                       protocol_violation: "нарушение JSON-протокола",
                       runtime_error: "ошибка шага",
+                      step_loop: "цикл действий",
+                      context_overflow: "переполнение контекста",
+                      task_drift: "дрейф задачи",
                     };
                     return (
                       <>
@@ -443,6 +456,14 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
                               <span className="rounded bg-amber-500/15 px-1 normal-case text-amber-300">{CAUSE_RU[r.cause] ?? r.cause}</span>
                             </div>
                             <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-300">{r.what}</div>
+                            {r.signals ? (
+                              <div className="mt-0.5 font-mono text-[8.5px] leading-snug text-amber-500/70">
+                                вызовы {r.signals.tool_calls ?? 0} · уник. {r.signals.distinct ?? 0} · записей {r.signals.writes ?? 0}
+                                {(r.signals.loop_top ?? 0) > 0 || (r.signals.tool_errors ?? 0) > 0 || (r.signals.parse_fails ?? 0) > 0
+                                  ? ` · аномалии: цикл×${r.signals.loop_top ?? 0} инстр-ошибки×${r.signals.tool_errors ?? 0} репарс×${r.signals.parse_fails ?? 0}`
+                                  : null}
+                              </div>
+                            ) : null}
                             <div className="mt-0.5 text-[9.5px] leading-snug text-emerald-300/90">↳ {r.hint}</div>
                           </div>
                         ) : null}

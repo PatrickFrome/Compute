@@ -125,18 +125,67 @@ function extractJson(text: string): { thought?: string; action?: { tool?: string
 
 const running = new Set<string>();
 
+export type ReflectCtx = {
+  toolCalls?: { tool: string; sig: string; err: boolean }[];
+  parseFails?: number;
+};
+
+const OVERFLOW_PATTERNS = [
+  "context length", "context_length", "maximum context", "token limit", "max_tokens",
+  "payload too large", "too large", "413",
+];
+
+function sigStats(calls: { tool: string; sig: string; err: boolean }[]) {
+  const counts = new Map<string, number>();
+  for (const c of calls) counts.set(c.sig, (counts.get(c.sig) ?? 0) + 1);
+  let top: { sig: string; n: number } | null = null;
+  for (const [sig, n] of counts) if (!top || n > top.n) top = { sig, n };
+  return {
+    top, total: calls.length, distinct: counts.size,
+    writes: calls.filter((c) => c.tool === "write_file").length,
+    toolErrors: calls.filter((c) => c.err).length,
+  };
+}
+
 /** Рефлексия провала (паттерн Reflexion, tier-1 детерминированный): диагноз причины + урок для повтора.
+ *  8 режимов сбоев (research/2026/R12-FAILURE-MODES-RESEARCH.md): budget_exhausted, provider_unavailable,
+ *  workspace_path, protocol_violation, runtime_error + step_loop, task_drift, context_overflow.
  *  Пишется в tasks.reflection при FAILED; TASK_RETRY-потомок получает её первым сообщением —
  *  эпизодическая память, направляющая следующую попытку (research/2026/R9-REFLECTION-RESEARCH.md §1). */
-export function buildReflection(task: TaskRow, errMsg: string): string {
+export function buildReflection(task: TaskRow, errMsg: string, ctx?: ReflectCtx): string {
   const e = errMsg.toLowerCase();
+  const st = sigStats(ctx?.toolCalls ?? []);
+  const parseFails = ctx?.parseFails ?? 0;
+  const loop = st.top && st.top.n >= 3 ? st.top : null;
+  const drift = st.total >= 6 && st.writes === 0 && st.distinct >= 4;
+  const overflow = OVERFLOW_PATTERNS.some((p) => e.includes(p));
+
   let cause = "runtime_error";
   let what = "Задача упала с исключением на шаге агента.";
   let hint = "Повторите задачу (TASK_RETRY добавляет +2 шага) — ретрай получит эту рефлексию как контекст.";
-  if (errMsg.includes("max_steps_exhausted")) {
-    cause = "budget_exhausted";
-    what = `Агент израсходовал все ${task.max_steps} шагов, не вызвав finish.`;
-    hint = "Раздробите спецификацию на подзадачи; ретрай даёт +2 шага — используйте их на finish, а не на новые изыскания.";
+
+  if (overflow) {
+    cause = "context_overflow";
+    what = "Контекст или полезная нагрузка переполнены (паттерн в тексте ошибки провайдера).";
+    hint = "Режьте объём данных в шагах: не читайте большие файлы целиком, дробите задачу на подзадачи; ретрай получит этот урок.";
+  } else if (errMsg.includes("max_steps_exhausted")) {
+    if (parseFails >= 2) {
+      cause = "protocol_violation";
+      what = `Модель ${parseFails} раз(а) нарушила JSON-протокол шага — шаги ушли на репарс вместо работы.`;
+      hint = "Смените модель агента (AGENT_MODEL) или упростите спецификацию; ретрай на той же модели повторит путь.";
+    } else if (loop) {
+      cause = "step_loop";
+      what = `Агент зациклился: действие «${loop.sig.slice(0, 80)}» повторилось ${loop.n} раз из ${st.total} вызовов — шаги без прогресса.`;
+      hint = "Цикл = спецификация не даёт критерия завершения либо данные не меняют решение. Конкретизируйте артефакт и условие готовности; ретрай получит этот урок.";
+    } else if (drift) {
+      cause = "task_drift";
+      what = `Дрейф: ${st.total} различных действий и ни одной записи (write_file) — агент исследует, но не производит результат.`;
+      hint = "Сузьте цель: опишите в спецификации конкретный артефакт и критерий готовности; ретрай получит этот урок.";
+    } else {
+      cause = "budget_exhausted";
+      what = `Агент израсходовал все ${task.max_steps} шагов, не вызвав finish.`;
+      hint = "Раздробите спецификацию на подзадачи; ретрай даёт +2 шага — используйте их на finish, а не на новые изыскания.";
+    }
   } else if (e.includes("fetch failed") || e.includes("timeout") || e.includes("econnrefused") || e.includes("provider") || e.includes("socket")) {
     cause = "provider_unavailable";
     what = "Провайдер LLM недоступен или ответил таймаутом на шаге агента.";
@@ -149,10 +198,19 @@ export function buildReflection(task: TaskRow, errMsg: string): string {
     cause = "protocol_violation";
     what = "Модель систематически нарушала JSON-протокол шага (контекст переполнен или модель слаба).";
     hint = "Смените модель агента (AGENT_MODEL) или упростите спецификацию; ретрай на той же модели повторит путь.";
+  } else if (loop) {
+    cause = "step_loop";
+    what = `Агент зациклился (${loop.n} повторов «${loop.sig.slice(0, 60)}»), после чего шаг упал с исключением.`;
+    hint = "Цикл + сбой: проверьте, что спецификация даёт агенту способ выйти из повторов; ретрай получит этот урок.";
+  } else if (drift) {
+    cause = "task_drift";
+    what = `Дрейф: ${st.total} действий без единой записи, затем исключение на шаге.`;
+    hint = "Сузьте цель спецификации до конкретного артефакта; ретрай получит этот урок.";
   }
   return JSON.stringify({
-    v: 1, cause, what, hint,
+    v: 2, cause, what, hint,
     error: errMsg.slice(0, 300), steps: task.steps, max_steps: task.max_steps,
+    signals: { loop_top: loop?.n ?? 0, tool_calls: st.total, distinct: st.distinct, writes: st.writes, tool_errors: st.toolErrors, parse_fails: parseFails },
     at: new Date().toISOString(),
   });
 }
@@ -188,6 +246,9 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
     messages.push({ role: "user", content: memory });
     emit("TASK_LEASED", { retry_memory: true, parent: task.parent_id }, agent.id, task.id);
   }
+  // сигналы для tier-1 рефлексии (R12): сигнатуры вызовов инструментов + репарсы
+  const toolCalls: { tool: string; sig: string; err: boolean }[] = [];
+  let parseFails = 0;
 
   try {
     let result: string | null = null;
@@ -196,6 +257,7 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       const reply = await chat(agent.model, messages, { temperature: 0.4 });
       const parsed = extractJson(reply);
       if (!parsed?.action?.tool) {
+        parseFails++;
         emit("STEP_DONE", { step, parse: "retry", raw: reply.slice(0, 300) }, agent.id, task.id);
         messages.push({ role: "assistant", content: reply.slice(0, 2000) });
         messages.push({ role: "user", content: `observation: формат неверен. Ответь РОВНО ОДНИМ JSON-объектом вида {"thought":"...","action":{"tool":"...","args":{...}}}` });
@@ -204,6 +266,8 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       const tool = parsed.action.tool;
       const args = parsed.action.args ?? {};
       emit("TOOL_CALL", { step, tool, args: JSON.stringify(args).slice(0, 500), thought: parsed.thought ?? "" }, agent.id, task.id);
+      const callRec = { tool, sig: `${tool}:${JSON.stringify(args).slice(0, 200)}`, err: false };
+      toolCalls.push(callRec);
 
       if (tool === "finish") {
         result = String(args.result ?? "(empty result)");
@@ -213,19 +277,22 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       }
 
       const observation = await execTool(tool, args, task.id);
+      callRec.err = observation.startsWith("ERROR:");
       emit("TOOL_RESULT", { step, tool, output: observation.slice(0, 1200) }, agent.id, task.id);
       messages.push({ role: "assistant", content: reply.slice(0, 2000) });
       messages.push({ role: "user", content: `observation (${tool}): ${observation}` });
       updateTask(task.id, { steps: step });
     }
     if (result === null) {
-      const refl = buildReflection(task, "max_steps_exhausted");
+      const refl = buildReflection(task, "max_steps_exhausted", { toolCalls, parseFails });
       updateTask(task.id, { status: "FAILED", error: "max_steps_exhausted", reflection: refl });
-      emit("TASK_FAILED", { error: "max_steps_exhausted", cause: "budget_exhausted" }, agent.id, task.id);
+      let cause: string | undefined;
+      try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
+      emit("TASK_FAILED", { error: "max_steps_exhausted", cause }, agent.id, task.id);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const refl = buildReflection(task, msg);
+    const refl = buildReflection(task, msg, { toolCalls, parseFails });
     updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500), reflection: refl });
     let cause: string | undefined;
     try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }

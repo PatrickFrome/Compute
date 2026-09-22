@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://ceaksan.com",
+    "name": "LLM Agentic Failure Modes: Task Drift, Reward Hacking,",
+    "snippet": "Apr 26, 2026 — Eight LLM failure modes that surface only in agent and tool-use systems. Mechanism and defense for task drift , incorrect tool invocation, reward ... Read more",
+    "host_name": "ceaksan.com",
+    "rank": 0,
+    "date": "Apr 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org",
+    "name": "Agent Drift: Quantifying Behavioral Degradation in Multi-",
+    "snippet": "Jan 7, 2026 — LLM -based agents introduce a novel failure mode : behavioral drift , where the system's decision-making patterns progressively deviate from ...",
+    "host_name": "arxiv.org",
+    "rank": 1,
+    "date": "Jan 7, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://latitude.so",
+    "name": "AI agent failure modes in production: Detection playbook +",
+    "snippet": "Mar 11, 2026 — A practical AI agent failure detection playbook for production teams: taxonomy , clustering, triage, regression gates, and weekly reliability ...",
+    "host_name": "latitude.so",
+    "rank": 2,
+    "date": "Mar 11, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://openreview.net",
+    "name": "Where LLM Agents Fail And How They can Learn From",
+    "snippet": "by WLLMA FAIL — First, we introduce the Agent Error Taxonomy , a modular classification of failure modes spanning memory, reflection, planning, action, and system-level ... Read more",
+    "host_name": "openreview.net",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.alphaxiv.org",
+    "name": "Agent Drift: Quantifying Behavioral Degradation in Multi-",
+    "snippet": "Jan 7, 2026 — This taxonomy provides a structured approach to understanding how multi- agent systems can fail in ways that are difficult to detect through ... Read more",
+    "host_name": "www.alphaxiv.org",
+    "rank": 4,
+    "date": "Jan 7, 2026",
+    "favicon": ""
+  }
+]

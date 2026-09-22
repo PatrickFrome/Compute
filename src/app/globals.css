@@ -220,7 +220,7 @@
 }
 @keyframes branchDotIn { to { opacity: 1; } }
 .branch-row { cursor: pointer; }
-.branch-row .branch-line { transition: stroke-width 0.15s ease; }
+.branch-row .branch-line { transition: stroke-width 0.15s ease; pointer-events: none; /* декоративная кривая: хит уходит в rect.branch-hover (R12) */ }
 .branch-row:hover .branch-line { stroke-width: 3.4; }
 .branch-row .branch-hover { opacity: 0; transition: opacity 0.15s ease; }
 .branch-row:hover .branch-hover { opacity: 0.05; }
@@ -257,6 +257,7 @@
 
 /* v0.7.0: retry-merge-линии ВЕТКИ (parent_id → родитель) + tooltip ветки */
 .branch-merge {
+  pointer-events: none; /* декорации не перехватывают hover/клики строк (R12) */
   stroke-dasharray: 4 4;
   opacity: 0.75;
   animation: branchMergeFlow 1.4s linear infinite;
