@@ -48,10 +48,27 @@
 | Свежечеканенный HS256 (base64-decoded secret, std и urlsafe) | 401 |
 | auth/v1/settings (публичный) | 401 — шлюз режет всё без валидного ключа |
 
-**Вердикт:** капсула §1.2 says проект был УДАЛЁН 2026-09-20 (лимиты, DNS-FAIL). Сегодня шлюз отвечает, но **ни архивный ключ, ни мятый из архивного секрета не принимаются** → проект пересоздан/переведён на новые ключи формата (sb_publishable_/sb_secret_) либо секрет ротирован. Legacy-JWT путь закрыт на уровне платформы. **Для live-доступа нужен актуальный ключ из дашборда (Settings → API keys) — старые не восстановимы принципиально.**
+**Вердикт (ИСПРАВЛЕН в 23:50 UTC — см. §2.5):** капсула §1.2 says проект был УДАЛЁН 2026-09-20. Сегодня шлюз отвечает, но архивные legacy-JWT (и 4 варианта мятых из архивного секрета) отвергнуты → проект ПЕРЕСОЗДАН оператором на ключах нового поколения (sb_secret_*), legacy-JWT путь отключён на уровне платформы. С предоставленным оператором sb_secret-ключом доступ ПОЛНЫЙ (root OpenAPI 200, auth health 200).
 
-### 2.2 Схема как код (истина — на рельсе; БД-данные — у оператора)
-- **Данные:** единственные копии у оператора: `supabase-backup-20260920.tar.gz` (38 МБ: snapshot-dump 35 МБ + манифесты + storage 1831/1831 + edge-исходники + migrate-кит) и `uploaded.clean.sql` (217 МБ). Верифицированы при создании: 256/256 таблиц, 0 потерь, 16 ролей, auth.users 1/1. В песочнице дампы умерли при сбросе.
+### 2.5 LIVE-НАХОДКИ (23:44–23:52 UTC, ключ sb_secret_0h3A…redacted)
+Проект ВОССТАНОВЛЕН и РАБОТАЕТ. Схема REST (public): **15 таблиц `compute_fabric_a2_*_h205f22`** — supervisor_state, supervisor_command, mesh_instance, actuation_lease, chat_bridge_remote_command/peer/pairing, browser_device(+enrollment_request/nonce), cognitive_cursor, peer_health, workspace_binding, architecture_checkpoint, development_gate_policy.
+
+| Проба | Результат |
+|---|---|
+| supervisor_state.last_seen_at | **2026-09-22T23:44:26 — пульс ~90 с! Браузер ПОДКЛЮЧЁН** |
+| extension_version | **0.7.0-dev.35655839197.1 — САМАЯ СВЕЖАЯ на рельсе** (самообновился!) |
+| supervisor_mode / armed | CONTROL / true; state.state.tabs: chat.z.ai (GLM_CHAT) ×3+ — агенты на Z.ai |
+| mesh_instance | 1 ACTIVE (sup_40a6119e…, pri 50, seen 23:44:28) + LOST-хвост (retired 21:29) |
+| actuation_lease | **fleet.transport-promotion:agent_* ×N, acquired 23:12 — флот РАБОТАЕТ СЕЙЧАС** |
+| supervisor_command | последний — 2026-09-21T22:19 (AGENT_FACTORY_PURGE CLOSE_TAB ×4: 2 OK/2 FAILED) — командный план тихий |
+| RPC devos_fleet_snapshot_v1 | PGRST202 — семейство devos_fleet_* в восстановленной схеме ОТСУТСТВУЕТ (restored-схема частичная: 15 таблиц, без функций) |
+| me2_evidence | **404 PGRST205 — миграция ME2 по-прежнему не применена** (теперь к ЖИВОМУ облаку) |
+| peer_health | пусто |
+
+**Следствие:** легаси-браузер жив не только как процесс у оператора — он СИНХРОНИЗИТСЯ с восстановленным облаком (heartbeat + fleet transport-promotion leases). Облако восстановлено ЧАСТИЧНО: 15 канонических таблиц есть, функций devos_fleet_* и таблицы me2_evidence нет → полный функционал (fleet-плоскость через RPC, evidence-приём) требует докатки схемы (SQL из рельсы sql/ + миграция ME2).
+
+### 2.2 Схема как код (истина — на рельсе; данные — у оператора; восстановлено частично — §2.5)
+- **Данные:** единственные полные копии у оператора: `supabase-backup-20260920.tar.gz` (38 МБ: snapshot-dump 35 МБ + манифесты + storage 1831/1831 + edge-исходники + migrate-кит) и `uploaded.clean.sql` (217 МБ). Верифицированы при создании: 256/256 таблиц, 0 потерь, 16 ролей, auth.users 1/1. В песочнице дампы умерли при сбросе.
 - **Схема/логика на рельсе:** `sql/` (browser_cognitive_delta_ingest_v1, browser_control_plane_fast_lane_v1, browser_control_plane_realtime_wake_v1, browser_fabric_event_effect_ledger_pilot_v1, t0_hermetic_toolchain_contract_v2/v3), канонические DB-функции `devos_fleet_{snapshot,reconcile,enqueue,lease,mark_running,complete}_v1`, RPC `h205f22_a2_browser_supervisor_issue_native_v1` (idempotency_key) и `_complete_batch_v1`, pgmq-очереди, realtime publication `supabase_realtime`, cron-задачи (supervisor-sweep 10s, fleet-watchdog 30s, attestation 1m, cat-trust 1m, baseline-sync 2m).
 - **Edge-слой:** `supabase/functions/` — a2-browser-supervisor-v1..v4(+canary), a2-chat-bridge-remote, metaengine-devos-baseline-push-sync-h205f22, wait-emergency роут.
 
@@ -71,7 +88,7 @@
 ## 3. СТАРЫЙ LIVE-БРАУЗЕР (Electron) — ДЕТАЛЬНЫЙ АНАЛИЗ (жив прямо сейчас у оператора)
 
 ### 3.1 Что это и где живёт
-Electron-приложение `apps/metaengine-browser/` в монорепо (1063 файла в src/; ~190 модулей доменов supervisor/fleet/memory/brain/rsi/self-update/mission/delta/loopback/sentinel). **Установлен и работает у оператора (Windows x64): v0.7.0-dev.35532004761.1** (инсталлятор 121 МБ, 2026-09-20). Рельса уже ушла дальше (35655839197.1) — браузер может самообновиться по каналу DEV_HINT, когда облако/канал доступны; сейчас (облако мёртво) он живёт **локальным режимом (B)**: native supervisor, loopback RPC, fleet, DevOS-цикл, Mission Control UI, память, delta bus — всё локально.
+Electron-приложение `apps/metaengine-browser/` в монорепо (1063 файла в src/; ~190 модулей доменов supervisor/fleet/memory/brain/rsi/self-update/mission/delta/loopback/sentinel). **Установлен и работает у оператора (Windows x64): v0.7.0-dev.35655839197.1 — самообновился на свежайшую рельсу и ПОДКЛЮЧЁН к восстановленному облаку (heartbeat 23:44:26, fleet leases 23:12 — см. §2.5).** Облако восстановлено частично (15 таблиц без devos_fleet_*/me2_evidence) — браузер на это не опирается в live-пути: нативный supervisor, loopback RPC, локальный fleet/DevOS/память/MC UI живут локально; DB-плоскость (heartbeat/lease/commands) — через восстановленный REST.
 
 ### 3.2 Карта механик (по исходнику рельсы 71d0d42 + капсулы)
 | Домен | Модули (файлы рельсы) | Суть |
@@ -149,7 +166,8 @@ seed-first bootstrap (lease→effect dead end), proof-based poisoned-agent-tab s
 4. Этот документ: research/2026/R22-AUDIT-SUPABASE-GITHUB-LEGACY-BROWSER.md.
 5. Worklog R22 + push sandbox/me2-os.
 
-## 7. ЧТО НУЖНО ОТ ОПЕРАТОРА
-- **Для live-аудита БД из песочницы:** актуальный ключ дашборда (новый формат sb_secret_… или реактивированный legacy JWT) — все архивные варианты отвергнуты шлюзом (проверено 5 способами).
-- **Для полного контура:** VPS/хост под вариант A (edge→Pigsty) или C (self-hosted Supabase); бэкапы у оператора (38 МБ + 217 МБ) — единственные копии данных.
-- Решение по P3.9 (легаси-остатки в дереве ME2).
+## 7. ЧТО НУЖНО ОТ ОПЕРАТОРА (актуализировано после §2.5)
+- ✅ Ключ получен (sb_secret_0h3A…redacted, сохранён в /home/z/.a2/, perms 600; env-алиасы evidence/mirror переведены на него).
+- **Докатка схемы восстановленного облака:** ① SQL-миграция me2_evidence + RPC me2_ingest_evidence_v1 (оживит evidence-plane ME2 сразу — ключ уже на месте); ② семейство devos_fleet_*_v1 (SQL из рельсы sql/ + капсулы) — вернёт каноническую fleet-плоскость для легаси-браузера; ③ (опц.) pgmq/realtime publication для wake-контура.
+- Решение по P3.9 (легаси-остатки в дереве ME2: fallback-console, api/fallback, lib/edge, lib/pg).
+- Бэкапы (38 МБ + 217 МБ) остаются эталоном полной схемы — восстановленное облако частично, сверять с манифестом.
