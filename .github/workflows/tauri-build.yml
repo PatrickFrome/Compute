@@ -49,6 +49,9 @@ jobs:
         run: |
           cd mini-services/me2-daemon
           bun install --frozen-lockfile || bun install
+          # git не хранит пустые каталоги: без mkdir bun build --compile падает
+          # ENOENT "could not open output directory ../../src-tauri/binaries" на всех ОС
+          mkdir -p ../../src-tauri/binaries
           EXT="${{ runner.os == 'Windows' && '.exe' || '' }}"
           bun build --compile index.ts --outfile "../../src-tauri/binaries/me2-daemon-${{ matrix.target }}${EXT}"
 
@@ -72,17 +75,19 @@ jobs:
             echo "updater: using repo secret key"
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
             {
-              echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY<<ME2KEYEOF"
               printf '%s\n' "$REPO_KEY"
-              echo "KEYEOF"
+              echo "ME2KEYEOF"
             } >> "$GITHUB_ENV"
           else
             echo "updater: repo secret missing/malformed -> ephemeral keypair (build-only)"
             cargo tauri signer generate -w /tmp/me2-updater.key --password me2-ci-ephemeral --force
             {
-              echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
-              cat /tmp/me2-updater.key
-              echo "KEYEOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY<<ME2KEYEOF"
+              # printf гарантирует ровно один завершающий \n — иначе последняя строка base64
+              # склеивается с делимитером и GitHub роняет шаг: "Matching delimiter not found"
+              printf '%s\n' "$(cat /tmp/me2-updater.key)"
+              echo "ME2KEYEOF"
               echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=me2-ci-ephemeral"
             } >> "$GITHUB_ENV"
           fi
