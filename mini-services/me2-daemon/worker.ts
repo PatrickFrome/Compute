@@ -186,6 +186,7 @@ export function startMasterLoop(intervalMs = 400) {
   timer = setInterval(() => {
     try {
       for (const agent of listAgents()) {
+        if (agent.paused === 1) continue; // пауза: агент не берёт задачи
         if (agent.status !== "IDLE" || running.has(agent.id)) continue;
         const task = nextReadyTask(agent.role);
         if (!task) continue;

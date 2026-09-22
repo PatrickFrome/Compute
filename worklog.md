@@ -6166,3 +6166,24 @@ Stage Summary:
 - ME2 v0.3.0: 13/47 действий; SQLite-персистентность переживает рестарты (last_seq сохраняется).
 - Инструмент write_file теперь идемпотентен по каталогам — агент больше не тратит шаги на mkdir.
 - Следующее: стрим результата задачи (token-поток), реестр 47 действий + permission-плитка, скринкаст CDP, M3 Tauri.
+---
+Task ID: M2V3-M5LITE-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task» — Раунд 3: реестр действий 19/47, планировщик (run_after), pause/resume агентов, M5-lite evidence-mirror, защита от тихой смерти процессов.
+
+Work Log:
+- ДИАГНОСТИКА: оба cron-jobs (404854, 404678) = "Disabled due to exec limits exceeded" — автономных раундов НЕТ, работа шла вручную. Сообщение 404678 (порты 3020/3021, M4-lite, outbox) — артефакт параллельной ветки, на ФС не подтверждён (порты тут 3040/3041, outbox-а не было).
+- ИНЦИДЕНТ-1: daemon+watchdog тихо умерли между tool-вызовами после перезапуска в той же команде, что и pkill. Лечение: start.sh (pidfile /tmp/me2-daemon.pid, убийство старых, ожидание освобождения :3041 до 8s, health-wait до 10s) + watchdog.sh v2 (single-instance lock /tmp/me2-watchdog.lock, рестарт только через start.sh). После этого процесс жив ≥12 мин при интенсивной работе.
+- DAEMON v0.4.0 (+6 действий → 19/47): AGENT_PAUSE/AGENT_RESUME (agents.paused, master loop пропускает запаузенных), TASK_SCHEDULE (вложенная TASK_ENQUEUE с run_after — дренаж исполняет по ETA; guard: команды с будущим run_after не исполняются синхронно через runOne в REST/WS), COMMAND_CANCEL (только PENDING→CANCELLED), WORKERS_LIST, ACTIONS_LIST. Схема: agents.paused INT, commands.run_after INTEGER + миграции PRAGMA table_info. events: TASK_SCHEDULED/AGENT_PAUSED/AGENT_RESUMED/COMMAND_CANCELLED.
+- РЕЕСТР: /actions теперь отдаёт полный каталог {action,lane,cost,desc,group} (actionCatalog), цель 47 подписана в UI.
+- M5-LITE EVIDENCE-MIRROR (evidence.ts): outbox-таблица evidence_outbox (seq PK), подписка onEvent, батч-аплоадер 40/10s в Supabase: сначала RPC me2_ingest_evidence_v1, при PGRST202 fallback INSERT в public.me2_evidence; при 404/PGRST205 → DEGRADED + backoff 60s + буфер растёт честно. /evidence GET: {mode LIVE|DEGRADED|OFF, pending, method, last_error, backoff}. Проверено: PING → 18 событий → PGRST205 → DEGRADED, pending буферизован. СЕКРЕТЫ НЕ ТРОНУТЫ (читаются из /home/z/.a2/supabase-cloud.env).
+- SQL-МИГРАЦИЯ ДЛЯ ОПЕРАТОРА: mini-services/me2-daemon/supabase-migration-me2-evidence.sql — CREATE TABLE me2_evidence + RLS (только service_role) + RPC me2_ingest_evidence_v1 (SECURITY DEFINER, on conflict do nothing). После запуска mirror перейдёт LIVE и дольёт outbox.
+- КОНСОЛЬ v3: чип evidence-mirror в хедере (Cloud/CloudOff, LIVE-пульс, pending), бейдж 19/47; кнопки Pause/Play на карточках агентов (PAUSED-бейдж, amber-ring); поле «Отложенный запуск (сек)» в форме задачи (кнопка меняется на «запланировать через Xs», TASK_SCHEDULE); lime-блок COMMAND BUS с живым ETA-отсчётом (тик 1s) и отменой отложенных команд (COMMAND_CANCEL); ⌘K-группа «Реестр действий шины · 19/47» из живого /actions (lane-чипы, описания, cost; безопасные исполняются сразу, с аргументами — подсказка/формы); футер: зеркало DEGRADED·outbox + отложено: n; анимация ev-in на новых строках лога (globals.css).
+- ВЕРИФИКАЦИЯ curl: TASK_SCHEDULE 20s → задача создана по ETA → COMPLETED (tk_mucal1bsmtcttq, 2 шага); ALL-pause → задача осталась READY → resume → RUNNING; COMMAND_CANCEL в шине.
+- ВЕРИФИКАЦИЯ agent-browser (:81): golden path планировщика из UI — N → спека+задержка 8s → toast «Запланировано через 8s» → lime-блок «TASK_ENQUEUE ETA 7s» с живым отсчётом → COMPLETED через 14s; pause/resume кнопки (PAUSED-бейдж); ⌘K-реестр с поиском (PING из реестра → COMMAND_COMPLETED); мобильная вёрстка не менялась (проверена в M2-V2). Линт 0/0, dev.log чист.
+- СЛЕДУЮЩЕЕ: M3 Tauri-оболочка (скелет), CDP-screencast панель, +28 действий к реестру 47 (TASK_ARCHIVE, AGENT_MODEL, WORKSPACE_SNAPSHOT, ...), миграция me2_evidence в облако (нужен SQL-доступ оператора или SUPABASE_ACCESS_TOKEN), GC воркеров агрессивнее (OFFLINE-зомби копятся).
+
+Stage Summary:
+- ME2 v0.4.0: 19/47 действий, планировщик и паузы — шина стала полноценным диспетчером (немедленно/по времени/отмена).
+- Evidence-plane подготовлен end-to-end: локальный outbox живёт, поставка в Supabase включится миграцией оператора без изменения кода.
+- Процессная надёжность: start.sh+watchdog v2 пережили весь раунд (причина тихих смертей — рестарт в одном вызове с pkill; разнесено и закрыто pidfile-логикой).

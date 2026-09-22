@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS agents (
   role TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'IDLE',
   model TEXT NOT NULL DEFAULT 'zai:default',
+  paused INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -62,8 +63,9 @@ CREATE TABLE IF NOT EXISTS commands (
   status TEXT NOT NULL DEFAULT 'PENDING',
   payload TEXT,
   result TEXT,
-  idempotency_key TEXT UNIQUE,
+  idempotency_key UNIQUE,
   cost INTEGER NOT NULL DEFAULT 0,
+  run_after INTEGER,
   created_at TEXT NOT NULL,
   leased_at TEXT,
   completed_at TEXT,
@@ -88,13 +90,17 @@ CREATE INDEX IF NOT EXISTS idx_events_seq ON events(seq);
 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
 `);
 
-// миграция: старая events-таблица без hash-колонок
+// миграции старых схем (events без hash, agents без paused, commands без run_after)
 const eventCols = (db.query(`PRAGMA table_info(events)`).all() as Array<{ name: string }>).map((c) => c.name);
 if (!eventCols.includes("prev_hash")) db.exec(`ALTER TABLE events ADD COLUMN prev_hash TEXT`);
 if (!eventCols.includes("hash")) db.exec(`ALTER TABLE events ADD COLUMN hash TEXT`);
+const agentCols = (db.query(`PRAGMA table_info(agents)`).all() as Array<{ name: string }>).map((c) => c.name);
+if (!agentCols.includes("paused")) db.exec(`ALTER TABLE agents ADD COLUMN paused INTEGER NOT NULL DEFAULT 0`);
+const cmdCols = (db.query(`PRAGMA table_info(commands)`).all() as Array<{ name: string }>).map((c) => c.name);
+if (!cmdCols.includes("run_after")) db.exec(`ALTER TABLE commands ADD COLUMN run_after INTEGER`);
 
 export type AgentRow = {
-  id: string; role: string; status: string; model: string; created_at: string; updated_at: string;
+  id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
 };
 export type TaskRow = {
   id: string; title: string; spec: string; role: string | null; status: string;
@@ -107,8 +113,8 @@ export type EventRow = {
 };
 export type CommandRow = {
   id: string; action: string; lane: string; status: string; payload: string | null; result: string | null;
-  idempotency_key: string | null; cost: number; created_at: string; leased_at: string | null;
-  completed_at: string | null; error: string | null;
+  idempotency_key: string | null; cost: number; run_after: number | null; created_at: string;
+  leased_at: string | null; completed_at: string | null; error: string | null;
 };
 export type WorkerRow = {
   id: string; role: string; kind: string; state: string; generation: number;
@@ -177,10 +183,16 @@ export function eventsByTask(taskId: string, limit = 300): EventRow[] {
 
 // ── agents ────────────────────────────────────────────────────────
 export function createAgent(role: string, model: string): AgentRow {
-  const a: AgentRow = { id: rid("ag"), role, status: "IDLE", model, created_at: nowIso(), updated_at: nowIso() };
-  db.query(`INSERT INTO agents (id, role, status, model, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
-    .run(a.id, a.role, a.status, a.model, a.created_at, a.updated_at);
+  const a: AgentRow = { id: rid("ag"), role, status: "IDLE", model, paused: 0, created_at: nowIso(), updated_at: nowIso() };
+  db.query(`INSERT INTO agents (id, role, status, model, paused, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`)
+    .run(a.id, a.role, a.status, a.model, a.paused, a.created_at, a.updated_at);
   return a;
+}
+export function setAgentPaused(id: string, paused: number) {
+  db.query(`UPDATE agents SET paused=?, updated_at=? WHERE id=?`).run(paused ? 1 : 0, nowIso(), id);
+}
+export function getAgent(id: string): AgentRow | null {
+  return (db.query(`SELECT * FROM agents WHERE id=?`).get(id) as AgentRow | null) ?? null;
 }
 export function listAgents(): AgentRow[] {
   return db.query(`SELECT * FROM agents ORDER BY created_at`).all() as AgentRow[];
@@ -237,7 +249,7 @@ export type EnqueueResult =
 
 export function enqueueCommand(input: {
   action: string; lane?: string; payload?: Record<string, unknown>;
-  idempotency_key?: string | null; cost?: number;
+  idempotency_key?: string | null; cost?: number; run_after?: number | null;
 }): EnqueueResult {
   const action = String(input.action ?? "").toUpperCase().slice(0, 64);
   if (!action) return { ok: false, error: "action_required" };
@@ -260,25 +272,26 @@ export function enqueueCommand(input: {
       return { ok: false, error: `budget_exceeded (used ${b.used}/${BUDGET_LIMIT} per ${BUDGET_WINDOW_MS / 1000}s)` };
     }
   }
-  const cmd = insertCommand({ action, lane, status: "PENDING", payload: input.payload, idempotency_key: input.idempotency_key ?? null, cost, error: null });
-  emit("COMMAND_ENQUEUED", { action, lane, cost, id: cmd.id }, null, null);
+  const runAfter = input.run_after ?? null;
+  const cmd = insertCommand({ action, lane, status: "PENDING", payload: input.payload, idempotency_key: input.idempotency_key ?? null, cost, error: null, run_after: runAfter });
+  emit("COMMAND_ENQUEUED", { action, lane, cost, id: cmd.id, ...(runAfter ? { run_after: runAfter, scheduled: true } : {}) }, null, null);
   return { ok: true, command: cmd, deduped: false };
 }
 
 function insertCommand(c: {
   action: string; lane: string; status: string; payload?: Record<string, unknown> | null;
-  idempotency_key: string | null; cost: number; error: string | null;
+  idempotency_key: string | null; cost: number; error: string | null; run_after?: number | null;
 }): CommandRow {
   const row: CommandRow = {
     id: rid("cmd"), action: c.action, lane: c.lane, status: c.status,
     payload: c.payload ? JSON.stringify(c.payload).slice(0, 8000) : null,
-    result: null, idempotency_key: c.idempotency_key, cost: c.cost,
+    result: null, idempotency_key: c.idempotency_key, cost: c.cost, run_after: c.run_after ?? null,
     created_at: nowIso(), leased_at: null, completed_at: null, error: c.error,
   };
   try {
-    db.query(`INSERT INTO commands (id,action,lane,status,payload,result,idempotency_key,cost,created_at,leased_at,completed_at,error)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(row.id, row.action, row.lane, row.status, row.payload, row.result, row.idempotency_key, row.cost, row.created_at, row.leased_at, row.completed_at, row.error);
+    db.query(`INSERT INTO commands (id,action,lane,status,payload,result,idempotency_key,cost,run_after,created_at,leased_at,completed_at,error)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(row.id, row.action, row.lane, row.status, row.payload, row.result, row.idempotency_key, row.cost, row.run_after, row.created_at, row.leased_at, row.completed_at, row.error);
   } catch (e) {
     // UNIQUE idempotency_key — гонка двух одинаковых команд: вернуть существующую
     if (c.idempotency_key) {
@@ -302,13 +315,13 @@ export function listCommands(limit = 100): CommandRow[] {
 }
 export function nextPendingCommands(limit = 8): CommandRow[] {
   return db.query(
-    `SELECT * FROM commands WHERE status='PENDING'
+    `SELECT * FROM commands WHERE status='PENDING' AND (run_after IS NULL OR run_after<=?)
      ORDER BY CASE lane WHEN 'EMERGENCY' THEN 0 WHEN 'CONTROL' THEN 1 WHEN 'MUTATION' THEN 5 ELSE 9 END, created_at
      LIMIT ?`,
-  ).all(limit) as CommandRow[];
+  ).all(Date.now(), limit) as CommandRow[];
 }
 export function setCommandStatus(id: string, status: string, patch: { result?: string; error?: string } = {}) {
-  const isFinal = status === "COMPLETED" || status === "FAILED" || status === "REJECTED";
+  const isFinal = status === "COMPLETED" || status === "FAILED" || status === "REJECTED" || status === "CANCELLED";
   if (isFinal) {
     db.query(`UPDATE commands SET status=?, result=?, error=?, completed_at=? WHERE id=?`)
       .run(status, patch.result ?? null, patch.error ?? null, nowIso(), id);
@@ -364,6 +377,7 @@ export function snapshot() {
     stats: {
       agentsIdle: agents.filter((a) => a.status === "IDLE").length,
       agentsBusy: agents.filter((a) => a.status === "BUSY").length,
+      agentsPaused: agents.filter((a) => a.paused === 1).length,
       tasksReady: tasks.filter((t) => t.status === "READY").length,
       tasksRunning: tasks.filter((t) => t.status === "RUNNING").length,
       tasksCompleted: tasks.filter((t) => t.status === "COMPLETED").length,

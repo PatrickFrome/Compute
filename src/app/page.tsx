@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * ME2 · MISSION CONTROL v2 — операторская консоль METAENGINE 2.
- * 3 колонки: ФЛОТ / ОЧЕРЕДЬ / EVENT-LOG. ⌘K палитра (13 действий, 4 полосы).
- * Live-стрим шагов задачи, спарклайн активности, lane-фильтры, retry, sticky статус-бар.
- * Каналы: WS :3040 (socket.io, snapshot push + события + команды), REST :3041 (fallback).
+ * ME2 · MISSION CONTROL v3 — операторская консоль METAENGINE 2.
+ * 3 колонки: ФЛОТ / ОЧЕРЕДЬ / EVENT-LOG. ⌘K с живым реестром действий (n/47).
+ * Планировщик задач (ETA + отмена), пауза/резюме агентов, evidence-mirror индикатор.
+ * Каналы: WS :3040 (snapshot push + события + команды), REST :3041 (fallback, evidence, catalog).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,13 +32,13 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Activity, AlertTriangle, Bot, Boxes, CheckCircle2, ChevronDown, Crosshair, Cpu,
-  Download, Gauge, ListChecks, Pause, Play, Plus, Radar, RefreshCw, RotateCcw,
+  Activity, AlertTriangle, Bot, Boxes, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff, Crosshair, Cpu,
+  Download, Gauge, Layers, ListChecks, Pause, Play, Plus, Radar, RefreshCw, RotateCcw,
   Rocket, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
-type Agent = { id: string; role: string; status: string; model: string; created_at: string; updated_at: string };
+type Agent = { id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string };
 type Task = {
   id: string; title: string; spec: string; role: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
@@ -47,9 +47,11 @@ type Task = {
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
-  created_at: string; error: string | null; result: string | null;
+  run_after: number | null; created_at: string; error: string | null; result: string | null;
 };
 type Event = { seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string };
+type ActionMeta = { action: string; lane: string; cost: number; desc: string; group: string; args?: string };
+type Mirror = { mode: string; pending: number; method: string | null; last_error: string | null; last_sent_seq: number };
 type Snapshot = {
   ok: boolean; ts: string; agents: Agent[]; tasks: Task[]; workers: Worker[];
   commands: Command[]; events: Event[];
@@ -74,9 +76,12 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_QUEUED: "text-emerald-400", TASK_LEASED: "text-amber-400", TASK_DONE: "text-emerald-300",
   TASK_COMPLETED: "text-emerald-300", TASK_FAILED: "text-rose-400", TASK_CANCELLED: "text-zinc-400",
   TASK_RETRIED: "text-amber-300",
+  TASK_SCHEDULED: "text-lime-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
+  AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
   COMMAND_COMPLETED: "text-emerald-400", COMMAND_FAILED: "text-rose-400",
+  COMMAND_CANCELLED: "text-zinc-400",
   BUDGET_FLUSHED: "text-rose-300",
   STEP_START: "text-zinc-500", STEP_DONE: "text-zinc-500",
   TOOL_CALL: "text-cyan-300", TOOL_RESULT: "text-cyan-500",
@@ -90,6 +95,7 @@ const STATUS_BADGE: Record<string, string> = {
   LEASED: "bg-amber-500/80 text-black", REJECTED: "bg-rose-800 text-rose-200",
   BUSY: "bg-amber-500/90 text-black", IDLE: "bg-emerald-700 text-emerald-100",
   OFFLINE: "bg-zinc-800 text-zinc-500",
+  PAUSED: "bg-amber-700 text-amber-100",
 };
 
 const EVENT_FILTERS: { key: string; label: string; prefix: string }[] = [
@@ -149,16 +155,22 @@ export default function MissionControl() {
   const [detail, setDetail] = useState<Task | null>(null);
   const [stream, setStream] = useState<Event[]>([]);
   const [busyAction, setBusyAction] = useState(false);
+  const [mirror, setMirror] = useState<Mirror | null>(null);
+  const [catalog, setCatalog] = useState<ActionMeta[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   // форма новой задачи
   const [fTitle, setFTitle] = useState("");
   const [fSpec, setFSpec] = useState("");
   const [fRole, setFRole] = useState("ANY");
   const [fSteps, setFSteps] = useState("6");
+  const [fDelay, setFDelay] = useState("0");
 
   const logRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const detailIdRef = useRef<string | null>(null);
+  const budgetFlushRef = useRef<() => void>(() => {});
+  const exportEventsRef = useRef<() => void>(() => {});
 
   // ── WS подключение (с защитой от StrictMode-зомби) ──────────────
   useEffect(() => {
@@ -196,12 +208,24 @@ export default function MissionControl() {
     return () => { cancelled = true; s?.close(); if (hb) clearInterval(hb); };
   }, []);
 
-  // REST fallback начального состояния
+  // REST fallback начального состояния + каталог действий + evidence-mirror poll + тик ETA
   useEffect(() => {
     fetch("/state?XTransformPort=3041")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d?.ok) { setSnap(d); setEvents(d.events ?? []); } })
       .catch(() => { /* daemon оффлайн — WS покажет статус */ });
+    fetch("/actions?XTransformPort=3041")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.ok) setCatalog(d.actions ?? []); })
+      .catch(() => { /* реестр подхватится при следующем заходе */ });
+    const ev = setInterval(() => {
+      fetch("/evidence?XTransformPort=3041")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d?.ok) setMirror({ mode: d.mode, pending: d.pending, method: d.method, last_error: d.last_error, last_sent_seq: d.last_sent_seq }); })
+        .catch(() => { /* зеркало недоступно */ });
+    }, 10_000);
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => { clearInterval(ev); clearInterval(tick); };
   }, []);
 
   // автоскроллы
@@ -279,20 +303,27 @@ export default function MissionControl() {
 
   const createTask = useCallback(async () => {
     if (!fSpec.trim()) { toast({ title: "Спецификация обязательна", variant: "destructive" }); return; }
-    const res = await sendCommand("TASK_ENQUEUE", {
+    const payload = {
       title: fTitle.trim() || fSpec.slice(0, 60),
       spec: fSpec.trim(),
       role: fRole === "ANY" ? null : fRole,
       max_steps: Number(fSteps) || 6,
-    }, { quiet: true });
-    const r = res as { task?: Task } | null;
-    if (r?.task) {
-      toast({ title: "Задача поставлена", description: r.task.id });
-      setNewTaskOpen(false); setFTitle(""); setFSpec(""); setCmdOpen(false);
+    };
+    const delaySec = Math.max(0, Number(fDelay) || 0);
+    const res = delaySec > 0
+      ? await sendCommand("TASK_SCHEDULE", { ...payload, delay_sec: delaySec }, { quiet: true })
+      : await sendCommand("TASK_ENQUEUE", payload, { quiet: true });
+    const r = res as { task?: Task; scheduled?: boolean; command_id?: string } | null;
+    if (r && (r.task || r.scheduled)) {
+      toast({
+        title: delaySec > 0 ? `Запланировано через ${delaySec}s` : "Задача поставлена",
+        description: r.task ? r.task.id : `команда ${r.command_id} — дренаж исполнит по ETA`,
+      });
+      setNewTaskOpen(false); setFTitle(""); setFSpec(""); setFDelay("0"); setCmdOpen(false);
     } else {
       toast({ title: "TASK_ENQUEUE ✗", description: "не удалось поставить задачу", variant: "destructive" });
     }
-  }, [fTitle, fSpec, fRole, fSteps, sendCommand, toast]);
+  }, [fTitle, fSpec, fRole, fSteps, fDelay, sendCommand, toast]);
 
   const cancelTask = useCallback(async (id: string) => {
     await sendCommand("TASK_CANCEL", { id }, { lane: "CONTROL", successMsg: "задача отменена" });
@@ -316,6 +347,41 @@ export default function MissionControl() {
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
   }, [sendCommand]);
+
+  const pauseAgent = useCallback(async (id: string) => {
+    await sendCommand("AGENT_PAUSE", { id }, { lane: "CONTROL", successMsg: "агент на паузе — задачи не берёт" });
+  }, [sendCommand]);
+
+  const resumeAgent = useCallback(async (id: string) => {
+    await sendCommand("AGENT_RESUME", { id }, { lane: "CONTROL", successMsg: "агент снова в строю" });
+  }, [sendCommand]);
+
+  const cancelCommand = useCallback(async (id: string) => {
+    await sendCommand("COMMAND_CANCEL", { id }, { lane: "CONTROL", successMsg: "команда отменена до исполнения" });
+  }, [sendCommand]);
+
+  /** Запуск действия из реестра ⌘K: безопасные — напрямую, с аргументами — подсказка/форма. */
+  const runRegistryAction = useCallback((meta: ActionMeta) => {
+    const direct: Record<string, () => void> = {
+      PING: () => sendCommand("PING", {}, { quiet: true, successMsg: "pong" }),
+      STATE_SNAPSHOT: () => sendCommand("STATE_SNAPSHOT", {}, { quiet: true }),
+      EVENTS_TAIL: () => sendCommand("EVENTS_TAIL", { since: 0, limit: 50 }, { quiet: true, successMsg: "хвост событий запрошен" }),
+      WORKERS_LIST: () => sendCommand("WORKERS_LIST", {}, { quiet: true, successMsg: "список workers в шине" }),
+      ACTIONS_LIST: () => sendCommand("ACTIONS_LIST", {}, { quiet: true, successMsg: "реестр действий в шине" }),
+      FLEET_RECONCILE: () => sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }),
+      BUDGET_FLUSH: () => { setCmdOpen(false); setResetConfirm(false); budgetFlushRef.current?.(); },
+      ENVIRONMENT_RESET: () => { setCmdOpen(false); setResetConfirm(true); },
+      TASK_ENQUEUE: () => { setCmdOpen(false); setNewTaskOpen(true); },
+      TASK_SCHEDULE: () => { setCmdOpen(false); setNewTaskOpen(true); },
+      EVENTS_EXPORT: () => exportEventsRef.current?.(),
+    };
+    const fn = direct[meta.action];
+    if (fn) { fn(); if (meta.action !== "ENVIRONMENT_RESET" && meta.action !== "TASK_ENQUEUE" && meta.action !== "TASK_SCHEDULE") setCmdOpen(false); }
+    else {
+      toast({ title: `${meta.action}`, description: "нужны аргументы — используйте формы и кнопки панелей" });
+      setCmdOpen(false);
+    }
+  }, [sendCommand, toast]);
 
   const environmentReset = useCallback(async () => {
     setResetConfirm(false);
@@ -343,6 +409,11 @@ export default function MissionControl() {
     setCmdOpen(false);
   }, [sendCommand, toast]);
 
+  useEffect(() => {
+    budgetFlushRef.current = budgetFlush;
+    exportEventsRef.current = exportEvents;
+  }, [budgetFlush, exportEvents]);
+
   // ── производные ─────────────────────────────────────────────────
   const filteredEvents = useMemo(() => {
     let list = events;
@@ -360,6 +431,24 @@ export default function MissionControl() {
   const budgetPct = Math.min(100, Math.round((budget.used / Math.max(1, budget.limit)) * 100));
   const budgetColor = budgetPct > 80 ? "bg-rose-500" : budgetPct > 50 ? "bg-amber-500" : "bg-fuchsia-500";
 
+  // отложенные команды (ETA в будущем) — живой отсчёт + отмена
+  const scheduledCommands = useMemo(
+    () => (snap?.commands ?? [])
+      .filter((c) => c.status === "PENDING" && c.run_after && c.run_after > nowMs)
+      .sort((a, b) => (a.run_after ?? 0) - (b.run_after ?? 0))
+      .slice(0, 4),
+    [snap, nowMs],
+  );
+  const etaOf = (c: Command) => `${Math.max(1, Math.ceil(((c.run_after ?? 0) - nowMs) / 1000))}s`;
+
+  const mirrorMode = mirror?.mode ?? "…";
+  const mirrorColor = mirrorMode === "LIVE" ? "text-emerald-400" : mirrorMode === "DEGRADED" ? "text-amber-400" : "text-zinc-500";
+  const laneChip = (lane: string) =>
+    lane === "EMERGENCY" ? "border-rose-800 text-rose-400"
+      : lane === "CONTROL" ? "border-amber-800 text-amber-400"
+      : lane === "MUTATION" ? "border-fuchsia-800 text-fuchsia-400"
+      : "border-zinc-700 text-zinc-400";
+
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100 lg:h-screen">
       {/* ── HEADER ── */}
@@ -371,10 +460,20 @@ export default function MissionControl() {
         </Badge>
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
           <span className="hidden xl:flex" aria-label="Активность"><Sparkline events={events} /></span>
+          <span
+            className={`hidden items-center gap-1.5 lg:flex ${mirrorColor}`}
+            title={mirror?.last_error ? `Зеркало: ${mirror.last_error}` : "Evidence-mirror → Supabase"}
+          >
+            {mirrorMode === "OFF" ? <CloudOff className="h-3.5 w-3.5" /> : <Cloud className={`h-3.5 w-3.5 ${mirrorMode === "LIVE" ? "mirror-live" : ""}`} />}
+            {mirrorMode}{mirror && mirror.pending > 0 ? ` · ${mirror.pending}` : ""}
+          </span>
           <span className="hidden items-center gap-1.5 md:flex" aria-live="polite">
             <Dot on={connected} pulse /> {connected ? "WS LIVE" : "WS OFFLINE"}
           </span>
           <span className="hidden font-mono lg:inline">seq {events[0]?.seq ?? 0}</span>
+          <Badge variant="outline" className="hidden border-zinc-700 font-mono text-[10px] text-zinc-500 sm:inline" title="реестр действий / цель 47">
+            <Layers className="mr-1 h-3 w-3" />{catalog.length || "—"}/47
+          </Badge>
           <Button variant="outline" size="sm" className="h-7 gap-1.5 border-zinc-700 text-xs" onClick={() => setCmdOpen(true)}>
             <Terminal className="h-3.5 w-3.5" /> ⌘K
           </Button>
@@ -411,16 +510,24 @@ export default function MissionControl() {
                 <p className="p-4 text-center text-xs text-zinc-500">флот пуст — создайте агента</p>
               )}
               {(snap?.agents ?? []).map((a) => (
-                <div key={a.id} className="group flex items-center gap-2.5 rounded-md px-2 py-2 hover:bg-zinc-800/60">
-                  <Dot on={a.status === "IDLE"} pulse={a.status === "BUSY"} />
+                <div key={a.id} className={`group flex items-center gap-2.5 rounded-md px-2 py-2 transition hover:bg-zinc-800/60 ${a.paused === 1 ? "opacity-70 ring-1 ring-amber-900/60" : ""}`}>
+                  <Dot on={a.status === "IDLE" && a.paused === 0} pulse={a.status === "BUSY"} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-xs font-medium">{a.role}</span>
                       <Badge variant="outline" className="h-4 border-zinc-700 px-1 font-mono text-[9px] text-zinc-500">{a.model}</Badge>
+                      {a.paused === 1 && <Badge className="h-4 bg-amber-700 px-1 text-[9px] text-amber-100">PAUSED</Badge>}
                     </div>
                     <p className="font-mono text-[10px] text-zinc-500">{a.id.slice(0, 14)}… · {age(a.updated_at)} назад</p>
                   </div>
-                  <Badge className={`${STATUS_BADGE[a.status] ?? ""} h-5 px-1.5 text-[10px]`}>{a.status}</Badge>
+                  <Badge className={`${a.paused === 1 ? STATUS_BADGE.PAUSED : STATUS_BADGE[a.status] ?? ""} h-5 px-1.5 text-[10px]`}>{a.paused === 1 ? "PAUSED" : a.status}</Badge>
+                  <button
+                    aria-label={a.paused === 1 ? `Возобновить ${a.role}` : `Пауза ${a.role}`}
+                    className="rounded p-1 text-zinc-600 opacity-0 transition hover:bg-amber-950 hover:text-amber-400 group-hover:opacity-100"
+                    onClick={() => (a.paused === 1 ? resumeAgent(a.id) : pauseAgent(a.id))}
+                  >
+                    {a.paused === 1 ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+                  </button>
                   <button
                     aria-label={`Уволить ${a.role}`}
                     className="rounded p-1 text-zinc-600 opacity-0 transition hover:bg-rose-950 hover:text-rose-400 group-hover:opacity-100"
@@ -499,10 +606,28 @@ export default function MissionControl() {
               </CardTitle>
               <span className="font-mono text-[10px] text-zinc-500">бюджет {budget.used}/{budget.limit} / 60s</span>
             </CardHeader>
-            <CardContent className="max-h-36 space-y-1 overflow-y-auto p-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+            <CardContent className="max-h-44 space-y-1 overflow-y-auto p-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+              {scheduledCommands.length > 0 && (
+                <div className="mb-1.5 space-y-1 rounded-md border border-lime-900/50 bg-lime-950/20 p-1.5">
+                  {scheduledCommands.map((c) => (
+                    <div key={c.id} className="flex items-center gap-2 rounded px-1 py-0.5">
+                      <Clock className="h-3 w-3 shrink-0 text-lime-400" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-lime-200">{c.action}</span>
+                      <span className="font-mono text-[10px] text-lime-400/90">ETA {etaOf(c)}</span>
+                      <button
+                        aria-label={`Отменить ${c.action} по расписанию`}
+                        className="rounded p-0.5 text-zinc-600 transition hover:bg-rose-950 hover:text-rose-400"
+                        onClick={() => cancelCommand(c.id)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {(snap?.commands ?? []).slice(0, 12).map((c) => (
                 <div key={c.id} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-zinc-800/60">
-                  <Badge variant="outline" className="h-4 border-fuchsia-800 px-1 font-mono text-[9px] text-fuchsia-400">{c.lane}</Badge>
+                  <Badge variant="outline" className={`h-4 border px-1 font-mono text-[9px] ${laneChip(c.lane)}`}>{c.lane}</Badge>
                   <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{c.action}</span>
                   <span className="font-mono text-[9px] text-zinc-600">cost {c.cost}</span>
                   <Badge className={`${STATUS_BADGE[c.status] ?? ""} h-4 px-1 text-[9px]`}>{c.status}</Badge>
@@ -558,7 +683,7 @@ export default function MissionControl() {
                 <p className="p-4 text-center text-zinc-500">{events.length ? "ничего не найдено по фильтру" : "ожидание событий…"}</p>
               )}
               {filteredEvents.map((e) => (
-                <div key={e.seq} className="flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
+                <div key={e.seq} className="ev-in flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
                   <span className="shrink-0 text-zinc-600">{e.seq}</span>
                   <span className="shrink-0 text-zinc-500">{hhmmss(e.ts)}</span>
                   <span className={`w-36 shrink-0 font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`}>{e.type}</span>
@@ -585,6 +710,15 @@ export default function MissionControl() {
           бюджет: <b className={budgetPct > 80 ? "text-rose-400" : "text-zinc-200"}>{budgetPct}%</b>
           <Progress value={budgetPct} className={`h-1 w-16 bg-zinc-800 [&>div]:${budgetColor}`} />
         </span>
+        <span className={`hidden items-center gap-1.5 md:flex ${mirrorColor}`}>
+          {mirrorMode === "OFF" ? <CloudOff className="h-3.5 w-3.5" /> : <Cloud className="h-3.5 w-3.5" />}
+          зеркало: <b className="text-zinc-200">{mirrorMode}</b> · outbox <b className="text-zinc-200">{mirror?.pending ?? 0}</b>
+        </span>
+        {scheduledCommands.length > 0 && (
+          <span className="flex items-center gap-1.5 text-lime-400">
+            <Clock className="h-3.5 w-3.5" /> отложено: <b>{scheduledCommands.length}</b>
+          </span>
+        )}
         <span className="hidden items-center gap-1 text-[10px] text-zinc-600 xl:flex">
           <kbd className="rounded border border-zinc-700 px-1">⌘K</kbd> палитра · <kbd className="rounded border border-zinc-700 px-1">N</kbd> задача
         </span>
@@ -595,7 +729,7 @@ export default function MissionControl() {
 
       {/* ── ⌘K ПАЛИТРА ── */}
       <CommandDialog open={cmdOpen} onOpenChange={setCmdOpen}>
-        <CommandInput placeholder="команда ME2… (13 из 47) · полоса выбирается автоматически" />
+        <CommandInput placeholder="команда ME2… · реестр {catalog.length || '…'}/47 · полоса авто" />
         <CommandList>
           <CommandEmpty>не найдено</CommandEmpty>
           <CommandGroup heading="Задачи">
@@ -635,6 +769,21 @@ export default function MissionControl() {
               <Trash2 className="mr-2 h-4 w-4" /> Сброс среды (EMERGENCY)…
             </CommandItem>
           </CommandGroup>
+          {catalog.length > 0 && (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading={`Реестр действий шины · ${catalog.length}/47`}>
+                {catalog.map((m) => (
+                  <CommandItem key={m.action} value={`${m.action} ${m.desc} ${m.group}`} onSelect={() => runRegistryAction(m)}>
+                    <Badge variant="outline" className={`mr-2 h-4 shrink-0 border px-1 font-mono text-[8px] ${laneChip(m.lane)}`}>{m.lane.slice(0, 4)}</Badge>
+                    <span className="font-mono text-xs">{m.action}</span>
+                    <span className="ml-2 truncate text-[10px] text-zinc-500">{m.desc}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[9px] text-zinc-600">c{m.cost}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
         </CommandList>
       </CommandDialog>
 
@@ -672,11 +821,21 @@ export default function MissionControl() {
                 <Input id="t-steps" type="number" min={1} max={24} value={fSteps} onChange={(e) => setFSteps(e.target.value)} className="border-zinc-800 bg-zinc-900 text-sm" />
               </div>
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="t-delay" className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <Clock className="h-3 w-3 text-lime-500" /> Отложенный запуск (сек, 0 = сразу)
+              </Label>
+              <Input id="t-delay" type="number" min={0} max={3600} value={fDelay} onChange={(e) => setFDelay(e.target.value)} className="border-zinc-800 bg-zinc-900 text-sm" />
+              {Number(fDelay) > 0 && (
+                <p className="text-[10px] text-lime-500/80">задача появится в очереди через {Number(fDelay)}s — команду TASK_ENQUEUE исполнит дренаж шины; отменить можно в COMMAND BUS до ETA</p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" className="border-zinc-700" onClick={() => setNewTaskOpen(false)}>отмена</Button>
             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={createTask} disabled={busyAction}>
-              <Rocket className="mr-1 h-3.5 w-3.5" /> поставить в очередь
+              {Number(fDelay) > 0 ? <Clock className="mr-1 h-3.5 w-3.5" /> : <Rocket className="mr-1 h-3.5 w-3.5" />}
+              {Number(fDelay) > 0 ? `запланировать через ${Number(fDelay)}s` : "поставить в очередь"}
             </Button>
           </DialogFooter>
         </DialogContent>

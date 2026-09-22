@@ -19,13 +19,15 @@ import {
 } from "./store";
 import { listProviders } from "./providers";
 import { startMasterLoop } from "./worker";
-import { drainCommands, runOne, knownActions } from "./commands";
+import { drainCommands, runOne, knownActions, actionCatalog } from "./commands";
+import { initEvidence, evidenceStatus } from "./evidence";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
+const VERSION = "0.4.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
-setMeta("version", "0.3.0");
+setMeta("version", VERSION);
 
 // ── seed (однократно) ─────────────────────────────────────────────
 function seed() {
@@ -83,13 +85,14 @@ const restServer = createServer(async (req, res) => {
   try {
     if (path === "/health") {
       return json(res, 200, {
-        ok: true, service: "me2-daemon", version: "0.3.0", boot: BOOT_TS,
+        ok: true, service: "me2-daemon", version: VERSION, boot: BOOT_TS,
         last_seq: lastSeq(), ts: nowIso(),
       });
     }
     if (path === "/state" && req.method === "GET") return json(res, 200, snapshot());
     if (path === "/budget" && req.method === "GET") return json(res, 200, { ok: true, ...budgetWindow() });
-    if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, actions: knownActions() });
+    if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, count: actionCatalog().length, total_target: 47, actions: actionCatalog() });
+    if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
 
     // ── command bus: единственная точка мутаций ──
@@ -101,9 +104,11 @@ const restServer = createServer(async (req, res) => {
         payload: (body.payload ?? {}) as Record<string, unknown>,
         idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
         cost: body.cost !== undefined ? Number(body.cost) : undefined,
+        run_after: body.run_after !== undefined ? Number(body.run_after) : undefined,
       });
       if (!r.ok) return json(res, 429, { ok: false, error: r.error });
-      const cmd = r.deduped ? r.command : await runOne(r.command);
+      // отложенная команда не исполняется синхронно — её подберёт дренаж, когда время придёт
+      const cmd = (r.deduped || (r.command.run_after && r.command.run_after > Date.now())) ? r.command : await runOne(r.command);
       let result: unknown = null;
       try { result = cmd.result ? JSON.parse(cmd.result) : null; } catch { result = cmd.result; }
       return json(res, r.deduped ? 200 : 201, { ok: true, deduped: r.deduped, command: cmd, result });
@@ -209,16 +214,17 @@ io.on("connection", (socket) => {
   });
 
   // команды через WS (request/response семантика)
-  socket.on("command", async (p: { action: string; payload?: Record<string, unknown>; idempotency_key?: string; lane?: string }, ack?: (r: unknown) => void) => {
+  socket.on("command", async (p: { action: string; payload?: Record<string, unknown>; idempotency_key?: string; lane?: string; run_after?: number }, ack?: (r: unknown) => void) => {
     try {
       const r = enqueueCommand({
         action: String(p?.action ?? ""),
         lane: p?.lane,
         payload: p?.payload ?? {},
         idempotency_key: p?.idempotency_key ?? null,
+        run_after: p?.run_after,
       });
       if (!r.ok) { ack?.({ ok: false, error: r.error }); return; }
-      const cmd = r.deduped ? r.command : await runOne(r.command);
+      const cmd = (r.deduped || (r.command.run_after && r.command.run_after > Date.now())) ? r.command : await runOne(r.command);
       let result: unknown = null;
       try { result = cmd.result ? JSON.parse(cmd.result) : null; } catch { result = cmd.result; }
       ack?.({ ok: true, deduped: r.deduped, command: cmd, result });
@@ -240,6 +246,7 @@ setInterval(() => {
 }, 30_000);
 
 startMasterLoop();
-wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v0.3.0 WS on :${WS_PORT} (path '/')`));
-restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v0.3.0 REST on :${REST_PORT}`));
+initEvidence();
+wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
+restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`));
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);
