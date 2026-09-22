@@ -34,7 +34,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
-  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, Pause, Play, Plus, Radar, RefreshCw,
+  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, Pause, Play, Plus, Radar, RefreshCw,
   RotateCcw, Rocket, Search, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
@@ -387,6 +387,12 @@ export default function MissionControl() {
   // ветки браузера (agent-browser через шину, v0.6.0)
   const [browserTabs, setBrowserTabs] = useState<{ id: string; title: string; url: string; active: boolean }[]>([]);
   const [browserBusy, setBrowserBusy] = useState(false);
+  // СКРИНКАСТ (v0.7.0): живой вид активной вкладки через WS-стрим agent-browser (:3042, вне бюджета шины)
+  const [castOn, setCastOn] = useState(false);
+  const [castStat, setCastStat] = useState<{ connected: boolean; fps: number; url: string | null; error: string | null; lastAge: number | null }>({
+    connected: false, fps: 0, url: null, error: null, lastAge: null,
+  });
+  const castImgRef = useRef<HTMLImageElement | null>(null);
 
   // EVENTS_SEARCH (диалог из ⌘K)
   const [searchOpen, setSearchOpen] = useState(false);
@@ -563,6 +569,48 @@ export default function MissionControl() {
   useEffect(() => {
     if (branchesOpen) loadBrowserTabs();
   }, [branchesOpen, loadBrowserTabs]);
+
+  // СКРИНКАСТ: WS-стрим кадров активной вкладки (gateway → agent-browser stream :3042).
+  // Кадры идут сразу после коннекта (push, maxFps=8); url/status — служебные события.
+  useEffect(() => {
+    if (!castOn) return;
+    let stopped = false;
+    let ws: WebSocket | null = null;
+    let fpsCount = 0;
+    let fpsMark = Date.now();
+    try {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3042&maxFps=8`);
+      ws.onopen = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: true, error: null })); };
+      ws.onmessage = (ev) => {
+        if (stopped) return;
+        try {
+          const msg = JSON.parse(ev.data as string) as { type: string; data?: string; url?: string; metadata?: { timestamp?: number } };
+          if (msg.type === "frame" && msg.data) {
+            const img = castImgRef.current;
+            if (img) img.src = `data:image/jpeg;base64,${msg.data}`;
+            fpsCount++;
+            const nowT = Date.now();
+            if (nowT - fpsMark >= 1000) {
+              setCastStat((s) => ({ ...s, fps: fpsCount, lastAge: msg.metadata?.timestamp ? nowT - msg.metadata.timestamp : null }));
+              fpsCount = 0; fpsMark = nowT;
+            }
+          } else if (msg.type === "url") {
+            setCastStat((s) => ({ ...s, url: msg.url ?? s.url }));
+          }
+        } catch { /* не-JSON кадр — игнор */ }
+      };
+      ws.onerror = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: false, error: "стрим недоступен (:3042)" })); };
+      ws.onclose = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: false })); };
+    } catch {
+      setCastStat((s) => ({ ...s, connected: false, error: "WS не открыт" }));
+    }
+    return () => {
+      stopped = true;
+      try { ws?.close(); } catch { /* уже закрыт */ }
+      setCastStat((s) => ({ ...s, connected: false, fps: 0 }));
+    };
+  }, [castOn]);
 
   const spawnAgent = useCallback(async (role: string) => {
     await sendCommand("AGENT_SPAWN", { role, model: "zai:default" }, { successMsg: `агент ${role} создан` });
@@ -1015,13 +1063,47 @@ export default function MissionControl() {
                   ))}
                   <button
                     type="button"
+                    onClick={() => setCastOn((v) => !v)}
+                    aria-pressed={castOn}
+                    title="Живой вид активной вкладки — WS-стрим агента-браузера (:3042)"
+                    className={`ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition ${
+                      castOn ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                    }`}
+                  >
+                    <MonitorPlay className="h-3 w-3" aria-hidden />
+                    live
+                  </button>
+                  <button
+                    type="button"
                     onClick={loadBrowserTabs}
                     aria-label="Обновить вкладки браузера"
-                    className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                    className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
                   >
                     <RefreshCw className={`h-3 w-3 ${browserBusy ? "animate-spin" : ""}`} aria-hidden />
                   </button>
                 </div>
+                {castOn && (
+                  <div className="shrink-0 border-b border-zinc-800/60 bg-black/40 px-3 py-2">
+                    <div className="relative overflow-hidden rounded-md border border-zinc-800 bg-black">
+                      <img ref={castImgRef} alt="Живой вид активной вкладки браузера" className="block max-h-56 w-full object-contain" />
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/75 px-2 py-0.5 font-mono text-[9px] text-zinc-400">
+                        <span className="truncate">{castStat.url ?? "ожидание кадра…"}</span>
+                        <span className="shrink-0">
+                          {castStat.connected ? (
+                            <span className="text-emerald-400">● {castStat.fps} fps{castStat.lastAge != null ? ` · ${castStat.lastAge}ms` : ""}</span>
+                          ) : (
+                            <span className="text-rose-400">● offline</span>
+                          )}
+                        </span>
+                      </div>
+                      {!castStat.connected && (
+                        <div className="absolute inset-0 grid place-items-center bg-black/60 text-[10px] text-zinc-500">
+                          {castStat.error ?? "подключение к стриму :3042…"}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="mc-scroll max-h-36 grow basis-auto overflow-y-auto px-2 py-1 lg:max-h-40">
                   {branchTasks.length === 0 ? (
                     <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>

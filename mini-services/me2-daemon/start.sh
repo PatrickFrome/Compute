@@ -25,6 +25,13 @@ done
 setsid nohup bun index.ts >> daemon.log 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 
+# 4.5) закрепить agent-browser stream WS на :3042 (скринкаст консоли; идемпотентно, вне бюджета шины)
+SP=$(agent-browser stream status --json 2>/dev/null | grep -o '"port":[0-9]*' | head -1 | cut -d: -f2)
+if [ "$SP" != "3042" ]; then
+  agent-browser stream disable >/dev/null 2>&1
+  agent-browser stream enable --port 3042 >/dev/null 2>&1
+fi
+
 # 5) дождаться health (до 10s)
 for i in $(seq 1 20); do
   H=$(curl -sf --max-time 1 http://localhost:3041/health 2>/dev/null)

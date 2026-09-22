@@ -6266,3 +6266,21 @@ Stage Summary:
 - Ветки браузера замкнуты в контур: оператор видит вкладки, навигирует, кликает, читает текст/URL/тайтл, вводит — всё через бюджетные полосы с идемпотентностью и event-журналом; retry-родословная задач рисуется merge-дугами.
 - Инфра-уроки: tooltip внутри overflow-контейнера = обрезка → portal+fixed; честные ошибки BROWSER_* (Element not found) всплывают в command.result.error — агент может сам исправить селектор.
 - Следующее: CDP-screencast панель (Page.startScreencast управляемого Chromium → canvas в ВЕТКИ), M3 Tauri 2 скелет, SQL-миграция me2_evidence оператором (PGRST205, outbox буфер), OFFLINE worker GC агрессивнее.
+
+---
+Task ID: R7-RESEARCH-SCREENCAST-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task, записывай всю систему в github, анализируй ветки браузера, делай ресёрчи по улучшениям» — web-ресёрч улучшений + внедрение СКРИНКАСТ-панели (live view вкладок).
+
+Work Log:
+- СТАРТ-АУДИТ: R6-состояние цело (v0.7.0 47/47, 9152682, watchdogs живы) — cron за паузу ничего не сломал.
+- РЕСЁРЧ (web-search CLI, 4 направления, research/2026/R7-IMPROVEMENTS-RESEARCH.md): Tauri externalBin-паттерн для M3 (грабля рабочей директории sidecar подтверждена issues); agent-паттерны 2026 (orchestrator-workers = наш master loop; reflection + saga/compensation — кандидаты бэклога); СКРИНКАСТ — ключевая находка: vercel-labs/agent-browser УЖЕ умеет WS-стриминг viewport («pair browsing»): frame{base64 jpeg+metadata.timestamp}/url/tabs/status/console сервер→клиент, input_mouse/keyboard/touch клиент→сервер, pacing=ack+maxFps, AGENT_BROWSER_STREAM_QUALITY 80≈54KB/кадр.
+- ВНЕДРЕНО: СКРИНКАСТ-панель в ВЕТКИ — (1) порт запинен :3042 (stream disable→enable --port 3042; автопин в start.sh §4.5 при каждом старте daemon, идемпотентно); (2) toggle «live» (MonitorPlay, aria-pressed) в БРАУЗЕР-стрипе; (3) WS из консоли по gateway-правилу: new WebSocket(`ws://${location.host}/?XTransformPort=3042&maxFps=8`) — origin localhost в allowlist стрима; (4) кадры → img.src data:image/jpeg;base64 (useRef), caption-бар: URL активной вкладки + ● fps + возраст кадра ms, честный offline/ошибка; (5) ВНЕ бюджета шины и event-log (иначе mirror-спам) — стрим как отдельный канал.
+- ИНЦИДЕНТ-МИНИ: eslint-disable-next-line с em-dash «—» вместо «--» парсится как имя правила → 1 error; фикс; затем directive unused → убрал. Итог lint 0/0.
+- GOLDEN PATHS (:81): toggle live → кадры пошли (118KB jpeg, connected); BROWSER_OPEN example.com через шину → стрип обновился (2 вкладки), стрим пережил переключение активной вкладки (fps 1 на статике = push-pacing шлёт только изменения — корректно), после viewport-смены 8 fps · 15ms; BROWSER_CLOSE t5 → remaining 1; mobile 390 без переполнения; скриншоты r7-01..03.
+- GITHUB: git-sync → sandbox/me2-os.
+
+Stage Summary:
+- Ветки браузера получили ГЛАЗА: оператор видит активную вкладку живьём прямо в ВЕТКИ (pair-browsing — половина пути к remote control; input_* прокидка — пункт №1 бэклога).
+- Ресёрч-бэклог приоритизирован в research/2026/R7-IMPROVEMENTS-RESEARCH.md: pair-browsing input, браузер-консоль в EVENT-LOG, saga/compensation spec-контракт, reflection-патч spec, M3 Tauri externalBin, bandwidth-профили, авто-reap, debate-дуэли. Анти-находки: не дублировать стрим через CDP/шину.
+- Следующее: pair-browsing input_* из консоли, браузер-console-лента, M3 Tauri-скелет, SQL-миграция me2_evidence оператором (outbox буфер растёт).
