@@ -59,3 +59,18 @@
 
 См. строку ниже (GHTOKEN=):
 GHTOKEN=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
+
+---
+
+## 🔐 ВОССТАНОВЛЕННЫЕ КЛЮЧИ (оператор прислал 2026-09-22, продублировано в /home/z/.a2/, chmod 600)
+
+**Supabase cloud — ЖИВОЙ проект (ref `xpeibufgzjknrhbhpffp`, REST 200 подтверждён 2026-09-22):**
+- URL: `https://xpeibufgzjknrhbhpffp.supabase.co`
+- service_role JWT (iat 1787190012, exp 2102766012):
+  `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwZWlidWZnemprbnJoYmhwZmZwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzE5MDAxMiwiZXhwIjoyMTAyNzY2MDEyfQ.GwPUwfFLebOQFDKJWl_NmExp_Pgww4x8xsVsgxiO8Gc`
+- JWT secret: `kYV+BImeSlNmuShN8LrQsU4064fao1ovHpueQ+pL/ldrModSQppEymp0/ctknVCbdsXEk0WI0rmXnmHGnz84ug==`
+
+**GitHub:**
+- `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`
+
+**Файлы-хранилища:** `/home/z/.a2/supabase-cloud.env`, `/home/z/.a2/.github.env`

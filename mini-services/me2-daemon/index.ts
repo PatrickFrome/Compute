@@ -1,23 +1,67 @@
 /**
- * ME2 Daemon — ядро METAENGINE 2 (Фаза B «Стратификация»).
+ * ME2 Daemon — ядро METAENGINE 2 (M1).
  * API-native agent runtime: агенты = контексты + инструменты, НЕ вкладки браузера.
- * Горячий путь: локальный SQLite + in-process шина. REST + socket.io на :3040.
+ * Горячий путь: локальный SQLite + command bus (single-writer).
  *
- * Запуск: bun run dev  (bun --hot index.ts)
+ * Порты (через gateway XTransformPort):
+ *   :3040 — socket.io, path '/' (WS-канал: snapshot push + события + команды)
+ *   :3041 — REST API (health/state/commands/tasks/agents/workers/budget/reset)
+ *
+ * Запуск long-run: setsid nohup bun index.ts > daemon.log 2>&1 &
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Server } from "socket.io";
 import {
-  createAgent, deleteAgent, listAgents, listTasks, createTask, getTask,
-  cancelTask, emit, tailEvents, db,
+  listAgents, listTasks, getTask, tailEvents, db, emit, snapshot,
+  enqueueCommand, budgetWindow, listCommands, listWorkers, upsertWorker,
+  getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
+  createAgent, createTask, nowIso,
 } from "./store";
 import { listProviders } from "./providers";
 import { startMasterLoop } from "./worker";
+import { drainCommands, runOne, knownActions } from "./commands";
 
-const PORT = 3040;
-const BOOT_TS = new Date().toISOString();
+const WS_PORT = 3040;
+const REST_PORT = 3041;
+const BOOT_TS = nowIso();
+setMeta("boot", BOOT_TS);
+setMeta("version", "0.2.0");
 
-// ── REST ──────────────────────────────────────────────────────────
+// ── seed (однократно) ─────────────────────────────────────────────
+function seed() {
+  if (getMeta("seeded") === "1") return;
+  const a1 = createAgent("IMPLEMENTER", "zai:default");
+  const a2 = createAgent("RESEARCHER", "zai:default");
+  emit("AGENT_CREATED", { role: "IMPLEMENTER", model: "zai:default", seed: true }, a1.id, null);
+  emit("AGENT_CREATED", { role: "RESEARCHER", model: "zai:default", seed: true }, a2.id, null);
+
+  const t1 = createTask({
+    id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    title: "ME2 smoke: осмотреть workspace, создать hello.txt с версией daemon",
+    spec: "Это smoke-задача рантайма ME2. Шаги: 1) list_dir . 2) write_file hello.txt с текстом 'ME2 daemon v0.2.0 live at <текущая дата>' 3) finish с результатом.",
+    role: "IMPLEMENTER", max_steps: 4,
+  });
+  const t2 = createTask({
+    id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    title: "Ресёрч: 3 ключевых тренда agent-runtime 2026",
+    spec: "Используй web_search по запросу 'agent runtime trends 2026'. Сделай саммари из 3 пунктов (по 1-2 предложения). Заверши через finish.",
+    role: "RESEARCHER", max_steps: 5,
+  });
+  const t3 = createTask({
+    id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    title: "Создать структуру docs/: index.md и architecture.md (заглушки)",
+    spec: "В workspace: write_file docs/index.md ('# ME2 Docs') и docs/architecture.md ('# Architecture: daemon + console'). finish после создания.",
+    role: "IMPLEMENTER", max_steps: 4,
+  });
+  emit("TASK_QUEUED", { seed: true, title: t1.title }, null, t1.id);
+  emit("TASK_QUEUED", { seed: true, title: t2.title }, null, t2.id);
+  emit("TASK_QUEUED", { seed: true, title: t3.title }, null, t3.id);
+  setMeta("seeded", "1");
+  console.log("[seed] agents: 2, tasks: 3");
+}
+seed();
+
+// ── REST API (:3041) ──────────────────────────────────────────────
 function json(res: ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
   res.end(JSON.stringify(body));
@@ -30,66 +74,89 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   catch { return {}; }
 }
 
-const httpServer = createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+const restServer = createServer(async (req, res) => {
+  const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
 
   try {
     if (path === "/health") {
-      return json(res, 200, { ok: true, service: "me2-daemon", version: "0.1.0", boot: BOOT_TS, ts: new Date().toISOString() });
-    }
-    if (path === "/state" && req.method === "GET") {
-      const agents = listAgents();
-      const tasks = listTasks();
-      const since = Number(url.searchParams.get("since") ?? 0);
       return json(res, 200, {
-        ok: true, agents, tasks,
-        events: tailEvents(since, 100),
-        stats: {
-          agentsIdle: agents.filter((a) => a.status === "IDLE").length,
-          agentsBusy: agents.filter((a) => a.status === "BUSY").length,
-          tasksReady: tasks.filter((t) => t.status === "READY").length,
-          tasksRunning: tasks.filter((t) => t.status === "RUNNING").length,
-          tasksCompleted: tasks.filter((t) => t.status === "COMPLETED").length,
-          tasksFailed: tasks.filter((t) => t.status === "FAILED").length,
-        },
+        ok: true, service: "me2-daemon", version: "0.2.0", boot: BOOT_TS,
+        last_seq: lastSeq(), ts: nowIso(),
       });
     }
+    if (path === "/state" && req.method === "GET") return json(res, 200, snapshot());
+    if (path === "/budget" && req.method === "GET") return json(res, 200, { ok: true, ...budgetWindow() });
+    if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, actions: knownActions() });
+    if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
+
+    // ── command bus: единственная точка мутаций ──
+    if (path === "/commands" && req.method === "POST") {
+      const body = await readBody(req);
+      const r = enqueueCommand({
+        action: String(body.action ?? ""),
+        lane: body.lane ? String(body.lane) : undefined,
+        payload: (body.payload ?? {}) as Record<string, unknown>,
+        idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
+        cost: body.cost !== undefined ? Number(body.cost) : undefined,
+      });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      const cmd = r.deduped ? r.command : await runOne(r.command);
+      let result: unknown = null;
+      try { result = cmd.result ? JSON.parse(cmd.result) : null; } catch { result = cmd.result; }
+      return json(res, r.deduped ? 200 : 201, { ok: true, deduped: r.deduped, command: cmd, result });
+    }
+    if (path === "/commands" && req.method === "GET") return json(res, 200, { ok: true, commands: listCommands(100) });
+
+    // ── workers ──
+    if (path === "/workers" && req.method === "GET") return json(res, 200, { ok: true, workers: listWorkers() });
+    if (path === "/workers/heartbeat" && req.method === "POST") {
+      const body = await readBody(req);
+      const w = upsertWorker({
+        id: body.id ? String(body.id) : undefined,
+        role: String(body.role ?? "console"),
+        kind: String(body.kind ?? "API"),
+        state: body.state ? String(body.state) : undefined,
+      });
+      return json(res, 200, { ok: true, worker: w });
+    }
+
+    // ── удобные обёртки (внутри всё равно command bus) ──
+    if (path === "/agents" && req.method === "GET") return json(res, 200, { ok: true, agents: listAgents() });
     if (path === "/agents" && req.method === "POST") {
       const body = await readBody(req);
-      const role = String(body.role ?? "IMPLEMENTER").toUpperCase().slice(0, 32);
-      const model = String(body.model ?? "zai:default").slice(0, 64);
-      const agent = createAgent(role, model);
-      const ev = emit("AGENT_CREATED", { role, model }, agent.id, null);
-      io.emit("event", ev);
-      return json(res, 200, { ok: true, agent });
+      const r = enqueueCommand({ action: "AGENT_SPAWN", payload: { role: body.role, model: body.model }, idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      const cmd = await runOne(r.command);
+      return json(res, 201, { ok: true, result: cmd.result ? JSON.parse(cmd.result) : null });
     }
     if (path.startsWith("/agents/") && req.method === "DELETE") {
       const id = path.split("/")[2];
-      deleteAgent(id);
-      const ev = emit("AGENT_RETIRED", { id }, id, null);
-      io.emit("event", ev);
+      const r = enqueueCommand({ action: "AGENT_RETIRE", lane: "CONTROL", payload: { id } });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      await runOne(r.command);
       return json(res, 200, { ok: true });
     }
+    if (path === "/tasks" && req.method === "GET") return json(res, 200, { ok: true, tasks: listTasks() });
     if (path === "/tasks" && req.method === "POST") {
       const body = await readBody(req);
-      const title = String(body.title ?? "untitled").slice(0, 200);
-      const spec = String(body.spec ?? "").slice(0, 20000);
-      if (!spec) return json(res, 400, { ok: false, error: "spec_required" });
-      const role = body.role ? String(body.role).toUpperCase().slice(0, 32) : null;
-      const maxSteps = Math.min(Math.max(Number(body.max_steps ?? 8), 1), 24);
-      const task = createTask({ id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, title, spec, role, max_steps: maxSteps });
-      const ev = emit("TASK_QUEUED", { title, role, max_steps: maxSteps }, null, task.id);
-      io.emit("event", ev);
-      return json(res, 200, { ok: true, task });
+      const r = enqueueCommand({
+        action: "TASK_ENQUEUE",
+        payload: { title: body.title, spec: body.spec, role: body.role, max_steps: body.max_steps },
+        idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
+      });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      const cmd = await runOne(r.command);
+      const parsed = cmd.result ? (JSON.parse(cmd.result) as { task?: unknown }) : null;
+      return json(res, 201, { ok: true, task: parsed?.task ?? null, command: cmd.id });
     }
     if (path.startsWith("/tasks/") && path.endsWith("/cancel") && req.method === "POST") {
       const id = path.split("/")[2];
-      cancelTask(id);
-      const ev = emit("TASK_CANCELLED", { id }, null, id);
-      io.emit("event", ev);
+      const r = enqueueCommand({ action: "TASK_CANCEL", lane: "CONTROL", payload: { id } });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      await runOne(r.command);
       return json(res, 200, { ok: true });
     }
     if (path.startsWith("/tasks/") && req.method === "GET") {
@@ -102,13 +169,10 @@ const httpServer = createServer(async (req, res) => {
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
       return json(res, 200, { ok: true, events: tailEvents(since, limit) });
     }
-    if (path === "/providers" && req.method === "GET") {
-      return json(res, 200, { ok: true, providers: await listProviders() });
-    }
     if (path === "/reset" && req.method === "POST") {
-      db.exec("DELETE FROM tasks; DELETE FROM events; DELETE FROM agents;");
-      const ev = emit("ENVIRONMENT_RESET", { by: "operator" }, null, null);
-      io.emit("event", ev);
+      const r = enqueueCommand({ action: "ENVIRONMENT_RESET", lane: "EMERGENCY", payload: { by: "operator" } });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      await runOne(r.command);
       return json(res, 200, { ok: true });
     }
     return json(res, 404, { ok: false, error: `no route ${req.method} ${path}` });
@@ -117,23 +181,64 @@ const httpServer = createServer(async (req, res) => {
   }
 });
 
-// ── socket.io (path = '/', Caddy forwards via XTransformPort) ─────
-const io = new Server(httpServer, {
+// ── socket.io (:3040, path '/' — требование gateway) ──────────────
+const wsHttpServer = createServer();
+const io = new Server(wsHttpServer, {
   path: "/",
   cors: { origin: "*", methods: ["GET", "POST"] },
   pingTimeout: 60_000,
   pingInterval: 25_000,
 });
 
+onEvent((e) => { io.emit("event", e); });
+
 io.on("connection", (socket) => {
-  socket.emit("hello", { service: "me2-daemon", boot: BOOT_TS });
-  socket.on("subscribe", () => {
-    const last = tailEvents(0, 1).pop();
-    socket.emit("catchup", { since: last?.seq ?? 0 });
+  socket.emit("hello", { service: "me2-daemon", boot: BOOT_TS, last_seq: lastSeq() });
+  socket.emit("snapshot", snapshot());
+
+  // heartbeat консоли → workers
+  socket.on("heartbeat", (p: { role?: string; state?: string } = {}, ack?: (r: unknown) => void) => {
+    const w = upsertWorker({
+      id: `wk_console_${socket.id.slice(0, 8)}`,
+      role: String(p.role ?? "console"),
+      kind: "API",
+      state: p.state ?? "IDLE",
+    });
+    ack?.({ ok: true, worker: w });
+  });
+
+  // команды через WS (request/response семантика)
+  socket.on("command", async (p: { action: string; payload?: Record<string, unknown>; idempotency_key?: string; lane?: string }, ack?: (r: unknown) => void) => {
+    try {
+      const r = enqueueCommand({
+        action: String(p?.action ?? ""),
+        lane: p?.lane,
+        payload: p?.payload ?? {},
+        idempotency_key: p?.idempotency_key ?? null,
+      });
+      if (!r.ok) { ack?.({ ok: false, error: r.error }); return; }
+      const cmd = r.deduped ? r.command : await runOne(r.command);
+      let result: unknown = null;
+      try { result = cmd.result ? JSON.parse(cmd.result) : null; } catch { result = cmd.result; }
+      ack?.({ ok: true, deduped: r.deduped, command: cmd, result });
+    } catch (e) {
+      ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
   });
 });
 
+// периодический snapshot push + дренаж команд + reaper
+setInterval(() => {
+  try { io.emit("snapshot", snapshot()); } catch { /* console может быть offline */ }
+}, 2000);
+setInterval(() => {
+  try { void drainCommands(8); } catch (e) { console.error(`[drain] ${String(e)}`); }
+}, 1000);
+setInterval(() => {
+  try { reapStaleWorkers(); } catch { /* noop */ }
+}, 30_000);
+
 startMasterLoop();
-httpServer.listen(PORT, () => {
-  console.log(`[me2-daemon] listening on :${PORT} (boot ${BOOT_TS})`);
-});
+wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v0.2.0 WS on :${WS_PORT} (path '/')`));
+restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v0.2.0 REST on :${REST_PORT}`));
+console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

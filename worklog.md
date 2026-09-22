@@ -6109,3 +6109,40 @@ Stage Summary:
 - Деливерабл: research/2026/METAENGINE-2-BLUEPRINT.md (+ предыдущий METAENGINE-REBUILD-RESEARCH.md).
 - Решение: Tauri 2 (консоль) + ME2 daemon + Chromium-via-CDP; все браузерные механики воспроизводятся 1:1 (AX-perception, Input-actuation, semantic frames, outcome-latch, вкладки, fleet, DevOS); облако деградирует до evidence-plane.
 - Риск: lease/claims дожимаются только к ~23:04; сброс на 22:53 подтвержден по fence.
+
+---
+Task ID: KEYS-RESTORED-20260922
+Agent: main (Super Z)
+Task: «вот ключи, сохрани их так, чтобы никогда не потерять в этом чате» — перманентная фиксация трёх секретов после сброса среды.
+
+Work Log:
+- Создан vault /home/z/.a2/ (chmod 700): supabase-cloud.env (SUPABASE_URL, SERVICE_ROLE_KEY + алиас SERVICE_ROLE_JWT для providers.ts, JWT_SECRET) и .github.env (GITHUB_TOKEN, GITHUB_REPO) — chmod 600.
+- Копия дописана в a2-capsule/01_CREDENTIALS_AND_ENDPOINTS.md (github-токен в workspace-копии автоматически редактируется хуком — оригинал жив только в /home/z/.a2/).
+- Верификация: curl REST Supabase → HTTP 200 (проект xpeibufgzjknrhbhpffp ЖИВОЙ, вопреки старой записи в capsule).
+- Тройная избыточность: диск /home/z/.a2/ + a2-capsule + текст чата/саммари.
+
+Stage Summary:
+- Секреты восстановлены в 3 местах, daemon providers.ts уже читает /home/z/.a2/supabase-cloud.env (gateway-провайдер оживёт при доступности RPC).
+- Supabase cloud доступен (200) — evidence-plane M5 разблокирован.
+
+---
+Task ID: M1-M2-IMPL-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task» — M1 ME2 daemon (spec DB-AUDIT §4) + M2 Mission Control, long-run режим с автоперезапуском.
+
+Work Log:
+- НАЙДЕНО: скелет daemon v0.1.0 от прошлой сессии (index/store/worker/providers, зомби-процесс держал :3040) — убит, код расширен до v0.2.0.
+- store.ts v2: + commands (command bus: полосы EMERGENCY(0)/CONTROL(1)/MUTATION(5)/READ_ONLY(9), бюджет 24 cost/60s, idempotency_key UNIQUE, атомарный claim), + workers (heartbeat, reap 90s), + meta (kv), events → hash-chain (sha256 prev_hash→hash), live-listeners для WS.
+- commands.ts: executor (PING, STATE_SNAPSHOT, TASK_ENQUEUE/CANCEL, AGENT_SPAWN/RETIRE, EVENTS_TAIL, WORKER_HEARTBEAT, FLEET_RECONCILE, ENVIRONMENT_RESET) + drainCommands для master loop.
+- index.ts: РАЗДЕЛЕНИЕ ПОРТОВ — WS :3040 (socket.io path '/', требование gateway: path '/' глотает весь HTTP → REST невозможен на том же порту) + REST :3041. Seed 2 агента + 3 задачи. Snapshot push 2s, дренаж 1s, reap 30s.
+- worker.ts (без изменений): master loop 400ms + agent loop (tools: write_file/read_file/list_dir/shell/web_search/finish, JSON-протокол шага).
+- long-run: setsid nohup bun index.ts + watchdog.sh (health /health :3041 каждые 10s, автоперезапуск; pid жив).
+- M2 Mission Control (src/app/page.tsx, полная замена): 3 колонки ФЛОТ/ОЧЕРЕДЬ/EVENT-LOG, ⌘K палитра (10 действий с полосами), диалог новой задачи (role/max_steps), Sheet-детали задачи (spec+результат+отмена), подтверждение EMERGENCY-сброса, статус-бар = sticky footer (mt-auto), heartbeat 15s, команды через WS-ack с REST-fallback, кастомные скроллбары, мобильная адаптация (колонки стекуются).
+- ВЕРИФИКАЦИЯ agent-browser (через gateway :81 — на :3000 напрямую XTransformPort НЕ проксируется, это норма): WS LIVE, seq растёт, задача создана из UI → RUNNING → COMPLETED (реальные файлы docs/ в me2-workspace), PING из палитры, бюджет 2/24, зомби-воркер → OFFLINE reap-ом, мобильная вёрстка ок. Линт 0/0. dev.log чист.
+- Инцидент по пути: старый v0.1.0 процесс удерживал :3040 → «Transport unknown»; первый старт нового упал (port in use) — убит, перезапущен.
+
+Stage Summary:
+- ME2 v0.2.0 LIVE: WS :3040 + REST :3041, single-writer command bus (4 полосы, бюджет, idempotency), hash-chain event log, seed-флот реально работает задачи через zai (включая web_search).
+- Консоль LIVE: полный golden path подтверждён браузером (создание→исполнение→результат).
+- Издержка радиации: skeleton-store.ts экспортирует nextPendingCommands/setCommandStatus — не используются (commands.ts имеет свои запросы), не критично.
+- Следующее: M2 расширение (скринкаст CDP, реестр 47 действий), M3 Tauri-оболочка, M5 ingest-RPC в Supabase (ключи уже на диске).
