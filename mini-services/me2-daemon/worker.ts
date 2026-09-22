@@ -125,6 +125,50 @@ function extractJson(text: string): { thought?: string; action?: { tool?: string
 
 const running = new Set<string>();
 
+/** Рефлексия провала (паттерн Reflexion, tier-1 детерминированный): диагноз причины + урок для повтора.
+ *  Пишется в tasks.reflection при FAILED; TASK_RETRY-потомок получает её первым сообщением —
+ *  эпизодическая память, направляющая следующую попытку (research/2026/R9-REFLECTION-RESEARCH.md §1). */
+export function buildReflection(task: TaskRow, errMsg: string): string {
+  const e = errMsg.toLowerCase();
+  let cause = "runtime_error";
+  let what = "Задача упала с исключением на шаге агента.";
+  let hint = "Повторите задачу (TASK_RETRY добавляет +2 шага) — ретрай получит эту рефлексию как контекст.";
+  if (errMsg.includes("max_steps_exhausted")) {
+    cause = "budget_exhausted";
+    what = `Агент израсходовал все ${task.max_steps} шагов, не вызвав finish.`;
+    hint = "Раздробите спецификацию на подзадачи; ретрай даёт +2 шага — используйте их на finish, а не на новые изыскания.";
+  } else if (e.includes("fetch failed") || e.includes("timeout") || e.includes("econnrefused") || e.includes("provider") || e.includes("socket")) {
+    cause = "provider_unavailable";
+    what = "Провайдер LLM недоступен или ответил таймаутом на шаге агента.";
+    hint = "Это инфраструктурный сбой, не ошибка спецификации: проверьте провайдеров (панель АГЕНТЫ) и повторите.";
+  } else if (e.includes("path_escape") || e.includes("enoent") || e.includes("no such file")) {
+    cause = "workspace_path";
+    what = "Инструмент workspace получил неверный или запрещённый путь.";
+    hint = "Пути относительны корня workspace; проверьте имя файла и повторите — рефлексия уже в контексте ретрая.";
+  } else if (e.includes("json") || e.includes("parse") || e.includes("protocol")) {
+    cause = "protocol_violation";
+    what = "Модель систематически нарушала JSON-протокол шага (контекст переполнен или модель слаба).";
+    hint = "Смените модель агента (AGENT_MODEL) или упростите спецификацию; ретрай на той же модели повторит путь.";
+  }
+  return JSON.stringify({
+    v: 1, cause, what, hint,
+    error: errMsg.slice(0, 300), steps: task.steps, max_steps: task.max_steps,
+    at: new Date().toISOString(),
+  });
+}
+
+/** Эпизодическая память ретрая: рефлексия родителя → строка для первого сообщения child-агента. */
+function parentMemory(task: TaskRow): string | null {
+  if (!task.parent_id) return null;
+  const parent = getTask(task.parent_id);
+  if (!parent?.reflection) return null;
+  try {
+    const r = JSON.parse(parent.reflection) as { cause?: string; what?: string; hint?: string };
+    if (!r.cause) return null;
+    return `ПРЕДЫДУЩАЯ ПОПЫТКА ЭТОЙ ЗАДАЧИ ПРОВАЛИЛАСЬ. Причина (${r.cause}): ${r.what ?? "—"} Урок: ${r.hint ?? "—"} Учти это и не повтори её путь.`;
+  } catch { return null; }
+}
+
 async function runAgentTask(agent: AgentRow, task: TaskRow) {
   running.add(agent.id);
   setAgentStatus(agent.id, "BUSY");
@@ -135,6 +179,12 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
     { role: "system", content: systemPrompt(agent) },
     { role: "user", content: `ЗАДАЧА: ${task.title}\n\nСПЕЦИФИКАЦИЯ:\n${task.spec}` },
   ];
+  // эпизодическая память: рефлексия родительской попытки направляет ретрай (Reflexion)
+  const memory = parentMemory(task);
+  if (memory) {
+    messages.push({ role: "user", content: memory });
+    emit("TASK_LEASED", { retry_memory: true, parent: task.parent_id }, agent.id, task.id);
+  }
 
   try {
     let result: string | null = null;
@@ -166,13 +216,17 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       updateTask(task.id, { steps: step });
     }
     if (result === null) {
-      updateTask(task.id, { status: "FAILED", error: "max_steps_exhausted" });
-      emit("TASK_FAILED", { error: "max_steps_exhausted" }, agent.id, task.id);
+      const refl = buildReflection(task, "max_steps_exhausted");
+      updateTask(task.id, { status: "FAILED", error: "max_steps_exhausted", reflection: refl });
+      emit("TASK_FAILED", { error: "max_steps_exhausted", cause: "budget_exhausted" }, agent.id, task.id);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500) });
-    emit("TASK_FAILED", { error: msg.slice(0, 300) }, agent.id, task.id);
+    const refl = buildReflection(task, msg);
+    updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500), reflection: refl });
+    let cause: string | undefined;
+    try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
+    emit("TASK_FAILED", { error: msg.slice(0, 300), cause }, agent.id, task.id);
   } finally {
     setAgentStatus(agent.id, "IDLE");
     running.delete(agent.id);

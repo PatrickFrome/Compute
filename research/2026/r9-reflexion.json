@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://neurips.cc",
+    "name": "Reflexion: language agents with verbal reinforcement",
+    "snippet": "In the Reflexion runs, the agent uses self - reflection to find its mistake, update its memory , reset the environment, and start a new trial.",
+    "host_name": "neurips.cc",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://zylos.ai",
+    "name": "Agent Self-Correction: From Reflexion to Process Reward",
+    "snippet": "May 12, 2026 — This article traces the full arc: what self - correction is, why pure intrinsic approaches fail , what makes grounded approaches work, and how ... Read more",
+    "host_name": "zylos.ai",
+    "rank": 1,
+    "date": "May 12, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org",
+    "name": "Multi-Agent Reflexion Improves Reasoning Abilities in LLMs",
+    "snippet": "Jun 7, 2026 — an LLM agent generates natural language reflections about its failures and stores them as episodic memory that guides future attempts.",
+    "host_name": "arxiv.org",
+    "rank": 2,
+    "date": "Jun 7, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://wandb.ai",
+    "name": "Agentic AI self-correction: How to build systems that fix their",
+    "snippet": "2025 – 2026 bakes reflection . Reflexion -style self -critique: runs after every step “ failure → replan.” Memory and permanent failure avoidance One-shot reflection ...",
+    "host_name": "wandb.ai",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.arthur.ai",
+    "name": "Self-Correction Loops for AI Agents, Explained | Arthur",
+    "snippet": "Jun 26, 2026 — A self - correction loop feeds guardrail failures back to the LLM to revise responses before users see them. Learn how the pattern works and ...",
+    "host_name": "www.arthur.ai",
+    "rank": 4,
+    "date": "Jun 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Self-Correction Reflection Loop — Automatic Retry with",
+    "snippet": "Mar 6, 2026 — Aider has a sophisticated self - correction reflection loop that dramatically improves edit reliability: when an edit fails to apply, lint errors ... Read more",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "Mar 6, 2026",
+    "favicon": ""
+  }
+]

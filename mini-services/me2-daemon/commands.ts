@@ -84,7 +84,7 @@ const handlers: Record<string, Handler> = {
       spec: orig.spec, role: orig.role, max_steps: maxSteps,
       parent_id: orig.id,
     });
-    emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps }, null, task.id);
+    emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps, has_reflection: Boolean(orig.reflection) }, null, task.id);
     return { task };
   },
 

@@ -44,8 +44,9 @@ type Agent = { id: string; role: string; status: string; model: string; paused: 
 type Task = {
   id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
-  error: string | null; created_at: string; updated_at: string;
+  error: string | null; reflection: string | null; created_at: string; updated_at: string;
 };
+type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -211,7 +212,7 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
 /** Git-подобный граф ветвей: рейка таймлайна, каждая задача — ветвь с точкой статуса.
  *  v0.7.0: retry-линии (parent_id → merge-дуга к родителю) + hover-tooltip через portal
  *  (fixed-позиция, не обрезается скролл-контейнером панели). */
-function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => void }) {
+function BranchGraph({ tasks, onOpen, onRetry }: { tasks: Task[]; onOpen: (t: Task) => void; onRetry: (t: Task) => void }) {
   const ROW_H = 30, W = 340, RAIL_X = 16, FORK_X = 46, DOT_X = 208, TEXT_X = 220, STEPS_X = 334;
   const [hover, setHover] = useState<{ t: Task; top: number; left: number } | null>(null);
   const h = Math.max(40, tasks.length * ROW_H + 26);
@@ -226,11 +227,39 @@ function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => vo
     });
     return out;
   }, [tasks]);
+  // координатная база — хит-зона строки (rect.branch-hover, ровно 30px), НЕ сам <g>:
+  // bbox g включает path ветви от рейки (M 16 10 → y строки) и тянется на пол-графа,
+  // из-за чего tooltip позиционировался мимо вьюпорта при скролле секции (ловили живьём в R9)
+  const rowRect = (t: Task): DOMRect | null => {
+    const el = document.querySelector(`g[data-branch-id="${t.id}"] rect.branch-hover`);
+    return el ? el.getBoundingClientRect() : null;
+  };
   const track = (t: Task) => (e: React.MouseEvent | React.FocusEvent) => {
-    const r = (e.currentTarget as Element).getBoundingClientRect();
+    const r = rowRect(t);
+    if (!r) return;
     setHover({ t, top: r.top, left: r.left });
   };
   const clr = (id: string) => setHover((cur) => (cur?.t.id === id ? null : cur));
+  // v0.9.0: координаты tooltip-а живут, пока живёт hover: скролл любого контейнера (capture),
+  // ресайз окна и движение мыши по строке обновляют позицию — иначе строка уезжает из-под
+  // зафиксированных координат (скролл секции под статичным курсором, ресайз каст-панели)
+  const hoverId = hover?.t.id;
+  useEffect(() => {
+    if (!hoverId) return;
+    const update = () => {
+      const el = document.querySelector(`g[data-branch-id="${hoverId}"]`);
+      if (!el) return;
+      const r = el.querySelector("rect.branch-hover")?.getBoundingClientRect();
+      if (!r) return;
+      setHover((cur) => (cur && cur.t.id === hoverId ? { ...cur, top: r.top, left: r.left } : cur));
+    };
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [hoverId]);
   return (
     <div className="relative">
       <svg
@@ -263,8 +292,10 @@ function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => vo
             <g
               key={t.id}
               className="branch-row"
+              data-branch-id={t.id}
               onClick={() => onOpen(t)}
               onMouseEnter={set}
+              onMouseMove={set}
               onMouseLeave={clearThis}
               onFocus={set}
               onBlur={clearThis}
@@ -292,6 +323,21 @@ function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => vo
               <text x={STEPS_X} y={y + 3.6} fontSize={9} textAnchor="end" className="branch-dot fill-zinc-500 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
                 {t.steps}/{t.max_steps}
               </text>
+              {(t.status === "FAILED" || t.status === "CANCELLED") && (
+                <g
+                  className="branch-retry cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); onRetry(t); }}
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={`Повторить задачу ${t.title}`}
+                >
+                  <title>{"Повторить (TASK_RETRY: +2 шага, рефлексия родителя в контексте)"}</title>
+                  <circle cx={STEPS_X - 34} cy={y} r={7.5} fill="transparent" className="hover:fill-amber-500/20" />
+                  <text x={STEPS_X - 34} y={y + 3.4} fontSize={9.5} textAnchor="middle" className="fill-amber-500/70 font-mono hover:fill-amber-300" style={{ pointerEvents: "none" }}>
+                    ↻
+                  </text>
+                </g>
+              )}
             </g>
           );
         })}
@@ -325,6 +371,30 @@ function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => vo
                     {hover.t.parent_id ? <span className="text-amber-400/90"> · ветвь от {hover.t.parent_id.slice(0, 16)}</span> : null}
                   </div>
                   {hover.t.error ? <div className="mt-1 max-w-[280px] truncate font-mono text-[9px] text-rose-400">⚠ {hover.t.error}</div> : null}
+                  {(() => {
+                    if (!hover.t.reflection) return null;
+                    try {
+                      const r = JSON.parse(hover.t.reflection) as Reflection;
+                      if (!r.cause) return null;
+                      const CAUSE_RU: Record<string, string> = {
+                        budget_exhausted: "бюджет шагов",
+                        provider_unavailable: "провайдер недоступен",
+                        workspace_path: "путь workspace",
+                        protocol_violation: "нарушение JSON-протокола",
+                        runtime_error: "ошибка шага",
+                      };
+                      return (
+                        <div className="mt-1.5 rounded border border-amber-900/60 bg-amber-950/30 px-1.5 py-1">
+                          <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-400">
+                            <span>рефлексия</span>
+                            <span className="rounded bg-amber-500/15 px-1 normal-case text-amber-300">{CAUSE_RU[r.cause] ?? r.cause}</span>
+                          </div>
+                          <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-300">{r.what}</div>
+                          <div className="mt-0.5 text-[9.5px] leading-snug text-emerald-300/90">↳ {r.hint}</div>
+                        </div>
+                      );
+                    } catch { return null; }
+                  })()}
                 </div>
               );
             })(),
@@ -390,8 +460,18 @@ export default function MissionControl() {
   const [browserBusy, setBrowserBusy] = useState(false);
   // СКРИНКАСТ (v0.7.0): живой вид активной вкладки через WS-стрим agent-browser (:3042, вне бюджета шины)
   const [castOn, setCastOn] = useState(false);
-  const [castStat, setCastStat] = useState<{ connected: boolean; fps: number; url: string | null; error: string | null; lastAge: number | null }>({
-    connected: false, fps: 0, url: null, error: null, lastAge: null,
+  // v0.9.0: профили полосы стрима (ресёрч ABR + streaming.md: pacing+maxFps — per-client, config мгновенен)
+  // макс = push 12fps (низкая задержка для руля) · баланс = ack 8 · эконом = ack 2 · авто = ack, maxFps адаптивен по KB/s
+  const CAST_PROFILES = {
+    "макс": { maxFps: 12, pacing: "push" },
+    "баланс": { maxFps: 8, pacing: "ack" },
+    "эконом": { maxFps: 2, pacing: "ack" },
+    "авто": { maxFps: 8, pacing: "ack" },
+  } as const;
+  type CastProfile = keyof typeof CAST_PROFILES;
+  const [castProfile, setCastProfile] = useState<CastProfile>("баланс");
+  const [castStat, setCastStat] = useState<{ connected: boolean; fps: number; url: string | null; error: string | null; lastAge: number | null; kbs: number | null }>({
+    connected: false, fps: 0, url: null, error: null, lastAge: null, kbs: null,
   });
   const castImgRef = useRef<HTMLImageElement | null>(null);
   // PAIR-CONTROL (v0.8.0): клик/клавиатура/колесо из скринкаста → активная вкладка (вне бюджета шины)
@@ -579,23 +659,30 @@ export default function MissionControl() {
   }, [branchesOpen, loadBrowserTabs]);
 
   // СКРИНКАСТ + PAIR-CONTROL: WS-стрим кадров активной вкладки (gateway → agent-browser stream :3042).
-  // Кадры — push maxFps=8; url/tabs/console — служебные; input_* летит только в armed-режиме «руль».
+  // v0.9.0 профили полосы: pacing+maxFps из CAST_PROFILES (URL покрывает открывающий кадр);
+  // в ack-режиме клиент эхом шлёт {type:"ack",seq} — сервер держит ≤1 кадра в полёте (нет очередей);
+  // «авто»: раз в секунду меряем KB/s и переставляем maxFps config-сообщением (без реконнекта).
+  // url/tabs/console — служебные; input_* летит только в armed-режиме «руль».
   useEffect(() => {
     if (!castOn) return;
     let stopped = false;
     let ws: WebSocket | null = null;
     let fpsCount = 0;
     let fpsMark = Date.now();
+    let b64Bytes = 0; // base64-символы за окно (≈ байты × 3/4)
+    const prof = CAST_PROFILES[castProfile];
+    const pacing = prof.pacing as "push" | "ack";
+    let autoFps = prof.maxFps; // для «авто»: текущий адаптивный потолок
     try {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3042&maxFps=8`);
+      ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3042&maxFps=${prof.maxFps}${pacing === "ack" ? "&pacing=ack" : ""}`);
       castWsRef.current = ws;
       ws.onopen = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: true, error: null })); };
       ws.onmessage = (ev) => {
         if (stopped) return;
         try {
           const msg = JSON.parse(ev.data as string) as {
-            type: string; data?: string; url?: string;
+            type: string; data?: string; url?: string; seq?: number;
             metadata?: { deviceWidth?: number; deviceHeight?: number; timestamp?: number };
             level?: string; text?: string;
             args?: Array<{ value?: string; description?: string; preview?: { description?: string } }>;
@@ -603,10 +690,25 @@ export default function MissionControl() {
           if (msg.type === "frame" && msg.data) {
             const img = castImgRef.current;
             if (img) img.src = `data:image/jpeg;base64,${msg.data}`;
+            b64Bytes += msg.data.length;
             fpsCount++;
+            // ack-пейсинг: эхо seq обязателен, иначе сервер молчит (cumulative: свежий ack покрывает старые)
+            if (pacing === "ack" && msg.seq != null && ws?.readyState === 1) {
+              ws.send(JSON.stringify({ type: "ack", seq: msg.seq }));
+            }
             const nowT = Date.now();
             if (nowT - fpsMark >= 1000) {
-              setCastStat((s) => ({ ...s, fps: fpsCount, lastAge: msg.metadata?.timestamp ? nowT - msg.metadata.timestamp : null }));
+              const kbs = Math.round((b64Bytes * 0.75) / 1024);
+              b64Bytes = 0;
+              // «авто»: держим полосу в разумных пределах, переставляя потолок fps
+              if (castProfile === "авто" && ws?.readyState === 1) {
+                const want = kbs > 600 ? 2 : kbs > 250 ? 4 : kbs > 100 ? 8 : 12;
+                if (want !== autoFps) {
+                  autoFps = want;
+                  ws.send(JSON.stringify({ type: "config", maxFps: want }));
+                }
+              }
+              setCastStat((s) => ({ ...s, fps: fpsCount, kbs, lastAge: msg.metadata?.timestamp ? nowT - msg.metadata.timestamp : null }));
               fpsCount = 0; fpsMark = nowT;
             }
           } else if (msg.type === "url") {
@@ -629,10 +731,10 @@ export default function MissionControl() {
       stopped = true;
       try { ws?.close(); } catch { /* уже закрыт */ }
       castWsRef.current = null;
-      setCastStat((s) => ({ ...s, connected: false, fps: 0 }));
+      setCastStat((s) => ({ ...s, connected: false, fps: 0, kbs: null }));
       setCastConsole([]);
     };
-  }, [castOn]);
+  }, [castOn, castProfile]);
 
   // pair-control: сняли «live» — руль выключается тоже
   useEffect(() => {
@@ -1093,7 +1195,9 @@ export default function MissionControl() {
 
         {/* Колонка 2: ОЧЕРЕДЬ + ВЕТКИ */}
         <section className="mc-scroll flex min-h-0 flex-col gap-4 lg:overflow-y-auto" aria-label="Очередь задач">
-          <Card className={`flex min-h-0 flex-col gap-0 overflow-hidden border-zinc-800 bg-zinc-900/40 py-0 card-lift ${castOn ? "lg:max-h-[62vh] lg:shrink-0" : "lg:max-h-[42vh]"}`}>
+          {/* castOn: карточка натуральной высоты (список ветвей целиком), скроллит секция-колонка —
+              иначе flex-1 список сжимается до ~8px и клиппится overflow-hidden карточки (урок R8/R9) */}
+          <Card className={`flex min-h-0 flex-col gap-0 overflow-hidden border-zinc-800 bg-zinc-900/40 py-0 card-lift ${castOn ? "lg:max-h-none lg:shrink-0" : "lg:max-h-[42vh]"}`}>
             <CardHeader className="shrink-0 border-b border-zinc-800 p-0">
               <button
                 type="button"
@@ -1226,7 +1330,7 @@ export default function MissionControl() {
                         <span className="truncate">{castStat.url ?? "ожидание кадра…"}</span>
                         <span className="shrink-0">
                           {castStat.connected ? (
-                            <span className="text-emerald-400">● {castStat.fps} fps{castStat.lastAge != null ? ` · ${castStat.lastAge}ms` : ""}</span>
+                            <span className="text-emerald-400">● {castStat.fps} fps{castStat.kbs != null ? ` · ${castStat.kbs} КБ/с` : ""}{castStat.lastAge != null ? ` · ${castStat.lastAge}ms` : ""}</span>
                           ) : (
                             <span className="text-rose-400">● offline</span>
                           )}
@@ -1238,7 +1342,7 @@ export default function MissionControl() {
                         </div>
                       )}
                     </div>
-                    <div className="mt-1.5 flex items-center gap-2">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => setCastConOpen((v) => !v)}
@@ -1249,6 +1353,28 @@ export default function MissionControl() {
                         <Terminal className="h-3 w-3" aria-hidden />
                         консоль ({castConsole.length})
                       </button>
+                      {/* v0.9.0: профили полосы — per-client pacing+maxFps; смена профиля = реконнект с новыми URL-параметрами (покрывают открывающий кадр) */}
+                      <div role="group" aria-label="Профиль полосы стрима" className="flex items-center gap-0.5 rounded border border-zinc-800 bg-black/40 p-0.5">
+                        {(Object.keys(CAST_PROFILES) as CastProfile[]).map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setCastProfile(p)}
+                            aria-pressed={castProfile === p}
+                            title={
+                              p === "макс" ? "push-пейсинг, до 12 fps — минимум задержки (для руля)"
+                              : p === "баланс" ? "ack-пейсинг, 8 fps — один кадр в полёте, без очередей"
+                              : p === "эконом" ? "ack-пейсинг, 2 fps — минимум полосы для слабой сети"
+                              : "ack-пейсинг, потолок fps подстраивается под измеренную полосу (2..12)"
+                            }
+                            className={`rounded px-1.5 py-0.5 font-mono text-[9px] transition ${
+                              castProfile === p ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
                       <span className="text-[9px] text-zinc-600">живая лента стрима — не в audit-журнале</span>
                     </div>
                     {castConOpen && (
@@ -1271,7 +1397,7 @@ export default function MissionControl() {
                   {branchTasks.length === 0 ? (
                     <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
                   ) : (
-                    <BranchGraph tasks={branchTasks} onOpen={openDetail} />
+                    <BranchGraph tasks={branchTasks} onOpen={openDetail} onRetry={(t) => void retryTask(t.id)} />
                   )}
                 </div>
               </div>
