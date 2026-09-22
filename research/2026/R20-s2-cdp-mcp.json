@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "Chrome DevTools for coding agents · GitHub",
+    "snippet": "It acts as a Model-Context-Protocol ( MCP ) server , giving your AI coding assistant access to the full power of Chrome DevTools for reliable automation, in-depth ... Read more",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.chrome.com",
+    "name": "Chrome DevTools (MCP) for your AI agent | Blog",
+    "snippet": "Sep 23, 2025 — The Chrome DevTools MCP server adds debugging capabilities to your AI agent. For example, the Chrome DevTools MCP server provides a tool ... Read more",
+    "host_name": "developer.chrome.com",
+    "rank": 1,
+    "date": "Sep 23, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.webfuse.com",
+    "name": "6 Best MCP Servers for Browser Automation in 2026",
+    "snippet": "Mar 8, 2026 — Start with Playwright MCP if you need a local, predictable browser automation server for testing, scraping, or repeatable agent workflows. Read more",
+    "host_name": "www.webfuse.com",
+    "rank": 2,
+    "date": "Mar 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://blog.cloudflare.com",
+    "name": "Browser Run: give your agents a browser",
+    "snippet": "Apr 15, 2026 — Chrome DevTools team is an MCP server that gives your AI coding assistant access to the full power of Chrome DevTools for reliable automation, ...",
+    "host_name": "blog.cloudflare.com",
+    "rank": 3,
+    "date": "Apr 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://addyosmani.com",
+    "name": "Give your AI eyes: Introducing Chrome DevTools MCP",
+    "snippet": "Sep 25, 2025 — Chrome DevTools MCP is a newly announced tool that allows AI coding assistants to **see and interact with a live Chrome browser.",
+    "host_name": "addyosmani.com",
+    "rank": 4,
+    "date": "Sep 25, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://alexandrubagu.github.io",
+    "name": "Chrome DevTools MCP vs agent-browser",
+    "snippet": "Mar 13, 2026 — Chrome DevTools MCP (Model Context Protocol) is an MCP server that integrates Chrome's Developer Tools with AI assistants like Claude Code. Read more",
+    "host_name": "alexandrubagu.github.io",
+    "rank": 5,
+    "date": "Mar 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.f22labs.com",
+    "name": "Chrome DevTools MCP: How AI Agents Debug the",
+    "snippet": "Jul 7, 2026 — Chrome DevTools MCP connects AI coding agents directly to a live Chrome browser via CDP + Puppeteer, letting them read console errors, network ...",
+    "host_name": "www.f22labs.com",
+    "rank": 6,
+    "date": "Jul 7, 2026",
+    "favicon": ""
+  }
+]

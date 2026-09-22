@@ -36,7 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, Search, Server, Sparkles, Terminal, Trash2, X, Zap,
+  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -66,6 +66,9 @@ type SuData = { ok: boolean; check: { ok: boolean; verdict: string; local_head: 
 type RsiP = { id: string; title: string; status: string; source: string; artifact: string | null; evidence: string; created_at: number };
 type RsiData = { ok: boolean; proposals: RsiP[]; stats: { total: number; proposed: number; adopted: number; rejected: number; rolled_back: number }; artifacts: number };
 type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id: string; name: string; old_ref: string; verdict: string; evidence: string }[]; gaps: { id: string; title: string; status: string; closure: string }[] };
+type SenseTargetT = { ref: string; role: string; name: string };
+type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
+type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1149,6 +1152,8 @@ export default function MissionControl() {
   const [fleet, setFleet] = useState<FleetData | null>(null);
   const [su, setSu] = useState<SuData | null>(null);
   const [rsi, setRsi] = useState<RsiData | null>(null);
+  const [sense, setSense] = useState<SenseData | null>(null);
+  const [senseBusy, setSenseBusy] = useState(false);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
   const [memQ, setMemQ] = useState("");
@@ -1175,6 +1180,31 @@ export default function MissionControl() {
   const loadRsi = useCallback(async () => {
     try { const r = await fetch("/rsi?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setRsi(r as RsiData); } catch { /* daemon недоступен */ }
   }, []);
+  // R20: SENSE — семантическая перцепция активной вкладки (GET: кэш или refresh=1 свежий CAPTURE)
+  const loadSense = useCallback(async (refresh = false) => {
+    setSenseBusy(true);
+    try {
+      const r = await fetch(`/browser/sense?XTransformPort=3041${refresh ? "&refresh=1" : ""}`, { cache: "no-store" }).then((x) => x.json());
+      if (r?.ok !== false) {
+        if (Array.isArray(r?.rows)) setSense(r as SenseData);
+        else if (r?.tab) setSense({ ok: true, rows: [r as SenseRowT], total_targets: Number(r.targets_count ?? 0) });
+      }
+    } catch { /* daemon недоступен */ } finally { setSenseBusy(false); }
+  }, []);
+  // R20: sense-действие по смыслу (имя/ref) + авто-verify → тост с вердиктом ревизий
+  const senseActUi = useCallback(async (key: string) => {
+    setSenseBusy(true);
+    try {
+      const res = await fetch("/browser/sense/act?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, action: "click" }),
+      }).then((x) => x.json());
+      if (res?.ok) {
+        toast({ title: `sense: ${key.slice(0, 24)} → ${res.target?.ref ?? "?"}`, description: `ревизия ${String(res.verify?.before ?? "?").slice(0, 8)} → ${String(res.verify?.after ?? "?").slice(0, 8)}${res.verify?.revision_changed ? " · изменилась ✓" : " · без изменений"}` });
+      } else toast({ title: `sense ✗ ${String(res?.error ?? "ошибка").slice(0, 70)}`, variant: "destructive" });
+    } catch { toast({ title: "sense ✗ daemon недоступен", variant: "destructive" }); }
+    finally { setSenseBusy(false); void loadSense(true); }
+  }, [loadSense, toast]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1197,11 +1227,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -1983,7 +2013,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2282,6 +2312,32 @@ export default function MissionControl() {
                   >
                     <RefreshCw className={`h-3 w-3 ${browserBusy ? "animate-spin" : ""}`} aria-hidden />
                   </button>
+                </div>
+                {/* R20: SENSE — семантическая перцепция вкладки (порт легаси CAPTURE→act→verify, ME17) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Семантическая перцепция страницы">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME17: aria-цели страницы персист в daemon (порт легаси semantic_targets[]); клик по чипу = действие по смыслу с авто-verify ревизии">
+                      <ScanEye className="h-3 w-3 text-lime-300" aria-hidden /> SENSE
+                    </span>
+                    <span className="min-w-0 truncate font-mono text-[9px] text-zinc-600" title={sense?.rows[0]?.url ? `rev ${sense.rows[0].revision} · ${sense.rows[0].url}` : "перцепция ещё не снималась"}>
+                      {sense ? `${sense.rows[0]?.targets_count ?? 0} целей · rev ${sense.rows[0]?.revision ?? "—"}` : "нет данных"}
+                    </span>
+                    <button type="button" onClick={() => { void loadSense(true); }} disabled={senseBusy} aria-label="Снять свежую перцепцию страницы" className="ml-auto shrink-0 rounded border border-lime-800/50 px-1.5 py-0.5 font-mono text-[9px] text-lime-300/90 transition hover:bg-zinc-800 disabled:opacity-40">снять</button>
+                  </div>
+                  {sense?.rows[0]?.targets?.length ? (
+                    <div className="mt-1.5 flex max-h-16 flex-wrap gap-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Семантические цели страницы">
+                      {sense.rows[0].targets.slice(0, 14).map((t) => (
+                        <button key={t.ref} type="button" role="listitem" disabled={senseBusy}
+                          onClick={() => { void senseActUi(t.name || t.ref); }}
+                          title={`${t.role} «${t.name || "(без имени)"}» · ${t.ref} — клик = sense-действие с авто-verify`}
+                          className="max-w-40 truncate rounded border border-zinc-800 bg-zinc-900/60 px-1.5 py-0.5 text-left font-mono text-[9px] text-zinc-400 transition hover:border-lime-700 hover:text-lime-200 disabled:opacity-40">
+                          <span className="text-zinc-600">{t.role.slice(0, 3)}·</span>{t.name || t.ref}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[9px] text-zinc-600">перцепции нет — «снять» сделает aria-snapshot активной вкладки в семантические цели</p>
+                  )}
                 </div>
                 {castOn && (
                   <div className="shrink-0 border-b border-zinc-800/60 bg-black/40 px-3 py-2">

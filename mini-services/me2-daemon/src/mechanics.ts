@@ -17,6 +17,7 @@ import { rerereStatus } from "./worktrees";
 import { sandboxCaps } from "./sandbox";
 import { roadmapVerdict } from "./roadmap";
 import { brainThoughts } from "./brain";
+import { senseStatus } from "./sense";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -121,6 +122,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME16", name: "Evidence + providers", old_ref: "M8/M9 device identity (частично)",
       verdict: getMeta("boot") ? "WORKS" : "CAVEAT",
       evidence: `boot=${getMeta("boot") ?? "?"}, version=${getMeta("version") ?? "?"}`,
+    },
+    {
+      id: "ME17", name: "Semantic browser perception (CAPTURE→act→verify)", old_ref: "browser-tools.ts semantic_targets[]",
+      verdict: senseStatus().tabs > 0 ? "WORKS" : "CAVEAT",
+      evidence: `sense: tabs=${senseStatus().tabs}, targets=${senseStatus().total_targets}, last_age=${senseStatus().last_age_s ?? "—"}s; act+auto-verify по ref/имени`,
     },
   ];
 

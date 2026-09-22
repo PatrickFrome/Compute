@@ -59,7 +59,7 @@ export function abGroupOf(taskId: string): "treatment" | "control" {
 
 // ── agent-browser CLI (ветки браузера как часть шины, v0.6.0) ──────────
 const AB_BIN = "/usr/local/bin/agent-browser";
-async function ab(args: string[], timeoutMs = 20_000): Promise<{ code: number; out: string }> {
+export async function ab(args: string[], timeoutMs = 20_000): Promise<{ code: number; out: string }> {
   const proc = Bun.spawn([AB_BIN, ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const timer = setTimeout(() => { try { proc.kill(); } catch { /* уже умер */ } }, timeoutMs);
   const [out, err] = await Promise.all([
@@ -70,7 +70,7 @@ async function ab(args: string[], timeoutMs = 20_000): Promise<{ code: number; o
   clearTimeout(timer);
   return { code, out: `${out}\n${err}`.trim() };
 }
-type BrowserTab = { id: string; title: string; url: string; active: boolean };
+export type BrowserTab = { id: string; title: string; url: string; active: boolean };
 function parseTabs(out: string): BrowserTab[] {
   const tabs: BrowserTab[] = [];
   for (const line of out.split("\n")) {
@@ -80,7 +80,7 @@ function parseTabs(out: string): BrowserTab[] {
   }
   return tabs;
 }
-async function browserTabs(): Promise<BrowserTab[]> {
+export async function browserTabs(): Promise<BrowserTab[]> {
   const r = await ab(["tab", "list"]);
   return parseTabs(r.out);
 }

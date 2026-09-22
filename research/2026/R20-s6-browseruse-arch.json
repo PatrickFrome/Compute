@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://arxiv.org",
+    "name": "Building Browser Agents: Architecture, Security, and",
+    "snippet": "Nov 22, 2025 — Accessibility tree snapshots provide a compact, semantic view of the page: labels, roles, focus state, and validation messages. Vision adds the ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 0,
+    "date": "Nov 22, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "[Feature] Browser automation via Accessibility Tree CLI #90",
+    "snippet": "Mar 16, 2026 — I've been working on this problem with DOMShell , which maps Chrome's Accessibility Tree to a virtual filesystem. Agents navigate with ls, cd, ... Read more",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "Mar 16, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://bytetunnels.com",
+    "name": "Playwright for Browser Automation in AI Agents - ByteTunnels",
+    "snippet": "Mar 5, 2026 — The accessibility tree is the single most important concept for understanding how AI agents interact with browsers through Playwright. When an ... Read more",
+    "host_name": "bytetunnels.com",
+    "rank": 2,
+    "date": "Mar 5, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.braintrust.dev",
+    "name": "How to evaluate web and browser agents - Articles - Braintrust",
+    "snippet": "Aug 16, 2026 — This guide explains how to trace and score web- agent runs, reproduce production failures, and add verified failures to regression datasets.",
+    "host_name": "www.braintrust.dev",
+    "rank": 3,
+    "date": "Aug 16, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://nohacks.co",
+    "name": "How AI Agents See Your Website (And How to Build for",
+    "snippet": "Feb 13, 2026 — The accessibility tree is built from your HTML. Use semantic elements , and the browser generates a useful accessibility tree automatically. Read more",
+    "host_name": "nohacks.co",
+    "rank": 4,
+    "date": "Feb 13, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://developer.chrome.com",
+    "name": "Full accessibility tree in Chrome DevTools | Blog",
+    "snippet": "Dec 13, 2021 — Web developers shape and manipulate the accessibility tree primarily through DOM properties such as ARIA attributes for HTML.",
+    "host_name": "developer.chrome.com",
+    "rank": 5,
+    "date": "Dec 13, 2021",
+    "favicon": ""
+  },
+  {
+    "url": "https://vispero.com",
+    "name": "The Browser Accessibility Tree - TPGi",
+    "snippet": "Jan 26, 2015 — Explore how browsers build accessibility trees from the DOM to support assistive technologies and how to inspect them effectively.",
+    "host_name": "vispero.com",
+    "rank": 6,
+    "date": "Jan 26, 2015",
+    "favicon": ""
+  },
+  {
+    "url": "https://anchorbrowser.io",
+    "name": "What Is a Browser Agent? How AI Browser Agents Work",
+    "snippet": "1 day ago — It uses accessibility - tree snapshots and element references so software can issue commands such as clicking a referenced element , as described ... Read more",
+    "host_name": "anchorbrowser.io",
+    "rank": 7,
+    "date": "Sep 21, 2026",
+    "favicon": ""
+  }
+]

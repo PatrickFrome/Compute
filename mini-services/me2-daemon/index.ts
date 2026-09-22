@@ -37,10 +37,11 @@ import { fleetList, fleetBeat, fleetSelfTick, fleetGc } from "./src/fleet";
 import { suCheck, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
+import { senseNow, senseList, senseAct } from "./src/sense";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.19.0";
+const VERSION = "0.20.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);
@@ -258,6 +259,31 @@ const restServer = createServer(async (req, res) => {
     // ── R19: ME-матрица (порт реестра механик M1–M18 старой системы) ──
     if (path === "/mechanics" && req.method === "GET") {
       return json(res, 200, mechanicsMatrix(VERSION, suCached()));
+    }
+
+    // ── R20: BROWSER-SENSE (порт легаси semantic-perception, вне шины — 47/47 инвариант) ──
+    if (path === "/browser/sense" && req.method === "GET") {
+      const refresh = url.searchParams.get("refresh") === "1";
+      const tab = url.searchParams.get("tab") ?? undefined;
+      try {
+        if (refresh) {
+          const row = await senseNow(tab);
+          return json(res, 200, { ok: true, ...row });
+        }
+        return json(res, 200, senseList());
+      } catch (e) { return json(res, 502, { ok: false, error: (e as Error).message }); }
+    }
+    if (path === "/browser/sense/act" && req.method === "POST") {
+      const body = await readBody(req);
+      try {
+        const r = await senseAct({
+          key: String(body.key ?? ""),
+          action: (String(body.action ?? "click") as "click" | "type" | "press"),
+          text: body.text ? String(body.text) : undefined,
+          tab: body.tab ? String(body.tab) : undefined,
+        });
+        return json(res, 200, r);
+      } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
     }
 
     // ── command bus: единственная точка мутаций ──
