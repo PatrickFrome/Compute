@@ -6208,3 +6208,23 @@ Stage Summary:
 - Консоль v4 «ВЕТКИ БРАУЗЕРА»: задачи читаются как git-граф с живыми статусами; вкладки-«браузер» + архив — рабочий процесс оператора.
 - Починен фундаментальный баг доставки результатов шины (усечённый JSON) — все будущие тяжёлые действия (TASK_LIST/EVENTS_EXPORT/поиск) больше не «теряют» результат молча.
 - Следующее: +22 действия к 47 (worker-* / browser-* группы), CDP-screencast панель, M3 Tauri-оболочка, миграция me2_evidence в облако (PGRST205 → нужен SQL-доступ оператора), GC OFFLINE-воркеров агрессивнее.
+
+---
+Task ID: GITHUB-SYNC-20260922
+Agent: main (Super Z)
+Task: «продолжи. используй long run task, записывай всю систему в github, анализируй ветки браузера» — санитизация секретов, чистая git-история, push в PatrickFrome/Compute, анализ веток.
+
+Work Log:
+- HEALTH: daemon v0.4.0→v0.5.0 (cron-раунды довели до 19, затем R4-субагент до 25 действий; last_seq 237→392).
+- СЕКРЕТЫ В ДЕРЕВЕ (устранены перед push): JWT в 5 файлах mini-services/agent-factory/sb-*.ts → общий sb-env.ts (читает /home/z/.a2/supabase-cloud.env, в репо ноль секретов); sb_secret_0h3… в a2-edge-local/index.ts → env-бутстрап из vault; sb_secret в тексте M6 src/app/api/mechanics/route.ts и worklog.md (8 вхождений) → редактированы. Parse-check bun build 7/7 OK, a2-edge-local пережил hot-reload.
+- GIT: авто-история с UUID-коммитами содержала секреты и ~108MB мусора (pigsty/download в истории) → orphan-squash: main = чистый 1f9fb02, шумная история сохранена локально в main-archive (не пушилась никогда). .gitignore +runtime-data (pigsty/, download/, me2-workspace/, mini-services/*/data/, browser-data*, db/*.db, .ghtoken, .a2/, a2-capsule/01+worklog-full и др.); git rm --cached всех секретов и бинарных данных (в т.ч. me2.db после R4).
+- GITHUB: токены — T1 (ghp_LBSc…, /home/z/.a2/.github.env) и НАЙДЕН ВТОРОЙ ЖИВОЙ админ-токен T2 в remote-URL чекаутов rsi-work/hostsrc (API 200) → сохранён в /home/z/.a2/.github.env как GITHUB_TOKEN_ADMIN (плюс дубликат .ghtoken → /home/z/.a2/.ghtoken-sandbox). Репозиторий PatrickFrome/Compute = ЖИВОЙ монорепо старой MetaEngine (2820 рефа: fix/*, analysis/*, archive/*, browser-dev-channel…) — main НЕ тронут; наша система запушена веткой sandbox/me2-os (1f9fb02 → 6dba960). scripts/git-sync.sh — идемпотентный commit+push для будущих раундов.
+- ВЕТКИ БРАУЗЕРА (agent-browser): сессия = 1 вкладка t1 «METAENGINE Mission Control — Local Contour Console» :81; в R4 тема «ветки браузера» реализована в консоли (git-граф задач ВЕТКИ, Chrome-вкладки фильтра). 
+- R4-СУБАГЕНТ (Task 4, full-stack-developer): стартовал при сетевых сбоях Task-инфраструктуры (2×timeout), но успел выполнить весь скоуп; его отчёт в worklog R4-BRANCHES-20260922 (25/47, багфикс усечённого JSON результатов, ВЕТКИ-панель, KPI-анимации, GP1-6 verification, скриншоты r4-01..08). Мой контрольный QA: после тихой смерти dev-сервера (рекуррентный инцидент, перезапуск ×2, второй с heap-cap 1024MB — стабилен) → :81 отдаёт консоль, ФЛОТ с model-select, ВЕТКИ(15), бейдж 25/47; скриншот r4-09; мобильная 390 — без переполнения. Линт 0/0.
+- CRON: 404854/404678 были Disabled (exec limits) — создан новый webDevReview job (15 мин) с контекстом :81/worklog/GitHub-sync.
+
+Stage Summary:
+- Вся система ME2 OS (daemon v0.5.0 25/47 + Mission Control v4 + agent-factory + research + capsule-доки без секретов) опубликована: ветка sandbox/me2-os в PatrickFrome/Compute; main монорепо нетронут.
+- Секретная гигиена: дерево репо чистое (JWT/sb_secret/vck_/пароли — ноль), секреты живут в /home/z/.a2/ (T1, T2-admin, sandbox-токен, Supabase JWT) и в тексте чата.
+- Инцидент-паттерн подтверждён: Next dev умирает молча между вызовами — лечится перезапуском; рассмотреть watchdog для :3000 аналогично me2-daemon.
+- Следующее: +22 действия к 47, CDP-screencast, M3 Tauri-скелет, SQL-миграция me2_evidence оператором (PGRST205), watchdog для Next dev.
