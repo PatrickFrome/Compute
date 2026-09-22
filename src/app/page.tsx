@@ -35,7 +35,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
-  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, MousePointerClick, Pause, Play, Plus,
+  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
   Radar, RefreshCw, RotateCcw, Rocket, Search, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
@@ -48,6 +48,10 @@ type Task = {
 };
 type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; source?: string; at?: string }; signals?: { loop_top?: number; tool_calls?: number; distinct?: number; writes?: number; tool_errors?: number; parse_fails?: number } };
 type RetryMetrics = { retries: number; with_lesson: { n: number; completed: number; rate: number | null }; without_lesson: { n: number; completed: number; rate: number | null }; ab?: { treatment: { n: number; completed: number; rate: number | null }; control: { n: number; completed: number; rate: number | null }; control_crossover: number } };
+type CGData = { ok: boolean; tier: string; generatedAt: string; scanMs: number; files: number; symbols: number; edges: number; externalImports: number; orphans: string[]; topFanIn: { path: string; inbound: number }[]; topFanOut: { path: string; outbound: number }[]; externalTop: { pkg: string; n: number }[]; truncated: boolean };
+type CGImpact = { ok: boolean; file: string; found: boolean; direct: string[]; transitive: string[]; inboundRoot: number; note?: string };
+type OtelData = { ok: boolean; spans: number; dropped: number; ringCap: number; stats: { name: string; n: number; err: number; avgMs: number; maxMs: number }[] };
+type WorktreeData = { ok: boolean; head: string; branch: string; worktrees: { worktrees: { name: string; branch: string; head: string; managed: boolean }[] }; rerere: { enabled: boolean | null; autoUpdate: boolean; cacheEntries: number; inConflict: boolean; remaining: string[] } };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1017,6 +1021,57 @@ export default function MissionControl() {
     return () => { dead = true; clearInterval(iv); };
   }, []);
 
+  // R16: Code Graph v1 (M2) + worktrees/rerere (M4) + OTel-lite (M7) — пробелы DEVOS-роадмапа
+  const [cgOpen, setCgOpen] = useState(false);
+  const [cg, setCg] = useState<CGData | null>(null);
+  const [otel, setOtel] = useState<OtelData | null>(null);
+  const [wt, setWt] = useState<WorktreeData | null>(null);
+  const [cgQuery, setCgQuery] = useState("");
+  const [cgImpact, setCgImpact] = useState<CGImpact | null>(null);
+  const [cgBusy, setCgBusy] = useState(false);
+
+  const loadCg = useCallback(async (force = false) => {
+    setCgBusy(true);
+    try {
+      const g = await fetch(`/codegraph?XTransformPort=3041${force ? "&force=1" : ""}`, { cache: "no-store" }).then((r) => r.json());
+      if (g?.ok) setCg(g as CGData);
+      const [o, w] = await Promise.all([
+        fetch("/spans?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+        fetch("/worktrees?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+      ]);
+      if (o?.ok) setOtel(o as OtelData);
+      if (w?.ok) setWt(w as WorktreeData);
+    } catch { /* daemon недоступен — панель просто без данных */ }
+    finally { setCgBusy(false); }
+  }, []);
+
+  const runImpact = useCallback(async () => {
+    const q = cgQuery.trim();
+    if (!q) return;
+    setCgBusy(true);
+    try {
+      const r = await fetch(`/codegraph/impact?XTransformPort=3041&file=${encodeURIComponent(q)}`, { cache: "no-store" }).then((res) => res.json());
+      setCgImpact(r as CGImpact);
+    } catch { setCgImpact(null); }
+    finally { setCgBusy(false); }
+  }, [cgQuery]);
+
+  const enableRerere = useCallback(async () => {
+    setCgBusy(true);
+    try {
+      await fetch("/worktrees/rerere?XTransformPort=3041", { method: "POST" });
+      const w = await fetch("/worktrees?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json());
+      if (w?.ok) {
+        setWt(w as WorktreeData);
+        toast({ title: "rerere включён", description: "git будет переиспользовать записанные разрешения конфликтов (M4)" });
+      }
+    } catch {
+      toast({ title: "rerere ✗", description: "daemon недоступен", variant: "destructive" });
+    } finally { setCgBusy(false); }
+  }, [toast]);
+
+  useEffect(() => { if (cgOpen) void loadCg(); }, [cgOpen, loadCg]);
+
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
   }, [sendCommand]);
@@ -1205,7 +1260,7 @@ export default function MissionControl() {
       : "border-zinc-700 text-zinc-400";
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100 lg:h-screen">
+    <div className="mc-dark flex min-h-screen flex-col bg-zinc-950 text-zinc-100 lg:h-screen">
       {/* ── HEADER ── */}
       <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-900/60 px-4 backdrop-blur">
         <Radar className="h-5 w-5 text-emerald-400" aria-hidden />
@@ -1396,6 +1451,146 @@ export default function MissionControl() {
                 </div>
               ))}
             </CardContent>
+          </Card>
+
+          {/* R16: ГРАФ КОДА (M2) + worktree/rerere (M4) + OTel-lite (M7) — пробелы DEVOS-роадмапа */}
+          <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
+            <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+              <button
+                type="button"
+                onClick={() => setCgOpen((o) => !o)}
+                aria-expanded={cgOpen}
+                aria-controls="codegraph-body"
+                className="flex min-w-0 items-center gap-2 text-left"
+              >
+                <Network className="h-4 w-4 shrink-0 text-teal-400" aria-hidden />
+                <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                  ГРАФ КОДА{cg ? ` · ${cg.files}` : ""}
+                </span>
+              </button>
+              <span className="flex shrink-0 items-center gap-2">
+                {cg && (
+                  <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="regex-tier v1 · детерминированный скан src/ + me2-daemon">
+                    {cg.symbols} эксп · {cg.edges} рёбер
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void loadCg(true)}
+                  disabled={cgBusy}
+                  title="Пересканировать репозиторий"
+                  aria-label="Пересканировать граф кода"
+                  className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${cgBusy ? "animate-spin" : ""}`} aria-hidden />
+                </button>
+                <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${cgOpen ? "" : "-rotate-90"}`} aria-hidden />
+              </span>
+            </CardHeader>
+            {cgOpen && (
+              <div id="codegraph-body" className="space-y-3 p-3">
+                <div className="grid grid-cols-4 gap-2" role="group" aria-label="Метрики графа кода">
+                  {([["файлов", cg?.files], ["экспортов", cg?.symbols], ["рёбер", cg?.edges], ["скан, мс", cg?.scanMs]] as const).map(([label, v]) => (
+                    <div key={label} className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5">
+                      <div className="font-mono text-sm text-teal-300">{v ?? "—"}</div>
+                      <div className="text-[9px] uppercase tracking-wider text-zinc-600">{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <form onSubmit={(e) => { e.preventDefault(); void runImpact(); }} className="flex gap-2">
+                  <Input
+                    value={cgQuery}
+                    onChange={(e) => setCgQuery(e.target.value)}
+                    placeholder="impact: src/lib/db или src/app/page.tsx"
+                    className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]"
+                    aria-label="Файл для impact-анализа"
+                  />
+                  <Button type="submit" size="sm" variant="outline" disabled={cgBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]">
+                    кто зависит
+                  </Button>
+                </form>
+                {cgImpact && (
+                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2 font-mono text-[10px]" aria-live="polite">
+                    {cgImpact.found ? (
+                      <>
+                        <div className="mb-1 text-zinc-300">{cgImpact.file} · входящих рёбер {cgImpact.inboundRoot}</div>
+                        <div className="max-h-28 overflow-y-auto text-zinc-500 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                          <div>прямые: {cgImpact.direct.length ? cgImpact.direct.join(", ") : "—"}</div>
+                          <div className="mt-1">
+                            транзитивно ({cgImpact.transitive.length}): {cgImpact.transitive.slice(0, 40).join(", ")}{cgImpact.transitive.length > 40 ? "…" : ""}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-amber-500/80">{cgImpact.note}</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+                    <div className="mb-1 text-[9px] uppercase tracking-wider text-zinc-600">top fan-in</div>
+                    <ul className="space-y-0.5 font-mono text-[10px] text-zinc-400">
+                      {(cg?.topFanIn ?? []).slice(0, 5).map((f) => (
+                        <li key={f.path} className="flex justify-between gap-2">
+                          <span className="truncate" title={f.path}>{f.path}</span>
+                          <span className="shrink-0 text-teal-400">{f.inbound}</span>
+                        </li>
+                      ))}
+                      {!cg && <li className="text-zinc-600">—</li>}
+                    </ul>
+                  </div>
+                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-2">
+                    <div className="mb-1 text-[9px] uppercase tracking-wider text-zinc-600">top fan-out</div>
+                    <ul className="space-y-0.5 font-mono text-[10px] text-zinc-400">
+                      {(cg?.topFanOut ?? []).slice(0, 5).map((f) => (
+                        <li key={f.path} className="flex justify-between gap-2">
+                          <span className="truncate" title={f.path}>{f.path}</span>
+                          <span className="shrink-0 text-amber-400/90">{f.outbound}</span>
+                        </li>
+                      ))}
+                      {!cg && <li className="text-zinc-600">—</li>}
+                    </ul>
+                  </div>
+                </div>
+
+                {wt && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 font-mono text-[10px] text-zinc-500">
+                    <GitBranch className="h-3 w-3 shrink-0 text-fuchsia-400" aria-hidden />
+                    <span>worktrees {wt.worktrees.worktrees.length} · HEAD {wt.head}</span>
+                    <span className={wt.rerere.enabled ? "text-emerald-400" : "text-amber-500/80"} title="rerere — переиспользование записанных разрешений конфликтов (M4)">
+                      rerere {wt.rerere.enabled ? "on" : "off"} · cache {wt.rerere.cacheEntries}
+                    </span>
+                    {!wt.rerere.enabled && (
+                      <button
+                        type="button"
+                        onClick={() => void enableRerere()}
+                        disabled={cgBusy}
+                        className="ml-auto rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40"
+                      >
+                        включить
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {otel && (
+                  <div
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-zinc-500"
+                    title="OTel-lite: спаны команд шины и задач; OTLP-JSON на /spans/otlp (совместимо с Perfetto-конвертерами)"
+                  >
+                    <span className="uppercase tracking-wider text-zinc-600">otel-lite</span>
+                    <span>спанов {otel.spans}/{otel.ringCap}</span>
+                    {(otel.stats ?? []).slice(0, 3).map((s) => (
+                      <span key={s.name} className={s.err ? "text-rose-400/80" : ""}>
+                        {s.name} ×{s.n} · ⌀{s.avgMs}ms{s.err ? ` · err ${s.err}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
 
         </section>

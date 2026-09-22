@@ -22,10 +22,13 @@ import { startMasterLoop } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
+import { codegraphSummary, codegraphImpact } from "./src/codegraph";
+import { otelStatus, toOtlp, onDaemonEvent } from "./src/otel";
+import { listWorktrees, repoHead, rerereStatus, rerereEnable, rerereRemaining } from "./src/worktrees";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.15.0";
+const VERSION = "0.16.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
@@ -95,6 +98,32 @@ const restServer = createServer(async (req, res) => {
     if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, count: actionCatalog().length, total_target: 47, actions: actionCatalog() });
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
+
+    // ── R16: M2 Code Graph v1 (read-only, вне шины — скан не мутирует состояние) ──
+    if (path === "/codegraph" && req.method === "GET") return json(res, 200, codegraphSummary(url.searchParams.get("force") === "1"));
+    if (path === "/codegraph/scan" && req.method === "POST") return json(res, 200, codegraphSummary(true));
+    if (path === "/codegraph/impact" && req.method === "GET") {
+      const f = url.searchParams.get("file");
+      if (!f) return json(res, 400, { ok: false, error: "file_required" });
+      return json(res, 200, codegraphImpact(f));
+    }
+
+    // ── R16: M4 worktrees+rerere (GET read; enable — maintenance-эндпоинт, как /reflect) ──
+    if (path === "/worktrees" && req.method === "GET") {
+      return json(res, 200, { ok: true, ...repoHead(), worktrees: listWorktrees(), rerere: { ...rerereStatus(), ...rerereRemaining() } });
+    }
+    if (path === "/worktrees/rerere" && req.method === "POST") {
+      try { return json(res, 200, { ok: true, rerere: { ...rerereEnable(), ...rerereRemaining() } }); }
+      catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
+    }
+
+    // ── R16: M7 OTel-lite ──
+    if (path === "/spans" && req.method === "GET") return json(res, 200, otelStatus());
+    if (path === "/spans/otlp" && req.method === "GET") {
+      const limit = Number(url.searchParams.get("limit") ?? 200);
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      return res.end(JSON.stringify(toOtlp(limit)));
+    }
 
     // ── command bus: единственная точка мутаций ──
     if (path === "/commands" && req.method === "POST") {
@@ -249,7 +278,10 @@ const io = new Server(wsHttpServer, {
   pingInterval: 25_000,
 });
 
-onEvent((e) => { io.emit("event", e); });
+onEvent((e) => {
+  io.emit("event", e);
+  try { onDaemonEvent(e.type, e.data ? (JSON.parse(e.data) as Record<string, unknown>) : {}, e.task_id); } catch { /* телеметрия не ломает шину */ }
+});
 
 io.on("connection", (socket) => {
   socket.emit("hello", { service: "me2-daemon", boot: BOOT_TS, last_seq: lastSeq() });

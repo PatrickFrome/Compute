@@ -123,6 +123,14 @@
 
 /* ── METAENGINE Mission Control additions ─────────────────────── */
 
+/* R16 (VLM-QA второй ревьюер): плейсхолдеры консоли на zinc-950 были muted-foreground
+   (~4:1, на грани WCAG) → zinc-400 (~7:1). Скоуп — только тёмная консоль .mc-dark. */
+.mc-dark input::placeholder,
+.mc-dark textarea::placeholder {
+  color: rgb(161 161 170);
+  opacity: 1;
+}
+
 .mc-scroll::-webkit-scrollbar,
 .mc-terminal::-webkit-scrollbar {
   width: 8px;

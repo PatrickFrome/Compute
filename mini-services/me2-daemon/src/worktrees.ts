@@ -3,7 +3,8 @@
 // so turbopack never watches them. Safety: strict name whitelist, cap of 8
 // managed worktrees, removal restricted to the managed prefix, 10s timeouts.
 import { spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 export const REPO_ROOT = "/home/z/my-project";
 export const WORKTREE_ROOT = "/home/z/me2-worktrees";
@@ -109,4 +110,39 @@ export function repoHead(): { head: string; branch: string; root: string } {
   const h = git(["rev-parse", "--short=10", "HEAD"]);
   const b = git(["rev-parse", "--abbrev-ref", "HEAD"]);
   return { head: h.out || "?", branch: b.out || "?", root: REPO_ROOT };
+}
+
+// ── M4: rerere (reuse recorded resolution) — R16 ──────────────────
+// Пробел из DEVOS-роадмапа: «Worktree Manager + rerere». v1: включение и
+// телеметрия rr-cache. Автостейдж (rerere.autoUpdate) сознательно off —
+// решения применяются, но индекс правит оператор (безопаснее для агентов).
+
+export function rerereStatus(): {
+  enabled: boolean | null; autoUpdate: boolean; cacheEntries: number; repo: string;
+} {
+  const cfg = git(["config", "--get", "rerere.enabled"]);
+  const au = git(["config", "--get", "rerere.autoUpdate"]);
+  let cacheEntries = 0;
+  try {
+    const rr = readdirSync(join(REPO_ROOT, ".git", "rr-cache"));
+    cacheEntries = rr.filter((d) => !d.startsWith("PRE") && d.length === 40).length;
+  } catch { /* rr-cache ещё не создан */ }
+  return {
+    enabled: cfg.ok ? cfg.out === "true" : null, // null = дефолт git (false до первого rerere)
+    autoUpdate: au.ok && au.out === "true",
+    cacheEntries,
+    repo: REPO_ROOT,
+  };
+}
+
+export function rerereEnable(): ReturnType<typeof rerereStatus> {
+  const r = git(["config", "rerere.enabled", "true"]);
+  if (!r.ok) gitFail(r);
+  return rerereStatus();
+}
+
+export function rerereRemaining(): { inConflict: boolean; remaining: string[] } {
+  const r = git(["rerere", "remaining"]);
+  const lines = r.out ? r.out.split("\n").filter(Boolean) : [];
+  return { inConflict: lines.length > 0, remaining: lines };
 }

@@ -11,6 +11,7 @@ import {
   LANES, LANE_OF, COST_OF, type CommandRow, type TaskRow, type Lane,
 } from "./store";
 import { WORKSPACE_ROOT } from "./worker";
+import { recordSpan } from "./src/otel";
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -661,6 +662,7 @@ function storeResult(result: unknown): string {
 
 async function runCommand(cmd: CommandRow): Promise<void> {
   emit("COMMAND_LEASED", { action: cmd.action, lane: cmd.lane, id: cmd.id }, null, null);
+  const spanT0 = Date.now();
   try {
     const handler = handlers[cmd.action];
     if (!handler) throw new Error(`unknown_action_${cmd.action}`);
@@ -669,11 +671,14 @@ async function runCommand(cmd: CommandRow): Promise<void> {
     db.query(`UPDATE commands SET status='COMPLETED', result=?, completed_at=? WHERE id=?`)
       .run(storeResult(result), nowIso(), cmd.id);
     emit("COMMAND_COMPLETED", { action: cmd.action, id: cmd.id }, null, null);
+    recordSpan(`command.${cmd.action}`, { "me2.lane": cmd.lane, "me2.cmd_id": cmd.id, "me2.cost": cmd.cost }, spanT0);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     db.query(`UPDATE commands SET status='FAILED', error=?, completed_at=? WHERE id=?`)
       .run(msg.slice(0, 500), nowIso(), cmd.id);
     emit("COMMAND_FAILED", { action: cmd.action, id: cmd.id, error: msg.slice(0, 200) }, null, null);
+    recordSpan(`command.${cmd.action}`, { "me2.lane": cmd.lane, "me2.cmd_id": cmd.id, "me2.cost": cmd.cost }, spanT0,
+      { status: "ERROR", message: msg });
   }
 }
 
