@@ -45,9 +45,11 @@ function parseJsonLoose(text: string): { lesson?: string; fix?: string } | null 
 
 export async function POST(req: Request) {
   let taskId = "";
+  let source = "operator";
   try {
-    const body = (await req.json()) as { taskId?: string };
+    const body = (await req.json()) as { taskId?: string; source?: string };
     taskId = String(body.taskId ?? "").trim();
+    if (body.source) source = String(body.source).slice(0, 32);
   } catch {
     return NextResponse.json({ ok: false, error: "bad_json" }, { status: 400 });
   }
@@ -113,11 +115,11 @@ export async function POST(req: Request) {
   const wr = await fetch(`${DAEMON}/tasks/${encodeURIComponent(taskId)}/reflect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ lesson, fix, model: "glm" }),
+    body: JSON.stringify({ lesson, fix, model: "glm", source }),
   }).catch(() => null);
   if (!wr || !wr.ok) {
     return NextResponse.json({ ok: false, error: wr ? `daemon_write_${wr.status}` : "daemon_write_unreachable" }, { status: 502 });
   }
 
-  return NextResponse.json({ ok: true, id: taskId, lesson, fix, model: "glm" });
+  return NextResponse.json({ ok: true, id: taskId, lesson, fix, model: "glm", source });
 }

@@ -301,7 +301,7 @@ export function cancelTask(id: string) {
   if (t && (t.status === "READY" || t.status === "RUNNING")) updateTask(id, { status: "CANCELLED", agent_id: null });
 }
 /** tier-2 LLM-рефлексия: обогащение tasks.reflection полем llm (не через шину — это enrichment, не агентская команда). */
-export function setTaskReflectionLlm(id: string, llm: { lesson: string; fix?: string; model?: string }) {
+export function setTaskReflectionLlm(id: string, llm: { lesson: string; fix?: string; model?: string; source?: string }) {
   const t = getTask(id);
   if (!t) throw new Error("task_not_found");
   let base: Record<string, unknown> = {};
@@ -310,7 +310,7 @@ export function setTaskReflectionLlm(id: string, llm: { lesson: string; fix?: st
   }
   base.llm = { ...llm, at: nowIso() };
   updateTask(id, { reflection: JSON.stringify(base).slice(0, 8000) });
-  return emit("TASK_REFLECTED", { task_id: id, has_llm: true, model: llm.model ?? null }, null, id);
+  return emit("TASK_REFLECTED", { task_id: id, has_llm: true, model: llm.model ?? null, source: llm.source ?? "operator" }, null, id);
 }
 export function setAgentModel(id: string, model: string) {
   db.query(`UPDATE agents SET model=?, updated_at=? WHERE id=?`).run(model.slice(0, 64), nowIso(), id);

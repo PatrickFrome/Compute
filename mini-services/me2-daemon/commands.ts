@@ -15,6 +15,35 @@ import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "n
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
 
+// ── R11: авто tier-2 LLM-рефлексия при ретрае (квота от infinite-loop) ──────────
+// Ресёрч 2026: самокоррекция без квоты → бесконечные платные циклы; двухуровневый гард:
+// (1) 1 попытка на задачу за 10 мин, (2) не более 2 in-flight, (3) skip если урок уже есть.
+const AUTO_REFLECT_COOLDOWN_MS = 10 * 60_000;
+const autoReflectAt = new Map<string, number>();
+let autoReflectInFlight = 0;
+async function autoReflect(task: TaskRow): Promise<void> {
+  const now = Date.now();
+  if (now - (autoReflectAt.get(task.id) ?? 0) < AUTO_REFLECT_COOLDOWN_MS) return;
+  if (autoReflectInFlight >= 2) return;
+  if (task.reflection) {
+    try {
+      const r = JSON.parse(task.reflection) as { llm?: { lesson?: string } };
+      if (r?.llm?.lesson) return; // вербальный урок уже записан (вручную или ранее)
+    } catch { /* битый reflection — пробуем сгенерировать */ }
+  }
+  autoReflectAt.set(task.id, now);
+  autoReflectInFlight++;
+  try {
+    await fetch("http://127.0.0.1:3000/api/reflect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: task.id, source: "auto_retry" }),
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch { /* dev-сервер недоступен — оператор нажмёт ✦ вручную */ }
+  finally { autoReflectInFlight--; }
+}
+
 // ── agent-browser CLI (ветки браузера как часть шины, v0.6.0) ──────────
 const AB_BIN = "/usr/local/bin/agent-browser";
 async function ab(args: string[], timeoutMs = 20_000): Promise<{ code: number; out: string }> {
@@ -85,6 +114,9 @@ const handlers: Record<string, Handler> = {
       parent_id: orig.id,
     });
     emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps, has_reflection: Boolean(orig.reflection) }, null, task.id);
+    // R11: если у родителя нет вербального урока — просим backend сгенерить его,
+    // пока потомок ещё в очереди: к моменту lease память будет полной
+    void autoReflect(orig);
     return { task };
   },
 

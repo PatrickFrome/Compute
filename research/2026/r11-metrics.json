@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://arxiv.org",
+    "name": "Memory for Autonomous LLM Agents:Mechanisms",
+    "snippet": "Mar 8, 2026 — This survey offers a structured account of how memory is designed, implemented, and evaluated in modern LLM -based agents , covering work from ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 0,
+    "date": "Mar 8, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://openreview.net",
+    "name": "Evaluating Memory in LLM Agents via Incremental Multi-",
+    "snippet": "by Y Hu · Cited by 231 — Published: 26 Jan 2026 , We introduce a unified evaluation framework designed for memory agents . comprehensive ablation studies. ablations ...",
+    "host_name": "openreview.net",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://mem0.ai",
+    "name": "State of AI Agent Memory 2026: Benchmarks & Trends",
+    "snippet": "Apr 1, 2026 — 2026 AI agent memory benchmarks: LoCoMo, LongMemEval, BEAM results, 21 framework integrations, and unsolved research gaps.",
+    "host_name": "mem0.ai",
+    "rank": 2,
+    "date": "Apr 1, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://proceedings.iclr.cc",
+    "name": "Evaluating Memory in LLM Agents via Incre- mental Multi-",
+    "snippet": "by Y Hu · 2026 · Cited by 217 — This benchmark evaluates memory agents on long dialogue histories. assess the fluency of the input text … the final evaluation metric .",
+    "host_name": "proceedings.iclr.cc",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "tfatykhov/awesome-agent-memory",
+    "snippet": "Aug 2026 Moves skill evaluation past aggregate success rates by isolating representation, outcome annotation, retrieval difficulty, and cross-framework ...",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net",
+    "name": "Evaluating Very Long-Term Conversational Memory of",
+    "snippet": "Across face benchmarks, the average owner and non-owner biometric success rates are 95.71% and 0.86%; across palmprint benchmarks, they are 97.60% and 2.00%.",
+    "host_name": "www.researchgate.net",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

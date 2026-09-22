@@ -24,7 +24,7 @@ import { initEvidence, evidenceStatus } from "./evidence";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.10.0";
+const VERSION = "0.11.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
@@ -175,6 +175,7 @@ const restServer = createServer(async (req, res) => {
           lesson: lesson.slice(0, 2000),
           fix: body.fix ? String(body.fix).slice(0, 1000) : undefined,
           model: body.model ? String(body.model).slice(0, 64) : undefined,
+          source: body.source ? String(body.source).slice(0, 32) : undefined,
         });
         return json(res, 200, { ok: true, id, seq: ev.seq });
       } catch (e) {
@@ -185,6 +186,29 @@ const restServer = createServer(async (req, res) => {
       const id = path.split("/")[2];
       const t = getTask(id);
       return t ? json(res, 200, { ok: true, task: t }) : json(res, 404, { ok: false, error: "not_found" });
+    }
+    if (path === "/metrics" && req.method === "GET") {
+      // R11: pass-rate ретраев с LLM-уроком vs без — живое измерение Reflexion-эффекта
+      const all = listTasks({ includeArchived: true });
+      const byId = new Map(all.map((t) => [t.id, t] as const));
+      let withN = 0, withOk = 0, withoutN = 0, withoutOk = 0;
+      for (const t of all) {
+        if (!t.parent_id) continue;
+        const parent = byId.get(t.parent_id);
+        if (!parent) continue;
+        let hasLlm = false;
+        if (parent.reflection) {
+          try { hasLlm = Boolean((JSON.parse(parent.reflection) as { llm?: { lesson?: string } })?.llm?.lesson); } catch { hasLlm = false; }
+        }
+        const ok = t.status === "COMPLETED";
+        if (hasLlm) { withN++; if (ok) withOk++; } else { withoutN++; if (ok) withoutOk++; }
+      }
+      return json(res, 200, {
+        ok: true,
+        retries: withN + withoutN,
+        with_lesson: { n: withN, completed: withOk, rate: withN ? Math.round((withOk / withN) * 100) : null },
+        without_lesson: { n: withoutN, completed: withoutOk, rate: withoutN ? Math.round((withoutOk / withoutN) * 100) : null },
+      });
     }
     if (path === "/events" && req.method === "GET") {
       const since = Number(url.searchParams.get("since") ?? 0);

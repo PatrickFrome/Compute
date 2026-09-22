@@ -46,7 +46,8 @@ type Task = {
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
   error: string | null; reflection: string | null; created_at: string; updated_at: string;
 };
-type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; at?: string } };
+type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; source?: string; at?: string } };
+type RetryMetrics = { retries: number; with_lesson: { n: number; completed: number; rate: number | null }; without_lesson: { n: number; completed: number; rate: number | null } };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -450,6 +451,7 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
                             <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-violet-400">
                               <span>llm-рефлексия</span>
                               <span className="rounded bg-violet-500/15 px-1 normal-case text-violet-300">tier-2</span>
+                              {r.llm.source === "auto_retry" ? <span className="rounded bg-fuchsia-500/15 px-1 normal-case text-fuchsia-300">авто</span> : null}
                               {r.llm.model ? <span className="normal-case text-violet-500/80">{r.llm.model}</span> : null}
                             </div>
                             <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-200">{r.llm.lesson}</div>
@@ -949,6 +951,19 @@ export default function MissionControl() {
     }
   }, [toast]);
 
+  // R11: pass-rate ретраев с LLM-уроком vs без — живое измерение Reflexion-эффекта из шина-данных
+  const [retryMetrics, setRetryMetrics] = useState<RetryMetrics | null>(null);
+  useEffect(() => {
+    let dead = false;
+    const load = () => fetch("/metrics?XTransformPort=3041")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!dead && d?.ok) setRetryMetrics(d as RetryMetrics); })
+      .catch(() => { /* daemon недоступен — чип просто скрыт */ });
+    load();
+    const iv = setInterval(load, 20_000);
+    return () => { dead = true; clearInterval(iv); };
+  }, []);
+
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
   }, [sendCommand]);
@@ -1298,6 +1313,14 @@ export default function MissionControl() {
                   <GitBranch className="h-4 w-4 text-fuchsia-400" aria-hidden /> ВЕТКИ · ЗАДАЧИ ({branchData.length})
                 </span>
                 <span className="flex items-center gap-2">
+                  {retryMetrics && retryMetrics.retries > 0 && (
+                    <span
+                      className="hidden font-mono text-[9px] text-zinc-500 sm:inline"
+                      title="Pass-rate ретраев: завершено с LLM-уроком (violet) vs без — живое измерение Reflexion-эффекта (/metrics)"
+                    >
+                      ↳ <span className="text-violet-400">{retryMetrics.with_lesson.completed}/{retryMetrics.with_lesson.n}</span> с уроком · <span className="text-zinc-400">{retryMetrics.without_lesson.completed}/{retryMetrics.without_lesson.n}</span> без
+                    </span>
+                  )}
                   <span className="font-mono text-[10px] text-zinc-600">{branchesOpen ? "git-graph" : "свёрнуто"}</span>
                   <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${branchesOpen ? "" : "-rotate-90"}`} aria-hidden />
                 </span>
