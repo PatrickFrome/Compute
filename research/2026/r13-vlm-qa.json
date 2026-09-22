@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "{\"readable\":true,\"overlaps\":[],\"truncated\":[\"wk_console_1UhkMv_\"],\"contrast_issues\":[],\"notes\":\"В целом дашборд выглядит целостным и хорошо структурированным. Мелкий моно-шрифт в логах и статус-баре (9-10px) читаем благодаря высокому контрасту. Обнаружено одно место с потенциальным обрезанием текста (последний элемент в списке WORKERS). Хедер содержит все необходимые элементы: бейдж версии, KPI-блоки и индикатор прогресса. Цветовая кодировка статусов (зеленый/красный/фиолетовый) на темном фоне обеспечивает отличную различимость.\"}",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790085425,
+  "id": "202609222157018173fdf40e174abd",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202609222157018173fdf40e174abd",
+  "usage": {
+    "completion_tokens": 159,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1022,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1181
+  }
+}

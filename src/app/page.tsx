@@ -47,7 +47,7 @@ type Task = {
   error: string | null; reflection: string | null; created_at: string; updated_at: string;
 };
 type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; source?: string; at?: string }; signals?: { loop_top?: number; tool_calls?: number; distinct?: number; writes?: number; tool_errors?: number; parse_fails?: number } };
-type RetryMetrics = { retries: number; with_lesson: { n: number; completed: number; rate: number | null }; without_lesson: { n: number; completed: number; rate: number | null } };
+type RetryMetrics = { retries: number; with_lesson: { n: number; completed: number; rate: number | null }; without_lesson: { n: number; completed: number; rate: number | null }; ab?: { treatment: { n: number; completed: number; rate: number | null }; control: { n: number; completed: number; rate: number | null }; control_crossover: number } };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1337,9 +1337,15 @@ export default function MissionControl() {
                   {retryMetrics && retryMetrics.retries > 0 && (
                     <span
                       className="hidden font-mono text-[9px] text-zinc-500 sm:inline"
-                      title="Pass-rate ретраев: завершено с LLM-уроком (violet) vs без — живое измерение Reflexion-эффекта (/metrics)"
+                      title="Pass-rate ретраев: завершено с LLM-уроком (violet) vs без — живое измерение Reflexion-эффекта (/metrics). A/B — рандомизированные группы авто-рефлексии: treatment получает авто-урок, control — нет (intent-to-treat); crossover — контрольные, получившие ручной урок"
                     >
                       ↳ <span className="text-violet-400">{retryMetrics.with_lesson.completed}/{retryMetrics.with_lesson.n}</span> с уроком · <span className="text-zinc-400">{retryMetrics.without_lesson.completed}/{retryMetrics.without_lesson.n}</span> без
+                      {retryMetrics.ab && (retryMetrics.ab.treatment.n > 0 || retryMetrics.ab.control.n > 0) ? (
+                        <>
+                          {' '}· A/B <span className="text-fuchsia-400">T {retryMetrics.ab.treatment.completed}/{retryMetrics.ab.treatment.n}</span> · <span className="text-zinc-500">C {retryMetrics.ab.control.completed}/{retryMetrics.ab.control.n}</span>
+                          {retryMetrics.ab.control_crossover > 0 ? <span className="text-amber-400/80"> · x{retryMetrics.ab.control_crossover}</span> : null}
+                        </>
+                      ) : null}
                     </span>
                   )}
                   <span className="font-mono text-[10px] text-zinc-600">{branchesOpen ? "git-graph" : "свёрнуто"}</span>

@@ -19,12 +19,12 @@ import {
 } from "./store";
 import { listProviders } from "./providers";
 import { startMasterLoop } from "./worker";
-import { drainCommands, runOne, knownActions, actionCatalog } from "./commands";
+import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus } from "./evidence";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.12.0";
+const VERSION = "0.13.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
@@ -188,10 +188,14 @@ const restServer = createServer(async (req, res) => {
       return t ? json(res, 200, { ok: true, task: t }) : json(res, 404, { ok: false, error: "not_found" });
     }
     if (path === "/metrics" && req.method === "GET") {
-      // R11: pass-rate ретраев с LLM-уроком vs без — живое измерение Reflexion-эффекта
+      // R11: pass-rate ретраев с LLM-уроком vs без — живое измерение Reflexion-эффекта.
+      // R13: A/B intent-to-treat — назначение по abGroupOf(parent.id) (детерминированное),
+      // сравнение групп независимо от факта генерации урока; control_crossover = control-родители,
+      // получившие урок вручную (✦ оператора) — честная видимость загрязнения группы.
       const all = listTasks({ includeArchived: true });
       const byId = new Map(all.map((t) => [t.id, t] as const));
       let withN = 0, withOk = 0, withoutN = 0, withoutOk = 0;
+      let tN = 0, tOk = 0, cN = 0, cOk = 0, cCross = 0;
       for (const t of all) {
         if (!t.parent_id) continue;
         const parent = byId.get(t.parent_id);
@@ -202,12 +206,19 @@ const restServer = createServer(async (req, res) => {
         }
         const ok = t.status === "COMPLETED";
         if (hasLlm) { withN++; if (ok) withOk++; } else { withoutN++; if (ok) withoutOk++; }
+        if (abGroupOf(parent.id) === "treatment") { tN++; if (ok) tOk++; }
+        else { cN++; if (ok) cOk++; if (hasLlm) cCross++; }
       }
       return json(res, 200, {
         ok: true,
         retries: withN + withoutN,
         with_lesson: { n: withN, completed: withOk, rate: withN ? Math.round((withOk / withN) * 100) : null },
         without_lesson: { n: withoutN, completed: withoutOk, rate: withoutN ? Math.round((withoutOk / withoutN) * 100) : null },
+        ab: {
+          treatment: { n: tN, completed: tOk, rate: tN ? Math.round((tOk / tN) * 100) : null },
+          control: { n: cN, completed: cOk, rate: cN ? Math.round((cOk / cN) * 100) : null },
+          control_crossover: cCross,
+        },
       });
     }
     if (path === "/events" && req.method === "GET") {

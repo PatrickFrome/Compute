@@ -44,6 +44,18 @@ async function autoReflect(task: TaskRow): Promise<void> {
   finally { autoReflectInFlight--; }
 }
 
+// ── R13: рандомизированный A/B авто-рефлексии ──────────────────────────────
+// Ресёрч (research/2026/R13-AB-REFLEXION-RESEARCH.md): observational-метрика «с уроком vs без»
+// смещена (урок получают более сложные задачи); честное измерение эффекта памяти требует
+// рандомизации НАЗНАЧЕНИЯ. Детерминированный FNV-1a по id → стабильная группа: повторные
+// ретраи того же родителя не перебрасывают его между группами, назначение воспроизводимо
+// и навсегда видно в событии TASK_RETRIED (ab_group).
+export function abGroupOf(taskId: string): "treatment" | "control" {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < taskId.length; i++) { h ^= taskId.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h % 2 === 0 ? "treatment" : "control";
+}
+
 // ── agent-browser CLI (ветки браузера как часть шины, v0.6.0) ──────────
 const AB_BIN = "/usr/local/bin/agent-browser";
 async function ab(args: string[], timeoutMs = 20_000): Promise<{ code: number; out: string }> {
@@ -113,10 +125,12 @@ const handlers: Record<string, Handler> = {
       spec: orig.spec, role: orig.role, max_steps: maxSteps,
       parent_id: orig.id,
     });
-    emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps, has_reflection: Boolean(orig.reflection) }, null, task.id);
+    emit("TASK_RETRIED", { from: id, to: task.id, title: task.title, max_steps: maxSteps, has_reflection: Boolean(orig.reflection), ab_group: abGroupOf(id) }, null, task.id);
     // R11: если у родителя нет вербального урока — просим backend сгенерить его,
-    // пока потомок ещё в очереди: к моменту lease память будет полной
-    void autoReflect(orig);
+    // пока потомок ещё в очереди: к моменту lease память будет полной.
+    // R13: A/B — авто-урок только treatment-группе; control копит честную базу
+    // «без авто-урока» (операторский ✦ остаётся доступен — crossover виден в /metrics)
+    if (abGroupOf(id) === "treatment") void autoReflect(orig);
     return { task };
   },
 
