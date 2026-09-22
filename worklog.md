@@ -86,3 +86,23 @@ Stage Summary:
 - Квест пользователя «анализируй ветки браузера» закрыт дважды: (а) ветки браузера = вкладки agent-browser в ВЕТКИ-панели (живые, q/w-чипы CDP), (б) git-ветки: main + main-archive локально (браузерных веток нет; легаси-браузер жил в main-истории, разобран в R19-OLD-MECHANICS-ANALYSIS.md §0–4).
 - Бэклог R20: ① green-check run b54e62ac (tauri-build) + разбор артефактов; ② tree-sitter tier Code Graph v2; ③ semantic-адресация browser-tools на codegraph-слое (из §2 анализа); ④ RSI-цикл: авто-propose из RH-вердиктов; ⑤ per-client jpeg quality :3042.
 - Скриншоты: download/r19-qa4-{mobile,desktop}.png; VLM: research/2026/r19-vlm-qa4.json.
+---
+Task ID: R20-BROWSER-SENSE-LEAP-20260922
+Agent: Z.ai Code (main)
+Task: «Проанализируй браузер, сделай глубокие ресёрчи лучших систем 2026, выдели следующие конкретные шаги которые дадут качественный скачок».
+
+Work Log:
+- R20-0 (анализ браузерного слоя): 16 действий BROWSER_* шины = CLI-обёртка agent-browser (20с timeout); :3043 me2-screencast — собственный CDP-сервер (находит QA-браузер :37165, jpeg q/w); ВЕТКИ-панель = живые вкладки. Гэпы: G1 snapshot-ы транзиторны (нет персист-реестра целей), G2 нет network/console-сенсоров, G3 нет verify-after-act, G4 нет семантической адресации (у легаси A2 была!), G5 нет регресс-датасета.
+- R20-1 (ресёрч 6 свипов → research/2026/R20-s1…s6.json): Browser Use 89.1% WebVoyager (a11y-tree как единственный интерфейс), Stagehand (code-owned), Skyvern 85.85% (формы/vision), Chrome DevTools MCP (network+console+perf — главный отсутствующий сенсор), self-healing gen-3 (semantic+context+visual, −60..80% правок селекторов), Braintrust (trace→score→регресс-датасет). Легаси browser-tools.ts (git-археология, read-only): semantic_targets[] {role,name,semantic_ref,value_sha256} + state_revision_id + CAPTURE→act→verify + «no pixel geometry anywhere» — опередил время.
+- R20-2 (дорожная карта): research/2026/R20-BROWSER-LEAP.md — S1 BROWSER-SENSE (персист-перцепция+act+verify) → S2 CDP network/console сенсоры → S3 VERIFY-макро+регресс-датасет → S4 vision-контур :3043. Отклонено: пиксель-first, облака; принято: tree-first + отладочные сенсоры.
+- R20-3 (S1 РЕАЛИЗОВАН, daemon v0.20.0): src/sense.ts — parseSnapshot (aria-snapshot → semantic_targets[], только интерактивные роли, cap 250), SQLite browser_sense (tab PK, url/title/targets_json/revision=sha256(snap)/chars/captured_at), senseNow (CAPTURE+persist+событие BROWSER_SENSED+span), senseAct (резолв ref|точное имя|уникальная подстрока → click/type/press → 400ms → re-sense → verify {revision_changed, target_alive} + BROWSER_SENSE_ACTED+span), самозаживление: цель не в кэше → свежий CAPTURE перед мутацией (порт легаси-урока state_revision_id). REST: GET /browser/sense[?refresh=1&tab], POST /browser/sense/act — вне шины, 47/47 инвариант.
+- R20-4 (живые тесты): sense MC → 57-58 целей (button/link/textbox…); act по ИМЕНИ «⌘K» → e4 → click → verify revision d87023b1→1066fb60 (изменилась) → Escape → ок. Bugfix-и по ходу: ① парсер брал все named-элементы → только INTERACTIVE; ② tab-ключ «active» плодил несогласованные базовые ревизии → ключ = active tab id, база = свежайшая строка + миграция DELETE tab='active'.
+- R20-5 (ME-матрица 16→17): ME17 «Semantic browser perception (CAPTURE→act→verify)» old_ref=browser-tools.ts semantic_targets[] → WORKS. /mechanics = 17/17 WORKS.
+- R20-6 (MC UI): ВЕТКИ-панель + SENSE-блок (lime ScanEye, счётчик целей + rev, кнопка «снять», 14 чипов целей «role·имя» с прокруткой); клик чипа = senseActUi (POST /browser/sense/act) → тост «sense: w480 → e229 · ревизия bbf17628 → 5f57e86e · изменилась ✓» — ПОЙМАН в DOM (li). Программно: chips=14, senseVisible=true, sw=cw=390 на мобайле.
+- R20-7 (QA): VLM r20-vlm-qa1 PASS 4/4 (блок/чипы/согласованность/без переполнений). lint 0/0. secrets-guard чист. commit 13257cc → push sandbox/me2-os (81ea5c0..13257cc).
+
+Stage Summary:
+- Браузер ME2 получил ГЛАВНЫЙ недостающий слой — персистентную семантическую перцепцию с verify-после-действия: агент теперь может ссылаться на СМЫСЛ («кнопка Обновить»), а не на хрупкий селектор; каждое действие возвращает вердикт «страница изменилась/цель жива» (self-healing сигнал gen-3-lite).
+- Daemon v0.20.0: 47/47 инвариант; ME-матрица 17/17 WORKS (ME17 = порт лучшей механики легаси-браузера).
+- Дорожная карта скачка: S1 DONE → S2 (CDP network/console на :3043) → S3 (регресс-датасет из браузерных трейсов) → S4 (vision-резерв). S2 — самый ценный следующий шаг (паритет Chrome DevTools MCP).
+- Скриншоты: download/r20-sense-ui.png; ресёрчи: research/2026/R20-s{1..6}.json; VLM: r20-vlm-qa1.json; роадмап: R20-BROWSER-LEAP.md.
