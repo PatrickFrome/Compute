@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://arxiv.org",
+    "name": "AgentFixer: From Failure Detection to Fix",
+    "snippet": "Feb 18, 2026 — We introduce a comprehensive validation framework for LLM -based agentic systems that provides systematic diagnosis and improvement of ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 0,
+    "date": "Feb 18, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://ceaksan.com",
+    "name": "LLM Agentic Failure Modes: Task Drift, Reward Hacking,",
+    "snippet": "Apr 26, 2026 — Eight LLM failure modes that surface only in agent and tool-use systems. Mechanism and defense for task drift, incorrect tool invocation, reward ... Read more",
+    "host_name": "ceaksan.com",
+    "rank": 1,
+    "date": "Apr 26, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.taskade.com",
+    "name": "Self-Improving AI Agents: The Reflection Loop (2026)",
+    "snippet": "Jun 29, 2026 — A self -improving agent catches mistakes by making the critique step concrete and testable rather than subjective. A vague \"review your answer ... Read more",
+    "host_name": "www.taskade.com",
+    "rank": 2,
+    "date": "Jun 29, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://futureagi.com",
+    "name": "Evaluating LLM Self-Reflection Loops (2026)",
+    "snippet": "May 20, 2026 — Self-reflection loops sometimes improve outputs and sometimes destroy them . The pre-vs-post delta, over-correction rate, ...",
+    "host_name": "futureagi.com",
+    "rank": 3,
+    "date": "May 20, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://icml.cc",
+    "name": "Failure Modes in Agentic AI: Reproducible Triggers, Trace",
+    "snippet": "Jul 10, 2026 — This long-horizon interaction exposes failures that single-turn evaluation often misses: error cascades over trajectories, brittle tool use ... Read more",
+    "host_name": "icml.cc",
+    "rank": 4,
+    "date": "Jul 10, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://pub.towardsai.net",
+    "name": "Reflection Agent Architecture: Eliminating LLM",
+    "snippet": "Jul 3, 2026 — The reflection hypothesis states that an LLM can improve the quality of its own output by evaluating it against explicit criteria and using ...",
+    "host_name": "pub.towardsai.net",
+    "rank": 5,
+    "date": "Jul 3, 2026",
+    "favicon": ""
+  }
+]

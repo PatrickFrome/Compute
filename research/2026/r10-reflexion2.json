@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://neurips.cc",
+    "name": "Reflexion: language agents with verbal reinforcement",
+    "snippet": "Reflexion achieves a 91% pass@1 accuracy on to improve upon, helping it learn from prior mistakes to perform better on the task.",
+    "host_name": "neurips.cc",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.alphaxiv.org",
+    "name": "Reflexion: Language Agents with Verbal Reinforcement",
+    "snippet": "Reflexion + ReAct achieved the highest performance improvement , reaching 53% success rate compared to 32% for ReAct alone. Notably, baseline approaches ... Read more",
+    "host_name": "www.alphaxiv.org",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openreview.net",
+    "name": "Language Agents with Verbal Reinforcement Learning",
+    "snippet": "by N Shinn · Cited by 7659 — Reflexion agent learns to optimize its own behavior to solve decision-making, programming, and reasoning tasks not having a formal guarantee for success .  ...",
+    "host_name": "openreview.net",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org",
+    "name": "Reflexion: Language Agents with Verbal Reinforcement",
+    "snippet": "by N Shinn · 2023 · Cited by 7753 — Reflexion achieves a 91% pass@1 accuracy on the HumanEval coding benchmark, surpassing the previous state-of-the-art GPT-4 that achieves 80%.",
+    "host_name": "arxiv.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://agent-patterns.readthedocs.io",
+    "name": "Reflexion Agent Pattern — Agent Patterns 0.2.0 documentation",
+    "snippet": "Unlike simple reflection, Reflexion performs multiple attempts , stores insights from each trial, and uses accumulated knowledge to improve subsequent attempts. Read more",
+    "host_name": "agent-patterns.readthedocs.io",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://collaborate.princeton.edu",
+    "name": "Reflexion: Language Agents with Verbal Reinforcement",
+    "snippet": "by N Shinn · 2023 · Cited by 7729 — For example, Reflexion achieves a 91% pass@1 accuracy on the HumanEval coding benchmark, surpassing the previous state-of-the-art GPT-4 that achieves 80%. We ... Read more",
+    "host_name": "collaborate.princeton.edu",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

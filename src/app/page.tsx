@@ -36,7 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, MousePointerClick, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, Search, Terminal, Trash2, X, Zap,
+  Radar, RefreshCw, RotateCcw, Rocket, Search, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -46,7 +46,7 @@ type Task = {
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
   error: string | null; reflection: string | null; created_at: string; updated_at: string;
 };
-type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string };
+type Reflection = { v?: number; cause?: string; what?: string; hint?: string; error?: string; steps?: number; max_steps?: number; at?: string; llm?: { lesson?: string; fix?: string; model?: string; at?: string } };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -211,22 +211,36 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
 
 /** Git-подобный граф ветвей: рейка таймлайна, каждая задача — ветвь с точкой статуса.
  *  v0.7.0: retry-линии (parent_id → merge-дуга к родителю) + hover-tooltip через portal
- *  (fixed-позиция, не обрезается скролл-контейнером панели). */
-function BranchGraph({ tasks, onOpen, onRetry }: { tasks: Task[]; onOpen: (t: Task) => void; onRetry: (t: Task) => void }) {
+ *  (fixed-позиция, не обрезается скролл-контейнером панели).
+ *  v1.0.0: окно 60 ветвей (старшие скрыты за toggle — SVG не деградирует на 50+ задачах)
+ *  + кнопка ✦ LLM-рефлексии (tier-2) на FAILED/CANCELLED строках. */
+function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
+  tasks: Task[];
+  onOpen: (t: Task) => void;
+  onRetry: (t: Task) => void;
+  onReflect?: (t: Task) => void;
+  reflectingId?: string | null;
+}) {
   const ROW_H = 30, W = 340, RAIL_X = 16, FORK_X = 46, DOT_X = 208, TEXT_X = 220, STEPS_X = 334;
+  const WINDOW = 60;
   const [hover, setHover] = useState<{ t: Task; top: number; left: number } | null>(null);
-  const h = Math.max(40, tasks.length * ROW_H + 26);
+  const [showAll, setShowAll] = useState(false);
+  const displayed = useMemo(
+    () => (showAll || tasks.length <= WINDOW ? tasks : tasks.slice(-WINDOW)),
+    [tasks, showAll],
+  );
+  const h = Math.max(40, displayed.length * ROW_H + 26);
   // merge-линии: дочерняя задача (parent_id) тянется дугой к родителю (TASK_RETRY lineage)
   const links = useMemo(() => {
-    const idx = new Map(tasks.map((t, i) => [t.id, i] as const));
+    const idx = new Map(displayed.map((t, i) => [t.id, i] as const));
     const out: { fromY: number; toY: number }[] = [];
-    tasks.forEach((t, i) => {
+    displayed.forEach((t, i) => {
       const pi = t.parent_id ? idx.get(t.parent_id) : undefined;
       if (pi === undefined) return;
       out.push({ fromY: 20 + pi * ROW_H, toY: 20 + i * ROW_H });
     });
     return out;
-  }, [tasks]);
+  }, [displayed]);
   // координатная база — хит-зона строки (rect.branch-hover, ровно 30px), НЕ сам <g>:
   // bbox g включает path ветви от рейки (M 16 10 → y строки) и тянется на пол-графа,
   // из-за чего tooltip позиционировался мимо вьюпорта при скролле секции (ловили живьём в R9)
@@ -262,6 +276,17 @@ function BranchGraph({ tasks, onOpen, onRetry }: { tasks: Task[]; onOpen: (t: Ta
   }, [hoverId]);
   return (
     <div className="relative">
+      {tasks.length > WINDOW && (
+        <div className="flex items-center justify-between gap-2 px-1 pb-1 font-mono text-[9px] text-zinc-500">
+          <span>{showAll ? `все ${tasks.length} ветвей` : `последние ${WINDOW} из ${tasks.length} · старшие скрыты`}</span>
+          <button
+            className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-400 transition hover:border-zinc-500 hover:text-zinc-200"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll ? "свернуть" : "показать все"}
+          </button>
+        </div>
+      )}
       <svg
         viewBox={`0 0 ${W} ${h}`}
         className="h-auto w-full"
@@ -280,7 +305,7 @@ function BranchGraph({ tasks, onOpen, onRetry }: { tasks: Task[]; onOpen: (t: Ta
             strokeWidth={1.4}
           />
         ))}
-        {tasks.map((t, i) => {
+        {displayed.map((t, i) => {
           const y = 20 + i * ROW_H;
           const color = BRANCH_COLOR[t.status] ?? "#a1a1aa";
           const d = `M ${RAIL_X} 10 C ${RAIL_X} ${y - 16}, ${RAIL_X + 9} ${y}, ${FORK_X} ${y} L ${DOT_X} ${y}`;
@@ -324,19 +349,43 @@ function BranchGraph({ tasks, onOpen, onRetry }: { tasks: Task[]; onOpen: (t: Ta
                 {t.steps}/{t.max_steps}
               </text>
               {(t.status === "FAILED" || t.status === "CANCELLED") && (
-                <g
-                  className="branch-retry cursor-pointer"
-                  onClick={(e) => { e.stopPropagation(); onRetry(t); }}
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={`Повторить задачу ${t.title}`}
-                >
-                  <title>{"Повторить (TASK_RETRY: +2 шага, рефлексия родителя в контексте)"}</title>
-                  <circle cx={STEPS_X - 34} cy={y} r={7.5} fill="transparent" className="hover:fill-amber-500/20" />
-                  <text x={STEPS_X - 34} y={y + 3.4} fontSize={9.5} textAnchor="middle" className="fill-amber-500/70 font-mono hover:fill-amber-300" style={{ pointerEvents: "none" }}>
-                    ↻
-                  </text>
-                </g>
+                <>
+                  <g
+                    className="branch-retry cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); onRetry(t); }}
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={`Повторить задачу ${t.title}`}
+                  >
+                    <title>{"Повторить (TASK_RETRY: +2 шага, рефлексия родителя в контексте)"}</title>
+                    <circle cx={STEPS_X - 34} cy={y} r={7.5} fill="transparent" className="hover:fill-amber-500/20" />
+                    <text x={STEPS_X - 34} y={y + 3.4} fontSize={9.5} textAnchor="middle" className="fill-amber-500/70 font-mono hover:fill-amber-300" style={{ pointerEvents: "none" }}>
+                      ↻
+                    </text>
+                  </g>
+                  {onReflect ? (
+                    <g
+                      className="branch-reflect cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); onReflect(t); }}
+                      role="button"
+                      tabIndex={-1}
+                      aria-label={`Сгенерировать LLM-рефлексию для задачи ${t.title}`}
+                    >
+                      <title>{"LLM-рефлексия (tier-2): вербальный урок провала — запишется в tasks.reflection.llm"}</title>
+                      <circle cx={STEPS_X - 50} cy={y} r={7.5} fill="transparent" className="hover:fill-violet-500/20" />
+                      <text
+                        x={STEPS_X - 50}
+                        y={y + 3.6}
+                        fontSize={9.5}
+                        textAnchor="middle"
+                        className={`font-mono ${reflectingId === t.id ? "fill-violet-300" : "fill-violet-500/70 hover:fill-violet-300"}`}
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {reflectingId === t.id ? "◌" : "✦"}
+                      </text>
+                    </g>
+                  ) : null}
+                </>
               )}
             </g>
           );
@@ -373,27 +422,42 @@ function BranchGraph({ tasks, onOpen, onRetry }: { tasks: Task[]; onOpen: (t: Ta
                   {hover.t.error ? <div className="mt-1 max-w-[280px] truncate font-mono text-[9px] text-rose-400">⚠ {hover.t.error}</div> : null}
                   {(() => {
                     if (!hover.t.reflection) return null;
+                    let r: Reflection;
                     try {
-                      const r = JSON.parse(hover.t.reflection) as Reflection;
-                      if (!r.cause) return null;
-                      const CAUSE_RU: Record<string, string> = {
-                        budget_exhausted: "бюджет шагов",
-                        provider_unavailable: "провайдер недоступен",
-                        workspace_path: "путь workspace",
-                        protocol_violation: "нарушение JSON-протокола",
-                        runtime_error: "ошибка шага",
-                      };
-                      return (
-                        <div className="mt-1.5 rounded border border-amber-900/60 bg-amber-950/30 px-1.5 py-1">
-                          <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-400">
-                            <span>рефлексия</span>
-                            <span className="rounded bg-amber-500/15 px-1 normal-case text-amber-300">{CAUSE_RU[r.cause] ?? r.cause}</span>
-                          </div>
-                          <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-300">{r.what}</div>
-                          <div className="mt-0.5 text-[9.5px] leading-snug text-emerald-300/90">↳ {r.hint}</div>
-                        </div>
-                      );
+                      r = JSON.parse(hover.t.reflection) as Reflection;
                     } catch { return null; }
+                    const CAUSE_RU: Record<string, string> = {
+                      budget_exhausted: "бюджет шагов",
+                      provider_unavailable: "провайдер недоступен",
+                      workspace_path: "путь workspace",
+                      protocol_violation: "нарушение JSON-протокола",
+                      runtime_error: "ошибка шага",
+                    };
+                    return (
+                      <>
+                        {r.cause ? (
+                          <div className="mt-1.5 rounded border border-amber-900/60 bg-amber-950/30 px-1.5 py-1">
+                            <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-400">
+                              <span>рефлексия</span>
+                              <span className="rounded bg-amber-500/15 px-1 normal-case text-amber-300">{CAUSE_RU[r.cause] ?? r.cause}</span>
+                            </div>
+                            <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-300">{r.what}</div>
+                            <div className="mt-0.5 text-[9.5px] leading-snug text-emerald-300/90">↳ {r.hint}</div>
+                          </div>
+                        ) : null}
+                        {r.llm?.lesson ? (
+                          <div className="mt-1.5 rounded border border-violet-900/60 bg-violet-950/30 px-1.5 py-1">
+                            <div className="flex items-center gap-1 font-mono text-[9px] font-semibold uppercase tracking-wide text-violet-400">
+                              <span>llm-рефлексия</span>
+                              <span className="rounded bg-violet-500/15 px-1 normal-case text-violet-300">tier-2</span>
+                              {r.llm.model ? <span className="normal-case text-violet-500/80">{r.llm.model}</span> : null}
+                            </div>
+                            <div className="mt-0.5 text-[9.5px] leading-snug text-zinc-200">{r.llm.lesson}</div>
+                            {r.llm.fix ? <div className="mt-0.5 text-[9.5px] leading-snug text-sky-300/90">→ {r.llm.fix}</div> : null}
+                          </div>
+                        ) : null}
+                      </>
+                    );
                   })()}
                 </div>
               );
@@ -860,6 +924,30 @@ export default function MissionControl() {
     const r = res as { task?: Task } | null;
     if (r?.task) openDetail(r.task);
   }, [sendCommand, openDetail]);
+
+  // tier-2 LLM-рефлексия: /api/reflect (z-ai SDK в backend) → daemon пишет llm-блок в reflection,
+  // событие TASK_REFLECTED пушит снапшот по WS — tooltip обновится сам
+  const [reflectingId, setReflectingId] = useState<string | null>(null);
+  const reflectTask = useCallback(async (t: Task) => {
+    setReflectingId(t.id);
+    try {
+      const r = await fetch("/api/reflect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: t.id }),
+      });
+      const d = await r.json().catch(() => null) as { ok?: boolean; lesson?: string; error?: string } | null;
+      if (r.ok && d?.ok) {
+        toast({ title: "LLM-рефлексия ✓", description: (d.lesson ?? "").slice(0, 140) || "урок записан в tasks.reflection" });
+      } else {
+        toast({ title: "LLM-рефлексия ✗", description: d?.error ?? `HTTP ${r.status}`, variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "LLM-рефлексия ✗", description: "сеть недоступна", variant: "destructive" });
+    } finally {
+      setReflectingId(null);
+    }
+  }, [toast]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -1397,7 +1485,7 @@ export default function MissionControl() {
                   {branchTasks.length === 0 ? (
                     <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
                   ) : (
-                    <BranchGraph tasks={branchTasks} onOpen={openDetail} onRetry={(t) => void retryTask(t.id)} />
+                    <BranchGraph tasks={branchTasks} onOpen={openDetail} onRetry={(t) => void retryTask(t.id)} onReflect={(t) => void reflectTask(t)} reflectingId={reflectingId} />
                   )}
                 </div>
               </div>
@@ -1837,9 +1925,22 @@ export default function MissionControl() {
                   </Button>
                 )}
                 {(detail.status === "FAILED" || detail.status === "CANCELLED") && (
-                  <Button size="sm" className="flex-1 bg-amber-600 text-black hover:bg-amber-500" onClick={() => retryTask(detail.id)} disabled={busyAction}>
-                    <RotateCcw className="mr-1 h-3.5 w-3.5" /> повторить (MUTATION)
-                  </Button>
+                  <>
+                    <Button size="sm" className="flex-1 bg-amber-600 text-black hover:bg-amber-500" onClick={() => retryTask(detail.id)} disabled={busyAction}>
+                      <RotateCcw className="mr-1 h-3.5 w-3.5" /> повторить (MUTATION)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1 border-violet-800 text-violet-300 hover:bg-violet-950/60"
+                      onClick={() => void reflectTask(detail)}
+                      disabled={busyAction || reflectingId === detail.id}
+                      title="Tier-2 LLM-рефлексия: вербальный урок провала запишется в tasks.reflection.llm"
+                    >
+                      <Sparkles className={`mr-1 h-3.5 w-3.5 ${reflectingId === detail.id ? "animate-pulse" : ""}`} />
+                      llm-урок
+                    </Button>
+                  </>
                 )}
                 {(detail.status === "COMPLETED" || detail.status === "FAILED" || detail.status === "CANCELLED") && (
                   <Button variant="outline" size="sm" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800" onClick={() => archiveTask(detail.id)} disabled={busyAction}>

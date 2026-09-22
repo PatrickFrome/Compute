@@ -163,9 +163,12 @@ function parentMemory(task: TaskRow): string | null {
   const parent = getTask(task.parent_id);
   if (!parent?.reflection) return null;
   try {
-    const r = JSON.parse(parent.reflection) as { cause?: string; what?: string; hint?: string };
-    if (!r.cause) return null;
-    return `ПРЕДЫДУЩАЯ ПОПЫТКА ЭТОЙ ЗАДАЧИ ПРОВАЛИЛАСЬ. Причина (${r.cause}): ${r.what ?? "—"} Урок: ${r.hint ?? "—"} Учти это и не повтори её путь.`;
+    const r = JSON.parse(parent.reflection) as { cause?: string; what?: string; hint?: string; llm?: { lesson?: string; fix?: string } };
+    if (!r.cause && !r.llm?.lesson) return null;
+    const parts: string[] = [];
+    if (r.cause) parts.push(`Причина (${r.cause}): ${r.what ?? "—"} Урок: ${r.hint ?? "—"}`);
+    if (r.llm?.lesson) parts.push(`Вербальный урок разбора: ${r.llm.lesson}${r.llm.fix ? ` Что исправить: ${r.llm.fix}` : ""}`);
+    return `ПРЕДЫДУЩАЯ ПОПЫТКА ЭТОЙ ЗАДАЧИ ПРОВАЛИЛАСЬ. ${parts.join(" ")} Учти это и не повтори её путь.`;
   } catch { return null; }
 }
 

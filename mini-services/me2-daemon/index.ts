@@ -15,7 +15,7 @@ import {
   listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
   enqueueCommand, budgetWindow, listCommands, listWorkers, upsertWorker,
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
-  createAgent, createTask, nowIso,
+  createAgent, createTask, nowIso, setTaskReflectionLlm,
 } from "./store";
 import { listProviders } from "./providers";
 import { startMasterLoop } from "./worker";
@@ -24,7 +24,7 @@ import { initEvidence, evidenceStatus } from "./evidence";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.9.0";
+const VERSION = "0.10.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
@@ -163,6 +163,23 @@ const restServer = createServer(async (req, res) => {
       if (!r.ok) return json(res, 429, { ok: false, error: r.error });
       await runOne(r.command);
       return json(res, 200, { ok: true });
+    }
+    if (path.startsWith("/tasks/") && path.endsWith("/reflect") && req.method === "POST") {
+      // tier-2 LLM-рефлексия (enrichment): пишет llm-блок в tasks.reflection, событие TASK_REFLECTED
+      const id = path.split("/")[2];
+      const body = await readBody(req);
+      const lesson = String(body.lesson ?? "").trim();
+      if (!lesson) return json(res, 400, { ok: false, error: "lesson_required" });
+      try {
+        const ev = setTaskReflectionLlm(id, {
+          lesson: lesson.slice(0, 2000),
+          fix: body.fix ? String(body.fix).slice(0, 1000) : undefined,
+          model: body.model ? String(body.model).slice(0, 64) : undefined,
+        });
+        return json(res, 200, { ok: true, id, seq: ev.seq });
+      } catch (e) {
+        return json(res, (e as Error).message === "task_not_found" ? 404 : 500, { ok: false, error: (e as Error).message });
+      }
     }
     if (path.startsWith("/tasks/") && req.method === "GET") {
       const id = path.split("/")[2];
