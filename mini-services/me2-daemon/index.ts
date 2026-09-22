@@ -24,7 +24,7 @@ import { initEvidence, evidenceStatus } from "./evidence";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
@@ -86,7 +86,7 @@ const restServer = createServer(async (req, res) => {
     if (path === "/health") {
       return json(res, 200, {
         ok: true, service: "me2-daemon", version: VERSION, boot: BOOT_TS,
-        last_seq: lastSeq(), ts: nowIso(),
+        last_seq: lastSeq(), actions: knownActions().length, ts: nowIso(),
       });
     }
     if (path === "/state" && req.method === "GET") return json(res, 200, snapshot());

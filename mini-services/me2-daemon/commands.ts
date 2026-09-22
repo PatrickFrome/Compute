@@ -7,8 +7,12 @@ import {
   db, emit, nowIso, snapshot, createTask, cancelTask, createAgent, deleteAgent,
   tailEvents, eventsByTask, upsertWorker, listAgents, getTask, updateTask,
   setAgentPaused, getAgent, listWorkers, listCommands, enqueueCommand,
-  LANES, type CommandRow, type TaskRow, type Lane,
+  searchEvents, setAgentModel, setMeta, budgetLimit,
+  LANES, LANE_OF, COST_OF, type CommandRow, type TaskRow, type Lane,
 } from "./store";
+import { WORKSPACE_ROOT } from "./worker";
+import { readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
 
@@ -66,7 +70,9 @@ const handlers: Record<string, Handler> = {
 
   EVENTS_EXPORT: (p) => {
     const limit = Math.min(Math.max(Number(p.limit ?? 500), 1), 1000);
-    return { exported_at: nowIso(), count: limit, events: tailEvents(0, limit) };
+    // data ужимаем до 1000 символов: выгрузка должна оставаться валидным JSON-результатом шины
+    const events = tailEvents(0, limit).map((e) => ({ ...e, data: e.data.slice(0, 1000) }));
+    return { exported_at: nowIso(), count: events.length, events };
   },
 
   AGENT_SPAWN: (p) => {
@@ -136,6 +142,85 @@ const handlers: Record<string, Handler> = {
 
   ACTIONS_LIST: () => ({ actions: actionCatalog() }),
 
+  // ── v0.5.0: +6 действий к реестру 47 ───────────────────────────
+
+  TASK_LIST: () => {
+    const tasks = db.query(`SELECT id,title,status,role,steps,max_steps,created_at FROM tasks ORDER BY created_at DESC LIMIT 200`).all();
+    emit("TASK_LISTED", { count: tasks.length, include_archived: true }, null, null);
+    return { count: tasks.length, tasks };
+  },
+
+  TASK_ARCHIVE: (p) => {
+    const id = String(p.id ?? "");
+    const t = getTask(id);
+    if (!t) throw new Error(`task_not_found_${id}`);
+    if (t.status !== "COMPLETED" && t.status !== "FAILED" && t.status !== "CANCELLED") {
+      throw new Error(`archive_allowed_only_for_terminal_states (now ${t.status})`);
+    }
+    updateTask(id, { status: "ARCHIVED" });
+    emit("TASK_ARCHIVED", { id, title: t.title, prev_status: t.status }, null, id);
+    return { id, archived: true, prev_status: t.status };
+  },
+
+  AGENT_MODEL: (p) => {
+    const id = String(p.agent_id ?? p.id ?? "");
+    const model = String(p.model ?? "").trim().slice(0, 64);
+    if (!model) throw new Error("model_required");
+    const a = getAgent(id);
+    if (!a) throw new Error(`agent_not_found_${id}`);
+    if (a.model === model) return { id, model, unchanged: true };
+    setAgentModel(id, model);
+    emit("AGENT_MODEL_SET", { id, role: a.role, from: a.model, to: model }, id, null);
+    return { id, role: a.role, from: a.model, to: model };
+  },
+
+  WORKSPACE_SNAPSHOT: () => {
+    const MAX_ENTRIES = 500;
+    const files: Array<{ path: string; size: number; mtime: number }> = [];
+    let totalBytes = 0;
+    let truncated = false;
+    const walk = (dir: string, rel: string, depth: number): void => {
+      if (files.length >= MAX_ENTRIES) { truncated = true; return; }
+      let entries: ReturnType<typeof readdirSync>;
+      try { entries = readdirSync(dir); } catch { return; }
+      for (const name of entries.sort()) {
+        if (files.length >= MAX_ENTRIES) { truncated = true; return; }
+        const r = rel ? `${rel}/${name}` : name;
+        const full = join(dir, name);
+        let isDir = false;
+        try { isDir = statSync(full).isDirectory(); } catch { continue; }
+        if (isDir) { if (depth < 4) walk(full, r, depth + 1); continue; }
+        try {
+          const st = statSync(full);
+          files.push({ path: r, size: st.size, mtime: Math.round(st.mtimeMs) });
+          totalBytes += st.size;
+        } catch { /* файл исчез между readdir и stat — пропускаем */ }
+      }
+    };
+    walk(WORKSPACE_ROOT, "", 0);
+    emit("WORKSPACE_SNAPSHOT", { root: WORKSPACE_ROOT, entries: files.length, bytes: totalBytes, truncated }, null, null);
+    return { root: WORKSPACE_ROOT, entries: files.length, total_bytes: totalBytes, truncated, files };
+  },
+
+  EVENTS_SEARCH: (p) => {
+    const q = String(p.q ?? "").trim().slice(0, 100);
+    if (!q) throw new Error("q_required");
+    const limit = Math.min(Math.max(Number(p.limit ?? 50), 1), 200);
+    const hits = searchEvents(q, limit).map((e) => ({ ...e, data: e.data.slice(0, 160) }));
+    emit("EVENTS_SEARCHED", { q, hits: hits.length, limit }, null, null);
+    return { q, count: hits.length, events: hits };
+  },
+
+  BUDGET_ADJUST: (p) => {
+    const raw = Number(p.limit ?? p.limit_per_min ?? 0);
+    if (!Number.isFinite(raw) || raw <= 0) throw new Error("limit_required");
+    const lim = Math.min(Math.max(Math.round(raw), 6), 96);
+    const prev = budgetLimit();
+    setMeta("budget_limit", String(lim));
+    emit("BUDGET_ADJUSTED", { from: prev, to: lim, by: "operator" }, null, null);
+    return { from: prev, to: lim };
+  },
+
   EVENTS_TAIL: (p) => ({
     events: tailEvents(Number(p.since ?? 0), Math.min(Number(p.limit ?? 100), 500)),
   }),
@@ -169,7 +254,7 @@ const handlers: Record<string, Handler> = {
 
 export function knownActions(): string[] { return Object.keys(handlers); }
 
-// ── реестр действий (цель — 47; сейчас 19) — источник для ⌘K и /actions ──
+// ── реестр действий (цель — 47; сейчас 25) — источник для ⌘K и /actions ──
 type ActionMeta = { action: string; lane: Lane; cost: number; desc: string; group: string; args?: string };
 const CATALOG_EXTRA: ActionMeta[] = [
   { action: "TASK_ENQUEUE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "поставить задачу в очередь (форма N)", group: "Задачи", args: "title, spec, role?, max_steps?" },
@@ -193,24 +278,34 @@ const DESC: Record<string, string> = {
   WORKER_HEARTBEAT: "регистрация/пульс worker-а",
   FLEET_RECONCILE: "сверка и чистка флота",
   ENVIRONMENT_RESET: "полный сброс среды (EMERGENCY)",
+  TASK_LIST: "сводка задач (id/title/status/steps)",
+  TASK_ARCHIVE: "архивировать задачу в терминальном статусе",
+  AGENT_MODEL: "сменить модель агента",
+  WORKSPACE_SNAPSHOT: "манифест workspace (файлы/байты)",
+  EVENTS_SEARCH: "поиск по событиям (type+data)",
+  BUDGET_ADJUST: "лимит бюджета шины (6..96/60s)",
 };
 const GROUP_OF: Record<string, string> = {
   PING: "Диагностика", STATE_SNAPSHOT: "Диагностика", EVENTS_EXPORT: "Диагностика",
   EVENTS_TAIL: "Диагностика", WORKERS_LIST: "Диагностика", ACTIONS_LIST: "Диагностика", WORKER_HEARTBEAT: "Диагностика",
-  TASK_CANCEL: "Задачи", TASK_RETRY: "Задачи",
-  AGENT_RETIRE: "Флот", AGENT_PAUSE: "Флот", AGENT_RESUME: "Флот", FLEET_RECONCILE: "Флот",
-  COMMAND_CANCEL: "Шина", BUDGET_FLUSH: "Опасная зона", ENVIRONMENT_RESET: "Опасная зона",
+  WORKSPACE_SNAPSHOT: "Диагностика", EVENTS_SEARCH: "Диагностика",
+  TASK_CANCEL: "Задачи", TASK_RETRY: "Задачи", TASK_LIST: "Задачи", TASK_ARCHIVE: "Задачи",
+  AGENT_RETIRE: "Флот", AGENT_PAUSE: "Флот", AGENT_RESUME: "Флот", FLEET_RECONCILE: "Флот", AGENT_MODEL: "Флот",
+  COMMAND_CANCEL: "Шина", BUDGET_ADJUST: "Шина",
+  BUDGET_FLUSH: "Опасная зона", ENVIRONMENT_RESET: "Опасная зона",
 };
 export function actionCatalog(): ActionMeta[] {
   const built = knownActions().map((a) => {
-    const lane = (a.endsWith("_RESET") || a.startsWith("FLUSH") || a.endsWith("_FLUSH") || a.startsWith("FENCE")
-      ? "EMERGENCY"
-      : a.endsWith("_CANCEL") || a.endsWith("_RETIRE") || a.endsWith("_PAUSE") || a.endsWith("_RESUME")
-        ? "CONTROL"
-        : a.endsWith("_ENQUEUE") || a.endsWith("_SPAWN") || a.endsWith("_RETRY") || a.endsWith("_SCHEDULE")
-          ? "MUTATION"
-          : "READ_ONLY") as Lane;
-    return { action: a, lane, cost: LANES[lane].cost, desc: DESC[a] ?? "—", group: GROUP_OF[a] ?? "Прочее" };
+    const lane = (LANE_OF[a]
+      ?? (a.endsWith("_RESET") || a.startsWith("FLUSH") || a.endsWith("_FLUSH") || a.startsWith("FENCE")
+        ? "EMERGENCY"
+        : a.endsWith("_CANCEL") || a.endsWith("_RETIRE") || a.endsWith("_PAUSE") || a.endsWith("_RESUME")
+          ? "CONTROL"
+          : a.endsWith("_ENQUEUE") || a.endsWith("_SPAWN") || a.endsWith("_RETRY") || a.endsWith("_SCHEDULE")
+            ? "MUTATION"
+            : "READ_ONLY")) as Lane;
+    const cost = COST_OF[a] ?? LANES[lane].cost;
+    return { action: a, lane, cost, desc: DESC[a] ?? "—", group: GROUP_OF[a] ?? "Прочее" };
   });
   const seen = new Set(built.map((x) => x.action));
   return [...built, ...CATALOG_EXTRA.filter((x) => !seen.has(x.action))].sort((x, y) => x.group.localeCompare(y.group) || x.action.localeCompare(y.action));
@@ -223,6 +318,15 @@ export function claimCommand(id: string): boolean {
   return Number(r.changes) === 1;
 }
 
+/** Результат команды храним КАК ВАЛИДНЫЙ JSON: длинные результаты режем честно-объектом
+ *  (truncated+preview), иначе JSON.parse на чтении падал и клиент получал сырую строку (баг R4). */
+const RESULT_CAP = 60_000;
+function storeResult(result: unknown): string {
+  const json = JSON.stringify(result ?? {});
+  if (json.length <= RESULT_CAP) return json;
+  return JSON.stringify({ truncated: true, original_bytes: json.length, preview: json.slice(0, 4000) });
+}
+
 async function runCommand(cmd: CommandRow): Promise<void> {
   emit("COMMAND_LEASED", { action: cmd.action, lane: cmd.lane, id: cmd.id }, null, null);
   try {
@@ -231,7 +335,7 @@ async function runCommand(cmd: CommandRow): Promise<void> {
     const payload = cmd.payload ? (JSON.parse(cmd.payload) as Record<string, unknown>) : {};
     const result = await handler(payload);
     db.query(`UPDATE commands SET status='COMPLETED', result=?, completed_at=? WHERE id=?`)
-      .run(JSON.stringify(result ?? {}).slice(0, 4000), nowIso(), cmd.id);
+      .run(storeResult(result), nowIso(), cmd.id);
     emit("COMMAND_COMPLETED", { action: cmd.action, id: cmd.id }, null, null);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * ME2 · MISSION CONTROL v3 — операторская консоль METAENGINE 2.
- * 3 колонки: ФЛОТ / ОЧЕРЕДЬ / EVENT-LOG. ⌘K с живым реестром действий (n/47).
- * Планировщик задач (ETA + отмена), пауза/резюме агентов, evidence-mirror индикатор.
+ * ME2 · MISSION CONTROL v4 — операторская консоль METAENGINE 2.
+ * 3 колонки: ФЛОТ / ОЧЕРЕДЬ / EVENT-LOG + панель «ВЕТКИ» (git-граф задач с вкладками-«браузером»).
+ * ⌘K с живым реестром действий (n/47), KPI-плитки с count-up, планировщик, пауза агентов, модели агентов.
  * Каналы: WS :3040 (snapshot push + события + команды), REST :3041 (fallback, evidence, catalog).
  */
 
@@ -32,9 +32,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Activity, AlertTriangle, Bot, Boxes, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff, Crosshair, Cpu,
-  Download, Gauge, Layers, ListChecks, Pause, Play, Plus, Radar, RefreshCw, RotateCcw,
-  Rocket, Terminal, Trash2, X, Zap,
+  Activity, AlertTriangle, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
+  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, Pause, Play, Plus, Radar, RefreshCw,
+  RotateCcw, Rocket, Search, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -53,7 +53,7 @@ type Event = { seq: number; ts: string; type: string; agent_id: string | null; t
 type ActionMeta = { action: string; lane: string; cost: number; desc: string; group: string; args?: string };
 type Mirror = { mode: string; pending: number; method: string | null; last_error: string | null; last_sent_seq: number };
 type Snapshot = {
-  ok: boolean; ts: string; agents: Agent[]; tasks: Task[]; workers: Worker[];
+  ok: boolean; ts: string; agents: Agent[]; tasks: Task[]; archived?: Task[]; workers: Worker[];
   commands: Command[]; events: Event[];
   budget: { used: number; limit: number; window_ms: number };
   stats: Record<string, number>;
@@ -75,14 +75,15 @@ function hhmmss(iso: string): string {
 const EVENT_STYLE: Record<string, string> = {
   TASK_QUEUED: "text-emerald-400", TASK_LEASED: "text-amber-400", TASK_DONE: "text-emerald-300",
   TASK_COMPLETED: "text-emerald-300", TASK_FAILED: "text-rose-400", TASK_CANCELLED: "text-zinc-400",
-  TASK_RETRIED: "text-amber-300",
+  TASK_RETRIED: "text-amber-300", TASK_ARCHIVED: "text-zinc-400", TASK_LISTED: "text-zinc-500",
   TASK_SCHEDULED: "text-lime-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
-  AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400",
+  AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400", AGENT_MODEL_SET: "text-cyan-300",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
   COMMAND_COMPLETED: "text-emerald-400", COMMAND_FAILED: "text-rose-400",
   COMMAND_CANCELLED: "text-zinc-400",
-  BUDGET_FLUSHED: "text-rose-300",
+  BUDGET_FLUSHED: "text-rose-300", BUDGET_ADJUSTED: "text-fuchsia-300",
+  WORKSPACE_SNAPSHOT: "text-cyan-400", EVENTS_SEARCHED: "text-cyan-400",
   STEP_START: "text-zinc-500", STEP_DONE: "text-zinc-500",
   TOOL_CALL: "text-cyan-300", TOOL_RESULT: "text-cyan-500",
   ENVIRONMENT_RESET: "text-rose-300", FLEET_RECONCILED: "text-amber-400",
@@ -96,6 +97,28 @@ const STATUS_BADGE: Record<string, string> = {
   BUSY: "bg-amber-500/90 text-black", IDLE: "bg-emerald-700 text-emerald-100",
   OFFLINE: "bg-zinc-800 text-zinc-500",
   PAUSED: "bg-amber-700 text-amber-100",
+  ARCHIVED: "bg-zinc-800 text-zinc-400",
+};
+
+const MODEL_OPTIONS = ["zai:default", "zai:glm-4.6", "zai:glm-4.5-air", "zai:glm-4-flash"];
+
+// ── панель «ВЕТКИ»: вкладки-«браузер» + цвета статусов ──────────
+type BranchTabKey = "ALL" | "ACTIVE" | "DONE" | "CANCELLED" | "ARCHIVE";
+const BRANCH_TABS: { key: BranchTabKey; label: string; dot: string; match: (s: string) => boolean }[] = [
+  { key: "ALL", label: "Все", dot: "bg-emerald-400", match: () => true },
+  { key: "ACTIVE", label: "Активные", dot: "bg-amber-400", match: (s) => s === "READY" || s === "RUNNING" },
+  { key: "DONE", label: "Завершённые", dot: "bg-emerald-500", match: (s) => s === "COMPLETED" || s === "FAILED" },
+  { key: "CANCELLED", label: "Отменённые", dot: "bg-zinc-400", match: (s) => s === "CANCELLED" },
+  { key: "ARCHIVE", label: "Архив", dot: "bg-zinc-600", match: (s) => s === "ARCHIVED" },
+];
+const BRANCH_COLOR: Record<string, string> = {
+  RUNNING: "#fbbf24",
+  COMPLETED: "#34d399",
+  FAILED: "#fb7185",
+  CANCELLED: "#f59e0b",
+  READY: "#d4d4d8",
+  SCHEDULED: "#a3e635",
+  ARCHIVED: "#71717a",
 };
 
 const EVENT_FILTERS: { key: string; label: string; prefix: string }[] = [
@@ -110,6 +133,131 @@ const EVENT_FILTERS: { key: string; label: string; prefix: string }[] = [
 function Dot({ on, pulse }: { on: boolean; pulse?: boolean }) {
   return (
     <span className={`inline-block h-2 w-2 rounded-full ${on ? "bg-emerald-400" : "bg-rose-500"} ${pulse && on ? "animate-pulse" : ""}`} />
+  );
+}
+
+/** count-up: плавная анимация числа к новому значению. */
+function useCountUp(target: number, ms = 420): number {
+  const [val, setVal] = useState(target);
+  const cur = useRef(target);
+  useEffect(() => {
+    const from = cur.current;
+    if (from === target) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const k = Math.min(1, (t - t0) / ms);
+      const eased = 1 - Math.pow(1 - k, 3);
+      const v = Math.round(from + (target - from) * eased);
+      cur.current = v;
+      setVal(v);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+  return val;
+}
+
+/** KPI-плитка хедера: count-up + вспышка/ glow при изменении (ключ по значению перезапускает анимацию). */
+function KpiTile({ label, value, tone }: { label: string; value: number; tone: string }) {
+  const v = useCountUp(value);
+  return (
+    <div
+      className="kpi-tile flex min-w-10 flex-col items-center rounded-md border border-zinc-800 bg-zinc-900/80 px-1.5 py-0.5"
+      title={`${label}: ${value}`}
+    >
+      <span key={value} className={`kpi-hot font-mono text-[13px] font-bold leading-tight ${tone}`}>{v}</span>
+      <span className="text-[8px] uppercase tracking-widest text-zinc-600">{label}</span>
+    </div>
+  );
+}
+
+/** Точка статуса на конце ветви (SVG). */
+function BranchDot({ status, x, y, color }: { status: string; x: number; y: number; color: string }) {
+  if (status === "RUNNING") {
+    return (
+      <>
+        <circle cx={x} cy={y} r={5} fill={color} opacity={0.5} className="svg-ping" />
+        <circle cx={x} cy={y} r={4.5} fill={color} className="svg-beat" />
+      </>
+    );
+  }
+  if (status === "SCHEDULED") {
+    return (
+      <g className="branch-dot">
+        <circle cx={x} cy={y} r={5} fill="none" stroke={color} strokeWidth={1.6} />
+        <path d={`M ${x} ${y - 2.6} L ${x} ${y} L ${x + 1.9} ${y + 0.6}`} fill="none" stroke={color} strokeWidth={1.2} strokeLinecap="round" />
+      </g>
+    );
+  }
+  const hollow = status === "READY" || status === "ARCHIVED";
+  return (
+    <circle
+      cx={x}
+      cy={y}
+      r={status === "ARCHIVED" ? 4 : 4.6}
+      fill={hollow ? "#09090b" : color}
+      stroke={color}
+      strokeWidth={hollow ? 1.8 : 0}
+      opacity={status === "ARCHIVED" ? 0.75 : 1}
+      className="branch-dot"
+    />
+  );
+}
+
+/** Git-подобный граф ветвей: рейка таймлайна, каждая задача — ветвь с точкой статуса. */
+function BranchGraph({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => void }) {
+  const ROW_H = 30, W = 340, RAIL_X = 16, FORK_X = 46, DOT_X = 208, TEXT_X = 220, STEPS_X = 334;
+  const h = Math.max(40, tasks.length * ROW_H + 26);
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${h}`}
+      className="h-auto w-full"
+      role="img"
+      aria-label="Граф ветвей задач"
+      preserveAspectRatio="xMidYMin meet"
+    >
+      <line x1={RAIL_X} y1={6} x2={RAIL_X} y2={h - 8} stroke="#3f3f46" strokeWidth={2.5} strokeLinecap="round" />
+      {tasks.map((t, i) => {
+        const y = 20 + i * ROW_H;
+        const color = BRANCH_COLOR[t.status] ?? "#a1a1aa";
+        const d = `M ${RAIL_X} 10 C ${RAIL_X} ${y - 16}, ${RAIL_X + 9} ${y}, ${FORK_X} ${y} L ${DOT_X} ${y}`;
+        const title = t.title.length > 15 ? `${t.title.slice(0, 13)}…` : t.title;
+        const delay = Math.min(i, 12) * 0.07;
+        return (
+          <g
+            key={t.id}
+            className="branch-row"
+            onClick={() => onOpen(t)}
+            role="button"
+            tabIndex={0}
+            aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов`}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(t); } }}
+          >
+            <rect className="branch-hover" x={4} y={y - ROW_H / 2 + 2} width={W - 8} height={ROW_H - 4} rx={6} fill="#ffffff" />
+            <title>{`${t.title} · ${t.status} · ${t.steps}/${t.max_steps}`}</title>
+            <path
+              className="branch-line branch-draw"
+              d={d}
+              fill="none"
+              stroke={color}
+              strokeWidth={2.2}
+              strokeLinecap="round"
+              pathLength={1}
+              style={{ animationDelay: `${delay}s` }}
+            />
+            <BranchDot status={t.status} x={DOT_X} y={y} color={color} />
+            <text x={TEXT_X} y={y + 3.6} fontSize={10} className="branch-dot fill-zinc-200 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
+              {title}
+            </text>
+            <text x={STEPS_X} y={y + 3.6} fontSize={9} textAnchor="end" className="branch-dot fill-zinc-500 font-mono" style={{ animationDelay: `${0.4 + delay}s` }}>
+              {t.steps}/{t.max_steps}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -158,6 +306,23 @@ export default function MissionControl() {
   const [mirror, setMirror] = useState<Mirror | null>(null);
   const [catalog, setCatalog] = useState<ActionMeta[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // панель ВЕТКИ: вкладки-«браузер» + сворачивание
+  const [branchTab, setBranchTab] = useState<BranchTabKey>("ALL");
+  const [branchesOpen, setBranchesOpen] = useState(true);
+
+  // EVENTS_SEARCH (диалог из ⌘K)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("TASK");
+  const [searchLimit, setSearchLimit] = useState("50");
+  const [searchRes, setSearchRes] = useState<{ q: string; count: number; preview: Event[] } | null>(null);
+
+  // BUDGET_ADJUST (диалог из ⌘K)
+  const [budgetOpen, setBudgetOpen] = useState(false);
+  const [budgetVal, setBudgetVal] = useState("24");
+
+  // AGENT_MODEL: черновики моделей по карточкам агентов
+  const [modelSel, setModelSel] = useState<Record<string, string>>({});
 
   // форма новой задачи
   const [fTitle, setFTitle] = useState("");
@@ -293,7 +458,14 @@ export default function MissionControl() {
         variant: ok ? "default" : "destructive",
       });
     }
-    return ok ? (res as { result?: unknown })?.result ?? res : null;
+    if (!ok) return null;
+    // результат шины может прийти строкой (давний урезанный JSON) — пробуем восстановить объект
+    let out: unknown = (res as { result?: unknown })?.result ?? res;
+    if (typeof out === "string") {
+      try { out = JSON.parse(out); } catch { out = null; }
+    }
+    if (out && typeof out === "object" && (out as { truncated?: boolean }).truncated) out = null;
+    return out;
   }, [socket, toast]);
 
   const spawnAgent = useCallback(async (role: string) => {
@@ -360,6 +532,64 @@ export default function MissionControl() {
     await sendCommand("COMMAND_CANCEL", { id }, { lane: "CONTROL", successMsg: "команда отменена до исполнения" });
   }, [sendCommand]);
 
+  const archiveTask = useCallback(async (id: string) => {
+    await sendCommand("TASK_ARCHIVE", { id }, { successMsg: "задача убрана в архив" });
+    setDetail(null);
+    detailIdRef.current = null;
+    setBranchesOpen(true);
+    setBranchTab("ARCHIVE");
+  }, [sendCommand]);
+
+  const saveAgentModel = useCallback(async (id: string, model: string) => {
+    await sendCommand("AGENT_MODEL", { agent_id: id, model }, { successMsg: `модель агента → ${model}` });
+  }, [sendCommand]);
+
+  const runWorkspaceSnapshot = useCallback(async () => {
+    const res = await sendCommand("WORKSPACE_SNAPSHOT", {}, { quiet: true });
+    const r = res as { entries?: number; total_bytes?: number; truncated?: boolean } | null;
+    if (r && typeof r.entries === "number") {
+      toast({
+        title: "WORKSPACE_SNAPSHOT ✓",
+        description: `${r.entries} файлов · ${((r.total_bytes ?? 0) / 1024).toFixed(1)} KB${r.truncated ? " · обрезано" : ""}`,
+      });
+    } else {
+      toast({ title: "WORKSPACE_SNAPSHOT ✗", description: "манифест workspace не получен", variant: "destructive" });
+    }
+    setCmdOpen(false);
+  }, [sendCommand, toast]);
+
+  const runEventsSearch = useCallback(async () => {
+    const res = await sendCommand(
+      "EVENTS_SEARCH",
+      { q: searchQ.trim(), limit: Math.min(Math.max(Number(searchLimit) || 50, 1), 200) },
+      { quiet: true },
+    );
+    const r = res as { q?: string; count?: number; events?: Event[] } | null;
+    if (r?.events) {
+      setSearchRes({ q: r.q ?? searchQ.trim(), count: r.count ?? r.events.length, preview: r.events.slice(0, 10) });
+      toast({ title: "EVENTS_SEARCH ✓", description: `${r.count ?? r.events.length} совпадений по «${searchQ.trim()}»` });
+    } else {
+      toast({ title: "EVENTS_SEARCH ✗", description: "поиск не удался (q обязателен)", variant: "destructive" });
+    }
+  }, [searchQ, searchLimit, sendCommand, toast]);
+
+  const runBudgetAdjust = useCallback(async () => {
+    const n = Math.round(Number(budgetVal));
+    if (!Number.isFinite(n) || n < 6 || n > 96) {
+      toast({ title: "BUDGET_ADJUST ✗", description: "лимит должен быть в диапазоне 6..96", variant: "destructive" });
+      return;
+    }
+    const res = await sendCommand("BUDGET_ADJUST", { limit: n }, { lane: "CONTROL", successMsg: `лимит шины: ${n} cost/60s` });
+    const r = res as { to?: number } | null;
+    if (r?.to) {
+      setBudgetVal(String(r.to));
+      setBudgetOpen(false);
+    }
+  }, [budgetVal, sendCommand, toast]);
+
+  /** Текущий лимит бюджета (для пресета в диалоге BUDGET_ADJUST). */
+  const budgetLimitNow = snap?.budget.limit ?? 24;
+
   /** Запуск действия из реестра ⌘K: безопасные — напрямую, с аргументами — подсказка/форма. */
   const runRegistryAction = useCallback((meta: ActionMeta) => {
     const direct: Record<string, () => void> = {
@@ -374,6 +604,13 @@ export default function MissionControl() {
       TASK_ENQUEUE: () => { setCmdOpen(false); setNewTaskOpen(true); },
       TASK_SCHEDULE: () => { setCmdOpen(false); setNewTaskOpen(true); },
       EVENTS_EXPORT: () => exportEventsRef.current?.(),
+      // ── v0.5.0 ──
+      TASK_LIST: () => sendCommand("TASK_LIST", {}, { quiet: true, successMsg: "сводка задач — в результате команды" }),
+      WORKSPACE_SNAPSHOT: () => void runWorkspaceSnapshot(),
+      EVENTS_SEARCH: () => { setCmdOpen(false); setSearchOpen(true); },
+      BUDGET_ADJUST: () => { setCmdOpen(false); setBudgetVal(String(budgetLimitNow)); setBudgetOpen(true); },
+      TASK_ARCHIVE: () => toast({ title: "TASK_ARCHIVE", description: "кнопка «в архив» — в карточке задачи (Sheet) для терминальных статусов" }),
+      AGENT_MODEL: () => toast({ title: "AGENT_MODEL", description: "выберите модель в карточке агента (колонка ФЛОТ) и сохраните" }),
     };
     const fn = direct[meta.action];
     if (fn) { fn(); if (meta.action !== "ENVIRONMENT_RESET" && meta.action !== "TASK_ENQUEUE" && meta.action !== "TASK_SCHEDULE") setCmdOpen(false); }
@@ -381,7 +618,7 @@ export default function MissionControl() {
       toast({ title: `${meta.action}`, description: "нужны аргументы — используйте формы и кнопки панелей" });
       setCmdOpen(false);
     }
-  }, [sendCommand, toast]);
+  }, [sendCommand, toast, runWorkspaceSnapshot, budgetLimitNow]);
 
   const environmentReset = useCallback(async () => {
     setResetConfirm(false);
@@ -431,6 +668,23 @@ export default function MissionControl() {
   const budgetPct = Math.min(100, Math.round((budget.used / Math.max(1, budget.limit)) * 100));
   const budgetColor = budgetPct > 80 ? "bg-rose-500" : budgetPct > 50 ? "bg-amber-500" : "bg-fuchsia-500";
 
+  // ── панель ВЕТКИ: данные + счётчики вкладок ────────────────────
+  const branchData = useMemo(() => [...(snap?.tasks ?? []), ...(snap?.archived ?? [])], [snap]);
+  const branchCounts = useMemo(() => {
+    const c: Record<BranchTabKey, number> = { ALL: branchData.length, ACTIVE: 0, DONE: 0, CANCELLED: 0, ARCHIVE: 0 };
+    for (const t of branchData) {
+      if (t.status === "READY" || t.status === "RUNNING") c.ACTIVE++;
+      else if (t.status === "COMPLETED" || t.status === "FAILED") c.DONE++;
+      else if (t.status === "CANCELLED") c.CANCELLED++;
+      else if (t.status === "ARCHIVED") c.ARCHIVE++;
+    }
+    return c;
+  }, [branchData]);
+  const branchTasks = useMemo(() => {
+    const tab = BRANCH_TABS.find((x) => x.key === branchTab) ?? BRANCH_TABS[0];
+    return branchData.filter((t) => tab.match(t.status)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }, [branchData, branchTab]);
+
   // отложенные команды (ETA в будущем) — живой отсчёт + отмена
   const scheduledCommands = useMemo(
     () => (snap?.commands ?? [])
@@ -459,6 +713,12 @@ export default function MissionControl() {
           v{snap?.meta.version ?? "?"}
         </Badge>
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
+          <div className="hidden items-center gap-1.5 lg:flex" aria-label="KPI задач" role="group">
+            <KpiTile label="ready" value={stats.tasksReady ?? 0} tone="text-zinc-200" />
+            <KpiTile label="run" value={stats.tasksRunning ?? 0} tone="text-amber-400" />
+            <KpiTile label="done" value={stats.tasksCompleted ?? 0} tone="text-emerald-400" />
+            <KpiTile label="fail" value={stats.tasksFailed ?? 0} tone="text-rose-400" />
+          </div>
           <span className="hidden xl:flex" aria-label="Активность"><Sparkline events={events} /></span>
           <span
             className={`hidden items-center gap-1.5 lg:flex ${mirrorColor}`}
@@ -484,7 +744,7 @@ export default function MissionControl() {
       <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3 lg:overflow-hidden">
         {/* Колонка 1: ФЛОТ */}
         <section className="flex min-h-0 flex-col gap-4 lg:overflow-hidden" aria-label="Флот">
-          <Card className="flex min-h-0 flex-col border-zinc-800 bg-zinc-900/40">
+          <Card className="flex min-h-0 flex-col border-zinc-800 bg-zinc-900/40 card-lift">
             <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
               <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
                 <Bot className="h-4 w-4 text-emerald-400" /> ФЛОТ · АГЕНТЫ ({snap?.agents.length ?? 0})
@@ -519,6 +779,31 @@ export default function MissionControl() {
                       {a.paused === 1 && <Badge className="h-4 bg-amber-700 px-1 text-[9px] text-amber-100">PAUSED</Badge>}
                     </div>
                     <p className="font-mono text-[10px] text-zinc-500">{a.id.slice(0, 14)}… · {age(a.updated_at)} назад</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <Select value={modelSel[a.id] ?? a.model} onValueChange={(v) => setModelSel((m) => ({ ...m, [a.id]: v }))}>
+                        <SelectTrigger
+                          aria-label={`Модель агента ${a.role}`}
+                          className="h-5 w-fit gap-1 border-zinc-800 bg-zinc-900 px-1.5 font-mono text-[9px] text-zinc-400 [&>svg]:h-2.5 [&>svg]:w-2.5"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="border-zinc-800 bg-zinc-950">
+                          {MODEL_OPTIONS.map((m) => (
+                            <SelectItem key={m} value={m} className="font-mono text-[10px]">{m}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {modelSel[a.id] && modelSel[a.id] !== a.model && (
+                        <button
+                          className="flex items-center gap-0.5 rounded border border-emerald-800 bg-emerald-950/50 px-1.5 py-0.5 text-[9px] text-emerald-300 transition hover:bg-emerald-900/60"
+                          onClick={() => saveAgentModel(a.id, modelSel[a.id])}
+                          disabled={busyAction}
+                          aria-label={`Сохранить модель ${modelSel[a.id]} для ${a.role}`}
+                        >
+                          <Check className="h-2.5 w-2.5" aria-hidden /> сохранить
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <Badge className={`${a.paused === 1 ? STATUS_BADGE.PAUSED : STATUS_BADGE[a.status] ?? ""} h-5 px-1.5 text-[10px]`}>{a.paused === 1 ? "PAUSED" : a.status}</Badge>
                   <button
@@ -563,9 +848,63 @@ export default function MissionControl() {
           </Card>
         </section>
 
-        {/* Колонка 2: ОЧЕРЕДЬ */}
-        <section className="flex min-h-0 flex-col gap-4 lg:overflow-hidden" aria-label="Очередь задач">
-          <Card className="flex min-h-0 flex-1 flex-col border-zinc-800 bg-zinc-900/40">
+        {/* Колонка 2: ОЧЕРЕДЬ + ВЕТКИ */}
+        <section className="mc-scroll flex min-h-0 flex-col gap-4 lg:overflow-y-auto" aria-label="Очередь задач">
+          <Card className="flex min-h-0 flex-col gap-0 overflow-hidden border-zinc-800 bg-zinc-900/40 py-0 card-lift lg:max-h-[42vh]">
+            <CardHeader className="shrink-0 border-b border-zinc-800 p-0">
+              <button
+                type="button"
+                onClick={() => setBranchesOpen((o) => !o)}
+                aria-expanded={branchesOpen}
+                aria-controls="branch-panel-body"
+                className="flex w-full items-center justify-between rounded-t-xl px-6 py-3 text-left transition hover:bg-zinc-900/70"
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
+                  <GitBranch className="h-4 w-4 text-fuchsia-400" aria-hidden /> ВЕТКИ · ЗАДАЧИ ({branchData.length})
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] text-zinc-600">{branchesOpen ? "git-graph" : "свёрнуто"}</span>
+                  <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${branchesOpen ? "" : "-rotate-90"}`} aria-hidden />
+                </span>
+              </button>
+            </CardHeader>
+            {branchesOpen && (
+              <div id="branch-panel-body" className="flex min-h-0 flex-col">
+                {/* вкладки в стиле браузера */}
+                <div className="flex shrink-0 items-end gap-1 overflow-x-auto border-b border-zinc-800 px-3 pt-2" role="tablist" aria-label="Фильтр ветвей">
+                  {BRANCH_TABS.map((tb) => {
+                    const active = branchTab === tb.key;
+                    return (
+                      <button
+                        key={tb.key}
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setBranchTab(tb.key)}
+                        className={`-mb-px flex shrink-0 items-center gap-1.5 rounded-t-lg border border-b-0 px-2.5 py-1.5 text-[10px] transition ${
+                          active
+                            ? "border-zinc-700 bg-zinc-800/90 text-zinc-100 shadow-[0_-2px_6px_rgba(0,0,0,0.35)]"
+                            : "border-transparent text-zinc-500 hover:bg-zinc-900/70 hover:text-zinc-300"
+                        }`}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${tb.dot}`} aria-hidden />
+                        {tb.label}
+                        <span className="font-mono text-[9px] text-zinc-600">{branchCounts[tb.key]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mc-scroll max-h-36 grow basis-auto overflow-y-auto px-2 py-1 lg:max-h-40">
+                  {branchTasks.length === 0 ? (
+                    <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
+                  ) : (
+                    <BranchGraph tasks={branchTasks} onOpen={openDetail} />
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
+
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-zinc-800 bg-zinc-900/40 card-lift lg:min-h-52">
             <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
               <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
                 <ListChecks className="h-4 w-4 text-emerald-400" /> ОЧЕРЕДЬ ЗАДАЧ ({snap?.tasks.length ?? 0})
@@ -599,14 +938,14 @@ export default function MissionControl() {
             </CardContent>
           </Card>
 
-          <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
+          <Card className="min-h-0 overflow-hidden border-zinc-800 bg-zinc-900/40 card-lift lg:max-h-[36vh]">
             <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
               <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
                 <Zap className="h-4 w-4 text-fuchsia-400" /> COMMAND BUS
               </CardTitle>
               <span className="font-mono text-[10px] text-zinc-500">бюджет {budget.used}/{budget.limit} / 60s</span>
             </CardHeader>
-            <CardContent className="max-h-44 space-y-1 overflow-y-auto p-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+            <CardContent className="max-h-44 min-h-0 grow basis-auto space-y-1 overflow-y-auto p-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
               {scheduledCommands.length > 0 && (
                 <div className="mb-1.5 space-y-1 rounded-md border border-lime-900/50 bg-lime-950/20 p-1.5">
                   {scheduledCommands.map((c) => (
@@ -640,7 +979,7 @@ export default function MissionControl() {
 
         {/* Колонка 3: EVENT LOG */}
         <section className="flex min-h-0 flex-col gap-4 lg:overflow-hidden" aria-label="Журнал событий">
-          <Card className="flex min-h-0 flex-1 flex-col border-zinc-800 bg-zinc-900/40">
+          <Card className="flex min-h-0 flex-1 flex-col border-zinc-800 bg-zinc-900/40 card-lift">
             <CardHeader className="flex-row items-center justify-between space-y-0 gap-2 border-b border-zinc-800 py-3">
               <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
                 <Activity className="h-4 w-4 text-cyan-400" /> EVENT LOG
@@ -682,8 +1021,8 @@ export default function MissionControl() {
               {filteredEvents.length === 0 && (
                 <p className="p-4 text-center text-zinc-500">{events.length ? "ничего не найдено по фильтру" : "ожидание событий…"}</p>
               )}
-              {filteredEvents.map((e) => (
-                <div key={e.seq} className="ev-in flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
+              {filteredEvents.map((e, i) => (
+                <div key={e.seq} className="ev-in flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
                   <span className="shrink-0 text-zinc-600">{e.seq}</span>
                   <span className="shrink-0 text-zinc-500">{hhmmss(e.ts)}</span>
                   <span className={`w-36 shrink-0 font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`}>{e.type}</span>
@@ -706,6 +1045,9 @@ export default function MissionControl() {
         <span className="flex items-center gap-1.5"><Crosshair className="h-3.5 w-3.5 text-amber-400" />
           задачи: <b className="text-zinc-200">{stats.tasksReady ?? 0}</b> ready · <b className="text-zinc-200">{stats.tasksRunning ?? 0}</b> running · <b className="text-emerald-400">{stats.tasksCompleted ?? 0}</b> done · <b className="text-rose-400">{stats.tasksFailed ?? 0}</b> fail
         </span>
+        <Badge variant="outline" className="border-zinc-700 font-mono text-[10px] text-zinc-400" title="реестр действий /actions · цель 47">
+          <Layers className="mr-1 h-3 w-3" />{catalog.length || "—"}/47 действий
+        </Badge>
         <span className="flex min-w-28 items-center gap-1.5"><Gauge className="h-3.5 w-3.5 text-fuchsia-400" />
           бюджет: <b className={budgetPct > 80 ? "text-rose-400" : "text-zinc-200"}>{budgetPct}%</b>
           <Progress value={budgetPct} className={`h-1 w-16 bg-zinc-800 [&>div]:${budgetColor}`} />
@@ -841,6 +1183,104 @@ export default function MissionControl() {
         </DialogContent>
       </Dialog>
 
+      {/* ── ПОИСК ПО СОБЫТИЯМ (EVENTS_SEARCH) ── */}
+      <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+        <DialogContent className="border-zinc-800 bg-zinc-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm tracking-widest">
+              <Search className="h-4 w-4 text-cyan-400" aria-hidden /> EVENTS_SEARCH
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-500">
+              подстрочный поиск по type+data журнала · limit ≤ 200 · полоса READ_ONLY · cost 1
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="flex gap-2">
+              <Input
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && searchQ.trim()) void runEventsSearch(); }}
+                placeholder="строка поиска, напр. TASK"
+                aria-label="Строка поиска событий"
+                className="h-8 flex-1 border-zinc-800 bg-zinc-900 font-mono text-xs"
+              />
+              <Input
+                value={searchLimit}
+                onChange={(e) => setSearchLimit(e.target.value)}
+                type="number" min={1} max={200}
+                aria-label="Лимит результатов"
+                className="h-8 w-20 border-zinc-800 bg-zinc-900 font-mono text-xs"
+              />
+            </div>
+            <Button size="sm" className="h-8 w-full bg-cyan-700 text-white hover:bg-cyan-600" onClick={runEventsSearch} disabled={busyAction || !searchQ.trim()}>
+              найти
+            </Button>
+            {searchRes && (
+              <div className="rounded-md border border-zinc-800 bg-zinc-900/60 p-2">
+                <p className="mb-1 text-[10px] text-zinc-400">
+                  найдено: <b className="text-cyan-300">{searchRes.count}</b> по «{searchRes.q}» {searchRes.count > searchRes.preview.length ? `(первые ${searchRes.preview.length})` : ""}
+                </p>
+                <div className="mc-scroll max-h-40 space-y-0.5 overflow-y-auto font-mono text-[10px]">
+                  {searchRes.preview.map((e) => (
+                    <div key={e.seq} className="flex gap-2">
+                      <span className="shrink-0 text-zinc-600">{e.seq}</span>
+                      <span className={`w-32 shrink-0 truncate ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`}>{e.type}</span>
+                      <span className="min-w-0 flex-1 truncate text-zinc-500">{e.data}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── ЛИМИТ БЮДЖЕТА ШИНЫ (BUDGET_ADJUST) ── */}
+      <Dialog open={budgetOpen} onOpenChange={setBudgetOpen}>
+        <DialogContent className="border-zinc-800 bg-zinc-950 sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm tracking-widest">
+              <Gauge className="h-4 w-4 text-fuchsia-400" aria-hidden /> BUDGET_ADJUST
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-500">
+              лимит стоимости команд на 60s · clamp 6..96 · сейчас {budgetLimitNow}/60s
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="flex items-center gap-2">
+              <Input
+                id="b-limit"
+                type="number" min={6} max={96}
+                value={budgetVal}
+                onChange={(e) => setBudgetVal(e.target.value)}
+                aria-label="Новый лимит бюджета"
+                className="h-8 w-24 border-zinc-800 bg-zinc-900 font-mono text-sm"
+              />
+              <span className="text-xs text-zinc-500">cost / 60s</span>
+              <div className="ml-auto flex gap-1" role="group" aria-label="Пресеты лимита">
+                {[24, 32, 48, 96].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setBudgetVal(String(n))}
+                    aria-pressed={Number(budgetVal) === n}
+                    className={`rounded border px-1.5 py-0.5 font-mono text-[10px] transition ${
+                      Number(budgetVal) === n
+                        ? "border-fuchsia-700 bg-fuchsia-950/60 text-fuchsia-300"
+                        : "border-zinc-700 text-zinc-400 hover:bg-zinc-800"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button size="sm" className="h-8 w-full bg-fuchsia-700 text-white hover:bg-fuchsia-600" onClick={runBudgetAdjust} disabled={busyAction}>
+              применить (CONTROL)
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ── ДЕТАЛЬ ЗАДАЧИ + LIVE-СТРИМ ── */}
       <Sheet open={!!detail} onOpenChange={(o) => { if (!o) { setDetail(null); detailIdRef.current = null; } }}>
         <SheetContent side="right" className="flex w-full flex-col overflow-hidden border-zinc-800 bg-zinc-950 sm:max-w-lg">
@@ -899,6 +1339,11 @@ export default function MissionControl() {
                 {(detail.status === "FAILED" || detail.status === "CANCELLED") && (
                   <Button size="sm" className="flex-1 bg-amber-600 text-black hover:bg-amber-500" onClick={() => retryTask(detail.id)} disabled={busyAction}>
                     <RotateCcw className="mr-1 h-3.5 w-3.5" /> повторить (MUTATION)
+                  </Button>
+                )}
+                {(detail.status === "COMPLETED" || detail.status === "FAILED" || detail.status === "CANCELLED") && (
+                  <Button variant="outline" size="sm" className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800" onClick={() => archiveTask(detail.id)} disabled={busyAction}>
+                    <Archive className="mr-1 h-3.5 w-3.5" /> в архив (MUTATION)
                   </Button>
                 )}
               </div>

@@ -132,6 +132,29 @@ export type Lane = keyof typeof LANES;
 export const BUDGET_LIMIT = 24;
 export const BUDGET_WINDOW_MS = 60_000;
 
+/** Явное сопоставление действий полосам, когда суффикс-эвристика недостаточна (v0.5.0). */
+export const LANE_OF: Record<string, Lane> = {
+  TASK_LIST: "READ_ONLY",
+  TASK_ARCHIVE: "MUTATION",
+  AGENT_MODEL: "MUTATION",
+  WORKSPACE_SNAPSHOT: "READ_ONLY",
+  EVENTS_SEARCH: "READ_ONLY",
+  BUDGET_ADJUST: "CONTROL",
+};
+/** Индивидуальные cost для действий, чей тариф отличается от дефолта полосы (spec R4). */
+export const COST_OF: Record<string, number> = {
+  WORKSPACE_SNAPSHOT: 1,
+  EVENTS_SEARCH: 1,
+  TASK_ARCHIVE: 1,
+  AGENT_MODEL: 1,
+};
+
+/** Лимит бюджета шины — оператор настраивает через BUDGET_ADJUST (meta: budget_limit, clamp 6..96). */
+export function budgetLimit(): number {
+  const v = Number(getMeta("budget_limit"));
+  return Number.isFinite(v) && v >= 6 && v <= 96 ? Math.round(v) : BUDGET_LIMIT;
+}
+
 export function nowIso() { return new Date().toISOString(); }
 export function rid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -212,8 +235,12 @@ export function createTask(t: Omit<TaskRow, "status" | "agent_id" | "steps" | "r
     .run(row.id, row.title, row.spec, row.role, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.created_at, row.updated_at);
   return row;
 }
-export function listTasks(): TaskRow[] {
-  return db.query(`SELECT * FROM tasks ORDER BY created_at DESC LIMIT 200`).all() as TaskRow[];
+export function listTasks(opts: { includeArchived?: boolean } = {}): TaskRow[] {
+  return db.query(
+    opts.includeArchived
+      ? `SELECT * FROM tasks ORDER BY created_at DESC LIMIT 200`
+      : `SELECT * FROM tasks WHERE status!='ARCHIVED' ORDER BY created_at DESC LIMIT 200`,
+  ).all() as TaskRow[];
 }
 export function getTask(id: string): TaskRow | null {
   return (db.query(`SELECT * FROM tasks WHERE id=?`).get(id) as TaskRow | null) ?? null;
@@ -233,6 +260,16 @@ export function cancelTask(id: string) {
   const t = getTask(id);
   if (t && (t.status === "READY" || t.status === "RUNNING")) updateTask(id, { status: "CANCELLED", agent_id: null });
 }
+export function setAgentModel(id: string, model: string) {
+  db.query(`UPDATE agents SET model=?, updated_at=? WHERE id=?`).run(model.slice(0, 64), nowIso(), id);
+}
+/** Поиск по событиям (подстрока в type+data); ESCAPE-экранирование % и _. */
+export function searchEvents(q: string, limit = 50): EventRow[] {
+  const like = `%${q.replace(/[%_]/g, "!$&")}%`;
+  return db.query(
+    `SELECT * FROM events WHERE type LIKE ?1 ESCAPE '!' OR data LIKE ?1 ESCAPE '!' ORDER BY seq DESC LIMIT ?2`,
+  ).all(like, limit) as EventRow[];
+}
 
 // ── command bus ───────────────────────────────────────────────────
 export function budgetWindow(): { used: number; limit: number; window_ms: number; reset_hint: string } {
@@ -240,7 +277,7 @@ export function budgetWindow(): { used: number; limit: number; window_ms: number
   const r = db.query(
     `SELECT COALESCE(SUM(cost),0) AS used FROM commands WHERE created_at>=? AND status IN ('PENDING','RUNNING','COMPLETED') AND lane!='EMERGENCY'`,
   ).get(since) as { used: number };
-  return { used: Number(r.used), limit: BUDGET_LIMIT, window_ms: BUDGET_WINDOW_MS, reset_hint: since };
+  return { used: Number(r.used), limit: budgetLimit(), window_ms: BUDGET_WINDOW_MS, reset_hint: since };
 }
 
 export type EnqueueResult =
@@ -264,12 +301,12 @@ export function enqueueCommand(input: {
     if (dup) return { ok: true, command: dup, deduped: true };
   }
 
-  const cost = input.cost ?? laneSpec.cost;
+  const cost = input.cost ?? COST_OF[action] ?? laneSpec.cost;
   if (lane !== "EMERGENCY") {
     const b = budgetWindow();
-    if (b.used + cost > BUDGET_LIMIT) {
+    if (b.used + cost > b.limit) {
       insertCommand({ action, lane, status: "REJECTED", payload: input.payload ?? null, idempotency_key: input.idempotency_key ?? null, cost, error: "budget_exceeded" });
-      return { ok: false, error: `budget_exceeded (used ${b.used}/${BUDGET_LIMIT} per ${BUDGET_WINDOW_MS / 1000}s)` };
+      return { ok: false, error: `budget_exceeded (used ${b.used}/${b.limit} per ${BUDGET_WINDOW_MS / 1000}s)` };
     }
   }
   const runAfter = input.run_after ?? null;
@@ -304,6 +341,7 @@ function insertCommand(c: {
 }
 
 function inferLane(action: string): Lane {
+  if (LANE_OF[action]) return LANE_OF[action]; // явные переопределения реестра v0.5.0
   if (action.endsWith("_RESET") || action.startsWith("FLUSH") || action.endsWith("_FLUSH") || action.startsWith("FENCE")) return "EMERGENCY";
   if (action.endsWith("_CANCEL") || action.endsWith("_RETIRE") || action.endsWith("_PAUSE") || action.endsWith("_RESUME")) return "CONTROL";
   if (action.endsWith("_ENQUEUE") || action.endsWith("_SPAWN") || action.endsWith("_RETRY") || action.endsWith("_CREATE") || action.endsWith("_UPDATE") || action.endsWith("_DELETE")) return "MUTATION";
@@ -362,7 +400,9 @@ export function reapStaleWorkers(): number {
 // ── снапшот для консоли/WS ────────────────────────────────────────
 export function snapshot() {
   const agents = listAgents();
-  const tasks = listTasks();
+  const allTasks = listTasks({ includeArchived: true });
+  const tasks = allTasks.filter((t) => t.status !== "ARCHIVED");
+  const archived = allTasks.filter((t) => t.status === "ARCHIVED");
   const workers = listWorkers();
   const commands = listCommands(50);
   return {
@@ -370,6 +410,7 @@ export function snapshot() {
     ts: nowIso(),
     agents,
     tasks,
+    archived,
     workers,
     commands,
     events: tailEvents(Math.max(0, lastSeq() - 60), 60),

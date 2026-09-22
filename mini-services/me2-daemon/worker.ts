@@ -13,6 +13,7 @@ import {
 import { chat } from "./providers";
 
 const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
+export { WORKSPACE_ROOT };
 const MAX_TOOL_OUTPUT = 4000;
 const SHELL_TIMEOUT_MS = 30_000;
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
