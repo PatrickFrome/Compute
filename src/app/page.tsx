@@ -32,7 +32,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Activity, AlertTriangle, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
+  Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, Pause, Play, Plus, Radar, RefreshCw,
   RotateCcw, Rocket, Search, Terminal, Trash2, X, Zap,
 } from "lucide-react";
@@ -311,6 +311,10 @@ export default function MissionControl() {
   const [branchTab, setBranchTab] = useState<BranchTabKey>("ALL");
   const [branchesOpen, setBranchesOpen] = useState(true);
 
+  // ветки браузера (agent-browser через шину, v0.6.0)
+  const [browserTabs, setBrowserTabs] = useState<{ id: string; title: string; url: string; active: boolean }[]>([]);
+  const [browserBusy, setBrowserBusy] = useState(false);
+
   // EVENTS_SEARCH (диалог из ⌘K)
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("TASK");
@@ -334,6 +338,7 @@ export default function MissionControl() {
   const logRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const detailIdRef = useRef<string | null>(null);
+  const browserRefreshRef = useRef<() => void>(() => {});
   const budgetFlushRef = useRef<() => void>(() => {});
   const exportEventsRef = useRef<() => void>(() => {});
 
@@ -365,6 +370,7 @@ export default function MissionControl() {
         if (e.task_id && e.task_id === detailIdRef.current) {
           setStream((prev) => (prev.some((x) => x.seq === e.seq) ? prev : [...prev, e]));
         }
+        if (e.type === "BROWSER_TAB_OPENED" || e.type === "BROWSER_TAB_CLOSED") browserRefreshRef.current();
       });
       hb = setInterval(() => {
         s?.emit("heartbeat", { role: "console", state: "IDLE" }, () => { /* ack */ });
@@ -467,6 +473,23 @@ export default function MissionControl() {
     if (out && typeof out === "object" && (out as { truncated?: boolean }).truncated) out = null;
     return out;
   }, [socket, toast]);
+
+  // ветки браузера: загрузка списка вкладок через шину (BROWSER_TABS, v0.6.0)
+  const loadBrowserTabs = useCallback(async () => {
+    setBrowserBusy(true);
+    const r = await sendCommand("BROWSER_TABS", {}, { quiet: true });
+    const d = r as { tabs?: { id: string; title: string; url: string; active: boolean }[] } | null;
+    if (d?.tabs) setBrowserTabs(d.tabs);
+    setBrowserBusy(false);
+  }, [sendCommand]);
+
+  // подписка реф-хуков для WS-событий + авто-загрузка при раскрытии панели ВЕТКИ
+  useEffect(() => {
+    browserRefreshRef.current = loadBrowserTabs;
+  }, [loadBrowserTabs]);
+  useEffect(() => {
+    if (branchesOpen) loadBrowserTabs();
+  }, [branchesOpen, loadBrowserTabs]);
 
   const spawnAgent = useCallback(async (role: string) => {
     await sendCommand("AGENT_SPAWN", { role, model: "zai:default" }, { successMsg: `агент ${role} создан` });
@@ -892,6 +915,39 @@ export default function MissionControl() {
                       </button>
                     );
                   })}
+                </div>
+                {/* ветки браузера: живые вкладки agent-browser (v0.6.0) */}
+                <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-800/60 bg-black/20 px-3 py-1.5" aria-label="Ветки браузера">
+                  <span className="flex shrink-0 items-center gap-1 pr-1 text-[9px] font-semibold tracking-widest text-zinc-500">
+                    <AppWindow className="h-3 w-3 text-sky-400" aria-hidden /> БРАУЗЕР
+                  </span>
+                  {browserTabs.length === 0 && !browserBusy && (
+                    <button type="button" onClick={loadBrowserTabs} className="shrink-0 text-[10px] text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline">
+                      показать вкладки
+                    </button>
+                  )}
+                  {browserTabs.map((t) => (
+                    <span
+                      key={t.id}
+                      title={`${t.title}\n${t.url}`}
+                      className={`flex max-w-44 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 py-1 text-[10px] transition ${
+                        t.active
+                          ? "border-zinc-600 bg-zinc-800 text-zinc-100"
+                          : "border-zinc-800 bg-zinc-900/60 text-zinc-400"
+                      }`}
+                    >
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
+                      <span className="truncate">{t.title.slice(0, 26) || t.url}</span>
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={loadBrowserTabs}
+                    aria-label="Обновить вкладки браузера"
+                    className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${browserBusy ? "animate-spin" : ""}`} aria-hidden />
+                  </button>
                 </div>
                 <div className="mc-scroll max-h-36 grow basis-auto overflow-y-auto px-2 py-1 lg:max-h-40">
                   {branchTasks.length === 0 ? (

@@ -6,15 +6,42 @@
 import {
   db, emit, nowIso, snapshot, createTask, cancelTask, createAgent, deleteAgent,
   tailEvents, eventsByTask, upsertWorker, listAgents, getTask, updateTask,
-  setAgentPaused, getAgent, listWorkers, listCommands, enqueueCommand,
+  setAgentPaused, getAgent, listWorkers, listCommands, enqueueCommand, reapStaleWorkers,
   searchEvents, setAgentModel, setMeta, budgetLimit,
   LANES, LANE_OF, COST_OF, type CommandRow, type TaskRow, type Lane,
 } from "./store";
 import { WORKSPACE_ROOT } from "./worker";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
+
+// ── agent-browser CLI (ветки браузера как часть шины, v0.6.0) ──────────
+const AB_BIN = "/usr/local/bin/agent-browser";
+async function ab(args: string[], timeoutMs = 20_000): Promise<{ code: number; out: string }> {
+  const proc = Bun.spawn([AB_BIN, ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const timer = setTimeout(() => { try { proc.kill(); } catch { /* уже умер */ } }, timeoutMs);
+  const [out, err] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  const code = await proc.exited;
+  clearTimeout(timer);
+  return { code, out: `${out}\n${err}`.trim() };
+}
+type BrowserTab = { id: string; title: string; url: string; active: boolean };
+function parseTabs(out: string): BrowserTab[] {
+  const tabs: BrowserTab[] = [];
+  for (const line of out.split("\n")) {
+    // формат: «→ [t1] Title - url» (→ = активная)
+    const m = line.match(/^\s*(→)?\s*\[(t\d+)\]\s+(.+?)\s+-\s+(\S+)\s*$/);
+    if (m) tabs.push({ id: m[2], title: m[3].trim(), url: m[4], active: Boolean(m[1]) });
+  }
+  return tabs;
+}
+async function browserTabs(): Promise<BrowserTab[]> {
+  const r = await ab(["tab", "list"]);
+  return parseTabs(r.out);
+}
 
 const handlers: Record<string, Handler> = {
   PING: () => ({ pong: true, ts: nowIso() }),
@@ -221,6 +248,87 @@ const handlers: Record<string, Handler> = {
     return { from: prev, to: lim };
   },
 
+  // ── v0.6.0: группа «Браузер» (agent-browser CLI) + обслуживание ──
+
+  BROWSER_TABS: async () => {
+    const tabs = await browserTabs();
+    emit("BROWSER_TABS_LISTED", { count: tabs.length }, null, null);
+    return { count: tabs.length, tabs };
+  },
+
+  BROWSER_OPEN: async (p) => {
+    const url = String(p.url ?? "").trim();
+    if (!/^https?:\/\//.test(url)) throw new Error("url_required_http_s");
+    await ab(["tab", "new", url]);
+    const tabs = await browserTabs();
+    const opened = tabs.find((t) => t.url.includes(url.replace(/^https?:\/\//, "").slice(0, 24))) ?? tabs.find((t) => t.active) ?? null;
+    emit("BROWSER_TAB_OPENED", { url, tab: opened?.id ?? null, count: tabs.length }, null, null);
+    return { opened: true, url, tab: opened, tabs };
+  },
+
+  BROWSER_SNAPSHOT: async (p) => {
+    const tab = p.tab ? String(p.tab) : null;
+    if (tab) await ab(["tab", tab]);
+    const r = await ab(["snapshot"]);
+    if (r.code !== 0 && !r.out) throw new Error(`agent_browser_failed_code_${r.code}`);
+    const text = r.out.slice(0, 8000);
+    emit("BROWSER_SNAPSHOT_TAKEN", { tab, chars: text.length }, null, null);
+    return { tab: tab ?? "active", truncated: r.out.length > 8000, chars: text.length, snapshot: text };
+  },
+
+  BROWSER_SCREENSHOT: async (p) => {
+    const rel = String(p.path ?? `br-${Date.now()}.png`).replace(/\.\.\/|^[/.]+/g, "");
+    const dir = "/home/z/my-project/download";
+    const full = `${dir}/${rel}`;
+    const r = await ab(["screenshot", full]);
+    let bytes = 0;
+    try { bytes = statSync(full).size; } catch { /* файл не появился — ниже ошибка */ }
+    if (r.code !== 0 || bytes === 0) throw new Error(`screenshot_failed_code_${r.code}`);
+    emit("BROWSER_SCREENSHOT_TAKEN", { path: rel, bytes }, null, null);
+    return { path: `download/${rel}`, bytes };
+  },
+
+  BROWSER_CLOSE: async (p) => {
+    const tab = String(p.tab ?? "").trim();
+    if (!tab) throw new Error("tab_required (id | номер | all)");
+    if (tab === "all") await ab(["close", "--all"]);
+    else await ab(["tab", "close", tab]);
+    const tabs = await browserTabs();
+    emit("BROWSER_TAB_CLOSED", { tab, remaining: tabs.length }, null, null);
+    return { closed: tab, remaining: tabs.length, tabs };
+  },
+
+  WORKER_REAP: () => {
+    const reaped = reapStaleWorkers();
+    emit("WORKERS_REAPPED", { reaped, by: "operator" }, null, null);
+    return { reaped };
+  },
+
+  DB_STATS: () => {
+    const cnt = (t: string) => (db.query(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c;
+    const pc = db.query("PRAGMA page_count").get() as { page_count?: number } | undefined;
+    const ps = db.query("PRAGMA page_size").get() as { page_size?: number } | undefined;
+    const jm = db.query("PRAGMA journal_mode").get() as { journal_mode?: string } | undefined;
+    const stats = {
+      agents: cnt("agents"), tasks: cnt("tasks"), events: cnt("events"),
+      commands: cnt("commands"), workers: cnt("workers"), meta: cnt("meta"),
+      db_bytes: Number(pc?.page_count ?? 0) * Number(ps?.page_size ?? 0),
+      journal_mode: jm?.journal_mode ?? "?",
+    };
+    emit("DB_STATS_TAKEN", { tasks: stats.tasks, events: stats.events, db_bytes: stats.db_bytes }, null, null);
+    return stats;
+  },
+
+  TASK_PURGE: (p) => {
+    const allTerminal = Boolean(p.all_terminal);
+    const statuses = allTerminal ? ["COMPLETED", "FAILED", "CANCELLED", "ARCHIVED"] : ["ARCHIVED"];
+    const ph = statuses.map(() => "?").join(",");
+    const r = db.query(`DELETE FROM tasks WHERE status IN (${ph})`).run(...statuses);
+    const purged = Number(r.changes);
+    emit("TASKS_PURGED", { purged, all_terminal: allTerminal, by: "operator" }, null, null);
+    return { purged, all_terminal: allTerminal };
+  },
+
   EVENTS_TAIL: (p) => ({
     events: tailEvents(Number(p.since ?? 0), Math.min(Number(p.limit ?? 100), 500)),
   }),
@@ -284,6 +392,14 @@ const DESC: Record<string, string> = {
   WORKSPACE_SNAPSHOT: "манифест workspace (файлы/байты)",
   EVENTS_SEARCH: "поиск по событиям (type+data)",
   BUDGET_ADJUST: "лимит бюджета шины (6..96/60s)",
+  BROWSER_TABS: "ветки браузера: список вкладок",
+  BROWSER_OPEN: "открыть URL новой вкладкой",
+  BROWSER_SNAPSHOT: "a11y-снимок активной вкладки",
+  BROWSER_SCREENSHOT: "скриншот активной вкладки в download/",
+  BROWSER_CLOSE: "закрыть вкладку (id | all)",
+  WORKER_REAP: "принудительный reap протухших workers",
+  DB_STATS: "статистика SQLite (таблицы/байты)",
+  TASK_PURGE: "удалить ARCHIVED (или все терминальные) задачи",
 };
 const GROUP_OF: Record<string, string> = {
   PING: "Диагностика", STATE_SNAPSHOT: "Диагностика", EVENTS_EXPORT: "Диагностика",
@@ -292,7 +408,9 @@ const GROUP_OF: Record<string, string> = {
   TASK_CANCEL: "Задачи", TASK_RETRY: "Задачи", TASK_LIST: "Задачи", TASK_ARCHIVE: "Задачи",
   AGENT_RETIRE: "Флот", AGENT_PAUSE: "Флот", AGENT_RESUME: "Флот", FLEET_RECONCILE: "Флот", AGENT_MODEL: "Флот",
   COMMAND_CANCEL: "Шина", BUDGET_ADJUST: "Шина",
-  BUDGET_FLUSH: "Опасная зона", ENVIRONMENT_RESET: "Опасная зона",
+  BROWSER_TABS: "Браузер", BROWSER_OPEN: "Браузер", BROWSER_SNAPSHOT: "Браузер", BROWSER_SCREENSHOT: "Браузер", BROWSER_CLOSE: "Браузер",
+  WORKER_REAP: "Диагностика", DB_STATS: "Диагностика",
+  BUDGET_FLUSH: "Опасная зона", ENVIRONMENT_RESET: "Опасная зона", TASK_PURGE: "Опасная зона",
 };
 export function actionCatalog(): ActionMeta[] {
   const built = knownActions().map((a) => {

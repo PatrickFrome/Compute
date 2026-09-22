@@ -140,6 +140,15 @@ export const LANE_OF: Record<string, Lane> = {
   WORKSPACE_SNAPSHOT: "READ_ONLY",
   EVENTS_SEARCH: "READ_ONLY",
   BUDGET_ADJUST: "CONTROL",
+  // v0.6.0: браузерная группа + обслуживание
+  BROWSER_TABS: "READ_ONLY",
+  BROWSER_OPEN: "MUTATION",
+  BROWSER_SNAPSHOT: "READ_ONLY",
+  BROWSER_SCREENSHOT: "READ_ONLY",
+  BROWSER_CLOSE: "CONTROL",
+  WORKER_REAP: "CONTROL",
+  DB_STATS: "READ_ONLY",
+  TASK_PURGE: "EMERGENCY",
 };
 /** Индивидуальные cost для действий, чей тариф отличается от дефолта полосы (spec R4). */
 export const COST_OF: Record<string, number> = {
@@ -147,6 +156,11 @@ export const COST_OF: Record<string, number> = {
   EVENTS_SEARCH: 1,
   TASK_ARCHIVE: 1,
   AGENT_MODEL: 1,
+  BROWSER_OPEN: 1,
+  BROWSER_SNAPSHOT: 1,
+  BROWSER_SCREENSHOT: 1,
+  BROWSER_CLOSE: 1,
+  WORKER_REAP: 1,
 };
 
 /** Лимит бюджета шины — оператор настраивает через BUDGET_ADJUST (meta: budget_limit, clamp 6..96). */
