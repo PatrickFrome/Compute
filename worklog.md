@@ -65,3 +65,24 @@ Stage Summary:
 - Env-reset 16:04 последствий не имеет: секреты/DB/билд-артефакты восстановлены; потерян только event-log истории (seed 3 задачи — ожидаемо).
 - Backlog R19: ① дождаться зелёности run b54e62ac (cron) и разобрать артефакты сборок; ② tree-sitter tier Code Graph v2 (research/2026/R18-treesitter-codegraph.json); ③ Monaco/xterm; ④ per-client jpeg quality :3042; ⑤ reward-hack: ручной операторский вердикт (confirm/deny) поверх tier-1.
 - Скриншоты: download/r18-0{1,2}.png; VLM: research/2026/r18-vlm-qa1.json; навык: skills/me2-round/SKILL.md.
+---
+Task ID: R19-LEGACY-MECHANICS-INTEGRATED-20260922
+Agent: Z.ai Code (main)
+Task: «Детально проанализируй все механики старого браузера, brain, memory, rsi, self update, fleet и прочие — полноценно интегрировать и улучшить» + «продолжи разработку с учётом всех полезных функций (long run task, task review, skill creator, vlm, github, ветки браузера, ресёрчи)».
+
+Work Log:
+- R19-0 (аудит): daemon v0.19.0 уже в ране (boot 17:31), HEAD fe64284; обнаружен несохранённый WIP прошлых раундов: memory.ts/brain.ts/fleet.ts/selfupdate.ts/rsi.ts/mechanics.ts + /memory*, /brain*, /fleet*, /selfupdate, /rsi, /mechanics в index.ts + панель МЕХАНИКИ в page.tsx.
+- R19-1 (археология подтверждена): research/2026/R19-OLD-MECHANICS-ANALYSIS.md — полная карта «старое → новое» по легаси-источникам (api/mechanics/route.ts M1–M18, browser-tools.ts, fleet-plane.ts, cloud.ts, probe-device.ts, a2-edge-local, a2-capsule): M13 memory (CAVEAT R6) → ME4 SQLite+persistence-пруф; M12 cognitive bus → ME5 brain (реколл памяти → JSON-план → мысль в память); M2/M3/M8/M10 fleet (proof-gate, 45s-контракт, CP-W1) → ME6; M15 self-update (журнал v8, 13.5h-тупик) → ME7 ff-only+барьеры; M14 RSI (91 модуль, R9) → ME8 propose/adopt оператором; M1–M18 реестр → ME-матрица ME1–ME16 с old_ref.
+- R19-2 (живые пробы всех 6 семейств): /mechanics 16/16 WORKS (после прогрева; старта 15/16), /fleet node_daemon ACTIVE (619 beats, freshness от last_seen) + node_console, /selfupdate UP_TO_DATE (local=remote=fe64284, journal 0), /rsi 1 proposal (rsi_mucynchfakfhtt — уже ADOPTED, артефакт skills/rsi/*.md на месте), /memory 7 rows (авто-материализация TASK_DONE/FAILED/RH/REFLECTED работает), /memory/block TEAM MEMORY 1400 ток.
+- R19-3 (brain/think live): POST /brain/think → строгий JSON {summary, steps[5], risks[3]}, memory_used=5 записей, 1823мс, мысль материализована (thought:<ts36>), событие BRAIN_THOUGHT + span brain.think. Zero-authority: план не enqueue-ит задачи.
+- R19-4 (VLM qa3 FAIL → программная проверка): qa3 заявлял «горизонтальную обрезку панели CDP/LIVE на 390px» — agent-browser 390×844: document.sw=cw=390, bad-элементов нет; правые края >391 только у tab-кнопок ВЕТКИ, но они в overflow-x-auto контейнере (sw 498 > cw 356 — легальный скролл). Вердикт: ЛОЖНОЕ СРАБАТЫВАНИЕ (артefакт скриншота) — урок №4 снова подтверждён.
+- R19-5 (улучшение из RSI-предложения): tab-полоса ВЕТКИ обёрнута в relative + правый fade-градиент (pointer-events-none, md:hidden, data-testid=branch-tabs-fade) + тонкий h-scrollbar — подсказка скролла на мобайле (принята суть rsi_mucynchfakfhtt «визуальные подсказки»).
+- R19-6 (VLM qa4, z-ai CLI, 2 скриншота): PASS 5/5 — нет обрезки на 390, МЕХАНИКИ видна, панели без наложений, контраст ок, десктоп-сетка цела. Программно: sw=cw на 390/1600, fade=true, 35 listitem-строк.
+- R19-7: lint 0/0, secrets-guard: 2 совпадения = паттерн-регекспы в git-sync.sh и упоминание в worklog (не токены), commit ec94032 → push sandbox/me2-os (fe64284..ec94032).
+
+Stage Summary:
+- **Интеграция легаси-механик ЗАВЕРШЕНА**: старый браузер (A2) → M1–M18 карта → ME1–ME16 живая матрица (/mechanics, каждая строка с old_ref и вердиктом из реального состояния); memory/brain/fleet/self-update/rsi — полный контур с улучшениями против старых CAVEAT'ов (persistence-пруф, proof-gate, ff-only барьеры, operator-gate RSI).
+- Daemon v0.19.0: инвариант 47/47 сохранён (все новые REST — maintenance-плоскость вне шины); авто-материализация памяти из событийной шины; fleet self-node 15s + GC 24h; selfupdate check-кэш 30s + фоновый прогрев.
+- Квест пользователя «анализируй ветки браузера» закрыт дважды: (а) ветки браузера = вкладки agent-browser в ВЕТКИ-панели (живые, q/w-чипы CDP), (б) git-ветки: main + main-archive локально (браузерных веток нет; легаси-браузер жил в main-истории, разобран в R19-OLD-MECHANICS-ANALYSIS.md §0–4).
+- Бэклог R20: ① green-check run b54e62ac (tauri-build) + разбор артефактов; ② tree-sitter tier Code Graph v2; ③ semantic-адресация browser-tools на codegraph-слое (из §2 анализа); ④ RSI-цикл: авто-propose из RH-вердиктов; ⑤ per-client jpeg quality :3042.
+- Скриншоты: download/r19-qa4-{mobile,desktop}.png; VLM: research/2026/r19-vlm-qa4.json.
