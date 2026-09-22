@@ -69,6 +69,14 @@ type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id
 type SenseTargetT = { ref: string; role: string; name: string };
 type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
 type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
+type ObsvNetT = { t: number; method: string; url: string; status: number | null; mime: string; type: string; ms: number | null; failed?: string };
+type ObsvConT = { t: number; level: string; text: string };
+type ObsvExcT = { t: number; text: string; url: string };
+type ObsvData = {
+  ok: boolean;
+  status: { wanted: boolean; attached: boolean; target: string | null; buffers: { net: number; con: number; exc: number }; totals: { net: number; con: number; exc: number }; last_event_age_s: number | null };
+  network: ObsvNetT[]; console: ObsvConT[]; exceptions: ObsvExcT[];
+};
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1154,6 +1162,9 @@ export default function MissionControl() {
   const [rsi, setRsi] = useState<RsiData | null>(null);
   const [sense, setSense] = useState<SenseData | null>(null);
   const [senseBusy, setSenseBusy] = useState(false);
+  const [obsv, setObsv] = useState<ObsvData | null>(null);
+  const [obsvBusy, setObsvBusy] = useState(false);
+  const [obsvOpen, setObsvOpen] = useState(false);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
   const [memQ, setMemQ] = useState("");
@@ -1206,6 +1217,23 @@ export default function MissionControl() {
     finally { setSenseBusy(false); void loadSense(true); }
   }, [loadSense, toast]);
 
+  // R21: OBSV — network/console/exceptions сенсоры вкладки (S2, Chrome DevTools MCP parity)
+  const loadObsv = useCallback(async () => {
+    setObsvBusy(true);
+    try {
+      const r = await fetch("/browser/obsv?XTransformPort=3041&limit=14", { cache: "no-store" }).then((x) => x.json());
+      if (r?.ok) setObsv(r as ObsvData);
+    } catch { /* daemon недоступен */ } finally { setObsvBusy(false); }
+  }, []);
+  const obsvOp = useCallback(async (op: string) => {
+    setObsvBusy(true);
+    try {
+      await fetch("/browser/obsv?XTransformPort=3041", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op }) }).then((x) => x.json());
+      toast({ title: `obsv: ${op} ✓` });
+    } catch { toast({ title: "obsv ✗ daemon недоступен", variant: "destructive" }); }
+    finally { setObsvBusy(false); void loadObsv(); }
+  }, [loadObsv, toast]);
+
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
     try {
@@ -1227,11 +1255,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2013,7 +2041,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2337,6 +2365,41 @@ export default function MissionControl() {
                     </div>
                   ) : (
                     <p className="mt-1 text-[9px] text-zinc-600">перцепции нет — «снять» сделает aria-snapshot активной вкладки в семантические цели</p>
+                  )}
+                </div>
+                {/* R21: OBSV — network/console/exceptions сенсоры вкладки (S2, ME18, Chrome DevTools MCP parity) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Сенсоры сети и консоли вкладки">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME18: CDP-сенсоры Network+Runtime вкладки; кольцевые буферы событий в daemon">
+                      <Radar className={`h-3 w-3 ${obsv?.status.attached ? "text-amber-300" : "text-zinc-600"}`} aria-hidden /> OBSV
+                    </span>
+                    <span data-testid="obsv-chips" className="flex shrink-0 items-center gap-1 font-mono text-[9px]" title={`captured всего: ${obsv?.status.totals ? obsv.status.totals.net + obsv.status.totals.con + obsv.status.totals.exc : 0}`}>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400">net {obsv?.status.buffers.net ?? 0}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-amber-300/90">con {obsv?.status.buffers.con ?? 0}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-rose-300/90">exc {obsv?.status.buffers.exc ?? 0}</span>
+                    </span>
+                    <button type="button" onClick={() => { setObsvOpen((v) => !v); if (!obsvOpen) void loadObsv(); }} aria-expanded={obsvOpen} aria-label="Показать последние события вкладки" disabled={obsvBusy} className="ml-auto shrink-0 rounded border border-zinc-700/60 px-1.5 py-0.5 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">события</button>
+                    <button type="button" onClick={() => { void obsvOp("reset"); }} aria-label="Очистить кольцевые буферы сенсоров" disabled={obsvBusy} className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800 disabled:opacity-40">сброс</button>
+                  </div>
+                  {obsvOpen && (
+                    <ul className="mt-1.5 max-h-40 space-y-0.5 overflow-y-auto pr-1 font-mono text-[9px] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" aria-label="Последние события сети и консоли">
+                      {(() => {
+                        const items: { t: number; kind: string; level: string; text: string }[] = [
+                          ...(obsv?.exceptions ?? []).map((e) => ({ t: e.t, kind: "exc", level: "error", text: e.text })),
+                          ...(obsv?.console ?? []).map((c) => ({ t: c.t, kind: "con", level: c.level, text: c.text })),
+                          ...(obsv?.network ?? []).filter((n) => n.failed || (n.status ?? 0) >= 400).map((n) => ({ t: n.t, kind: "net", level: "error", text: `${n.method} ${n.url} ${n.failed ? `· ${n.failed}` : `· ${n.status}`}` })),
+                          ...(obsv?.network ?? []).filter((n) => !n.failed && n.status !== null && (n.status ?? 0) < 400).slice(0, 8).map((n) => ({ t: n.t, kind: "net", level: "ok", text: `${n.status} ${n.method} ${n.url}${n.ms != null ? ` · ${n.ms}ms` : ""}` })),
+                        ].sort((a, b) => b.t - a.t).slice(0, 14);
+                        if (!items.length) return <li className="text-zinc-600">событий нет — подожди трафик вкладки или нажми «сброс» и подожди</li>;
+                        return items.map((e, i) => (
+                          <li key={`${e.kind}-${e.t}-${i}`} className="flex items-start gap-1.5">
+                            <span className="shrink-0 text-zinc-600">{new Date(e.t).toLocaleTimeString("ru-RU", { hour12: false })}</span>
+                            <span className={`shrink-0 uppercase ${e.level === "error" ? "text-rose-300" : e.level === "warning" ? "text-amber-300" : "text-zinc-500"}`}>{e.kind}</span>
+                            <span className="min-w-0 break-all text-zinc-400" title={e.text}>{e.text}</span>
+                          </li>
+                        ));
+                      })()}
+                    </ul>
                   )}
                 </div>
                 {castOn && (

@@ -18,6 +18,7 @@ import { sandboxCaps } from "./sandbox";
 import { roadmapVerdict } from "./roadmap";
 import { brainThoughts } from "./brain";
 import { senseStatus } from "./sense";
+import { obsvStatus } from "./obsv";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -127,6 +128,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME17", name: "Semantic browser perception (CAPTURE→act→verify)", old_ref: "browser-tools.ts semantic_targets[]",
       verdict: senseStatus().tabs > 0 ? "WORKS" : "CAVEAT",
       evidence: `sense: tabs=${senseStatus().tabs}, targets=${senseStatus().total_targets}, last_age=${senseStatus().last_age_s ?? "—"}s; act+auto-verify по ref/имени`,
+    },
+    {
+      id: "ME18", name: "CDP network/console sensors (Chrome DevTools MCP parity)", old_ref: "—",
+      verdict: obsvStatus().attached && obsvStatus().captured > 0 ? "WORKS" : "CAVEAT",
+      evidence: `obsv: attached=${obsvStatus().attached}, captured net+con+exc=${obsvStatus().captured}, buffers=${JSON.stringify(obsvStatus().buffers)}; GET /browser/obsv`,
     },
   ];
 

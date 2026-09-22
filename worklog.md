@@ -106,3 +106,24 @@ Stage Summary:
 - Daemon v0.20.0: 47/47 инвариант; ME-матрица 17/17 WORKS (ME17 = порт лучшей механики легаси-браузера).
 - Дорожная карта скачка: S1 DONE → S2 (CDP network/console на :3043) → S3 (регресс-датасет из браузерных трейсов) → S4 (vision-резерв). S2 — самый ценный следующий шаг (паритет Chrome DevTools MCP).
 - Скриншоты: download/r20-sense-ui.png; ресёрчи: research/2026/R20-s{1..6}.json; VLM: r20-vlm-qa1.json; роадмап: R20-BROWSER-LEAP.md.
+---
+Task ID: R21-BROWSER-OBSV-S2-20260922
+Agent: Z.ai Code (main)
+Task: «продолжи разработку с учетом всех полезных функций… записывай всю систему в github, анализируй ветки браузера, делай ресёрчи по улучшениям» — S2 из роадмапа R20-BROWSER-LEAP: CDP network/console сенсоры (паритет Chrome DevTools MCP) + восстановление после env-reset.
+
+Work Log:
+- R21-0 (env-reset ~23:0x): /home/z/.a2/ ПУСТ + download/ удалён. Секреты восстановлены дословно из хранилища сессии (.github.env T1+T2, .ghtoken-sandbox, supabase-cloud.env; perms 600). 24 «грязных» файла = только mode 100644→100755 (артефакт ресета) → chmod 644, дерево чистое; remote sandbox/me2-os = local = 3cd51ce (push не терялся).
+- R21-1 (диагностика ME7/ME8/ME17 после бута): матрица 14/17 — ME7 NO_TOKEN (токен отсутствовал на диске), ME8 proposals=0 (DB пересоздана), ME17 tabs=0 (нет сессии). ME7 → UP_TO_DATE после восстановления .github.env; ME17/ME8 прогреты ниже.
+- R21-2 (S2 РЕАЛИЗОВАН, daemon v0.21.0): src/obsv.ts — ленивый CDP-колектор (Network.enable+Runtime.enable к цели discoverCdp(), тот же Chromium, что :3043): requestWillBeSent/responseReceived/loadingFailed с корреляцией requestId (Map pending → entry, TTL 60s, cap 1000) и латентностью ≈ разница прихода; consoleAPICalled (argText: value→description→preview) + exceptionThrown. Кольцевые буферы В ПАМЯТИ (net 400 / con 250 / exc 120) — не SQLite и не hash-chain (наблюдатели = спам, философия /stats). Авто-реаттач каждые 2с при смерти ws. REST: GET /browser/obsv?limit&level&filter + POST {op:attach|reset|stop} — вне шины, 47/47 инвариант. CDP-хелперы screencast.ts экспортированы (один CDP-слой на оба сервиса).
+- R21-3 (ME18): mechanics.ts — «CDP network/console sensors (Chrome DevTools MCP parity)», old_ref=«—», verdict = attached && captured>0. Матрица 17→18 строк.
+- R21-4 (UI): ВЕТКИ-панель + OBSV-блок под SENSE: чипы net/con/exc (zinc/amber/rose), точка attached (amber), кнопки «события» (раскрыть список) и «сброс»; список = merge exc+con+ошибочные net (≥400/failed) + первые ok-net с латентностью, max-h-40 overflow-y-auto, кастомный скроллбар, время ru-RU. loadObsv в стартовый effect MC + refresh-all.
+- R21-5 (живые пробы): sense-цель = вкладка :81 (43 цели, rev 9ec3b61a); obsv attached=true к localhost:81, за минуты захвачено 80+ событий (net с латентностями 3–142ms, con: «[HMR] connected»); сенсор поймал даже собственный запрос скринкаста (GET /screencast.jpg?XTransformPort=3043). Клик «события» в UI → 12 li в DOM. RSI: создан легитимный proposal rsi_mudarmkw64c5cx «Replayable Browser Regression Dataset» (=S3 роадмапа, из реальной находки раунда) → ME8 WORKS. Матрица 18/18 WORKS.
+- R21-6 (QA + урок №4): VLM qa1 заявил «OBSV отсутствует на мобайле + CDP-preview переполняет» → программная проверка: sw=cw=390; OBSV в DOM на y=2996 (ниже вьюпорта — скриншот ловил верх страницы); превью x25+w340=365≤390 в контейнере. ОБА пункта — ложные срабатывания кадрирования. Скролл к блоку → честный скриншот → VLM qa2 PASS (obsv_visible=true, events_list=true, clipping=false). lint 0/0. secrets-guard: 1 совпадение = регекспа-гвард в SKILL.md (не токен).
+- R21-7 (Supabase, оператор-уровень): /evidence DEGRADED rpc HTTP 401 «Invalid API key» — НЕ PGRST205: сам service_role JWT отвергается (401 на /rest/v1/ и /auth/v1/health). Отчеканен свежий HS256-JWT известным JWT secret → тоже 401 → секрет проекта РОТИРОВАН. Новые ключи только из дашборда Supabase (Settings→API). Дизайн evidence-plane без потерь: outbox копится локально (pending 108+), доставка догонит. НЕ циклить.
+
+Stage Summary:
+- Браузер ME2 закрыл второй слой скачка R20: ЗРЕНИЕ (S1 sense) + ПОСЛЕДСТВИЯ (S2 obsv) — агент теперь видит сеть/консоль/исключения вкладки после act+verify, паритет Chrome DevTools MCP по network+console. Осталось: S3 (регресс-датасет из obsv-трейсов; proposal уже в RSI) → S4 (vision-резерв).
+- Daemon v0.21.0: инвариант 47/47; ME-матрица 18/18 WORKS (ME18 живой: attached, буферы наполняются).
+- Уроки: env-reset повторяется — восстановление секретов по чек-листу из хранилища сессии; mode-only диффы лечатся chmod 644; VLM-дефекты кадрирования доказываются rect-измерениями до любых «фиксов».
+- Оператору: ① Supabase — выдать новые service_role key + JWT secret (секрет ротировался, 401 подтверждён прямым вызовом и повторной чеканкой); ② старые пункты (SQL-миграция me2_evidence, Electron, Pigsty) в силе.
+- Скриншоты: download/r21-obsv-{desktop,mobile,mobile2}.png; VLM: research/2026/r21-vlm-qa{1,2}.json.

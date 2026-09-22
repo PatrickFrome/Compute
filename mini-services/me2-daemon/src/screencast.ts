@@ -27,7 +27,7 @@ const CORS = {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-type CdpInfo = { port: number; targetId: string; targetUrl: string };
+export type CdpInfo = { port: number; targetId: string; targetUrl: string };
 let cdpCache: { info: CdpInfo | null; at: number } = { info: null, at: 0 };
 let framesTotal = 0;
 let activeStreams = 0;
@@ -59,7 +59,7 @@ function probeTarget(info: CdpInfo): Promise<boolean> {
     } catch { clearTimeout(t); done(false); }
   });
 }
-async function discoverCdp(force = false): Promise<CdpInfo | null> {
+export async function discoverCdp(force = false): Promise<CdpInfo | null> {
   const now = Date.now();
   if (!force && cdpCache.info && now - cdpCache.at < CDP_TTL_MS) return cdpCache.info;
   cdpCache.at = now;
@@ -100,7 +100,7 @@ async function discoverCdp(force = false): Promise<CdpInfo | null> {
 
 // ── мини-CDP-клиент ────────────────────────────────────────────────
 let wsSeq = 0;
-function wsOpen(url: string, timeoutMs = 4000): Promise<WebSocket> {
+export function wsOpen(url: string, timeoutMs = 4000): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
     const t = setTimeout(() => { try { ws.close(); } catch {} reject(new Error("ws open timeout")); }, timeoutMs);
@@ -108,7 +108,7 @@ function wsOpen(url: string, timeoutMs = 4000): Promise<WebSocket> {
     ws.addEventListener("error", () => { clearTimeout(t); reject(new Error("ws open error")); }, { once: true });
   });
 }
-function cdpCall(ws: WebSocket, method: string, params?: object, timeoutMs = 6000): Promise<Record<string, unknown>> {
+export function cdpCall(ws: WebSocket, method: string, params?: object, timeoutMs = 6000): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const id = ++wsSeq;
     const t = setTimeout(() => { cleanup(); reject(new Error(`cdp timeout: ${method}`)); }, timeoutMs);
@@ -125,7 +125,7 @@ function cdpCall(ws: WebSocket, method: string, params?: object, timeoutMs = 600
     ws.send(JSON.stringify({ id, method, params: params ?? {} }));
   });
 }
-function cdpEvent(ws: WebSocket, method: string, handler: (params: Record<string, unknown>) => void) {
+export function cdpEvent(ws: WebSocket, method: string, handler: (params: Record<string, unknown>) => void) {
   ws.addEventListener("message", (ev: MessageEvent) => {
     try {
       const m = JSON.parse(String(ev.data)) as { method?: string; params?: Record<string, unknown> };

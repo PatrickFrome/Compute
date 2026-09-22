@@ -22,6 +22,7 @@ import { startMasterLoop } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
+import { obsvStart, obsvSnapshot, obsvReset, obsvStop } from "./src/obsv";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
 import { listWorktrees, repoHead, rerereStatus, rerereEnable, rerereRemaining } from "./src/worktrees";
@@ -41,7 +42,7 @@ import { senseNow, senseList, senseAct } from "./src/sense";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.20.0";
+const VERSION = "0.21.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);
@@ -284,6 +285,25 @@ const restServer = createServer(async (req, res) => {
         });
         return json(res, 200, r);
       } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
+    }
+
+    // ── R21: BROWSER-OBSV (S2: CDP network/console/exceptions сенсоры, вне шины — 47/47) ──
+    if (path === "/browser/obsv" && req.method === "GET") {
+      obsvStart(); // ленивый старт колектора (идемпотентно)
+      const limit = parseInt(url.searchParams.get("limit") ?? "", 10);
+      return json(res, 200, obsvSnapshot({
+        limit: Number.isFinite(limit) ? limit : 40,
+        level: url.searchParams.get("level") ?? undefined,
+        filter: url.searchParams.get("filter") ?? undefined,
+      }));
+    }
+    if (path === "/browser/obsv" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "reset") { obsvReset(); return json(res, 200, { ok: true, op: "reset" }); }
+      if (op === "stop") { obsvStop(); return json(res, 200, { ok: true, op: "stop" }); }
+      if (op === "attach") { obsvStart(); return json(res, 200, { ok: true, op: "attach" }); }
+      return json(res, 400, { ok: false, error: "op_required: attach|reset|stop" });
     }
 
     // ── command bus: единственная точка мутаций ──
