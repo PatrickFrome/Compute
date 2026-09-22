@@ -568,6 +568,13 @@ export default function MissionControl() {
   const [castConsole, setCastConsole] = useState<{ id: number; level: string; text: string }[]>([]);
   const [castConOpen, setCastConOpen] = useState(false);
   const castMsgId = useRef(0);
+  // CDP-СКРИНКАСТ (v0.15.0): per-client jpeg-качество/ширина через CDP (:3043, snapshot-поллинг).
+  // Зазор против :3042: бинарный stream-сервер agent-browser умеет per-client maxFps/pacing,
+  // но НЕ per-client quality/масштаб — это закрывает собственный сервер daemon'а (CDP-сессия на клиента).
+  const [cdpQ, setCdpQ] = useState(55);
+  const [cdpW, setCdpW] = useState(640);
+  const [cdpTick, setCdpTick] = useState(0);
+  const [cdpInfo, setCdpInfo] = useState<{ cdp: { port: number; target: string } | null; frames: number; streams: number } | null>(null);
 
   // EVENTS_SEARCH (диалог из ⌘K)
   const [searchOpen, setSearchOpen] = useState(false);
@@ -827,6 +834,31 @@ export default function MissionControl() {
   useEffect(() => {
     if (!castOn && castCtl) setCastCtl(false);
   }, [castOn, castCtl]);
+
+  // CDP-тайл (:3043): poll /stats раз в 4с + САМОТЕМПЕРИРУЕМАЯ перезагрузка снапшота —
+  // следующий тик ставится только после onLoad/onError кадра (урок R15: фиксированный тик
+  // 2.5с отменял каждую загрузку при тяжёлых кадрах — кадр не успевал НИКОГДА).
+  // Каденс задаёт клиент (поллинг), поэтому зеркало-рекурсия не каскадит.
+  useEffect(() => {
+    let alive = true;
+    const pull = async () => {
+      try {
+        const r = await fetch("/stats?XTransformPort=3043");
+        if (r.ok && alive) setCdpInfo(await r.json());
+      } catch { /* daemon/restart — тише */ }
+    };
+    void pull();
+    const st = setInterval(pull, 4000);
+    return () => { alive = false; clearInterval(st); };
+  }, []);
+  const aliveTickRef = useRef(true);
+  useEffect(() => {
+    aliveTickRef.current = true;
+    return () => { aliveTickRef.current = false; };
+  }, []);
+  const cdpNextTick = useCallback((ms: number) => {
+    window.setTimeout(() => { if (aliveTickRef.current) setCdpTick((t) => t + 1); }, ms);
+  }, []);
 
   // PAIR-CONTROL: координаты клика → координаты страницы. База — naturalWidth/Height кадра:
   // jpeg кадра = РЕАЛЬНЫЙ вьюпорт страницы (напр. 1280×577), а metadata.deviceWidth/Height —
@@ -1294,6 +1326,56 @@ export default function MissionControl() {
             </CardContent>
           </Card>
 
+          {/* CDP-LIVE (v0.15.0): per-client jpeg q/w через собственный CDP-сервер daemon'а (:3043).
+              Каденс — клиентский поллинг 2.5с; качества меняются чипами, кадр перезапрашивается тиком. */}
+          <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
+            <CardHeader className="flex-row items-center justify-between space-y-0 gap-2 border-b border-zinc-800 py-3">
+              <CardTitle className="flex shrink-0 items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
+                <MonitorPlay className="h-4 w-4 text-violet-400" aria-hidden /> CDP · LIVE
+              </CardTitle>
+              <div className="flex flex-wrap items-center justify-end gap-1" role="group" aria-label="Качество CDP-скринкаста">
+                {[30, 55, 85].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    aria-pressed={cdpQ === q}
+                    className={`rounded border px-1.5 py-0.5 font-mono text-[9px] transition ${cdpQ === q ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"}`}
+                    onClick={() => setCdpQ(q)}
+                  >
+                    q{q}
+                  </button>
+                ))}
+                <span className="mx-0.5 text-zinc-700" aria-hidden>·</span>
+                {[480, 640, 960].map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    aria-pressed={cdpW === w}
+                    className={`rounded border px-1.5 py-0.5 font-mono text-[9px] transition ${cdpW === w ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300"}`}
+                    onClick={() => setCdpW(w)}
+                  >
+                    w{w}
+                  </button>
+                ))}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-1.5 p-2">
+              <img
+                key={`${cdpQ}-${cdpW}`}
+                src={`/screencast.jpg?XTransformPort=3043&q=${cdpQ}&w=${cdpW}&t=${cdpTick}`}
+                alt="Живой кадр активной вкладки QA-браузера через CDP"
+                className="w-full rounded border border-zinc-800 bg-zinc-950 object-cover"
+                decoding="async"
+                onLoad={() => cdpNextTick(1500)}
+                onError={() => cdpNextTick(4000)}
+              />
+              <p className="font-mono text-[10px] leading-4 text-zinc-500">
+                {cdpInfo?.cdp
+                  ? <>cdp :{cdpInfo.cdp.port} · <span className="truncate align-bottom">{(cdpInfo.cdp.target || "—").replace(/^https?:\/\//, "").slice(0, 42)}</span> · кадров {cdpInfo.frames} · стримов {cdpInfo.streams}</>
+                  : <span className="text-amber-500/80">CDP-цель не найдена — agent-browser не запущен?</span>}
+              </p>
+            </CardContent>
+          </Card>
           <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">
             <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
               <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
@@ -1315,6 +1397,7 @@ export default function MissionControl() {
               ))}
             </CardContent>
           </Card>
+
         </section>
 
         {/* Колонка 2: ОЧЕРЕДЬ + ВЕТКИ */}

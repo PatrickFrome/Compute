@@ -1,0 +1,47 @@
+[
+  {
+    "url": "https://github.com",
+    "name": "Cant stream MJPEG with multipart/x-mixed-replace #1207",
+    "snippet": "Apr 25, 2024 — I created server that supposed to provide MJPEG stream to browser. Cant stream MJPEG with multipart / x - mixed - replace #1207. Type: multipart / x - ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "Apr 25, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://news.ycombinator.com",
+    "name": "If I understand multipart/x-mixed-replace right, this could be",
+    "snippet": "Oct 7, 2021 — The main place x - mixed - replace makes sense is a dead simple webcam that takes a picture every x seconds. MJPEG is not bandwidth efficient. , ...",
+    "host_name": "news.ycombinator.com",
+    "rank": 1,
+    "date": "Oct 7, 2021",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.experts-exchange.com",
+    "name": "Solved: decode multipart/x-mixed-replace (Server-Push)",
+    "snippet": "Mar 9, 2003 — Is it possible to stream a Server -Push- Stream into a java-applet and dislay the images ?? I am an absulte beginner and dont know how to ... Read more",
+    "host_name": "www.experts-exchange.com",
+    "rank": 2,
+    "date": "Mar 9, 2003",
+    "favicon": ""
+  },
+  {
+    "url": "https://bugzilla.mozilla.org",
+    "name": "multipart/x-mixed-replace stream terminated on bad first frame",
+    "snippet": "An MJPEG stream is not displayed until the first frame in the multipart message is received. There can be a delay, so rather than showing a blank box,",
+    "host_name": "bugzilla.mozilla.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://wiki.tcl-lang.org",
+    "name": "multipart/x-mixed-replace",
+    "snippet": "This page shows an implementation of a multipart / x - mixed - replace HTTP server in plain Tcl. Code. dbohdan 2021-08-25: This example is not as minimal as it ... Read more",
+    "host_name": "wiki.tcl-lang.org",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  }
+]

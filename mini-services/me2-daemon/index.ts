@@ -21,10 +21,11 @@ import { listProviders } from "./providers";
 import { startMasterLoop } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus } from "./evidence";
+import { startScreencastServer } from "./src/screencast";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.14.0";
+const VERSION = "0.15.0";
 const BOOT_TS = nowIso();
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
@@ -299,6 +300,7 @@ setInterval(() => {
 
 startMasterLoop();
 initEvidence();
+try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`));
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);
