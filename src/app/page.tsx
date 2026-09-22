@@ -4,6 +4,7 @@
  * ME2 · MISSION CONTROL v4 — операторская консоль METAENGINE 2.
  * 3 колонки: ФЛОТ / ОЧЕРЕДЬ / EVENT-LOG + панель «ВЕТКИ» (git-граф задач с вкладками-«браузером»).
  * ⌘K с живым реестром действий (n/47), KPI-плитки с count-up, планировщик, пауза агентов, модели агентов.
+ * СКРИНКАСТ + PAIR-CONTROL: live-вид вкладки (:3042, вне бюджета шины) + руль (клик/клавиатура/колесо).
  * Каналы: WS :3040 (snapshot push + события + команды), REST :3041 (fallback, evidence, catalog).
  */
 
@@ -34,8 +35,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
-  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, Pause, Play, Plus, Radar, RefreshCw,
-  RotateCcw, Rocket, Search, Terminal, Trash2, X, Zap,
+  Crosshair, Cpu, Download, Gauge, GitBranch, Layers, ListChecks, MonitorPlay, MousePointerClick, Pause, Play, Plus,
+  Radar, RefreshCw, RotateCcw, Rocket, Search, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -393,6 +394,13 @@ export default function MissionControl() {
     connected: false, fps: 0, url: null, error: null, lastAge: null,
   });
   const castImgRef = useRef<HTMLImageElement | null>(null);
+  // PAIR-CONTROL (v0.8.0): клик/клавиатура/колесо из скринкаста → активная вкладка (вне бюджета шины)
+  const castWsRef = useRef<WebSocket | null>(null);
+  const castWrapRef = useRef<HTMLDivElement | null>(null);
+  const [castCtl, setCastCtl] = useState(false);
+  const [castConsole, setCastConsole] = useState<{ id: number; level: string; text: string }[]>([]);
+  const [castConOpen, setCastConOpen] = useState(false);
+  const castMsgId = useRef(0);
 
   // EVENTS_SEARCH (диалог из ⌘K)
   const [searchOpen, setSearchOpen] = useState(false);
@@ -570,8 +578,8 @@ export default function MissionControl() {
     if (branchesOpen) loadBrowserTabs();
   }, [branchesOpen, loadBrowserTabs]);
 
-  // СКРИНКАСТ: WS-стрим кадров активной вкладки (gateway → agent-browser stream :3042).
-  // Кадры идут сразу после коннекта (push, maxFps=8); url/status — служебные события.
+  // СКРИНКАСТ + PAIR-CONTROL: WS-стрим кадров активной вкладки (gateway → agent-browser stream :3042).
+  // Кадры — push maxFps=8; url/tabs/console — служебные; input_* летит только в armed-режиме «руль».
   useEffect(() => {
     if (!castOn) return;
     let stopped = false;
@@ -581,11 +589,17 @@ export default function MissionControl() {
     try {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3042&maxFps=8`);
+      castWsRef.current = ws;
       ws.onopen = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: true, error: null })); };
       ws.onmessage = (ev) => {
         if (stopped) return;
         try {
-          const msg = JSON.parse(ev.data as string) as { type: string; data?: string; url?: string; metadata?: { timestamp?: number } };
+          const msg = JSON.parse(ev.data as string) as {
+            type: string; data?: string; url?: string;
+            metadata?: { deviceWidth?: number; deviceHeight?: number; timestamp?: number };
+            level?: string; text?: string;
+            args?: Array<{ value?: string; description?: string; preview?: { description?: string } }>;
+          };
           if (msg.type === "frame" && msg.data) {
             const img = castImgRef.current;
             if (img) img.src = `data:image/jpeg;base64,${msg.data}`;
@@ -597,6 +611,12 @@ export default function MissionControl() {
             }
           } else if (msg.type === "url") {
             setCastStat((s) => ({ ...s, url: msg.url ?? s.url }));
+          } else if (msg.type === "console") {
+            // живая лента консоли вкладки (не в audit): text = первый string-arg, объекты — кратко
+            let text = msg.text ?? "";
+            for (const a of (msg.args ?? []).slice(1)) text += ` ${a.value ?? a.preview?.description ?? a.description ?? "…"}`;
+            text = (text || "(пусто)").slice(0, 200);
+            setCastConsole((prev) => [...prev.slice(-29), { id: ++castMsgId.current, level: msg.level ?? "log", text }]);
           }
         } catch { /* не-JSON кадр — игнор */ }
       };
@@ -608,9 +628,88 @@ export default function MissionControl() {
     return () => {
       stopped = true;
       try { ws?.close(); } catch { /* уже закрыт */ }
+      castWsRef.current = null;
       setCastStat((s) => ({ ...s, connected: false, fps: 0 }));
+      setCastConsole([]);
     };
   }, [castOn]);
+
+  // pair-control: сняли «live» — руль выключается тоже
+  useEffect(() => {
+    if (!castOn && castCtl) setCastCtl(false);
+  }, [castOn, castCtl]);
+
+  // PAIR-CONTROL: координаты клика → координаты страницы. База — naturalWidth/Height кадра:
+  // jpeg кадра = РЕАЛЬНЫЙ вьюпорт страницы (напр. 1280×577), а metadata.deviceWidth/Height —
+  // эмулированные метрики (напр. 720) и для маппинга не годятся (проверено живьём в R8)
+  const castMapXY = useCallback((clientX: number, clientY: number): { x: number; y: number } | null => {
+    const img = castImgRef.current;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return null;
+    const dw = img.naturalWidth;
+    const dh = img.naturalHeight;
+    const r = img.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+    const scale = Math.min(r.width / dw, r.height / dh);
+    const ox = r.left + (r.width - dw * scale) / 2;
+    const oy = r.top + (r.height - dh * scale) / 2;
+    const x = Math.round((clientX - ox) / scale);
+    const y = Math.round((clientY - oy) / scale);
+    if (x < 0 || y < 0 || x > dw || y > dh) return null;
+    return { x, y };
+  }, []);
+
+  // клик (mousePressed+mouseReleased) — только в armed-режиме
+  const castSendMouse = useCallback((eventType: string, e: { clientX: number; clientY: number }) => {
+    if (!castCtl) return;
+    const ws = castWsRef.current;
+    if (!ws || ws.readyState !== 1) return;
+    const p = castMapXY(e.clientX, e.clientY);
+    if (!p) return;
+    ws.send(JSON.stringify({ type: "input_mouse", eventType, ...p, button: "left", clickCount: 1 }));
+  }, [castCtl, castMapXY]);
+
+  // клавиатура: keyDown{text}/keyUp по CDP-семантике; Ctrl/Meta-комбо остаются у оператора
+  const castKey = useCallback((e: React.KeyboardEvent) => {
+    if (!castCtl || e.ctrlKey || e.metaKey) return;
+    if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
+    const ws = castWsRef.current;
+    if (!ws || ws.readyState !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const mods = (e.altKey ? 1 : 0) | (e.shiftKey ? 8 : 0);
+    const down: Record<string, unknown> = { type: "input_keyboard", eventType: "keyDown", key: e.key, modifiers: mods };
+    if (e.key.length === 1 && !e.altKey) down.text = e.key;
+    else if (e.key === "Enter") down.text = "\r";
+    else if (e.key === "Backspace") down.text = "\b";
+    ws.send(JSON.stringify(down));
+    ws.send(JSON.stringify({ type: "input_keyboard", eventType: "keyUp", key: e.key, modifiers: mods }));
+  }, [castCtl]);
+
+  // armed: автофокус на кадр + колесо нативным listener'ом (React onWheel пассивен — preventDefault не сработал бы)
+  useEffect(() => {
+    if (!castCtl) return;
+    castWrapRef.current?.focus({ preventScroll: true });
+    const el = castWrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      const ws = castWsRef.current;
+      if (!ws || ws.readyState !== 1) return;
+      const p = castMapXY(e.clientX, e.clientY);
+      if (!p) return;
+      e.preventDefault();
+      ws.send(JSON.stringify({ type: "input_mouse", eventType: "mouseWheel", ...p, deltaX: Math.round(e.deltaX), deltaY: Math.round(e.deltaY) }));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [castCtl, castMapXY]);
+
+  const toggleCastCtl = useCallback(() => {
+    setCastCtl((v) => {
+      const nv = !v;
+      if (nv) toast({ title: "Ручное управление включено", description: "Клики, клавиатура и колесо в кадре идут в активную вкладку. Ctrl/Meta-комбо остаются у оператора." });
+      return nv;
+    });
+  }, [toast]);
 
   const spawnAgent = useCallback(async (role: string) => {
     await sendCommand("AGENT_SPAWN", { role, model: "zai:default" }, { successMsg: `агент ${role} создан` });
@@ -994,7 +1093,7 @@ export default function MissionControl() {
 
         {/* Колонка 2: ОЧЕРЕДЬ + ВЕТКИ */}
         <section className="mc-scroll flex min-h-0 flex-col gap-4 lg:overflow-y-auto" aria-label="Очередь задач">
-          <Card className="flex min-h-0 flex-col gap-0 overflow-hidden border-zinc-800 bg-zinc-900/40 py-0 card-lift lg:max-h-[42vh]">
+          <Card className={`flex min-h-0 flex-col gap-0 overflow-hidden border-zinc-800 bg-zinc-900/40 py-0 card-lift ${castOn ? "lg:max-h-[62vh] lg:shrink-0" : "lg:max-h-[42vh]"}`}>
             <CardHeader className="shrink-0 border-b border-zinc-800 p-0">
               <button
                 type="button"
@@ -1073,6 +1172,20 @@ export default function MissionControl() {
                     <MonitorPlay className="h-3 w-3" aria-hidden />
                     live
                   </button>
+                  {castOn && (
+                    <button
+                      type="button"
+                      onClick={toggleCastCtl}
+                      aria-pressed={castCtl}
+                      title="Руль: клики, клавиатура и колесо в кадре идут в активную вкладку. Ctrl/Meta-комбо остаются у оператора."
+                      className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition ${
+                        castCtl ? "bg-amber-500/15 text-amber-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                      }`}
+                    >
+                      <MousePointerClick className="h-3 w-3" aria-hidden />
+                      руль
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={loadBrowserTabs}
@@ -1084,8 +1197,31 @@ export default function MissionControl() {
                 </div>
                 {castOn && (
                   <div className="shrink-0 border-b border-zinc-800/60 bg-black/40 px-3 py-2">
-                    <div className="relative overflow-hidden rounded-md border border-zinc-800 bg-black">
-                      <img ref={castImgRef} alt="Живой вид активной вкладки браузера" className="block max-h-56 w-full object-contain" />
+                    <div
+                      ref={castWrapRef}
+                      tabIndex={castCtl ? 0 : -1}
+                      onKeyDown={castKey}
+                      aria-label={castCtl ? "Живой вид вкладки — ручное управление включено" : "Живой вид активной вкладки браузера"}
+                      className={`relative overflow-hidden rounded-md border bg-black transition ${
+                        castCtl
+                          ? "cursor-crosshair select-none border-amber-500/70 ring-1 ring-amber-500/40 focus-visible:outline-none focus-visible:ring-amber-400"
+                          : "border-zinc-800"
+                      }`}
+                    >
+                      <img
+                        ref={castImgRef}
+                        alt="Живой вид активной вкладки браузера"
+                        className="block max-h-40 w-full object-contain lg:max-h-48"
+                        draggable={false}
+                        onPointerDown={(e) => castSendMouse("mousePressed", e)}
+                        onPointerUp={(e) => castSendMouse("mouseReleased", e)}
+                        onContextMenu={(e) => { if (castCtl) e.preventDefault(); }}
+                      />
+                      {castCtl && (
+                        <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center gap-1 rounded bg-amber-500/90 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-black shadow">
+                          <MousePointerClick className="h-3 w-3" aria-hidden /> РУЛЬ · клики/клавиатура → вкладка
+                        </div>
+                      )}
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-black/75 px-2 py-0.5 font-mono text-[9px] text-zinc-400">
                         <span className="truncate">{castStat.url ?? "ожидание кадра…"}</span>
                         <span className="shrink-0">
@@ -1102,9 +1238,36 @@ export default function MissionControl() {
                         </div>
                       )}
                     </div>
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCastConOpen((v) => !v)}
+                        aria-expanded={castConOpen}
+                        title="Живая лента console-событий вкладки из стрима (не в audit-журнале)"
+                        className="flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+                      >
+                        <Terminal className="h-3 w-3" aria-hidden />
+                        консоль ({castConsole.length})
+                      </button>
+                      <span className="text-[9px] text-zinc-600">живая лента стрима — не в audit-журнале</span>
+                    </div>
+                    {castConOpen && (
+                      <div className="mc-scroll mt-1 max-h-16 overflow-y-auto rounded border border-zinc-800 bg-black/60 p-1.5 font-mono text-[9px] leading-relaxed">
+                        {castConsole.length === 0 ? (
+                          <p className="text-zinc-600">нет console-событий в этой сессии (http(s)-страницы; file:// не эмитит)</p>
+                        ) : (
+                          castConsole.map((m) => (
+                            <div key={m.id} className="flex gap-1.5">
+                              <span className={m.level === "error" ? "shrink-0 text-rose-400" : m.level === "warning" ? "shrink-0 text-amber-400" : "shrink-0 text-sky-400"}>{m.level}</span>
+                              <span className="truncate text-zinc-300" title={m.text}>{m.text}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-                <div className="mc-scroll max-h-36 grow basis-auto overflow-y-auto px-2 py-1 lg:max-h-40">
+                <div className="mc-scroll min-h-0 flex-1 basis-auto overflow-y-auto px-2 py-1">
                   {branchTasks.length === 0 ? (
                     <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
                   ) : (

@@ -12,8 +12,12 @@ if [ -f "$PIDFILE" ]; then
   fi
   rm -f "$PIDFILE"
 fi
-# 2) прибить случайные выжившие bun index.ts (кроме себя)
-for p in $(pgrep -f "bun index.ts" 2>/dev/null); do [ "$p" != "$$" ] && kill -9 "$p" 2>/dev/null; done
+# 2) прибить живой daemon по cwd (надёжнее шаблона cmdline: процесс запускается как «bun --hot index.ts»,
+#    а рядом живут чужие сервисы — a2-edge-local; трогаем только свой каталог)
+SELFDIR="$(pwd)"
+for p in $(pgrep -f "index.ts" 2>/dev/null); do
+  [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$SELFDIR" ] && kill -9 "$p" 2>/dev/null
+done
 
 # 3) дождаться освобождения портов (до 8s)
 for i in $(seq 1 16); do
@@ -21,7 +25,9 @@ for i in $(seq 1 16); do
   sleep 0.5
 done
 
-# 4) старт
+# 4) старт — AGENT_BROWSER_STREAM_PORT наследуется daemon'ом и его agent-browser-детьми:
+#    при любом респавне agent-browser стрим сам поднимется на :3042 (дока стрима, "pins the port for the whole daemon")
+export AGENT_BROWSER_STREAM_PORT=3042
 setsid nohup bun index.ts >> daemon.log 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 

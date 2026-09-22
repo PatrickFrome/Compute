@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://news.ycombinator.com",
+    "name": "The Codex App",
+    "snippet": "Don't forget that these Electron apps outcompeted native apps . Figma and VSCode were underdogs to native apps at one point. This is why your supply side ...",
+    "host_name": "news.ycombinator.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://openai.com",
+    "name": "Introducing the Codex app",
+    "snippet": "Feb 2, 2026 — Introducing the Codex app for macOS —a command center for AI coding and software development with multiple agents, parallel workflows, ...",
+    "host_name": "openai.com",
+    "rank": 1,
+    "date": "Feb 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://kitze.io",
+    "name": "A technical breakdown of the Codex desktop app",
+    "snippet": "Codex Desktop is an Electron app with a Vite-built React renderer . But the important part is that the Electron app is mostly the shell and user interface.",
+    "host_name": "kitze.io",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "Codex Desktop App: macOS Intel (x86_64) support #10410",
+    "snippet": "Feb 2, 2026 — The desktop app is Electron-based and only ships ARM64 native modules. Replace the Electron runtime, helper apps, and frameworks with the x64  ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "Feb 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://codenote.net",
+    "name": "A 2026 Audit of Famous Electron Apps — Why VS Code",
+    "snippet": "May 4, 2026 — OpenAI's Codex ships two distinct surfaces: the terminal Codex CLI (Rust core plus a Ratatui TUI), and a separate GUI build named Codex Desktop .",
+    "host_name": "codenote.net",
+    "rank": 4,
+    "date": "May 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://learn.chatgpt.com",
+    "name": "Build for macOS | ChatGPT use cases",
+    "snippet": "Use Codex to build macOS SwiftUI apps , wire a shell-first build -and-run loop, and add desktop - native scene, window, AppKit, and signing workflows as the app ...",
+    "host_name": "learn.chatgpt.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

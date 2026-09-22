@@ -64,3 +64,35 @@ agent-browser. Внедрённое из ресёрча в этом же рау�
 - **CDP напрямую сейчас** — дублирует agent-browser стрим/ввод; вернуться только в M3-Rust (chromiumoxide).
 - **Кадры через шину команд** — mirror-спам в event-log и budget; стрим отдельным каналом — верно.
 - **`bun run build` в sandbox** — по-прежнему не запускать (dev-only контур).
+
+## 5. R8: протокол pair-browsing ВЕРИФИЦИРОВАН живьём (база для pair-control)
+
+Метод: детерминированная проба — страница-мишень с полноширинной кнопкой (fixed bottom 200px) и
+input с автофокусом; bun-скрипт коннектится к ws://127.0.0.1:3042 и шлёт input-события по доке
+(skill-data/core/references/streaming.md); результат читается через `agent-browser get title`.
+
+| Событие (client→server) | Результат пробы |
+|---|---|
+| `{"type":"input_mouse","eventType":"mousePressed"\|"mouseReleased",x,y,button:"left",clickCount:1}` | ✅ клик отработал (title→CLICKED-OK) |
+| `{"type":"input_keyboard","eventType":"keyDown",key:"m",text:"m"}` + `keyUp` | ✅ посимвольный ввод (title→TYPED:me2) |
+| `{"type":"input_keyboard","eventType":"keyDown",key:"Enter",text:"\r"}` | ✅ (принят, страница без формы) |
+| координатная база | `metadata.deviceWidth/Height` = viewport (1280×720), не размер jpeg |
+
+**Console-лента** (server→client, только по http-страницам; file:// НЕ эмитит — caveat):
+`{"type":"console","level":"log\|error\|warning","text":"<первый string-arg>","args":[{type,value\|preview}],"timestamp"}` —
+текст покрывает только первый аргумент; объекты брать из `args[i].preview.properties` / `description`.
+Дока честно предупреждает: console = live feed, НЕ audit log (ordered channel может терять события при лаге).
+
+**CDP-семантика клавиатуры** (web-search, chromedevtools/Playwright-исходники): `keyDown` с `text`
+вставляет символ (text и есть символ); спец-клавиши — keyDown/keyUp без text; модификаторы — битмаска
+Alt=1, Ctrl=2, Meta=4, Shift=8. Browser-шорткаты с Ctrl/Meta из remote-ввода сознательно НЕ прокидывать.
+
+**Эксплуатационная находка (start.sh)**: пин :3042 слетел после рестарта daemon — процесс живёт как
+`bun --hot index.ts`, а kill-паттерн искал `bun index.ts`; и export AGENT_BROWSER_STREAM_PORT не
+наследовался (export стоял после старта). Фикс: kill по cwd (рядом чужие сервисы) + export до старта.
+Дубль-защита: даже при респавне agent-browser env-пин сам поднимет стрим на :3042.
+
+**UX-решение pair-control** (реализовано в R8): режим «руль» — отдельная кнопка-arm (не по умолчанию!),
+клик/клавиатура/колесо идут в стрим только в armed-состоянии; Ctrl/Meta-комбо пропускаются в браузер
+оператора; координаты маппятся с учётом letterbox (object-contain): scale = min(rw/dw, rh/dh), offset —
+центрирование; колесо — нативный listener passive:false (React onWheel пассивен, preventDefault не сработал бы).

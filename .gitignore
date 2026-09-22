@@ -70,3 +70,7 @@ mini-services/agent-factory/browser-data*/
 db/*.db
 db/*.db-*
 *.sqlite
+
+# секреты-архивы никогда не в репо (push protection R8)
+.a2-backup/
+*.env.*backup*
