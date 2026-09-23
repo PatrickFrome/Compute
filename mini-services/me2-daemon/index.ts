@@ -24,6 +24,7 @@ import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from ".
 import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
+import { SqlMirror } from "./src/sqlmirror";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
@@ -175,6 +176,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/budget" && req.method === "GET") return json(res, 200, { ok: true, ...budgetWindow() });
     if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, count: actionCatalog().length, total_target: 47, actions: actionCatalog() });
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
+    // ── R52 (фаза D, H6): статус SQL-контура (read-only, вне шины; 47-инвариант не тронут) ──
+    if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
       if (body?.op === "probe_ddl") return json(res, 200, { ok: true, ...(await probeDdl(true)) });
@@ -1061,6 +1064,11 @@ initEvidence();
 // boot-span: телеметрия холодного старта (M7-проверка «ring живой» перестаёт быть ложной после рестарта)
 try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-daemon" }, BOOT_T0); } catch { /* телеметрия не ломает старт */ }
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
+// ── R52 (фаза D, H6): SQL-контур — зеркало hash-chain событий в Supabase SQL (operator-gated) ──
+// ME2_SQL_MIRROR=1 включает; без таблицы (миграция sql/0001 у оператора) — честный WARMUP, без штормов.
+const sqlMirror = new SqlMirror(db);
+sqlMirror.start();
+if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
 
