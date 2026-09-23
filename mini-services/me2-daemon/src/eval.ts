@@ -45,14 +45,17 @@ import { createTask, updateTask, rid } from "../store";
 import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
   supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
+  outcomeReport, outcomePending,
 } from "./agentchat";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
+import { policyAllows, policyCheckTool, tierForRole, policyReload, policyStatus, policyCaps } from "./policy";
+import { cronAdd, cronList, cronTick, cronCancel, cronTestReset } from "./cron";
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 15;
+export const EVAL_DATASET_VERSION = 16;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -865,6 +868,84 @@ export const EVAL_DATASET: EvalCheck[] = [
       demandTestReset();
       const ok = createdOk && objectiveOk && chatClean && suppressOk;
       return { ok, evidence: `гистерезис: тик1=${d1.action}, тик2=${d2.action}; чат создан=${!!d2.session_id}, цель назначена=${objectiveOk}, cleanup=${chatClean}, кап-подавление=${d4.action} (${d4.detail.slice(0, 50)})` };
+    },
+  },
+  {
+    id: "policy.tiers",
+    plane: "policy",
+    title: "H2 policy-файл T0/T1/T2: tier-маппинг ролей, эластичность T2 сохранена, запрет не молчит (POLICY_DENIED в chain), reload работает",
+    critical: true,
+    expect: "SUPERVISOR→T1, CODE→T2; T2 сохраняет shell/create_chat (эластичность флота); policyCheckTool('T2','admin_shutdown')=false → POLICY_DENIED в шине с ledger-полями; policyReload перечитывает файл (version≥1)",
+    run: () => {
+      const tierOk = tierForRole("SUPERVISOR") === "T1" && tierForRole("CODE") === "T2" && tierForRole("CHAT") === "T2";
+      const elastic = policyAllows("T2", "shell") && policyAllows("T2", "create_chat") && policyAllows("T1", "set_objective");
+      const before = policyStatus().counters.denied;
+      const denied = policyCheckTool("T2", "admin_shutdown", "eval-policy-probe");
+      const after = policyStatus().counters.denied;
+      const ev = db.query(`SELECT COUNT(*) AS c FROM events WHERE type='POLICY_DENIED' AND ts>=?`).get(new Date(Date.now() - 60_000).toISOString()) as { c: number };
+      const p = policyReload();
+      const reloadOk = p.version >= 1 && !!p.tiers.T1.tools.length && p.caps.crons_per_chat >= 1;
+      const ok = tierOk && elastic && !denied.ok && after === before + 1 && ev.c >= 1 && reloadOk;
+      return { ok, evidence: `tiers=${tierOk}, эластичность T2 (shell+create_chat)=${elastic}, запрет admin_shutdown=${denied.ok ? "ПРОПУЩЕН!" : "denied"} (счётчик ${before}→${after}, POLICY_DENIED в chain=${ev.c}), reload v${p.version}=${reloadOk}` };
+    },
+  },
+  {
+    id: "cron.schedule",
+    plane: "fleet",
+    title: "G7 cron из чатов: чат ставит задание, тик будит (сообщение в истории + AGENT_CHAT_CRON в chain), next уезжает вперёд, капы и cancel работают",
+    critical: true,
+    expect: "cronAdd каждые 5м → активное; cronTick(kick:false) по due → сообщение в истории чата + событие AGENT_CHAT_CRON(action=fired) + runs=1 + next в будущем; 9-е задание → cap_crons_per_chat; cancel → CANCELLED; изоляция прогонов cronTestReset",
+    run: () => {
+      cronTestReset();
+      const s = agentChatCreate({ role: "CHAT", title: "eval-cron" });
+      try {
+        const a = cronAdd(s.id, { every_minutes: 5 }, "проверь бэклог и отчитайся", { tier: "T2" });
+        const past = new Date(Date.now() - 60_000).toISOString();
+        db.query(`UPDATE chat_crons SET next_run_at=? WHERE id=?`).run(past, a.cron!.id); // сделать due
+        const t = cronTick({ kick: false }); // eval без LLM-хода: только сообщение+событие
+        const msgs = db.query(`SELECT COUNT(*) AS n FROM agent_messages WHERE session_id=? AND meta LIKE '%"kind":"cron"%'`).get(s.id) as { n: number };
+        const ev = db.query(`SELECT COUNT(*) AS c FROM events WHERE type='AGENT_CHAT_CRON' AND ts>=?`).get(new Date(Date.now() - 60_000).toISOString()) as { c: number };
+        const after = cronList(s.id)[0];
+        const nextOk = after.runs === 1 && after.next_run_at > new Date().toISOString();
+        // кап per-chat: добить до cap и получить отказ на следующий
+        const cap = policyCaps().crons_per_chat;
+        let capErr = "";
+        for (let i = 0; i < cap + 1; i++) {
+          const r = cronAdd(s.id, { every_minutes: 5 }, `задание ${i}`, { tier: "T2" });
+          if (!r.ok) { capErr = r.error ?? ""; break; }
+        }
+        const cancelOk = cronCancel(a.cron!.id) && cronList(s.id).find((c) => c.id === a.cron!.id)?.status === "CANCELLED";
+        const ok = a.ok && t.fired >= 1 && Number(msgs.n) >= 1 && ev.c >= 1 && nextOk && capErr.startsWith("cap_crons_per_chat") && cancelOk;
+        return { ok, evidence: `add=${a.ok}, tick fired=${t.fired}, сообщений в истории=${msgs.n}, AGENT_CHAT_CRON=${ev.c}, runs=${after.runs}/next→${nextOk ? "будущее" : "ПРОШЛОЕ"}, кап=${capErr}, cancel=${cancelOk}` };
+      } finally {
+        cronTestReset();
+        agentChatDelete(s.id);
+      }
+    },
+  },
+  {
+    id: "demand.outcome",
+    plane: "fleet",
+    title: "R44 outcome-proof: report_outcome фиксирует исход с доказательством (AGENT_CHAT_OUTCOME в chain), успех-без-пруфа попадает в outcomePending, неверный статус отвергается",
+    critical: true,
+    expect: "reply «исправлено» без outcome → чат в outcomePending; outcomeReport(fixed, proof) → outcome_status=fixed + событие AGENT_CHAT_OUTCOME + чат покидает pending; status=bad → error; proof пустой → error; cleanup чата",
+    run: () => {
+      const s = agentChatCreate({ role: "CODE", title: "eval-outcome" });
+      try {
+        chatSetObjective(s.id, "разобрать отказы и исправить (eval)");
+        chatAppend(s.id, "assistant", "все отказы исправлены, система готово", { kind: "reply" });
+        const pendingBefore = outcomePending().some((p) => p.session_id === s.id);
+        const badStatus = outcomeReport(s.id, "bad", "пруф");
+        const noProof = outcomeReport(s.id, "fixed", "  ");
+        const good = outcomeReport(s.id, "fixed", "eval: 3 отказа разобраны, тест зелёный (пруф eval-харнесса)");
+        const g = agentChatGet(s.id, 5);
+        const ev = db.query(`SELECT COUNT(*) AS c FROM events WHERE type='AGENT_CHAT_OUTCOME' AND ts>=?`).get(new Date(Date.now() - 60_000).toISOString()) as { c: number };
+        const pendingAfter = outcomePending().some((p) => p.session_id === s.id);
+        const ok = pendingBefore && !badStatus.ok && !noProof.ok && good.ok && g?.session.outcome_status === "fixed" && ev.c >= 1 && !pendingAfter;
+        return { ok, evidence: `pending-до=${pendingBefore}, bad-status rejected=${!badStatus.ok}, без-пруфа rejected=${!noProof.ok}, fixed принят=${good.ok}, outcome_status=${g?.session.outcome_status}, AGENT_CHAT_OUTCOME=${ev.c}, pending-после=${pendingAfter}` };
+      } finally {
+        agentChatDelete(s.id);
+      }
     },
   },
 ];

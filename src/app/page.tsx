@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import AgentChatPanel from "@/components/me2/agent-chat-panel";
+import FleetGrid from "@/components/me2/fleet-grid";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1126,25 +1127,32 @@ export default function MissionControl() {
     if (r?.task) openDetail(r.task);
   }, [sendCommand, openDetail]);
 
-  // tier-2 LLM-рефлексия: /api/reflect (z-ai SDK в backend) → daemon пишет llm-блок в reflection,
-  // событие TASK_REFLECTED пушит снапшот по WS — tooltip обновится сам
+  // R44: операторский /api/reflect СНЕСЁН — разбор провалов теперь работа ФЛОТА: провал
+  // уходит сообщением живому супервизору чат-флота (op:"send"), тот координирует разбор;
+  // исход фиксируется агентом через report_outcome (outcome-proof, попадает в hash-chain)
   const [reflectingId, setReflectingId] = useState<string | null>(null);
   const reflectTask = useCallback(async (t: Task) => {
     setReflectingId(t.id);
     try {
-      const r = await fetch("/api/reflect", {
+      const list = await fetch("/agentchat?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()) as { sessions?: Array<{ id: string; role: string; status: string; title: string }> };
+      const sup = list.sessions?.find((s) => s.role === "SUPERVISOR" && s.status === "ACTIVE");
+      if (!sup) {
+        toast({ title: "флот недоступен", description: "нет активного супервизора — создайте чат-агента", variant: "destructive" });
+        return;
+      }
+      const r = await fetch("/agentchat?XTransformPort=3041", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskId: t.id }),
-      });
-      const d = await r.json().catch(() => null) as { ok?: boolean; lesson?: string; error?: string } | null;
-      if (r.ok && d?.ok) {
-        toast({ title: "LLM-рефлексия ✓", description: (d.lesson ?? "").slice(0, 140) || "урок записан в tasks.reflection" });
+        body: JSON.stringify({ op: "send", id: sup.id, text: `Разбери провал задачи ${t.id} «${t.title}» (статус ${t.status}). Диагноз и урок — reply; фиксацию исхода — report_outcome (outcome-proof).` }),
+      }).then((r) => r.json()) as { ok?: boolean; error?: string };
+      if (r.ok) {
+        toast({ title: "провал передан флоту ✓", description: `супервизор «${sup.title}» координирует разбор — река рассуждений покажет ход работы` });
+        window.dispatchEvent(new CustomEvent("me2:select-chat", { detail: { id: sup.id } }));
       } else {
-        toast({ title: "LLM-рефлексия ✗", description: d?.error ?? `HTTP ${r.status}`, variant: "destructive" });
+        toast({ title: "передача флоту ✗", description: r.error ?? "ошибка", variant: "destructive" });
       }
     } catch {
-      toast({ title: "LLM-рефлексия ✗", description: "сеть недоступна", variant: "destructive" });
+      toast({ title: "передача флоту ✗", description: "daemon недоступен", variant: "destructive" });
     } finally {
       setReflectingId(null);
     }
@@ -1803,6 +1811,8 @@ export default function MissionControl() {
       <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-3 lg:overflow-hidden">
         {/* Колонка 1: ФЛОТ */}
         <section className="flex min-h-0 flex-col gap-4 lg:overflow-hidden" aria-label="Флот">
+          {/* R44 G6: сетка чатов с целями — вся работа оператора в открытых чатах прямо в браузере (API снесён) */}
+          <FleetGrid />
           <Card className="flex min-h-0 flex-col border-zinc-800 bg-zinc-900/40 card-lift">
             <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
               <CardTitle className="flex items-center gap-2 text-xs font-semibold tracking-widest text-zinc-400">
@@ -3683,10 +3693,10 @@ export default function MissionControl() {
                       className="flex-1 border-violet-800 text-violet-300 hover:bg-violet-950/60"
                       onClick={() => void reflectTask(detail)}
                       disabled={busyAction || reflectingId === detail.id}
-                      title="Tier-2 LLM-рефлексия: вербальный урок провала запишется в tasks.reflection.llm"
+                      title="R44: провал уходит живому супервизору чат-флота на разбор (операторский LLM-endpoint снесён)"
                     >
-                      <Sparkles className={`mr-1 h-3.5 w-3.5 ${reflectingId === detail.id ? "animate-pulse" : ""}`} />
-                      llm-урок
+                      <Brain className={`mr-1 h-3.5 w-3.5 ${reflectingId === detail.id ? "animate-pulse" : ""}`} />
+                      во флот (разбор)
                     </Button>
                   </>
                 )}

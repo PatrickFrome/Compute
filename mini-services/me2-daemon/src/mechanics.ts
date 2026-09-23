@@ -28,6 +28,7 @@ import { approvalsVerdict } from "./approvals";
 import { evalVerdict } from "./eval";
 import { governorStatus } from "./governor";
 import { demandStatus } from "./demand";
+import { policyStatus } from "./policy";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
 import { glmVerdict } from "./glm";
@@ -260,6 +261,23 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
         const g = governorStatus(); const d = demandStatus();
         return `governor: breaker=${g.breaker.state} trips=${g.breaker.trips} cooldown=${g.breaker.cooldown_ms / 1000}s, полосы=${g.lanes.map((l) => `${l.lane}:${l.tokens}/${l.capacity}+${l.refill_per_min}/м`).join(",")}, admitted=${g.admitted_total} rejected=${g.rejected_total}; demand: ${d.config.enabled ? "включен" : "выключен"} max=${d.config.max}, тиков=${d.ticks}, решений=${d.decisions.length}, снимок: ready=${d.snapshot.ready_count} leases=${d.snapshot.pool_leases}/${d.snapshot.pool_max} fails15м=${d.snapshot.fails_15m} чатов=${d.snapshot.active_chats}; GET /governor, GET /demand, POST /demand {op:tick|config}`;
       } catch (e) { return `ME38 evidence failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME39", name: "H2+G6+G7+outcome (R44): policy-файл T0/T1/T2 с ledger-полями (POLICY_DENIED в chain), сетка флота в браузере (цели чатов), cron-планировщик из чатов (schedule_cron, тик 30с, капы policy.json), outcome-proof (report_outcome + супервизор-наддув успеха-без-доказательства)", old_ref: "легаси: политика — разрозненные if'ы; у чатов не было времени (cron) и честного исхода (COMPLETED ≠ решено)",
+      verdict: (() => { try {
+        const pol = policyStatus();
+        const crons = db.query(`SELECT COUNT(*) AS n FROM chat_crons WHERE status='ACTIVE'`).get() as { n: number };
+        const outcome = db.query(`SELECT COUNT(*) AS n FROM agent_sessions WHERE outcome_status IS NOT NULL`).get() as { n: number };
+        return pol.policy.version >= 1 && pol.ok && Number(crons.n) >= 0 && Number(outcome.n) >= 0 ? "WORKS" : "CAVEAT";
+      } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try {
+        const pol = policyStatus();
+        const crons = db.query(`SELECT COUNT(*) AS n FROM chat_crons WHERE status='ACTIVE'`).get() as { n: number };
+        const fired = db.query(`SELECT COUNT(*) AS n FROM events WHERE type='AGENT_CHAT_CRON'`).get() as { n: number };
+        const outcomes = db.query(`SELECT COUNT(*) AS n FROM agent_sessions WHERE outcome_status IS NOT NULL`).get() as { n: number };
+        const denied = db.query(`SELECT COUNT(*) AS n FROM events WHERE type='POLICY_DENIED'`).get() as { n: number };
+        return `policy v${pol.policy.version} (T0=${pol.policy.tiers.T0.tools.join("/")}, T1=${pol.policy.tiers.T1.tools.length} инструментов, T2=${pol.policy.tiers.T2.tools.length}; капы ${pol.policy.caps.crons_per_chat}/чат, ${pol.policy.caps.crons_global} глобально, ≥${pol.policy.caps.cron_min_minutes}м), POLICY_DENIED в chain=${denied.n}, отказов в счётчике=${pol.counters.denied}; cron активных=${crons.n}, срабатываний=${fired.n}; outcome-исходов=${outcomes.n}; GET /policy, GET /cron`;
+      } catch (e) { return `ME39 evidence failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

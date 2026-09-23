@@ -44,13 +44,15 @@
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
-import { db, emit, nowIso, createAgent, createTask, type AgentRow } from "../store";
+import { db, emit, nowIso, createAgent, createTask, getMeta, setMeta, type AgentRow } from "../store";
 import { chat } from "../providers";
 import { laneForRole } from "./governor";
 import { agentTag, canonicalGlm } from "./glm";
 import { memBlockEconomy } from "./memory";
 import { poolStatus } from "./pool";
 import { livenessBrief } from "./autonomy";
+import { tierForRole, policyCheckTool } from "./policy";
+import { cronBridge } from "./cron";
 
 // ── константы ─────────────────────────────────────────────────────
 const CHAT_ROOT = "/home/z/my-project/me2-workspace";
@@ -110,6 +112,10 @@ function ensureSchema(): void {
   `);
   // миграция существующей БД (G5, R37): колонка objective
   try { db.query("ALTER TABLE agent_sessions ADD COLUMN objective TEXT NOT NULL DEFAULT ''").run(); } catch { /* уже есть */ }
+  // миграция (R44, outcome-proof): исход сессии с доказательством (report_outcome)
+  try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_status TEXT").run(); } catch { /* уже есть */ }
+  try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_proof TEXT").run(); } catch { /* уже есть */ }
+  try { db.query("ALTER TABLE agent_sessions ADD COLUMN outcome_at TEXT").run(); } catch { /* уже есть */ }
   // хил двойного префикса в СЕССИЯХ (R37: R36 вылечил реестр, но не персистентные session-строки)
   try { db.query("UPDATE agent_sessions SET model=? WHERE model LIKE 'zai:zai:%'").run("zai:" + canonicalGlm()); } catch { /* noop */ }
   schemaReady = true;
@@ -121,6 +127,7 @@ export interface AgentChatSession {
   state: "IDLE" | "THINKING"; summary: string; compactions: number;
   turns_ok: number; turns_fail: number; fail_streak: number;
   last_error: string | null; model: string; objective: string; created_at: string; updated_at: string;
+  outcome_status: string | null; outcome_proof: string | null; outcome_at: string | null; // R44 outcome-proof
   role: string; // роль флота (из агента реестра): CHAT/SUPERVISOR/EXECUTOR/…
 }
 export interface AgentChatMessage {
@@ -142,6 +149,7 @@ function rowToSession(r: Record<string, unknown>): AgentChatSession {
     turns_ok: Number(r.turns_ok ?? 0), turns_fail: Number(r.turns_fail ?? 0),
     fail_streak: Number(r.fail_streak ?? 0), last_error: (r.last_error as string) ?? null,
     model: String(r.model ?? ""), objective: String(r.objective ?? ""), created_at: String(r.created_at), updated_at: String(r.updated_at),
+    outcome_status: (r.outcome_status as string) ?? null, outcome_proof: (r.outcome_proof as string) ?? null, outcome_at: (r.outcome_at as string) ?? null,
     role,
   };
 }
@@ -174,11 +182,61 @@ function safeJoin(cwd: string, p: string): string {
   if (!full.startsWith(resolve(cwd))) throw new Error("path_escape_blocked");
   return full;
 }
+/** Роль флота для сессии (policy T0/T1/T2 и laneForRole) — один запрос, кэш не нужен (дёшево). */
+export function sessionRoleOf(sessionId: string): string {
+  try {
+    const r = db.query("SELECT a.role AS role FROM agent_sessions s JOIN agents a ON a.id = s.agent_id WHERE s.id=?").get(sessionId) as { role?: string } | null;
+    return String(r?.role ?? "CHAT");
+  } catch { return "CHAT"; }
+}
+
+// ── R44: outcome-proof — исход работы чата С ДОКАЗАТЕЛЬСТВОМ ─────
+const OUTCOME_STATUSES = ["fixed", "done", "blocked"] as const;
+export type OutcomeStatus = (typeof OUTCOME_STATUSES)[number];
+
+/** Фиксация исхода чата (инструмент report_outcome): статус + доказательство → hash-chain. */
+export function outcomeReport(sessionId: string, status: string, proof: string): { ok: boolean; error?: string; status?: string } {
+  ensureSchema();
+  const st = String(status ?? "").trim().toLowerCase();
+  if (!OUTCOME_STATUSES.includes(st as OutcomeStatus)) return { ok: false, error: `status ∈ ${OUTCOME_STATUSES.join("|")}` };
+  const pf = String(proof ?? "").trim().slice(0, 1200);
+  if (!pf) return { ok: false, error: "proof_required — исход без доказательства не принимается" };
+  const r = qSession(sessionId);
+  if (!r) return { ok: false, error: "session_not_found" };
+  db.query("UPDATE agent_sessions SET outcome_status=?, outcome_proof=?, outcome_at=?, updated_at=? WHERE id=?").run(st, pf, nowIso(), nowIso(), sessionId);
+  emit("AGENT_CHAT_OUTCOME", { session_id: sessionId, status: st, proof_preview: pf.slice(0, 200), chars: pf.length }, String(r.agent_id), null);
+  return { ok: true, status: st };
+}
+
+const SUCCESS_CLAIM_RE = /(исправлен|починен|восстановлен|решен|решён|готово|завершено|fixed|done|works)/i;
+
+/**
+ * R44: чаты, отчитавшиеся об успехе в reply, но БЕЗ report_outcome —
+ * «COMPLETED ≠ решено» (урок reward hacking): супервизор требует proof.
+ */
+export function outcomePending(): Array<{ session_id: string; title: string; role: string; preview: string }> {
+  ensureSchema();
+  const rows = db.query(`
+    SELECT s.id, s.title, a.role, (
+      SELECT content FROM agent_messages m
+      WHERE m.session_id = s.id AND m.role='assistant' AND m.meta LIKE '%"kind":"reply"%'
+      ORDER BY m.id DESC LIMIT 1
+    ) AS last_reply
+    FROM agent_sessions s JOIN agents a ON a.id = s.agent_id
+    WHERE s.status='ACTIVE' AND s.outcome_status IS NULL
+      AND s.objective != ''
+  `).all() as Array<{ id: string; title: string; role: string; last_reply: string | null }>;
+  return rows
+    .filter((r) => r.last_reply && SUCCESS_CLAIM_RE.test(r.last_reply))
+    .map((r) => ({ session_id: r.id, title: r.title, role: r.role, preview: String(r.last_reply).slice(0, 120) }));
+}
 
 // ── инструменты чата (JSON-протокол, как worker, + chat-специфика) ─
 export type ChatToolName =
   | "list_dir" | "read_file" | "write_file" | "shell" | "web_search"
-  | "daemon_status" | "create_task" | "list_chats" | "chat_send" | "create_chat" | "set_objective" | "reply";
+  | "daemon_status" | "create_task" | "list_chats" | "chat_send" | "create_chat" | "set_objective" | "reply"
+  | "schedule_cron" | "list_crons" | "cancel_cron"   // G7 (R44): время из чатов
+  | "report_outcome";                                  // R44 outcome-proof
 const CHAT_TOOLS: Array<{ name: ChatToolName; description: string; args: Record<string, string> }> = [
   { name: "list_dir", description: "Список файлов workspace чата", args: { path: "string" } },
   { name: "read_file", description: "Прочитать файл из workspace чата", args: { path: "string" } },
@@ -191,6 +249,10 @@ const CHAT_TOOLS: Array<{ name: ChatToolName; description: string; args: Record<
   { name: "chat_send", description: "Отправить сообщение другому чату флота (межчатовая координация; супервизор увидит и отреагирует)", args: { session_id: "string", text: "string" } },
   { name: "create_chat", description: "Создать нового чата-агента флота (эластичное масштабирование, потолок 24)", args: { title: "string", role: "string" } },
   { name: "set_objective", description: "Долгоживущая ЦЕЛЬ чата: закрепить/обновить (супервизор может назначить другому, передав session_id)", args: { objective: "string", session_id: "string?" } },
+  { name: "schedule_cron", description: "G7: поставить себе повторяющееся задание — каждые N минут {every_minutes} или ежедневно {daily_time:'HH:MM'}; текст задания {text} ты выполняешь при каждом срабатывании", args: { every_minutes: "number?", daily_time: "HH:MM?", text: "string" } },
+  { name: "list_crons", description: "G7: мои cron-задания (расписание, следующий запуск, счётчик срабатываний)", args: {} },
+  { name: "cancel_cron", description: "G7: отменить своё cron-задание по id", args: { id: "number" } },
+  { name: "report_outcome", description: "R44: ИСХОД С ДОКАЗАТЕЛЬСТВОМ — итог работы: {status: fixed|done|blocked, proof: что именно сделано и как проверено}; уходит в hash-chain, виден супервизору и оператору", args: { status: "fixed|done|blocked", proof: "string" } },
   { name: "reply", description: "ФИНАЛЬНЫЙ ответ пользователю (завершает ход)", args: { text: "string" } },
 ];
 
@@ -262,6 +324,9 @@ export function chatSetObjective(sessionId: string, objective: string, opts: { b
 /** Синхронные инструменты — переиспользуются eval-харнесом (без сети). */
 export function execChatToolSync(name: ChatToolName, args: Record<string, unknown>, sessionId: string): string {
   const cwd = chatDir(sessionId);
+  // H2 (R44): policy-гейт T0/T1/T2 — запрет не молчит (POLICY_DENIED в hash-chain)
+  const pv = policyCheckTool(tierForRole(sessionRoleOf(sessionId)), name, sessionId);
+  if (!pv.ok) return `ERROR: ${pv.reason}`;
   try {
     switch (name) {
       case "write_file": {
@@ -303,8 +368,12 @@ export function execChatToolSync(name: ChatToolName, args: Record<string, unknow
         const r = chatSetObjective(target, String(args.objective ?? ""), { by: sessionId });
         return r.ok ? `OK: цель закреплена для ${target}: ${String(r.objective).slice(0, 80)}` : `ERROR: ${r.error}`;
       }
+      case "report_outcome": {
+        const r = outcomeReport(sessionId, String(args.status ?? ""), String(args.proof ?? ""));
+        return r.ok ? `OK: исход зафиксирован (${r.status}) — доказательство в hash-chain, супервизор и оператор уведомлены` : `ERROR: ${r.error}`;
+      }
       default:
-        return `ERROR: tool "${name}" требует async-контекст хода (shell/web_search/create_task) или неизвестен`;
+        return `ERROR: tool "${name}" требует async-контекст хода (shell/web_search/create_task/schedule_cron) или неизвестен`;
     }
   } catch (e) {
     return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
@@ -314,8 +383,33 @@ export function execChatToolSync(name: ChatToolName, args: Record<string, unknow
 /** Async-исполнение инструмента внутри хода. */
 async function execChatTool(name: ChatToolName, args: Record<string, unknown>, sessionId: string): Promise<string> {
   const cwd = chatDir(sessionId);
+  // H2 (R44): policy-гейт T0/T1/T2 — единый для sync/async путей
+  const tier = tierForRole(sessionRoleOf(sessionId));
+  const pv = policyCheckTool(tier, name, sessionId);
+  if (!pv.ok) return `ERROR: ${pv.reason}`;
   try {
     switch (name) {
+      case "schedule_cron": {
+        // G7: чат ставит себе задание по времени (ленивый импорт — разрываем цикл cron⇄agentchat)
+        const { cronAdd, cronList } = await import("./cron");
+        const r = cronAdd(sessionId, { every_minutes: args.every_minutes != null ? Number(args.every_minutes) : undefined, daily_time: args.daily_time != null ? String(args.daily_time) : undefined }, String(args.text ?? ""), { tier });
+        if (!r.ok) return `ERROR: ${r.error}`;
+        const mine = cronList(sessionId).filter((c) => c.status === "ACTIVE");
+        return `OK: расписание #${r.cron?.id} принято (${r.cron?.kind === "daily" ? `ежедневно в ${r.cron?.hhmm}` : `каждые ${r.cron?.every_minutes}м`}), следующий запуск ${r.cron?.next_run_at}. Активных заданий: ${mine.length}`;
+      }
+      case "list_crons": {
+        const { cronList } = await import("./cron");
+        const mine = cronList(sessionId);
+        if (!mine.length) return "(cron-заданий нет — schedule_cron поставит)";
+        return mine.map((c) => `#${c.id} ${c.status} ${c.kind === "daily" ? `daily ${c.hhmm}` : `every ${c.every_minutes}м`} · next=${c.next_run_at} · runs=${c.runs} · ${c.text.slice(0, 80)}`).join("\n");
+      }
+      case "cancel_cron": {
+        const { cronGet, cronCancel } = await import("./cron");
+        const c = cronGet(Number(args.id ?? 0));
+        if (!c) return "ERROR: cron_not_found";
+        if (c.session_id !== sessionId && tier !== "T1") return "ERROR: not_your_cron";
+        return cronCancel(c.id, sessionId) ? `OK: расписание #${c.id} отменено` : "ERROR: cron_not_active";
+      }
       case "shell":
         return await new Promise<string>((res) => {
           const proc = spawn("bash", ["-lc", String(args.command ?? "")], { cwd, timeout: SHELL_TIMEOUT_MS });
@@ -416,6 +510,11 @@ function systemPrompt(sess: AgentChatSession, role: string): string {
     `Ты можешь выполнять реальную работу (файлы, shell, поиск) и ставить задачи в workgraph daemon'а (create_task).`,
   ];
   if (sess.objective) base.push(``, `Твоя ДОЛГОЖИВУЩАЯ ЦЕЛЬ (objective) — держи её в голове, каждый ход приближает её:\n${sess.objective}`);
+  base.push(
+    ``,
+    `ДИСЦИПЛИНА ИСХОДА (R44): заявленный успех без доказательства не принимается системой — завершая работу, зафиксируй итог инструментом report_outcome {status: fixed|done|blocked, proof}.`,
+    `ВРЕМЯ (G7): повторяющиеся обязанности ставь себе schedule_cron (например проверки каждые 10м) — демон будет будить тебя по расписанию.`,
+  );
   if (role === "SUPERVISOR") {
     base.push(
       ``,
@@ -705,7 +804,7 @@ export function supervisorEnsure(title: string = SUPERVISOR_TITLE): { created: b
 }
 
 /** Тик супервизоров: перерождение мёртвых + автономные ходы (по расписанию или при входящем межчате). */
-export function agentChatSupervisorTick(opts: { force?: boolean } = {}): { ensured: { created: boolean; id: string | null }; kicked: string[]; supervisors: number } {
+export function agentChatSupervisorTick(opts: { force?: boolean } = {}): { ensured: { created: boolean; id: string | null }; kicked: string[]; supervisors: number; outcome_nudged: string[] } {
   ensureSchema();
   const ensured = supervisorEnsure();
   const sups = qSupervisors().map(rowToSession);
@@ -723,5 +822,29 @@ export function agentChatSupervisorTick(opts: { force?: boolean } = {}): { ensur
     kicked.push(sup.id);
     agentChatTurnAsync(sup.id, text);
   }
-  return { ensured, kicked, supervisors: sups.length };
+  // R44 outcome-proof: успех-без-доказательства — супервизор требует report_outcome (cooldown 10м/чат)
+  const outcome_nudged: string[] = [];
+  for (const p of outcomePending().slice(0, 3)) {
+    const key = `outcome_nudge_${p.session_id}`;
+    const last = Number(getMeta(key) ?? "0");
+    if (Date.now() - last < 10 * 60_000) continue;
+    setMeta(key, String(Date.now()));
+    emit("AGENT_CHAT_OUTCOME_REQUIRED", { session_id: p.session_id, preview: p.preview }, null, null);
+    agentChatTurnAsync(p.session_id, `Ты отчитался об успехе («${p.preview.slice(0, 80)}»), но исход НЕ зафиксирован. Урок системы: заявление ≠ решение. Вызови инструмент report_outcome {status: fixed|done|blocked, proof: что именно сделано и как проверено}. Если работа не завершена — честно продолжи.`);
+    outcome_nudged.push(p.session_id);
+  }
+  return { ensured, kicked, supervisors: sups.length, outcome_nudged };
 }
+
+// G7-мост: cron.ts шлёт сообщения и будит чаты без цикла импортов (cron импортирует только типы)
+cronBridge({
+  chatAppend,
+  turnAsync: (sid, text) => agentChatTurnAsync(sid, text),
+  sessionState: (sid) => {
+    const r = qSession(sid);
+    if (!r) return "missing";
+    const s = rowToSession(r);
+    if (s.status === "CLOSED") return "CLOSED";
+    return s.state;
+  },
+});

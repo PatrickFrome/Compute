@@ -21,6 +21,7 @@ type Session = {
   state: "IDLE" | "THINKING"; summary: string; compactions: number;
   turns_ok: number; turns_fail: number; fail_streak: number; model: string; role: string;
   objective: string; created_at: string; updated_at: string;
+  outcome_status: string | null; outcome_proof: string | null; outcome_at: string | null;
 };
 type Msg = { id: number; session_id: string; role: "user" | "assistant" | "tool" | "system"; content: string; meta: Record<string, unknown>; at: string };
 type Status = { total: number; active: number; thinking: number; supervisors: number; turns_ok: number; turns_fail: number; compactions: number; degraded: number; in_flight: number };
@@ -65,6 +66,7 @@ export default function AgentChatPanel() {
   const boxRef = useRef<HTMLDivElement>(null);
   const riverRef = useRef<HTMLDivElement>(null);
   const titlesRef = useRef<Record<string, string>>({});
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -93,6 +95,18 @@ export default function AgentChatPanel() {
   }, [sel, thinking, loadMsgs]);
   useEffect(() => { boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight }); }, [msgs]);
   useEffect(() => { riverRef.current?.scrollTo({ top: 0 }); }, [river]);
+
+  // R44 G6: связка с сеткой флота — клик по карточке открывает чат прямо здесь (браузер сам держит чаты открытыми)
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
+      if (!id) return;
+      setSel(id);
+      wrapRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    };
+    window.addEventListener("me2:select-chat", onSelect as EventListener);
+    return () => window.removeEventListener("me2:select-chat", onSelect as EventListener);
+  }, []);
 
   // ── G3: река рассуждений — WS-канал daemon (все чаты одновременно, real-time) ──
   useEffect(() => {
@@ -168,7 +182,7 @@ export default function AgentChatPanel() {
   const titleOf = (sid: string) => titlesRef.current[sid]?.slice(0, 18) ?? sid.slice(0, 10);
 
   return (
-    <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" data-testid="agentchat-panel" aria-label="Флот агентных чатов">
+    <div ref={wrapRef} className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" data-testid="agentchat-panel" aria-label="Флот агентных чатов">
       {/* заголовок + чипы */}
       <div className="flex items-center gap-2">
         <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="G1/G2/ME35: флот из полноценных агентных чатов (пересборка механизма старого Electron-браузера: вкладки chat.z.ai + fleet leases → постоянные чат-сессии daemon'а). Ход = tool-цикл (файлы/shell/поиск/create_task/chat_send) с компакцией контекста; каждый ход — в hash-chain evidence. Вечно-живущие супервизоры координируют флот (тик 60с, перерождение)">
@@ -216,6 +230,7 @@ export default function AgentChatPanel() {
               {s.role === "SUPERVISOR" && <Shield className="h-2.5 w-2.5" aria-hidden />}
               {s.title.slice(0, 20)}
               <span className="text-zinc-600">{s.turns_ok}</span>
+              {s.outcome_status === "fixed" || s.outcome_status === "done" ? <span className="text-emerald-400" title={`исход: ${s.outcome_proof?.slice(0, 80) ?? s.outcome_status}`}>✓proof</span> : s.outcome_status === "blocked" ? <span className="text-rose-400" title="честно заблокирован">blocked</span> : null}
             </button>
           ))}
         </div>
