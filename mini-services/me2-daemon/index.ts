@@ -18,11 +18,12 @@ import {
   createAgent, createTask, nowIso, setTaskReflectionLlm,
 } from "./store";
 import { listProviders } from "./providers";
-import { startMasterLoop } from "./worker";
+import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop } from "./src/obsv";
+import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
 import { listWorktrees, repoHead, rerereStatus, rerereEnable, rerereRemaining } from "./src/worktrees";
@@ -34,7 +35,7 @@ import {
   memSearch, memWrite, memDelete, memoryStatus, memBlock, onMemoryEvent,
 } from "./src/memory";
 import { brainThink, brainStatus } from "./src/brain";
-import { fleetList, fleetBeat, fleetSelfTick, fleetGc } from "./src/fleet";
+import { fleetList, fleetBeat, fleetSelfTick, fleetGc, fleetTick } from "./src/fleet";
 import { suCheck, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
@@ -42,7 +43,7 @@ import { senseNow, senseList, senseAct } from "./src/sense";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.21.0";
+const VERSION = "0.22.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);
@@ -306,6 +307,22 @@ const restServer = createServer(async (req, res) => {
       return json(res, 400, { ok: false, error: "op_required: attach|reset|stop" });
     }
 
+    // ── R23: EFFECT-плоскость (5 статусов + durable fences, вне шины — 47/47) ──
+    if (path === "/browser/effect" && req.method === "GET") {
+      return json(res, 200, { ok: true, fences: fenceList(60), stats: verdictStats() });
+    }
+    if (path === "/browser/effect" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "clear") {
+        const key = String(body.effect_key ?? "");
+        if (!key) return json(res, 400, { ok: false, error: "effect_key_required" });
+        const cleared = fenceClear(key, body.note ? String(body.note) : undefined);
+        return json(res, cleared ? 200 : 404, { ok: cleared, op: "clear", effect_key: key });
+      }
+      return json(res, 400, { ok: false, error: "op_required: clear" });
+    }
+
     // ── command bus: единственная точка мутаций ──
     if (path === "/commands" && req.method === "POST") {
       const body = await readBody(req);
@@ -521,10 +538,13 @@ setInterval(() => {
 }, 1000);
 setInterval(() => {
   try { reapStaleWorkers(); } catch { /* noop */ }
+  try { watchdogStaleTasks(); } catch { /* noop */ }
 }, 30_000);
 // R19: self-node в fleet (liveness-проекция, урок CP-W1) + GC LOST-нод раз в час
 fleetSelfTick(VERSION);
 setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_000);
+// R23: Outcome River (деградации freshness = исходы) + reliability-ordered retirement
+setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 setTimeout(() => { try { suCheck(VERSION); } catch { /* noop */ } }, 4_000);

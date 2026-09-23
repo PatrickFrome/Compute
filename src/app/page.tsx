@@ -1165,6 +1165,7 @@ export default function MissionControl() {
   const [obsv, setObsv] = useState<ObsvData | null>(null);
   const [obsvBusy, setObsvBusy] = useState(false);
   const [obsvOpen, setObsvOpen] = useState(false);
+  const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
   const [memQ, setMemQ] = useState("");
@@ -1211,7 +1212,8 @@ export default function MissionControl() {
         body: JSON.stringify({ key, action: "click" }),
       }).then((x) => x.json());
       if (res?.ok) {
-        toast({ title: `sense: ${key.slice(0, 24)} → ${res.target?.ref ?? "?"}`, description: `ревизия ${String(res.verify?.before ?? "?").slice(0, 8)} → ${String(res.verify?.after ?? "?").slice(0, 8)}${res.verify?.revision_changed ? " · изменилась ✓" : " · без изменений"}` });
+        setLastEffect(String(res.effect?.status ?? "—"));
+        toast({ title: `sense: ${key.slice(0, 24)} → ${res.target?.ref ?? "?"}`, description: `ревизия ${String(res.verify?.before ?? "?").slice(0, 8)} → ${String(res.verify?.after ?? "?").slice(0, 8)}${res.verify?.revision_changed ? " · изменилась ✓" : " · без изменений"} · effect: ${String(res.effect?.status ?? "—")}` });
       } else toast({ title: `sense ✗ ${String(res?.error ?? "ошибка").slice(0, 70)}`, variant: "destructive" });
     } catch { toast({ title: "sense ✗ daemon недоступен", variant: "destructive" }); }
     finally { setSenseBusy(false); void loadSense(true); }
@@ -2350,6 +2352,9 @@ export default function MissionControl() {
                     <span className="min-w-0 truncate font-mono text-[9px] text-zinc-600" title={sense?.rows[0]?.url ? `rev ${sense.rows[0].revision} · ${sense.rows[0].url}` : "перцепция ещё не снималась"}>
                       {sense ? `${sense.rows[0]?.targets_count ?? 0} целей · rev ${sense.rows[0]?.revision ?? "—"}` : "нет данных"}
                     </span>
+                    {lastEffect && (
+                      <span data-testid="effect-status" className={`shrink-0 rounded border px-1 py-0.5 font-mono text-[9px] ${lastEffect === "CONFIRMED" ? "border-lime-800/50 text-lime-300" : lastEffect === "AMBIGUOUS" || lastEffect === "FENCED" ? "border-rose-900/60 text-rose-300" : "border-amber-900/50 text-amber-300"}`} title="ME19: вердикт эффекта последнего sense-действия (легаси-эпистемология; AMBIGUOUS ставит durable fence)">{lastEffect}</span>
+                    )}
                     <button type="button" onClick={() => { void loadSense(true); }} disabled={senseBusy} aria-label="Снять свежую перцепцию страницы" className="ml-auto shrink-0 rounded border border-lime-800/50 px-1.5 py-0.5 font-mono text-[9px] text-lime-300/90 transition hover:bg-zinc-800 disabled:opacity-40">снять</button>
                   </div>
                   {sense?.rows[0]?.targets?.length ? (

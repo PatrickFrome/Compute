@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { db, emit } from "../store";
 import { recordSpan } from "./otel";
 import { ab, browserTabs, type BrowserTab } from "../commands";
+import { effectVerdict, fenceCheck } from "./effect";
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS browser_sense (
@@ -127,13 +128,15 @@ function resolve(targets: SemanticTarget[], key: string): SemanticTarget | null 
 }
 
 /**
- * Act с verify (порт CAPTURE→act→verify): резолв key → действие → re-sense → вердикт.
- * Никогда не мутирует вне браузера; ошибки резолва/действия — throw (REST → 400/502).
+ * Act с verify (порт CAPTURE→act→verify) + effect-эпистемология легаси (R23):
+ * 5 статусов (CONFIRMED/NO_EFFECT_PROVEN/FAILED_PRE_EFFECT/FENCED/AMBIGUOUS)
+ * + one-attempt durable fences на AMBIGUOUS. Никогда не мутирует вне браузера.
  */
 export async function senseAct(input: {
   key: string; action: "click" | "type" | "press"; text?: string; tab?: string;
 }): Promise<{
   ok: true; acted: string; target: SemanticTarget | null;
+  effect: { status: string; fenced_now: boolean; evidence: Record<string, unknown> };
   verify: { revision_changed: boolean; target_alive: boolean; before: string; after: string };
 }> {
   const t0 = Date.now();
@@ -142,52 +145,93 @@ export async function senseAct(input: {
   let before = input.tab ? rows.find((r) => r.tab === input.tab) ?? null : rows[0] ?? null;
   let prevTargets = before?.targets ?? [];
   let target = resolve(prevTargets, input.key);
+
   // Самозаживление (урок легаси: перцепция перед мутацией обязана быть свежей —
   // state_revision_id): цель не в кэше → свежий CAPTURE и повторный резолв.
   if (!target && input.action !== "press") {
-    const fresh = await senseNow(input.tab);
-    before = fresh;
-    prevTargets = fresh.targets;
-    target = resolve(prevTargets, input.key);
-    if (!target) throw new Error(`sense_target_not_found: ${input.key}`);
+    try {
+      const fresh = await senseNow(input.tab);
+      before = fresh;
+      prevTargets = fresh.targets;
+      target = resolve(prevTargets, input.key);
+    } catch (e) {
+      const v = effectVerdict({
+        effectKey: `${input.action}:${input.key}`, preOk: false,
+        revisionChanged: false, targetAlive: false,
+        preError: `fresh_capture_failed: ${(e as Error).message}`,
+      });
+      return { ok: true, acted: input.action, target: null, effect: v, verify: { revision_changed: false, target_alive: false, before: "—", after: "—" } };
+    }
+    if (!target) {
+      const v = effectVerdict({
+        effectKey: `${input.action}:${input.tab ?? before?.tab ?? "default"}:${input.key}`, preOk: false,
+        revisionChanged: false, targetAlive: false, preError: `sense_target_not_found: ${input.key}`,
+      });
+      return { ok: true, acted: input.action, target: null, effect: v, verify: { revision_changed: false, target_alive: false, before: before?.revision ?? "—", after: before?.revision ?? "—" } };
+    }
   }
+
+  // идентичность эффекта (exact identity, порт легаси): действие + вкладка + цель
+  const effectKey = input.action === "press"
+    ? `press:${input.key}`
+    : `${input.action}:${input.tab ?? before?.tab ?? "default"}:${target?.ref ?? input.key}`;
+
+  // durable fence ДО физического повтора: повтор AMBIGUOUS-эффекта отвергается (zero-authority)
+  const preFence = fenceCheck(effectKey);
+  if (preFence.fenced) {
+    const v = effectVerdict({ effectKey, preOk: false, revisionChanged: false, targetAlive: false, evidence: { fenced_pre_action: true } });
+    recordSpan("browser.sense_act", { "me2.ms": Date.now() - t0, "me2.action": input.action, "me2.status": "FENCED" }, t0);
+    return { ok: true, acted: input.action, target, effect: v, verify: { revision_changed: false, target_alive: false, before: before?.revision ?? "—", after: before?.revision ?? "—" } };
+  }
+
   const refArg = target ? `@${target.ref}` : input.key; // ref из легаси-семантики: @eN
-
-  if (input.action === "click") {
-    const r = await ab(["click", refArg]);
-    if (r.code !== 0) throw new Error(`sense_click_failed_code_${r.code}: ${r.out.slice(0, 140)}`);
-  } else if (input.action === "type") {
-    const text = String(input.text ?? "");
-    if (!text) throw new Error("text_required_for_type");
-    const r = await ab(["fill", refArg, text]);
-    if (r.code !== 0) throw new Error(`sense_type_failed_code_${r.code}: ${r.out.slice(0, 140)}`);
-  } else {
-    const r = await ab(["press", input.key || "Escape"]);
-    if (r.code !== 0) throw new Error(`sense_press_failed_code_${r.code}: ${r.out.slice(0, 140)}`);
+  let acted = false;
+  try {
+    if (input.action === "click") {
+      const r = await ab(["click", refArg]);
+      if (r.code !== 0) throw new Error(`sense_click_failed_code_${r.code}: ${r.out.slice(0, 140)}`);
+    } else if (input.action === "type") {
+      const text = String(input.text ?? "");
+      if (!text) throw new Error("text_required_for_type");
+      const r = await ab(["fill", refArg, text]);
+      if (r.code !== 0) throw new Error(`sense_type_failed_code_${r.code}: ${r.out.slice(0, 140)}`);
+    } else {
+      const r = await ab(["press", input.key || "Escape"]);
+      if (r.code !== 0) throw new Error(`sense_press_failed_code_${r.code}: ${r.out.slice(0, 140)}`);
+    }
+    acted = true;
+  } catch (e) {
+    // FAILED_PRE_EFFECT: действие не ушло — повтор безопасен (fence не ставится)
+    const v = effectVerdict({ effectKey, preOk: false, revisionChanged: false, targetAlive: false, preError: (e as Error).message });
+    recordSpan("browser.sense_act", { "me2.ms": Date.now() - t0, "me2.action": input.action, "me2.status": "FAILED_PRE_EFFECT" }, t0);
+    return { ok: true, acted: input.action, target, effect: v, verify: { revision_changed: false, target_alive: false, before: before?.revision ?? "—", after: before?.revision ?? "—" } };
   }
 
-  // VERIFY: re-sense и сравнение ревизий + живость цели
+  // VERIFY: re-sense и сравнение ревизий + живость цели + смена URL (навигация)
   await new Promise((res) => setTimeout(res, 400)); // дать странице отреагировать
   const after = await senseNow(input.tab);
+  const revisionChanged = after.revision !== before?.revision;
+  const urlChanged = Boolean(before?.url) && after.url !== before?.url;
   const alive = target ? after.targets.some((t) => t.ref === target.ref) : false;
+  const v = effectVerdict({
+    effectKey, preOk: acted, revisionChanged, targetAlive: alive,
+    urlChanged, hadTarget: Boolean(target),
+    evidence: { before_url: (before?.url ?? "").slice(0, 120), after_url: (after.url ?? "").slice(0, 120) },
+  });
   emit("BROWSER_SENSE_ACTED", {
     action: input.action, key: input.key, resolved: target?.ref ?? null,
-    revision_changed: after.revision !== before?.revision, target_alive: alive,
+    revision_changed: revisionChanged, target_alive: alive, effect: v.status,
   }, null, null);
   recordSpan("browser.sense_act", {
     "me2.ms": Date.now() - t0, "me2.action": input.action,
-    "me2.revision_changed": after.revision !== before?.revision, "me2.alive": alive,
+    "me2.revision_changed": revisionChanged, "me2.alive": alive, "me2.status": v.status,
   }, t0);
   return {
     ok: true,
     acted: input.action,
     target,
-    verify: {
-      revision_changed: after.revision !== before?.revision,
-      target_alive: alive,
-      before: before?.revision ?? "—",
-      after: after.revision,
-    },
+    effect: v,
+    verify: { revision_changed: revisionChanged, target_alive: alive, before: before?.revision ?? "—", after: after.revision },
   };
 }
 

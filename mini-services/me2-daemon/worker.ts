@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "n
 import { resolve, join, normalize, dirname } from "node:path";
 import ZAI from "z-ai-web-dev-sdk";
 import {
-  listAgents, nextReadyTask, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
+  listAgents, listTasks, nextReadyTask, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
 import { chat } from "./providers";
 import { recordSpan } from "./src/otel";
@@ -17,6 +17,9 @@ const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
 const MAX_TOOL_OUTPUT = 4000;
 const SHELL_TIMEOUT_MS = 30_000;
+// R23 (CP-W1, порт a452e3e): жёсткий дедлайн цикла задачи — стенные часы, не шаги;
+// зависший LLM-вызов/инструмент не должен держать lease вечно
+const TASK_HARD_DEADLINE_MS = 10 * 60_000;
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
 type ToolDef = { name: string; description: string; args: Record<string, string> };
@@ -274,6 +277,8 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
   setAgentStatus(agent.id, "BUSY");
   updateTask(task.id, { status: "RUNNING", agent_id: agent.id });
   emit("TASK_LEASED", { title: task.title, agent: agent.id, model: agent.model }, agent.id, task.id);
+  // CP-W1 lease liveness: точка отсчёта lease для телеметрии и дедлайна
+  const leaseStartedAt = Date.now();
 
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: systemPrompt(agent) },
@@ -291,7 +296,16 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
 
   try {
     let result: string | null = null;
+    let deadlineBreached = false;
     for (let step = 1; step <= task.max_steps; step++) {
+      // CP-W1: cycle hard deadline — стенные часы важнее счётчика шагов
+      const leaseAgeMs = Date.now() - leaseStartedAt;
+      if (leaseAgeMs > TASK_HARD_DEADLINE_MS) {
+        deadlineBreached = true;
+        recordSpan("lease.liveness", { "me2.task_id": task.id, "me2.step": step, "me2.lease_age_ms": leaseAgeMs, "me2.breach": true }, Date.now(), { status: "ERROR", message: "hard_deadline_exceeded" });
+        break;
+      }
+      recordSpan("lease.liveness", { "me2.task_id": task.id, "me2.step": step, "me2.lease_age_ms": leaseAgeMs }, Date.now());
       emit("STEP_START", { step, max_steps: task.max_steps }, agent.id, task.id);
       const reply = await chat(agent.model, messages, { temperature: 0.4 });
       const parsed = extractJson(reply);
@@ -329,11 +343,12 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       updateTask(task.id, { steps: step });
     }
     if (result === null) {
-      const refl = buildReflection(task, "max_steps_exhausted", { toolCalls, parseFails });
-      updateTask(task.id, { status: "FAILED", error: "max_steps_exhausted", reflection: refl });
+      const errMsg = deadlineBreached ? "hard_deadline_exceeded" : "max_steps_exhausted";
+      const refl = buildReflection(task, errMsg, { toolCalls, parseFails });
+      updateTask(task.id, { status: "FAILED", error: errMsg, reflection: refl });
       let cause: string | undefined;
       try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
-      emit("TASK_FAILED", { error: "max_steps_exhausted", cause }, agent.id, task.id);
+      emit("TASK_FAILED", { error: errMsg, cause, lease_age_ms: Date.now() - leaseStartedAt }, agent.id, task.id);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -349,6 +364,30 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * R23 (CP-W1 watchdog, порт a452e3e): RUNNING-задача без прогресса ≥5 мин (зависший
+ * агент или сирота после рестарта daemon) честно проваливается — lease не живёт дольше
+ * proof-of-progress. Повтор безопасен: FAILED_PRE_EFFECT-семантика на уровне задачи.
+ */
+export function watchdogStaleTasks(): { reaped: number; ids: string[] } {
+  const STALE_MS = 5 * 60_000;
+  const ids: string[] = [];
+  try {
+    for (const t of listTasks()) {
+      if (t.status !== "RUNNING") continue;
+      const upd = Date.parse(t.updated_at);
+      if (Number.isFinite(upd) && Date.now() - upd <= STALE_MS) continue;
+      const refl = buildReflection(t, "stale_worker_watchdog", {});
+      updateTask(t.id, { status: "FAILED", error: "stale_worker_watchdog", reflection: refl });
+      emit("TASK_FAILED", { error: "stale_worker_watchdog", agent: t.agent_id, stale_s: Math.round((Date.now() - upd) / 1000) }, t.agent_id, t.id);
+      recordSpan("watchdog.stale_worker", { "me2.task_id": t.id }, Date.now(), { status: "ERROR", message: "stale_worker_watchdog" });
+      if (t.agent_id) { try { setAgentStatus(t.agent_id, "IDLE"); } catch { /* noop */ } }
+      ids.push(t.id);
+    }
+  } catch { /* watchdog не роняет master loop */ }
+  return { reaped: ids.length, ids };
+}
 
 /** Master loop: lease READY-задач на свободных агентов. */
 export function startMasterLoop(intervalMs = 400) {

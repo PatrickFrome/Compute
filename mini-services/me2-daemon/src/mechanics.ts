@@ -19,6 +19,8 @@ import { roadmapVerdict } from "./roadmap";
 import { brainThoughts } from "./brain";
 import { senseStatus } from "./sense";
 import { obsvStatus } from "./obsv";
+import { verdictStats } from "./effect";
+import { fleetOutcomeCount } from "./fleet";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -57,7 +59,7 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     {
       id: "ME3", name: "Agent loop: воркеры + задачи", old_ref: "M2 elastic governor",
       verdict: agents.length > 0 ? "WORKS" : "CAVEAT",
-      evidence: `agents=${agents.length}, tasks=${tasks.length}, ready=${tasks.filter((t) => t.status === "READY").length}`,
+      evidence: `agents=${agents.length}, tasks=${tasks.length}, ready=${tasks.filter((t) => t.status === "READY").length}; CP-W1: hard_deadline=600s, watchdog_stale=300s, lease_liveness_span=on`,
     },
     {
       id: "ME4", name: "MEMORY: эпизоды/семантика/процедуры в SQLite", old_ref: "M13 episodic memory (CAVEAT→исправлен)",
@@ -70,9 +72,9 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       evidence: `thoughts=${thoughts.length}, self-probe eventloop/db в /brain`,
     },
     {
-      id: "ME6", name: "FLEET: реестр нод + transport-proof + freshness", old_ref: "M2/M3/M8/M10 fleet",
+      id: "ME6", name: "FLEET: реестр нод + transport-proof + freshness + reliability retirement", old_ref: "M2/M3/M8/M10 fleet + T3-9 Outcome River",
       verdict: fleet.self && fleet.self.freshness === "ACTIVE" ? "WORKS" : "CAVEAT",
-      evidence: `nodes=${fleet.nodes.length}, active=${fleet.capacity.active}, verified=${fleet.capacity.verified}, backlog=${fleet.backlog.ready} ready`,
+      evidence: `nodes=${fleet.nodes.length}, active=${fleet.capacity.active}, verified=${fleet.capacity.verified}, backlog=${fleet.backlog.ready} ready; outcome_river=${fleetOutcomeCount().total} (fails=${fleetOutcomeCount().fails}), grace=120s, retire=worst-first`,
     },
     {
       id: "ME7", name: "SELF-UPDATE: check/apply ff-only + journal", old_ref: "M15 self-update (hint→barrier→rollback)",
@@ -132,7 +134,12 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     {
       id: "ME18", name: "CDP network/console sensors (Chrome DevTools MCP parity)", old_ref: "—",
       verdict: obsvStatus().attached && obsvStatus().captured > 0 ? "WORKS" : "CAVEAT",
-      evidence: `obsv: attached=${obsvStatus().attached}, captured net+con+exc=${obsvStatus().captured}, buffers=${JSON.stringify(obsvStatus().buffers)}; GET /browser/obsv`,
+      evidence: `obsv: attached=${obsvStatus().attached}, captured net+con+exc=${obsvStatus().captured}, gen=${obsvStatus().generation}, target=${(obsvStatus().target_info?.target_id ?? "—").slice(0, 12)}; GET /browser/obsv`,
+    },
+    {
+      id: "ME19", name: "Effect epistemology (5 статусов + one-attempt durable fences)", old_ref: "a2 effect-статусы + markAmbiguousContinuationAttempt",
+      verdict: verdictStats().total > 0 ? "WORKS" : "CAVEAT",
+      evidence: `verdicts=${verdictStats().total} by=${JSON.stringify(verdictStats().by_status)}, fences_active=${verdictStats().fences_active}; POST /browser/effect {op:clear} — только оператор`,
     },
   ];
 

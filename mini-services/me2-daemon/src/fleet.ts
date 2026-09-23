@@ -80,6 +80,7 @@ export function fleetList(): {
     freshness: freshnessOf(r.last_seen),
     verified: Boolean(r.proof),
     age_s: Math.round((Date.now() - r.last_seen) / 1000),
+    reliability: reliabilityOf(r.id),
   }));
   const self = nodes.find((n) => n.kind === "daemon") ?? null;
   const ready = listTasks().filter((t) => t.status === "READY").length;
@@ -110,6 +111,98 @@ export function fleetSelfTick(version: string): void {
       meta: { pid: process.pid },
     });
   } catch { /* noop */ }
+}
+
+// ── R23: Outcome River + reliability-ordered retirement (порт T3-9 легаси) ──
+// Каждая нода пишет исходы (ok = беат в ACTIVE-окне, fail = деградация freshness).
+// Retirement при давлении на ёмкость — по НАИХУДШЕЙ надёжности, с grace-окном после
+// недавнего отказа (не казнить только что споткнувшегося: «grace before retire»).
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS fleet_outcomes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  node_id TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  note TEXT,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fleet_outcomes_node ON fleet_outcomes(node_id, at);
+`);
+
+const OUTCOME_CAP = 4000;
+const GRACE_AFTER_FAIL_MS = 120_000;
+
+/** Записать исход ноды (ok/fail). Outcome River — только добавление, капится. */
+export function fleetOutcome(nodeId: string, ok: boolean, note?: string): void {
+  db.query(`INSERT INTO fleet_outcomes (node_id, outcome, note, at) VALUES (?,?,?,?)`)
+    .run(nodeId, ok ? "ok" : "fail", note ? String(note).slice(0, 120) : null, Date.now());
+  db.query(`DELETE FROM fleet_outcomes WHERE id <= (SELECT MAX(id) FROM fleet_outcomes) - ?`).run(OUTCOME_CAP);
+}
+
+export interface Reliability {
+  ok: number; fail: number; ratio: number;
+  consecutive_fails: number; last_fail_at: number | null;
+  in_grace: boolean; grade: "solid" | "usable" | "shaky" | "poor" | "unknown";
+}
+
+/** Надёжность ноды по последним исходам ( Outcome River → score). */
+export function reliabilityOf(nodeId: string, window = 50): Reliability {
+  const rows = db.query(`SELECT outcome, at FROM fleet_outcomes WHERE node_id=? ORDER BY at DESC LIMIT ?`)
+    .all(nodeId, window) as Array<{ outcome: string; at: number }>;
+  if (!rows.length) return { ok: 0, fail: 0, ratio: 1, consecutive_fails: 0, last_fail_at: null, in_grace: false, grade: "unknown" };
+  const ok = rows.filter((r) => r.outcome === "ok").length;
+  const fail = rows.length - ok;
+  let consecutive = 0;
+  for (const r of rows) { if (r.outcome !== "ok") consecutive++; else break; }
+  const lastFail = rows.find((r) => r.outcome === "fail")?.at ?? null;
+  const ratio = rows.length ? ok / rows.length : 1;
+  const inGrace = lastFail !== null && Date.now() - lastFail < GRACE_AFTER_FAIL_MS;
+  const grade: Reliability["grade"] =
+    rows.length < 3 ? "unknown" : ratio >= 0.95 ? "solid" : ratio >= 0.75 ? "usable" : ratio >= 0.5 ? "shaky" : "poor";
+  return { ok, fail, ratio, consecutive_fails: consecutive, last_fail_at: lastFail, in_grace: inGrace, grade };
+}
+
+const _lastFreshness = new Map<string, FleetState>();
+
+/** ТикOutcome River: деградация freshness = fail-исход; давление на ёмкость = retire worst-first. */
+export function fleetTick(): { recorded: number; retired: Array<{ id: string; grade: string }> } {
+  let recorded = 0;
+  const nodes = db.query(`SELECT * FROM fleet_nodes`).all() as FleetNodeRow[];
+  for (const n of nodes) {
+    const fresh = freshnessOf(n.last_seen);
+    const prev = _lastFreshness.get(n.id);
+    if (prev && prev !== fresh && (fresh === "STALE" || fresh === "LOST")) {
+      fleetOutcome(n.id, false, `freshness ${prev}→${fresh}`);
+      recorded++;
+    } else if (prev && prev !== "ACTIVE" && fresh === "ACTIVE") {
+      fleetOutcome(n.id, true, `freshness ${prev}→ACTIVE`);
+      recorded++;
+    }
+    _lastFreshness.set(n.id, fresh);
+  }
+  // давление на ёмкость: ACTIVE сверх потолка → уволить худших по надёжности (grace защищает)
+  const active = nodes.filter((n) => freshnessOf(n.last_seen) === "ACTIVE" && n.kind !== "daemon");
+  const ceiling = 64;
+  const retired: Array<{ id: string; grade: string }> = [];
+  if (active.length > ceiling) {
+    const ordered = active
+      .map((n) => ({ n, rel: reliabilityOf(n.id) }))
+      .filter((x) => !x.rel.in_grace && x.rel.grade !== "unknown")
+      .sort((a, b) => a.rel.ratio - b.rel.ratio);
+    for (const x of ordered.slice(0, active.length - ceiling)) {
+      db.query(`DELETE FROM fleet_nodes WHERE id=?`).run(x.n.id);
+      emit("FLEET_RETIRED", { id: x.n.id, reason: "capacity_pressure_worst_reliability", grade: x.rel.grade, ratio: x.rel.ratio });
+      retired.push({ id: x.n.id, grade: x.rel.grade });
+    }
+  }
+  return { recorded, retired };
+}
+
+/** Счётчик исходов (для evidence-строк механик). */
+export function fleetOutcomeCount(): { total: number; fails: number } {
+  const t = db.query(`SELECT COUNT(*) AS n FROM fleet_outcomes`).get() as { n: number };
+  const f = db.query(`SELECT COUNT(*) AS n FROM fleet_outcomes WHERE outcome='fail'`).get() as { n: number };
+  return { total: Number(t.n), fails: Number(f.n) };
 }
 
 /** GC: LOST-ноды старше 24ч удаляются (реестр не растёт бесконечно). */

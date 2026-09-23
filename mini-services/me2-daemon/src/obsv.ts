@@ -14,7 +14,7 @@
  *  - авто-реаттач при смерти ws; REST-роуты вне шины (47/47 инвариант).
  */
 
-import { discoverCdp, wsOpen } from "./screencast";
+import { discoverCdp, wsOpen, cdpCall } from "./screencast";
 
 const NET_CAP = 400;
 const CON_CAP = 250;
@@ -39,6 +39,10 @@ const pending = new Map<string, { at: number; entry: ObsvNetEntry | null }>(); /
 let wanted = false;          // колектор нужен (лениво, по первому запросу)
 let attached = false;
 let currentTarget: string | null = null;
+// R23 (identity chain, порт легаси): точная идентичность цели + поколение сессии —
+// вырос на каждом ре-аттаче; агент может отличить «та же вкладка» от «новая инкарнация»
+let targetInfo: { target_id: string; url: string; title: string; type: string } | null = null;
+let attachGeneration = 0;
 let totals = { net: 0, con: 0, exc: 0 };
 let lastEventAt = 0;
 let loopStarted = false;
@@ -119,6 +123,18 @@ async function attachOnce(): Promise<boolean> {
   };
   ws.addEventListener("message", (ev: MessageEvent) => onMsg(ev.data));
   ws.addEventListener("close", () => { attached = false; currentTarget = null; }, { once: true });
+  // identity chain: точная цель (не URL/title-авторитет — TargetInfo от CDP) + поколение
+  try {
+    const ti = (await cdpCall(ws, "Target.getTargetInfo", { targetId: info.targetId }, 3000)) as { targetInfo?: Record<string, unknown> };
+    const t = (ti.targetInfo ?? {}) as Record<string, unknown>;
+    targetInfo = {
+      target_id: String(t.targetId ?? info.targetId).slice(0, 64),
+      url: String(t.url ?? info.targetUrl).slice(0, 300),
+      title: String(t.title ?? "").slice(0, 160),
+      type: String(t.type ?? "page"),
+    };
+  } catch { targetInfo = { target_id: info.targetId.slice(0, 64), url: info.targetUrl.slice(0, 300), title: "", type: "page" }; }
+  attachGeneration++;
   attached = true;
   currentTarget = info.targetUrl;
   return true;
@@ -154,6 +170,8 @@ export interface ObsvSnapshot {
   ok: true;
   status: {
     wanted: boolean; attached: boolean; target: string | null;
+    target_info: { target_id: string; url: string; title: string; type: string } | null;
+    generation: number;
     buffers: { net: number; con: number; exc: number };
     totals: { net: number; con: number; exc: number };
     last_event_age_s: number | null;
@@ -172,6 +190,8 @@ export function obsvSnapshot(opts?: { limit?: number; level?: string; filter?: s
     ok: true,
     status: {
       wanted, attached, target: currentTarget,
+      target_info: targetInfo,
+      generation: attachGeneration,
       buffers: { net: net.length, con: con.length, exc: exc.length },
       totals,
       last_event_age_s: lastEventAt ? Math.round((Date.now() - lastEventAt) / 1000) : null,
@@ -190,6 +210,8 @@ export function obsvReset() {
 export function obsvStatus() {
   return {
     attached, wanted, target: currentTarget,
+    target_info: targetInfo,
+    generation: attachGeneration,
     captured: totals.net + totals.con + totals.exc,
     buffers: { net: net.length, con: con.length, exc: exc.length },
   };
