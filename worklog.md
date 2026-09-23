@@ -221,3 +221,23 @@ Stage Summary:
 - Инструментальный урок: agent-browser element-screenshot пишет файл в CWD сессии браузера, а не в заданный путь при селекторе с кириллицей — использовать кроп PIL или текст-пруф.
 - Далее по роадмапу R24: C-линия — C1 (objectives→tasks проекция + work_graph fails-closed) → C2 (handoffs) → C3 (reviewer-agent) → C4 (approval-политики); Track D: D1 sense-diffing, D2 obsv→SQLite TTL, D4 БД-гигиена. suApply → async в backlog.
 - Оператору: me2_evidence SQL (research/2026/R23-me2-evidence-migration.sql) всё ещё не применён — evidence DEGRADED 404 ждёт.
+---
+Task ID: R27
+Agent: Z.ai Code (main)
+Task: «продолжи разработку…» — исполнено как R27: пункт C1 роадмапа R24 (порт Mission Control: objectives→tasks→agents + work_graph).
+
+Work Log:
+- R27-1 (C1, P2): mini-services/me2-daemon/src/objectives.ts — таблица objectives (ACTIVE/ACHIEVED/FAILED/PARKED, priority, spec-критерии), tasks.objective_id (миграция ALTER), проекция workGraph() на чтении: рёбра objective→task→agent строятся из фактического SQLite, derived-состояния on_track/stalled/empty (+achieved/failed/parked), attention-пояснения; orphan-флаг для READY/RUNNING задач вне целей. FAILS-CLOSED: система НИКОГДА не закрывает цель сама; ZERO-AUTHORITY: смена статуса — только REST оператора (шина не получает действия — 47/47).
+- R27-2 (интеграция): TASK_ENQUEUE принимает objective_id с валидацией (не существует → objective_not_found; не ACTIVE → objective_not_active — задача не может молча оторваться от миссии); POST /tasks пробрасывает ошибку команды как 400 (было ok:true при FAILED-команде — дефект поверхности, найден негативным тестом); REST GET /objectives, POST /objectives {op:create|status|delete}, GET /workgraph (/workgraph+/objectives в BENCH_ADMIN).
+- R27-3 (eval v2 + ME23): датасет v1→v2 (+mc.workgraph_shape: fails_closed=true, типы рёбер; +mc.statuses_canonical: канон статусов/derived) → 22 чека; строка ME23 (старый_ref=mission-control-projection.mjs).
+- R27-4 (UI): секция OBJECTIVES в MC-панели: чипы цели/задачи·рёбра/внимание/orphan (data-testid=wg-chips), форма создания (заголовок+spec), карточки с бейджами status/derived и счётчиком done/total, операторские кнопки достигнута/парк/провал/✕ (только для ACTIVE), orphan-блок; loadWg в mcxOpen.
+- R27-5 (багфиксы по ходу верификации): ① канон статусов легаси — COMPLETED (не DONE) — countsOf/TERMINAL исправлены (DONE дал бы вечный stalled при выполненных задачах — поймано проекцией сразу); ② `byState is not defined` в objectivesVerdict — реальный баг, пойман ME-матрицей при первом прогоне, исправлен; ③ REST /tasks 400-проброс.
+- R27-6 (e2e верификация): цель создана → привязанная задача (objective_id) → агент выполнил (COMPLETED, артефакт me2-workspace/tk_*/docs/objectives-plane.md) → проекция stalled+attention (fails-closed видит незакрытость) → оператор ACHIEVED → attention очищен; негатив: objective_id=nonexistent → HTTP 400; eval v2 PASS 22/22 за 2ms; матрица **23/23 WORKS**; UI: создание/удаление цели из панели, overflow нет (390px: sw=iw), VLM qa1 PASS (бейджи/чипы/форма/обрезок нет).
+- R27-7: lint 0/0; secrets-guard чист; push 6fbd17d.
+
+Stage Summary:
+- ME2 получил слой миссии: цели оператора → задачи с объективной привязкой → агенты → эффекты, всё в одной честной проекции; неполное состояние ВИДНО (stalled/empty/orphan), а не приукрашено.
+- Daemon v0.25.0, матрица 23/23; датасет v2 — 22 чека.
+- Урок: ME-матрица + негативные REST-тесты ловят реальные баги на первой же инкарнации (2 дефекта поймано до push).
+- Далее по роадмапу R24: C2 (handoffs: передача задач между агентами + протокол), C3 (reviewer-agent auto-review), C4 (approval-policy таблица); Track D: D1 sense-diffing, D2 obsv→SQLite TTL.
+- Оператору: me2_evidence SQL всё ещё не применён (evidence DEGRADED 404).
