@@ -161,3 +161,31 @@ if (primaryUiRecoveryEnabled && primaryInstance) {
     app.once('ready', requestInitialPrimaryUi);
   }
 }
+
+// ── ME2 SMART MERGE (R40): плоскость интеграции METAENGINE 2 ─────────────
+// Fail-open и zero-authority по построению: при ME2_INTEGRATION=0, отсутствии
+// ME2-рунтайма на хосте или любых ошибках — браузер работает ровно как раньше.
+// Не касается self-update authority, single-instance, second-scheduler, окон.
+// Карта слияния: docs/me2-smart-merge-r40.md
+if (!probeStdoutReserved && primaryUiRecoveryEnabled && process.env.ME2_INTEGRATION !== '0') {
+  import('./me2/me2-integration-entry.mjs')
+    .then((me2) => {
+      const r = me2.startMe2Integration({ app });
+      if (r && typeof r.catch === 'function') {
+        r.catch((error) => console.error(JSON.stringify({
+          schema: 'metaengine.browser.me2.integration.v1',
+          state: 'ME2_INTEGRATION_START_FAILED',
+          error: String(error?.message || error).slice(0, 240),
+          update_authority_effect: false,
+          authority_effect: false,
+        })));
+      }
+    })
+    .catch((error) => console.error(JSON.stringify({
+      schema: 'metaengine.browser.me2.integration.v1',
+      state: 'ME2_INTEGRATION_IMPORT_FAILED',
+      error: String(error?.message || error).slice(0, 240),
+      update_authority_effect: false,
+      authority_effect: false,
+    })));
+}
