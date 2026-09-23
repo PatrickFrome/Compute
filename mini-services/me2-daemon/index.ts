@@ -1107,6 +1107,18 @@ try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-d
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
 // ── R52 (фаза D, H6): SQL-контур — зеркало hash-chain событий в Supabase SQL (operator-gated) ──
 // ME2_SQL_MIRROR=1 включает; без таблицы (миграция sql/0001 у оператора) — честный WARMUP, без штормов.
+// R56: гейт оператора обязан держаться на ЛЮБОМ пути бута (start.sh / ui-host-респавн / Electron PID-1).
+// Решение оператора R53 было зашито только в start.sh; ui-host (supervisor-keepalive R50) респавнит
+// daemon БЕЗ наследования этого env → зеркало молча уходило в OFF. Восстанавливаем решение из того
+// же условия, что и start.sh: SUPABASE_DB_URL в supabase-cloud.env = операторское решение активно.
+if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase-cloud.env")) {
+  try {
+    if (/^SUPABASE_DB_URL=/m.test(readFileSync("/home/z/.a2/supabase-cloud.env", "utf8"))) {
+      process.env.ME2_SQL_MIRROR = "1";
+      console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
+    }
+  } catch { /* честный отказ: гейт остаётся выключенным */ }
+}
 const sqlMirror = new SqlMirror(db);
 sqlMirror.start();
 if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");

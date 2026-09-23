@@ -55,7 +55,7 @@ echo "[apply-sql] цель: $MASKED"
 echo "[apply-sql] psql: $PSQL_BIN ($($PSQL_BIN --version | head -1))"
 
 FAILED=0
-for f in 0001-me2-event-mirror.sql 0002-rpc-registry.sql 0003-mirror-read-policy.sql; do
+for f in 0001-me2-event-mirror.sql 0002-rpc-registry.sql 0003-mirror-read-policy.sql 0004-mirror-grants.sql; do
   if [ ! -f "$SQL_DIR/$f" ]; then echo "[apply-sql] пропущен (файла нет в $SQL_DIR): $f"; continue; fi
   echo "[apply-sql] → применяю $f"
   if ! "$PSQL_BIN" "$DB_URL" -v ON_ERROR_STOP=1 -f "$SQL_DIR/$f" 2>&1 | sed -E 's#(postgres(ql)?://[^:]+:)[^@]+@#\1***@#g'; then

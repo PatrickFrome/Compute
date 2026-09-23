@@ -282,6 +282,7 @@ export function missionUiHtml(): string {
         // живой вердикт RLS-гейта
         if(!anon){ html+='<div class="row sub">RLS-проба: публичного токена нет ('+esc(j.channel||"?")+") — демонстрация гейта словами, не делом</div>"; }
         else if(anon.code===404 || String(anon.body).indexOf("PGRST205")>=0){ html+='<div class="row sub">RLS-проба: облако отвечает PGRST205 — таблицы ещё нет (WARMUP: DDL оператора); аутентификация ПУБЛИЧНОГО ключа прошла ✓</div>'; }
+        else if(String(anon.body).indexOf("42501")>=0 || (anon.code===401&&String(anon.body).indexOf("permission denied")>=0)){ html+='<div class="row sub">RLS-гейт: anon ОТКАЗАН (42501 permission denied) — fail-closed ✓ (гранты sql/0004 + политики sql/0003: чтение только authenticated)</div>'; }
         else if(anon.code===401||anon.code===403){ html+='<div class="row sub">облако отвергло публичный токен ('+anon.code+") — неожиданно; проверить ключи vault'а</div>"; }
         else if(anon.code===200){ html+='<div class="row sub">'+(leak?"⚠ anon ПРОЧИТАЛ строки — RLS-гейт НЕ работает (проверить sql/0003)":"RLS-гейт: anon → 200 · 0 строк — fail-closed ✓ (политики sql/0003: чтение только authenticated)")+"</div>"; }
         else html+='<div class="row sub">RLS-проба: неожиданный ответ облака ('+anon.code+") "+esc(String(anon.body).slice(0,60))+"</div>";
