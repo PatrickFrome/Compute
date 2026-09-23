@@ -50,7 +50,7 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token"],
       write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron"],
     },
     memory: ["/memory op:write|delete|economy"],
@@ -64,6 +64,7 @@ export function capabilitiesJson(): CapabilityContract {
         "browser me2-плоскость ожидает ops ['turn','mesh_heartbeat'] и GET /ui (R40-док)",
         "disconnect контракта → честный DEGRADED у моста, restart-шторма нет (R49 handshake)",
         "матрица: docs/version-matrix.md (K8)",
+        "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
       ],
     },
   };
@@ -161,6 +162,10 @@ export function missionUiHtml(): string {
     <h2>Река <span class="n" id="river-n">—</span></h2>
     <div class="scroll" id="river" data-testid="mc-river" aria-live="polite"></div>
   </section>
+  <section aria-label="SQL-зеркало с гейтом RLS" style="grid-column:1/-1">
+    <h2>Зеркало SQL (Supabase · RLS) <span class="n" id="mirror-n">—</span></h2>
+    <div class="scroll" id="mirror" data-testid="mc-mirror" style="max-height:32vh" aria-live="polite"></div>
+  </section>
 </main>
 <footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — read-only REST</footer>
 <div id="toast" class="toast" role="alert"></div>
@@ -252,6 +257,33 @@ export function missionUiHtml(): string {
     });
   }
 
+  function loadMirror(){
+    // R53: чтение SQL-зеркала из UI с гейтом RLS — короткоживущий JWT (120с) от daemon'а;
+    // authenticated читает, anon-проба должна получить пусто/401 (fail-closed). Без долгоживущих ключей в UI.
+    fetch(api("/sqlmirror/ui-token")).then(function(r){ return r.json(); }).then(function(j){
+      var box=$("mirror");
+      if(!j.ok){ box.innerHTML='<div class="row sub">RLS-канал честно недоступен: '+esc(j.reason)+" · зеркало state="+esc(j.mirror_state||"?")+" (секрет JWT не в vault'е)</div>"; $("mirror-n").textContent="канал n/a"; return; }
+      var req=function(tok){
+        return fetch(j.rest+"/"+j.table+"?select=seq,ts,type,actor,subject&order=seq.desc&limit=12", {headers:{apikey:tok,Authorization:"Bearer "+tok}})
+          .then(function(r){ return r.text().then(function(t){ return {code:r.status,body:t}; }); });
+      };
+      Promise.all([req(j.token), req(j.anon_token)]).then(function(rs){
+        var auth=rs[0], anon=rs[1];
+        var rows=null; try { rows=JSON.parse(auth.body); } catch(e){}
+        var anonRows=null; try { anonRows=JSON.parse(anon.body); } catch(e){}
+        var leak=anon.code===200 && Array.isArray(anonRows) && anonRows.length>0;
+        var html='<div class="row sub">state='+esc(j.mirror_state)+" · "+esc(j.table)+" · канал "+esc(j.channel||"?")+(j.ttl?" · ttl "+j.ttl+"с":"")+" · гейт RLS: строки видны только по политикам sql/0003</div>";
+        if(auth.code===404){ html+='<div class="row sub">таблица отсутствует в облаке — миграции sql/0001..0003 не применены (WARMUP: зеркалирование ждёт DDL)</div>'; }
+        else if(auth.code===401||auth.code===403){ html+='<div class="row sub">облако отвергло read-канал (401/403) — нужен sb_publishable_… ключ (vault SUPABASE_PUBLISHABLE_KEY) или включённые legacy JWT-ключи</div>'; }
+        else if(Array.isArray(rows)){ html+=rows.map(function(r){ return '<div class="ev"><div class="ty">'+esc(r.type)+" · seq "+esc(r.seq)+" · "+esc(r.actor||"daemon")+(r.subject?" · "+esc(String(r.subject).slice(0,28)):"")+'</div><div class="pl">'+ago(r.ts)+" назад</div></div>"; }).join("")||'<div class="row sub">зеркало живо, строк пока нет</div>'; }
+        else html+='<div class="row sub">неожиданный ответ зеркала: '+esc(String(auth.body).slice(0,120))+"</div>";
+        html+='<div class="row sub">'+(leak?"⚠ anon ПРОЧИТАЛ строки — RLS-гейт НЕ работает (проверить sql/0003)":"RLS-гейт: anon → код "+anon.code+" "+esc(String(anon.body).slice(0,50))+" — fail-closed ✓")+"</div>";
+        box.innerHTML=html;
+        $("mirror-n").textContent=Array.isArray(rows)?(rows.length+" строк(и)"):"—";
+      }).catch(function(){ $("mirror-n").textContent="ошибка облака"; });
+    }).catch(function(){ $("mirror-n").textContent="ошибка"; });
+  }
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -293,8 +325,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>

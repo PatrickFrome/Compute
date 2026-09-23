@@ -51,6 +51,8 @@ import {
   outcomeReport, outcomePending, meshHeartbeatApply,
 } from "./agentchat";
 import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
+import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey } from "./supabase-jwt";
+import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
@@ -60,7 +62,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 18;
+export const EVAL_DATASET_VERSION = 19;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1058,6 +1060,59 @@ export const EVAL_DATASET: EvalCheck[] = [
       } finally {
         db.query(`DELETE FROM meta WHERE key IN ('mesh_last_heartbeat','mesh_epoch_last')`).run();
       }
+    },
+  },
+  {
+    id: "contract.supabase_jwt",
+    plane: "contract",
+    title: "R53 фаза D-исполнение: read-канал зеркала с гейтом RLS — publishable (anon/RLS, канонический) или mint HS256 (authenticated/anon, ttl 120с) — подпись, роли, тампер, честный отказ",
+    critical: true,
+    expect: "channel=publishable → sb_publishable_-префикс; channel=mint → bundle.token/anon_token = 3 сегмента, verify ok, роль-мисматч отклонён, тампер пойман, ttl ≤ 600; нет каналов (probe/CI) → reason=no_read_channel — PASS в любом честном режиме",
+    run: () => {
+      const bundle = uiTokenBundle();
+      if (!bundle.ok) {
+        const ok = bundle.reason === "no_read_channel" && !jwtSecretPresent() && !publishableKey();
+        return { ok, evidence: `без каналов (честно): reason=${bundle.reason}, jwtSecret=${jwtSecretPresent()}, publishable=${Boolean(publishableKey())}` };
+      }
+      if (bundle.channel === "publishable") {
+        const tok = String(bundle.token);
+        const ok = tok.startsWith("sb_publishable_") && bundle.anon_token === tok && bundle.ttl === 0 && bundle.table === SQLMIRROR_TABLE;
+        return { ok, evidence: `channel=publishable (канонический RLS-гейт, роль anon), token-ok=${tok.startsWith("sb_publishable_")}, table=${bundle.table}` };
+      }
+      const tok = String(bundle.token), anon = String(bundle.anon_token);
+      const shape = [tok, anon].every((t) => t.split(".").length === 3 && t.length > 60);
+      const vAuth = verifySupabaseJwt(tok, "authenticated");
+      const vAnon = verifySupabaseJwt(anon, "anon");
+      const vMismatch = verifySupabaseJwt(tok, "anon"); // authenticated-токен под ролью anon — должен быть role_mismatch
+      const tampered = tok.slice(0, -4) + (tok.endsWith("AAAA") ? "BBBB" : "AAAA");
+      const vTamper = verifySupabaseJwt(tampered);
+      const claims = JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      const ttlOk = typeof claims.exp === "number" && typeof claims.iat === "number" && claims.exp - claims.iat <= 600 && claims.exp > claims.iat;
+      const ok = shape && vAuth.ok && vAnon.ok && !vMismatch.ok && vMismatch.reason === "role_mismatch"
+        && !vTamper.ok && vTamper.reason === "bad_signature" && ttlOk && bundle.ttl === 120
+        && bundle.table === SQLMIRROR_TABLE;
+      return { ok, evidence: `channel=mint, shape=${shape}, auth=${vAuth.ok}, anon=${vAnon.ok}, mismatch→${vMismatch.reason}, tamper→${vTamper.reason}, ttl=${claims.exp - claims.iat}с, table=${bundle.table}` };
+    },
+  },
+  {
+    id: "mission.sqlmirror_ui",
+    plane: "mission",
+    title: "R53 фаза D-исполнение: GET /ui несёт панель «Зеркало SQL (RLS)» — jwt-токены только от daemon'а, anon-проба с честным fail-closed-вердиктом, никакого секрета в HTML",
+    critical: true,
+    expect: "HTML содержит data-testid=mc-mirror, fetch /sqlmirror/ui-token, маркеры RLS-гейта (anon-проба + fail-closed + предупреждение о протечке), в HTML нет вшитых JWT (eyJ…), нет внешних ключей; имя таблицы зеркала совпадает с sql/0001 (если файл доступен по относительному пути)",
+    run: () => {
+      const html = missionUiHtml();
+      const markers = ['data-testid="mc-mirror"', "/sqlmirror/ui-token", "anon_token", "fail-closed", "RLS", "ПРОЧИТАЛ"].every((m) => html.includes(m));
+      const noSecretInHtml = !/eyJ[A-Za-z0-9_-]{20,}/.test(html); // вшитых JWT нет — только выдача по требованию
+      const noLongLivedKeys = !/service_role/i.test(html); // сервисных ключей в UI нет (R47/T2 не утекает)
+      let tableCross = "sql-file-n/a"; let tableOk = true;
+      try {
+        const sql0001 = readFileSync(join(import.meta.dir, "..", "..", "..", "sql", "0001-me2-event-mirror.sql"), "utf8");
+        tableOk = sql0001.includes(SQLMIRROR_TABLE);
+        tableCross = `0001 содержит ${SQLMIRROR_TABLE}=${tableOk}`;
+      } catch { /* probe/CI-раскладка: файл может отсутствовать — честный частичный проход */ }
+      const ok = markers && noSecretInHtml && noLongLivedKeys && tableOk;
+      return { ok, evidence: `маркеры=${markers}, no-вшитых-jwt=${noSecretInHtml}, no-service-role=${noLongLivedKeys}, ${tableCross}` };
     },
   },
 ];

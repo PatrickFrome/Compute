@@ -20,7 +20,8 @@ import { Database } from "bun:sqlite";
 import { tokenGet, onTokenChange } from "./tokens";
 
 export const SQLMIRROR_SCHEMA = "me2.sqlmirror.v1";
-const TABLE = process.env.ME2_SQL_MIRROR_TABLE || "me2_event_mirror_h205f22";
+export const SQLMIRROR_TABLE = process.env.ME2_SQL_MIRROR_TABLE || "me2_event_mirror_h205f22";
+const TABLE = SQLMIRROR_TABLE; // единый источник имени (R53: использует supabase-jwt.ts)
 const BATCH = Number(process.env.ME2_SQL_MIRROR_BATCH || 50);
 const INTERVAL_MS = Number(process.env.ME2_SQL_MIRROR_INTERVAL_MS || 15000);
 const PROBE_MS = Number(process.env.ME2_SQL_MIRROR_PROBE_MS || 600000); // 10 мин между перепробами отсутствующей таблицы

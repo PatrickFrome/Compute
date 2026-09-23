@@ -25,6 +25,7 @@ import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evid
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { SqlMirror } from "./src/sqlmirror";
+import { uiTokenBundle, verifySupabaseJwt } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
@@ -178,6 +179,26 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
     // ── R52 (фаза D, H6): статус SQL-контура (read-only, вне шины; 47-инвариант не тронут) ──
     if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
+    // R53 (фаза D-исполнение): короткоживущие JWT для чтения зеркала из UI с гейтом RLS.
+    // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
+    // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/ui-token" && req.method === "GET") {
+      const bundle = uiTokenBundle();
+      if (!bundle.ok) return json(res, 200, { ...bundle, mirror_state: sqlMirror.status().state });
+      return json(res, 200, { ...bundle, mirror_state: sqlMirror.status().state });
+    }
+    if (path === "/sqlmirror/ui-token/verify" && req.method === "GET") {
+      // само-проверка канала: daemon сам валидирует выдачу (подпись+срок+роль либо publishable-префикс)
+      const b = uiTokenBundle();
+      if (!b.ok || !b.token) return json(res, 200, { ok: false, reason: b.reason ?? "mint_failed" });
+      if (b.channel === "publishable") {
+        const ok = String(b.token).startsWith("sb_publishable_");
+        return json(res, 200, { ok, channel: "publishable", note: ok ? "публичный read-ключ (роль anon, видимость диктует RLS)" : "неожиданный формат", schema: b.schema, table: b.table });
+      }
+      const v = verifySupabaseJwt(String(b.token), "authenticated");
+      const va = b.anon_token ? verifySupabaseJwt(String(b.anon_token), "anon") : { ok: false, reason: "no_anon" };
+      return json(res, 200, { ok: v.ok && va.ok, channel: "mint", authenticated: v, anon: va, schema: b.schema, table: b.table });
+    }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
       if (body?.op === "probe_ddl") return json(res, 200, { ok: true, ...(await probeDdl(true)) });
