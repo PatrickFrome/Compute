@@ -23,6 +23,7 @@ import { verdictStats } from "./effect";
 import { fleetOutcomeCount } from "./fleet";
 import { benchVerdict } from "./bench";
 import { mcpStatus } from "./mcp";
+import { approvalsVerdict } from "./approvals";
 import { evalVerdict } from "./eval";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
@@ -182,6 +183,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME26", name: "Reviewer-agent: антифальшь-ревью результатов против спека (C3)", old_ref: "— (R29: «работа агентов не фальшивая»; усиливает ME15 tier-1)",
       verdict: reviewerVerdict().verdict,
       evidence: reviewerVerdict().evidence + "; GET /reviews | POST /reviews/run — zero-authority (не меняет статусы)",
+    },
+    {
+      id: "ME27", name: "Approval-политики: operator-configurable гейты на мутирующие операции (C4)", old_ref: "— (R24 §C4: fence-clear, RSI-adopt, authority-эффекты в одном месте)",
+      verdict: approvalsVerdict().verdict,
+      evidence: approvalsVerdict().evidence + "; POST /approvals {op:policy} — смена режима; one-attempt token + TTL 15м; FAILS-CLOSED",
     },
   ];
 

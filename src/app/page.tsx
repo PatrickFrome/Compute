@@ -36,7 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, ArrowLeftRight, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, Sparkles, Target, Terminal, Trash2, X, Zap,
+  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, ShieldCheck, Sparkles, Target, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -132,6 +132,14 @@ type ReviewsData = {
   reviews: Array<{ task_id: string; title: string; status: string; review: { verdict: "real" | "suspect" | "empty"; reasons: string[]; checked_at: string; evidence: { steps: number; writes: number; tool_calls: number; result_len: number; reward_hack: boolean } } }>;
   stats: { total: number; by_verdict: Record<string, number>; last: { task_id: string; verdict: string; at: string } | null };
 };
+// R30 C4: approval-политики (ME27, GET /approvals) — гейты мутирующих операций
+ type ApprovalsData = {
+  ok: boolean;
+  policies: Array<{ gate: string; mode: string; updated_at: number; updated_by: string }>;
+  pending: Array<{ id: string; gate: string; subject: string; label: string; requested_by: string; created_at: number }>;
+  recent: Array<{ id: string; gate: string; subject: string; label: string; status: "APPROVED" | "DENIED" | "CONSUMED" | "EXPIRED"; decided_at: number | null }>;
+  stats: { total: number; pending: number; approved: number; denied: number; consumed: number; expired: number };
+};
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -166,6 +174,7 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_RETRIED: "text-amber-300", TASK_ARCHIVED: "text-zinc-400", TASK_LISTED: "text-zinc-500",
   TASK_SCHEDULED: "text-lime-300", TASK_HANDOFF: "text-violet-300", TASK_LEASE_VOID: "text-zinc-500",
   TASK_REVIEWED: "text-cyan-300", GLM_PROBE: "text-cyan-400", GLM_LATEST_SET: "text-cyan-300",
+  APPROVAL_REQUESTED: "text-amber-400", APPROVAL_APPROVED: "text-emerald-300", APPROVAL_DENIED: "text-rose-300", APPROVAL_CONSUMED: "text-emerald-400", APPROVAL_POLICY_SET: "text-amber-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
   AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400", AGENT_MODEL_SET: "text-cyan-300",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
@@ -1238,6 +1247,7 @@ export default function MissionControl() {
   // R29: GLM currency + reviewer (директивы: агенты на последней GLM, работа не фальшивая)
   const [glmData, setGlmData] = useState<GlmData | null>(null);
   const [revData, setRevData] = useState<ReviewsData | null>(null);
+  const [apprData, setApprData] = useState<ApprovalsData | null>(null);
   const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
@@ -1343,6 +1353,10 @@ export default function MissionControl() {
   const loadRev = useCallback(async () => {
     try { const r = await fetch("/reviews?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setRevData(r as ReviewsData); } catch { /* daemon недоступен */ }
   }, []);
+  // R30 C4: approval-политики (GET /approvals)
+  const loadAppr = useCallback(async () => {
+    try { const r = await fetch("/approvals?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setApprData(r as ApprovalsData); } catch { /* daemon недоступен */ }
+  }, []);
   // BENCH виден в браузерной панели всегда — грузим на mount и обновляем каждые 30с
   useEffect(() => {
     void loadBench();
@@ -1381,6 +1395,14 @@ export default function MissionControl() {
     void ok;
   }, [mcxOp, loadGlm]);
 
+  // R30 C4: операторские действия approval-плоскости (после mcxOp — TDZ-урок R28/R29)
+  const apprOp = useCallback(async (body: Record<string, unknown>, okMsg: string) => {
+    await mcxOp("approvals", body, okMsg, async () => { await loadAppr(); });
+  }, [mcxOp, loadAppr]);
+  const apprPolicy = useCallback(async (gate: string, mode: "require_approval" | "auto_approve") => {
+    await mcxOp("approvals", { op: "policy", gate, mode }, `политика ${gate} → ${mode === "auto_approve" ? "auto_approve (гейт снят)" : "require_approval (гейт активен)"}`, async () => { await loadAppr(); });
+  }, [mcxOp, loadAppr]);
+
   // Передача задачи: POST /tasks/{id}/handoff — через шину (TASK_ENQUEUE+handoff, 47/47)
   const doHandoff = useCallback(async () => {
     if (!hoTask.trim() || !hoReason.trim() || !hoNext.trim()) {
@@ -1396,11 +1418,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2182,7 +2204,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2385,6 +2407,49 @@ export default function MissionControl() {
                     )}
                     {!revData && (
                       <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка ревью…</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* R30 C4: APPROVAL-ПОЛИТИКИ — гейты мутирующих операций в одном месте (fence_clear / rsi_adopt / authority_effect) */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="ME27 (C4): FAILS-CLOSED гейты на мутирующие операции — снятие fence, RSI-adopt, authority (selfupdate). Один approve = одно исполнение (one-attempt token, TTL 15м); дефолт всех политик — require_approval; шина 47/47 не тронута">
+                      <ShieldCheck className="h-3 w-3 text-amber-400" aria-hidden /> APPROVALS
+                    </span>
+                    <span data-testid="appr-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className={`rounded border px-1 py-0.5 ${(apprData?.stats.pending ?? 0) > 0 ? "border-amber-900 bg-amber-950/40 text-amber-300" : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title="заявок ждёт решения оператора">pending {apprData?.stats.pending ?? "—"}</span>
+                      {(apprData?.stats.consumed ?? 0) > 0 && <span className="rounded border border-emerald-900 bg-emerald-950/40 px-1 py-0.5 text-emerald-300" title="согласий израсходовано — один approve = одно исполнение">used {apprData?.stats.consumed}</span>}
+                      {(apprData?.stats.denied ?? 0) > 0 && <span className="rounded border border-rose-900 bg-rose-950/40 px-1 py-0.5 text-rose-300" title="заявок отклонено">denied {apprData?.stats.denied}</span>}
+                    </span>
+                  </div>
+                  <div className="mb-1.5 space-y-1" role="list" aria-label="Политики гейтов мутирующих операций" data-testid="appr-policies">
+                    {(apprData?.policies ?? []).map((p) => (
+                      <div key={p.gate} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-900/50 px-1.5 py-1" title={`гейт ${p.gate}: mode=${p.mode} (обновил ${p.updated_by})`}>
+                        <span className="font-mono text-[9px] text-zinc-300">{p.gate}</span>
+                        <span className={`rounded px-1 text-[8px] ${p.mode === "auto_approve" ? "bg-zinc-800 text-zinc-400" : "bg-amber-950/60 text-amber-300"}`}>{p.mode === "auto_approve" ? "auto" : "gate"}</span>
+                        <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-zinc-600" title={p.gate === "fence_clear" ? "снятие durable fence (ME19)" : p.gate === "rsi_adopt" ? "принятие RSI-предложения в skills/ (ME8)" : "authority-операции: selfupdate apply — смена живого кода"}>{p.gate === "fence_clear" ? "снятие fence" : p.gate === "rsi_adopt" ? "RSI adopt" : "selfupdate apply"}</span>
+                        <button type="button" onClick={() => { void apprPolicy(p.gate, p.mode === "auto_approve" ? "require_approval" : "auto_approve"); }} disabled={mcxBusy} aria-label={`Переключить политику ${p.gate} на ${p.mode === "auto_approve" ? "require_approval" : "auto_approve"}`} className="rounded border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800">{p.mode === "auto_approve" ? "включить гейт" : "отключить"}</button>
+                      </div>
+                    ))}
+                    {!apprData && <div className="rounded-md border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[10px] text-zinc-600">загрузка политик…</div>}
+                  </div>
+                  <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Заявки на согласование" data-testid="appr-pending">
+                    {(apprData?.pending ?? []).map((a) => (
+                      <div key={a.id} role="listitem" className="rounded border border-amber-950/60 bg-amber-950/20 px-1.5 py-1">
+                        <div className="flex items-center gap-1.5 font-mono text-[9px]">
+                          <span className="shrink-0 rounded bg-amber-950/60 px-1 text-[8px] text-amber-300">{a.gate}</span>
+                          <span className="min-w-0 flex-1 truncate text-zinc-300" title={`${a.subject} · от ${a.requested_by}`}>{a.label}</span>
+                          <span className="shrink-0 text-zinc-600">{hhmmss(new Date(a.created_at).toISOString())}</span>
+                        </div>
+                        <div className="mt-0.5 flex gap-1">
+                          <button type="button" onClick={() => { void apprOp({ op: "approve", id: a.id }, "согласие выдано: один approve = одно исполнение (токен TTL 15м)"); }} disabled={mcxBusy} aria-label={`Одобрить заявку ${a.gate}`} className="rounded border border-emerald-900 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 transition hover:bg-emerald-950/40">approve</button>
+                          <button type="button" onClick={() => { void apprOp({ op: "deny", id: a.id }, "заявка отклонена — операция останется под гейтом"); }} disabled={mcxBusy} aria-label={`Отклонить заявку ${a.gate}`} className="rounded border border-rose-900 px-1.5 py-0.5 font-mono text-[9px] text-rose-300 transition hover:bg-rose-950/40">deny</button>
+                        </div>
+                      </div>
+                    ))}
+                    {apprData && apprData.pending.length === 0 && (
+                      <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">нет заявок — гейты молчат, пока операции не пытаются пройти</div>
                     )}
                   </div>
                 </div>

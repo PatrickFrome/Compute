@@ -43,6 +43,7 @@ import { senseNow, senseList, senseAct } from "./src/sense";
 import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
+import { gateCheck, approvalsStatus, approvalRequest, approvalDecide, policySet } from "./src/approvals";
 import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
 import { handoffList, handoffStats } from "./src/handoffs";
 import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag } from "./src/glm";
@@ -50,7 +51,7 @@ import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/revi
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.27.0";
+const VERSION = "0.28.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -252,7 +253,12 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const op = String(body.op ?? "check");
       try {
         if (op === "check") return json(res, 200, { ok: true, check: await suCheckAsync(VERSION, true) });
-        if (op === "apply") return json(res, 200, suApply(VERSION));
+        if (op === "apply") {
+          // R30 C4: authority-гейт — selfupdate меняет живой код daemon (один approve = один apply)
+          const g = gateCheck("authority_effect", "selfupdate:apply", "Self-update daemon (apply) — смена живого кода");
+          if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "authority_effect", approval_id: g.approval_id ?? null });
+          return json(res, 200, suApply(VERSION));
+        }
         return json(res, 400, { ok: false, error: "op_required: check|apply" });
       } catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
     }
@@ -264,7 +270,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const op = String(body.op ?? "propose");
       try {
         if (op === "propose") return json(res, 201, { ok: true, proposal: await rsiPropose({ auto: body.auto !== false, hint: body.hint ? String(body.hint) : undefined }) });
-        if (op === "adopt") return json(res, 200, { ok: true, proposal: rsiAdopt(String(body.id ?? "")) });
+        if (op === "adopt") {
+          // R30 C4: RSI-гейт — принятие предложения пишет артефакт в skills/ (один approve = один adopt)
+          const pid = String(body.id ?? "");
+          const g = gateCheck("rsi_adopt", `rsi:${pid}`, `RSI adopt ${pid}`);
+          if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "rsi_adopt", approval_id: g.approval_id ?? null });
+          return json(res, 200, { ok: true, proposal: rsiAdopt(pid) });
+        }
         if (op === "reject") return json(res, 200, { ok: true, proposal: rsiReject(String(body.id ?? "")) });
         if (op === "rollback") return json(res, 200, { ok: true, proposal: rsiRollback(String(body.id ?? "")) });
         return json(res, 400, { ok: false, error: "op_required: propose|adopt|reject|rollback" });
@@ -332,10 +344,29 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       if (op === "clear") {
         const key = String(body.effect_key ?? "");
         if (!key) return json(res, 400, { ok: false, error: "effect_key_required" });
+        // R30 C4: fence-гейт — снятие durable fence требует живого согласия (один approve = одно снятие)
+        const g = gateCheck("fence_clear", `fence:${key}`, `Снятие fence ${key}`);
+        if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "fence_clear", approval_id: g.approval_id ?? null });
         const cleared = fenceClear(key, body.note ? String(body.note) : undefined);
         return json(res, cleared ? 200 : 404, { ok: cleared, op: "clear", effect_key: key });
       }
       return json(res, 400, { ok: false, error: "op_required: clear" });
+    }
+
+    // ── R30 C4: APPROVAL-ПОЛИТИКИ (гейты мутирующих операций в одном месте, вне шины — 47/47) ──
+    if (path === "/approvals" && req.method === "GET") return json(res, 200, approvalsStatus());
+    if (path === "/approvals" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      try {
+        if (op === "request") return json(res, 201, { ok: true, approval: approvalRequest(String(body.gate ?? ""), String(body.subject ?? ""), String(body.label ?? body.subject ?? "")) });
+        if (op === "approve") return json(res, 200, { ok: true, approval: approvalDecide(String(body.id ?? ""), "APPROVED", body.note ? String(body.note) : undefined) });
+        if (op === "deny") return json(res, 200, { ok: true, approval: approvalDecide(String(body.id ?? ""), "DENIED", body.note ? String(body.note) : undefined) });
+        if (op === "policy") return json(res, 200, { ok: true, policy: policySet(String(body.gate ?? ""), String(body.mode ?? "")) });
+        return json(res, 400, { ok: false, error: "op_required: request|approve|deny|policy" });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: (e as Error).message });
+      }
     }
 
     // ── command bus: единственная точка мутаций ──
@@ -584,7 +615,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

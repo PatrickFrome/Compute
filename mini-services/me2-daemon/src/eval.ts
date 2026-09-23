@@ -34,9 +34,10 @@ import { workGraph, OBJECTIVE_STATUSES } from "./objectives";
 import { handoffList, handoffStats } from "./handoffs";
 import { glmStatus, canonicalGlm, agentTag } from "./glm";
 import { reviewStats } from "./reviewer";
+import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 4;
+export const EVAL_DATASET_VERSION = 5;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -86,6 +87,7 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v3 (R28) — рёбра task_handoff в workgraph_shape, +mc.tasks_statuses_canonical (HANDED_OFF),
 //            +handoff.table_api = 24. Осознанное изменение контракта → версия поднята.
 // v4 (R29) — +glm.currency (канон+drift флота), +reviewer.api (колонка/статистика) = 26.
+// v5 (R30) — +approval.policies_canonical, +approval.gate_api (живой гейт-цикл с самоочисткой) = 28.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -346,6 +348,42 @@ export const EVAL_DATASET: EvalCheck[] = [
       const bad = Object.keys(s.by_verdict).filter((k) => !["real", "suspect", "empty"].includes(k));
       const ok = !!col && Number.isFinite(s.total) && s.total >= 0 && bad.length === 0;
       return { ok, evidence: `column=${col ? "yes" : "no"}, reviews=${s.total}, by=${JSON.stringify(s.by_verdict)}` };
+    },
+  },
+  // — Approval-политики (R30 C4) —
+  {
+    id: "approval.policies_canonical", plane: "approval", title: "Approval-политики (ME27): 3 гейта, режимы каноничны",
+    critical: true, expect: `policies = ${APPROVAL_GATES.join(",")}; mode ∈ {require_approval, auto_approve}`,
+    run: () => {
+      const s = approvalsStatus();
+      const gates = new Set(s.policies.map((p) => p.gate));
+      const missing = APPROVAL_GATES.filter((g) => !gates.has(g));
+      const badModes = s.policies.filter((p) => p.mode !== "require_approval" && p.mode !== "auto_approve");
+      const ok = s.policies.length === APPROVAL_GATES.length && missing.length === 0 && badModes.length === 0;
+      return { ok, evidence: `policies=${s.policies.length}/${APPROVAL_GATES.length}${missing.length ? `, MISSING=${missing.join(",")}` : ""}${badModes.length ? `, BAD_MODE=${badModes.map((p) => p.gate).join(",")}` : ""}; approvals=${s.stats.total} (pending=${s.stats.pending})` };
+    },
+  },
+  {
+    id: "approval.gate_api", plane: "approval", title: "Гейт-цикл (ME27) жив: unknown→denied, request→approve→consume",
+    critical: true, expect: "FAILS-CLOSED: неизвестный гейт запрещён; живой цикл на пробном subject с самоочисткой",
+    run: () => {
+      const unknown = gateCheck("__no_such_gate__", "x", "x");
+      if (unknown.allowed || !unknown.reason.startsWith("unknown_gate")) {
+        return { ok: false, evidence: `unknown gate не отклонён: ${JSON.stringify(unknown)}` };
+      }
+      // живой цикл: denied → approve → consume; строки пробного subject удаляем (самоочистка)
+      const d1 = gateCheck("rsi_adopt", "__eval_probe__", "eval-probe");
+      if (d1.allowed || d1.reason !== "approval_required" || !d1.approval_id) {
+        return { ok: false, evidence: `первый вызов не denied: ${JSON.stringify(d1).slice(0, 160)}` };
+      }
+      const id = d1.approval_id;
+      db.query(`UPDATE approvals SET status='APPROVED', decided_at=? WHERE id=?`).run(Date.now(), id);
+      const d2 = gateCheck("rsi_adopt", "__eval_probe__", "eval-probe");
+      const consumed = db.query(`SELECT status FROM approvals WHERE id=?`).get(id) as { status: string } | undefined;
+      const d3 = gateCheck("rsi_adopt", "__eval_probe__", "eval-probe");
+      db.query(`DELETE FROM approvals WHERE subject='__eval_probe__'`).run();
+      const ok = d2.allowed && consumed?.status === "CONSUMED" && !d3.allowed && d3.reason === "approval_required";
+      return { ok, evidence: `unknown→denied; цикл: denied→approved→allowed(token)→${consumed?.status}→повтор denied (one-attempt) — пробные строки удалены` };
     },
   },
 ];
