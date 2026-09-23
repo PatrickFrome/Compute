@@ -33,7 +33,7 @@ import {
 } from "./src/sandbox";
 import { roadmapVerdict } from "./src/roadmap";
 import {
-  memSearch, memWrite, memDelete, memoryStatus, memBlock, onMemoryEvent,
+  memSearch, memWrite, memDelete, memoryStatus, memBlock, memBlockEconomy, memoryEconStatus, onMemoryEvent,
 } from "./src/memory";
 import { brainThink, brainStatus } from "./src/brain";
 import { fleetList, fleetBeat, fleetSelfTick, fleetGc, fleetTick } from "./src/fleet";
@@ -55,7 +55,7 @@ import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX 
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.32.0";
+const VERSION = "0.33.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -238,6 +238,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const budget = Number(url.searchParams.get("budget") ?? 1400);
       return json(res, 200, { ok: true, ...memBlock(n, budget) });
     }
+    // ── R35 E5: token-economy памяти — агрегат + живая доставка ──
+    if (path === "/memory/economy" && req.method === "GET") return json(res, 200, memoryEconStatus());
     if (path === "/memory" && req.method === "POST") {
       const body = await readBody(req);
       const op = String(body.op ?? "write");
@@ -252,7 +254,11 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           return json(res, 201, { ok: true, row });
         }
         if (op === "delete") return json(res, 200, { ok: true, deleted: memDelete(Number(body.id)) });
-        return json(res, 400, { ok: false, error: "op_required: write|delete" });
+        if (op === "economy") {
+          const d = memBlockEconomy(String(body.consumer ?? "rest"), Number(body.n ?? 5), Number(body.budget ?? 1400));
+          return json(res, 200, { ok: true, ...d });
+        }
+        return json(res, 400, { ok: false, error: "op_required: write|delete|economy" });
       } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
     }
 

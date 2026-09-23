@@ -8,7 +8,7 @@
  */
 import { knownActions, actionCatalog } from "../commands";
 import { lastEventHash, lastSeq, listAgents, listTasks, getMeta } from "../store";
-import { memoryStatus } from "./memory";
+import { memoryStatus, memoryEconStatus } from "./memory";
 import { fleetList } from "./fleet";
 import { rsiList } from "./rsi";
 import { otelStatus } from "./otel";
@@ -221,6 +221,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME33", name: "E3: executor-пул — N живых GLM-контекстов, эксклюзивные lease с heartbeat/reaper, универсальный claim (R34)", old_ref: "M2 task cycle (одиночный агент) → parallel live-GLM pool",
       verdict: (() => { try { const s = poolStatus(); const canon = s.workers.every((w) => w.model === `zai:${s.canonical}`); return s.workers.length > 0 && canon && s.leases.reaped_total >= 0 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
       evidence: (() => { try { const s = poolStatus(); return `scale=${s.scale} live=${s.live}/${s.ceiling}, canonical=${s.canonical}, queue=${s.queue.ready}/${s.queue.running}, concurrency max=${s.concurrency.max_observed}, leases active=${s.leases.active} reaped=${s.leases.reaped_total}, throughput 1ч=${s.throughput.done_1h}✓/${s.throughput.failed_1h}✗; POST /pool {op:scale|burn}`; } catch (e) { return `pool status failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME34", name: "E5: token-economy памяти — дельта-доставка (sticky-ядро всегда, familiar-элиминация по hash+TTL, тампер возвращает запись) (R35)", old_ref: "M13 memory block (полный блок каждому промпту) → progressive disclosure",
+      verdict: (() => { try { const s = memoryEconStatus(); return s.deliveries > 0 && s.avg_saved_pct >= 0 && s.avg_saved_pct <= 1 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try { const s = memoryEconStatus(); const top = s.by_consumer[0]; return `доставок=${s.deliveries}, avg saved=${Math.round(s.avg_saved_pct * 100)}%, байт сэкономлено=${s.bytes_saved_total}, consumers=${s.by_consumer.map((c) => c.consumer).join(",")}${top ? `, топ=${top.consumer} −${Math.round(top.avg_saved_pct * 100)}%` : ""}; GET /memory/economy | POST /memory {op:economy}`; } catch (e) { return `econ status failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

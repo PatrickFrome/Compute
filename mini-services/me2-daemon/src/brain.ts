@@ -12,13 +12,13 @@
  * Zero-authority: план НЕ enqueue-ит задачи сам — оператор видит steps и решает.
  */
 import { chat } from "../providers";
-import { memSearch, memTouch, memBlock, memWrite, memoryStatus } from "./memory";
+import { memSearch, memTouch, memBlockEconomy, memWrite, memoryStatus } from "./memory";
 import { emit } from "../store";
 import { recordSpan } from "./otel";
 
 export interface BrainThought {
   goal: string; summary: string; steps: string[]; risks: string[];
-  memory_used: number[]; ms: number; model: string;
+  memory_used: number[]; mem_saved_pct: number; ms: number; model: string;
 }
 
 function extractJson(text: string): Record<string, unknown> | null {
@@ -35,7 +35,9 @@ export async function brainThink(goalRaw: string): Promise<BrainThought & { thou
   // 1) реколл: топ-совпадения по цели + верхний TEAM MEMORY блок
   const recalled = memSearch({ q: goal, limit: 6 });
   memTouch(recalled.map((r) => r.id));
-  const block = memBlock(5, 1200);
+  // E5 (R35): экономная дельта-доставка вместо полного блока (sticky-уроки всегда на месте)
+  const econ = memBlockEconomy("brain", 5, 1200);
+  const block = { block: econ.block, used: econ.used };
 
   // 2) LLM-план
   const sys = [
@@ -71,9 +73,9 @@ export async function brainThink(goalRaw: string): Promise<BrainThought & { thou
 
   const thought: BrainThought = {
     goal: goal.slice(0, 300), summary, steps, risks,
-    memory_used: block.used.map((u) => u.id), ms, model: "zai:default",
+    memory_used: block.used.map((u) => u.id), mem_saved_pct: econ.metrics.saved_pct, ms, model: "zai:default",
   };
-  emit("BRAIN_THOUGHT", { goal: thought.goal, steps: steps.length, ms, memory_used: thought.memory_used.length });
+  emit("BRAIN_THOUGHT", { goal: thought.goal, steps: steps.length, ms, memory_used: thought.memory_used.length, mem_saved_pct: thought.mem_saved_pct });
   recordSpan("brain.think", { "me2.ms": ms, "me2.steps": steps.length, "me2.mem_used": thought.memory_used.length }, t0);
   return { ...thought, thought_key: key };
 }

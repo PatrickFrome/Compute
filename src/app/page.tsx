@@ -94,6 +94,9 @@ type ChainVerifyT = { ok: boolean; scheme: string; from: number; to: number; che
 // R34 E3: executor-пул (живые GLM-воркеры с честными lease)
 type PoolWorkerT = { slot: number; agent_id: string; state: string; paused: number; model: string; agent_status: string; lease: { task_id: string; acquired_at: string; hb_age_s: number; expires_in_s: number } | null };
 type PoolT = { ok: boolean; canonical: string; scale: number; workers_total: number; live: number; ceiling: number; workers: PoolWorkerT[]; queue: { ready: number; running: number }; concurrency: { current: number; max_observed: number }; leases: { active: number; reaped_total: number }; throughput: { done_1h: number; failed_1h: number; avg_ms: number | null; p95_ms: number | null } };
+// R35 E5: token-economy памяти (GET /memory/economy — дельта-доставка вместо полного блока)
+type MemEconConsumerT = { consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number };
+type MemEconT = { ok: boolean; deliveries: number; avg_saved_pct: number; bytes_saved_total: number; by_consumer: MemEconConsumerT[] };
 type BenchProbeT = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
 type BenchData = {
   ok: boolean;
@@ -193,6 +196,7 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_REVIEWED: "text-cyan-300", GLM_PROBE: "text-cyan-400", GLM_LATEST_SET: "text-cyan-300",
   APPROVAL_REQUESTED: "text-amber-400", APPROVAL_APPROVED: "text-emerald-300", APPROVAL_DENIED: "text-rose-300", APPROVAL_CONSUMED: "text-emerald-400", APPROVAL_POLICY_SET: "text-amber-300",
   DB_HYGIENE: "text-teal-300",
+  MEMORY_ECONOMY: "text-teal-300",
   POOL_SCALED: "text-cyan-300", POOL_WORKER_CREATED: "text-cyan-400", POOL_BURN: "text-lime-300",
   POOL_LEASE_ACQUIRED: "text-amber-300", POOL_LEASE_RELEASED: "text-emerald-400", POOL_LEASE_REAPED: "text-rose-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
@@ -1242,6 +1246,8 @@ export default function MissionControl() {
   // ── R19: панель МЕХАНИКИ (порт старых механик A2: memory/brain/fleet/self-update/rsi) ──
   const [mcxOpen, setMcxOpen] = useState(false);
   const [mem, setMem] = useState<MemData | null>(null);
+  // R35 E5: экономия памяти
+  const [memEcon, setMemEcon] = useState<MemEconT | null>(null);
   const [brain, setBrain] = useState<BrainData | null>(null);
   const [fleet, setFleet] = useState<FleetData | null>(null);
   const [su, setSu] = useState<SuData | null>(null);
@@ -1292,6 +1298,9 @@ export default function MissionControl() {
   }, []);
   const loadMem = useCallback(async (q = "", kind = "") => {
     try { const r = await fetch(`/memory?XTransformPort=3041&limit=8${q ? `&q=${encodeURIComponent(q)}` : ""}${kind ? `&kind=${kind}` : ""}`, { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setMem(r as MemData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadMemEcon = useCallback(async () => {
+    try { const r = await fetch("/memory/economy?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setMemEcon(r as MemEconT); } catch { /* daemon недоступен */ }
   }, []);
   const loadBrain = useCallback(async () => {
     try { const r = await fetch("/brain?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setBrain(r as BrainData); } catch { /* daemon недоступен */ }
@@ -1509,11 +1518,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool]);
+  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2295,7 +2304,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2550,6 +2559,20 @@ export default function MissionControl() {
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500"><Database className="h-3 w-3 text-cyan-400" aria-hidden /> MEMORY{mem ? ` · ${mem.status.rows}` : ""}</span>
                     <span className="font-mono text-[9px] text-zinc-600" title="SQLite WAL — переживает рестарт (исправление CAVEAT M13/R6)">{mem ? `epi ${mem.status.by_kind.episodic ?? 0} · sem ${mem.status.by_kind.semantic ?? 0} · proc ${mem.status.by_kind.procedural ?? 0}` : ""}</span>
+                  </div>
+                  {/* R35 E5: token-economy — дельта-доставка памяти consumer'ам */}
+                  <div className="mb-1.5 flex items-center gap-1.5 rounded border border-teal-900/50 bg-teal-950/20 px-1.5 py-1" data-testid="mem-econ-chips" title="E5: дельта-доставка памяти — критичные semantic-уроки (importance ≥ 0.85) всегда в блоке; эпизоды и неизменённые записи элиминируются по hash+TTL 30м; любое изменение контента возвращает запись в «свежие». Brain и demo-доставки честно мерят bytes_full vs bytes_compact">
+                    <span className="shrink-0 rounded bg-teal-950/60 px-1 font-mono text-[8px] text-teal-300">ECON</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[9px] text-zinc-400" aria-live="polite">
+                      {memEcon ? `−${Math.round(memEcon.avg_saved_pct * 100)}% · ${memEcon.deliveries} дост. · сэкономлено ${memEcon.bytes_saved_total >= 1024 ? `${(memEcon.bytes_saved_total / 1024).toFixed(1)}KB` : `${memEcon.bytes_saved_total}B`}${memEcon.by_consumer[0] ? ` · топ ${memEcon.by_consumer[0].consumer} −${Math.round(memEcon.by_consumer[0].avg_saved_pct * 100)}%` : ""}` : "нет доставок — brain-план или кнопка «доставка» запустят первую"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { void mcxOp("memory", { op: "economy", consumer: "ui-demo" }, "экономная доставка памяти выполнена (журнал в /memory/economy)", async () => { await loadMemEcon(); }); }}
+                      disabled={mcxBusy}
+                      className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800"
+                      aria-label="Выполнить экономную доставку памяти"
+                    >доставка</button>
                   </div>
                   <form
                     onSubmit={(e) => { e.preventDefault(); void (async () => { if (memWrite_.trim()) { await mcxOp("memory", { op: "write", kind: "semantic", key: `op:${Date.now().toString(36)}`, content: memWrite_.trim(), tags: ["operator"], importance: 0.8 }, "запись в память добавлена", async () => { await loadMem(memQ, memKind); }); setMemWrite_(""); } })(); }}

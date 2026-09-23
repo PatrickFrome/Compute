@@ -22,7 +22,7 @@
 import { db, emit } from "../store";
 import { knownActions, actionCatalog } from "../commands";
 import { lastSeq, lastEventHash, listAgents, listTasks, getMeta } from "../store";
-import { memoryStatus } from "./memory";
+import { memoryStatus, memWrite, memBlockEconomy, memEconCleanup } from "./memory";
 import { fleetList, fleetOutcomeCount } from "./fleet";
 import { verdictStats, fenceCheck } from "./effect";
 import { obsvStatus } from "./obsv";
@@ -43,7 +43,7 @@ import { recordSpan } from "./otel";
 import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
 import { createTask, updateTask, rid } from "../store";
 
-export const EVAL_DATASET_VERSION = 9;
+export const EVAL_DATASET_VERSION = 10;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -98,6 +98,7 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v7 (R32) — +evidence.remote (доставка в облако: LIVE/LIVE-STORAGE или healer активен + outbox ограничен) = 32.
 // v8 (R33) — +evidence.verify (hash-chain на живых данных + тампер-детект на чистой функции, critical) = 33.
 // v9 (R34) — +pool.executors (E3: эксклюзивные lease, reap мёртвого lease, канон-модель воркеров, потолок scale; critical) = 34.
+// v10 (R35) — +memory.economy (E5: экономная доставка — sticky-ядро, familiar-элиминация, тампер контента возвращает запись в свежие; critical) = 35.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -160,6 +161,40 @@ export const EVAL_DATASET: EvalCheck[] = [
     run: () => {
       const m = memoryStatus();
       return { ok: m.db_bytes > 1024, evidence: `db=${Math.round(m.db_bytes / 1024)}KB` };
+    },
+  },
+  {
+    id: "memory.economy", plane: "memory",
+    title: "Token-economy памяти (E5): sticky-ядро не элиминируется, familiar-элиминация экономит байты, тампер контента возвращает запись",
+    critical: true,
+    expect: "1-я доставка = полная (saved 0); 2-я неизменная = элиминация familiar (saved>0); изменение контента = запись снова свежая; журнал честный [0..1]",
+    run: () => {
+      const C = "eval:econ";
+      try {
+        // seed: sticky (0.9) + две не-sticky записи с длинным контентом (элиминация заметна)
+        const a = memWrite({ kind: "semantic", key: "eval-econ-a", content: "STICKY урок: падение шины лечится рестартом демона.".repeat(3), importance: 0.9 });
+        const b = memWrite({ kind: "semantic", key: "eval-econ-b", content: `eval econ filler B ${Date.now()} — текст для экономии байтов экономики памяти.`.repeat(4), importance: 0.4 });
+        const c = memWrite({ kind: "semantic", key: "eval-econ-c", content: `eval econ filler C ${Date.now()} — второй филлер для familiar-элиминации.`.repeat(4), importance: 0.4 });
+        const ids = [a.id, b.id, c.id];
+        // 1-я доставка: sticky(a) остаётся сама, b,c свежие, знакомых нет → saved_pct = 0 (честный базлайн)
+        const d1 = memBlockEconomy(C, 5, 8000, { ids });
+        const firstOk = d1.metrics.sticky_n === 1 && d1.metrics.fresh_n === 2 && d1.metrics.familiar_n === 0 && d1.metrics.saved_pct === 0 && d1.metrics.bytes_full > 0;
+        // 2-я доставка без изменений: b,c знакомы → элиминация, sticky остаётся
+        const d2 = memBlockEconomy(C, 5, 8000, { ids });
+        const secondOk = d2.metrics.familiar_n === 2 && d2.metrics.sticky_n === 1 && d2.metrics.saved_pct > 0 && d2.metrics.bytes_compact < d2.metrics.bytes_full;
+        // 3-я: тампер контента b → b снова свежая (hash-изменение не теряется)
+        memWrite({ kind: "semantic", key: "eval-econ-b", content: `eval econ filler B TAMPERED ${Date.now()} — контент изменён, запись обязана вернуться.`.repeat(4), importance: 0.4 });
+        const d3 = memBlockEconomy(C, 5, 8000, { ids });
+        const tamperOk = d3.metrics.fresh_n === 1 && d3.metrics.familiar_n === 1 && d3.block.includes("eval-econ-b");
+        const ok = firstOk && secondOk && tamperOk;
+        return { ok, evidence: `d1 fresh=${d1.metrics.fresh_n} saved=${d1.metrics.saved_pct} (${d1.metrics.bytes_full}b); d2 familiar=${d2.metrics.familiar_n} sticky=${d2.metrics.sticky_n} saved=${d2.metrics.saved_pct} (${d2.metrics.bytes_full}→${d2.metrics.bytes_compact}b); d3 после тампера b: fresh=${d3.metrics.fresh_n} familiar=${d3.metrics.familiar_n}` };
+      } finally {
+        // самоочистка: синтетические записи + следы consumer'а
+        for (const k of ["eval-econ-a", "eval-econ-b", "eval-econ-c"]) {
+          try { const r = db.query(`DELETE FROM memory WHERE key=?`).run(k); void r; } catch { /* noop */ }
+        }
+        try { memEconCleanup(C); } catch { /* noop */ }
+      }
     },
   },
   // — флот —

@@ -23,15 +23,29 @@ import { fileURLToPath } from "node:url";
 import { mcpStatus } from "./mcp";
 
 const RING_CAP = 512;
+// B3-уточнение (R35): сэмплы boot-окна (первые 10с — JIT/первое соединение/флеш outbox)
+// идут в ОТДЕЛЬНОЕ холодное кольцо: они меряют прогрев, а не стационарный p95 сервиса.
+// Иначе пара холодных сэмплов вечно держит p95 над порогом (ложный FAIL после рестарта).
+const COLD_WINDOW_MS = 10_000;
+const COLD_CAP = 64;
 const rings = new Map<BenchProbe, number[]>();
+const coldRings = new Map<BenchProbe, number[]>();
 
 /** Наблюдение латентности (ms). Вызывается из горячего пути — O(1) амортизированно. */
 export function benchObserve(probe: BenchProbe, ms: number): void {
   if (!Number.isFinite(ms) || ms < 0) return;
+  const v = Math.round(ms);
+  if (Date.now() - bootT0 < COLD_WINDOW_MS) {
+    let cr = coldRings.get(probe);
+    if (!cr) { cr = []; coldRings.set(probe, cr); }
+    if (cr.length >= COLD_CAP) cr.shift();
+    cr.push(v);
+    return;
+  }
   let ring = rings.get(probe);
   if (!ring) { ring = []; rings.set(probe, ring); }
   if (ring.length >= RING_CAP) ring.shift();
-  ring.push(Math.round(ms));
+  ring.push(v);
 }
 
 function pct(sorted: number[], p: number): number | null {
@@ -46,6 +60,16 @@ export interface BenchStats {
 
 function statsOf(probe: BenchProbe): BenchStats {
   const ring = rings.get(probe) ?? [];
+  const sorted = [...ring].sort((a, b) => a - b);
+  return {
+    n: sorted.length,
+    p50: pct(sorted, 50), p95: pct(sorted, 95), p99: pct(sorted, 99),
+    max: sorted.length ? sorted[sorted.length - 1] : null,
+  };
+}
+
+function statsOfCold(probe: BenchProbe): BenchStats {
+  const ring = coldRings.get(probe) ?? [];
   const sorted = [...ring].sort((a, b) => a - b);
   return {
     n: sorted.length,
@@ -93,7 +117,7 @@ export const BENCH_THRESHOLDS = {
 
 export interface BenchReport {
   ok: true;
-  probes: { rest: BenchStats; rest_admin: BenchStats; rest_browser: BenchStats; sense: BenchStats; sense_act: BenchStats };
+  probes: { rest: BenchStats; rest_admin: BenchStats; rest_browser: BenchStats; sense: BenchStats; sense_act: BenchStats; cold_rest: BenchStats };
   memory: ReturnType<typeof memSnapshot>;
   boot_ms: number | null;
   thresholds: typeof BENCH_THRESHOLDS;
@@ -121,7 +145,7 @@ export function benchSnapshot(): BenchReport {
   const measured = rest.n >= BENCH_THRESHOLDS.min_samples; // rest — самый частотный зонд
   return {
     ok: true,
-    probes: { rest, rest_admin, rest_browser, sense, sense_act },
+    probes: { rest, rest_admin, rest_browser, sense, sense_act, cold_rest: statsOfCold("rest") },
     memory,
     boot_ms: bootDoneMs,
     thresholds: BENCH_THRESHOLDS,
@@ -138,7 +162,7 @@ export function benchVerdict(): { verdict: "WORKS" | "CAVEAT"; evidence: string 
     return { verdict: "CAVEAT", evidence: `WARMUP: rest_n=${r.probes.rest.n}<${BENCH_THRESHOLDS.min_samples}; GET /bench` };
   }
   const ev =
-    `rest p50/p95=${r.probes.rest.p50}/${r.probes.rest.p95}ms (n=${r.probes.rest.n}), ` +
+    `rest p50/p95=${r.probes.rest.p50}/${r.probes.rest.p95}ms (n=${r.probes.rest.n}, cold-boot отдельно: n=${r.probes.cold_rest.n} p95=${r.probes.cold_rest.p95 ?? "—"}ms), ` +
     `admin p95=${r.probes.rest_admin.p95 ?? "—"}ms (n=${r.probes.rest_admin.n}, без порога), ` +
     `browser p95=${r.probes.rest_browser.p95 ?? "—"}ms (n=${r.probes.rest_browser.n}, CLI-шеллы, без порога), ` +
     `act p95=${r.probes.sense_act.p95 ?? "—"}ms (n=${r.probes.sense_act.n}), ` +

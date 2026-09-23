@@ -144,11 +144,26 @@ function liveCount(): number {
  *  Зомби-lease прошлой инкарнации чистятся немедленно (урок R34: heartbeat в БД продлевал
  *  lease мёртвого воркера вечно → задача-зомби RUNNING). Исполнитель мёртв = lease мёртв:
  *  pool-задачи в RUNNING честно FAILED "pool_lease_expired", без ожидания watchdog'а. */
-export function poolRestore(): { restored: number; cleared: number } {
+export function poolRestore(): { restored: number; cleared: number; healed: number } {
   const rows = workerRows();
   const tag = agentTag();
   let restored = 0;
+  let healed = 0;
   for (const w of rows) {
+    // R35 урок: слот может указывать на УДАЛЁННОГО агента (чурн реестра) → model="?" в
+    // статусе и вечный канон-FAIL. Самозаживление: агент реестра отсутствует → пересоздать
+    // исполнителя слота с каноническим тегом (режим слота сохраняется: live/drain).
+    const exists = !!db.query(`SELECT 1 FROM agents WHERE id=?`).get(w.agent_id);
+    if (!exists) {
+      db.query(`DELETE FROM pool_workers WHERE slot=?`).run(w.slot);
+      const a = createAgentForSlot(w.slot, tag);
+      if (w.mode === "drain") setAgentPaused(a.id, 1);
+      db.query(`INSERT INTO pool_workers (slot,agent_id,mode,created_at) VALUES (?,?,?,?)`).run(w.slot, a.id, w.mode, nowIso());
+      emit("POOL_WORKER_CREATED", { slot: w.slot, agent_id: a.id, model: a.model, heal: "missing_agent_recreated" }, a.id, null);
+      healed++;
+      if (w.mode === "live") restored++;
+      continue;
+    }
     if (w.mode === "live") {
       setAgentPaused(w.agent_id, 0);
       syncAgentModel(w.agent_id, tag);
@@ -168,7 +183,7 @@ export function poolRestore(): { restored: number; cleared: number } {
     }
   }
   if (zombies.length) db.query(`DELETE FROM pool_leases WHERE done=0`).run();
-  return { restored, cleared: zombies.length };
+  return { restored, cleared: zombies.length, healed };
 }
 
 /**

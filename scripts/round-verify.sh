@@ -45,9 +45,15 @@ curl -sf --max-time 5 "$B/glm" | j "d.get('canonical'), 'honoring='+str(d.get('p
 echo "== WORKGRAPH =="
 curl -sf --max-time 5 "$B/workgraph" | j "'objectives='+str(len(d.get('objectives',[]))), 'edges='+str(len(d.get('edges',[]))), 'orphan='+str(len(d.get('orphan_tasks',[])))"
 echo "== POOL (E3) =="
-curl -sf --max-time 5 "$B/pool" | j "'live='+str(d['live'])+'/'+str(d['ceiling']), 'total='+str(d['workers_total']), 'q='+str(d['queue']['ready'])+'/'+str(d['queue']['running']), 'conc='+str(d['concurrency']['max_observed']), '1ч='+str(d['throughput']['done_1h'])+'✓/'+str(d['throughput']['failed_1h'])+'✗'
+curl -sf --max-time 5 "$B/pool" | j "'live='+str(d['live'])+'/'+str(d['ceiling']), 'total='+str(d['workers_total']), 'q='+str(d['queue']['ready'])+'/'+str(d['queue']['running']), 'conc='+str(d['concurrency']['max_observed']), '1ч='+str(d['throughput']['done_1h'])+'✓/'+str(d['throughput']['failed_1h'])+'✗'"
 echo "== POOL lease-exclusivity (synthetic) =="
 curl -s --max-time 10 -X POST "$B/pool" -H "Content-Type: application/json" -d '{"op":"scale","n":2}' | j "'scale='+str(d['scale']), 'created='+str(d['created'])"
+
+echo "== MEMORY ECONOMY (E5) =="
+curl -sf --max-time 5 "$B/memory/economy" | j "'deliveries='+str(d['deliveries']), 'avg_saved='+str(round(d['avg_saved_pct']*100))+'%', 'bytes_saved='+str(d['bytes_saved_total']), 'consumers='+','.join(c['consumer'] for c in d['by_consumer'][:4])"
+echo "== MEMORY economy live delivery ×2 (1-я = базлайн, 2-я = familiar-элиминация) =="
+curl -s --max-time 5 -X POST "$B/memory" -H "Content-Type: application/json" -d '{"op":"economy","consumer":"verify-demo"}' | j "'#1 ok='+str(d.get('ok')), 'saved='+str(d['metrics']['saved_pct']), 'fresh='+str(d['metrics']['fresh_n']), 'sticky='+str(d['metrics']['sticky_n']), 'familiar='+str(d['metrics']['familiar_n'])"
+curl -s --max-time 5 -X POST "$B/memory" -H "Content-Type: application/json" -d '{"op":"economy","consumer":"verify-demo"}' | j "'#2 ok='+str(d.get('ok')), 'saved='+str(d['metrics']['saved_pct']), 'full='+str(d['metrics']['bytes_full'])+'b', 'compact='+str(d['metrics']['bytes_compact'])+'b', 'fresh='+str(d['metrics']['fresh_n']), 'familiar='+str(d['metrics']['familiar_n'])"
 
 echo "== APPROVALS =="
 curl -sf --max-time 5 "$B/approvals" | j "'pending='+str(d.get('pending')), 'stats='+json.dumps(d.get('stats',{}))[:80]"
