@@ -18,6 +18,9 @@ LOG="$DATA/probe.log"
 export ME2_WS_PORT="$WS" ME2_REST_PORT="$REST" ME2_LEGACY_MIRROR_PORT="$MIRROR" \
        ME2_SCREENCEAST_PORT="$SC" ME2_DATA_DIR="$DATA" ME2_LOCK_FILE="$LOCK"
 export ME2_BOOT_MODE=probe
+# корень репо/чатов probe-инстанса — внутри его временного каталога (CI: /home/z недоступен)
+mkdir -p "$DATA/repo"
+export ME2_REPO_ROOT="$DATA/repo"
 
 cleanup() {
   kill "$PROBE_PID" 2>/dev/null || true
