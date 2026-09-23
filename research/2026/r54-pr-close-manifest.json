@@ -1,0 +1,949 @@
+{
+ "schema": "me2.pr-close-manifest.v1",
+ "repo": "PatrickFrome/Compute",
+ "mode": "apply",
+ "cutoff": "2026-09-09T21:42:59.954096+00:00",
+ "generated_at": "2026-09-23T21:44:18.691857+00:00",
+ "open_pr_total": 569,
+ "stale_total": 249,
+ "batch": 150,
+ "closed": {
+  "50": {
+   "title": "feat(w1): prepare-only locked regression",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "51": {
+   "title": "fix(read-plane): restrict privileged bar",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "48": {
+   "title": "A2: realtime cognitive bus observer cons",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "12": {
+   "title": "AOP1: autonomous orchestration plane (no",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "37": {
+   "title": "fix(read-plane): fingerprint v2.2 — plan",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "52": {
+   "title": "A2: DB-enforced interactive dual-round +",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "53": {
+   "title": "W1: provider-neutral lifecycle evidence ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "57": {
+   "title": "A2 Browser Operator v0.6.0 — P0/P1 opera",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "54": {
+   "title": "A2: dual web-chat bridge for GPT/GLM (PR",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "58": {
+   "title": "A2 Browser Operator V1 R0 — source-of-tr",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "59": {
+   "title": "A2 Browser Operator V1 R1 — live runtime",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "60": {
+   "title": "A2 Browser Operator V1 R2 — canonical mo",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "63": {
+   "title": "feat(browser-compute): add fail-closed B",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "61": {
+   "title": "R3: Target Registry v1 and per-target ob",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "64": {
+   "title": "feat(browser-compute): add bounded B3/R4",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "49": {
+   "title": "A2: realtime multi-agent cognitive bus",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "65": {
+   "title": "fix(contracts): derive manifest version ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "67": {
+   "title": "fix(duel-v4): preserve upstream tariff a",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "69": {
+   "title": "fix(sovereign-legacy): preserve upstream",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "66": {
+   "title": "feat(f1): prepare zero-spend multi-model",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "72": {
+   "title": "METAENGINE Browser Privacy-Safe Tab Live",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "75": {
+   "title": "Fix repeated WORKER_LOST wake spam",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "73": {
+   "title": "METAENGINE Browser Dev Update Channel Al",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "74": {
+   "title": "Browser liveness telemetry: exact render",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "78": {
+   "title": "C5: pin autonomous dispatch to exact wor",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "79": {
+   "title": "Observe live Browser self-update state s",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "77": {
+   "title": "Finalize Browser self-update with in-pla",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "82": {
+   "title": "Enforce maximum available reasoning acro",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "80": {
+   "title": "C5: protect fleet-owned Browser tabs fro",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "84": {
+   "title": "Benchmark persistent Electron builder ca",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "85": {
+   "title": "Diagnose PR #83 packaged singleton verif",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "86": {
+   "title": "Fix trusted dev metadata raw-byte verifi",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "81": {
+   "title": "Add autonomous verified downloads and ty",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "87": {
+   "title": "Make verified dev self-update continuous",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "89": {
+   "title": "Persist trusted dev release anti-rollbac",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "92": {
+   "title": "Wire Browser Control Plane capabilities ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "91": {
+   "title": "Define maximum typed Browser Control Pla",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "93": {
+   "title": "Add typed keyboard and isolated per-tab ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "83": {
+   "title": "Add autonomous Browser dev-update comman",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "94": {
+   "title": "Add versioned command contract for Brows",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "88": {
+   "title": "Add multi-supervisor mesh with shared ac",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "90": {
+   "title": "Complete multi-supervisor mesh runtime a",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "95": {
+   "title": "Make self-update nonblocking for active ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "100": {
+   "title": "Add owner-overridable METAENGINE safety ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "101": {
+   "title": "Harden supervisor mesh tables with fail-",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "102": {
+   "title": "Add federated autonomy runtime and geome",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "104": {
+   "title": "Add Chromium/Firefox-style durable updat",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "105": {
+   "title": "Qualify self-update successor only after",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "106": {
+   "title": "Qualify self-update successor only after",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "114": {
+   "title": "Enable GATE_DISABLE_ALL_DEV development ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "115": {
+   "title": "Fail-close Development OS gate policy st",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "107": {
+   "title": "Require accepted signed heartbeat before",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "116": {
+   "title": "Fail-close privileged supervisor RPC exe",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "113": {
+   "title": "Fence Development OS supervisor coordina",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "118": {
+   "title": "Fail-close supervisor table RLS and dire",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "117": {
+   "title": "Falsify persisted fleet transport proof ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "119": {
+   "title": "Add zero-authority fresh fleet target re",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "121": {
+   "title": "Persist Browser-local fleet target reval",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "120": {
+   "title": "Bind fleet target revalidation to Browse",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "122": {
+   "title": "C5: transact fleet-state target revalida",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "124": {
+   "title": "C5: require fresh transport proof after ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "123": {
+   "title": "C5: wire zero-authority target revalidat",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "125": {
+   "title": "C5: derive transport proof only from Bro",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "126": {
+   "title": "C5: gate transport promotion behind Brow",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "127": {
+   "title": "C5: compose transport promotion behind B",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "128": {
+   "title": "C5: add restricted Browser main-process ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "130": {
+   "title": "DevBrowser: add autonomous Development B",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "133": {
+   "title": "Fleet: bind background submit to exact S",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "129": {
+   "title": "C5: hide raw FleetProvisioner behind Bro",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "134": {
+   "title": "C5: fail before background fleet send ef",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "135": {
+   "title": "DBR1: harden worktree identity with porc",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "132": {
+   "title": "DBR1: add exact-identity Workspace Manag",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "136": {
+   "title": "C5: split fleet dispatch into foreground",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "137": {
+   "title": "C5: wire exact-bound two-phase fleet dis",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "138": {
+   "title": "C5: require exact actuation lease before",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "131": {
+   "title": "C5: wire restricted fleet composition in",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "143": {
+   "title": "C5: harden server lease verifier CI supp",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "141": {
+   "title": "C5: verify transport promotion lease on ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "145": {
+   "title": "C0: restore canonical unified source sna",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "146": {
+   "title": "C0: minimize unified source snapshot to ",
+   "close": "http_200",
+   "comment": "http_201"
+  },
+  "147": {
+   "title": "C0: derive zero-authority supervisor rol",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "148": {
+   "title": "C0: make rollover evidence a stable stat",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "149": {
+   "title": "C0: compose and durably persist zero-aut",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "150": {
+   "title": "C0: fence rollover checkpoints by proces",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "151": {
+   "title": "C0: bind rollover checkpoints to canonic",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "152": {
+   "title": "C0: gate successor identity from durable",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "154": {
+   "title": "C0: compose zero-authority restart readi",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "144": {
+   "title": "Browser: add zero-authority Meta-Orchest",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "153": {
+   "title": "C0: verify fresh successor heartbeat and",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "155": {
+   "title": "C0: bind restart intent to verified roll",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "156": {
+   "title": "C0: persist zero-authority restart inten",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "157": {
+   "title": "C0: verify durable restart intent readba",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "158": {
+   "title": "C0: fence restart consumption behind typ",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "160": {
+   "title": "C0: persist typed restart effect receipt",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "159": {
+   "title": "C0: verify typed restart effect receipts",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "162": {
+   "title": "C0: compose verified restart with succes",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "161": {
+   "title": "C0: verify durable restart effect receip",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "163": {
+   "title": "C0: verify post-successor continuity rea",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "164": {
+   "title": "C0: persist post-successor continuity pr",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "165": {
+   "title": "C0: verify durable post-successor contin",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "167": {
+   "title": "C0: gate recovery resume on durable and ",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "169": {
+   "title": "C0: verify durable recovery resume proof",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "168": {
+   "title": "C0: persist recovery resume proof durabl",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "170": {
+   "title": "C0: gate recovery admission on fresh qui",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "171": {
+   "title": "C0: persist recovery admission proof dur",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "172": {
+   "title": "C0: verify durable recovery admission pr",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "173": {
+   "title": "C0: compose recovery admission with type",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "174": {
+   "title": "C0: persist recovery restart preconditio",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "175": {
+   "title": "C0: verify durable recovery restart prec",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "176": {
+   "title": "C0: bind durable recovery proof to resta",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "179": {
+   "title": "Browser shell v0.6.4 design system and v",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "178": {
+   "title": "C0: persist recovery restart effect inte",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "181": {
+   "title": "C0: verify durable recovery restart effe",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "180": {
+   "title": "Browser Workbench V2: native context rai",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "182": {
+   "title": "Browser Typed Workspaces V1: durable wor",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "185": {
+   "title": "Browser Final Optimization V1: linear wo",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "184": {
+   "title": "C0: verify final restart admission witho",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "183": {
+   "title": "Browser Workspace Reincarnation V1: opti",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "191": {
+   "title": "DevOS: add successor adoption for expire",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "189": {
+   "title": "Browser Live Control Recovery V1: enroll",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "194": {
+   "title": "test(devos): falsify result-ready expiry",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "193": {
+   "title": "DevOS: verify expired-result successor r",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "190": {
+   "title": "Browser runtime: port exact PR-head Deve",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "195": {
+   "title": "test(devos): falsify continuity liveness",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "192": {
+   "title": "fix(browser): bootstrap root DevOS worke",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "186": {
+   "title": "DevOS: fence expired RESULT_READY and BL",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "201": {
+   "title": "fix(browser): decouple self-update verif",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "197": {
+   "title": "fix(browser): exact supervisor tab activ",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "208": {
+   "title": "fix(devos): make ChatGPT rate limits bou",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "199": {
+   "title": "fix(browser): foreground-bind supervisor",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "203": {
+   "title": "fix(browser): recover dead crash-sentine",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "210": {
+   "title": "fix(browser): restore fleet wrapper/core",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "205": {
+   "title": "fix(browser): isolate exact self-update ",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "213": {
+   "title": "fix(browser): restore fleet wrapper/core",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "214": {
+   "title": "fix(devos): persist continuous current-b",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "217": {
+   "title": "fix(browser): recover unresolved success",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "216": {
+   "title": "fix(browser): keep fleet capacity backpr",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "218": {
+   "title": "fix(browser): foreground-fence superviso",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "219": {
+   "title": "fix(browser): close successor and mesh c",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "221": {
+   "title": "fix(browser): restore owner-gated fleet ",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "220": {
+   "title": "fix(browser): resume stalled verified su",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "270": {
+   "title": "feat(browser): add explicit Context Pack",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "268": {
+   "title": "feat(browser): add Agentic Workbench V1",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "269": {
+   "title": "feat(browser): add exact-target native S",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "318": {
+   "title": "feat(browser): fuse live process plane w",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "8": {
+   "title": "F1: live external federation evidence (d",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "319": {
+   "title": "fix(browser): preserve rollover attempt ",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "329": {
+   "title": "feat(browser): make cognitive ingest dur",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "330": {
+   "title": "feat(browser): bind BrowserCells to exac",
+   "close": "http_200",
+   "comment": "http_403"
+  },
+  "331": {
+   "title": "perf(browser): make command causal bookk",
+   "close": "http_200",
+   "comment": "http_403"
+  }
+ },
+ "errors": 70,
+ "stale_preview": [
+  {
+   "n": 37,
+   "head": "fix/read-plane-v2.2-plane-separation",
+   "base": "main",
+   "updated": "2026-08-23T01:25:13Z"
+  },
+  {
+   "n": 12,
+   "head": "work/aop1-autonomous-orchestration",
+   "base": "main",
+   "updated": "2026-08-24T10:37:40Z"
+  },
+  {
+   "n": 48,
+   "head": "work/a2-realtime-cognitive-bus",
+   "base": "main",
+   "updated": "2026-08-24T11:53:34Z"
+  },
+  {
+   "n": 50,
+   "head": "work/w1-linux-worker-safety",
+   "base": "main",
+   "updated": "2026-08-24T13:52:26Z"
+  },
+  {
+   "n": 51,
+   "head": "work/same-point-duel-v4-read-plane-hardening",
+   "base": "main",
+   "updated": "2026-08-24T13:59:04Z"
+  },
+  {
+   "n": 52,
+   "head": "work/same-point-duel-v4-a2-interactive-v2",
+   "base": "work/same-point-duel-v4-a2-cognitive-bus",
+   "updated": "2026-08-24T22:49:15Z"
+  },
+  {
+   "n": 53,
+   "head": "work/w1-provider-neutral-lifecycle-v2",
+   "base": "main",
+   "updated": "2026-08-25T04:08:44Z"
+  },
+  {
+   "n": 54,
+   "head": "work/chat-control-plane-browser-bridge",
+   "base": "main",
+   "updated": "2026-08-26T14:23:26Z"
+  },
+  {
+   "n": 57,
+   "head": "work/a2-browser-operator-v060",
+   "base": "main",
+   "updated": "2026-08-27T08:03:57Z"
+  },
+  {
+   "n": 58,
+   "head": "work/a2-browser-operator-r0-source-of-truth",
+   "base": "main",
+   "updated": "2026-08-27T19:03:25Z"
+  },
+  {
+   "n": 59,
+   "head": "work/a2-browser-operator-r1-live-stability",
+   "base": "main",
+   "updated": "2026-08-27T19:23:25Z"
+  },
+  {
+   "n": 60,
+   "head": "work/a2-browser-operator-r2-module-consolidation",
+   "base": "work/a2-browser-operator-r1-live-stability",
+   "updated": "2026-08-27T19:45:07Z"
+  },
+  {
+   "n": 61,
+   "head": "work/a2-browser-operator-r3-target-registry",
+   "base": "work/a2-browser-operator-r2-module-consolidation",
+   "updated": "2026-08-27T20:32:37Z"
+  },
+  {
+   "n": 63,
+   "head": "work/a2-compute-browser-b2-contexts",
+   "base": "work/a2-compute-browser-b2-b3",
+   "updated": "2026-08-28T00:02:15Z"
+  },
+  {
+   "n": 64,
+   "head": "work/a2-compute-browser-b3-session-scheduler",
+   "base": "work/a2-compute-browser-b2-contexts",
+   "updated": "2026-08-28T05:48:35Z"
+  },
+  {
+   "n": 65,
+   "head": "work/a2-compute-browser-b2-contract-pin-repair",
+   "base": "work/a2-compute-browser-b2-contexts",
+   "updated": "2026-08-28T21:38:12Z"
+  },
+  {
+   "n": 49,
+   "head": "work/same-point-duel-v4-a2-cognitive-bus",
+   "base": "main",
+   "updated": "2026-08-29T04:30:20Z"
+  },
+  {
+   "n": 67,
+   "head": "work/same-point-duel-v4-upstream-provenance",
+   "base": "main",
+   "updated": "2026-08-29T04:32:14Z"
+  },
+  {
+   "n": 69,
+   "head": "work/same-point-duel-v4-legacy-upstream-provenance",
+   "base": "main",
+   "updated": "2026-08-29T05:31:24Z"
+  },
+  {
+   "n": 66,
+   "head": "work/f1-multimodel-vercel-gateway-v1",
+   "base": "main",
+   "updated": "2026-08-29T11:20:11Z"
+  },
+  {
+   "n": 72,
+   "head": "work/convergence-browser-liveness-v1",
+   "base": "work/convergence-supervisor-keepalive-v1",
+   "updated": "2026-08-29T15:27:17Z"
+  },
+  {
+   "n": 73,
+   "head": "work/convergence-update-channel-v1",
+   "base": "work/convergence-supervisor-keepalive-v1",
+   "updated": "2026-08-29T15:33:54Z"
+  },
+  {
+   "n": 74,
+   "head": "work/supervisor-liveness-telemetry-v1",
+   "base": "work/convergence-supervisor-keepalive-v1",
+   "updated": "2026-08-29T15:48:42Z"
+  },
+  {
+   "n": 75,
+   "head": "work/keepalive-worker-lost-edge-dedupe-v1",
+   "base": "work/convergence-supervisor-keepalive-v1",
+   "updated": "2026-08-29T17:01:24Z"
+  },
+  {
+   "n": 78,
+   "head": "work/c5-incarnation-pinned-dispatch-v1",
+   "base": "work/convergence-global-observer-memory-v1",
+   "updated": "2026-08-29T17:58:30Z"
+  },
+  {
+   "n": 77,
+   "head": "work/self-update-finalization-v1",
+   "base": "work/keepalive-worker-lost-edge-dedupe-v1",
+   "updated": "2026-08-29T18:49:48Z"
+  },
+  {
+   "n": 79,
+   "head": "work/self-update-live-observability-v1",
+   "base": "work/self-update-finalization-v1",
+   "updated": "2026-08-29T18:50:56Z"
+  },
+  {
+   "n": 80,
+   "head": "work/fleet-owned-tab-lifecycle-v1",
+   "base": "work/self-update-finalization-v1",
+   "updated": "2026-08-29T18:55:52Z"
+  },
+  {
+   "n": 82,
+   "head": "work/max-reasoning-policy-v1",
+   "base": "work/self-update-finalization-v1",
+   "updated": "2026-08-29T19:04:30Z"
+  },
+  {
+   "n": 84,
+   "head": "work/ci-electron-cache-benchmark-v1",
+   "base": "work/self-update-autonomous-actuator-v1",
+   "updated": "2026-08-29T21:46:29Z"
+  }
+ ],
+ "comment_retry": {
+  "delivered": 69,
+  "undelivered": 1
+ }
+}

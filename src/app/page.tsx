@@ -14,6 +14,7 @@ import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import AgentChatPanel from "@/components/me2/agent-chat-panel";
 import FleetGrid from "@/components/me2/fleet-grid";
+import MirrorPanel from "@/components/me2/mirror-panel";
 import { agentChatOp, tokensOp } from "@/lib/me2-socket";
 import { me2Desktop } from "@/lib/me2-desktop";
 import { Badge } from "@/components/ui/badge";
@@ -2530,6 +2531,7 @@ export default function MissionControl() {
                           ))}
                         </CardContent>
                       </Card>
+              <MirrorPanel />
               </div>
               <div className="flex min-w-0 flex-col gap-4">
                       <Card className="shrink-0 border-zinc-800 bg-zinc-900/40">

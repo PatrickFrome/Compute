@@ -188,16 +188,36 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 200, { ...bundle, mirror_state: sqlMirror.status().state });
     }
     if (path === "/sqlmirror/ui-token/verify" && req.method === "GET") {
-      // само-проверка канала: daemon сам валидирует выдачу (подпись+срок+роль либо publishable-префикс)
+      // само-проверка канала: daemon сам валидирует выдачу (подпись+срок+роль либо префиксы/режимы).
+      // R54: service_proxy не выдаёт токен вовсе — его verify идёт через живую пробу облака (readFeed).
       const b = uiTokenBundle();
+      if (b.channel === "service_proxy") {
+        const feed = await sqlMirror.readFeed(1);
+        return json(res, 200, { ok: feed.ok || feed.error === "table_missing_ddl_pending", channel: "service_proxy",
+                                cloud: feed.ok ? "readable" : feed.error, schema: b.schema, table: b.table });
+      }
       if (!b.ok || !b.token) return json(res, 200, { ok: false, reason: b.reason ?? "mint_failed" });
       if (b.channel === "publishable") {
         const ok = String(b.token).startsWith("sb_publishable_");
         return json(res, 200, { ok, channel: "publishable", note: ok ? "публичный read-ключ (роль anon, видимость диктует RLS)" : "неожиданный формат", schema: b.schema, table: b.table });
       }
+      if (b.channel === "anon_registered") {
+        // R54: зарегистрированный legacy anon — проверяем форму JWT (3 сегмента, роль anon в claims)
+        const tok = String(b.token);
+        let role = ""; let shape = tok.split(".").length === 3 && tok.length > 60;
+        try { role = String(JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? ""); } catch { shape = false; }
+        return json(res, 200, { ok: shape && role === "anon", channel: "anon_registered", shape, role, note: "зарегистрированный legacy anon-ключ — RLS-гейт канонический", schema: b.schema, table: b.table });
+      }
       const v = verifySupabaseJwt(String(b.token), "authenticated");
       const va = b.anon_token ? verifySupabaseJwt(String(b.anon_token), "anon") : { ok: false, reason: "no_anon" };
       return json(res, 200, { ok: v.ok && va.ok, channel: "mint", authenticated: v, anon: va, schema: b.schema, table: b.table });
+    }
+    // R54: read-прокси зеркала (канал service_proxy) — daemon читает облако сам, service-ключ не покидает сервер.
+    // Read-only SELECT, лимит ≤ 200, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/feed" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      const limit = Number(url.searchParams.get("limit") || 50);
+      return json(res, 200, await sqlMirror.readFeed(limit));
     }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };

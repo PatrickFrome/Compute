@@ -87,7 +87,10 @@ function parseEnvFile(path: string): Record<string, string> {
 }
 
 const SEED_FILES = [
-  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET"] },
+  // R54: +SUPABASE_SERVICE_ROLE_JWT_LEGACY (операторский legacy service_role JWT, HMAC-верифицирован
+  // против SUPABASE_JWT_SECRET; облако принимает точную строку зарегистрированного ключа — пробы E2/E5)
+  // и +SUPABASE_ANON_JWT (слот на будущее: зарегистрированный legacy anon-ключ → канонический RLS-гейт).
+  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_ANON_JWT"] },
   { path: "/home/z/.a2/.github.env", keys: ["GITHUB_TOKEN_ADMIN"] },
 ];
 

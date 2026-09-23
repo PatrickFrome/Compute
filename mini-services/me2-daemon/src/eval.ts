@@ -51,7 +51,7 @@ import {
   outcomeReport, outcomePending, meshHeartbeatApply,
 } from "./agentchat";
 import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
-import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey } from "./supabase-jwt";
+import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt } from "./supabase-jwt";
 import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
@@ -62,7 +62,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 19;
+export const EVAL_DATASET_VERSION = 20;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1065,9 +1065,9 @@ export const EVAL_DATASET: EvalCheck[] = [
   {
     id: "contract.supabase_jwt",
     plane: "contract",
-    title: "R53 фаза D-исполнение: read-канал зеркала с гейтом RLS — publishable (anon/RLS, канонический) или mint HS256 (authenticated/anon, ttl 120с) — подпись, роли, тампер, честный отказ",
+    title: "R54 фаза D: read-канал зеркала — publishable/anon_registered (RLS, токен в UI) / service_proxy (ключ не покидает daemon) / mint (офлайн-верификация) — честный режим без утечки service-ключа",
     critical: true,
-    expect: "channel=publishable → sb_publishable_-префикс; channel=mint → bundle.token/anon_token = 3 сегмента, verify ok, роль-мисматч отклонён, тампер пойман, ttl ≤ 600; нет каналов (probe/CI) → reason=no_read_channel — PASS в любом честном режиме",
+    expect: "publishable → sb_publishable_-префикс; anon_registered → JWT с ролью anon; service_proxy → НИКАКОГО токена в выдаче (утечки нет) + note; mint → 3 сегмента, verify ok, тампер пойман, ttl ≤ 600; нет каналов → no_read_channel — PASS в любом честном режиме",
     run: () => {
       const bundle = uiTokenBundle();
       if (!bundle.ok) {
@@ -1078,6 +1078,20 @@ export const EVAL_DATASET: EvalCheck[] = [
         const tok = String(bundle.token);
         const ok = tok.startsWith("sb_publishable_") && bundle.anon_token === tok && bundle.ttl === 0 && bundle.table === SQLMIRROR_TABLE;
         return { ok, evidence: `channel=publishable (канонический RLS-гейт, роль anon), token-ok=${tok.startsWith("sb_publishable_")}, table=${bundle.table}` };
+      }
+      if (bundle.channel === "anon_registered") {
+        const tok = String(bundle.token);
+        let role = ""; let shape = tok.split(".").length === 3 && tok.length > 60;
+        try { role = String(JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? ""); } catch { shape = false; }
+        const ok = shape && role === "anon" && bundle.anon_token === tok && bundle.ttl === 0;
+        return { ok, evidence: `channel=anon_registered (зарегистрированный legacy anon, RLS-гейт), shape=${shape}, role=${role}` };
+      }
+      if (bundle.channel === "service_proxy") {
+        // ключ НЕ должен покидать daemon: ни JWT (eyJ…), ни sb_secret в выдаче
+        const raw = JSON.stringify(bundle);
+        const noLeak = !/eyJ[A-Za-z0-9_-]{20,}/.test(raw) && !/sb_(secret|publishable)_[A-Za-z0-9_-]{10,}/.test(raw);
+        const ok = noLeak && !bundle.token && !bundle.anon_token && typeof bundle.note === "string" && bundle.note.length > 10;
+        return { ok, evidence: `channel=service_proxy, no-leak=${noLeak}, note=${Boolean(bundle.note)}, table=${bundle.table}` };
       }
       const tok = String(bundle.token), anon = String(bundle.anon_token);
       const shape = [tok, anon].every((t) => t.split(".").length === 3 && t.length > 60);
@@ -1091,13 +1105,38 @@ export const EVAL_DATASET: EvalCheck[] = [
       const ok = shape && vAuth.ok && vAnon.ok && !vMismatch.ok && vMismatch.reason === "role_mismatch"
         && !vTamper.ok && vTamper.reason === "bad_signature" && ttlOk && bundle.ttl === 120
         && bundle.table === SQLMIRROR_TABLE;
-      return { ok, evidence: `channel=mint, shape=${shape}, auth=${vAuth.ok}, anon=${vAnon.ok}, mismatch→${vMismatch.reason}, tamper→${vTamper.reason}, ttl=${claims.exp - claims.iat}с, table=${bundle.table}` };
+      return { ok, evidence: `channel=mint (офлайн-верификация; облако отвергает сам-минт — R54), shape=${shape}, auth=${vAuth.ok}, anon=${vAnon.ok}, mismatch→${vMismatch.reason}, tamper→${vTamper.reason}, ttl=${claims.exp - claims.iat}с, table=${bundle.table}` };
+    },
+  },
+  {
+    id: "contract.supabase_legacy",
+    plane: "contract",
+    title: "R54: legacy-креденшал оператора — офлайн HMAC-верификация пары (secret, service_role JWT) и честная пара vault-имен",
+    critical: false,
+    expect: "если оба ключа в vault'е: legacy JWT — 3 сегмента, роль service_role, подпись совпадает с HMAC-SHA256(secret, header.payload) — пар authenticity; в ui-token выдаче ключа нет (см. contract.supabase_jwt). Если ключей нет — честный skip-ok",
+    run: () => {
+      const svc = serviceRoleLegacyJwt();
+      const secret = tokenGet("SUPABASE_JWT_SECRET") ?? "";
+      if (!svc || !secret) return { ok: true, evidence: `skip-ok: legacy=${svc ? "есть" : "нет"}, secret=${secret ? "есть" : "нет"} — пары нет, проверять нечего` };
+      const parts = svc.split(".");
+      if (parts.length !== 3) return { ok: false, evidence: `legacy JWT malformed: ${parts.length} сегментов` };
+      let claims: Record<string, unknown> = {};
+      try { claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return { ok: false, evidence: "legacy JWT payload не парсится" }; }
+      const roleOk = claims.role === "service_role";
+      const b64u = (s: string) => s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const h = new Bun.CryptoHasher("sha256", secret);
+      h.update(`${parts[0]}.${parts[1]}`);
+      const calc = b64u(Buffer.from(h.digest()).toString("base64"));
+      const sigOk = calc === parts[2];
+      const expOk = typeof claims.exp === "number" && claims.exp > Math.floor(Date.now() / 1000);
+      const ok = roleOk && sigOk && expOk;
+      return { ok, evidence: `HMAC=${sigOk ? "подпись сходится" : "подпись НЕ сходится"}, role=${String(claims.role)}, exp-fresh=${expOk}, ref=${String(claims.ref ?? "-")}` };
     },
   },
   {
     id: "mission.sqlmirror_ui",
     plane: "mission",
-    title: "R53 фаза D-исполнение: GET /ui несёт панель «Зеркало SQL (RLS)» — jwt-токены только от daemon'а, anon-проба с честным fail-closed-вердиктом, никакого секрета в HTML",
+    title: "R54 фаза D: GET /ui несёт панель «Зеркало SQL» — каналы publishable/anon_registered/service_proxy/mint, anon-проба с честным fail-closed-вердиктом, никакого секрета в HTML",
     critical: true,
     expect: "HTML содержит data-testid=mc-mirror, fetch /sqlmirror/ui-token, маркеры RLS-гейта (anon-проба + fail-closed + предупреждение о протечке), в HTML нет вшитых JWT (eyJ…), нет внешних ключей; имя таблицы зеркала совпадает с sql/0001 (если файл доступен по относительному пути)",
     run: () => {

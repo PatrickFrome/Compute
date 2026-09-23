@@ -10,9 +10,11 @@
 // выключена. Поэтому канал чтения двухрежимный (честный приоритет):
 //   1) channel=publishable — sb_publishable_… ключ (роль anon, RLS-управляемый,
 //      публичный по дизайну — оператор кладёт в vault/env; канонический RLS-гейт);
-//   2) channel=mint — HS256 JWT (authenticated/anon, ttl 120с) из vault-секрета —
-//      работает, если оператор включит legacy JWT-ключи;
-//   3) ok:false reason=no_read_channel — честный отказ.
+//   2) channel=anon_registered — зарегистрированный legacy anon JWT (роль anon; RLS-гейт);
+//   3) channel=service_proxy — читает daemon через legacy service_role JWT (ключ не покидает сервер);
+//   4) channel=mint — HS256 JWT (authenticated/anon, ttl 120с) — сохранён для eval/офлайн;
+//      пробы R54 доказали: облако отвергает сам-минт (точный матч зарегистрированных строк);
+//   5) ok:false reason=no_read_channel — честный отказ.
 // Zero-authority: модуль только выдаёт read-каналы; на шину, решения и self-update не влияет.
 import { tokenGet } from "./tokens";
 import { SQLMIRROR_TABLE } from "./sqlmirror";
@@ -82,10 +84,35 @@ export function publishableKey(): string {
   return process.env.ME2_SUPABASE_PUBLISHABLE_KEY || tokenGet("SUPABASE_PUBLISHABLE_KEY") || "";
 }
 
-/** Полная раздача для UI: REST-база PostgREST, таблица зеркала и read-канал. */
+/** R54: зарегистрированный legacy anon-ключ (слот: оператор кладёт строку из дашборда → канонический RLS-гейт). */
+export function anonRegisteredJwt(): string {
+  return tokenGet("SUPABASE_ANON_JWT") || "";
+}
+
+/** R54: legacy service_role JWT (операторский; канал service_proxy — ключ НЕ покидает daemon). */
+export function serviceRoleLegacyJwt(): string {
+  return tokenGet("SUPABASE_SERVICE_ROLE_JWT_LEGACY") || "";
+}
+
+/**
+ * Полная раздача для UI: REST-база PostgREST, таблица зеркала и read-канал.
+ *
+ * R54 (пробы живого облака): gateway принимает ТОЛЬКО точную строку зарегистрированного ключа
+ * (HMAC-подпись того же секрета с иным iat → 401 — E1; канонические iss/ref — 401 — probe C;
+ * GoTrue-шейп — 401 — G1-G3; точная строка service_role — 200 — E2/E5). Сам-минт мёртв.
+ * Честный приоритет каналов:
+ *   1) publishable     — sb_publishable_… (роль anon, RLS-гейт канонический, публичен по дизайну);
+ *   2) anon_registered — зарегистрированный legacy anon JWT (роль anon, RLS-гейт; публичен по дизайну);
+ *   3) service_proxy   — читает сам daemon через legacy service_role JWT (ключ НЕ покидает daemon;
+ *                        RLS-гейт так НЕ демонстрируется — панель маркирует честно);
+ *   4) mint            — HS256 минт (сохранён для eval/офлайн-верификации; облако отвергает —
+ *                        панель покажет живой 401);
+ *   5) ok:false no_read_channel — честный отказ.
+ */
 export function uiTokenBundle(): {
-  ok: boolean; reason?: string; schema?: string; table?: string; rest?: string; channel?: "publishable" | "mint";
-  token?: string; anon_token?: string; role?: string; ttl?: number; mirror_state?: string;
+  ok: boolean; reason?: string; schema?: string; table?: string; rest?: string;
+  channel?: "publishable" | "anon_registered" | "service_proxy" | "mint";
+  token?: string; anon_token?: string; role?: string; ttl?: number; mirror_state?: string; note?: string;
 } {
   const restBase =
     tokenGet("SUPABASE_URL") ?? process.env.ME2_SQL_MIRROR_URL ?? "https://xpeibufgzjknrhbhpffp.supabase.co";
@@ -95,11 +122,24 @@ export function uiTokenBundle(): {
     return { ok: true, schema: SUPABASE_JWT_SCHEMA, table: SQLMIRROR_TABLE, channel: "publishable",
              rest: `${restBase.replace(/\/$/, "")}/rest/v1`, token: pub, anon_token: pub, role: "anon", ttl: 0 };
   }
+  const anonJwt = anonRegisteredJwt();
+  if (anonJwt) {
+    // зарегистрированный legacy anon-ключ: роль anon, RLS-гейт канонический, публичен по дизайну
+    return { ok: true, schema: SUPABASE_JWT_SCHEMA, table: SQLMIRROR_TABLE, channel: "anon_registered",
+             rest: `${restBase.replace(/\/$/, "")}/rest/v1`, token: anonJwt, anon_token: anonJwt, role: "anon", ttl: 0 };
+  }
+  if (serviceRoleLegacyJwt()) {
+    // рабочий режим R54: читает daemon, ключ не покидает сервер; RLS-демонстрация ждёт publishable/anon
+    return { ok: true, schema: SUPABASE_JWT_SCHEMA, table: SQLMIRROR_TABLE, channel: "service_proxy",
+             rest: `${restBase.replace(/\/$/, "")}/rest/v1`, role: "service", ttl: 0,
+             note: "читает daemon (service_role legacy) — ключ не покидает сервер; RLS-гейт демонстрируется при sb_publishable или зарегистрированном legacy anon-ключе" };
+  }
   if (jwtSecretPresent()) {
     return { ok: true, schema: SUPABASE_JWT_SCHEMA, table: SQLMIRROR_TABLE, channel: "mint",
              rest: `${restBase.replace(/\/$/, "")}/rest/v1`,
              token: mintSupabaseJwt("authenticated", 120) ?? "", anon_token: mintSupabaseJwt("anon", 120) ?? "",
-             role: "authenticated", ttl: 120 };
+             role: "authenticated", ttl: 120,
+             note: "сам-минт: облако принимает только точные строки зарегистрированных ключей — ожидаем честный 401" };
   }
   return { ok: false, reason: "no_read_channel" };
 }
