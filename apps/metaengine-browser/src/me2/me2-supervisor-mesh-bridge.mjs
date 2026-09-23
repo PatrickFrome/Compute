@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
+import { me2SocketOp } from './me2-socket-client.mjs';
 import { bindCoordinationFence, assertCoordinationFenceCurrent } from '../supervisor-mesh-epoch-fence.mjs';
 
 export const ME2_SUPERVISOR_MESH_BRIDGE_SCHEMA = 'metaengine.browser.me2.supervisor-mesh-bridge.v1';
@@ -110,18 +111,21 @@ export async function me2MeshSync(userData) {
     emitRow(row_('FENCE_STALE', lastFenceStale), { error: true });
     return null; // ход не уходит с устаревшим фенсом — наследие mesh-дисциплины
   }
-  // 4. mesh → daemon
-  const j = await me2Fetch('/agentchat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  // 4. mesh → daemon (R49: транспорт socket agentchat:op — REST-операции сняты;
+  //    mesh_heartbeat — контрактный op, capabilities подтверждаются handshake'ем entry)
+  let j;
+  try {
+    j = await me2SocketOp({
       op: 'mesh_heartbeat',
       mesh_epoch: fence.mesh_epoch,
-      coordinator_supervisor_id: fence.coordinator_supervisor_id,
+      coordinator: fence.coordinator_supervisor_id,
+      coordinator_supervisor_id: fence.coordinator_supervisor_id, // оба имени — совместимость R41/R49
       supervisors: lastMeshState?.supervisors ?? [],
       fence,
-    }),
-  });
+    });
+  } catch (e) {
+    throw new Error(`mesh_heartbeat_transport: ${String(e?.message || e).slice(0, 100)}`);
+  }
   if (!j?.ok) throw new Error(`mesh_heartbeat_rejected: ${String(j?.error || '?').slice(0, 80)}`);
   lastHeartbeatAt = new Date().toISOString();
   stats.heartbeats_ok += 1;
@@ -182,6 +186,7 @@ export function me2SupervisorMeshBridgeStatus() {
     stats: { ...stats },
     last_error: lastError,
     rest_base: ME2_REST_BASE,
+    heartbeat_transport: 'socket:agentchat:op',
     authority_effect: false,
   };
 }
