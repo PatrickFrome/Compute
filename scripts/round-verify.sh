@@ -49,6 +49,9 @@ curl -sf --max-time 5 "$B/pool" | j "'live='+str(d['live'])+'/'+str(d['ceiling']
 echo "== POOL lease-exclusivity (synthetic) =="
 curl -s --max-time 10 -X POST "$B/pool" -H "Content-Type: application/json" -d '{"op":"scale","n":2}' | j "'scale='+str(d['scale']), 'created='+str(d['created'])"
 
+echo "== AGENTCHAT (G1: флот агентных чатов) =="
+curl -sf --max-time 5 "$B/agentchat" | j "'сессий='+str(d['status']['total']), 'active='+str(d['status']['active']), 'thinking='+str(d['status']['thinking']), 'ходов='+str(d['status']['turns_ok'])+'✓/'+str(d['status']['turns_fail'])+'✗', 'компакций='+str(d['status']['compactions']), 'деградаций='+str(d['status']['degraded'])"
+
 echo "== MEMORY ECONOMY (E5) =="
 curl -sf --max-time 5 "$B/memory/economy" | j "'deliveries='+str(d['deliveries']), 'avg_saved='+str(round(d['avg_saved_pct']*100))+'%', 'bytes_saved='+str(d['bytes_saved_total']), 'consumers='+','.join(c['consumer'] for c in d['by_consumer'][:4])"
 echo "== MEMORY economy live delivery ×2 (1-я = базлайн, 2-я = familiar-элиминация) =="

@@ -32,6 +32,7 @@ import { glmVerdict } from "./glm";
 import { reviewerVerdict } from "./reviewer";
 import { evidenceStatus, verifyChain } from "../evidence";
 import { poolStatus } from "./pool";
+import { agentChatStatus } from "./agentchat";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -226,6 +227,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME34", name: "E5: token-economy памяти — дельта-доставка (sticky-ядро всегда, familiar-элиминация по hash+TTL, тампер возвращает запись) (R35)", old_ref: "M13 memory block (полный блок каждому промпту) → progressive disclosure",
       verdict: (() => { try { const s = memoryEconStatus(); return s.deliveries > 0 && s.avg_saved_pct >= 0 && s.avg_saved_pct <= 1 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
       evidence: (() => { try { const s = memoryEconStatus(); const top = s.by_consumer[0]; return `доставок=${s.deliveries}, avg saved=${Math.round(s.avg_saved_pct * 100)}%, байт сэкономлено=${s.bytes_saved_total}, consumers=${s.by_consumer.map((c) => c.consumer).join(",")}${top ? `, топ=${top.consumer} −${Math.round(top.avg_saved_pct * 100)}%` : ""}; GET /memory/economy | POST /memory {op:economy}`; } catch (e) { return `econ status failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME35", name: "G1: флот из полноценных агентных чатов — постоянные сессии с tool-циклом, компакцией контекста, workspace и evidence-ходами (пересборка механизма старого Electron-браузера) (R36)", old_ref: "легаси: вкладки chat.z.ai + actuation_lease fleet.transport-promotion → чат = первичный объект daemon",
+      verdict: (() => { try { const s = agentChatStatus(); return s.total > 0 && s.turns_ok > 0 && s.degraded === 0 ? "WORKS" : s.total > 0 ? "CAVEAT" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try { const s = agentChatStatus(); return `сессий=${s.total} (active=${s.active}, thinking=${s.thinking}), ходов ok/fail=${s.turns_ok}/${s.turns_fail}, компакций=${s.compactions}, деградаций=${s.degraded}, последний ход=${s.last_turn_at ?? "—"}; GET /agentchat | POST /agentchat {op:create|turn|compact|close}`; } catch (e) { return `agentchat status failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

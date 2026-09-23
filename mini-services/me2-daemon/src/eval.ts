@@ -42,8 +42,13 @@ import { evidenceStatus, verifyChain, recomputeHash } from "../evidence";
 import { recordSpan } from "./otel";
 import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
 import { createTask, updateTask, rid } from "../store";
+import {
+  agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
+} from "./agentchat";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 10;
+export const EVAL_DATASET_VERSION = 11;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -99,6 +104,9 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v8 (R33) — +evidence.verify (hash-chain на живых данных + тампер-детект на чистой функции, critical) = 33.
 // v9 (R34) — +pool.executors (E3: эксклюзивные lease, reap мёртвого lease, канон-модель воркеров, потолок scale; critical) = 34.
 // v10 (R35) — +memory.economy (E5: экономная доставка — sticky-ядро, familiar-элиминация, тампер контента возвращает запись в свежие; critical) = 35.
+// v11 (R36) — +agentchat.sessions (G1: сессия/история/контекст-бюджет/счётчики/закрытие; critical),
+//             +agentchat.tools (G1: write→read→list roundtrip в workspace чата + path-escape заблокирован; critical) = 37.
+//             Живой GLM-ход — НЕ в sync-харнесе (урок R25: сеть только async): доказывается живым REST-ходом в раунде (worklog).
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -530,6 +538,59 @@ export const EVAL_DATASET: EvalCheck[] = [
       const fragOk = st.db.freelist_pct < 60;
       const ok = wal && st.db.page_count > 0 && idxOk && fragOk;
       return { ok, evidence: `journal=${st.db.journal_mode}, pages=${st.db.page_count}, freelist=${st.db.freelist_pct}%, db=${st.db.file_mb}MB, wal=${st.db.wal_mb}MB, индексов=${st.indexes.length}${idxOk ? "" : " (нет горячих idx)"}` };
+    },
+  },
+  {
+    id: "agentchat.sessions",
+    plane: "agentchat",
+    title: "AgentChat (G1): сессия флота — история, контекст-бюджет, счётчики, закрытие",
+    critical: true,
+    expect: "create→append(user/assistant/tool)→buildChatContext содержит system-промпт и хвост в бюджете; status считает сессии/ходы; close переводит статус",
+    run: () => {
+      let s: ReturnType<typeof agentChatCreate> | null = null;
+      try {
+        s = agentChatCreate({ role: "CHAT", title: "eval-chat", model: "glm-eval-stub" });
+        chatAppend(s.id, "user", "привет, собери статус демона");
+        chatAppend(s.id, "assistant", JSON.stringify({ thought: "посмотрю pool", action: { tool: "daemon_status", args: {} } }));
+        chatAppend(s.id, "tool", "pool: live=2/4; eval: PASS (35/35)");
+        const ctx = buildChatContext({ ...s, summary: "ранняя сводка", compactions: 1 }, "CHAT");
+        const sys = ctx.filter((m) => m.role === "system").map((m) => m.content).join("\n");
+        const sysOk = sys.includes("постоянный агент-чат") && sys.includes("ранняя сводка") && sys.includes("reply");
+        const tailRoles = ctx.slice(2).map((m) => `${m.role}:${m.content.slice(0, 12)}`);
+        const tailOk = ctx.some((m) => m.role === "user" && m.content.includes("привет")) && ctx.some((m) => m.content.includes("[observation]"));
+        const before = agentChatStatus().total;
+        const closed = agentChatClose(s.id);
+        const after = agentChatList({ status: "ACTIVE" }).filter((x) => x.id === s!.id).length;
+        const ok = sysOk && tailOk && closed && after === 0 && before >= 1;
+        return { ok, evidence: `session=${s.id}, ctx_msgs=${ctx.length} (system ok=${sysOk}, tail ok=${tailOk}), tail=[${tailRoles.join(" | ").slice(0, 90)}], close=${closed}, активных после=${after}, всего=${before}` };
+      } finally {
+        if (s) agentChatDelete(s.id);
+      }
+    },
+  },
+  {
+    id: "agentchat.tools",
+    plane: "agentchat",
+    title: "AgentChat (G1): workspace-инструменты чата — write→read→list roundtrip + path-escape заблокирован",
+    critical: true,
+    expect: "write_file создаёт файл, read_file возвращает контент, list_dir видит его, ../-выход за workspace = path_escape_blocked",
+    run: () => {
+      let s: ReturnType<typeof agentChatCreate> | null = null;
+      try {
+        s = agentChatCreate({ role: "CHAT", title: "eval-chat-tools", model: "glm-eval-stub" });
+        const fn = `eval-chat-${Date.now().toString(36)}.txt`;
+        const w = execChatToolSync("write_file", { path: fn, content: "ME2-CHAT-TOOL-OK" }, s.id);
+        const r = execChatToolSync("read_file", { path: fn }, s.id);
+        const l = execChatToolSync("list_dir", { path: "." }, s.id);
+        const esc = execChatToolSync("read_file", { path: "../../../etc/hostname" }, s.id);
+        const ok = w.startsWith("OK:") && r === "ME2-CHAT-TOOL-OK" && l.includes(fn) && esc.includes("path_escape_blocked");
+        return { ok, evidence: `write=${w.slice(0, 40)}, read=${r.slice(0, 20)}, list ok=${l.includes(fn)}, escape=${esc.slice(0, 40)}` };
+      } finally {
+        if (s) {
+          try { rmSync(join("/home/z/my-project/me2-workspace", `chat_${s.id.slice(3, 11)}`), { recursive: true, force: true }); } catch { /* noop */ }
+          agentChatDelete(s.id);
+        }
+      }
     },
   },
 ];

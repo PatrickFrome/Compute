@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
+import AgentChatPanel from "@/components/me2/agent-chat-panel";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -3035,6 +3036,8 @@ export default function MissionControl() {
                     </ul>
                   )}
                 </div>
+                {/* R36 G1: AGENT·CHAT — флот из полноценных агентных чатов (ME35, пересборка механизма старого Electron-браузера) */}
+                <AgentChatPanel />
                 {castOn && (
                   <div className="shrink-0 border-b border-zinc-800/60 bg-black/40 px-3 py-2">
                     <div

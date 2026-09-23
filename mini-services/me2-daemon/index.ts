@@ -52,10 +52,14 @@ import { handoffList, handoffStats } from "./src/handoffs";
 import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag } from "./src/glm";
 import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/reviewer";
 import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX } from "./src/pool";
+import {
+  agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
+  agentChatTurnAsync, agentChatCompact, agentChatRestore,
+} from "./src/agentchat";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.33.0";
+const VERSION = "0.34.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -661,6 +665,69 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       }
       return json(res, 400, { ok: false, error: `unknown op ${op} (create|status|delete); статусы: ${OBJECTIVE_STATUSES.join("/")} — только оператор` });
     }
+    // ── G1 (R36): флот из полноценных агентных чатов (пересборка механизма старого Electron-браузера) ──
+    if (path === "/agentchat" && req.method === "GET") {
+      const status = url.searchParams.get("status") as "ACTIVE" | "CLOSED" | null;
+      return json(res, 200, { ok: true, sessions: agentChatList(status ? { status } : {}), status: agentChatStatus() });
+    }
+    if (path === "/agentchat" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      try {
+        if (op === "create") {
+          const s = agentChatCreate({
+            agent_id: body.agent_id ? String(body.agent_id) : undefined,
+            role: body.role ? String(body.role) : undefined,
+            title: body.title ? String(body.title) : undefined,
+          });
+          return json(res, 201, { ok: true, session: s });
+        }
+        if (op === "turn") {
+          const id = String(body.id ?? "");
+          const text = String(body.text ?? "").trim();
+          if (!id || !text) return json(res, 400, { ok: false, error: "id_and_text_required" });
+          const cur = agentChatGet(id, 1);
+          if (!cur) return json(res, 404, { ok: false, error: "session_not_found" });
+          if (cur.session.state === "THINKING") return json(res, 409, { ok: false, error: "session_busy", state: cur.session.state });
+          if (cur.session.status !== "ACTIVE") return json(res, 409, { ok: false, error: "session_closed" });
+          agentChatTurnAsync(id, text); // долгий ход — 202 немедленно, UI поллит status (как этот чат)
+          return json(res, 202, { ok: true, id, state: "THINKING", note: "ход выполняется в фоне; GET /agentchat/:id/status" });
+        }
+        if (op === "compact") {
+          const id = String(body.id ?? "");
+          void agentChatCompact(id, { force: body.force === true }).catch(() => { /* фоновая компакция */ });
+          return json(res, 202, { ok: true, id, note: "компакция в фоне" });
+        }
+        if (op === "close") {
+          const ok = agentChatClose(String(body.id ?? ""));
+          return ok ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: "session_not_found" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (path.startsWith("/agentchat/") && path.endsWith("/status") && req.method === "GET") {
+      const id = path.slice("/agentchat/".length, -"/status".length);
+      const data = agentChatGet(id, 3);
+      if (!data) return json(res, 404, { ok: false, error: "session_not_found" });
+      const { session, messages } = data;
+      return json(res, 200, {
+        ok: true, id: session.id, state: session.state, status: session.status,
+        turns_ok: session.turns_ok, turns_fail: session.turns_fail, fail_streak: session.fail_streak,
+        compactions: session.compactions, last_error: session.last_error, updated_at: session.updated_at,
+        last_message: messages.length ? { role: messages[messages.length - 1].role, at: messages[messages.length - 1].at } : null,
+        global: agentChatStatus(),
+      });
+    }
+    if (path.startsWith("/agentchat/") && req.method === "GET") {
+      const id = path.slice("/agentchat/".length);
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 200) || 200, 500);
+      const data = agentChatGet(id, limit);
+      if (!data) return json(res, 404, { ok: false, error: "session_not_found" });
+      return json(res, 200, { ok: true, ...data });
+    }
+
     if (path === "/mcp" && req.method === "POST") {
       const body = await readBody(req);
       const out = await mcpHandle(body);
@@ -677,7 +744,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -807,6 +874,7 @@ try {
 if (poolBootAllowed) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
   try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
+  try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
 }
 
 startMasterLoop();
