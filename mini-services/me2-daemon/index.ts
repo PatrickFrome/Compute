@@ -810,4 +810,15 @@ try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-d
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
+
+// R34: legacy health-mirror na :3021 - zhivoy next-server derzhit staryy me2-watchdog s HEALTH=3021
+// (iskhodnik uzhe ispravlen na :3041, no reinkarnatsiya next-server nevmozhna iznutri). Bez zerkala
+// watchdog vechno "nezdorov" -> spawn dubley kazhdye 8s (ikh lovit strazh inkarnatsii, no eto fork-shum).
+try {
+  createServer((_rq, rs) => {
+    rs.writeHead(200, { "Content-Type": "application/json" });
+    rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: 3021, ts: nowIso() }));
+  }).listen(3021);
+  console.log("[me2-daemon] legacy health mirror on :3021 (watchdog-compat)");
+} catch (e) { console.error(`[me2-daemon] 3021 mirror failed: ${String(e).slice(0, 100)}`); }
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);
