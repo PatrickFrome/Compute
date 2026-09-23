@@ -181,6 +181,7 @@ export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/commands": "ШИНА (главный enforcement): enqueueCommand → полосы EMERGENCY/CONTROL/MUTATION/READ_ONLY + бюджет 24cost/60s + idempotency",
   "/reset": "EMERGENCY kill-switch оператора (полоса 0): ENVIRONMENT_RESET — всегда доступен, root of trust",
   "/agentchat": "REST-семейство G-линии: валидация op/состояний (busy/closed/ceiling/not_permitted) + события в hash-chain",
+  "/demand": "G10 автопилот спроса: op tick|config, гистерезис+cooldown+капы (ME2_DEMAND_MAX/CHAT_CEILING)+breaker-aware, решения в hash-chain (AGENT_CHAT_DEMAND)",
   "/pool": "REST-семейство E3: lease-плоскость (UNIQUE-эксклюзивность) + потолок POOL_MAX + POOL_* в chain",
   "/evidence": "REST-семейство E1: mirror-плоскость, honest-статусы, cap'ы outbox",
   "/memory": "REST-семейство E5: экономная доставка, cap журнала, MEMORY_ECONOMY в chain",

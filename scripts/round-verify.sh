@@ -61,6 +61,13 @@ echo "== AUTONOMY v4 (H-линия: liveness/budget/non-bypass/recovery/independ
 curl -sf --max-time 10 "$B/autonomy" | j "'liveness='+str(d['liveness']['verdict']), 'stall='+str(len(d['liveness']['stalled_reasons'])), 'budget='+str(d['budget']['state'])+' ('+str(d['budget']['score'])+'/'+str(d['budget']['breach'])+')', 'non_bypass='+str(d['non_bypass']['verdict'])+' ('+str(len(d['non_bypass']['post_routes']))+' маршрутов)', 'recovery L0-L5='+str(len(d['recovery'])), 'reviewer_пишет_статусы='+str(d['independence']['reviewer_writes_status']), 'chain='+str(d['independence']['chain_ok'])"
 curl -sf --max-time 5 "$B/mechanics" | j "'ME37 v4 WORKS='+str(any('ME37'==m['id'] and m['verdict']=='WORKS' for m in d['mechanics']))"
 
+echo "== GOVERNOR G11 + DEMAND G10 (полосы/bucket/breaker + автопилот спроса) =="
+curl -sf --max-time 5 "$B/governor" | j "'breaker='+str(d['breaker']['state']), 'trips='+str(d['breaker']['trips']), 'cooldown_s='+str(d['breaker']['cooldown_ms']//1000), 'полосы='+','.join(l['lane']+':'+str(l['tokens'])+'/'+str(l['capacity']) for l in d['lanes']), 'admitted='+str(d['admitted_total']), 'rejected='+str(d['rejected_total'])"
+curl -sf --max-time 5 "$B/demand" | j "'config='+str(d['config']), 'тиков='+str(d['ticks']), 'снимок: ready='+str(d['snapshot']['ready_count']), 'leases='+str(d['snapshot']['pool_leases'])+'/'+str(d['snapshot']['pool_max']), 'fails15м='+str(d['snapshot']['fails_15m']), 'чатов='+str(d['snapshot']['active_chats']), 'последнее='+str((d['last_decision'] or {}).get('action'))+' '+str((d['last_decision'] or {}).get('signal') or '')"
+curl -sf --max-time 5 "$B/mechanics" | j "'ME38 WORKS='+str(any('ME38'==m['id'] and m['verdict']=='WORKS' for m in d['mechanics']))"
+echo "-- demand tick вручную (честное решение на живом состоянии) --"
+curl -sf --max-time 5 -X POST "$B/demand" -H "content-type: application/json" -d '{"op":"tick"}' | j "'решение='+str(d['decision']['action']), 'signal='+str(d['decision']['signal']), 'detail='+str(d['decision']['detail'][:60])"
+
 echo "== MEMORY ECONOMY (E5) =="
 curl -sf --max-time 5 "$B/memory/economy" | j "'deliveries='+str(d['deliveries']), 'avg_saved='+str(round(d['avg_saved_pct']*100))+'%', 'bytes_saved='+str(d['bytes_saved_total']), 'consumers='+','.join(c['consumer'] for c in d['by_consumer'][:4])"
 echo "== MEMORY economy live delivery ×2 (1-я = базлайн, 2-я = familiar-элиминация) =="

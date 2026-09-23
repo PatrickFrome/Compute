@@ -77,7 +77,7 @@ export async function rsiPropose(opts: { auto?: boolean; hint?: string } = {}): 
       const raw = await chat("zai:default", [
         { role: "system", content: "Ты — RSI-контур ME2 OS. По evidence (уроки памяти, hint) предложи КОНКРЕТНОЕ улучшение системы. Верни СТРОГО JSON: {\"title\": \"короткий заголовок\", \"body_md\": \"markdown: Проблема/Предложение/Шаги внедрения/Риски\"}. Никаких изменений в коде не делаешь — только черновик для оператора." },
         { role: "user", content: JSON.stringify({ hint, lessons: ev.lessons, reward_hack_count: ev.rh }) },
-      ], { temperature: 0.4 });
+      ], { temperature: 0.4, lane: "P2" }); // RSI — фон (G11)
       const m = raw.match(/\{[\s\S]*\}/);
       if (m) {
         const j = JSON.parse(m[0]) as { title?: string; body_md?: string };

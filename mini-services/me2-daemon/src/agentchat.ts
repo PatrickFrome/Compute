@@ -46,6 +46,7 @@ import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
 import { db, emit, nowIso, createAgent, createTask, type AgentRow } from "../store";
 import { chat } from "../providers";
+import { laneForRole } from "./governor";
 import { agentTag, canonicalGlm } from "./glm";
 import { memBlockEconomy } from "./memory";
 import { poolStatus } from "./pool";
@@ -575,7 +576,7 @@ export async function agentChatCompact(id: string, opts: { force?: boolean } = {
   const raw = await chat(model, [
     { role: "system", content: "Ты — архивариус агентных чатов. Сожми диалог в плотную сводку: факты, решения, результаты инструментов, незакрытые вопросы. Без воды, до 1200 символов." },
     { role: "user", content: transcript },
-  ], { temperature: 0.2 });
+  ], { temperature: 0.2, lane: "P2" }); // компакция — фон (G11)
   const summary = raw.replace(/```/g, "").trim().slice(0, 1600);
   db.query("UPDATE agent_sessions SET summary=?, compactions=compactions+1, updated_at=? WHERE id=?").run(summary, nowIso(), id);
   chatAppend(id, "system", `[компакция #${sess.compactions + 1}] ранняя история (${older.length} сообщений, ${totalChars} симв.) сжата в сводку — контекст продолжается со свежего хвоста`, { compaction: true });
@@ -612,7 +613,7 @@ export async function agentChatTurn(sessionId: string, userText: string): Promis
     const history = buildChatContext({ ...sess, state: "THINKING" }, role);
     for (let step = 0; step < MAX_STEPS; step++) {
       if (Date.now() - t0 > TURN_DEADLINE_MS) { hardError = "turn_deadline"; break; }
-      const raw = await chat(model, history, { temperature: 0.4 });
+      const raw = await chat(model, history, { temperature: 0.4, lane: laneForRole(role) }); // SUPERVISOR→P0, остальные→P1 (G11)
       const parsed = extractJson(raw);
       if (!parsed || !parsed.action?.tool) {
         // один честный ретрай на формат

@@ -104,6 +104,23 @@ type AutonomyT = {
   recovery: Array<{ level: string; component: string; status: string; recovers: string }>;
   independence: { reviewer_writes_status: boolean; reviewer_guarded: boolean; chain_ok: boolean; chain_checked: number; evidence_producer: string; meta_note: string };
 };
+// R43 G11: LLM-Governor (GET /governor) — полосы P0>P1>P2 + token bucket + circuit breaker
+type GovernorT = {
+  ok: boolean;
+  breaker: { state: "CLOSED" | "OPEN" | "HALF_OPEN"; trips: number; opened_at: string | null; open_until_ms: number; cooldown_ms: number };
+  lanes: Array<{ lane: "P0" | "P1" | "P2"; capacity: number; refill_per_min: number; tokens: number; admitted: number; rejected_bucket: number; waited_ms_total: number }>;
+  admitted_total: number; rejected_total: number;
+  recent: Array<{ ts: string; kind: string; lane: string; detail: string }>;
+};
+// R43 G10: автопилот спроса (GET /demand) — daemon-demand → create_chat
+type DemandT = {
+  ok: boolean;
+  config: { enabled: boolean; max: number };
+  ticks: number;
+  last_decision: { ts: string; action: string; signal: string | null; role: string | null; session_id: string | null; detail: string } | null;
+  decisions: Array<{ ts: string; action: string; signal: string | null; role: string | null; session_id: string | null; detail: string }>;
+  snapshot: { ready_count: number; ready_research: number; pool_leases: number; pool_max: number; fails_15m: number; active_chats: number; breaker_open: boolean };
+};
 // R35 E5: token-economy памяти (GET /memory/economy — дельта-доставка вместо полного блока)
 type MemEconConsumerT = { consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number };
 type MemEconT = { ok: boolean; deliveries: number; avg_saved_pct: number; bytes_saved_total: number; by_consumer: MemEconConsumerT[] };
@@ -1279,6 +1296,8 @@ export default function MissionControl() {
   // R34 E3: executor-пул
   const [pool, setPool] = useState<PoolT | null>(null);
   const [autonomy, setAutonomy] = useState<AutonomyT | null>(null);
+  const [governor, setGovernor] = useState<GovernorT | null>(null);
+  const [demand, setDemand] = useState<DemandT | null>(null);
   const [poolBusy, setPoolBusy] = useState(false);
   const [evalBusy, setEvalBusy] = useState(false);
   const [wg, setWg] = useState<WorkGraphData | null>(null);
@@ -1403,6 +1422,21 @@ export default function MissionControl() {
   const loadAutonomy = useCallback(async () => {
     try { const r = await fetch("/autonomy?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setAutonomy(r as AutonomyT); } catch { /* daemon недоступен */ }
   }, []);
+  // R43 G11: телеметрия Governor (GET /governor)
+  const loadGovernor = useCallback(async () => {
+    try { const r = await fetch("/governor?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setGovernor(r as GovernorT); } catch { /* daemon недоступен */ }
+  }, []);
+  // R43 G10: статус автопилота спроса (GET /demand) + операторский переключатель
+  const loadDemand = useCallback(async () => {
+    try { const r = await fetch("/demand?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setDemand(r as DemandT); } catch { /* daemon недоступен */ }
+  }, []);
+  const demandToggle = useCallback(async () => {
+    try {
+      const r = await fetch("/demand?XTransformPort=3041", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "config", enabled: !(demand?.config.enabled ?? true) }) }).then((x) => x.json());
+      if (r?.ok) toast({ title: `автопилот спроса: ${r.config.enabled ? "включен" : "выключен"} (max ${r.config.max})` });
+    } catch { /* daemon недоступен */ }
+    await loadDemand();
+  }, [demand, loadDemand, toast]);
   const poolOp = useCallback(async (op: "scale" | "burn", n: number) => {
     setPoolBusy(true);
     try {
@@ -1485,6 +1519,7 @@ export default function MissionControl() {
   // R33 E2: hash-chain verify — mount + при каждом открытии панели
   useEffect(() => { void loadEvChain(); }, [loadEvChain]);
   useEffect(() => { void loadAutonomy(); }, [loadAutonomy]);
+  useEffect(() => { void loadGovernor(); void loadDemand(); }, [loadGovernor, loadDemand]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1534,11 +1569,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool]);
+  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2320,7 +2355,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -3035,6 +3070,35 @@ export default function MissionControl() {
                   </div>
                   {autonomy && autonomy.liveness.stalled_reasons.length > 0 && (
                     <p className="mt-1 truncate font-mono text-[9px] text-rose-300" role="alert" title={autonomy.liveness.stalled_reasons.join("; ")}>{autonomy.liveness.stalled_reasons.join(" · ")}</p>
+                  )}
+                </div>
+                {/* R43 G11+G10: GOVERNOR (полосы LLM-спроса + circuit breaker) и АВТОПИЛОТ СПРОСА (daemon-demand → create_chat) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="LLM-Governor и автопилот спроса">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="G11 LLM-Governor (ME38): полосы приоритета P0 (супервизоры) > P1 (ходы чатов/пул) > P2 (фон: компакция/брейн/ревью); у каждой — token bucket (burst + refill/мин); circuit breaker: 3 исчерпанных 429/5xx за 120с → OPEN (fast-fail без сети, шторм гасится) → HALF_OPEN (только P0-проба) → успех → CLOSED; cooldown растёт геометрически до 10м">
+                      <Gauge className={`h-3 w-3 ${governor ? (governor.breaker.state === "CLOSED" ? "text-emerald-300" : governor.breaker.state === "HALF_OPEN" ? "text-amber-300" : "text-rose-400") : "text-zinc-600"}`} aria-hidden /> GOVERNOR·G11
+                    </span>
+                    <span data-testid="governor-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className={`rounded border px-1 py-0.5 ${governor ? (governor.breaker.state === "CLOSED" ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : governor.breaker.state === "HALF_OPEN" ? "border-amber-900/60 bg-amber-950/30 text-amber-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300 animate-pulse") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={governor ? `circuit breaker: ${governor.breaker.state}, срабатываний=${governor.breaker.trips}, cooldown=${Math.round(governor.breaker.cooldown_ms / 1000)}с, открыт: ${governor.breaker.opened_at ?? "—"}` : "состояние breaker"}>{governor ? governor.breaker.state : "—"}</span>
+                      {(governor?.lanes ?? []).map((l) => (
+                        <span key={l.lane} className={`rounded border px-1 py-0.5 ${l.lane === "P0" ? "border-violet-900/60 bg-violet-950/30 text-violet-300" : l.lane === "P1" ? "border-zinc-700 bg-zinc-900/60 text-zinc-300" : "border-zinc-800 bg-zinc-900/40 text-zinc-500"}`} title={`полоса ${l.lane}: токенов ${l.tokens}/${l.capacity}, refill ${l.refill_per_min}/мин, прошло=${l.admitted}, откл. бакетом=${l.rejected_bucket}, ожидание сумм=${Math.round(l.waited_ms_total / 1000)}с`}>{l.lane} {l.tokens}/{l.capacity}·{l.refill_per_min}/м</span>
+                      ))}
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="всего пропущено / отклонено Governor (breaker+bucket)">⌁ {governor ? `${governor.admitted_total}/${governor.rejected_total}` : "—"}</span>
+                    </span>
+                    <span className="hidden h-3 w-px shrink-0 bg-zinc-800 md:inline-block" aria-hidden />
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="G10 автопилот спроса (ME38): демон измеряет живой спрос (READY-бэклог при насыщенном пуле, RESEARCH-голод, шторм отказов) и сам создаёт профильного чат-агента (CODE/RESEARCH/DEBUG) с целью (G5) и первым ходом; гистерезис 2 тика, cooldown 10м/роль, капы max/CHAT_CEILING; при OPEN breaker создание отложено — новый чат без LLM мёртв">
+                      <Radar className={`h-3 w-3 ${demand ? (demand.config.enabled ? "text-amber-300" : "text-zinc-600") : "text-zinc-600"}`} aria-hidden /> АВТОПИЛОТ·G10
+                    </span>
+                    <span data-testid="demand-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <button type="button" data-testid="demand-toggle" onClick={() => void demandToggle()} className={`rounded border px-1 py-0.5 transition-colors ${demand ? (demand.config.enabled ? "border-amber-900/60 bg-amber-950/30 text-amber-300 hover:bg-amber-950/60" : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:bg-zinc-900") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title="переключить автопилот спроса (POST /demand {op:config,enabled})">{demand ? (demand.config.enabled ? "вкл" : "выкл") : "—"}</button>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`кап автопилота=${demand?.config.max ?? "—"}, тиков=${demand?.ticks ?? "—"}`}>max {demand?.config.max ?? "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="снимок спроса: READY-задач / RESEARCH среди них · leases пула · FAIL за 15м · активных чатов">r{demand?.snapshot.ready_count ?? "—"}/f{demand?.snapshot.fails_15m ?? "—"}/c{demand?.snapshot.active_chats ?? "—"}</span>
+                    </span>
+                  </div>
+                  {demand?.last_decision && demand.last_decision.action !== "idle" && (
+                    <p data-testid="demand-last" className={`mt-1 truncate font-mono text-[9px] ${demand.last_decision.action === "created" ? "text-emerald-300" : demand.last_decision.action === "suppressed" ? "text-amber-300" : "text-zinc-400"}`} title={demand.decisions.slice(0, 5).map((d) => `${d.ts.slice(11, 19)} ${d.action}${d.signal ? ` [${d.signal}]` : ""}: ${d.detail}`).join("\n")}>
+                      {demand.last_decision.ts.slice(11, 19)} {demand.last_decision.action}{demand.last_decision.signal ? ` · ${demand.last_decision.signal}` : ""}{demand.last_decision.role ? ` · ${demand.last_decision.role}` : ""} — {demand.last_decision.detail}
+                    </p>
                   )}
                 </div>
                 {/* R34 E3: EXECUTOR·POOL — параллельные живые GLM-исполнители с честными lease (ME33, GET/POST /pool) */}

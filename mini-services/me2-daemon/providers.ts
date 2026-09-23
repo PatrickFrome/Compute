@@ -7,6 +7,7 @@
  */
 import ZAI from "z-ai-web-dev-sdk";
 import { emit } from "./store";
+import { governorAdmit, governorReport429, governorReportSuccess, type Lane } from "./src/governor";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -101,9 +102,23 @@ export async function listProviders(): Promise<Record<string, { ready: boolean; 
   };
 }
 
-/** Единая точка вызова LLM. Возвращает текст ответа. Семафор + 429-backoff (R14). */
-export async function chat(model: string, messages: ChatMessage[], opts: { temperature?: number } = {}): Promise<string> {
-  return llmSlot(() => llmRetry((attempt) => chatOnce(model, messages, opts, attempt), 4, model));
+/** Единая точка вызова LLM. Возвращает текст ответа.
+ *  G11: governor-admission (полосы P0>P1>P2 + token bucket + circuit breaker) →
+ *  слот конкурентности (R14) → retry с backoff (R14). Исчерпанный 429/5xx питает breaker —
+ *  шторм гасится fast-fail'ом, а не амплифицируется бесполезными сетевыми попытками.
+ *  opts.lane: P0 (супервизоры флота) | P1 (ходы чатов/worker, default) | P2 (фон). */
+export async function chat(model: string, messages: ChatMessage[], opts: { temperature?: number; lane?: Lane } = {}): Promise<string> {
+  const lane = opts.lane ?? "P1";
+  const adm = await governorAdmit(lane);
+  if (!adm.ok) throw new Error(`${adm.reason}: LLM-вызов отклонён Governor (lane ${lane})`);
+  try {
+    const r = await llmSlot(() => llmRetry((attempt) => chatOnce(model, messages, opts, attempt), 4, model));
+    governorReportSuccess(lane);
+    return r;
+  } catch (e) {
+    if (RETRYABLE.test(String(e))) governorReport429(lane);
+    throw e;
+  }
 }
 
 async function chatOnce(model: string, messages: ChatMessage[], opts: { temperature?: number }, attempt: number): Promise<string> {

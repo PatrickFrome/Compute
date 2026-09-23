@@ -26,6 +26,8 @@ import { benchVerdict } from "./bench";
 import { mcpStatus } from "./mcp";
 import { approvalsVerdict } from "./approvals";
 import { evalVerdict } from "./eval";
+import { governorStatus } from "./governor";
+import { demandStatus } from "./demand";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
 import { glmVerdict } from "./glm";
@@ -250,6 +252,14 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
         const a = autonomyStatus();
         return `liveness=${a.liveness.verdict} (предикатов=${a.liveness.checks.length}), budget=${a.budget.state} (${a.budget.score}/${a.budget.breach}), non_bypass=${a.non_bypass.verdict} (${a.non_bypass.post_routes.length} маршрутов), recovery L0–L5=${a.recovery.length} уровней, independence: reviewer-статусы=${a.independence.reviewer_writes_status ? "ПИШЕТ!" : "нет"}, chain=${a.independence.chain_ok}; GET /autonomy`;
       } catch (e) { return `ME37 evidence failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME38", name: "G10+G11: автопилот спроса (daemon-demand → create_chat: гистерезис 2 тика, cooldown 10м/роль, капы ME2_DEMAND_MAX/CHAT_CEILING, breaker-aware) + LLM-Governor (полосы P0>P1>P2, token bucket, circuit breaker против 429-шторма) (R43)", old_ref: "легаси: никакой дисциплины LLM-спроса — ретраи честные, но шторм амплифицировался (51✗ за день)",
+      verdict: (() => { try { const g = governorStatus(); const d = demandStatus(); const lanesOk = ["P0", "P1", "P2"].every((l) => g.lanes.some((b) => b.lane === l)); const states = ["CLOSED", "OPEN", "HALF_OPEN"]; return lanesOk && states.includes(g.breaker.state) && d.config.max >= 1 && d.ticks >= 0 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try {
+        const g = governorStatus(); const d = demandStatus();
+        return `governor: breaker=${g.breaker.state} trips=${g.breaker.trips} cooldown=${g.breaker.cooldown_ms / 1000}s, полосы=${g.lanes.map((l) => `${l.lane}:${l.tokens}/${l.capacity}+${l.refill_per_min}/м`).join(",")}, admitted=${g.admitted_total} rejected=${g.rejected_total}; demand: ${d.config.enabled ? "включен" : "выключен"} max=${d.config.max}, тиков=${d.ticks}, решений=${d.decisions.length}, снимок: ready=${d.snapshot.ready_count} leases=${d.snapshot.pool_leases}/${d.snapshot.pool_max} fails15м=${d.snapshot.fails_15m} чатов=${d.snapshot.active_chats}; GET /governor, GET /demand, POST /demand {op:tick|config}`;
+      } catch (e) { return `ME38 evidence failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

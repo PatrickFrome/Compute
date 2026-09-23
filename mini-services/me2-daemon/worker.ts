@@ -342,7 +342,7 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       }
       recordSpan("lease.liveness", { "me2.task_id": task.id, "me2.step": step, "me2.lease_age_ms": leaseAgeMs }, Date.now());
       emit("STEP_START", { step, max_steps: task.max_steps }, agent.id, task.id);
-      const reply = await chat(agent.model, messages, { temperature: 0.4 });
+      const reply = await chat(agent.model, messages, { temperature: 0.4, lane: "P1" }); // pool-исполнители — P1 (G11)
       const parsed = extractJson(reply);
       if (!parsed?.action?.tool) {
         parseFails++;

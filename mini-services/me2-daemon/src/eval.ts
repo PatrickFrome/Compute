@@ -47,10 +47,12 @@ import {
   supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
 } from "./agentchat";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
+import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
+import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 14;
+export const EVAL_DATASET_VERSION = 15;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -804,6 +806,65 @@ export const EVAL_DATASET: EvalCheck[] = [
       const chain = verifyChain(undefined, undefined, 200);
       const ok = a.verdict === "NO_BYPASS" && exact && enough && reviewerClean && chain.ok;
       return { ok, evidence: `verdict=${a.verdict}, маршрутов=${a.post_routes.length}, манифест=${manifest.size}, точное_равенство=${exact}, reviewer_не_пишет_статусы=${reviewerClean}, chain=${chain.ok}(${chain.checked})` };
+    },
+  },
+  {
+    id: "governor.breaker",
+    plane: "governor",
+    title: "G11 LLM-Governor: circuit breaker открывается от шторма исчерпанных 429, fast-fail без сети, cooldown растёт",
+    critical: true,
+    expect: "3×governorInject429 → state OPEN + GOVERNOR_TRIP в шине; повторный шторм не сбрасывает; governorTestReset → CLOSED; статус-плоскость /governor отдаёт полосы P0/P1/P2",
+    run: () => {
+      const st0 = governorStatus();
+      const lanesOk = ["P0", "P1", "P2"].every((l) => st0.lanes.some((b) => b.lane === l));
+      governorTestReset();
+      governorInject429("P1"); governorInject429("P1");
+      const after2 = governorBreakerState(); // ещё CLOSED (2 < порога)
+      governorInject429("P1");
+      const after3 = governorBreakerState(); // OPEN
+      const trips1 = governorStatus().breaker.trips;
+      const cooldown1 = governorCooldownForTest();
+      governorInject429("P1"); // в OPEN не триггерит повторный trip
+      const trips2 = governorStatus().breaker.trips;
+      const ev = db.query(`SELECT COUNT(*) c FROM events WHERE type='GOVERNOR_TRIP' AND ts>=?`).get(new Date(Date.now() - 60_000).toISOString()) as { c: number };
+      governorTestReset();
+      const closed = governorBreakerState();
+      const ok = after2 === "CLOSED" && after3 === "OPEN" && trips1 === 1 && trips2 === 1 && ev.c >= 1 && closed === "CLOSED" && lanesOk;
+      return { ok, evidence: `2×429→${after2}, 3×429→${after3} (trips=${trips1}, повтор не триггерит=${trips2 === 1}), GOVERNOR_TRIP в шине=${ev.c}, cooldown=${cooldown1}мс, reset→${closed}, полосы P0/P1/P2=${lanesOk}` };
+    },
+  },
+  {
+    id: "demand.autopilot",
+    plane: "demand",
+    title: "G10 автопилот спроса: гистерезис 2 тика, создание живого CODE-чата по сигналу, suppression по капам, cleanup",
+    critical: true,
+    expect: "1 тик → deferred (гистерезис); 2-й тик → created (реальный чат Demand·CODE с целью); max=0-кап подавляет; demandTestReset+cleanup чата",
+    run: () => {
+      demandTestReset();
+      const prevMax = demandConfig().max; // читаем ДО изменения
+      demandConfigSet({ max: 24 });
+      const hot: DemandSnapshot = { ready_count: 6, ready_research: 0, pool_leases: 4, pool_max: 4, fails_15m: 0, active_chats: 1, breaker_open: false };
+      const d1 = demandTick({ snapshot: hot });
+      const d2 = demandTick({ snapshot: hot, kick: false }); // eval без реального LLM-хода
+      const createdOk = d1.action === "deferred" && d1.detail.includes("гистерезис") && d2.action === "created" && !!d2.session_id;
+      let objectiveOk = false;
+      let chatClean = false;
+      if (d2.session_id) {
+        const g = agentChatGet(d2.session_id, 20);
+        objectiveOk = !!g && g.session.objective.length > 10;
+        if (g) { agentChatClose(d2.session_id); agentChatDelete(d2.session_id); chatClean = !agentChatGet(d2.session_id); }
+      } else chatClean = true;
+      // suppression капом: тик ×2 под капом=1 — гистерезис пройден, кап реально режет
+      const st = demandStatus();
+      demandConfigSet({ max: 1 }); // кап = числу реальных чатов → suppression
+      const hotCapped: DemandSnapshot = { ...hot, active_chats: st.snapshot.active_chats };
+      demandTick({ snapshot: hotCapped, kick: false });
+      const d4 = demandTick({ snapshot: hotCapped, kick: false });
+      const suppressOk = d4.action === "suppressed" && d4.detail.length > 5;
+      demandConfigSet({ max: prevMax }); // восстановить исходный кап
+      demandTestReset();
+      const ok = createdOk && objectiveOk && chatClean && suppressOk;
+      return { ok, evidence: `гистерезис: тик1=${d1.action}, тик2=${d2.action}; чат создан=${!!d2.session_id}, цель назначена=${objectiveOk}, cleanup=${chatClean}, кап-подавление=${d4.action} (${d4.detail.slice(0, 50)})` };
     },
   },
 ];

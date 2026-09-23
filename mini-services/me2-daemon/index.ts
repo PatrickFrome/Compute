@@ -53,6 +53,8 @@ import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag 
 import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/reviewer";
 import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX } from "./src/pool";
 import { autonomyStatus, livenessBrief } from "./src/autonomy";
+import { governorStatus } from "./src/governor";
+import { demandTick, demandStatus, demandConfigSet, DEMAND_TICK_MS } from "./src/demand";
 import {
   agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
   agentChatTurnAsync, agentChatCompact, agentChatRestore,
@@ -61,7 +63,7 @@ import {
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.37.0";
+const VERSION = "0.38.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -396,6 +398,17 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/db/hygiene" && req.method === "GET") return json(res, 200, hygieneStatus());
     // H-линия (R38): плоскость v4 — liveness/deadlock/risk-budget/non-bypass/recovery/independence (read-only)
     if (path === "/autonomy" && req.method === "GET") return json(res, 200, { ok: true, ...autonomyStatus() });
+    // G11: телеметрия LLM-Governor (полосы/bucket/breaker) — read-only
+    if (path === "/governor" && req.method === "GET") return json(res, 200, { ok: true, ...governorStatus() });
+    // G10: автопилот спроса — статус/конфиг/ручной тик
+    if (path === "/demand" && req.method === "GET") return json(res, 200, { ok: true, ...demandStatus() });
+    if (path === "/demand" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "tick") return json(res, 200, { ok: true, decision: demandTick() });
+      if (op === "config") return json(res, 200, { ok: true, config: demandConfigSet({ enabled: typeof body.enabled === "boolean" ? body.enabled : undefined, max: typeof body.max === "number" ? body.max : undefined }) });
+      return json(res, 400, { ok: false, error: "op_required: tick|config" });
+    }
     if (path === "/db/hygiene" && req.method === "POST") {
       const body = await readBody(req);
       const op = String(body.op ?? "");
@@ -767,7 +780,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -906,6 +919,13 @@ if (poolBootAllowed) {
       if (r.kicked.length) console.log(`[agentchat] supervisor tick: kicked=${r.kicked.join(",")} supervisors=${r.supervisors}`);
     } catch (e) { console.error(`[agentchat] supervisor tick failed: ${String(e)}`); }
   }, SUPERVISOR_TICK_MS);
+  // G10: автопилот спроса — демон сам создаёт чат-агентов под живой спрос (гистерезис 2 тика, cooldown, caps)
+  setInterval(() => {
+    try {
+      const d = demandTick();
+      if (d.action !== "idle") console.log(`[demand] ${d.action} signal=${d.signal} role=${d.role} sid=${d.session_id} — ${d.detail}`);
+    } catch (e) { console.error(`[demand] tick failed: ${String(e).slice(0, 160)}`); }
+  }, DEMAND_TICK_MS);
 }
 
 startMasterLoop();

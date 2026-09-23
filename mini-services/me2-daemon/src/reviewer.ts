@@ -122,7 +122,7 @@ async function runReview(t: TaskRow, hint?: { writes: number; tool_calls: number
   const raw = await chat("zai:default", [
     { role: "system", content: "Ты антифальшь-ревьюер. Только JSON." },
     { role: "user", content: prompt },
-  ], { temperature: 0.1 });
+  ], { temperature: 0.1, lane: "P2" }); // ревью — фон (G11)
   const m = raw.match(/\{[\s\S]*\}/);
   let verdict: ReviewVerdict = "suspect";
   let reasons: string[] = ["reviewer: ответ не распознан — консервативный suspect"];

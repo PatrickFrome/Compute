@@ -55,7 +55,7 @@ export async function brainThink(goalRaw: string): Promise<BrainThought & { thou
   const raw = await chat("zai:default", [
     { role: "system", content: sys },
     { role: "user", content: user },
-  ], { temperature: 0.3 });
+  ], { temperature: 0.3, lane: "P2" }); // брейн — фон (G11)
 
   const parsed = extractJson(raw);
   const summary = String(parsed?.summary ?? raw.slice(0, 400));
