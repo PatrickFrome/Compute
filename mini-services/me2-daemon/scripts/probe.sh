@@ -18,6 +18,9 @@ LOG="$DATA/probe.log"
 export ME2_WS_PORT="$WS" ME2_REST_PORT="$REST" ME2_LEGACY_MIRROR_PORT="$MIRROR" \
        ME2_SCREENCEAST_PORT="$SC" ME2_DATA_DIR="$DATA" ME2_LOCK_FILE="$LOCK"
 export ME2_BOOT_MODE=probe
+# корень репо/чатов probe-инстанса — внутри его временного каталога (CI: /home/z недоступен)
+mkdir -p "$DATA/repo"
+export ME2_REPO_ROOT="$DATA/repo"
 
 cleanup() {
   kill "$PROBE_PID" 2>/dev/null || true
@@ -65,6 +68,16 @@ fi
 
 echo "gate: eval $VERDICT $SCORE (ws:$WS rest:$REST, data=$DATA)"
 if [ "$VERDICT" != "PASS" ]; then
-  echo "GATE FAIL: eval вердикт $VERDICT"; tail -40 "$LOG"; exit 1
+  echo "GATE FAIL: eval вердикт $VERDICT — упавшие проверки:"
+  printf '%s' "$EVAL_JSON" | python3 -c '
+import json,sys
+try:
+    d=(json.load(sys.stdin) or {}).get("last") or {}
+    for r in d.get("results") or []:
+        if not r.get("ok"):
+            print(" -", r.get("id"), "| crit:", r.get("critical"), "|", str(r.get("evidence",""))[:110])
+except Exception as e:
+    print("  (не удалось разобрать результаты:", e, ")")'
+  tail -40 "$LOG"; exit 1
 fi
 echo "GATE PASS: daemon boot + eval $SCORE"
