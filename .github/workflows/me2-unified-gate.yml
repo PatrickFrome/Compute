@@ -1,0 +1,40 @@
+name: ME2 Unified Gate (daemon boot+eval, UI deps)
+
+# R51 (фаза C, план C6-C7): контрактный гейт единой системы.
+# daemon-gate: изолированный инстанс (свежая SQLite, свои порты, ME2_BOOT_MODE=probe)
+#   должен подняться и дать eval verdict=PASS — тот же probe, что проверен локально.
+# ui-gate: разрешение зависимостей панельного UI (frozen lockfile).
+# R52 (C7): сюда же войдёт `next build` и упаковка в resources/me2-ui autorelease'ом.
+on:
+  pull_request:
+    branches: [release/self-update-ambiguity-live-v2]
+  push:
+    branches: [release/self-update-ambiguity-live-v2]
+
+jobs:
+  daemon-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install daemon deps (frozen)
+        working-directory: apps/me2-daemon
+        run: bun install --frozen-lockfile
+      - name: Boot probe + eval (isolated instance, fresh DB)
+        working-directory: apps/me2-daemon
+        run: bun run check
+
+  ui-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install UI deps (frozen)
+        working-directory: apps/me2-ui
+        run: bun install --frozen-lockfile
