@@ -3,6 +3,7 @@
 // Браузерная me2-плоскость (apps/metaengine-browser/src/me2/*) при старте читает
 // /state → contract + capabilities и честно деградирует при несовпадении (K1-фикс).
 import { VERSION } from "../store";
+import { WS_PORT, REST_PORT } from "./ports";
 
 export const CONTRACT_VERSION = "me2-daemon-contract.v1";
 
@@ -36,7 +37,7 @@ export function capabilitiesJson(): CapabilityContract {
     transport: {
       socket: "agentchat:op",
       path: "/",
-      port: 3040,
+      port: WS_PORT,
       ack: true,
       events: ["agentchat:step", "snapshot"],
     },
@@ -142,7 +143,7 @@ export function missionUiHtml(): string {
     <div class="scroll" id="river" data-testid="mc-river" aria-live="polite"></div>
   </section>
 </main>
-<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:3040, path "/") · данные — read-only REST</footer>
+<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — read-only REST</footer>
 <div id="toast" class="toast" role="alert"></div>
 <script>
 (function(){
@@ -150,9 +151,9 @@ export function missionUiHtml(): string {
   var $ = function(id){ return document.getElementById(id); };
   var socket = null, socketOk = false, chats = [];
   // gateway-адаптация: на гейте (:81) относительные REST-пути требуют XTransformPort;
-  // на прямом :3041 (Electron/оператор) — путь как есть.
+  // на прямом REST-порту (Electron/оператор) — путь как есть.
   var GATEWAY = (location.port === "81");
-  function api(p){ return GATEWAY ? p + (p.indexOf("?") >= 0 ? "&" : "?") + "XTransformPort=3041" : p; }
+  function api(p){ return GATEWAY ? p + (p.indexOf("?") >= 0 ? "&" : "?") + "XTransformPort=${REST_PORT}" : p; }
 
   function toast(msg, cls){ var t=$("toast"); t.textContent=msg; t.className="toast "+(cls||""); t.style.display="block"; clearTimeout(t._h); t._h=setTimeout(function(){ t.style.display="none"; }, 4200); }
   function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
@@ -234,11 +235,11 @@ export function missionUiHtml(): string {
 
   function connectSocket(){
     var s=document.createElement("script");
-    s.src="http://"+location.hostname+":3040/socket.io.js";
+    s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
     s.onerror=function(){ $("ch-socket").textContent="socket недоступен"; $("ch-socket").className="chip err"; };
     s.onload=function(){
       if(typeof io!=="function"){ $("ch-socket").textContent="socket client n/a"; $("ch-socket").className="chip err"; return; }
-      socket=io("http://"+location.hostname+":3040",{ path:"/", transports:["websocket","polling"] });
+      socket=io("http://"+location.hostname+":${WS_PORT}",{ path:"/", transports:["websocket","polling"] });
       socket.on("connect", function(){ socketOk=true; $("ch-socket").innerHTML='<span class="dot"></span>socket live'; $("ch-socket").className="chip ok"; loadFleet(); loadRiver(); });
       socket.on("disconnect", function(){ socketOk=false; $("ch-socket").className="chip warn"; });
       socket.on("agentchat:step", function(e){ renderRiver([e], true); });

@@ -11,7 +11,7 @@
  *
  * Слои: episodic (что случилось) / semantic (факты-уроки) / procedural (как делать).
  */
-import { db, emit, nowIso } from "../store";
+import { db, emit, nowIso, DB_FILE } from "../store";
 import { statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
@@ -136,7 +136,7 @@ export function memoryStatus(): {
     oldest = oldest === null ? r.oldest : Math.min(oldest, r.oldest);
     lastWrite = lastWrite === null ? r.last_write : Math.max(lastWrite, r.last_write);
   }
-  const dbPath = join(dirname(fileURLToPath(import.meta.url)), "..", "data", "me2.db");
+  const dbPath = DB_FILE; // R51: единый источник пути (ME2_DATA_DIR-совместимый, фикс gate-probe)
   let dbBytes = 0;
   try { dbBytes = statSync(dbPath).size; } catch { /* noop */ }
   return { ok: true, rows: total, by_kind: byKind, db_bytes: dbBytes, oldest, last_write: lastWrite, db_path: "data/me2.db" };

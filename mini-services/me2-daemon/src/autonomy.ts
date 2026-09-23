@@ -27,12 +27,15 @@
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { db, getMeta } from "../store";
 import { verifyChain } from "../evidence";
 
-const REPO = "/home/z/my-project";
-const INDEX_TS = join(REPO, "mini-services/me2-daemon/index.ts");
-const REVIEWER_TS = join(REPO, "mini-services/me2-daemon/src/reviewer.ts");
+// R51: исходники резолвятся относительно пакета (укладка-независимо: sandbox, monorepo apps/, CI)
+const PKG_SRC = dirname(fileURLToPath(import.meta.url));
+const INDEX_TS = join(PKG_SRC, "..", "index.ts");
+const REVIEWER_TS = join(PKG_SRC, "reviewer.ts");
 const RUNNING_OVERRUN_MS = 10 * 60_000;   // TASK_HARD_DEADLINE воркера: дольше = watchdog обязан был вмешаться
 const REVIEWER_BACKLOG_MS = 15 * 60_000;  // COMPLETED без review дольше → reviewer-голодание
 const REVIEWER_BACKLOG_MAX = 10;

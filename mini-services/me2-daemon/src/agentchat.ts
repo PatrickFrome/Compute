@@ -42,6 +42,7 @@
  * GET /agentchat/:id, GET /agentchat/:id/status. Механика ME35.
  */
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import * as ports from "./ports";
 import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
 import { db, emit, nowIso, createAgent, createTask, getMeta, setMeta, type AgentRow } from "../store";
@@ -55,7 +56,7 @@ import { tierForRole, policyCheckTool } from "./policy";
 import { cronBridge } from "./cron";
 
 // ── константы ─────────────────────────────────────────────────────
-const CHAT_ROOT = "/home/z/my-project/me2-workspace";
+const CHAT_ROOT = ports.CHAT_ROOT; // R51: ME2_CHAT_ROOT/ME2_REPO_ROOT (CI без /home/z)
 const MAX_STEPS = 8;                 // шагов tool-цикла на один ход (как max_steps задач)
 const TURN_DEADLINE_MS = 150_000;    // стенные часы хода (LLM+инструменты)
 const SHELL_TIMEOUT_MS = 30_000;

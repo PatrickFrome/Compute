@@ -14,13 +14,16 @@ import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const HERE = join(dirname(fileURLToPath(import.meta.url)), "data");
+// R51 (фаза C): ME2_DATA_DIR позволяет поднять изолированный инстанс (gate-probe CI,
+// песочницы) без конфликтов с production-каталогом. По умолчанию — как раньше.
+const HERE = process.env.ME2_DATA_DIR || join(dirname(fileURLToPath(import.meta.url)), "data");
 mkdirSync(HERE, { recursive: true });
 
 /** Версия daemon'а — единый источник (R49): health, /state.capabilities, eval, UI. */
-export const VERSION = "0.42.0";
+export const VERSION = "0.43.0";
 
-export const db = new Database(join(HERE, "me2.db"));
+export const DB_FILE = join(HERE, "me2.db");
+export const db = new Database(DB_FILE);
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA synchronous = NORMAL;");
 db.exec("PRAGMA busy_timeout = 5000;");

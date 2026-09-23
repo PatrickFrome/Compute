@@ -83,8 +83,8 @@
 4. **Решение K2: авторитетная оболочка — `apps/metaengine-browser`** (live-установки + self-update + Guardian + CI). Механизмы `desktop/` переезжают как me2-модули: gateway → `src/me2/me2-ui-gateway.mjs` (UI :3000 за внутренним прокси), daemon-supervisor → слияние с `supervisor-keepalive` (единые политики рестарта + exit-13 кооперация), `updater.ts` — выводится из эксплуатации (закрытие K6).
 5. Панели v5 доставляются как Mission Control: ME2_UI_URL → спавнимый daemon-host'ом Next-UI через внутренний gateway (выбор между static-бандлом и живым Next — по результату A3).
 
-### Фаза C — единый monorepo (R51-R52, P1)
-6. База — `release/self-update-ambiguity-live-v2`; в неё переносятся пакеты `apps/me2-daemon` (из `mini-services/me2-daemon`), `apps/me2-ui` (Next), `desktop/` (как source для B4). `sandbox/me2-os` остаётся dev-интеграционной веткой git-sync; в release — смарт-мерж PR'ами (как R40/R41). `main` заморозить.
+### Фаза C — единый monorepo (R51-R52, P1) — C6 ЗАКРЫТ (R51)
+6. ✅ **C6 ЗАКРЫТ (R51, PR #952)**: в release-ветку перенесены `apps/me2-daemon` (v0.43.0) и `apps/me2-ui` (панели v5). Изоляция инстансов: `ME2_WS_PORT/ME2_REST_PORT/ME2_DATA_DIR/ME2_LOCK_FILE/ME2_LEGACY_MIRROR_PORT/ME2_SCREENCEAST_PORT/ME2_REPO_ROOT/ME2_CHAT_ROOT/ME2_BOOT_MODE=probe`. Gate: `apps/me2-daemon → bun run check` (boot-probe на девственной SQLite требует eval PASS) + ui-gate (frozen install). Gate нашёл и починил 3 реальных бага: idx_eval_runs_started до таблицы, memory.db_file хардкод-путь (DB_FILE в store), memory.rows на девственной DB (boot-запись инкарнации). CI-репликация локально: PASS 53/53. Остаток C7 → R52: `next build` + упаковка `resources/me2-ui` в autorelease-конвейер, gate как required-check. `sandbox/me2-os` остаётся dev-интеграционной; в release — смарт-мерж PR'ами; `main` заморожен.
 7. В autorelease-конвейер — шаги: сборка UI, прогон eval/round-verify артефакта, публикация «ME2 unified» dev-релиза (живые установки обновятся сами).
 
 ### Фаза D — Supabase-контур (R53, P1, H6)

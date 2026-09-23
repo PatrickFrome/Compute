@@ -82,3 +82,5 @@ db/*.db-*
 desktop/node_modules/
 desktop/dist/
 desktop/release/
+--set-viewport
+--width

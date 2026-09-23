@@ -3,7 +3,7 @@
  * API-native agent runtime: агенты = контексты + инструменты, НЕ вкладки браузера.
  * Горячий путь: локальный SQLite + command bus (single-writer).
  *
- * Порты (через gateway XTransformPort):
+ * Порты (через gateway XTransformPort; дефолты, переопределяются env ME2_WS_PORT/ME2_REST_PORT — R51):
  *   :3040 — socket.io, path '/' (WS-канал: snapshot push + события + команды)
  *   :3041 — REST API (health/state/commands/tasks/agents/workers/budget/reset)
  *
@@ -57,6 +57,7 @@ import { governorStatus } from "./src/governor";
 import { demandTick, demandStatus, demandConfigSet, DEMAND_TICK_MS } from "./src/demand";
 import { policyStatus, policyReload } from "./src/policy";
 import { cronStatus, cronTick, cronCancel, cronFire, CRON_TICK_MS } from "./src/cron";
+import * as ports from "./src/ports";
 import { tokensEnsure, tokenList, tokenSet, tokenDelete, tokensStatus } from "./src/tokens";
 import { withContract, missionUiHtml } from "./src/contract";
 import {
@@ -66,13 +67,30 @@ import {
   meshHeartbeatApply,
 } from "./src/agentchat";
 
-const WS_PORT = 3040;
-const REST_PORT = 3041;
+// R51 (фаза C): порты вынесены в src/ports.ts (env ME2_WS_PORT/ME2_REST_PORT для gate-probe)
+// ME2_BOOT_MODE=probe — инкарнация «только контракт»: REST+socket+eval подняты,
+// LLM-приводы (worker/GLM-проба/demand/cron/supervisor-тики/selfupdate) отключены —
+// gate в CI проверяет здоровье без сетевых зависимостей и без расхода квот.
+const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe";
+const WS_PORT = ports.WS_PORT;
+const REST_PORT = ports.REST_PORT;
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
+
+// R51 (фаза C): boot-запись памяти — persistence-пруф с первой секунды инкарнации
+// (eval memory.rows не должен зависеть от того, «повезёт» ли с ранними событиями на девственной DB).
+try {
+  memWrite({
+    kind: "episodic",
+    key: `incarnation:${BOOT_TS}`,
+    content: `daemon v${VERSION} инкарнация начата (seq=${lastSeq()}, ws:${WS_PORT} rest:${REST_PORT})`,
+    tags: ["boot", "incarnation"],
+    importance: 0.4,
+  });
+} catch (e) { console.log(`[memory] boot row skipped: ${String(e).slice(0, 80)}`); }
 
 // ── seed (однократно) ─────────────────────────────────────────────
 function seed() {
@@ -119,7 +137,7 @@ try {
   const up = upgradeAgents();
   console.log(`[glm] canonical=${agentTag()} upgraded=${up.upgraded} already=${up.already}`);
 } catch (e) { console.log(`[glm] upgrade failed: ${String(e).slice(0, 120)}`); }
-setTimeout(() => { void glmProbe().catch(() => { /* R38: проба не роняет процесс */ }); }, 3_000);
+if (!PROBE_MODE) setTimeout(() => { void glmProbe().catch(() => { /* R38: проба не роняет процесс */ }); }, 3_000);
 
 // ── REST API (:3041) ──────────────────────────────────────────────
 function json(res: ServerResponse, code: number, body: unknown) {
@@ -976,7 +994,7 @@ setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_0
 setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
-setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
+if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
 // R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
 setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
 // R31 D4: расписание гигиены БД (PASSIVE-checkpoint каждые 10м) + немедленный первый прогон
@@ -986,7 +1004,9 @@ try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${
 // Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear зомби-lease)
 // и убить lease живого демона, после чего сам умер на EADDRINUSE. Lockfile O_EXCL + kill-0: дубль
 // честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
-const ME2_LOCK_FILE = "/tmp/me2-daemon.lock";
+// R51 (фаза C): путь lockfile переопределяется env ME2_LOCK_FILE — изолированный gate-probe
+// рядом с production-daemon'ом получает собственный lock (в CI дефолт не используется вторым).
+const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || "/tmp/me2-daemon.lock";
 let poolBootAllowed = true;
 try {
   if (existsSync(ME2_LOCK_FILE)) {
@@ -1010,25 +1030,25 @@ try {
 // восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
 if (poolBootAllowed) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
-  try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
+  if (!PROBE_MODE) { try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); } }
   try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
   // G2: вечно-живущий супервизор флота — гарантия при boot + тик каждые 60с (перерождение + автономные ходы)
   try { const se = supervisorEnsure(); console.log(`[agentchat] supervisor ${se.created ? "created" : "alive"} (${se.id})`); } catch (e) { console.error(`[agentchat] supervisorEnsure failed: ${String(e)}`); }
-  setInterval(() => {
+  if (!PROBE_MODE) setInterval(() => {
     try {
       const r = agentChatSupervisorTick();
       if (r.kicked.length) console.log(`[agentchat] supervisor tick: kicked=${r.kicked.join(",")} supervisors=${r.supervisors}`);
     } catch (e) { console.error(`[agentchat] supervisor tick failed: ${String(e)}`); }
   }, SUPERVISOR_TICK_MS);
   // G10: автопилот спроса — демон сам создаёт чат-агентов под живой спрос (гистерезис 2 тика, cooldown, caps)
-  setInterval(() => {
+  if (!PROBE_MODE) setInterval(() => {
     try {
       const d = demandTick();
       if (d.action !== "idle") console.log(`[demand] ${d.action} signal=${d.signal} role=${d.role} sid=${d.session_id} — ${d.detail}`);
     } catch (e) { console.error(`[demand] tick failed: ${String(e).slice(0, 160)}`); }
   }, DEMAND_TICK_MS);
   // G7 (R44): cron-планировщик из чатов — будим чаты по их расписаниям (overdue догоняет первым тиком)
-  setInterval(() => {
+  if (!PROBE_MODE) setInterval(() => {
     try {
       const r = cronTick();
       if (r.fired) console.log(`[cron] fired=${r.fired} postponed=${r.postponed}`);
@@ -1036,7 +1056,7 @@ if (poolBootAllowed) {
   }, CRON_TICK_MS);
 }
 
-startMasterLoop();
+if (!PROBE_MODE) startMasterLoop();
 initEvidence();
 // boot-span: телеметрия холодного старта (M7-проверка «ring живой» перестаёт быть ложной после рестарта)
 try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-daemon" }, BOOT_T0); } catch { /* телеметрия не ломает старт */ }
@@ -1047,11 +1067,12 @@ restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] 
 // R34: legacy health-mirror na :3021 - zhivoy next-server derzhit staryy me2-watchdog s HEALTH=3021
 // (iskhodnik uzhe ispravlen na :3041, no reinkarnatsiya next-server nevmozhna iznutri). Bez zerkala
 // watchdog vechno "nezdorov" -> spawn dubley kazhdye 8s (ikh lovit strazh inkarnatsii, no eto fork-shum).
+const LEGACY_MIRROR_PORT = Number(process.env.ME2_LEGACY_MIRROR_PORT ?? 3021);
 try {
   createServer((_rq, rs) => {
     rs.writeHead(200, { "Content-Type": "application/json" });
-    rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: 3021, ts: nowIso() }));
-  }).listen(3021);
-  console.log("[me2-daemon] legacy health mirror on :3021 (watchdog-compat)");
-} catch (e) { console.error(`[me2-daemon] 3021 mirror failed: ${String(e).slice(0, 100)}`); }
+    rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: LEGACY_MIRROR_PORT, ts: nowIso() }));
+  }).listen(LEGACY_MIRROR_PORT);
+  console.log(`e2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
+} catch (e) { console.error(`[me2-daemon] legacy mirror :${LEGACY_MIRROR_PORT} failed: ${String(e).slice(0, 100)}`); }
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

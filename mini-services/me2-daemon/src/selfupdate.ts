@@ -17,7 +17,7 @@ import { db, emit } from "../store";
 import { recordSpan } from "./otel";
 import { tokenGet } from "./tokens";
 
-const REPO_ROOT = "/home/z/my-project";
+const REPO_ROOT = process.env.ME2_REPO_ROOT ?? "/home/z/my-project"; // R51
 const REMOTE_URL_BASE = "https://github.com/PatrickFrome/Compute.git";
 const REMOTE_REF = "sandbox/me2-os";
 const GIT_TIMEOUT_MS = 20_000;

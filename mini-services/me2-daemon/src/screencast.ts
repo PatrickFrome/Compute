@@ -17,7 +17,8 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const SC_PORT = 3043;
+// R51 (фаза C): env-оверрайд для изолированного gate-probe (дефолт — production :3043)
+const SC_PORT = Number(process.env.ME2_SCREENCEAST_PORT ?? 3043);
 const CDP_TTL_MS = 15_000;
 const CORS = {
   "Access-Control-Allow-Origin": "*",

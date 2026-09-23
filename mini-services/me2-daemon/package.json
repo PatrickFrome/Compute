@@ -1,11 +1,12 @@
 {
   "name": "me2-daemon",
-  "version": "0.1.0",
+  "version": "0.43.0",
   "private": true,
   "description": "METAENGINE 2 core daemon: API-native agent runtime (no browser tabs)",
   "scripts": {
     "dev": "bun --hot index.ts",
-    "start": "bun index.ts"
+    "start": "bun index.ts",
+    "check": "bash scripts/probe.sh"
   },
   "dependencies": {
     "socket.io": "^4.8.1",
