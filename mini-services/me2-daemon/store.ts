@@ -104,6 +104,8 @@ const taskCols = (db.query(`PRAGMA table_info(tasks)`).all() as Array<{ name: st
 if (!taskCols.includes("parent_id")) db.exec(`ALTER TABLE tasks ADD COLUMN parent_id TEXT`);
 // v0.9.0: рефлексия провала (паттерн Reflexion) — детерминированный диагноз, child-ретрай читает как эпизодическую память
 if (!taskCols.includes("reflection")) db.exec(`ALTER TABLE tasks ADD COLUMN reflection TEXT`);
+// R27 C1: Mission Control — проекция objectives→tasks→agents→effects (fails-closed, zero-authority)
+if (!taskCols.includes("objective_id")) db.exec(`ALTER TABLE tasks ADD COLUMN objective_id TEXT`);
 
 export type AgentRow = {
   id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
@@ -111,7 +113,7 @@ export type AgentRow = {
 export type TaskRow = {
   id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
-  error: string | null; reflection: string | null; created_at: string; updated_at: string;
+  error: string | null; reflection: string | null; objective_id: string | null; created_at: string; updated_at: string;
 };
 export type EventRow = {
   seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string;
@@ -267,12 +269,12 @@ export function deleteAgent(id: string) {
 }
 
 // ── tasks ─────────────────────────────────────────────────────────
-export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "reflection" | "created_at" | "updated_at" | "parent_id"> & { parent_id?: string | null; reflection?: string | null };
+export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "reflection" | "created_at" | "updated_at" | "parent_id" | "objective_id"> & { parent_id?: string | null; objective_id?: string | null; reflection?: string | null };
 export function createTask(t: NewTask): TaskRow {
-  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, reflection: t.reflection ?? null, created_at: nowIso(), updated_at: nowIso() };
-  db.query(`INSERT INTO tasks (id,title,spec,role,parent_id,status,agent_id,max_steps,steps,result,error,reflection,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(row.id, row.title, row.spec, row.role, row.parent_id, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.reflection, row.created_at, row.updated_at);
+  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, objective_id: t.objective_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, reflection: t.reflection ?? null, created_at: nowIso(), updated_at: nowIso() };
+  db.query(`INSERT INTO tasks (id,title,spec,role,parent_id,status,agent_id,max_steps,steps,result,error,reflection,objective_id,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(row.id, row.title, row.spec, row.role, row.parent_id, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.reflection, row.objective_id, row.created_at, row.updated_at);
   return row;
 }
 export function listTasks(opts: { includeArchived?: boolean } = {}): TaskRow[] {

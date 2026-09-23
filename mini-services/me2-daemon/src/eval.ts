@@ -30,9 +30,10 @@ import { mcpStatus } from "./mcp";
 import { benchSnapshot, BENCH_THRESHOLDS } from "./bench";
 import { codegraphSummary } from "./codegraph";
 import { otelStatus } from "./otel";
+import { workGraph, OBJECTIVE_STATUSES } from "./objectives";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 1;
+export const EVAL_DATASET_VERSION = 2;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -264,6 +265,32 @@ export const EVAL_DATASET: EvalCheck[] = [
       const t = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='selfupdate_journal'`).get();
       const rows = t ? (db.query(`SELECT COUNT(*) AS n FROM selfupdate_journal`).get() as { n: number }).n : -1;
       return { ok: !!t, evidence: `table=${t ? "yes" : "no"}, journal_rows=${rows}` };
+    },
+  },
+  // — Mission Control (R27 C1) —
+  {
+    id: "mc.workgraph_shape", plane: "mc", title: "Work_graph (ME23) форма валидна",
+    critical: true, expect: "workGraph(): fails_closed=true, статистика полная, рёбра только objective_task/task_agent",
+    run: () => {
+      const g = workGraph();
+      const kinds = new Set(g.edges.map((e) => e.kind));
+      const foreign = [...kinds].filter((k) => k !== "objective_task" && k !== "task_agent");
+      const ok = g.fails_closed === true
+        && typeof g.stats.objectives_total === "number"
+        && typeof g.stats.tasks_orphan === "number"
+        && foreign.length === 0;
+      return { ok, evidence: `objectives=${g.stats.objectives_total}, tasks_linked=${g.stats.tasks_linked}, orphan=${g.stats.tasks_orphan}, edges=${g.stats.edges}${foreign.length ? `, FOREIGN=${foreign.join(",")}` : ""}` };
+    },
+  },
+  {
+    id: "mc.statuses_canonical", plane: "mc", title: "Статусы целей (ME23) каноничны",
+    critical: true, expect: "status ∈ {ACTIVE,ACHIEVED,FAILED,PARKED}; derived ∈ {on_track,stalled,empty,achieved,failed,parked}",
+    run: () => {
+      const g = workGraph();
+      const DERIVED = new Set(["on_track", "stalled", "empty", "achieved", "failed", "parked"]);
+      const badStatus = g.objectives.filter((o) => !(OBJECTIVE_STATUSES as readonly string[]).includes(o.status));
+      const badDerived = g.objectives.filter((o) => !DERIVED.has(o.derived_state));
+      return { ok: badStatus.length === 0 && badDerived.length === 0, evidence: g.objectives.length ? `objectives=${g.objectives.length}, bad_status=${badStatus.length}, bad_derived=${badDerived.length}` : "objectives=0 (пусто — каноничность тривиальна)" };
     },
   },
 ];

@@ -12,6 +12,7 @@ import {
 } from "./store";
 import { WORKSPACE_ROOT } from "./worker";
 import { recordSpan } from "./src/otel";
+import { getObjective } from "./src/objectives";
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -96,11 +97,20 @@ const handlers: Record<string, Handler> = {
     if (!spec) throw new Error("spec_required");
     const role = p.role ? String(p.role).toUpperCase().slice(0, 32) : null;
     const maxSteps = Math.min(Math.max(Number(p.max_steps ?? 8), 1), 24);
+    // R27 C1 fails-closed: задача с objective_id не может молча оторваться от миссии —
+    // несуществующая цель = ошибка постановки, а не orphan.
+    let objectiveId: string | null = null;
+    if (p.objective_id != null && String(p.objective_id).trim()) {
+      const obj = getObjective(String(p.objective_id).trim());
+      if (!obj) throw new Error(`objective_not_found: ${String(p.objective_id).slice(0, 40)}`);
+      if (obj.status !== "ACTIVE") throw new Error(`objective_not_active: ${obj.status}`);
+      objectiveId = obj.id;
+    }
     const task = createTask({
       id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      title, spec, role, max_steps: maxSteps,
+      title, spec, role, max_steps: maxSteps, objective_id: objectiveId,
     });
-    emit("TASK_QUEUED", { title, role, max_steps: maxSteps, via: "command_bus" }, null, task.id);
+    emit("TASK_QUEUED", { title, role, max_steps: maxSteps, objective_id: objectiveId, via: "command_bus" }, null, task.id);
     return { task };
   },
 

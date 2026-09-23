@@ -36,7 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, Sparkles, Terminal, Trash2, X, Zap,
+  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, Sparkles, Target, Terminal, Trash2, X, Zap,
 } from "lucide-react";
 
 // ── типы (зеркало store.ts daemon) ────────────────────────────────
@@ -101,6 +101,13 @@ type EvalData = {
   } | null;
   history: Array<{ run_id: string; started_at: string; duration_ms: number; verdict: string; passed: number; warned: number; failed: number; total: number; version: string; dataset_version: number }>;
   runs_total: number;
+};
+// R27 C1: Mission Control — objectives + work_graph (ME23, GET /workgraph | POST /objectives)
+type WorkGraphData = {
+  ok: boolean; fails_closed: boolean;
+  objectives: Array<{ id: string; title: string; spec: string; status: string; priority: number; derived_state: string; attention: string | null; counts: { total: number; active: number; done: number; failed: number } }>;
+  orphan_tasks: Array<{ id: string; title: string; status: string }>;
+  stats: { objectives_total: number; objectives_active: number; objectives_achieved: number; objectives_failed: number; objectives_parked: number; attention_objectives: number; tasks_linked: number; tasks_orphan: number; agents_total: number; edges: number };
 };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
@@ -1193,6 +1200,9 @@ export default function MissionControl() {
   const [bench, setBench] = useState<BenchData | null>(null);
   const [evalData, setEvalData] = useState<EvalData | null>(null);
   const [evalBusy, setEvalBusy] = useState(false);
+  const [wg, setWg] = useState<WorkGraphData | null>(null);
+  const [objTitle, setObjTitle] = useState("");
+  const [objSpec, setObjSpec] = useState("");
   const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
@@ -1283,6 +1293,10 @@ export default function MissionControl() {
     } catch { toast({ title: "eval ✗", description: "daemon недоступен", variant: "destructive" }); }
     finally { setEvalBusy(false); }
   }, [loadEval, toast]);
+  // R27 C1: work_graph проекция (objectives→tasks→agents, fails-closed)
+  const loadWg = useCallback(async () => {
+    try { const r = await fetch("/workgraph?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setWg(r as WorkGraphData); } catch { /* daemon недоступен */ }
+  }, []);
   // BENCH виден в браузерной панели всегда — грузим на mount и обновляем каждые 30с
   useEffect(() => {
     void loadBench();
@@ -1317,11 +1331,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2133,6 +2147,64 @@ export default function MissionControl() {
                     ))}
                     {!mech && (
                       <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка матрицы…</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* R27 C1: MISSION CONTROL — objectives→tasks→agents (ME23, fails-closed, zero-authority) */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="ME23: порт mission-control-projection — цели не закрываются системой (zero-authority), неполные данные видны (stalled/empty), orphan-задачи флaгаются">
+                      <Target className="h-3 w-3 text-violet-400" aria-hidden /> OBJECTIVES
+                    </span>
+                    <span data-testid="wg-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`цели: active=${wg?.stats.objectives_active ?? 0}, achieved=${wg?.stats.objectives_achieved ?? 0}, failed=${wg?.stats.objectives_failed ?? 0}, parked=${wg?.stats.objectives_parked ?? 0}`}>цели {wg?.stats.objectives_total ?? "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="задачи, привязанные к целям, и рёбра objective→task→agent">задачи {wg?.stats.tasks_linked ?? "—"} · рёбра {wg?.stats.edges ?? "—"}</span>
+                      {(wg?.stats.attention_objectives ?? 0) > 0 && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 py-0.5 text-amber-300" title="цели со stalled/empty — ждут оператора (fails-closed: система не закрывает сама)">внимание {wg?.stats.attention_objectives}</span>}
+                      {(wg?.stats.tasks_orphan ?? 0) > 0 && <span className="rounded border border-amber-900 bg-amber-950/40 px-1 py-0.5 text-amber-300" title="READY/RUNNING задачи вне целей">orphan {wg?.stats.tasks_orphan}</span>}
+                    </span>
+                  </div>
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); void (async () => { if (objTitle.trim()) { await mcxOp("objectives", { op: "create", title: objTitle.trim(), spec: objSpec.trim() }, "цель создана", async () => { await loadWg(); }); setObjTitle(""); setObjSpec(""); } })(); }}
+                    className="mb-1.5 space-y-1"
+                  >
+                    <Input value={objTitle} onChange={(e) => setObjTitle(e.target.value)} placeholder="новая цель: заголовок…" className="h-7 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Заголовок новой цели" />
+                    <div className="flex gap-1.5">
+                      <Input value={objSpec} onChange={(e) => setObjSpec(e.target.value)} placeholder="критерии успеха (spec)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Критерии успеха цели" />
+                      <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]"><Plus className="mr-1 h-3 w-3" aria-hidden /> цель</Button>
+                    </div>
+                  </form>
+                  <div className="max-h-36 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Цели и их производные состояния">
+                    {(wg?.objectives ?? []).map((o) => (
+                      <div key={o.id} role="listitem" className="rounded bg-zinc-900/50 px-1.5 py-1" title={`${o.spec ? `spec: ${o.spec}` : "без spec"} · priority ${o.priority} · ${o.id}`}>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`shrink-0 rounded px-1 text-[8px] ${o.status === "ACTIVE" ? "bg-emerald-950/60 text-emerald-300" : o.status === "ACHIEVED" ? "bg-lime-950/60 text-lime-300" : o.status === "FAILED" ? "bg-rose-950/60 text-rose-300" : "bg-zinc-800 text-zinc-400"}`}>{o.status.toLowerCase()}</span>
+                          <span className={`shrink-0 rounded px-1 text-[8px] ${o.derived_state === "on_track" ? "bg-cyan-950/60 text-cyan-300" : o.derived_state === "stalled" || o.derived_state === "empty" ? "bg-amber-950/60 text-amber-300" : "bg-zinc-800 text-zinc-500"}`}>{o.derived_state}</span>
+                          <span className="min-w-0 flex-1 truncate text-zinc-300">{o.title}</span>
+                          <span className="shrink-0 font-mono text-[9px] text-zinc-600" title={`задачи: всего ${o.counts.total}, активных ${o.counts.active}, готово ${o.counts.done}, упало ${o.counts.failed}`}>{o.counts.done}/{o.counts.total}</span>
+                        </div>
+                        {o.attention && <div className="mt-0.5 font-mono text-[9px] text-amber-300/80">⚠ {o.attention}</div>}
+                        {o.status === "ACTIVE" && (
+                          <div className="mt-1 flex gap-1">
+                            <button type="button" onClick={() => { void mcxOp("objectives", { op: "status", id: o.id, status: "ACHIEVED" }, "цель закрыта как достигнутая", async () => { await loadWg(); }); }} disabled={mcxBusy} className="rounded border border-lime-900 px-1.5 py-0.5 font-mono text-[9px] text-lime-300 transition hover:bg-lime-950/40">достигнута</button>
+                            <button type="button" onClick={() => { void mcxOp("objectives", { op: "status", id: o.id, status: "PARKED" }, "цель отложена", async () => { await loadWg(); }); }} disabled={mcxBusy} className="rounded border border-zinc-700 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800">парк</button>
+                            <button type="button" onClick={() => { void mcxOp("objectives", { op: "status", id: o.id, status: "FAILED" }, "цель закрыта как провальная", async () => { await loadWg(); }); }} disabled={mcxBusy} className="rounded border border-rose-900 px-1.5 py-0.5 font-mono text-[9px] text-rose-300 transition hover:bg-rose-950/40">провал</button>
+                            <button type="button" onClick={() => { void mcxOp("objectives", { op: "delete", id: o.id }, "цель удалена", async () => { await loadWg(); }); }} disabled={mcxBusy} aria-label={`Удалить цель ${o.title}`} className="ml-auto text-zinc-600 transition hover:text-rose-400">✕</button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {wg && wg.objectives.length === 0 && (
+                      <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">целей нет — создай первую (задачи привязываются через objective_id при постановке)</div>
+                    )}
+                    {(wg?.orphan_tasks.length ?? 0) > 0 && (
+                      <div className="rounded border border-amber-900/50 bg-amber-950/20 px-1.5 py-1" title="незакреплённые за целями активные задачи — fails-closed видит их явно">
+                        <div className="font-mono text-[9px] text-amber-300/90">orphan-задачи (вне целей):</div>
+                        {wg?.orphan_tasks.slice(0, 3).map((t) => <div key={t.id} className="truncate font-mono text-[9px] text-zinc-500">· {t.title} [{t.status}]</div>)}
+                      </div>
+                    )}
+                    {!wg && (
+                      <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка work_graph…</div>
                     )}
                   </div>
                 </div>

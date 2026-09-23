@@ -43,10 +43,11 @@ import { senseNow, senseList, senseAct } from "./src/sense";
 import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
+import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.24.0";
+const VERSION = "0.25.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -381,11 +382,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const body = await readBody(req);
       const r = enqueueCommand({
         action: "TASK_ENQUEUE",
-        payload: { title: body.title, spec: body.spec, role: body.role, max_steps: body.max_steps },
+        payload: { title: body.title, spec: body.spec, role: body.role, max_steps: body.max_steps, objective_id: body.objective_id ?? null },
         idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
       });
       if (!r.ok) return json(res, 429, { ok: false, error: r.error });
       const cmd = await runOne(r.command);
+      // fails-closed: ошибка шины (например objective_not_found) обязана дойти до оператора
+      if (cmd.status === "FAILED") return json(res, 400, { ok: false, error: cmd.error ?? "task_command_failed", command: cmd.id });
       const parsed = cmd.result ? (JSON.parse(cmd.result) as { task?: unknown }) : null;
       return json(res, 201, { ok: true, task: parsed?.task ?? null, command: cmd.id });
     }
@@ -473,6 +476,30 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const report = evalRun(VERSION);
       return json(res, 200, report);
     }
+    // ── R27 C1: Mission Control — objectives + work_graph (fails-closed, zero-authority) ──
+    if (path === "/workgraph" && req.method === "GET") return json(res, 200, workGraph());
+    if (path === "/objectives" && req.method === "GET") return json(res, 200, { ok: true, objectives: listObjectives() });
+    if (path === "/objectives" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "create");
+      if (op === "create") {
+        try {
+          const obj = createObjective(String(body.title ?? ""), String(body.spec ?? ""), Number(body.priority ?? 0));
+          return json(res, 201, { ok: true, objective: obj });
+        } catch (e) { return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) }); }
+      }
+      if (op === "status") {
+        try {
+          const obj = setObjectiveStatus(String(body.id ?? ""), String(body.status ?? "") as never, body.result ? String(body.result) : undefined);
+          return json(res, 200, { ok: true, objective: obj });
+        } catch (e) { return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) }); }
+      }
+      if (op === "delete") {
+        const ok = deleteObjective(String(body.id ?? ""));
+        return ok ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: "objective_not_found" });
+      }
+      return json(res, 400, { ok: false, error: `unknown op ${op} (create|status|delete); статусы: ${OBJECTIVE_STATUSES.join("/")} — только оператор` });
+    }
     if (path === "/mcp" && req.method === "POST") {
       const body = await readBody(req);
       const out = await mcpHandle(body);
@@ -489,7 +516,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

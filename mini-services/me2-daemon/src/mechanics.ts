@@ -24,6 +24,7 @@ import { fleetOutcomeCount } from "./fleet";
 import { benchVerdict } from "./bench";
 import { mcpStatus } from "./mcp";
 import { evalVerdict } from "./eval";
+import { objectivesVerdict } from "./objectives";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -158,6 +159,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME22", name: "Eval-харнесс: регресс-датасет + история прогонов (B1)", old_ref: "— (R24-критика: регрессии между версиями никто не ловил)",
       verdict: evalVerdict().verdict,
       evidence: evalVerdict().evidence + "; GET /eval | POST /eval/run",
+    },
+    {
+      id: "ME23", name: "Mission Control: objectives→tasks→agents проекция + work_graph (C1)", old_ref: "mission-control-projection.mjs (fails-closed, zero-authority)",
+      verdict: objectivesVerdict().verdict,
+      evidence: objectivesVerdict().evidence + "; GET /objectives | POST /objectives {op:create|status|delete} — статусы только оператором",
     },
   ];
 
