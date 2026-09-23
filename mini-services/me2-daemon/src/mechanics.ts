@@ -21,6 +21,8 @@ import { senseStatus } from "./sense";
 import { obsvStatus } from "./obsv";
 import { verdictStats } from "./effect";
 import { fleetOutcomeCount } from "./fleet";
+import { benchVerdict } from "./bench";
+import { mcpStatus } from "./mcp";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -140,6 +142,16 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME19", name: "Effect epistemology (5 статусов + one-attempt durable fences)", old_ref: "a2 effect-статусы + markAmbiguousContinuationAttempt",
       verdict: verdictStats().total > 0 ? "WORKS" : "CAVEAT",
       evidence: `verdicts=${verdictStats().total} by=${JSON.stringify(verdictStats().by_status)}, fences_active=${verdictStats().fences_active}; POST /browser/effect {op:clear} — только оператор`,
+    },
+    {
+      id: "ME20", name: "Perf baselines: REST p95, act p95, obsv память, boot (B3)", old_ref: "— (R24-критика: ресёрч обязан закрываться измерениями)",
+      verdict: benchVerdict().verdict,
+      evidence: benchVerdict().evidence + "; GET /bench",
+    },
+    {
+      id: "ME21", name: "MCP-сервер: stdio + Streamable HTTP, 7 инструментов (A1)", old_ref: "— (R24: индустрия стандартизовала MCP)",
+      verdict: mcpStatus().calls > 0 ? "WORKS" : "CAVEAT",
+      evidence: `tools=${mcpStatus().tools}, protocol=${mcpStatus().protocol}, initialized=${mcpStatus().initialized}, calls=${mcpStatus().calls}, errors=${mcpStatus().errors}, last=${mcpStatus().lastTool || "—"}; POST /mcp | bun mcp-stdio.ts`,
     },
   ];
 

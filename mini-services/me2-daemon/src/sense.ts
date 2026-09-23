@@ -18,6 +18,7 @@ import { db, emit } from "../store";
 import { recordSpan } from "./otel";
 import { ab, browserTabs, type BrowserTab } from "../commands";
 import { effectVerdict, fenceCheck } from "./effect";
+import { benchObserve } from "./bench";
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS browser_sense (
@@ -95,6 +96,7 @@ export async function senseNow(tab?: string): Promise<SenseRow & { targets: Sema
   `).run(row.tab, row.url, row.title, JSON.stringify(targets.slice(0, MAX_TARGETS)), row.targets_count, row.revision, row.chars, row.captured_at);
   emit("BROWSER_SENSED", { tab: row.tab, count: row.targets_count, revision }, null, null);
   recordSpan("browser.sense", { "me2.ms": Date.now() - t0, "me2.targets": row.targets_count }, t0);
+  benchObserve("sense", Date.now() - t0); // B3: зонд перцепции (порог в /bench)
   return { ...row, targets: targets.slice(0, MAX_TARGETS) };
 }
 
@@ -133,6 +135,18 @@ function resolve(targets: SemanticTarget[], key: string): SemanticTarget | null 
  * + one-attempt durable fences на AMBIGUOUS. Никогда не мутирует вне браузера.
  */
 export async function senseAct(input: {
+  key: string; action: "click" | "type" | "press"; text?: string; tab?: string;
+}): Promise<{
+  ok: true; acted: string; target: SemanticTarget | null;
+  effect: { status: string; fenced_now: boolean; evidence: Record<string, unknown> };
+  verify: { revision_changed: boolean; target_alive: boolean; before: string; after: string };
+}> {
+  const t0 = Date.now();
+  try { return await senseActImpl(input); }
+  finally { benchObserve("sense_act", Date.now() - t0); } // B3: зонд act (порог p95<2000ms)
+}
+
+async function senseActImpl(input: {
   key: string; action: "click" | "type" | "press"; text?: string; tab?: string;
 }): Promise<{
   ok: true; acted: string; target: SemanticTarget | null;

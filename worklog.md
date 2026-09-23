@@ -183,3 +183,23 @@ Stage Summary:
 - CI: три корня падений найдены и починены (binaries mkdir, GITHUB_ENV delimiter, pubkey placeholder) — зелёность докажет следующий ран.
 - Главный стратегический вывод раунда: индустрия стандартизовала MCP; ME2 должен стать MCP-сервером (A1) — это превращает наш браузерный план в инструмент всей экосистемы агентов.
 - Критика ресёрчей зафиксирована как Track B: ресёрч обязан закрываться измерениями, а не файлами.
+
+---
+Task ID: R25
+Agent: Z.ai Code (main)
+Task: «продолжи разработку… используй long run task, task review, skill creator, vlm и прочие, записывай всю систему в github, анализируй ветки браузера, делай ресёрчи по улучшениям» — исполнено как R25: пункты B3+A1 роадмапа R24 (порядок B3→A1→B1→C).
+
+Work Log:
+- R25-1 (B3, P1): mini-services/me2-daemon/src/bench.ts — перф-бейслайны: скользящие гистограммы (ring 512) по зондам rest/rest_admin/rest_browser/sense/sense_act, p50/p95/p99/max, память (RSS/heap/obsv_est/sqlite), boot_ms (BOOT_T0→первый REST-запрос), пороги из роадмапа: REST p95<50ms, act p95<2000ms, obsv<50MB, boot<5000ms; вердикт PASS/WARMUP/FAIL только при n≥5 (нет WORKS на пустых данных). REST GET /bench (вне шины, 47/47 инвариант). Механика ME20.
+- R25-2 (A1, P1): mini-services/me2-daemon/src/mcp.ts — MCP-сервер (JSON-RPC 2.0, Streamable HTTP POST /mcp + stdio-адаптер mcp-stdio.ts): initialize/tools/list/tools/call/ping, 7 инструментов: browser_sense, browser_act (с effect-вердиктом), browser_obsv (attach/reset/stop), fleet_list, memory_search, task_enqueue (через bus), daemon_health. Zero-authority: без eval, без привилегий; статистика calls/errors для честного вердикта ME21 (WORKS только после реального вызова). stdio-адаптер: дренаж pending-запросов перед exit (fetch-гонка исправлена), stdout=протокол, stderr=логи.
+- R25-3 (классы латентности): глобальный REST p95 смешивал лёгкие poll-запросы с тяжёлыми — разделены 3 класса: rest (hot, порог 50ms), rest_admin (тяжёлые сканы /mechanics,/codegraph,/memory,/rsi,/roadmap,/selfupdate,/spans,/mcp,/metrics,/commands,/state,/events — без порога), rest_browser (CLI-шеллы /browser,/screencast — без порога; sense_act имеет свой зонд с порогом 2s).
+- R25-4 (ДЕРЕКТ ДОКАЗАТЕЛЬСТВА — event-loop freeze): бейслайн сразу поймал реальный дефект: все hot-роуты замерзали на ~1.3-1.4s одновременно после старта (performance entries браузера: /commands 1396ms, /state 1363ms, /bench 1340ms…). Корень: suCheck делал spawnSync("git ls-remote")+spawnSync("git fetch") — СЕТЕВЫЕ вызовы (1-3s) блокировали весь event-loop (REST+WS+bus) на boot+4s. Фикс: gitRemote() на Bun.spawn (async, timeout) в src/selfupdate.ts; suCheckAsync для boot-таймера и POST /selfupdate op=check; локальные git (rev-parse/status/rev-list <5ms) остались sync. После фикса worst-request 1396ms→91ms (15x). suApply остался sync (операторский, редкий) — в backlog.
+- R25-5 (UI): src/app/page.tsx — блок BENCH в браузерной панели (после OBSV): чипы rest p95/act p95/rss/boot + бейдж PASS/WARMUP/FAIL (тултипы с n/p50/p99 и admin/browser классами) + чип mcp (tools·calls, тултип с protocol/errors/last) + кнопка «обновить»; автозагрузка на mount + каждые 30с; ME20/ME21 в списке механик.
+- R25-6 (верификация): daemon v0.23.0, actions=47/47 инвариант; /bench PASS hot p95=5ms boot=15ms rss≈83MB; MCP: initialize+tools/list+tools/call по HTTP (curl) И stdio (bun mcp-stdio.ts, оба ответа с дренированием); browser_obsv attach через MCP-инструмент → ME18 WORKS; матрица 21/21 WORKS (впервые, включая ME7 selfupdate после async-фикса); agent-browser: чипы рендерятся (data-testid=bench-chips), rect-проверка на мобиле 390px (y=2946, ниже фолда — скролл работает) и десктопе 1440px; VLM-ревью скриншота: чипы видны, PASS зелёный, без наложений/обрезки, вёрстка целостна.
+- R25-7: lint 0/0.
+
+Stage Summary:
+- ME2 = измеряемая система: впервые есть СВОИ перф-метрики (закрыт главный упрёк R24-критики «ресёрч обязан закрываться измерениями») — и они немедленно окупились, поймав 1.3s event-loop freeze от sync-git.
+- ME2 = MCP-сервер (A1): браузерный план ME2 (sense/act/obsv+fleet+memory+tasks) доступен любому MCP-клиенту (VS Code/Codex/Claude) — HTTP :3041/mcp или stdio mcp-stdio.ts; матрица 21 механика (ME20=B3, ME21=A1).
+- Пороги B3 в /mechanics evidence; классы латентности честные (hot/admin/browser), вердикт только на реальной выборке.
+- Backlog: suApply → async; act p95 ждёт первых sense_act вызовов через MCP (порог 2000ms); далее по роадмапу B1 (регресс-датасет) → C-линия (C1 objectives/work_graph).

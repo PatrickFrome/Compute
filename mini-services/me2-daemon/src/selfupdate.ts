@@ -62,6 +62,26 @@ function remoteUrl(token: string): string {
   return `https://${token}@github.com/PatrickFrome/Compute.git`;
 }
 
+/**
+ * R25/B3-урок: spawnSync-«git ls-remote/fetch» — это СЕТЕВЫЙ вызов (1-3s), который
+ * блокировал весь event-loop daemon'а (REST+WS+bus замерзали на старте; бейслайн
+ * /bench поймал p95=1.3s). Сетевые git-операции — только async (Bun.spawn),
+ * локальные (rev-parse/status/rev-list, <5ms) остаются sync.
+ */
+async function gitRemote(args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+  const p = Bun.spawn(["git", ...args], {
+    cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe",
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  const timer = setTimeout(() => { try { p.kill(); } catch { /* уже мёртв */ } }, GIT_TIMEOUT_MS);
+  try {
+    const [out, err, code] = await Promise.all([
+      new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited,
+    ]);
+    return { ok: code === 0, out, err };
+  } finally { clearTimeout(timer); }
+}
+
 export interface SuCheck {
   ok: boolean; verdict: "UP_TO_DATE" | "BEHIND" | "AHEAD" | "DIVERGED" | "NO_TOKEN" | "ERROR";
   local_head: string | null; remote_head: string | null; branch: string;
@@ -84,6 +104,54 @@ export function suCheck(version: string, force = false): SuCheck {
     data.verdict === "ERROR" || data.verdict === "NO_TOKEN" ? { status: "ERROR", message: data.error ?? data.verdict } : {});
   checkCache = { at: Date.now(), data };
   return data;
+}
+
+/** Async-проверка (R25): сетевые ls-remote/fetch без блокировки event-loop. */
+export async function suCheckAsync(version: string, force = false): Promise<SuCheck> {
+  if (!force && checkCache && Date.now() - checkCache.at < CHECK_TTL_MS) return checkCache.data;
+  const t0 = Date.now();
+  const data = await suCheckAsyncInner(version);
+  recordSpan("selfupdate.check", { "me2.verdict": data.verdict, "me2.ms": Date.now() - t0 }, t0,
+    data.verdict === "ERROR" || data.verdict === "NO_TOKEN" ? { status: "ERROR", message: data.error ?? data.verdict } : {});
+  checkCache = { at: Date.now(), data };
+  return data;
+}
+
+async function suCheckAsyncInner(version: string): Promise<SuCheck> {
+  const token = readToken();
+  const head = git(["rev-parse", "HEAD"]);
+  const localHead = head.ok ? head.out.trim() : null;
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  const dirty = git(["status", "--porcelain"]);
+  const dirtyFiles = dirty.ok ? dirty.out.split("\n").filter((l) => l.trim()).length : -1;
+  const base: SuCheck = {
+    ok: false, verdict: "ERROR", local_head: localHead, remote_head: null,
+    branch: branch.ok ? branch.out.trim() : "?", behind: null, ahead: null,
+    dirty_files: dirtyFiles, version, checked_at: Date.now(),
+  };
+  if (!token) return { ...base, verdict: "NO_TOKEN", error: "no GITHUB_TOKEN_ADMIN in /home/z/.a2/.github.env" };
+  if (!localHead) return { ...base, error: mask(head.err, token).slice(0, 200) || "git_rev_parse_failed" };
+
+  const url = remoteUrl(token);
+  const ls = await gitRemote(["ls-remote", url, `refs/heads/${REMOTE_REF}`]);
+  if (!ls.ok) return { ...base, error: mask(ls.err, token).slice(0, 200) || "ls_remote_failed" };
+  const remoteHead = ls.out.trim().split(/\s+/)[0] ?? "";
+  if (!remoteHead) return { ...base, error: `remote ref ${REMOTE_REF} not found` };
+
+  const fetch = await gitRemote(["fetch", url, REMOTE_REF]);
+  if (!fetch.ok) return { ...base, remote_head: remoteHead, error: mask(fetch.err, token).slice(0, 200) || "fetch_failed" };
+
+  const behind = git(["rev-list", "--count", `HEAD..FETCH_HEAD`]);
+  const ahead = git(["rev-list", "--count", `FETCH_HEAD..HEAD`]);
+  if (!behind.ok || !ahead.ok) return { ...base, remote_head: remoteHead, error: "rev_list_failed" };
+  const b = Number(behind.out.trim() || 0);
+  const a = Number(ahead.out.trim() || 0);
+  let verdict: SuCheck["verdict"];
+  if (b === 0 && a === 0) verdict = "UP_TO_DATE";
+  else if (b > 0 && a === 0) verdict = "BEHIND";
+  else if (b === 0 && a > 0) verdict = "AHEAD";
+  else verdict = "DIVERGED";
+  return { ...base, ok: true, verdict, remote_head: remoteHead, behind: b, ahead: a };
 }
 
 function suCheckInner(version: string): SuCheck {

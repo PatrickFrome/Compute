@@ -36,16 +36,19 @@ import {
 } from "./src/memory";
 import { brainThink, brainStatus } from "./src/brain";
 import { fleetList, fleetBeat, fleetSelfTick, fleetGc, fleetTick } from "./src/fleet";
-import { suCheck, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
+import { suCheckAsync, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
 import { senseNow, senseList, senseAct } from "./src/sense";
+import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
+import { mcpHandle, mcpStatus } from "./src/mcp";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.22.0";
+const VERSION = "0.23.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
+benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
 
@@ -96,7 +99,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   catch { return {}; }
 }
 
-const restServer = createServer(async (req, res) => {
+async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
@@ -236,7 +239,7 @@ const restServer = createServer(async (req, res) => {
       const body = await readBody(req);
       const op = String(body.op ?? "check");
       try {
-        if (op === "check") return json(res, 200, { ok: true, check: suCheck(VERSION, true) });
+        if (op === "check") return json(res, 200, { ok: true, check: await suCheckAsync(VERSION, true) });
         if (op === "apply") return json(res, 200, suApply(VERSION));
         return json(res, 400, { ok: false, error: "op_required: check|apply" });
       } catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
@@ -461,9 +464,36 @@ const restServer = createServer(async (req, res) => {
       await runOne(r.command);
       return json(res, 200, { ok: true });
     }
+    // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
+    if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
+    if (path === "/mcp" && req.method === "POST") {
+      const body = await readBody(req);
+      const out = await mcpHandle(body);
+      if (!out) { res.writeHead(202, { "Access-Control-Allow-Origin": "*" }); return res.end(); }
+      return json(res, out.status, out.json);
+    }
+    if (path === "/mcp" && req.method === "GET")
+      return json(res, 405, { ok: false, error: "MCP: POST /mcp (Streamable HTTP JSON-RPC); stdio: bun mcp-stdio.ts" });
     return json(res, 404, { ok: false, error: `no route ${req.method} ${path}` });
   } catch (e) {
     return json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+// B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
+// vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events"];
+const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
+function benchClassOf(p: string): BenchProbeName {
+  if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
+  if (BENCH_BROWSER_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_browser";
+  return "rest";
+}
+type BenchProbeName = Parameters<typeof benchObserve>[0];
+const restServer = createServer(async (req, res) => {
+  const t0 = Date.now();
+  try { await restHandler(req, res); } finally {
+    benchObserve(benchClassOf((req.url ?? "/").split("?")[0]), Date.now() - t0);
   }
 });
 
@@ -547,7 +577,7 @@ setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_0
 setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
-setTimeout(() => { try { suCheck(VERSION); } catch { /* noop */ } }, 4_000);
+setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
 
 startMasterLoop();
 initEvidence();
@@ -555,5 +585,5 @@ initEvidence();
 try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-daemon" }, BOOT_T0); } catch { /* телеметрия не ломает старт */ }
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
-restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`));
+restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

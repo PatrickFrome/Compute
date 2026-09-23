@@ -77,6 +77,17 @@ type ObsvData = {
   status: { wanted: boolean; attached: boolean; target: string | null; buffers: { net: number; con: number; exc: number }; totals: { net: number; con: number; exc: number }; last_event_age_s: number | null };
   network: ObsvNetT[]; console: ObsvConT[]; exceptions: ObsvExcT[];
 };
+type BenchProbeT = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
+type BenchData = {
+  ok: boolean;
+  probes: { rest: BenchProbeT; rest_admin: BenchProbeT; rest_browser: BenchProbeT; sense: BenchProbeT; sense_act: BenchProbeT };
+  memory: { rss_mb: number; heap_mb: number; obsv_est_mb: number; sqlite_mb: number };
+  boot_ms: number | null;
+  thresholds: { rest_p95_ms: number; act_p95_ms: number; obsv_max_mb: number; boot_max_ms: number; min_samples: number };
+  verdict: "PASS" | "WARMUP" | "FAIL";
+  fails: string[];
+  mcp: { tools: number; protocol: string; initialized: number; calls: number; errors: number; lastTool: string };
+};
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -1165,6 +1176,7 @@ export default function MissionControl() {
   const [obsv, setObsv] = useState<ObsvData | null>(null);
   const [obsvBusy, setObsvBusy] = useState(false);
   const [obsvOpen, setObsvOpen] = useState(false);
+  const [bench, setBench] = useState<BenchData | null>(null);
   const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
@@ -1235,6 +1247,16 @@ export default function MissionControl() {
     } catch { toast({ title: "obsv ✗ daemon недоступен", variant: "destructive" }); }
     finally { setObsvBusy(false); void loadObsv(); }
   }, [loadObsv, toast]);
+  // R25 B3: перф-бейслайны daemon'а (GET /bench — p95, память, boot; пороги роадмапа)
+  const loadBench = useCallback(async () => {
+    try { const r = await fetch("/bench?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setBench(r as BenchData); } catch { /* daemon недоступен */ }
+  }, []);
+  // BENCH виден в браузерной панели всегда — грузим на mount и обновляем каждые 30с
+  useEffect(() => {
+    void loadBench();
+    const iv = setInterval(() => void loadBench(), 30_000);
+    return () => clearInterval(iv);
+  }, [loadBench]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1257,11 +1279,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2043,7 +2065,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2405,6 +2427,28 @@ export default function MissionControl() {
                         ));
                       })()}
                     </ul>
+                  )}
+                </div>
+                {/* R25: BENCH — перф-бейслайны daemon (ME20, GET /bench) + живость MCP-сервера (ME21) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Перф-бейслайны daemon и MCP-сервер">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME20: пороги B3 — REST p95<50ms, act p95<2000ms, obsv<50MB, boot<5s; замер живого трафика, не синтетика">
+                      <Gauge className={`h-3 w-3 ${bench?.verdict === "PASS" ? "text-lime-300" : bench?.verdict === "FAIL" ? "text-rose-400" : "text-zinc-600"}`} aria-hidden /> BENCH
+                    </span>
+                    <span data-testid="bench-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`n=${bench?.probes.rest.n ?? 0}, p50=${bench?.probes.rest.p50 ?? "—"}ms, p99=${bench?.probes.rest.p99 ?? "—"}ms; admin (heavy-сканы, без порога) p95=${bench?.probes.rest_admin.p95 ?? "—"}ms n=${bench?.probes.rest_admin.n ?? 0}`}>rest p95 {bench?.probes.rest.p95 != null ? `${bench.probes.rest.p95}ms` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="sense-act: CAPTURE→act→verify; порог p95<2000ms">act p95 {bench?.probes.sense_act.p95 != null ? `${bench.probes.sense_act.p95}ms` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`heap=${bench?.memory.heap_mb ?? "—"}MB, sqlite=${bench?.memory.sqlite_mb ?? "—"}MB, obsv_est=${bench?.memory.obsv_est_mb ?? "—"}MB`}>rss {bench ? `${bench.memory.rss_mb}MB` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="BOOT_T0 → первый принятый REST-запрос">boot {bench?.boot_ms != null ? `${bench.boot_ms}ms` : "—"}</span>
+                      {bench?.verdict === "PASS" && <span className="rounded border border-lime-900 bg-lime-950/40 px-1 py-0.5 text-lime-300">PASS</span>}
+                      {bench?.verdict === "WARMUP" && <span className="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-zinc-400" title={`n < ${bench.thresholds.min_samples}`}>warmup</span>}
+                      {bench?.verdict === "FAIL" && <span className="rounded border border-rose-900 bg-rose-950/40 px-1 py-0.5 text-rose-300" title={bench.fails.join(", ")}>FAIL</span>}
+                      <span className="rounded border border-violet-900 bg-violet-950/40 px-1 py-0.5 text-violet-300" title={`MCP ${bench?.mcp.protocol ?? "—"}: tools=${bench?.mcp.tools ?? 0}, calls=${bench?.mcp.calls ?? 0}, errors=${bench?.mcp.errors ?? 0}, last=${bench?.mcp.lastTool || "—"} · POST /mcp или bun mcp-stdio.ts (A1: мост для VS Code/Codex/Claude)`}>mcp {bench?.mcp.tools ?? "—"}·{bench?.mcp.calls ?? "—"}calls</span>
+                    </span>
+                    <button type="button" onClick={() => void loadBench()} aria-label="Обновить перф-бейслайны" className="ml-auto shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800">обновить</button>
+                  </div>
+                  {bench?.verdict === "FAIL" && (
+                    <p className="mt-1 font-mono text-[9px] text-rose-300/90" role="status">пороги нарушены: {bench.fails.join(" · ")}</p>
                   )}
                 </div>
                 {castOn && (
