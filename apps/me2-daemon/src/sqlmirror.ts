@@ -20,7 +20,8 @@ import { Database } from "bun:sqlite";
 import { tokenGet, onTokenChange } from "./tokens";
 
 export const SQLMIRROR_SCHEMA = "me2.sqlmirror.v1";
-const TABLE = process.env.ME2_SQL_MIRROR_TABLE || "me2_event_mirror_h205f22";
+export const SQLMIRROR_TABLE = process.env.ME2_SQL_MIRROR_TABLE || "me2_event_mirror_h205f22";
+const TABLE = SQLMIRROR_TABLE; // единый источник имени (R53: использует supabase-jwt.ts)
 const BATCH = Number(process.env.ME2_SQL_MIRROR_BATCH || 50);
 const INTERVAL_MS = Number(process.env.ME2_SQL_MIRROR_INTERVAL_MS || 15000);
 const PROBE_MS = Number(process.env.ME2_SQL_MIRROR_PROBE_MS || 600000); // 10 мин между перепробами отсутствующей таблицы
@@ -28,6 +29,11 @@ const MAX_ERR_BACKOFF_MS = 300000;
 
 function restBase(): string {
   return process.env.ME2_SQL_MIRROR_URL || "https://xpeibufgzjknrhbhpffp.supabase.co/rest/v1";
+}
+
+/** R54: выбор креденшала записи — sb_secret (новый формат) → legacy service_role JWT → пусто. */
+function pickCredential(): string {
+  return tokenGet("SUPABASE_SERVICE_ROLE_JWT") || tokenGet("SUPABASE_SERVICE_ROLE_JWT_LEGACY") || "";
 }
 
 export type SqlMirrorState = "OFF" | "WARMUP" | "LIVE" | "DEGRADED";
@@ -61,10 +67,13 @@ export class SqlMirror {
   private running = false;
 
   constructor(private db: Database) {
-    this.key = tokenGet("SUPABASE_SERVICE_ROLE_JWT") ?? "";
+    this.key = pickCredential();
     onTokenChange((name) => {
-      if (name === "SUPABASE_SERVICE_ROLE_JWT") {
-        this.key = tokenGet("SUPABASE_SERVICE_ROLE_JWT") ?? "";
+      // R54: канал записи — sb_secret (новый формат) с фолбэком на legacy service_role JWT
+      // (операторский, HMAC-верифицирован против SUPABASE_JWT_SECRET; облако принимает точную
+      // строку зарегистрированного ключа — пробы R54 E2/E5: 200). Оба имени валидны.
+      if (name === "SUPABASE_SERVICE_ROLE_JWT" || name === "SUPABASE_SERVICE_ROLE_JWT_LEGACY") {
+        this.key = pickCredential();
         this.recomputeGate();
       }
     });
@@ -191,6 +200,37 @@ export class SqlMirror {
       }
     } finally {
       this.running = false;
+    }
+  }
+
+  /**
+   * R54: read-прокси (канал service_proxy) — daemon сам читает зеркало через service-креденшал.
+   * Честный режим: UI НЕ получает service-ключ (утечки нет), но и RLS-гейт так не демонстрируется —
+   * панель обязана маркировать это словами. Read-only SELECT, вне шины (47-инвариант не тронут).
+   */
+  async readFeed(limit = 50): Promise<
+    | { ok: true; channel: "service_proxy"; table: string; rows: Array<Record<string, unknown>>; mirror_state: SqlMirrorState }
+    | { ok: false; channel: "service_proxy"; table: string; error: string; http?: number; mirror_state: SqlMirrorState }
+  > {
+    const n = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const state = this.configured ? this.state : "OFF";
+    if (!this.key) return { ok: false, channel: "service_proxy", table: TABLE, error: "no_service_credential", mirror_state: state };
+    try {
+      const r = await fetch(`${restBase()}/${TABLE}?select=seq,ts,type,actor,subject&order=seq.desc&limit=${n}`, {
+        headers: { apikey: this.key, Authorization: `Bearer ${this.key}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      const text = await r.text();
+      if (!r.ok) {
+        return { ok: false, channel: "service_proxy", table: TABLE, http: r.status,
+                 error: r.status === 404 || r.status === 400 ? "table_missing_ddl_pending" : `http_${r.status}:${text.slice(0, 100)}`,
+                 mirror_state: state };
+      }
+      let rows: Array<Record<string, unknown>>;
+      try { rows = JSON.parse(text); } catch { return { ok: false, channel: "service_proxy", table: TABLE, error: "bad_json", mirror_state: state }; }
+      return { ok: true, channel: "service_proxy", table: TABLE, rows: Array.isArray(rows) ? rows : [], mirror_state: state };
+    } catch (e) {
+      return { ok: false, channel: "service_proxy", table: TABLE, error: String(e?.message || e).slice(0, 140), mirror_state: state };
     }
   }
 

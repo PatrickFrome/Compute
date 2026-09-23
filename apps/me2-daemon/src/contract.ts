@@ -50,7 +50,7 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token"],
       write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron"],
     },
     memory: ["/memory op:write|delete|economy"],
@@ -64,6 +64,7 @@ export function capabilitiesJson(): CapabilityContract {
         "browser me2-плоскость ожидает ops ['turn','mesh_heartbeat'] и GET /ui (R40-док)",
         "disconnect контракта → честный DEGRADED у моста, restart-шторма нет (R49 handshake)",
         "матрица: docs/version-matrix.md (K8)",
+        "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
       ],
     },
   };
@@ -161,6 +162,10 @@ export function missionUiHtml(): string {
     <h2>Река <span class="n" id="river-n">—</span></h2>
     <div class="scroll" id="river" data-testid="mc-river" aria-live="polite"></div>
   </section>
+  <section aria-label="SQL-зеркало с гейтом RLS" style="grid-column:1/-1">
+    <h2>Зеркало SQL (Supabase · RLS) <span class="n" id="mirror-n">—</span></h2>
+    <div class="scroll" id="mirror" data-testid="mc-mirror" style="max-height:32vh" aria-live="polite"></div>
+  </section>
 </main>
 <footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — read-only REST</footer>
 <div id="toast" class="toast" role="alert"></div>
@@ -252,6 +257,57 @@ export function missionUiHtml(): string {
     });
   }
 
+  function loadMirror(){
+    // R55: гибрид — ДАННЫЕ доставляет daemon (/sqlmirror/feed, service-канал; UI не держит приватных
+    // ключей), а RLS демонстрируется ЖИВОЙ пробой облака. R57: ПОЛНАЯ матрица — anon-проба публичным
+    // токеном (fail-closed) + authenticated-проба настоящим GoTrue access_token (читает строки по
+    // политике, не обходя RLS). apikey-заголовок для GoTrue-пробы — публичный ключ, Bearer — юзер-JWT.
+    fetch(api("/sqlmirror/ui-token")).then(function(r){ return r.json(); }).then(function(j){
+      var box=$("mirror");
+      if(!j.ok){ box.innerHTML='<div class="row sub">RLS-канал честно недоступен: '+esc(j.reason)+" · зеркало state="+esc(j.mirror_state||"?")+" (ключей нет в vault'е)</div>"; $("mirror-n").textContent="канал n/a"; return; }
+      var probe=function(tok, key){
+        return fetch(j.rest+"/"+j.table+"?select=seq&limit=3", {headers:{apikey:(key||tok),Authorization:"Bearer "+tok}})
+          .then(function(r){ return r.text().then(function(t){ return {code:r.status,body:t}; }); });
+      };
+      var feedP=fetch(api("/sqlmirror/feed?limit=12")).then(function(r){ return r.json(); });
+      var probeP=(j.channel==="publishable"||j.channel==="anon_registered"||j.channel==="mint")
+        ? probe(j.anon_token||j.token) : Promise.resolve(null);
+      var authTok=j.auth_token||(j.channel==="gotrue"?j.token:null);
+      var probeA=authTok ? probe(authTok, j.anon_token||j.token) : Promise.resolve(null);
+      Promise.all([feedP, probeP, probeA]).then(function(rs){
+        var f=rs[0], anon=rs[1], auth=rs[2];
+        var rows=f&&f.ok?f.rows:null;
+        var anonRows=null; if(anon){ try { anonRows=JSON.parse(anon.body); } catch(e){} }
+        var leak=!!anon && anon.code===200 && Array.isArray(anonRows) && anonRows.length>0;
+        var authRows=null; if(auth){ try { authRows=JSON.parse(auth.body); } catch(e){} }
+        var chLine='канал '+esc(j.channel||"?")+(j.ttl?" · ttl "+j.ttl+"с":"")+(j.auth_channel?" · auth: "+esc(j.auth_channel)+" (ttl "+esc(String(j.auth_ttl||0))+"с)":"");
+        var html='<div class="row sub">state='+esc(j.mirror_state||"?")+" · "+esc(j.table||"?")+" · "+chLine+" · данные — через daemon (/sqlmirror/feed), приватных ключей в UI нет</div>";
+        // живой вердикт RLS-гейта (anon)
+        if(!anon){ html+='<div class="row sub">RLS-проба: публичного токена нет ('+esc(j.channel||"?")+") — демонстрация гейта словами, не делом</div>"; }
+        else if(anon.code===404 || String(anon.body).indexOf("PGRST205")>=0){ html+='<div class="row sub">RLS-проба: облако отвечает PGRST205 — таблицы ещё нет (WARMUP: DDL оператора); аутентификация ПУБЛИЧНОГО ключа прошла ✓</div>'; }
+        else if(String(anon.body).indexOf("42501")>=0 || (anon.code===401&&String(anon.body).indexOf("permission denied")>=0)){ html+='<div class="row sub">RLS-гейт: anon ОТКАЗАН (42501 permission denied) — fail-closed ✓ (гранты sql/0004 + политики sql/0003: чтение только authenticated)</div>'; }
+        else if(anon.code===401||anon.code===403){ html+='<div class="row sub">облако отвергло публичный токен ('+anon.code+") — неожиданно; проверить ключи vault'а</div>"; }
+        else if(anon.code===200){ html+='<div class="row sub">'+(leak?"⚠ anon ПРОЧИТАЛ строки — RLS-гейт НЕ работает (проверить sql/0003)":"RLS-гейт: anon → 200 · 0 строк — fail-closed ✓ (политики sql/0003: чтение только authenticated)")+"</div>"; }
+        else html+='<div class="row sub">RLS-проба: неожиданный ответ облака ('+anon.code+") "+esc(String(anon.body).slice(0,60))+"</div>";
+        // живой вердикт RLS-чтения (authenticated, gotrue) — R57
+        if(authTok){
+          if(auth && auth.code===200 && Array.isArray(authRows) && authRows.length>0){ html+='<div class="row sub">RLS-чтение: authenticated → 200 · '+esc(String(authRows.length))+" строк(и) видит политика — чтение по RLS ✓ (GoTrue-токен, не обход гейта)</div>"; }
+          else if(auth && auth.code===200){ html+='<div class="row sub">authenticated → 200 · 0 строк — токен принят, но политика отдала пусто (проверить sql/0003/0004)</div>'; }
+          else if(auth && (auth.code===401||auth.code===403||String(auth.body).indexOf("42501")>=0)){ html+='<div class="row sub">authenticated отвергнут облаком ('+esc(String(auth.code))+") — неожиданно (токен настоящий GoTrue)</div>"; }
+          else if(auth){ html+='<div class="row sub">authenticated-проба: неожиданный ответ облака ('+esc(String(auth.code))+") "+esc(String(auth.body).slice(0,60))+"</div>"; }
+          else { html+='<div class="row sub">authenticated-проба не выполнена (сеть) — статус: '+esc(String((j.auth&&j.auth.last_error)||"нет кэша токена"))+"</div>"; }
+          if(anon && auth){ html+='<div class="row sub"><b>матрица RLS: anon — отказ ✓ · authenticated — чтение ✓ · service — пишет ✓ (полная демонстрация гейта)</b></div>'; }
+        }
+        // данные (service-канал daemon'а)
+        if(f&&f.ok===false){ html+='<div class="row sub">данных нет: '+(f.error==="table_missing_ddl_pending"?"таблица не создана (DDL оператора) — канал daemon'а при этом жив":"feed: "+esc(String(f.error||"?").slice(0,90)))+"</div>"; }
+        else if(Array.isArray(rows)){ html+=rows.map(function(r){ return '<div class="ev"><div class="ty">'+esc(r.type)+" · seq "+esc(r.seq)+" · "+esc(r.actor||"daemon")+(r.subject?" · "+esc(String(r.subject).slice(0,28)):"")+'</div><div class="pl">'+ago(r.ts)+" назад</div></div>"; }).join("")||'<div class="row sub">канал жив, событий пока нет</div>'; }
+        else html+='<div class="row sub">feed недоступен</div>';
+        box.innerHTML=html;
+        $("mirror-n").textContent=Array.isArray(rows)?(rows.length+" строк(и)"):"—";
+      }).catch(function(){ $("mirror-n").textContent="ошибка облака"; });
+    }).catch(function(){ $("mirror-n").textContent="ошибка"; });
+  }
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -293,8 +349,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>

@@ -25,6 +25,7 @@ import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evid
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { SqlMirror } from "./src/sqlmirror";
+import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
@@ -178,6 +179,56 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
     // ── R52 (фаза D, H6): статус SQL-контура (read-only, вне шины; 47-инвариант не тронут) ──
     if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
+    // R53 (фаза D-исполнение): короткоживущие JWT для чтения зеркала из UI с гейтом RLS.
+    // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
+    // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/ui-token" && req.method === "GET") {
+      // R57: gotrue-канал — best-effort логин/рефреш сервис-аккаунта ДО сборки bundle (кэш+анти-шторм).
+      // Пароль/email не покидают daemon; в bundle уходит только короткоживущий access_token пользователя.
+      try { await gotrueToken(); } catch { /* честная деградация — статус в auth */ }
+      const bundle = uiTokenBundle();
+      if (!bundle.ok) return json(res, 200, { ...bundle, auth: gotrueStatus(), mirror_state: sqlMirror.status().state });
+      return json(res, 200, { ...bundle, auth: gotrueStatus(), mirror_state: sqlMirror.status().state });
+    }
+    if (path === "/sqlmirror/ui-token/verify" && req.method === "GET") {
+      // само-проверка канала: daemon сам валидирует выдачу (подпись+срок+роль либо префиксы/режимы).
+      // R54: service_proxy не выдаёт токен вовсе — его verify идёт через живую пробу облака (readFeed).
+      const b = uiTokenBundle();
+      if (b.channel === "service_proxy") {
+        const feed = await sqlMirror.readFeed(1);
+        return json(res, 200, { ok: feed.ok || feed.error === "table_missing_ddl_pending", channel: "service_proxy",
+                                cloud: feed.ok ? "readable" : feed.error, schema: b.schema, table: b.table });
+      }
+      if (!b.ok || !b.token) return json(res, 200, { ok: false, reason: b.reason ?? "mint_failed" });
+      if (b.channel === "publishable") {
+        const ok = String(b.token).startsWith("sb_publishable_");
+        const auth = b.auth_token ? gotrueVerifyShape(String(b.auth_token)) : null;
+        return json(res, 200, { ok, channel: "publishable", note: ok ? "публичный read-ключ (роль anon, видимость диктует RLS)" : "неожиданный формат",
+                                auth: auth ? { shape_ok: auth.ok, reason: auth.reason, role: auth.role, iss: auth.iss, aal: auth.aal } : "нет gotrue-токена (креденшалы/сеть)",
+                                schema: b.schema, table: b.table });
+      }
+      if (b.channel === "gotrue") {
+        const v = gotrueVerifyShape(String(b.token));
+        return json(res, 200, { ok: v.ok, channel: "gotrue", shape: v, note: b.note, schema: b.schema, table: b.table });
+      }
+      if (b.channel === "anon_registered") {
+        // R54: зарегистрированный legacy anon — проверяем форму JWT (3 сегмента, роль anon в claims)
+        const tok = String(b.token);
+        let role = ""; let shape = tok.split(".").length === 3 && tok.length > 60;
+        try { role = String(JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? ""); } catch { shape = false; }
+        return json(res, 200, { ok: shape && role === "anon", channel: "anon_registered", shape, role, note: "зарегистрированный legacy anon-ключ — RLS-гейт канонический", schema: b.schema, table: b.table });
+      }
+      const v = verifySupabaseJwt(String(b.token), "authenticated");
+      const va = b.anon_token ? verifySupabaseJwt(String(b.anon_token), "anon") : { ok: false, reason: "no_anon" };
+      return json(res, 200, { ok: v.ok && va.ok, channel: "mint", authenticated: v, anon: va, schema: b.schema, table: b.table });
+    }
+    // R54: read-прокси зеркала (канал service_proxy) — daemon читает облако сам, service-ключ не покидает сервер.
+    // Read-only SELECT, лимит ≤ 200, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/feed" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      const limit = Number(url.searchParams.get("limit") || 50);
+      return json(res, 200, await sqlMirror.readFeed(limit));
+    }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
       if (body?.op === "probe_ddl") return json(res, 200, { ok: true, ...(await probeDdl(true)) });
@@ -1066,8 +1117,23 @@ try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-d
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
 // ── R52 (фаза D, H6): SQL-контур — зеркало hash-chain событий в Supabase SQL (operator-gated) ──
 // ME2_SQL_MIRROR=1 включает; без таблицы (миграция sql/0001 у оператора) — честный WARMUP, без штормов.
+// R56: гейт оператора обязан держаться на ЛЮБОМ пути бута (start.sh / ui-host-респавн / Electron PID-1).
+// Решение оператора R53 было зашито только в start.sh; ui-host (supervisor-keepalive R50) респавнит
+// daemon БЕЗ наследования этого env → зеркало молча уходило в OFF. Восстанавливаем решение из того
+// же условия, что и start.sh: SUPABASE_DB_URL в supabase-cloud.env = операторское решение активно.
+if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase-cloud.env")) {
+  try {
+    if (/^SUPABASE_DB_URL=/m.test(readFileSync("/home/z/.a2/supabase-cloud.env", "utf8"))) {
+      process.env.ME2_SQL_MIRROR = "1";
+      console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
+    }
+  } catch { /* честный отказ: гейт остаётся выключенным */ }
+}
 const sqlMirror = new SqlMirror(db);
 sqlMirror.start();
+// R57: gotrue-канал — разогрев кэша токена сервис-аккаунта (best-effort; анти-шторм держит,
+// панель при неудаче честно покажет auth.last_error)
+void gotrueToken().catch(() => { /* honest degradation */ });
 if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });

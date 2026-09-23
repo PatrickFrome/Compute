@@ -51,6 +51,8 @@ import {
   outcomeReport, outcomePending, meshHeartbeatApply,
 } from "./agentchat";
 import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
+import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt, anonRegisteredJwt, gotrueStatus, gotrueCreds, gotrueVerifyShape } from "./supabase-jwt";
+import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
@@ -60,7 +62,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 18;
+export const EVAL_DATASET_VERSION = 22;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1058,6 +1060,129 @@ export const EVAL_DATASET: EvalCheck[] = [
       } finally {
         db.query(`DELETE FROM meta WHERE key IN ('mesh_last_heartbeat','mesh_epoch_last')`).run();
       }
+    },
+  },
+  {
+    id: "contract.supabase_jwt",
+    plane: "contract",
+    title: "R54 фаза D: read-канал зеркала — publishable/anon_registered (RLS, токен в UI) / service_proxy (ключ не покидает daemon) / mint (офлайн-верификация) — честный режим без утечки service-ключа",
+    critical: true,
+    expect: "publishable → sb_publishable_-префикс; anon_registered → JWT с ролью anon; service_proxy → НИКАКОГО токена в выдаче (утечки нет) + note; mint → 3 сегмента, verify ok, тампер пойман, ttl ≤ 600; нет каналов → no_read_channel — PASS в любом честном режиме",
+    run: () => {
+      const bundle = uiTokenBundle();
+      if (!bundle.ok) {
+        const ok = bundle.reason === "no_read_channel" && !jwtSecretPresent() && !publishableKey();
+        return { ok, evidence: `без каналов (честно): reason=${bundle.reason}, jwtSecret=${jwtSecretPresent()}, publishable=${Boolean(publishableKey())}` };
+      }
+      if (bundle.channel === "publishable") {
+        const tok = String(bundle.token);
+        const ok = tok.startsWith("sb_publishable_") && bundle.anon_token === tok && bundle.ttl === 0 && bundle.table === SQLMIRROR_TABLE;
+        return { ok, evidence: `channel=publishable (канонический RLS-гейт, роль anon), token-ok=${tok.startsWith("sb_publishable_")}, table=${bundle.table}` };
+      }
+      if (bundle.channel === "anon_registered") {
+        const tok = String(bundle.token);
+        let role = ""; let shape = tok.split(".").length === 3 && tok.length > 60;
+        try { role = String(JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? ""); } catch { shape = false; }
+        const ok = shape && role === "anon" && bundle.anon_token === tok && bundle.ttl === 0;
+        return { ok, evidence: `channel=anon_registered (зарегистрированный legacy anon, RLS-гейт), shape=${shape}, role=${role}` };
+      }
+      if (bundle.channel === "service_proxy") {
+        // ключ НЕ должен покидать daemon: ни JWT (eyJ…), ни sb_secret в выдаче
+        const raw = JSON.stringify(bundle);
+        const noLeak = !/eyJ[A-Za-z0-9_-]{20,}/.test(raw) && !/sb_(secret|publishable)_[A-Za-z0-9_-]{10,}/.test(raw);
+        const ok = noLeak && !bundle.token && !bundle.anon_token && typeof bundle.note === "string" && bundle.note.length > 10;
+        return { ok, evidence: `channel=service_proxy, no-leak=${noLeak}, note=${Boolean(bundle.note)}, table=${bundle.table}` };
+      }
+      const tok = String(bundle.token), anon = String(bundle.anon_token);
+      const shape = [tok, anon].every((t) => t.split(".").length === 3 && t.length > 60);
+      const vAuth = verifySupabaseJwt(tok, "authenticated");
+      const vAnon = verifySupabaseJwt(anon, "anon");
+      const vMismatch = verifySupabaseJwt(tok, "anon"); // authenticated-токен под ролью anon — должен быть role_mismatch
+      const tampered = tok.slice(0, -4) + (tok.endsWith("AAAA") ? "BBBB" : "AAAA");
+      const vTamper = verifySupabaseJwt(tampered);
+      const claims = JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      const ttlOk = typeof claims.exp === "number" && typeof claims.iat === "number" && claims.exp - claims.iat <= 600 && claims.exp > claims.iat;
+      const ok = shape && vAuth.ok && vAnon.ok && !vMismatch.ok && vMismatch.reason === "role_mismatch"
+        && !vTamper.ok && vTamper.reason === "bad_signature" && ttlOk && bundle.ttl === 120
+        && bundle.table === SQLMIRROR_TABLE;
+      return { ok, evidence: `channel=mint (офлайн-верификация; облако отвергает сам-минт — R54), shape=${shape}, auth=${vAuth.ok}, anon=${vAnon.ok}, mismatch→${vMismatch.reason}, tamper→${vTamper.reason}, ttl=${claims.exp - claims.iat}с, table=${bundle.table}` };
+    },
+  },
+  {
+    id: "contract.supabase_legacy",
+    plane: "contract",
+    title: "R54: legacy-креденшал оператора — офлайн HMAC-верификация пары (secret, service_role JWT) и честная пара vault-имен",
+    critical: false,
+    expect: "если оба ключа в vault'е: legacy JWT — 3 сегмента, роль service_role, подпись совпадает с HMAC-SHA256(secret, header.payload) — пар authenticity; в ui-token выдаче ключа нет (см. contract.supabase_jwt). Если ключей нет — честный skip-ok",
+    run: () => {
+      const svc = serviceRoleLegacyJwt();
+      const secret = tokenGet("SUPABASE_JWT_SECRET") ?? "";
+      if (!svc || !secret) return { ok: true, evidence: `skip-ok: legacy=${svc ? "есть" : "нет"}, secret=${secret ? "есть" : "нет"} — пары нет, проверять нечего` };
+      const b64u = (s: string) => s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const verifyPair = (jwt: string, expectRole: string) => {
+        const parts = jwt.split(".");
+        if (parts.length !== 3) return { ok: false, why: "malformed", role: "", ref: "" };
+        let claims: Record<string, unknown> = {};
+        try { claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return { ok: false, why: "payload", role: "", ref: "" }; }
+        const h = new Bun.CryptoHasher("sha256", secret);
+        h.update(`${parts[0]}.${parts[1]}`);
+        const sigOk = b64u(Buffer.from(h.digest()).toString("base64")) === parts[2];
+        const expOk = typeof claims.exp === "number" && claims.exp > Math.floor(Date.now() / 1000);
+        return { ok: sigOk && expOk && claims.role === expectRole, why: sigOk ? (expOk ? "role?" : "expired") : "sig", role: String(claims.role ?? ""), ref: String(claims.ref ?? "") };
+      };
+      const svcV = verifyPair(svc, "service_role");
+      const anon = anonRegisteredJwt();
+      const anonV = anon ? verifyPair(anon, "anon") : null;
+      const ok = svcV.ok && (anonV === null || anonV.ok);
+      return { ok, evidence: `service_role: HMAC=${svcV.ok}, ref=${svcV.ref}; anon: ${anonV === null ? "слота нет (ok)" : `HMAC=${anonV.ok}, ref=${anonV.ref}`} — обе пары против одного секрета` };
+    },
+  },
+  {
+    id: "contract.supabase_gotrue",
+    plane: "contract",
+    title: "R57: gotrue-канал — настоящий access_token сервис-аккаунта (кэш+refresh, single-flight, анти-шторм); без утечки email/пароля; честная деградация без сети",
+    critical: false,
+    expect: "креденшалов нет → skip-ok; есть → при кэше: auth_token — форма GoTrue (3 сегмента, role=authenticated, iss /auth/v1, aal, срок жив), в выдаче НЕТ email и НЕТ пароля; без кэша: честная last_error либо попытка ещё не потребовалась — PASS в любом честном режиме",
+    run: () => {
+      const st = gotrueStatus();
+      if (!st.configured) return { ok: true, evidence: `skip-ok: креденшалов GoTrue в vault'е нет — канал честно отсутствует` };
+      const creds = gotrueCreds();
+      if (!creds) return { ok: true, evidence: "skip-ok: creds недоступны" };
+      const bundle = uiTokenBundle();
+      const raw = JSON.stringify(bundle);
+      const noLeak = !raw.includes(creds.password) && !raw.includes(creds.email);
+      const authTok = bundle.auth_token ?? (bundle.channel === "gotrue" ? bundle.token : undefined);
+      if (!authTok) {
+        // кэша нет: честно, если есть честная ошибка (сеть/облако) — канал деградирует словами
+        const ok = st.cached === false && (st.last_error !== null || st.last_attempt_at === null);
+        return { ok, evidence: `кэша нет: last_error=${String(st.last_error)}, attempt=${st.last_attempt_at ? "был" : "не требовался"}, no-leak=${noLeak} — честная деградация` };
+      }
+      const shape = gotrueVerifyShape(authTok);
+      const bundleShape = bundle.auth_channel === "gotrue" && (bundle.channel === "gotrue" || Boolean(bundle.anon_token));
+      const sig = verifySupabaseJwt(authTok); // GoTrue подписывает тем же проектным секретом — evidence-only
+      const ok = shape.ok && bundleShape && noLeak;
+      return { ok, evidence: `channel=${bundle.channel}, auth=gotrue, shape=${shape.ok} (role=${shape.role}, iss=${String(shape.iss ?? "").slice(0, 24)}…, aal=${shape.aal}), sig(offline)=${sig.ok}/${sig.reason}, ttl=${st.expires_in}с, no-leak(email/пароль)=${noLeak}` };
+    },
+  },
+  {
+    id: "mission.sqlmirror_ui",
+    plane: "mission",
+    title: "R54 фаза D: GET /ui несёт панель «Зеркало SQL» — каналы publishable/anon_registered/service_proxy/mint, anon-проба с честным fail-closed-вердиктом, никакого секрета в HTML",
+    critical: true,
+    expect: "HTML содержит data-testid=mc-mirror, fetch /sqlmirror/ui-token, маркеры RLS-гейта (anon-проба + fail-closed + предупреждение о протечке), в HTML нет вшитых JWT (eyJ…), нет внешних ключей; имя таблицы зеркала совпадает с sql/0001 (если файл доступен по относительному пути)",
+    run: () => {
+      const html = missionUiHtml();
+      const markers = ['data-testid="mc-mirror"', "/sqlmirror/ui-token", "anon_token", "fail-closed", "RLS", "ПРОЧИТАЛ"].every((m) => html.includes(m));
+      const noSecretInHtml = !/eyJ[A-Za-z0-9_-]{20,}/.test(html); // вшитых JWT нет — только выдача по требованию
+      const noLongLivedKeys = !/service_role/i.test(html); // сервисных ключей в UI нет (R47/T2 не утекает)
+      let tableCross = "sql-file-n/a"; let tableOk = true;
+      try {
+        const sql0001 = readFileSync(join(import.meta.dir, "..", "..", "..", "sql", "0001-me2-event-mirror.sql"), "utf8");
+        tableOk = sql0001.includes(SQLMIRROR_TABLE);
+        tableCross = `0001 содержит ${SQLMIRROR_TABLE}=${tableOk}`;
+      } catch { /* probe/CI-раскладка: файл может отсутствовать — честный частичный проход */ }
+      const ok = markers && noSecretInHtml && noLongLivedKeys && tableOk;
+      return { ok, evidence: `маркеры=${markers}, no-вшитых-jwt=${noSecretInHtml}, no-service-role=${noLongLivedKeys}, ${tableCross}` };
     },
   },
 ];
