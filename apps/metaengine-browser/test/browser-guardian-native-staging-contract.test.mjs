@@ -45,6 +45,11 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     from: '../../coordination/browser-shared',
     to: 'browser-shared',
     filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
+  }, {
+    // R52 (фаза C7): панели Mission Control едут в установщике (контракт me2-ui-host, R50)
+    from: 'me2-ui-dist',
+    to: 'me2-ui',
+    filter: ['**/*'],
   }]);
   assert.match(hook, /buildDevOSSourceSnapshot/);
   assert.match(hook, /devos-source-snapshot/);

@@ -68,5 +68,11 @@ test('convergence product head contains no temporary patch authority and package
       to: 'browser-shared',
       filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
     },
+    {
+      // R52 (фаза C7): панели Mission Control едут в установщике (контракт me2-ui-host, R50)
+      from: 'me2-ui-dist',
+      to: 'me2-ui',
+      filter: ['**/*'],
+    },
   ]);
 });
