@@ -22,7 +22,7 @@ import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
-import { obsvStart, obsvSnapshot, obsvReset, obsvStop } from "./src/obsv";
+import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
@@ -43,6 +43,8 @@ import { senseNow, senseList, senseAct } from "./src/sense";
 import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
+import { senseDiffs } from "./src/sense";
+import { hygieneStatus, hygieneCheckpoint, hygieneVacuum, startHygieneLoop } from "./src/dbhygiene";
 import { gateCheck, approvalsStatus, approvalRequest, approvalDecide, policySet } from "./src/approvals";
 import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
 import { handoffList, handoffStats } from "./src/handoffs";
@@ -51,7 +53,7 @@ import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/revi
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.28.0";
+const VERSION = "0.29.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -319,10 +321,12 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/browser/obsv" && req.method === "GET") {
       obsvStart(); // ленивый старт колектора (идемпотентно)
       const limit = parseInt(url.searchParams.get("limit") ?? "", 10);
+      // R31 D2: source=history — чтение SQLite-истории с TTL (переживает кольца памяти)
       return json(res, 200, obsvSnapshot({
         limit: Number.isFinite(limit) ? limit : 40,
         level: url.searchParams.get("level") ?? undefined,
         filter: url.searchParams.get("filter") ?? undefined,
+        source: url.searchParams.get("source") === "history" ? "history" : undefined,
       }));
     }
     if (path === "/browser/obsv" && req.method === "POST") {
@@ -331,7 +335,25 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       if (op === "reset") { obsvReset(); return json(res, 200, { ok: true, op: "reset" }); }
       if (op === "stop") { obsvStop(); return json(res, 200, { ok: true, op: "stop" }); }
       if (op === "attach") { obsvStart(); return json(res, 200, { ok: true, op: "attach" }); }
-      return json(res, 400, { ok: false, error: "op_required: attach|reset|stop" });
+      // R31 D2: конфигурация TTL истории (1..1440 минут)
+      if (op === "ttl") return json(res, 200, { ok: true, op: "ttl", persist: obsvSetTtl(Number(body.minutes ?? 30)) });
+      return json(res, 400, { ok: false, error: "op_required: attach|reset|stop|ttl" });
+    }
+
+    // ── R31 D1: история дифов перцепции (sense-diffing, вне шины — 47/47) ──
+    if (path === "/browser/sense/diffs" && req.method === "GET") {
+      const limit = parseInt(url.searchParams.get("limit") ?? "", 10);
+      return json(res, 200, senseDiffs(url.searchParams.get("tab") ?? undefined, Number.isFinite(limit) ? limit : 10));
+    }
+
+    // ── R31 D4: DB-гигиена (WAL checkpoint / VACUUM / индексы, вне шины — 47/47) ──
+    if (path === "/db/hygiene" && req.method === "GET") return json(res, 200, hygieneStatus());
+    if (path === "/db/hygiene" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "checkpoint") return json(res, 200, { ok: true, op, ...hygieneCheckpoint(body.mode === "TRUNCATE" ? "TRUNCATE" : "PASSIVE") });
+      if (op === "vacuum") return json(res, 200, { ok: true, op, ...hygieneVacuum(body.force === true) });
+      return json(res, 400, { ok: false, error: "op_required: checkpoint|vacuum" });
     }
 
     // ── R23: EFFECT-плоскость (5 статусов + durable fences, вне шины — 47/47) ──
@@ -615,7 +637,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -713,6 +735,8 @@ setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
 setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
 // R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
 setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
+// R31 D4: расписание гигиены БД (PASSIVE-checkpoint каждые 10м) + немедленный первый прогон
+try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
 
 startMasterLoop();
 initEvidence();

@@ -17,8 +17,9 @@ import { rerereStatus } from "./worktrees";
 import { sandboxCaps } from "./sandbox";
 import { roadmapVerdict } from "./roadmap";
 import { brainThoughts } from "./brain";
-import { senseStatus } from "./sense";
-import { obsvStatus } from "./obsv";
+import { senseStatus, senseDiffVerdict } from "./sense";
+import { obsvStatus, obsvPersistVerdict } from "./obsv";
+import { hygieneVerdict } from "./dbhygiene";
 import { verdictStats } from "./effect";
 import { fleetOutcomeCount } from "./fleet";
 import { benchVerdict } from "./bench";
@@ -188,6 +189,21 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME27", name: "Approval-политики: operator-configurable гейты на мутирующие операции (C4)", old_ref: "— (R24 §C4: fence-clear, RSI-adopt, authority-эффекты в одном месте)",
       verdict: approvalsVerdict().verdict,
       evidence: approvalsVerdict().evidence + "; POST /approvals {op:policy} — смена режима; one-attempt token + TTL 15м; FAILS-CLOSED",
+    },
+    {
+      id: "ME28", name: "Sense-diffing: дифы ревизий вместо полных снапшотов (D1)", old_ref: "— (R24 §D1: экономия токенов агентам между ревизиями)",
+      verdict: senseDiffVerdict().verdict,
+      evidence: senseDiffVerdict().evidence + "; GET /browser/sense/diffs — история изменений по идентичности (role+name), ref-перенумерация не шум",
+    },
+    {
+      id: "ME29", name: "Obsv→SQLite TTL: история сенсоров переживает кольца памяти (D2)", old_ref: "— (R24 §D2: долгоживущие сессии без роста памяти)",
+      verdict: obsvPersistVerdict().verdict,
+      evidence: obsvPersistVerdict().evidence + "; GET /browser/obsv?source=history | POST {op:ttl} — батч-флеш 2с, TTL-ротация, кап 5000",
+    },
+    {
+      id: "ME30", name: "DB-гигиена: WAL checkpoint + VACUUM-окно + индексы горячих запросов (D4)", old_ref: "— (R24 §D4: SQLite-гигиена долгоживущего daemon)",
+      verdict: hygieneVerdict().verdict,
+      evidence: hygieneVerdict().evidence + "; GET /db/hygiene | POST {op:checkpoint|vacuum} — PASSIVE по расписанию 10м, TRUNCATE/VACUUM оператором",
     },
   ];
 

@@ -9,11 +9,16 @@
  *  - Network.enable → requestWillBeSent / responseReceived / loadingFailed
  *    (корреляция по requestId, латентность ≈ разница прихода событий);
  *  - Runtime.enable → consoleAPICalled (log/warning/error/...) + exceptionThrown;
- *  - кольцевые буферы В ПАМЯТИ (не SQLite и не hash-chain — наблюдатели = спам,
- *    та же философия, что у /stats скринкаста); персист не нужен: сенсор про «живое»;
+ *  - кольцевые буферы В ПАМЯТИ (не hash-chain — наблюдатели = спам, та же философия,
+ *    что у /stats скринкаста);
+ *  - R31 D2: НО живая сессия может жить часами — буферы в памяти капируются (400/250/120),
+ *    а история ТЕРЯЛАСЬ. Персист последних N в SQLite с TTL (дефолт 30м, конфигурируемо):
+ *    батч-флеш раз в 2с (одна транзакция, WAL), TTL-ротация на каждом флеше —
+ *    долгоживущие сессии без роста памяти; история читается source=history;
  *  - авто-реаттач при смерти ws; REST-роуты вне шины (47/47 инвариант).
  */
 
+import { db } from "../store";
 import { discoverCdp, wsOpen, cdpCall } from "./screencast";
 
 const NET_CAP = 400;
@@ -35,6 +40,93 @@ const net: ObsvNetEntry[] = [];
 const con: ObsvConEntry[] = [];
 const exc: ObsvExcEntry[] = [];
 const pending = new Map<string, { at: number; entry: ObsvNetEntry | null }>(); // requestId → открытый запрос
+
+// ── R31 D2: персист в SQLite с TTL ──────────────────────────────
+db.exec(`
+CREATE TABLE IF NOT EXISTS browser_obsv (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  data_json TEXT NOT NULL
+);
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_browser_obsv_ts ON browser_obsv(ts)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_browser_obsv_kind_ts ON browser_obsv(kind, ts)`);
+
+const OBSV_ROWS_CAP = 5000;      // жёсткий потолок таблицы (мульти-вкладки/долгие сессии)
+let obsvTtlMin = 30;             // TTL истории (минуты) — конфигурируется POST {op:"ttl"}
+let flushedTotal = 0;            // сколько записей легло в SQLite за жизнь процесса
+let lastFlushAt: number | null = null;
+let lastFlushErr: string | null = null;
+const flushQ: Array<{ kind: string; ts: number; data: string }> = [];
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+function persistLater(kind: string, entry: ObsvNetEntry | ObsvConEntry | ObsvExcEntry) {
+  try { flushQ.push({ kind, ts: entry.t, data: JSON.stringify(entry) }); } catch { /* сериализация не ломает сбор */ }
+  if (flushQ.length > 800) flushQ.splice(0, flushQ.length - 800); // защита от затопления
+  if (!flushTimer) flushTimer = setInterval(() => { try { obsvFlush(); } catch { /* флаш не ломает сбор */ } }, 2000);
+}
+
+/** Батч-флеш: одна транзакция + TTL-ротация + жёсткий кап таблицы. */
+export function obsvFlush(): { flushed: number; pruned: number } {
+  if (!flushQ.length && flushedTotal === 0) return { flushed: 0, pruned: 0 };
+  let flushed = 0;
+  let pruned = 0;
+  const batch = flushQ.splice(0, flushQ.length);
+  try {
+    if (batch.length) {
+      db.transaction(() => {
+        for (const it of batch) {
+          db.query(`INSERT INTO browser_obsv (kind, ts, data_json) VALUES (?,?,?)`).run(it.kind, it.ts, it.data);
+          flushed++;
+        }
+      })();
+    }
+    const ttlCut = Date.now() - obsvTtlMin * 60_000;
+    const r1 = db.query(`DELETE FROM browser_obsv WHERE ts < ?`).run(ttlCut);
+    const r2 = db.query(`DELETE FROM browser_obsv WHERE id NOT IN (SELECT id FROM browser_obsv ORDER BY id DESC LIMIT ${OBSV_ROWS_CAP})`).run();
+    pruned = r1.changes + r2.changes;
+    flushedTotal += flushed;
+    lastFlushAt = Date.now();
+    lastFlushErr = null;
+  } catch (e) {
+    lastFlushErr = (e as Error).message.slice(0, 120);
+  }
+  return { flushed, pruned };
+}
+
+export interface ObsvPersistState {
+  ttl_min: number; rows: number; flushed_total: number;
+  queue: number; last_flush_age_s: number | null; last_error: string | null;
+}
+export function obsvPersistState(): ObsvPersistState {
+  let rows = 0;
+  try {
+    rows = (db.query(`SELECT COUNT(*) AS n FROM browser_obsv`).get() as { n: number }).n;
+  } catch { /* таблица может быть занята — статус важнее */ }
+  return {
+    ttl_min: obsvTtlMin, rows, flushed_total: flushedTotal, queue: flushQ.length,
+    last_flush_age_s: lastFlushAt ? Math.round((Date.now() - lastFlushAt) / 1000) : null,
+    last_error: lastFlushErr,
+  };
+}
+export function obsvSetTtl(minutes: number): ObsvPersistState {
+  const m = Math.round(minutes);
+  if (Number.isFinite(m) && m >= 1 && m <= 1440) obsvTtlMin = m;
+  return obsvPersistState();
+}
+
+/** Чтение истории из SQLite (D2): rows = net|con|exc, since — временной срез. */
+export function obsvHistory(kind: "net" | "con" | "exc", limit = 50, since?: number): Array<Record<string, unknown>> {
+  const lim = Math.min(Math.max(limit, 1), 500);
+  const cut = typeof since === "number" && Number.isFinite(since) ? since : 0;
+  const rows = db.query(`SELECT ts, data_json FROM browser_obsv WHERE kind=? AND ts>=? ORDER BY id DESC LIMIT ?`)
+    .all(kind, cut, lim) as Array<{ ts: number; data_json: string }>;
+  return rows.map((r) => {
+    try { return JSON.parse(r.data_json) as Record<string, unknown>; }
+    catch { return { t: r.ts, kind, error: "unparseable" } as Record<string, unknown>; }
+  });
+}
 
 let wanted = false;          // колектор нужен (лениво, по первому запросу)
 let attached = false;
@@ -86,6 +178,7 @@ async function attachOnce(): Promise<boolean> {
         const e: ObsvNetEntry = { t: Date.now(), method: req.method ?? "GET", url: trim(req.url, URL_MAX), status: null, mime: "", type: String(p.type ?? ""), ms: null };
         pending.set(rid, { at: Date.now(), entry: e });
         pushCapped(net, e, NET_CAP); totals.net++;
+        persistLater("net", e); // D2: в SQLite с TTL
       }
     } else if (m.method === "Network.responseReceived") {
       const rid = String(p.requestId ?? "");
@@ -106,19 +199,25 @@ async function attachOnce(): Promise<boolean> {
         open.entry.failed = trim(String(p.errorText ?? "failed"), 120);
       } else {
         // URL не приходит в loadingFailed — компактная запись без корреляции (лучше тишины)
-        pushCapped(net, { t: Date.now(), method: "—", url: `(failed requestId=${rid.slice(0, 12)})`, status: null, mime: "", type: String(p.type ?? ""), ms: null, failed: trim(String(p.errorText ?? "failed"), 120) }, NET_CAP);
+        const e: ObsvNetEntry = { t: Date.now(), method: "—", url: `(failed requestId=${rid.slice(0, 12)})`, status: null, mime: "", type: String(p.type ?? ""), ms: null, failed: trim(String(p.errorText ?? "failed"), 120) };
+        pushCapped(net, e, NET_CAP);
         totals.net++;
+        persistLater("net", e);
       }
       pending.delete(rid);
     } else if (m.method === "Runtime.consoleAPICalled") {
       const level = String(p.type ?? "log");
       const args = Array.isArray(p.args) ? (p.args as Array<Record<string, unknown>>) : [];
       const text = trim(args.map(argText).join(" ").replace(/\s+/g, " ").trim() || "(empty)", TEXT_MAX);
-      pushCapped(con, { t: Date.now(), level, text }, CON_CAP); totals.con++;
+      const e: ObsvConEntry = { t: Date.now(), level, text };
+      pushCapped(con, e, CON_CAP); totals.con++;
+      persistLater("con", e); // D2
     } else if (m.method === "Runtime.exceptionThrown") {
       const d = p.exceptionDetails as { text?: string; exception?: { description?: string }; url?: string } | undefined;
       const text = trim(d?.exception?.description || d?.text || "exception", TEXT_MAX);
-      pushCapped(exc, { t: Date.now(), text, url: trim(d?.url ?? "", URL_MAX) }, EXC_CAP); totals.exc++;
+      const e: ObsvExcEntry = { t: Date.now(), text, url: trim(d?.url ?? "", URL_MAX) };
+      pushCapped(exc, e, EXC_CAP); totals.exc++;
+      persistLater("exc", e); // D2
     }
   };
   ws.addEventListener("message", (ev: MessageEvent) => onMsg(ev.data));
@@ -175,17 +274,37 @@ export interface ObsvSnapshot {
     buffers: { net: number; con: number; exc: number };
     totals: { net: number; con: number; exc: number };
     last_event_age_s: number | null;
+    persist: ObsvPersistState;
   };
   network: ObsvNetEntry[];
   console: ObsvConEntry[];
   exceptions: ObsvExcEntry[];
 }
 
-export function obsvSnapshot(opts?: { limit?: number; level?: string; filter?: string }): ObsvSnapshot {
+export function obsvSnapshot(opts?: { limit?: number; level?: string; filter?: string; source?: "live" | "history" }): ObsvSnapshot {
   const limit = Math.min(Math.max(opts?.limit ?? 40, 1), 200);
   const filter = (opts?.filter ?? "").toLowerCase();
   const match = (u: string) => !filter || u.toLowerCase().includes(filter);
   const lvl = (opts?.level ?? "").toLowerCase();
+  const persist = obsvPersistState();
+  if (opts?.source === "history") {
+    // D2: чтение ИСТОРИИ из SQLite (то, что пережило кольца памяти и TTL)
+    return {
+      ok: true,
+      status: {
+        wanted, attached, target: currentTarget,
+        target_info: targetInfo,
+        generation: attachGeneration,
+        buffers: { net: net.length, con: con.length, exc: exc.length },
+        totals,
+        last_event_age_s: lastEventAt ? Math.round((Date.now() - lastEventAt) / 1000) : null,
+        persist,
+      },
+      network: obsvHistory("net", limit).filter((e) => match(String(e.url ?? ""))) as unknown as ObsvNetEntry[],
+      console: obsvHistory("con", limit).filter((e) => (!lvl || e.level === lvl) && match(String(e.text ?? ""))) as unknown as ObsvConEntry[],
+      exceptions: obsvHistory("exc", limit) as unknown as ObsvExcEntry[],
+    };
+  }
   return {
     ok: true,
     status: {
@@ -195,6 +314,7 @@ export function obsvSnapshot(opts?: { limit?: number; level?: string; filter?: s
       buffers: { net: net.length, con: con.length, exc: exc.length },
       totals,
       last_event_age_s: lastEventAt ? Math.round((Date.now() - lastEventAt) / 1000) : null,
+      persist,
     },
     network: net.filter((e) => match(e.url)).slice(-limit).reverse(),
     console: con.filter((e) => (!lvl || e.level === lvl) && match(e.text)).slice(-limit).reverse(),
@@ -205,6 +325,7 @@ export function obsvSnapshot(opts?: { limit?: number; level?: string; filter?: s
 export function obsvReset() {
   net.length = 0; con.length = 0; exc.length = 0; pending.clear();
   totals = { net: 0, con: 0, exc: 0 };
+  // D2: сброс КОЛЕЦ памяти — SQLite-история с TTL НЕ трогается (это уже архив)
 }
 
 export function obsvStatus() {
@@ -214,5 +335,19 @@ export function obsvStatus() {
     generation: attachGeneration,
     captured: totals.net + totals.con + totals.exc,
     buffers: { net: net.length, con: con.length, exc: exc.length },
+    persist: obsvPersistState(),
+  };
+}
+
+/** Вердикт механики ME29 (D2): WORKS — история льётся в SQLite и живёт в TTL. */
+export function obsvPersistVerdict(): { verdict: "WORKS" | "CAVEAT"; evidence: string } {
+  const st = obsvPersistState();
+  if (st.flushed_total === 0) {
+    return { verdict: "CAVEAT", evidence: "флешей не было — подожди трафик вкладки (POST /browser/obsv {op:attach}) или проверь через 5с" };
+  }
+  if (st.last_error) return { verdict: "CAVEAT", evidence: `ошибка флеша: ${st.last_error}; rows=${st.rows}` };
+  return {
+    verdict: "WORKS",
+    evidence: `SQLite rows=${st.rows} (TTL ${st.ttl_min}м, кап 5000), флешей=${st.flushed_total}, queue=${st.queue}; source=history — переживает рестарт колец памяти`,
   };
 }

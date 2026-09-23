@@ -74,8 +74,20 @@ type ObsvConT = { t: number; level: string; text: string };
 type ObsvExcT = { t: number; text: string; url: string };
 type ObsvData = {
   ok: boolean;
-  status: { wanted: boolean; attached: boolean; target: string | null; buffers: { net: number; con: number; exc: number }; totals: { net: number; con: number; exc: number }; last_event_age_s: number | null };
+  status: { wanted: boolean; attached: boolean; target: string | null; buffers: { net: number; con: number; exc: number }; totals: { net: number; con: number; exc: number }; last_event_age_s: number | null; persist?: ObsvPersistT };
   network: ObsvNetT[]; console: ObsvConT[]; exceptions: ObsvExcT[];
+};
+// R31 D2: персист obsv в SQLite (TTL)
+type ObsvPersistT = { ttl_min: number; rows: number; flushed_total: number; queue: number; last_flush_age_s: number | null; last_error: string | null };
+// R31 D1: последний диф перцепции (экономия токенов агентам)
+type SenseDiffT = { changed: boolean; added_n: number; removed_n: number; moved_n: number; saved_pct: number };
+// R31 D4: DB-гигиена (GET /db/hygiene)
+type HygData = {
+  ok: boolean;
+  db: { file_mb: number; wal_mb: number; journal_mode: string; page_count: number; freelist_count: number; freelist_pct: number };
+  indexes: string[];
+  last_runs: Array<{ op: string; duration_ms: number; ok: boolean; detail: string; ran_at: number; age_s: number }>;
+  schedule_min: number;
 };
 type BenchProbeT = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
 type BenchData = {
@@ -175,6 +187,7 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_SCHEDULED: "text-lime-300", TASK_HANDOFF: "text-violet-300", TASK_LEASE_VOID: "text-zinc-500",
   TASK_REVIEWED: "text-cyan-300", GLM_PROBE: "text-cyan-400", GLM_LATEST_SET: "text-cyan-300",
   APPROVAL_REQUESTED: "text-amber-400", APPROVAL_APPROVED: "text-emerald-300", APPROVAL_DENIED: "text-rose-300", APPROVAL_CONSUMED: "text-emerald-400", APPROVAL_POLICY_SET: "text-amber-300",
+  DB_HYGIENE: "text-teal-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
   AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400", AGENT_MODEL_SET: "text-cyan-300",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
@@ -1233,6 +1246,10 @@ export default function MissionControl() {
   const [obsvOpen, setObsvOpen] = useState(false);
   const [bench, setBench] = useState<BenchData | null>(null);
   const [evalData, setEvalData] = useState<EvalData | null>(null);
+  // R31 Track D: последний диф перцепции + DB-гигиена
+  const [lastDiff, setLastDiff] = useState<SenseDiffT | null>(null);
+  const [hyg, setHyg] = useState<HygData | null>(null);
+  const [hygBusy, setHygBusy] = useState(false);
   const [evalBusy, setEvalBusy] = useState(false);
   const [wg, setWg] = useState<WorkGraphData | null>(null);
   const [objTitle, setObjTitle] = useState("");
@@ -1282,7 +1299,11 @@ export default function MissionControl() {
       const r = await fetch(`/browser/sense?XTransformPort=3041${refresh ? "&refresh=1" : ""}`, { cache: "no-store" }).then((x) => x.json());
       if (r?.ok !== false) {
         if (Array.isArray(r?.rows)) setSense(r as SenseData);
-        else if (r?.tab) setSense({ ok: true, rows: [r as SenseRowT], total_targets: Number(r.targets_count ?? 0) });
+        else if (r?.tab) {
+          setSense({ ok: true, rows: [r as SenseRowT], total_targets: Number(r.targets_count ?? 0) });
+          // R31 D1: диф последнего снимка (экономия токенов агентам)
+          if (r.diff) setLastDiff(r.diff as SenseDiffT);
+        }
       }
     } catch { /* daemon недоступен */ } finally { setSenseBusy(false); }
   }, []);
@@ -1326,6 +1347,21 @@ export default function MissionControl() {
   const loadEval = useCallback(async () => {
     try { const r = await fetch("/eval?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setEvalData(r as EvalData); } catch { /* daemon недоступен */ }
   }, []);
+  // R31 D4: DB-гигиена (GET /db/hygiene — WAL, freelist, индексы, журнал операций)
+  const loadHyg = useCallback(async () => {
+    try { const r = await fetch("/db/hygiene?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setHyg(r as HygData); } catch { /* daemon недоступен */ }
+  }, []);
+  // Операторская гигиена: checkpoint (PASSIVE/TRUNCATE) или VACUUM (осмысленно при freelist≥10%)
+  const hygOp = useCallback(async (op: "checkpoint" | "vacuum") => {
+    setHygBusy(true);
+    try {
+      const r = await fetch("/db/hygiene?XTransformPort=3041", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op, mode: "TRUNCATE" }) }).then((x) => x.json());
+      if (r?.ok) toast({ title: `db: ${op} ✓ за ${r.duration_ms}ms`, description: String(r.detail ?? "").slice(0, 90) });
+      else toast({ title: `db ${op} ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
+      await loadHyg();
+    } catch { toast({ title: "db ✗ daemon недоступен", variant: "destructive" }); }
+    finally { setHygBusy(false); }
+  }, [loadHyg, toast]);
   // Прогнать регресс-датасет (POST /eval/run) — золотой путь daemon, read-only чеки
   const runEval = useCallback(async () => {
     setEvalBusy(true);
@@ -1369,6 +1405,12 @@ export default function MissionControl() {
     const iv = setInterval(() => void loadEval(), 60_000);
     return () => clearInterval(iv);
   }, [loadEval]);
+  // R31 D4: DB-гигиена видна в браузерной панели — mount + 60с
+  useEffect(() => {
+    void loadHyg();
+    const iv = setInterval(() => void loadHyg(), 60_000);
+    return () => clearInterval(iv);
+  }, [loadHyg]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1418,11 +1460,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2204,7 +2246,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2729,6 +2771,11 @@ export default function MissionControl() {
                     <span className="min-w-0 truncate font-mono text-[9px] text-zinc-600" title={sense?.rows[0]?.url ? `rev ${sense.rows[0].revision} · ${sense.rows[0].url}` : "перцепция ещё не снималась"}>
                       {sense ? `${sense.rows[0]?.targets_count ?? 0} целей · rev ${sense.rows[0]?.revision ?? "—"}` : "нет данных"}
                     </span>
+                    {lastDiff && (
+                      <span data-testid="sense-diff-chips" className="flex shrink-0 items-center gap-1 font-mono text-[9px]" title="ME28 (D1): диф последней ревизии против предыдущей — агенту отдаём только изменения (экономия токенов); ~ — перенумерация ref (не шум)">
+                        <span className={`rounded border px-1 py-0.5 ${lastDiff.changed ? "border-teal-800/60 bg-teal-950/30 text-teal-300" : "border-zinc-800 bg-zinc-900/60 text-zinc-500"}`}>{lastDiff.changed ? `diff +${lastDiff.added_n}/−${lastDiff.removed_n}${lastDiff.moved_n ? `/~${lastDiff.moved_n}` : ""} · −${lastDiff.saved_pct}% токенов` : "без изменений"}</span>
+                      </span>
+                    )}
                     {lastEffect && (
                       <span data-testid="effect-status" className={`shrink-0 rounded border px-1 py-0.5 font-mono text-[9px] ${lastEffect === "CONFIRMED" ? "border-lime-800/50 text-lime-300" : lastEffect === "AMBIGUOUS" || lastEffect === "FENCED" ? "border-rose-900/60 text-rose-300" : "border-amber-900/50 text-amber-300"}`} title="ME19: вердикт эффекта последнего sense-действия (легаси-эпистемология; AMBIGUOUS ставит durable fence)">{lastEffect}</span>
                     )}
@@ -2759,6 +2806,11 @@ export default function MissionControl() {
                       <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400">net {obsv?.status.buffers.net ?? 0}</span>
                       <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-amber-300/90">con {obsv?.status.buffers.con ?? 0}</span>
                       <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-rose-300/90">exc {obsv?.status.buffers.exc ?? 0}</span>
+                      {obsv?.status.persist && (
+                        <span className="rounded border border-teal-900/60 bg-teal-950/30 px-1 py-0.5 text-teal-300/90" title={`ME29 (D2): история сенсоров персистится в SQLite с TTL ${obsv.status.persist.ttl_min}м (батч-флеш 2с, кап 5000); source=history переживает рестарт колец памяти; очередь=${obsv.status.persist.queue}, всего слито=${obsv.status.persist.flushed_total}${obsv.status.persist.last_error ? ", ОШИБКА=" + obsv.status.persist.last_error : ""}`}>
+                          sql {obsv.status.persist.rows}·TTL{obsv.status.persist.ttl_min}м
+                        </span>
+                      )}
                     </span>
                     <button type="button" onClick={() => { setObsvOpen((v) => !v); if (!obsvOpen) void loadObsv(); }} aria-expanded={obsvOpen} aria-label="Показать последние события вкладки" disabled={obsvBusy} className="ml-auto shrink-0 rounded border border-zinc-700/60 px-1.5 py-0.5 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">события</button>
                     <button type="button" onClick={() => { void obsvOp("reset"); }} aria-label="Очистить кольцевые буферы сенсоров" disabled={obsvBusy} className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800 disabled:opacity-40">сброс</button>
@@ -2831,6 +2883,30 @@ export default function MissionControl() {
                         </li>
                       ))}
                     </ul>
+                  )}
+                </div>
+                {/* R31 D4: DB·HYGIENE — гигиена SQLite daemon (ME30, GET/POST /db/hygiene) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Гигиена базы данных daemon">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME30 (D4): WAL checkpoint PASSIVE по расписанию каждые 10м; TRUNCATE/VACUUM — оператором; индексы горячих запросов; журнал операций в hygiene_runs">
+                      <Database className={`h-3 w-3 ${hyg && hyg.db.wal_mb < 50 ? "text-teal-300" : hyg ? "text-amber-300" : "text-zinc-600"}`} aria-hidden /> DB·HYG
+                    </span>
+                    <span data-testid="hygiene-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`journal_mode=${hyg?.db.journal_mode ?? "—"}, страниц=${hyg?.db.page_count ?? "—"}`}>{hyg?.db.journal_mode ?? "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="размер файла БД и WAL-файла (TRUNCATE-checkpoint обнуляет WAL)">db {hyg ? `${hyg.db.file_mb}MB` : "—"} · wal {hyg ? `${hyg.db.wal_mb}MB` : "—"}</span>
+                      <span className={`rounded border px-1 py-0.5 ${hyg && hyg.db.freelist_pct >= 30 ? "border-amber-900/60 bg-amber-950/30 text-amber-300" : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={`freelist ${hyg?.db.freelist_count ?? "—"} страниц (${hyg?.db.freelist_pct ?? 0}%) — фрагментация; VACUум осмыслен при ≥10%`}>free {hyg ? `${hyg.db.freelist_pct}%` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`горячие индексы: ${hyg?.indexes.join(", ") ?? "—"}`}>idx {hyg?.indexes.length ?? "—"}</span>
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      <button type="button" onClick={() => void hygOp("checkpoint")} disabled={hygBusy} aria-label="Выполнить WAL checkpoint (TRUNCATE)" data-testid="hygiene-actions" className="rounded border border-teal-900/60 px-1.5 py-0.5 font-mono text-[9px] text-teal-300/90 transition hover:bg-zinc-800 disabled:opacity-40">checkpoint</button>
+                      <button type="button" onClick={() => void hygOp("vacuum")} disabled={hygBusy} aria-label="Выполнить VACUUM базы данных" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">vacuum</button>
+                      <button type="button" onClick={() => void loadHyg()} aria-label="Обновить статус гигиены БД" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800">обновить</button>
+                    </span>
+                  </div>
+                  {hyg?.last_runs[0] && (
+                    <p className="mt-1 truncate font-mono text-[9px] text-zinc-600" title={hyg.last_runs[0].detail}>
+                      last: {hyg.last_runs[0].op} {hyg.last_runs[0].ok ? "✓" : "✗"} {hyg.last_runs[0].duration_ms}ms · {hyg.last_runs[0].age_s}s назад{hyg.last_runs[0].detail ? ` · ${hyg.last_runs[0].detail}` : ""}
+                    </p>
                   )}
                 </div>
                 {castOn && (

@@ -35,9 +35,12 @@ import { handoffList, handoffStats } from "./handoffs";
 import { glmStatus, canonicalGlm, agentTag } from "./glm";
 import { reviewStats } from "./reviewer";
 import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
+import { senseDiffs } from "./sense";
+import { obsvPersistState } from "./obsv";
+import { hygieneStatus } from "./dbhygiene";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 5;
+export const EVAL_DATASET_VERSION = 6;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -384,6 +387,51 @@ export const EVAL_DATASET: EvalCheck[] = [
       db.query(`DELETE FROM approvals WHERE subject='__eval_probe__'`).run();
       const ok = d2.allowed && consumed?.status === "CONSUMED" && !d3.allowed && d3.reason === "approval_required";
       return { ok, evidence: `unknown→denied; цикл: denied→approved→allowed(token)→${consumed?.status}→повтор denied (one-attempt) — пробные строки удалены` };
+    },
+  },
+
+  // ── R31 Track D (sense-diffing / obsv-TTL / db-hygiene) ─────────
+  {
+    id: "sense.diff_api",
+    plane: "sense",
+    title: "Sense-diffing: дифы ревизий вместо полных снапшотов (D1)",
+    critical: false,
+    expect: "browser_sense_diff жива; записи либо нет (WARMUP), либо форма честная (0≤saved_pct≤100, counts≥0)",
+    run: () => {
+      const d = senseDiffs(undefined, 1);
+      if (!d.total) return { ok: true, evidence: "WARMUP: диф-записей ещё нет — ≥2 sense-снимка с изменением страницы (GET /browser/sense/diffs)" };
+      const r = d.rows[0];
+      const ok = r.saved_pct >= 0 && r.saved_pct <= 100 && r.added_n >= 0 && r.removed_n >= 0 && r.revision.length > 0;
+      return { ok, evidence: `дифов=${d.total}, last: +${r.added_n}/−${r.removed_n}/~${r.moved_n}, экономия ${r.saved_pct}% (${r.chars_diff}B vs ${r.chars_full}B)` };
+    },
+  },
+  {
+    id: "obsv.persist_ttl",
+    plane: "obsv",
+    title: "Obsv→SQLite TTL: история сенсоров переживает кольца памяти (D2)",
+    critical: false,
+    expect: "ttl_min∈[1..1440], кап 5000; флешей либо нет (WARMUP), либо без ошибки и очередь не растёт",
+    run: () => {
+      const st = obsvPersistState();
+      const ttlOk = st.ttl_min >= 1 && st.ttl_min <= 1440;
+      if (st.flushed_total === 0) return { ok: ttlOk, evidence: `WARMUP: флешей не было (ttl=${st.ttl_min}м, queue=${st.queue}) — подожди трафик вкладки` };
+      const ok = ttlOk && !st.last_error && st.queue < 800;
+      return { ok, evidence: `rows=${st.rows} (TTL ${st.ttl_min}м, кап 5000), флешей=${st.flushed_total}, queue=${st.queue}${st.last_error ? `, err=${st.last_error}` : ""}` };
+    },
+  },
+  {
+    id: "db.hygiene",
+    plane: "state",
+    title: "DB-гигиена: WAL checkpoint + freelist + индексы горячих запросов (D4)",
+    critical: false,
+    expect: "journal_mode=wal, page_count>0, есть idx_eval_runs_started/idx_tasks_status/idx_browser_obsv_ts; freelist<60% (иначе WARN)",
+    run: () => {
+      const st = hygieneStatus();
+      const idxOk = ["idx_eval_runs_started", "idx_tasks_status", "idx_browser_obsv_ts"].every((i) => st.indexes.includes(i));
+      const wal = st.db.journal_mode === "wal";
+      const fragOk = st.db.freelist_pct < 60;
+      const ok = wal && st.db.page_count > 0 && idxOk && fragOk;
+      return { ok, evidence: `journal=${st.db.journal_mode}, pages=${st.db.page_count}, freelist=${st.db.freelist_pct}%, db=${st.db.file_mb}MB, wal=${st.db.wal_mb}MB, индексов=${st.indexes.length}${idxOk ? "" : " (нет горячих idx)"}` };
     },
   },
 ];
