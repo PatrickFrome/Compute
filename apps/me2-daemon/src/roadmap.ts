@@ -12,7 +12,7 @@ import { otelStatus } from "./otel";
 import { listSandboxes, sandboxCaps } from "./sandbox";
 import { listWorktrees, rerereStatus } from "./worktrees";
 
-const REPO_ROOT = "/home/z/my-project";
+const REPO_ROOT = process.env.ME2_REPO_ROOT ?? "/home/z/my-project"; // R51
 
 export type RoadmapStatus = "DONE" | "PARTIAL" | "MISSING";
 

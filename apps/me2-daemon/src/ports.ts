@@ -7,4 +7,10 @@
 export const WS_PORT = Number(process.env.ME2_WS_PORT ?? 3040);
 export const REST_PORT = Number(process.env.ME2_REST_PORT ?? 3041);
 /** Каталог данных (SQLite me2.db): по умолчанию — data/ рядом с daemon'ом. */
+import { join } from "node:path";
+
 export const DATA_DIR: string | null = process.env.ME2_DATA_DIR ?? null;
+/** Корень dev-репозитория (R51: env ME2_REPO_ROOT — CI/monorepo-укладки без /home/z). */
+export const REPO_ROOT = process.env.ME2_REPO_ROOT ?? "/home/z/my-project";
+/** Корень рабочих каталогов чатов (agentchat). */
+export const CHAT_ROOT = process.env.ME2_CHAT_ROOT ?? join(REPO_ROOT, "me2-workspace");
