@@ -38,10 +38,10 @@ import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
 import { senseDiffs } from "./sense";
 import { obsvPersistState } from "./obsv";
 import { hygieneStatus } from "./dbhygiene";
-import { evidenceStatus } from "../evidence";
+import { evidenceStatus, verifyChain, recomputeHash } from "../evidence";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 7;
+export const EVAL_DATASET_VERSION = 8;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -94,6 +94,7 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v5 (R30) — +approval.policies_canonical, +approval.gate_api (живой гейт-цикл с самоочисткой) = 28.
 // v6 (R31) — +sense.diff_api, +obsv.persist_ttl, +db.hygiene = 31.
 // v7 (R32) — +evidence.remote (доставка в облако: LIVE/LIVE-STORAGE или healer активен + outbox ограничен) = 32.
+// v8 (R33) — +evidence.verify (hash-chain на живых данных + тампер-детект на чистой функции, critical) = 33.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -433,6 +434,23 @@ export const EVAL_DATASET: EvalCheck[] = [
       if (st.mode === "LIVE" || st.mode === "LIVE-STORAGE") return { ok: true, evidence: `mode=${st.mode}, method=${st.method}, pending=${st.pending}, storage.objects=${st.storage.objects}` };
       const healing = st.mode === "DEGRADED" && st.pending < 500 && st.ddl.retry_every_min > 0;
       return { ok: healing, evidence: `mode=${st.mode}, pending=${st.pending}, ddl.last=${st.ddl.last_result ?? "—"}, healer=${st.ddl.retry_every_min}м${st.last_error ? ", err=" + String(st.last_error).slice(0, 80) : ""}` };
+    },
+  },
+  {
+    id: "evidence.verify",
+    plane: "state",
+    title: "Hash-chain верифицируем: живая цепь ok + подделка данных детектится (E2, IETF)",
+    critical: true,
+    expect: "verifyChain на живых 200 событиях ok=true; recomputeHash(tampered) != recomputeHash(honest) — тампер детектится без мутации БД",
+    run: () => {
+      const v = verifyChain(undefined, undefined, 200);
+      if (!v.ok) return { ok: false, evidence: `chain BROKEN at seq=${v.broken_at}: ${v.reason}` };
+      // тампер-негатив: один байт данных → другой хеш (чистая функция, БД не трогаем)
+      const honest = recomputeHash(null, "2026-01-01T00:00:00Z", "TAMPER.TEST", null, null, '{"a":1}');
+      const tampered = recomputeHash(null, "2026-01-01T00:00:00Z", "TAMPER.TEST", null, null, '{"a":2}');
+      const link = recomputeHash("abc", "2026-01-01T00:00:00Z", "TAMPER.TEST", null, null, '{"a":1}') !== honest; // смена prev тоже меняет хеш
+      const tamperDetected = honest !== tampered && link;
+      return { ok: tamperDetected, evidence: `chain ok ${v.checked} событий (${v.from}..${v.to}) за ${v.ms}ms, scheme=${v.scheme.split(",")[0]}, тампер-детект=${tamperDetected ? "ok" : "FAIL"}` };
     },
   },
   {

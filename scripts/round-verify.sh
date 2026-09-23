@@ -32,6 +32,13 @@ curl -s --max-time 20 -X POST "$B/evidence" -H "Content-Type: application/json" 
 echo "== EVIDENCE probe_ddl (каналы миграции) =="
 curl -s --max-time 40 -X POST "$B/evidence" -H "Content-Type: application/json" -d '{"op":"probe_ddl"}' | j "'applied='+str(d.get('applied')), str(d.get('attempts'))[:220]"
 
+echo "== EVIDENCE verify (E2 hash-chain) =="
+curl -sf --max-time 10 "$B/evidence/verify?limit=500" | j "d['ok'], 'checked='+str(d['checked']), 'range='+str(d['from'])+'..'+str(d['to']), str(d['ms'])+'ms', 'reason='+str(d.get('reason'))"
+
+echo "== EVIDENCE query (связка) =="
+TID=$(curl -sf --max-time 5 "$B/state" | python3 -c "import json,sys;d=json.load(sys.stdin);ts=[t['id'] for t in d.get('tasks',[]) if t.get('id')];print(ts[0] if ts else '')")
+if [ -n "$TID" ]; then curl -sf --max-time 5 "$B/evidence/query?task_id=$TID" | j "'task='+d['task_id'], 'events='+str(d['total']), 'review='+str(d.get('review')), 'ho_in='+str(d['handoffs_in']), 'ho_out='+str(d['handoffs_out'])"; else echo "(нет задач — WARMUP)"; fi
+
 echo "== GLM =="
 curl -sf --max-time 5 "$B/glm" | j "d.get('canonical'), 'honoring='+str(d.get('platform_honoring')), 'agents='+json.dumps(d.get('agents',{}))[:80], 'probes='+str(d.get('probes_total'))"
 

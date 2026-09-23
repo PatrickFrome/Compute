@@ -12,7 +12,7 @@
  */
 import { db, onEvent, getMeta, setMeta, emit } from "./store";
 import { readFileSync } from "node:fs";
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 const ENV_PATH = "/home/z/.a2/supabase-cloud.env";
 const MIGRATION_PATH = new URL("./supabase-migration-me2-evidence.sql", import.meta.url).pathname;
@@ -360,6 +360,95 @@ export async function probeStorage(): Promise<{ ok: boolean; detail: string }> {
   } catch (e) {
     return { ok: false, detail: String(e).slice(0, 200) };
   }
+}
+
+// ── E2 (R33): верификация hash-chain + связка evidence↔task↔review ──
+// IETF draft-sharif-agent-audit-trail: аудит-трейл должен быть верифицируемым
+// третьей стороной. Схема v1 (текущая): sha256(prev|ts|type|actor|subject|data),
+// prev=GENESIS для первого события. JCS-канонизация запланирована как scheme v2
+// с явной миграцией (смена схемы = осознанное изменение контракта, как eval-версии).
+
+export const EVIDENCE_SCHEME = "v1:sha256(prev|ts|type|actor|subject|data), prev=GENESIS";
+
+/** Чистая функция пересчёта хеша (для verify + тампер-негатива в eval без мутации БД). */
+export function recomputeHash(prev: string | null, ts: string, type: string, actor: string | null, subject: string | null, data: string): string {
+  return createHash("sha256").update(`${prev ?? "GENESIS"}|${ts}|${type}|${actor ?? "-"}|${subject ?? "-"}|${data}`).digest("hex");
+}
+
+export interface ChainVerifyResult {
+  ok: boolean;
+  scheme: string;
+  from: number; to: number; checked: number;
+  broken_at: number | null;
+  reason: string | null; // hash_mismatch | link_mismatch | empty_range
+  ms: number;
+}
+
+/** Проверка целостности цепочки событий в диапазоне seq [from..to] (по умолчанию — последние 500). */
+export function verifyChain(fromSeq?: number, toSeq?: number, limit = 500): ChainVerifyResult {
+  const t0 = Date.now();
+  let rows: Array<{ seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string; prev_hash: string | null; hash: string | null }>;
+  if (fromSeq !== undefined || toSeq !== undefined) {
+    const f = fromSeq ?? 1;
+    const t = toSeq ?? Number.MAX_SAFE_INTEGER;
+    rows = db.query(
+      `SELECT seq, ts, type, agent_id, task_id, data, prev_hash, hash FROM events WHERE seq >= ? AND seq <= ? ORDER BY seq ASC LIMIT ?`,
+    ).all(f, t, limit) as typeof rows;
+  } else {
+    rows = db.query(
+      `SELECT seq, ts, type, agent_id, task_id, data, prev_hash, hash FROM events ORDER BY seq DESC LIMIT ?`,
+    ).all(limit) as typeof rows;
+    rows.reverse();
+  }
+  if (!rows.length) {
+    return { ok: false, scheme: EVIDENCE_SCHEME, from: fromSeq ?? 0, to: toSeq ?? 0, checked: 0, broken_at: null, reason: "empty_range", ms: Date.now() - t0 };
+  }
+  let expectedPrev = rows[0].prev_hash ?? "GENESIS";
+  for (const e of rows) {
+    // 1) связь: prev_hash события должен совпадать с хешем предыдущего
+    if ((e.prev_hash ?? "GENESIS") !== expectedPrev) {
+      return { ok: false, scheme: EVIDENCE_SCHEME, from: rows[0].seq, to: rows[rows.length - 1].seq, checked: e.seq - rows[0].seq, broken_at: e.seq, reason: `link_mismatch: prev_hash=${(e.prev_hash ?? "GENESIS").slice(0, 12)}…, expected=${expectedPrev.slice(0, 12)}…`, ms: Date.now() - t0 };
+    }
+    // 2) хеш: пересчёт по канонической схеме
+    const recomputed = recomputeHash(e.prev_hash, e.ts, e.type, e.agent_id, e.task_id, e.data);
+    if (recomputed !== e.hash) {
+      return { ok: false, scheme: EVIDENCE_SCHEME, from: rows[0].seq, to: rows[rows.length - 1].seq, checked: e.seq - rows[0].seq, broken_at: e.seq, reason: `hash_mismatch: stored=${(e.hash ?? "null").slice(0, 12)}…, recomputed=${recomputed.slice(0, 12)}…`, ms: Date.now() - t0 };
+    }
+    expectedPrev = e.hash ?? "GENESIS";
+  }
+  return { ok: true, scheme: EVIDENCE_SCHEME, from: rows[0].seq, to: rows[rows.length - 1].seq, checked: rows.length, broken_at: null, reason: null, ms: Date.now() - t0 };
+}
+
+/** Связка evidence↔task↔review (IETF: каждый артефакт привязан к identity/model/действиям). */
+export function evidenceQuery(taskId: string): {
+  ok: boolean; task_id: string;
+  events: Array<{ seq: number; ts: string; type: string; agent_id: string | null; data_preview: string }>;
+  total: number;
+  review: { verdict: string | null; checked_at: string | null } | null;
+  handoffs_in: number; handoffs_out: number;
+} {
+  const ev = db.query(
+    `SELECT seq, ts, type, agent_id, data FROM events WHERE task_id = ? ORDER BY seq DESC LIMIT 50`,
+  ).all(taskId) as Array<{ seq: number; ts: string; type: string; agent_id: string | null; data: string }>;
+  const t = db.query(`SELECT review, updated_at FROM tasks WHERE id = ?`).get(taskId) as { review: string | null; updated_at: string | null } | undefined;
+  let review: { verdict: string | null; checked_at: string | null } | null = null;
+  if (t?.review) {
+    try {
+      const r = JSON.parse(t.review) as { verdict?: string; checked_at?: string };
+      review = { verdict: r.verdict ?? null, checked_at: r.checked_at ?? null };
+    } catch { review = { verdict: null, checked_at: null }; }
+  }
+  const hIn = (db.query(`SELECT COUNT(*) AS n FROM handoffs WHERE to_task = ?`).get(taskId) as { n: number }).n;
+  const hOut = (db.query(`SELECT COUNT(*) AS n FROM handoffs WHERE from_task = ?`).get(taskId) as { n: number }).n;
+  return {
+    ok: true,
+    task_id: taskId,
+    events: ev.map((e) => ({ seq: e.seq, ts: e.ts, type: e.type, agent_id: e.agent_id, data_preview: e.data.slice(0, 120) })),
+    total: ev.length,
+    review,
+    handoffs_in: hIn,
+    handoffs_out: hOut,
+  };
 }
 
 /** Инициализация: подписка на события + аплоадер + DDL-хилер (boot+5s, затем каждые 15 мин). */

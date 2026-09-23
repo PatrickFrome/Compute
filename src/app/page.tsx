@@ -89,6 +89,8 @@ type HygData = {
   last_runs: Array<{ op: string; duration_ms: number; ok: boolean; detail: string; ran_at: number; age_s: number }>;
   schedule_min: number;
 };
+// R33 E2: верификация hash-chain audit-trail (GET /evidence/verify)
+type ChainVerifyT = { ok: boolean; scheme: string; from: number; to: number; checked: number; broken_at: number | null; reason: string | null; ms: number };
 type BenchProbeT = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
 type BenchData = {
   ok: boolean;
@@ -1250,6 +1252,9 @@ export default function MissionControl() {
   const [lastDiff, setLastDiff] = useState<SenseDiffT | null>(null);
   const [hyg, setHyg] = useState<HygData | null>(null);
   const [hygBusy, setHygBusy] = useState(false);
+  // R33 E2: hash-chain verify
+  const [evChain, setEvChain] = useState<ChainVerifyT | null>(null);
+  const [evChainBusy, setEvChainBusy] = useState(false);
   const [evalBusy, setEvalBusy] = useState(false);
   const [wg, setWg] = useState<WorkGraphData | null>(null);
   const [objTitle, setObjTitle] = useState("");
@@ -1362,6 +1367,20 @@ export default function MissionControl() {
     } catch { toast({ title: "db ✗ daemon недоступен", variant: "destructive" }); }
     finally { setHygBusy(false); }
   }, [loadHyg, toast]);
+  // R33 E2: верификация hash-chain audit-trail (GET /evidence/verify — пересчёт цепи + тампер-детект на eval)
+  const loadEvChain = useCallback(async () => {
+    try { const r = await fetch("/evidence/verify?XTransformPort=3041&limit=300", { cache: "no-store" }).then((x) => x.json()); setEvChain(r as ChainVerifyT); } catch { /* daemon недоступен */ }
+  }, []);
+  const verifyEvChain = useCallback(async () => {
+    setEvChainBusy(true);
+    try {
+      const r = await fetch("/evidence/verify?XTransformPort=3041&limit=1000", { cache: "no-store" }).then((x) => x.json()) as ChainVerifyT;
+      setEvChain(r);
+      if (r?.ok) toast({ title: `цепь ✓ ${r.checked} событий за ${r.ms}ms`, description: `${r.scheme}` });
+      else toast({ title: `цепь ✗ @seq ${r?.broken_at ?? "?"}`, description: String(r?.reason ?? "нет данных"), variant: "destructive" });
+    } catch { toast({ title: "verify ✗ daemon недоступен", variant: "destructive" }); }
+    finally { setEvChainBusy(false); }
+  }, [toast]);
   // Прогнать регресс-датасет (POST /eval/run) — золотой путь daemon, read-only чеки
   const runEval = useCallback(async () => {
     setEvalBusy(true);
@@ -1411,6 +1430,8 @@ export default function MissionControl() {
     const iv = setInterval(() => void loadHyg(), 60_000);
     return () => clearInterval(iv);
   }, [loadHyg]);
+  // R33 E2: hash-chain verify — mount + при каждом открытии панели
+  useEffect(() => { void loadEvChain(); }, [loadEvChain]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1460,11 +1481,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2246,7 +2267,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2906,6 +2927,28 @@ export default function MissionControl() {
                   {hyg?.last_runs[0] && (
                     <p className="mt-1 truncate font-mono text-[9px] text-zinc-600" title={hyg.last_runs[0].detail}>
                       last: {hyg.last_runs[0].op} {hyg.last_runs[0].ok ? "✓" : "✗"} {hyg.last_runs[0].duration_ms}ms · {hyg.last_runs[0].age_s}s назад{hyg.last_runs[0].detail ? ` · ${hyg.last_runs[0].detail}` : ""}
+                    </p>
+                  )}
+                </div>
+                {/* R33 E2: EVIDENCE·CHAIN — верификация hash-chain audit-trail (ME32, GET /evidence/verify; IETF agent-audit-trail) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Верификация цепочки доказательств">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="E2/ME32 (IETF draft-sharif-agent-audit-trail): цепь sha256(prev|ts|type|actor|subject|data); verify пересчитывает хеши и связи; тампер данных детектится; GET /evidence/query?task_id — связка evidence↔task↔review">
+                      <ShieldCheck className={`h-3 w-3 ${evChain ? (evChain.ok ? "text-emerald-300" : "text-rose-400") : "text-zinc-600"}`} aria-hidden /> EVIDENCE·CHAIN
+                    </span>
+                    <span data-testid="evchain-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className={`rounded border px-1 py-0.5 ${evChain ? (evChain.ok ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={evChain?.reason ?? "пересчёт всей цепи: хеш каждого события + связь prev_hash"}>{evChain ? (evChain.ok ? "chain ✓" : `chain ✗ @${evChain.broken_at}`) : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="сколько событий проверено">{evChain?.checked ?? "—"} ev</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="диапазон seq">{evChain ? `${evChain.from}..${evChain.to}` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="длительность пересчёта">{evChain ? `${evChain.ms}ms` : "—"}</span>
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      <button type="button" onClick={() => void verifyEvChain()} disabled={evChainBusy} aria-label="Проверить целостность hash-chain доказательств" data-testid="evchain-actions" className="rounded border border-emerald-900/60 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300/90 transition hover:bg-zinc-800 disabled:opacity-40">проверить</button>
+                    </span>
+                  </div>
+                  {evChain && (
+                    <p className="mt-1 truncate font-mono text-[9px] text-zinc-600" title={evChain.reason ?? evChain.scheme}>
+                      scheme {evChain.scheme.split(",")[0]}{evChain.reason ? ` · ${evChain.reason}` : ""} · query: /evidence/query?task_id=…
                     </p>
                   )}
                 </div>

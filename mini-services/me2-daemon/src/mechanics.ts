@@ -30,7 +30,7 @@ import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
 import { glmVerdict } from "./glm";
 import { reviewerVerdict } from "./reviewer";
-import { evidenceStatus } from "../evidence";
+import { evidenceStatus, verifyChain } from "../evidence";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -210,6 +210,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME31", name: "Evidence-зеркало v2: storage-доставка + DDL-хилер с авто-применением миграции (R32)", old_ref: "M5 evidence-plane (outbox → Supabase; DEGRADED ждал DDL)",
       verdict: (() => { const st = evidenceStatus(); return st.mode === "LIVE" || st.mode === "LIVE-STORAGE" ? "WORKS" : st.mode === "DEGRADED" ? "CAVEAT" : "DECOR"; })(),
       evidence: (() => { const st = evidenceStatus(); return `mode=${st.mode}, pending=${st.pending}, storage=${st.storage.ok ? "ok/" + st.storage.objects + " объектов" : "—"}, ddl=${st.ddl.last_result ?? "—"} (ретрай ${st.ddl.retry_every_min}м); POST /evidence {op:probe_ddl|probe_storage}`; })(),
+    },
+    {
+      id: "ME32", name: "E2: верифицируемый audit-trail — hash-chain check + тампер-детект + связка evidence↔task↔review (IETF)", old_ref: "— (IETF draft-sharif-agent-audit-trail: third-party verifiability)",
+      verdict: (() => { const v = verifyChain(undefined, undefined, 300); return v.ok ? "WORKS" : "CAVEAT"; })(),
+      evidence: (() => { const v = verifyChain(undefined, undefined, 300); return v.ok ? `chain ok ${v.checked} событий (${v.from}..${v.to}) за ${v.ms}ms; GET /evidence/verify?from&to | /evidence/query?task_id — тампер меняет хеш (eval-негатив)` : `chain BROKEN at ${v.broken_at}: ${v.reason}`; })(),
     },
   ];
 

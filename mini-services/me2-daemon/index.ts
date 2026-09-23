@@ -20,7 +20,7 @@ import {
 import { listProviders } from "./providers";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
-import { initEvidence, evidenceStatus, probeDdl, probeStorage } from "./evidence";
+import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
@@ -53,7 +53,7 @@ import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/revi
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.30.0";
+const VERSION = "0.31.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -136,6 +136,18 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       if (body?.op === "probe_ddl") return json(res, 200, { ok: true, ...(await probeDdl(true)) });
       if (body?.op === "probe_storage") return json(res, 200, await probeStorage());
       return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe_ddl", "probe_storage"] });
+    }
+    // ── E2 (R33): верификация hash-chain + связка evidence↔task↔review (read-only, вне шины) ──
+    if (path === "/evidence/verify" && req.method === "GET") {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 500) || 500, 2000);
+      return json(res, 200, verifyChain(from ? Number(from) : undefined, to ? Number(to) : undefined, limit));
+    }
+    if (path === "/evidence/query" && req.method === "GET") {
+      const tid = url.searchParams.get("task_id");
+      if (!tid) return json(res, 400, { ok: false, error: "task_id_required" });
+      return json(res, 200, evidenceQuery(tid));
     }
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
 

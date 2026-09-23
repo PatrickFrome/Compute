@@ -350,3 +350,23 @@ Stage Summary:
 - Daemon v0.30.0, eval v7 32/32 PASS, матрица 31 строка (ME31), шина 47/47 нетронута.
 - Далее: E2 (IETF-выравнивание evidence + verify-API) → E3 (parallel live-GLM pool) → E4 (авто после DDL) → E5; следить за GLM honoring-переходом.
 - Оператору: при желании мгновенной SQL-плоскости — достаточно выполнить research/2026/R23-me2-evidence-migration.sql в SQL Editor (или выдать PAT/включить legacy-JWT — хилер подхватит сам за ≤15 мин).
+---
+Task ID: R33
+Agent: Z.ai Code (main)
+Task: «продолжи разработку… всё в замкнутый производственный контур, агенты на последней GLM и не фальшивые, ресёрчи 2026 → конкретные шаги качественного скачка» — исполнено как R33: пункт E2 E-линии (верифицируемый audit-trail по IETF draft-sharif-agent-audit-trail).
+
+Work Log:
+- R33-0 (аудит): CI 8479429 (R32) — ВСЕ SUCCESS (ubuntu/macos/windows); daemon v0.30.0 жил ровно (evidence LIVE-STORAGE pending=0, objects растут честно от событий, eval PASS 32/32 v7); GLM glm-5.3 honoring=False probes=9 (честный факт платформы, флот drift=0). Worklog R32 — последняя запись.
+- R33-1 (E2 ядро): evidence.ts + verifyChain(from,to,limit≤2000) — двойная проверка каждого события: (1) связь prev_hash===хеш предыдущего (линк), (2) пересчёт sha256(prev|ts|type|actor|subject|data)===hash (тампер-детект); broken_at+reason точечно указывают первое нарушение; дефолт — последние 500; pure recomputeHash() экспортирован (тампер-негатив в eval БЕЗ мутации БД); EVIDENCE_SCHEME="v1:..." задокументирована, JCS-канонизация = осознанная будущая scheme v2 (смена схемы — как eval-версии, не тихо).
+- R33-2 (связка): evidenceQuery(task_id) — evidence↔task↔review в одном ответе: события задачи (≤50, с preview) + review.verdict из tasks.review + handoffs_in/out из handoffs (IETF: каждый артефакт привязан к identity/модели/действиям).
+- R33-3 (REST): GET /evidence/verify?from&to&limit, GET /evidence/query?task_id (400 без task_id) — read-only, вне шины 47/47.
+- R33-4 (контракт): eval v7→v8: +evidence.verify (CRITICAL: живая цепь 200 событий ok + тампер-негатив на чистой функции — один байт данных или смена prev меняет хеш) = 33 чека; механика ME32 (32-я строка); v0.31.0.
+- R33-5 (e2e поймал дефект): первый прогон — /evidence/verify 500 «createHash is not defined»: при rewrite v2 импорт createHash был заменён на createHmac (mint-JWT), recomputeHash остался без createHash; eval FAIL 33 упал честно (critical), проверил root-cause в daemon-логе, импорт восстановлен. Урок: pure-функции из модуля с двойным крипто-импортом — проверять import-список при рефакторинге импортов.
+- R33-6 (верификация): verify ok=True 500 событий за 2ms (range 1618..2117); eval PASS 33/33 v8; /evidence/query на живой задаче: events=18, review={verdict:suspect}, ho 0/0 — связка работает; UI: блок EVIDENCE·CHAIN после DB·HYG (chain ✓ бейдж emerald, чипы checked/range/ms, кнопка «проверить» с тостом); клик из UI пересчитал 1000 событий за 3ms (chips 300→1000 обновились — реальная работа, не декорация); скриншот r33-evidence-chain.png: тост «цепь ✓ 1000 событий за 3ms» + v0.31.0 + LIVE-STORAGE·s3 + 47/47; mobile 390 sw=iw; lint 0/0.
+- R33-7: round-verify.sh дополнен E2-чками (verify + query на реальной задаче); worklog + push.
+
+Stage Summary:
+- ME2 — первая система в связке с ОПЕРАЦИОННЫМ верифицируемым audit-trail: цепь hash-chain теперь проверяется на живых данных одним GET (500 событий/2ms), подделка любого байта любого события в прошлом детектится точечно (broken_at+reason), каждая задача имеет связку evidence↔review-вердикт↔handoffs. Директива «работа агентов не фальшивая» получила криптографический слой поверх tier-1-детектора (ME15) и tier-2 LLM-ревью (ME26).
+- Daemon v0.31.0, actions=47, eval v8 33/33 PASS (33-й — critical), матрица 32 строки (ME32), шина не тронута.
+- E-линия: E1 ✅ (R32) → E2 ✅ (R33) → E3 parallel live-GLM executor pool (следующий качественный скачок: N живых контекстов, честные lease) → E4 SQL-аналитика (авто после DDL) → E5 token-economy памяти.
+- Оператору: me2_evidence DDL по-прежнему закрыт платформой (хилер ретраит каждые 15м, журнал attempts в /evidence), но Storage-зеркало доставляет всё; для мгновенной SQL-плоскости — выполнить research/2026/R23-me2-evidence-migration.sql в SQL Editor.
