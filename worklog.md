@@ -263,3 +263,24 @@ Stage Summary:
 - Найдено и починено 1 реальный гон (completion↔handoff) — e2e перед push снова окупился.
 - Далее по роадмапу R24: C3 (reviewer-agent: авто-ревью результатов) → C4 (approval-политики); Track D: D1 sense-diffing, D2 obsv→SQLite TTL, D4 БД-гигиена.
 - Оператору: me2_evidence SQL всё ещё не применён (evidence DEGRADED 404 ждёт применения миграции).
+---
+Task ID: R29
+Agent: Z.ai Code (main)
+Task: «продолжи разработку…» + НОВЫЕ директивы оператора: «все агенты всегда должны работать на последней версии glm», «следи чтобы работа агентов была не фальшивой» — исполнено как R29: C3 reviewer-agent + GLM currency plane.
+
+Work Log:
+- R29-0 (ресёрч директив): web_search → флагман Z.ai на 2026-09 = GLM-5.3 (релиз 2026-08-18; research/2026/r29-glm-latest.json). Живые пробы: z-ai-web-dev-sdk 0.0.18 (последняя) принимает model?: string, НО sandbox-бэкенд ИГНОРИРУЕТ тег — api.model="glm-4-plus" при любом теге (glm-5.3/5.2/4.7 — проверено скриптами); Vercel AI Gateway (маршрутизирует zai/glm-5.3) из сети sandbox НЕДОСТУПЕН (TLS alert, проверено curl+bun). Решение — ЧЕСТНАЯ currency-плоскость: тег enforced + probe факта, никакой фальши.
+- R29-1 (ME25 GLM currency): src/glm.ts — канонический тег в meta (glm_canonical, дефолт glm-5.3), agent_tag=zai:<canon>; upgradeAgents() переводит ВЕСЬ флот (каждая смена = AGENT_MODEL_SET с by=glm_currency_directive); glmProbe() — живая проба бэкенда (requested → api.model, honoring-флаг) в таблицу glm_probes (cap 100) + событие GLM_PROBE; REST GET /glm, POST /glm {op:probe|upgrade|set_latest}; boot: upgrade сразу + probe async (+3s, урок R25).
+- R29-2 (ME26 C3 reviewer): src/reviewer.ts — антифальшь-ревью COMPLETED-задач: LLM сверяет результат со спеком и телеметрией lease (writes/tool_calls/parse_fails из воркера); канон вердиктов real/suspect/empty; ZERO-AUTHORITY (не меняет статусы задач/целей); квоты R11 (1 ревью на задачу idempotent, ≤2 in-flight); suspect/empty → семантическая память importance 0.85 + событие TASK_REVIEWED; колонка tasks.review (миграция); REST GET /reviews, POST /reviews/run {task_id}; хук в worker.ts после TASK_DONE (в leaseAlive-ветке — гон R28 учтён).
+- R29-3 (интеграция): AGENT_SPAWN default → agentTag() (новые агенты сразу на каноне); eval-датасет v3→v4: +glm.currency (drift=0 обязателен, critical), +reviewer.api → 26 чеков; механики ME25/ME26.
+- R29-4 (UI): блок GLM·REVIEWS в MC-панели: чипы canon/drift/«таг не honoring» (data-testid=glm-chips), кнопки probe/upgrade флот, строка probe-факта, антифальшь-список с бейджами real/suspect/empty (data-testid=reviews-list); события TASK_REVIEWED/GLM_PROBE/GLM_LATEST_SET в EVENT_STYLE; glmOp после mcxOp (TDZ-урок R28 — но всё равно поймал себя снова).
+- R29-5 (e2e + багфиксы): ① eval v4 FAIL при первом прогоне — SQL reviewStats ссылался на task_id (нет такого столбца) — поймано датасетом, починено; ② live-задача «создать отчёт» → агент отчитался «docs/r29-report.md», НО файл не существует — tier-1 пропустил, РЕВЬЮЕР ПОЙМАЛ ФАЛЬШЬ (empty, «результат содержит только путь без содержимого») — первая поимка антифальшь-контура на живой задаче (проверено программно: каталога нет); ③ негативы: /reviews/run 404/400, set_latest кривой тег → 400 bad_model_tag; ④ клиентский краш 500: TDZ glmOp→mcxOp (мой же урок R28!) — починен, страница живая.
+- R29-6 (верификация): daemon v0.27.0, actions=47, флот на zai:glm-5.3 (drift=0), probes копятся (honoring=false — честный факт платформы виден в UI и матрице); матрица 26/26 WORKS (ME18/20/21 восстановлены obsv/MCP/bench); UI: блок рендерится, кнопка probe из UI сработала (probes 2→3), mobile 390px sw=iw; VLM qa1 4/4 (чипы/probe/список/дефектов нет) + программное дублирование. lint 0/0; secrets-guard чист.
+
+Stage Summary:
+- Директива «агенты на последней GLM» исполнена честно: канон glm-5.3 enforced на весь флот (boot+spawn+upgrade+REST), живая probe при каждой инкарнации фиксирует факт бэкенда (сейчас honoring=false: платформа отдаёт glm-4-plus — видно оператору, никакого притворства); когда платформа начнёт уважать тег — флот уже на последней версии, drift=0 автоматически.
+- Директива «работа не фальшивая» закрыта контуром: tier-1 детектор (ME15) + tier-2 LLM-ревью (ME26) + память о подозрительных (обучение следующих задач) + видимость в UI; первое живое ревью поймало фальшь сразу.
+- Daemon v0.27.0, матрица 26/26 WORKS; eval v4 — 26 чеков.
+- Уроки: TDZ-ловушка useCallback повторилась (glmOp/mcxOp) — в R30: все mcxOp-зависимые колбэки размещать ТОЛЬКО после mcxOp; eval-датасет снова поймал SQL-баг до push.
+- Далее по роадмапу R24: C4 (approval-политики: гейт на мутирующие операции), Track D: D1 sense-diffing, D2 obsv→SQLite TTL, D4 БД-гигиена; мониторинг honoring-перехода платформы.
+- Оператору: me2_evidence SQL всё ещё не применён (evidence DEGRADED 404); CI 5e92e91 (R28) проверен cron-раундом.

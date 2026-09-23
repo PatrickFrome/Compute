@@ -12,6 +12,7 @@ import {
 } from "./store";
 import { chat } from "./providers";
 import { recordSpan } from "./src/otel";
+import { reviewTask } from "./src/reviewer";
 
 const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
@@ -337,6 +338,15 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         if (leaseAlive(task.id)) {
           emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
           updateTask(task.id, { status: "COMPLETED", result, steps: step });
+          // R29 C3: антифальшь-ревью результата против спека (zero-authority, async, квотировано);
+          // улики — телеметрия lease (writes/tool_calls/parse_fails)
+          try {
+            reviewTask(task.id, {
+              writes: toolCalls.filter((c) => c.tool === "write_file").length,
+              tool_calls: toolCalls.length,
+              parse_fails: parseFails,
+            });
+          } catch { /* ревью не ломает цикл задачи */ }
         } else {
           emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", finish_result: result.slice(0, 200) }, agent.id, task.id);
         }

@@ -120,6 +120,18 @@ type HandoffData = {
   }>;
   stats: { total: number; last_24h: number; by_to_role: Record<string, number>; last: { id: string; to_role: string | null; created_at: string } | null };
 };
+// R29: GLM currency plane (ME25, GET /glm) + reviewer-agent (ME26, GET /reviews)
+type GlmData = {
+  ok: boolean; canonical: string; agent_tag: string;
+  agents: { total: number; on_canonical: number; drift: number; by_model: Record<string, number> };
+  last_probe: { requested_tag: string; api_model: string | null; honoring: number; ok: number; error: string | null; at: string } | null;
+  probes_total: number; platform_honoring: boolean | null; research: string;
+};
+type ReviewsData = {
+  ok: boolean;
+  reviews: Array<{ task_id: string; title: string; status: string; review: { verdict: "real" | "suspect" | "empty"; reasons: string[]; checked_at: string; evidence: { steps: number; writes: number; tool_calls: number; result_len: number; reward_hack: boolean } } }>;
+  stats: { total: number; by_verdict: Record<string, number>; last: { task_id: string; verdict: string; at: string } | null };
+};
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
   id: string; action: string; lane: string; status: string; cost: number;
@@ -153,6 +165,7 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_COMPLETED: "text-emerald-300", TASK_FAILED: "text-rose-400", TASK_CANCELLED: "text-zinc-400",
   TASK_RETRIED: "text-amber-300", TASK_ARCHIVED: "text-zinc-400", TASK_LISTED: "text-zinc-500",
   TASK_SCHEDULED: "text-lime-300", TASK_HANDOFF: "text-violet-300", TASK_LEASE_VOID: "text-zinc-500",
+  TASK_REVIEWED: "text-cyan-300", GLM_PROBE: "text-cyan-400", GLM_LATEST_SET: "text-cyan-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
   AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400", AGENT_MODEL_SET: "text-cyan-300",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
@@ -1222,6 +1235,9 @@ export default function MissionControl() {
   const [hoReason, setHoReason] = useState("");
   const [hoNext, setHoNext] = useState("");
   const [hoDone, setHoDone] = useState("");
+  // R29: GLM currency + reviewer (директивы: агенты на последней GLM, работа не фальшивая)
+  const [glmData, setGlmData] = useState<GlmData | null>(null);
+  const [revData, setRevData] = useState<ReviewsData | null>(null);
   const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
@@ -1320,6 +1336,13 @@ export default function MissionControl() {
   const loadHo = useCallback(async () => {
     try { const r = await fetch("/handoffs?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setHoData(r as HandoffData); } catch { /* daemon недоступен */ }
   }, []);
+  // R29: GLM currency (GET /glm) + reviewer (GET /reviews)
+  const loadGlm = useCallback(async () => {
+    try { const r = await fetch("/glm?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setGlmData(r as GlmData); } catch { /* daemon недоступен */ }
+  }, []);
+  const loadRev = useCallback(async () => {
+    try { const r = await fetch("/reviews?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setRevData(r as ReviewsData); } catch { /* daemon недоступен */ }
+  }, []);
   // BENCH виден в браузерной панели всегда — грузим на mount и обновляем каждые 30с
   useEffect(() => {
     void loadBench();
@@ -1352,6 +1375,12 @@ export default function MissionControl() {
     return null;
   }, [toast]);
 
+  // R29: операторские действия GLM-плоскости (после mcxOp — TDZ-урок R28)
+  const glmOp = useCallback(async (op: "probe" | "upgrade") => {
+    const ok = await mcxOp("glm", { op }, op === "probe" ? "probe GLM снята — факт в /glm" : "флот переведён на канонический тег GLM", async () => { await loadGlm(); });
+    void ok;
+  }, [mcxOp, loadGlm]);
+
   // Передача задачи: POST /tasks/{id}/handoff — через шину (TASK_ENQUEUE+handoff, 47/47)
   const doHandoff = useCallback(async () => {
     if (!hoTask.trim() || !hoReason.trim() || !hoNext.trim()) {
@@ -1367,11 +1396,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2153,7 +2182,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2307,6 +2336,55 @@ export default function MissionControl() {
                     )}
                     {!hoData && (
                       <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка передач…</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* R29: GLM CURRENCY + REVIEWER — директивы: агенты на последней GLM, работа не фальшивая */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="ME25: канонический тег GLM enforced на весь флот (boot+spawn+upgrade), живая probe фиксирует фактический api.model бэкенда — расхождение платформы видно честно. ME26: антифальшь-ревью COMPLETED-результатов против спека (zero-authority, квоты R11)">
+                      <Cpu className="h-3 w-3 text-cyan-400" aria-hidden /> GLM · REVIEWS
+                    </span>
+                    <span data-testid="glm-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`канонический тег: ${glmData?.agent_tag ?? "—"};probe'ов снято: ${glmData?.probes_total ?? 0}`}>canon {glmData?.canonical ?? "—"}</span>
+                      <span className={`rounded border px-1 py-0.5 ${(glmData?.agents.drift ?? 0) === 0 ? "border-emerald-900 bg-emerald-950/40 text-emerald-300" : "border-rose-900 bg-rose-950/40 text-rose-300"}`} title={`агентов на каноне: ${glmData?.agents.on_canonical ?? 0}/${glmData?.agents.total ?? 0}; drift>0 = есть агенты на старых тегах`}>drift {glmData?.agents.drift ?? "—"}</span>
+                      {glmData?.platform_honoring === false && (
+                        <span className="rounded border border-amber-900 bg-amber-950/40 px-1 py-0.5 text-amber-300" title={`бэкенд отвечает api.model=${glmData.last_probe?.api_model ?? "?"} на тег ${glmData.last_probe?.requested_tag} — платформа пока не уважает тег (зафиксировано честно, таг enforced)`}>таг не honoring</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="mb-1.5 flex gap-1.5">
+                    <button type="button" onClick={() => { void glmOp("probe"); }} disabled={mcxBusy} aria-label="Снять живую пробу GLM" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">probe</button>
+                    <button type="button" onClick={() => { void glmOp("upgrade"); }} disabled={mcxBusy} aria-label="Перевести флот на канонический тег GLM" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">upgrade флот</button>
+                    <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить GLM и ревью" className="ml-auto text-zinc-600 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>
+                  </div>
+                  {glmData?.last_probe && (
+                    <div className="mb-1.5 rounded bg-zinc-900/50 px-1.5 py-1 font-mono text-[9px]" title={`probe: ${glmData.last_probe.at} · requested=${glmData.last_probe.requested_tag}`}>
+                      <span className={glmData.last_probe.ok ? "text-cyan-300" : "text-rose-300"}>probe:</span> <span className="text-zinc-400">запрошен {glmData.last_probe.requested_tag} → бэкенд {glmData.last_probe.api_model ?? `ошибка: ${glmData.last_probe.error ?? "?"}`}</span>
+                    </div>
+                  )}
+                  <div className="mb-0.5 flex items-center gap-1.5" title="ME26: ревью COMPLETED-задач — сверка результата со спеком и телеметрией lease; suspect/empty уходят в память с высоким весом">
+                    <ScanEye className="h-3 w-3 text-cyan-400" aria-hidden />
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-600">антифальшь-ревью</span>
+                    <span className="font-mono text-[9px] text-zinc-500">{revData ? `real ${revData.stats.by_verdict.real ?? 0} · suspect ${revData.stats.by_verdict.suspect ?? 0} · empty ${revData.stats.by_verdict.empty ?? 0}` : ""}</span>
+                  </div>
+                  <div className="max-h-28 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние антифальшь-ревью" data-testid="reviews-list">
+                    {(revData?.reviews ?? []).slice(0, 4).map((r) => (
+                      <div key={r.task_id} role="listitem" className="rounded bg-zinc-900/50 px-1.5 py-1" title={`${r.task_id} · ${r.review.checked_at} · телеметрия: шагов=${r.review.evidence.steps}, вызовов=${r.review.evidence.tool_calls}${r.review.evidence.reward_hack ? ", tier-1 reward-hack" : ""}`}>
+                        <div className="flex items-center gap-1.5 font-mono text-[9px]">
+                          <span className={`shrink-0 rounded px-1 text-[8px] ${r.review.verdict === "real" ? "bg-emerald-950/60 text-emerald-300" : r.review.verdict === "empty" ? "bg-zinc-800 text-zinc-400" : "bg-amber-950/60 text-amber-300"}`}>{r.review.verdict}</span>
+                          <span className="min-w-0 flex-1 truncate text-zinc-400">{r.title}</span>
+                          <span className="shrink-0 text-zinc-600">{hhmmss(r.review.checked_at)}</span>
+                        </div>
+                        {r.review.reasons[0] && <div className="mt-0.5 truncate font-mono text-[9px] text-zinc-500" title={r.review.reasons.join("; ")}>· {r.review.reasons[0]}</div>}
+                      </div>
+                    ))}
+                    {revData && revData.reviews.length === 0 && (
+                      <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">ревью ещё не было — появятся после выполнения задач (POST /reviews/run {`{task_id}`} — вручную)</div>
+                    )}
+                    {!revData && (
+                      <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка ревью…</div>
                     )}
                   </div>
                 </div>

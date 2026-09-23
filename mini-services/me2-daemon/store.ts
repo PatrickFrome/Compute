@@ -106,6 +106,8 @@ if (!taskCols.includes("parent_id")) db.exec(`ALTER TABLE tasks ADD COLUMN paren
 if (!taskCols.includes("reflection")) db.exec(`ALTER TABLE tasks ADD COLUMN reflection TEXT`);
 // R27 C1: Mission Control — проекция objectives→tasks→agents→effects (fails-closed, zero-authority)
 if (!taskCols.includes("objective_id")) db.exec(`ALTER TABLE tasks ADD COLUMN objective_id TEXT`);
+// R29 C3: reviewer-agent — LLM-ревью результата против спека (антифальшь, директива оператора)
+if (!taskCols.includes("review")) db.exec(`ALTER TABLE tasks ADD COLUMN review TEXT`);
 
 export type AgentRow = {
   id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
@@ -113,7 +115,7 @@ export type AgentRow = {
 export type TaskRow = {
   id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
-  error: string | null; reflection: string | null; objective_id: string | null; created_at: string; updated_at: string;
+  error: string | null; reflection: string | null; objective_id: string | null; review: string | null; created_at: string; updated_at: string;
 };
 export type EventRow = {
   seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string;

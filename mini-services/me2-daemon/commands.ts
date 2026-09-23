@@ -14,6 +14,7 @@ import { WORKSPACE_ROOT } from "./worker";
 import { recordSpan } from "./src/otel";
 import { getObjective } from "./src/objectives";
 import { handoffCreate, type HandoffProtocol } from "./src/handoffs";
+import { agentTag } from "./src/glm";
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -178,7 +179,8 @@ const handlers: Record<string, Handler> = {
 
   AGENT_SPAWN: (p) => {
     const role = String(p.role ?? "IMPLEMENTER").toUpperCase().slice(0, 32);
-    const model = String(p.model ?? "zai:default").slice(0, 64);
+    // R29: директива «все агенты всегда на последней GLM» — дефолт модели = канонический тег
+    const model = String(p.model ?? agentTag()).slice(0, 64);
     const agent = createAgent(role, model);
     emit("AGENT_CREATED", { role, model }, agent.id, null);
     return { agent };

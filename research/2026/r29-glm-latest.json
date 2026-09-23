@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://docs.z.ai",
+    "name": "New Released - Overview - Z.AI DEVELOPER DOCUMENT",
+    "snippet": "We've launched GLM-4.7-Flash , a lightweight and efficient model designed as the free-tier version of GLM-4.7, delivering strong performance across coding,",
+    "host_name": "docs.z.ai",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://z.ai",
+    "name": "GLM-5.2: Built for Long-Horizon Tasks",
+    "snippet": "Jun 16, 2026 — GLM-5.2 , our latest flagship model for long-horizon tasks. Opus 4.7 by 11%. GLM-5.2 outperforms both Opus 4.7 and GPT-5.5, ranking second only ...",
+    "host_name": "z.ai",
+    "rank": 1,
+    "date": "Jun 16, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://en.wikipedia.org",
+    "name": "GLM (AI)",
+    "snippet": "Stable release GLM-5.3-FlashX September 21, 2026 ; GLM is the flagship model series of Z.ai, Zhipu AI launches new major model GLM-5 in challenge to its rivals\".",
+    "host_name": "en.wikipedia.org",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://huggingface.co",
+    "name": "zai-org (Z.ai)",
+    "snippet": "Zhipu AI ( Z . ai ). We build the ChatGLM family of LLMs, develop LLMs as Agents, and release related LLM training & inference techniques: GLM -5.3 & GLM -5.2 ... Read more",
+    "host_name": "huggingface.co",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.secondtalent.com",
+    "name": "Every GLM (Z.ai) Model Explained and Compared [2026]",
+    "snippet": "8 days ago — TL;DR: Z.ai's flagship is GLM-5.3, released on August 18, 2026 at $1.40 per million input tokens and $4.40 per million output tokens. Read more",
+    "host_name": "www.secondtalent.com",
+    "rank": 4,
+    "date": "Sep 15, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com",
+    "name": "GLM-5.3 & GLM-5.2 & GLM-5.1 & GLM-5",
+    "snippet": "Stronger Coding: GLM-5.3 is the most capable open-weights model for coding , with a 50% improvement over GLM-5.2 on our in-house Z.ai Code Bench. It also achieve ... Read more",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  }
+]

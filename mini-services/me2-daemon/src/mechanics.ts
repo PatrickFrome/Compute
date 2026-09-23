@@ -26,6 +26,8 @@ import { mcpStatus } from "./mcp";
 import { evalVerdict } from "./eval";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
+import { glmVerdict } from "./glm";
+import { reviewerVerdict } from "./reviewer";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -170,6 +172,16 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME24", name: "Handoffs: передача задач между агентами с протоколом (C2)", old_ref: "codex handoffs semantics (протокол done/in_flight/next/context)",
       verdict: handoffsVerdict().verdict,
       evidence: handoffsVerdict().evidence + "; POST /tasks/{id}/handoff — через шину (TASK_ENQUEUE+handoff), 47/47",
+    },
+    {
+      id: "ME25", name: "GLM currency: флот на каноническом теге + живая probe бэкенда (директива)", old_ref: "— (R29: «все агенты всегда на последней версии glm»)",
+      verdict: glmVerdict().verdict,
+      evidence: glmVerdict().evidence + "; POST /glm {op:probe|upgrade|set_latest}",
+    },
+    {
+      id: "ME26", name: "Reviewer-agent: антифальшь-ревью результатов против спека (C3)", old_ref: "— (R29: «работа агентов не фальшивая»; усиливает ME15 tier-1)",
+      verdict: reviewerVerdict().verdict,
+      evidence: reviewerVerdict().evidence + "; GET /reviews | POST /reviews/run — zero-authority (не меняет статусы)",
     },
   ];
 

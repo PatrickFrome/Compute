@@ -32,9 +32,11 @@ import { codegraphSummary } from "./codegraph";
 import { otelStatus } from "./otel";
 import { workGraph, OBJECTIVE_STATUSES } from "./objectives";
 import { handoffList, handoffStats } from "./handoffs";
+import { glmStatus, canonicalGlm, agentTag } from "./glm";
+import { reviewStats } from "./reviewer";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 3;
+export const EVAL_DATASET_VERSION = 4;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -83,6 +85,7 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v1 (R26) — 20 чеков; v2 (R27) — +mc.workgraph_shape, mc.statuses_canonical = 22;
 // v3 (R28) — рёбра task_handoff в workgraph_shape, +mc.tasks_statuses_canonical (HANDED_OFF),
 //            +handoff.table_api = 24. Осознанное изменение контракта → версия поднята.
+// v4 (R29) — +glm.currency (канон+drift флота), +reviewer.api (колонка/статистика) = 26.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -321,6 +324,28 @@ export const EVAL_DATASET: EvalCheck[] = [
       const badProto = rows.filter((r) => !r.protocol_parsed || typeof r.protocol_parsed.next !== "string").length;
       const ok = !!t && Array.isArray(rows) && badProto === 0 && Number.isFinite(s.total) && s.total >= 0 && s.last_24h >= 0;
       return { ok, evidence: `table=${t ? "yes" : "no"}, rows=${rows.length}, total=${s.total}, 24h=${s.last_24h}, bad_proto=${badProto}` };
+    },
+  },
+  // — GLM currency (R29, директива оператора) —
+  {
+    id: "glm.currency", plane: "glm", title: "GLM currency (ME25): весь флот на каноническом теге",
+    critical: true, expect: `meta.glm_canonical непуст; все агенты на теге zai:<canonical> (drift=0); таблица glm_probes в схеме`,
+    run: () => {
+      const s = glmStatus();
+      const t = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='glm_probes'`).get();
+      const ok = !!canonicalGlm() && s.agents.total >= 0 && s.agents.drift === 0 && !!t;
+      return { ok, evidence: `canonical=${s.canonical}, agents=${s.agents.total}, drift=${s.agents.drift}, tag=${s.agent_tag}, probes=${s.probes_total}, honoring=${s.platform_honoring}` };
+    },
+  },
+  {
+    id: "reviewer.api", plane: "review", title: "Reviewer API (ME26): колонка и статистика живы",
+    critical: true, expect: "колонка tasks.review; reviewStats(): total≥0, by_verdict ⊆ {real,suspect,empty}",
+    run: () => {
+      const col = db.query(`SELECT name FROM pragma_table_info('tasks') WHERE name='review'`).get();
+      const s = reviewStats();
+      const bad = Object.keys(s.by_verdict).filter((k) => !["real", "suspect", "empty"].includes(k));
+      const ok = !!col && Number.isFinite(s.total) && s.total >= 0 && bad.length === 0;
+      return { ok, evidence: `column=${col ? "yes" : "no"}, reviews=${s.total}, by=${JSON.stringify(s.by_verdict)}` };
     },
   },
 ];
