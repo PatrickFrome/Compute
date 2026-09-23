@@ -25,6 +25,7 @@ import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evid
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { SqlMirror } from "./src/sqlmirror";
+import { runRlsAuditAsync } from "./src/rls-audit";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
@@ -228,6 +229,12 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const url = new URL(req.url || "", "http://local");
       const limit = Number(url.searchParams.get("limit") || 50);
       return json(res, 200, await sqlMirror.readFeed(limit));
+    }
+    // ── R58 «Политики как данные»: RLS-самоаудит облака против ожидаемой матрицы (sql/0003+0004) ──
+    // read-only интроспекция psql-каналом, кэш 60с, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/rls-audit" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      return json(res, 200, await runRlsAuditAsync(url.searchParams.get("force") === "1"));
     }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
