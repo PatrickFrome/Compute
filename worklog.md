@@ -689,3 +689,8 @@ Stage Summary:
 - Ресёрч r51-analogues: 5 паттернов-эталонов + 1 новый (изоляция как gate-требование); осознанные НЕ-заимствования зафиксированы.
 - Мониторинг: CI #952 round-2 (daemon-gate) — проверка merge; VLM/веб-верификация ресёрчей — при окне квоты; webDevReview cron 409178 продолжает.
 - Далее (R52, C7): next build apps/me2-ui в CI + упаковка в resources/me2-ui (ui-host R50 подхватит каталог), gate → required-check autorelease; затем фаза D (Supabase DEPRECATED-реестр 243 RPC, H6 SQL-контур) и E (архивация 1025+ веток, матрица версий K8 в /state).
+
+R51-FINAL (доставка подтверждена):
+- CI round-4: ME2 Unified Gate SUCCESS на раннере GitHub (daemon-gate: изолированный boot-probe eval PASS; ui-gate: frozen install) → PR #952 MERGED в release/self-update-ambiguity-live-v2 (round-3 фикс: probe.sh самодостаточен — ME2_REPO_ROOT внутри mktemp-каталога; round-4: честные WARMUP — tokens.in_db фиксирует пустоту vault ДО probe-токена, evidence.remote WARMUP при config-OFF).
+- Итог фазы C6: release-мейнлайн = apps/metaengine-browser + apps/me2-daemon (v0.43.0) + apps/me2-ui + unified gate; 4 реальных бага найдено и починено gate'ом; 5 коммит-раундов смарт-мержа (7e2dd317d→e039f6e5d→…→merge).
+- Локальный HEAD 5a4256ef1 → push sandbox/me2-os (ниже в этом же раунде); следующий dev-релиз браузера соберёт CI уже с monorepo.
