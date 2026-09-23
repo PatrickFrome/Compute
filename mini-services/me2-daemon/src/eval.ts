@@ -44,11 +44,12 @@ import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
 import { createTask, updateTask, rid } from "../store";
 import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
+  supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList,
 } from "./agentchat";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 11;
+export const EVAL_DATASET_VERSION = 12;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -107,6 +108,8 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v11 (R36) — +agentchat.sessions (G1: сессия/история/контекст-бюджет/счётчики/закрытие; critical),
 //             +agentchat.tools (G1: write→read→list roundtrip в workspace чата + path-escape заблокирован; critical) = 37.
 //             Живой GLM-ход — НЕ в sync-харнесе (урок R25: сеть только async): доказывается живым REST-ходом в раунде (worklog).
+// v12 (R36) — +agentchat.supervisor (G2: вечно-живущий супервизор — идемпотентный ensure, перерождение после смерти с новым id, роль SUPERVISOR; critical),
+//             +agentchat.interchat (G2: межчатовая связь — доставка в историю цели с meta.from_chat, unread-счётчик, честные ошибки цели; critical) = 39.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -590,6 +593,61 @@ export const EVAL_DATASET: EvalCheck[] = [
           try { rmSync(join("/home/z/my-project/me2-workspace", `chat_${s.id.slice(3, 11)}`), { recursive: true, force: true }); } catch { /* noop */ }
           agentChatDelete(s.id);
         }
+      }
+    },
+  },
+  {
+    id: "agentchat.supervisor",
+    plane: "agentchat",
+    title: "AgentChat (G2): вечно-живущий супервизор — идемпотентный ensure, перерождение после смерти",
+    critical: true,
+    expect: "supervisorEnsure(title) создаёт SUPERVISOR-сессию; повторный ensure не дублирует (тот же id); close → ensure рождает НОВОГО с другим id (перезапускающийся)",
+    run: () => {
+      const TITLE = "eval-super";
+      const ids: string[] = [];
+      try {
+        const a = supervisorEnsure(TITLE);
+        if (a.id) ids.push(a.id);
+        const again = supervisorEnsure(TITLE);
+        const idemOk = !again.created && again.id === a.id;
+        const s1 = a.id ? agentChatGet(a.id, 1)?.session ?? null : null;
+        const roleOk1 = s1?.role === "SUPERVISOR";
+        if (s1) agentChatClose(s1.id); // смерть супервизора
+        const reborn = supervisorEnsure(TITLE); // перерождение (вечно-живущий)
+        if (reborn.id) ids.push(reborn.id);
+        const s2 = reborn.id ? agentChatGet(reborn.id, 1)?.session ?? null : null;
+        const roleOk2 = s2?.role === "SUPERVISOR";
+        const ok = idemOk && roleOk1 && reborn.created && reborn.id !== a.id && roleOk2;
+        return { ok, evidence: `idem=${idemOk}, role1=${roleOk1}, умер → перерождение created=${reborn.created}, id сменился=${reborn.id !== a.id}, role2=${roleOk2} (${a.id}→${reborn.id})` };
+      } finally {
+        for (const id of ids) { try { agentChatDelete(id); } catch { /* noop */ } }
+      }
+    },
+  },
+  {
+    id: "agentchat.interchat",
+    plane: "agentchat",
+    title: "AgentChat (G2): межчатовая связь — доставка в историю цели, unread-счётчик, честные ошибки",
+    critical: true,
+    expect: "interchatDeliver(a→b) кладёт user-сообщение с meta.from_chat=a в историю b; unreadInterchat(b)=1; цель не существует → target_not_found; цель закрыта → target_closed",
+    run: () => {
+      let a: ReturnType<typeof agentChatCreate> | null = null;
+      let b: ReturnType<typeof agentChatCreate> | null = null;
+      try {
+        a = agentChatCreate({ role: "CHAT", title: "eval-ic-a", model: "glm-eval-stub" });
+        b = agentChatCreate({ role: "CHAT", title: "eval-ic-b", model: "glm-eval-stub" });
+        const r = interchatDeliver(a.id, b.id, "координация: сверка канала флота");
+        const got = agentChatGet(b.id, 50);
+        const delivered = got?.messages.some((m) => m.role === "user" && m.meta.from_chat === a!.id && m.content.includes("координация")) ?? false;
+        const unread = unreadInterchat(b.id);
+        const nf = interchatDeliver(a.id, "ac_missing_target", "x");
+        agentChatClose(b.id);
+        const closedErr = interchatDeliver(a.id, b.id, "y");
+        const ok = r.ok && delivered && unread === 1 && !nf.ok && nf.error === "target_not_found" && !closedErr.ok && closedErr.error === "target_closed";
+        return { ok, evidence: `delivered=${delivered}, unread=${unread}, missing=${nf.error}, closed=${closedErr.error}` };
+      } finally {
+        if (a) agentChatDelete(a.id);
+        if (b) agentChatDelete(b.id);
       }
     },
   },

@@ -55,11 +55,12 @@ import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX 
 import {
   agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
   agentChatTurnAsync, agentChatCompact, agentChatRestore,
+  agentChatSupervisorTick, supervisorEnsure, SUPERVISOR_TICK_MS, interchatDeliver,
 } from "./src/agentchat";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.34.0";
+const VERSION = "0.35.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -702,7 +703,20 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           const ok = agentChatClose(String(body.id ?? ""));
           return ok ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: "session_not_found" });
         }
-        return json(res, 400, { ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close"] });
+        if (op === "tick") {
+          // G2: ручной тик супервизоров (перерождение мёртвых + автономные ходы) — force: без ожидания idle
+          const r = agentChatSupervisorTick({ force: body.force === true });
+          return json(res, 200, { ok: true, ...r, in_flight: agentChatStatus().in_flight });
+        }
+        if (op === "send") {
+          // G2: межчат от оператора — сообщение в историю чата (meta.from_chat=operator) + авто-пробуждение получателя
+          const id = String(body.id ?? "");
+          const text = String(body.text ?? "").trim();
+          if (!id || !text) return json(res, 400, { ok: false, error: "id_and_text_required" });
+          const r = interchatDeliver("operator", id, text);
+          return r.ok ? json(res, 200, { ok: true, ...r }) : json(res, 400, { ok: false, error: r.error });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
       }
@@ -875,6 +889,14 @@ if (poolBootAllowed) {
   try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
   try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
   try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
+  // G2: вечно-живущий супервизор флота — гарантия при boot + тик каждые 60с (перерождение + автономные ходы)
+  try { const se = supervisorEnsure(); console.log(`[agentchat] supervisor ${se.created ? "created" : "alive"} (${se.id})`); } catch (e) { console.error(`[agentchat] supervisorEnsure failed: ${String(e)}`); }
+  setInterval(() => {
+    try {
+      const r = agentChatSupervisorTick();
+      if (r.kicked.length) console.log(`[agentchat] supervisor tick: kicked=${r.kicked.join(",")} supervisors=${r.supervisors}`);
+    } catch (e) { console.error(`[agentchat] supervisor tick failed: ${String(e)}`); }
+  }, SUPERVISOR_TICK_MS);
 }
 
 startMasterLoop();
