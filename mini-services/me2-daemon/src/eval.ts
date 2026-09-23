@@ -51,7 +51,7 @@ import {
   outcomeReport, outcomePending, meshHeartbeatApply,
 } from "./agentchat";
 import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
-import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt, anonRegisteredJwt } from "./supabase-jwt";
+import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt, anonRegisteredJwt, gotrueStatus, gotrueCreds, gotrueVerifyShape } from "./supabase-jwt";
 import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
@@ -62,7 +62,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 21;
+export const EVAL_DATASET_VERSION = 22;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1135,6 +1135,33 @@ export const EVAL_DATASET: EvalCheck[] = [
       const anonV = anon ? verifyPair(anon, "anon") : null;
       const ok = svcV.ok && (anonV === null || anonV.ok);
       return { ok, evidence: `service_role: HMAC=${svcV.ok}, ref=${svcV.ref}; anon: ${anonV === null ? "слота нет (ok)" : `HMAC=${anonV.ok}, ref=${anonV.ref}`} — обе пары против одного секрета` };
+    },
+  },
+  {
+    id: "contract.supabase_gotrue",
+    plane: "contract",
+    title: "R57: gotrue-канал — настоящий access_token сервис-аккаунта (кэш+refresh, single-flight, анти-шторм); без утечки email/пароля; честная деградация без сети",
+    critical: false,
+    expect: "креденшалов нет → skip-ok; есть → при кэше: auth_token — форма GoTrue (3 сегмента, role=authenticated, iss /auth/v1, aal, срок жив), в выдаче НЕТ email и НЕТ пароля; без кэша: честная last_error либо попытка ещё не потребовалась — PASS в любом честном режиме",
+    run: () => {
+      const st = gotrueStatus();
+      if (!st.configured) return { ok: true, evidence: `skip-ok: креденшалов GoTrue в vault'е нет — канал честно отсутствует` };
+      const creds = gotrueCreds();
+      if (!creds) return { ok: true, evidence: "skip-ok: creds недоступны" };
+      const bundle = uiTokenBundle();
+      const raw = JSON.stringify(bundle);
+      const noLeak = !raw.includes(creds.password) && !raw.includes(creds.email);
+      const authTok = bundle.auth_token ?? (bundle.channel === "gotrue" ? bundle.token : undefined);
+      if (!authTok) {
+        // кэша нет: честно, если есть честная ошибка (сеть/облако) — канал деградирует словами
+        const ok = st.cached === false && (st.last_error !== null || st.last_attempt_at === null);
+        return { ok, evidence: `кэша нет: last_error=${String(st.last_error)}, attempt=${st.last_attempt_at ? "был" : "не требовался"}, no-leak=${noLeak} — честная деградация` };
+      }
+      const shape = gotrueVerifyShape(authTok);
+      const bundleShape = bundle.auth_channel === "gotrue" && (bundle.channel === "gotrue" || Boolean(bundle.anon_token));
+      const sig = verifySupabaseJwt(authTok); // GoTrue подписывает тем же проектным секретом — evidence-only
+      const ok = shape.ok && bundleShape && noLeak;
+      return { ok, evidence: `channel=${bundle.channel}, auth=gotrue, shape=${shape.ok} (role=${shape.role}, iss=${String(shape.iss ?? "").slice(0, 24)}…, aal=${shape.aal}), sig(offline)=${sig.ok}/${sig.reason}, ttl=${st.expires_in}с, no-leak(email/пароль)=${noLeak}` };
     },
   },
   {

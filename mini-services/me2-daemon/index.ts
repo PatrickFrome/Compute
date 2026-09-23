@@ -25,7 +25,7 @@ import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evid
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { SqlMirror } from "./src/sqlmirror";
-import { uiTokenBundle, verifySupabaseJwt } from "./src/supabase-jwt";
+import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
@@ -183,9 +183,12 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
     // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
     if (path === "/sqlmirror/ui-token" && req.method === "GET") {
+      // R57: gotrue-канал — best-effort логин/рефреш сервис-аккаунта ДО сборки bundle (кэш+анти-шторм).
+      // Пароль/email не покидают daemon; в bundle уходит только короткоживущий access_token пользователя.
+      try { await gotrueToken(); } catch { /* честная деградация — статус в auth */ }
       const bundle = uiTokenBundle();
-      if (!bundle.ok) return json(res, 200, { ...bundle, mirror_state: sqlMirror.status().state });
-      return json(res, 200, { ...bundle, mirror_state: sqlMirror.status().state });
+      if (!bundle.ok) return json(res, 200, { ...bundle, auth: gotrueStatus(), mirror_state: sqlMirror.status().state });
+      return json(res, 200, { ...bundle, auth: gotrueStatus(), mirror_state: sqlMirror.status().state });
     }
     if (path === "/sqlmirror/ui-token/verify" && req.method === "GET") {
       // само-проверка канала: daemon сам валидирует выдачу (подпись+срок+роль либо префиксы/режимы).
@@ -199,7 +202,14 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       if (!b.ok || !b.token) return json(res, 200, { ok: false, reason: b.reason ?? "mint_failed" });
       if (b.channel === "publishable") {
         const ok = String(b.token).startsWith("sb_publishable_");
-        return json(res, 200, { ok, channel: "publishable", note: ok ? "публичный read-ключ (роль anon, видимость диктует RLS)" : "неожиданный формат", schema: b.schema, table: b.table });
+        const auth = b.auth_token ? gotrueVerifyShape(String(b.auth_token)) : null;
+        return json(res, 200, { ok, channel: "publishable", note: ok ? "публичный read-ключ (роль anon, видимость диктует RLS)" : "неожиданный формат",
+                                auth: auth ? { shape_ok: auth.ok, reason: auth.reason, role: auth.role, iss: auth.iss, aal: auth.aal } : "нет gotrue-токена (креденшалы/сеть)",
+                                schema: b.schema, table: b.table });
+      }
+      if (b.channel === "gotrue") {
+        const v = gotrueVerifyShape(String(b.token));
+        return json(res, 200, { ok: v.ok, channel: "gotrue", shape: v, note: b.note, schema: b.schema, table: b.table });
       }
       if (b.channel === "anon_registered") {
         // R54: зарегистрированный legacy anon — проверяем форму JWT (3 сегмента, роль anon в claims)
@@ -1121,6 +1131,9 @@ if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase
 }
 const sqlMirror = new SqlMirror(db);
 sqlMirror.start();
+// R57: gotrue-канал — разогрев кэша токена сервис-аккаунта (best-effort; анти-шторм держит,
+// панель при неудаче честно покажет auth.last_error)
+void gotrueToken().catch(() => { /* honest degradation */ });
 if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });

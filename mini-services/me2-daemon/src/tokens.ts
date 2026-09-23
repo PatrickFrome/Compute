@@ -91,7 +91,9 @@ const SEED_FILES = [
   // против SUPABASE_JWT_SECRET; облако принимает точную строку зарегистрированного ключа — пробы E2/E5);
   // R55: +SUPABASE_PUBLISHABLE_KEY и +SUPABASE_ANON_JWT (публичные-по-дизайну ключи; живая проба R55:
   // PGRST205 на таблице = аутентификация прошла → канонический RLS-гейт из UI РАБОТАЕТ).
-  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_JWT"] },
+  // R57: +SUPABASE_UI_ACCOUNT_EMAIL/PASSWORD (сервис-аккаунт GoTrue от R55; gotrue-канал —
+  // authenticated-чтение зеркала по политике RLS; креденшалы только в vault/env, никогда не печатаются).
+  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_JWT", "SUPABASE_UI_ACCOUNT_EMAIL", "SUPABASE_UI_ACCOUNT_PASSWORD"] },
   { path: "/home/z/.a2/.github.env", keys: ["GITHUB_TOKEN_ADMIN"] },
 ];
 

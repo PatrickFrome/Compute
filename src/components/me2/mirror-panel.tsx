@@ -1,12 +1,13 @@
 "use client";
 
 /**
- * ME2 · R54 — панель «SQL-ЗЕРКАЛО (SUPABASE)» для консоли Mission Control :3000.
+ * ME2 · R54/R57 — панель «SQL-ЗЕРКАЛО (SUPABASE)» для консоли Mission Control :3000.
  * Честные состояния канала чтения (по приоритету daemon'а):
  *   publishable / anon_registered — RLS-гейт канонический (токен публичен по дизайну);
+ *   gotrue                        — настоящий GoTrue access_token (authenticated, кэш+refresh в daemon);
  *   service_proxy                 — читает сам daemon (legacy service-ключ не покидает сервер);
  *   mint                          — облако отвергает сам-минт (доказано пробами R54);
- * состояние зеркала: OFF / WARMUP (ждёт DDL оператора) / LIVE / DEGRADED.
+ * состояние зеркала: OFF / WARMUP (ждёт DDL) / LIVE / DEGRADED; auth_channel — gotrue-дополнение (R57).
  * Read-only: 2 GET-запроса каждые 30с, вне шины (47-инвариант не тронут). Секретов не показывает.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -33,6 +34,9 @@ type UiToken = {
   note?: string;
   reason?: string;
   mirror_state?: string;
+  auth_channel?: string;
+  auth_ttl?: number;
+  auth?: { configured?: boolean; cached?: boolean; expires_in?: number; last_error?: string | null };
 };
 
 type FeedRow = { seq: number; ts: string; type: string; actor?: string; subject?: string | null };
@@ -59,6 +63,8 @@ function channelNote(ch?: string) {
       return { icon: <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />, text: "RLS-гейт канонический: публичный read-ключ (роль anon), видимость строк диктует RLS" };
     case "anon_registered":
       return { icon: <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />, text: "RLS-гейт канонический: зарегистрированный legacy anon-ключ (роль anon)" };
+    case "gotrue":
+      return { icon: <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />, text: "настоящий GoTrue access_token сервис-аккаунта (кэш+refresh в daemon, ttl ~1ч) — authenticated-чтение по RLS канонически" };
     case "service_proxy":
       return { icon: <ShieldAlert className="h-3.5 w-3.5 text-amber-400" />, text: "читает сам daemon — ключ не покидает сервер; RLS-демонстрация ждёт sb_publishable / legacy anon (vault SUPABASE_ANON_JWT)" };
     case "mint":
@@ -144,6 +150,12 @@ export default function MirrorPanel() {
               {note.icon}
               <span>
                 <span className="text-zinc-300">канал {token?.channel || "n/a"}:</span> {note.text}
+                {token?.auth_channel === "gotrue" && (
+                  <span className="text-emerald-400/90"> · auth: gotrue (ttl {token?.auth_ttl ?? 0}с) — authenticated читает строки по политике</span>
+                )}
+                {token?.auth_channel !== "gotrue" && token?.auth?.configured && token?.auth?.last_error && (
+                  <span className="text-amber-400/90"> · auth: gotrue недоступен ({token.auth.last_error}) — честная деградация</span>
+                )}
                 {token?.ok === false && token?.reason && <span className="text-zinc-500"> · {token.reason}</span>}
               </span>
             </div>
