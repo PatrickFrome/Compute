@@ -13,6 +13,7 @@
  * больше не теряется при перезагрузке вкладки.
  */
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
+import { me2SocketOp } from './me2-socket-client.mjs';
 
 export const ME2_FLEET_BRIDGE_SCHEMA = 'metaengine.browser.me2.fleet-bridge.v1';
 
@@ -73,14 +74,23 @@ export async function me2FleetObserve() {
   return lastFleetDigest;
 }
 
-/** Ход оператора/браузера в чат ME2 (мост «вкладка → чат»); ход идёт фоном (202). */
+/** Ход оператора/браузера в чат ME2 (мост «вкладка → чат»); ход идёт фоном (THINKING).
+ * R49: транспорт — socket agentchat:op (REST-операции сняты в daemon v0.40; контракт
+ * me2-daemon-contract.v1). Недоступный socket — честный throw → OBSERVE/DEGRADED строка. */
 export async function me2ChatTurn(sessionId, text) {
-  const j = await me2Fetch('/agentchat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ op: 'turn', id: String(sessionId), text: String(text ?? '').slice(0, 8000) }),
-  });
-  emitRow({ schema: ME2_FLEET_BRIDGE_SCHEMA, event: 'TURN_RELAYED', id: sessionId, ok: j?.ok === true });
+  let j;
+  try {
+    j = await me2SocketOp({ op: 'turn', id: String(sessionId), text: String(text ?? '').slice(0, 8000) });
+  } catch (e) {
+    emitRow({ schema: ME2_FLEET_BRIDGE_SCHEMA, event: 'TURN_RELAY_FAILED', id: sessionId, error: String(e?.message || e).slice(0, 120) }, { error: true });
+    throw e;
+  }
+  if (!j?.ok) {
+    // честный отказ daemon'а (busy/closed/not_found) — наружу без ретраев (штормы недопустимы)
+    emitRow({ schema: ME2_FLEET_BRIDGE_SCHEMA, event: 'TURN_REJECTED', id: sessionId, error: String(j?.error || '?').slice(0, 80) }, { error: true });
+    return j;
+  }
+  emitRow({ schema: ME2_FLEET_BRIDGE_SCHEMA, event: 'TURN_RELAYED', id: sessionId, ok: true, transport: 'socket:agentchat:op' });
   return j;
 }
 
@@ -103,5 +113,5 @@ export function stopMe2FleetBridge() {
 }
 
 export function me2FleetBridgeStatus() {
-  return { schema: ME2_FLEET_BRIDGE_SCHEMA, stopped, last_digest: lastFleetDigest, rest_base: ME2_REST_BASE };
+  return { schema: ME2_FLEET_BRIDGE_SCHEMA, stopped, last_digest: lastFleetDigest, rest_base: ME2_REST_BASE, turn_transport: 'socket:agentchat:op' };
 }

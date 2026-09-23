@@ -18,17 +18,54 @@ import { startMe2MissionControl, stopMe2MissionControl, me2MissionControlStatus 
 import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
 import { startMe2SupervisorMeshBridge, stopMe2SupervisorMeshBridge, me2SupervisorMeshBridgeStatus } from './me2-supervisor-mesh-bridge.mjs';
 import { me2FleetTabsHostStatus } from './me2-fleet-tabs-host.mjs';
+import { me2SocketStatus } from './me2-socket-client.mjs';
+import { ME2_REST_BASE } from './me2-daemon-host.mjs';
 
 export const ME2_INTEGRATION_SCHEMA = 'metaengine.browser.me2.integration.v1';
-export const ME2_INTEGRATION_VERSION = 'r41-r42-smart-merge-1';
+export const ME2_INTEGRATION_VERSION = 'r49-contract-smart-merge-1';
+
+/** Ожидаемый контракт daemon'а (docs/electron-rebuild-plan.md, фаза A; аналогия — LSP initialize). */
+export const ME2_EXPECTED_CONTRACT = 'me2-daemon-contract.v1';
 
 let started = false;
 let stoppedFlag = false;
+let contractState = { checked: false, ok: false, contract: null, expected: ME2_EXPECTED_CONTRACT, capabilities: null, at: null, error: null };
 
 function emitRow(row, { error = false } = {}) {
   const text = JSON.stringify(row);
   if (error || process.argv.some((a) => String(a || '').startsWith('--metaengine-'))) console.error(text);
   else console.log(text);
+}
+
+/**
+ * R49 (фаза A): capabilities-handshake daemon ⇄ браузерная me2-плоскость.
+ * Читает GET /state → contract + capabilities; при несовпадении — честный DEGRADED
+ * (без шторма рестартов): наблюдение продолжает работать (read-only REST жив),
+ * операции через socket будут честно падать с машинными кодами до починки контракта.
+ */
+export async function me2ContractHandshake() {
+  contractState = { checked: false, ok: false, contract: null, expected: ME2_EXPECTED_CONTRACT, capabilities: null, at: new Date().toISOString(), error: null };
+  try {
+    const r = await fetch(`${ME2_REST_BASE}/state`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error(`me2_http_${r.status}`);
+    const j = await r.json();
+    contractState.checked = true;
+    contractState.contract = j?.contract ?? null;
+    contractState.capabilities = j?.capabilities ?? null;
+    const ops = Array.isArray(j?.capabilities?.ops) ? j.capabilities.ops : [];
+    const meshOk = ops.includes('mesh_heartbeat');
+    const uiOk = j?.capabilities?.ui === '/ui';
+    contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && meshOk && uiOk;
+    if (contractState.ok) {
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null });
+    } else {
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, mesh_heartbeat: meshOk, ui: uiOk, verdict: 'DEGRADED — операции честно падают до починки контракта' }, { error: true });
+    }
+  } catch (e) {
+    contractState.error = String(e?.message || e).slice(0, 140);
+    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_UNREACHABLE', error: contractState.error, verdict: 'DEGRADED' }, { error: true });
+  }
+  return contractState;
 }
 
 export function me2IntegrationStatus() {
@@ -37,6 +74,8 @@ export function me2IntegrationStatus() {
     version: ME2_INTEGRATION_VERSION,
     started,
     stopped: stoppedFlag,
+    contract: contractState,
+    socket_client: me2SocketStatus(),
     daemon: me2DaemonStatus(),
     fleet_bridge: me2FleetBridgeStatus(),
     tabs_host: me2FleetTabsHostStatus(),
@@ -54,6 +93,12 @@ export async function startMe2Integration({ app } = {}) {
     await startMe2DaemonHost();
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_HOST_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
+  }
+  // R49 (фаза A): capabilities-handshake до стартов мостов — честный контрактdaemon⇄браузер
+  try {
+    await me2ContractHandshake();
+  } catch (e) {
+    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'CONTRACT_HANDSHAKE_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
   try {
     startMe2FleetBridge();
