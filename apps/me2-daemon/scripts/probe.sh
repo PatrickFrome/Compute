@@ -68,6 +68,16 @@ fi
 
 echo "gate: eval $VERDICT $SCORE (ws:$WS rest:$REST, data=$DATA)"
 if [ "$VERDICT" != "PASS" ]; then
-  echo "GATE FAIL: eval вердикт $VERDICT"; tail -40 "$LOG"; exit 1
+  echo "GATE FAIL: eval вердикт $VERDICT — упавшие проверки:"
+  printf '%s' "$EVAL_JSON" | python3 -c '
+import json,sys
+try:
+    d=(json.load(sys.stdin) or {}).get("last") or {}
+    for r in d.get("results") or []:
+        if not r.get("ok"):
+            print(" -", r.get("id"), "| crit:", r.get("critical"), "|", str(r.get("evidence",""))[:110])
+except Exception as e:
+    print("  (не удалось разобрать результаты:", e, ")")'
+  tail -40 "$LOG"; exit 1
 fi
 echo "GATE PASS: daemon boot + eval $SCORE"
