@@ -24,6 +24,9 @@ import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+// ME2 smart merge (R41): узкая capability вкладок для ME2-плоскости (fail-open, zero-authority).
+// Плоскость не переписывает createTab — она вызывает его штатно, политика навигации браузера авторитетна.
+import { me2FleetTabsSetHost } from './me2/me2-fleet-tabs-host.mjs';
 import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
 import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
 import {
@@ -65,6 +68,12 @@ nativeTheme.themeSource = 'dark';
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
+// R41: регистрация хоста вкладок для ME2 Mission Control (браузер сам открывает чат-агентов
+// прямо в сайте). Guarded: ME2_INTEGRATION=0 → ровно прежнее поведение. createTab — hoisted
+// function declaration, ссылка валидна до её текстового определения.
+if (process.env.ME2_INTEGRATION !== '0') {
+  try { me2FleetTabsSetHost({ registry, createTab: (input, opts) => createTab(input, opts) }); } catch { /* ME2-плоскость опциональна */ }
+}
 const views = new ExactBrowserTabViewMap();
 const bridge = new ComputeBridgeClient();
 let windowRef = null;

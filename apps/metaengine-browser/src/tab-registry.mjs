@@ -14,7 +14,12 @@ function envBoundedInt(name, fallback, min, max) {
 }
 export const FLEET_TAB_CEILING = envBoundedInt('A2_FLEET_TAB_CEILING', 28, 4, 64);
 export const MAX_TABS = envBoundedInt('A2_MAX_TABS', 48, 8, 128);
-const TAB_ROLES = Object.freeze(['USER', 'FLEET']);
+// ME2 smart merge (R41): SUPERVISOR role — вкладка Mission Control, которую браузер открывает
+// сам (TabRegistry.create(role='SUPERVISOR') — её собственный крошечный потолок, ОТДЕЛЬНЫЙ от
+// FLEET: супервизорская вкладка не съедает флот-квоту и не ломает пользовательскую бронь).
+// Все существующие контракты USER/FLEET не тронуты (аддитивно, census остаётся честным).
+export const SUPERVISOR_TAB_CEILING = envBoundedInt('A2_SUPERVISOR_TAB_CEILING', 4, 1, 16);
+const TAB_ROLES = Object.freeze(['USER', 'FLEET', 'SUPERVISOR']);
 // Continuity provenance stamp (P0 repair, point 4): tabs created by a
 // self-update session-continuity restore attempt carry the attempt's
 // continuity_id so post-restore cleanup can close ONLY provable duplicates
@@ -44,6 +49,9 @@ export class TabRegistry {
     // ambiguous) keeps working without modification.
     if (this.#tabs.size >= MAX_TABS) throw new Error('tab_capacity_exceeded');
     if (tabRole === 'FLEET' && countRole([...this.#tabs.values()], 'FLEET') >= FLEET_TAB_CEILING) {
+      throw new Error('tab_capacity_exceeded');
+    }
+    if (tabRole === 'SUPERVISOR' && countRole([...this.#tabs.values()], 'SUPERVISOR') >= SUPERVISOR_TAB_CEILING) {
       throw new Error('tab_capacity_exceeded');
     }
     const tab = Object.freeze({
@@ -117,13 +125,16 @@ export class TabRegistry {
     const tabs = [...this.#tabs.values()];
     const byKind = {};
     for (const tab of tabs) byKind[tab.kind] = (byKind[tab.kind] || 0) + 1;
+    // R41: явные счётчики по ролям (SUPERVISOR аддитивен; USER больше не «остаток»,
+    // а честный подсчёт — семантика для чистых USER/FLEET-флотов не изменилась)
     const fleetTabs = countRole(tabs, 'FLEET');
-    const userTabs = tabs.length - fleetTabs;
+    const supervisorTabs = countRole(tabs, 'SUPERVISOR');
+    const userTabs = countRole(tabs, 'USER');
     return Object.freeze({
       schema: 'metaengine.browser.tab-census.v1',
       total_tabs: tabs.length,
       max_tabs: MAX_TABS,
-      by_role: Object.freeze({ USER: userTabs, FLEET: fleetTabs }),
+      by_role: Object.freeze({ USER: userTabs, FLEET: fleetTabs, SUPERVISOR: supervisorTabs }),
       by_kind: Object.freeze(byKind),
       fleet_tab_ceiling: FLEET_TAB_CEILING,
       fleet_tab_headroom: Math.max(0, FLEET_TAB_CEILING - fleetTabs),
@@ -135,6 +146,10 @@ export class TabRegistry {
       fleet_at_ceiling: fleetTabs >= FLEET_TAB_CEILING,
       total_at_wall: tabs.length >= MAX_TABS,
       fleet_tab_ids: Object.freeze(tabs.filter((tab) => tab.role === 'FLEET').map((tab) => tab.tab_id)),
+      // R41: SUPERVISOR-квота Mission Control (аддитивные поля, старые потребители не читают)
+      supervisor_tab_ceiling: SUPERVISOR_TAB_CEILING,
+      supervisor_tab_headroom: Math.max(0, SUPERVISOR_TAB_CEILING - supervisorTabs),
+      supervisor_tab_ids: Object.freeze(tabs.filter((tab) => tab.role === 'SUPERVISOR').map((tab) => tab.tab_id)),
       create_tab_attempted: false,
       release_signal: 'PHYSICAL_TAB_CLOSED',
       authority_effect: false,
