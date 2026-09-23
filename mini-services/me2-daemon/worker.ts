@@ -20,6 +20,14 @@ const SHELL_TIMEOUT_MS = 30_000;
 // R23 (CP-W1, порт a452e3e): жёсткий дедлайн цикла задачи — стенные часы, не шаги;
 // зависший LLM-вызов/инструмент не должен держать lease вечно
 const TASK_HARD_DEADLINE_MS = 10 * 60_000;
+
+// R28 C2: живость lease — финальные записи воркера честны, только пока статус RUNNING.
+// Гон handoff↔completion (найден e2e R28): если работа ушла в handoff (HANDED_OFF) или
+// watchdog уже закрыл задачу во время lease — воркер не перезаписывает статус.
+function leaseAlive(id: string): boolean {
+  const cur = getTask(id);
+  return !!cur && cur.status === "RUNNING";
+}
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
 type ToolDef = { name: string; description: string; args: Record<string, string> };
@@ -324,8 +332,14 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
 
       if (tool === "finish") {
         result = String(args.result ?? "(empty result)");
-        emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
-        updateTask(task.id, { status: "COMPLETED", result, steps: step });
+        // R28 C2: гон handoff↔completion — если работа ушла в handoff во время lease,
+        // финальные записи воркера НЕ затирают честный HANDED_OFF (передача старше lease).
+        if (leaseAlive(task.id)) {
+          emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
+          updateTask(task.id, { status: "COMPLETED", result, steps: step });
+        } else {
+          emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", finish_result: result.slice(0, 200) }, agent.id, task.id);
+        }
         // R18: вердикт завершения — ловим finish-без-работы (reward hacking)
         const verdict = buildVerdict(task, { steps: step, toolCalls, result });
         if (verdict) {
@@ -344,19 +358,28 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
     }
     if (result === null) {
       const errMsg = deadlineBreached ? "hard_deadline_exceeded" : "max_steps_exhausted";
-      const refl = buildReflection(task, errMsg, { toolCalls, parseFails });
-      updateTask(task.id, { status: "FAILED", error: errMsg, reflection: refl });
-      let cause: string | undefined;
-      try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
-      emit("TASK_FAILED", { error: errMsg, cause, lease_age_ms: Date.now() - leaseStartedAt }, agent.id, task.id);
+      // R28 C2: HANDED_OFF не превращается в FAILED — передача старше lease
+      if (leaseAlive(task.id)) {
+        const refl = buildReflection(task, errMsg, { toolCalls, parseFails });
+        updateTask(task.id, { status: "FAILED", error: errMsg, reflection: refl });
+        let cause: string | undefined;
+        try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
+        emit("TASK_FAILED", { error: errMsg, cause, lease_age_ms: Date.now() - leaseStartedAt }, agent.id, task.id);
+      } else {
+        emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", error: errMsg }, agent.id, task.id);
+      }
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const refl = buildReflection(task, msg, { toolCalls, parseFails });
-    updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500), reflection: refl });
-    let cause: string | undefined;
-    try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
-    emit("TASK_FAILED", { error: msg.slice(0, 300), cause }, agent.id, task.id);
+    if (leaseAlive(task.id)) {
+      const refl = buildReflection(task, msg, { toolCalls, parseFails });
+      updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500), reflection: refl });
+      let cause: string | undefined;
+      try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
+      emit("TASK_FAILED", { error: msg.slice(0, 300), cause }, agent.id, task.id);
+    } else {
+      emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", error: msg.slice(0, 200) }, agent.id, task.id);
+    }
   } finally {
     setAgentStatus(agent.id, "IDLE");
     running.delete(agent.id);

@@ -44,10 +44,11 @@ import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdic
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
 import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
+import { handoffList, handoffStats } from "./src/handoffs";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.25.0";
+const VERSION = "0.26.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -378,6 +379,35 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 200, { ok: true });
     }
     if (path === "/tasks" && req.method === "GET") return json(res, 200, { ok: true, tasks: listTasks() });
+    // ── R28 C2: handoffs — передача задач между агентами (протокол Codex handoffs) ──
+    if (path === "/handoffs" && req.method === "GET") {
+      return json(res, 200, { ok: true, handoffs: handoffList(20), stats: handoffStats() });
+    }
+    if (path.startsWith("/tasks/") && path.endsWith("/handoff") && req.method === "POST") {
+      const id = path.split("/")[2];
+      const body = await readBody(req);
+      // Через шину (TASK_ENQUEUE+handoff) — 47/47 инвариант; ошибка шины доходит до оператора (fails-closed)
+      const r = enqueueCommand({
+        action: "TASK_ENQUEUE",
+        payload: {
+          handoff: {
+            from_task: id,
+            to_role: body.to_role ?? null,
+            reason: body.reason,
+            protocol: body.protocol ?? { next: body.next ?? "" },
+            max_steps: body.max_steps,
+            by: body.by ?? "operator",
+          },
+        },
+        idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
+      });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      const cmd = await runOne(r.command);
+      if (cmd.status === "FAILED") return json(res, 400, { ok: false, error: cmd.error ?? "handoff_command_failed", command: cmd.id });
+      let parsed: { task?: unknown; handoff?: unknown } | null = null;
+      try { parsed = cmd.result ? JSON.parse(cmd.result) as { task?: unknown; handoff?: unknown } : null; } catch { parsed = null; }
+      return json(res, 201, { ok: true, task: parsed?.task ?? null, handoff: parsed?.handoff ?? null, command: cmd.id });
+    }
     if (path === "/tasks" && req.method === "POST") {
       const body = await readBody(req);
       const r = enqueueCommand({
@@ -516,7 +546,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

@@ -241,3 +241,25 @@ Stage Summary:
 - Урок: ME-матрица + негативные REST-тесты ловят реальные баги на первой же инкарнации (2 дефекта поймано до push).
 - Далее по роадмапу R24: C2 (handoffs: передача задач между агентами + протокол), C3 (reviewer-agent auto-review), C4 (approval-policy таблица); Track D: D1 sense-diffing, D2 obsv→SQLite TTL.
 - Оператору: me2_evidence SQL всё ещё не применён (evidence DEGRADED 404).
+---
+Task ID: R28
+Agent: Z.ai Code (main)
+Task: «продолжи разработку…» — исполнено как R28: пункт C2 роадмапа R24 (handoffs: передача задач между агентами с протоколом).
+
+Work Log:
+- R28-1 (ядро): mini-services/me2-daemon/src/handoffs.ts — таблица handoffs (from_task/to_task/from_agent/from_role/to_role/reason/protocol/by), протокол Codex handoffs (done/in_flight/next/context/open_questions/artifacts); handoffCreate: fails-closed (task_not_found, handoff_not_allowed_from_{COMPLETED,ARCHIVED}, reason_required, protocol_next_required), continuation = TASK_ENQUEUE-семантика (parent_id=источник, objective_id наследуется — валидация цели из C1), источник закрывается HANDED_OFF, MEMORY-episodic запись (получатель видит через memBlock), span task.handoff; handoffList/Stats/Edges/Verdict.
+- R28-2 (47/47): НОВОГО действия в шине нет — TASK_ENQUEUE получил handoff-ветку (роадмап: «handoff = MEMORY-запись + TASK_ENQUEUE с parent»); catalog desc расширен, actions=47 сохранено.
+- R28-3 (C1-интеграция): objectives.ts — HANDED_OFF в TERMINAL, counts.handed (отдельно от done/failed), рёбра task_handoff в work_graph (чтение из фактов handoffs), stats.handoffs.
+- R28-4 (eval v3): DATASET_VERSION 2→3 (осознанное изменение контракта) — mc.workgraph_shape допустил kind=task_handoff + stats.handoffs, новые чеки mc.tasks_statuses_canonical (канон задач +HANDED_OFF) и handoff.table_api → 24 чека.
+- R28-5 (ME24 + REST): строка ME24 в механике (WORKS только при реальной передаче); GET /handoffs, POST /tasks/{id}/handoff (обёртка над шиной, 400-проброс ошибки команды); /handoffs в BENCH_ADMIN_PREFIXES; v0.26.0.
+- R28-6 (UI): блок HANDOFFS в MC-панели после OBJECTIVES: чипы передач/last (data-testid=ho-chips), форма (select задачи из snapshot READY/RUNNING/FAILED/CANCELLED, роль получателя, reason, protocol.next, protocol.done — кнопка «передать»), список ≤5 передач со статусом continuation и next; бейдж HANDED_OFF (violet), событие TASK_HANDOFF + TASK_LEASE_VOID в EVENT_STYLE; loadHo на mcxOpen + refresh-all + в doHandoff; doHandoff поставлен после mcxOp (TDZ).
+- R28-7 (e2e нашёл реальный гон): позитив — цель→задача→передача с полным протоколом: continuation READY c parent+objective, работа/память/рёбра/статистика на месте. ГОН: задача была RUNNING у агента → handoff поставил HANDED_OFF → воркер дописал COMPLETED поверх честного статуса. ФИКС: worker.ts leaseAlive() — финальные записи (COMPLETED/FAILED) только пока статус RUNNING; иначе событие TASK_LEASE_VOID; источник восстановлен в БД до HANDED_OFF. Негативы: handoff_not_allowed_from_COMPLETED / protocol_next_required / task_not_found — все 400. eval v3 PASS 24/24; матрица 24/24 WORKS (ME18/ME21 восстановлены obsv-attach + MCP initialize).
+- R28-8 (верификация UI): agent-browser 1440px — ME24 в матрице, блок HANDOFFS с формой; UI-передача выполнена из панели (2-я передача DEBUGGER→DEBUGGER), список/чипы обновились (передач 2, первая → handed_off); mobile 390px: sw=iw (overflow нет). VLM qa1: 5/5 пунктов подтверждены (блок/чипы/форма/список/дефектов нет) + дублировано программно (урок №4).
+- R28-9: lint 0/0; secrets-guard чист; финальный eval PASS 24/24 за 4ms; цель e2e — ACTIVE/on_track, counts.handed=2 (fails-closed видит незакрытость).
+
+Stage Summary:
+- ME2 научился передавать работу: протокол Codex handoffs без нового действия в шине (47/47), честный статус HANDED_OFF вместо лжи CANCELLED/FAILED, контекст через память и spec-бриф, передачи видны в Mission Control как рёбра task_handoff.
+- Daemon v0.26.0, матрица 24/24 WORKS; eval-датасет v3 (24 чека, история в eval_runs).
+- Найдено и починено 1 реальный гон (completion↔handoff) — e2e перед push снова окупился.
+- Далее по роадмапу R24: C3 (reviewer-agent: авто-ревью результатов) → C4 (approval-политики); Track D: D1 sense-diffing, D2 obsv→SQLite TTL, D4 БД-гигиена.
+- Оператору: me2_evidence SQL всё ещё не применён (evidence DEGRADED 404 ждёт применения миграции).

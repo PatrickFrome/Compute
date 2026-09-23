@@ -31,9 +31,10 @@ import { benchSnapshot, BENCH_THRESHOLDS } from "./bench";
 import { codegraphSummary } from "./codegraph";
 import { otelStatus } from "./otel";
 import { workGraph, OBJECTIVE_STATUSES } from "./objectives";
+import { handoffList, handoffStats } from "./handoffs";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 2;
+export const EVAL_DATASET_VERSION = 3;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -78,7 +79,10 @@ export interface EvalCheck {
 
 const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_EFFECT", "FENCED", "AMBIGUOUS"]);
 
-// ── ДАТАСЕТ v1: золотой путь daemon (read-only, без сети, без spawn) ──
+// ── ДАТАСЕТ: золотой путь daemon (read-only, без сети, без spawn) ──
+// v1 (R26) — 20 чеков; v2 (R27) — +mc.workgraph_shape, mc.statuses_canonical = 22;
+// v3 (R28) — рёбра task_handoff в workgraph_shape, +mc.tasks_statuses_canonical (HANDED_OFF),
+//            +handoff.table_api = 24. Осознанное изменение контракта → версия поднята.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -270,16 +274,17 @@ export const EVAL_DATASET: EvalCheck[] = [
   // — Mission Control (R27 C1) —
   {
     id: "mc.workgraph_shape", plane: "mc", title: "Work_graph (ME23) форма валидна",
-    critical: true, expect: "workGraph(): fails_closed=true, статистика полная, рёбра только objective_task/task_agent",
+    critical: true, expect: "workGraph(): fails_closed=true, статистика полная, рёбра только objective_task/task_agent/task_handoff (v3: +handoff)",
     run: () => {
       const g = workGraph();
       const kinds = new Set(g.edges.map((e) => e.kind));
-      const foreign = [...kinds].filter((k) => k !== "objective_task" && k !== "task_agent");
+      const foreign = [...kinds].filter((k) => k !== "objective_task" && k !== "task_agent" && k !== "task_handoff");
       const ok = g.fails_closed === true
         && typeof g.stats.objectives_total === "number"
         && typeof g.stats.tasks_orphan === "number"
+        && typeof g.stats.handoffs === "number"
         && foreign.length === 0;
-      return { ok, evidence: `objectives=${g.stats.objectives_total}, tasks_linked=${g.stats.tasks_linked}, orphan=${g.stats.tasks_orphan}, edges=${g.stats.edges}${foreign.length ? `, FOREIGN=${foreign.join(",")}` : ""}` };
+      return { ok, evidence: `objectives=${g.stats.objectives_total}, tasks_linked=${g.stats.tasks_linked}, orphan=${g.stats.tasks_orphan}, handoffs=${g.stats.handoffs}, edges=${g.stats.edges}${foreign.length ? `, FOREIGN=${foreign.join(",")}` : ""}` };
     },
   },
   {
@@ -291,6 +296,31 @@ export const EVAL_DATASET: EvalCheck[] = [
       const badStatus = g.objectives.filter((o) => !(OBJECTIVE_STATUSES as readonly string[]).includes(o.status));
       const badDerived = g.objectives.filter((o) => !DERIVED.has(o.derived_state));
       return { ok: badStatus.length === 0 && badDerived.length === 0, evidence: g.objectives.length ? `objectives=${g.objectives.length}, bad_status=${badStatus.length}, bad_derived=${badDerived.length}` : "objectives=0 (пусто — каноничность тривиальна)" };
+    },
+  },
+  // — Handoffs (R28 C2) —
+  {
+    id: "mc.tasks_statuses_canonical", plane: "mc", title: "Статусы задач каноничны (v3: +HANDED_OFF)",
+    critical: true, expect: "task.status ∈ {READY,RUNNING,COMPLETED,FAILED,REJECTED,CANCELLED,ARCHIVED,HANDED_OFF}",
+    run: () => {
+      const CANON = new Set(["READY", "RUNNING", "COMPLETED", "FAILED", "REJECTED", "CANCELLED", "ARCHIVED", "HANDED_OFF"]);
+      const tk = listTasks({ includeArchived: true });
+      const foreign = tk.filter((t) => !CANON.has(t.status));
+      const byStatus: Record<string, number> = {};
+      for (const t of tk) byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+      return { ok: foreign.length === 0, evidence: `tasks=${tk.length}, foreign=${foreign.length}, statuses=${JSON.stringify(byStatus)}` };
+    },
+  },
+  {
+    id: "handoff.table_api", plane: "handoff", title: "Handoff API (ME24) жив, таблица в схеме",
+    critical: true, expect: "таблица handoffs; handoffList() массив с protocol_parsed.next; handoffStats(): total≥0, last_24h≥0",
+    run: () => {
+      const t = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='handoffs'`).get();
+      const rows = handoffList(5);
+      const s = handoffStats();
+      const badProto = rows.filter((r) => !r.protocol_parsed || typeof r.protocol_parsed.next !== "string").length;
+      const ok = !!t && Array.isArray(rows) && badProto === 0 && Number.isFinite(s.total) && s.total >= 0 && s.last_24h >= 0;
+      return { ok, evidence: `table=${t ? "yes" : "no"}, rows=${rows.length}, total=${s.total}, 24h=${s.last_24h}, bad_proto=${badProto}` };
     },
   },
 ];

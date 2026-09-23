@@ -24,6 +24,7 @@
  */
 import { db, emit } from "../store";
 import { listTasks, listAgents, type TaskRow } from "../store";
+import { handoffEdges } from "./handoffs";
 import { recordSpan } from "./otel";
 
 export const OBJECTIVE_STATUSES = ["ACTIVE", "ACHIEVED", "FAILED", "PARKED"] as const;
@@ -93,13 +94,13 @@ export function deleteObjective(id: string): boolean {
   return ok;
 }
 
-const TERMINAL = new Set(["COMPLETED", "FAILED", "REJECTED", "CANCELLED", "ARCHIVED"]);
+const TERMINAL = new Set(["COMPLETED", "FAILED", "REJECTED", "CANCELLED", "ARCHIVED", "HANDED_OFF"]);
 
 function tasksOf(objectiveId: string, tasks: TaskRow[]): TaskRow[] {
   return tasks.filter((t) => t.objective_id === objectiveId);
 }
 
-function derivedOf(obj: ObjectiveRow, tasks: TaskRow[]): { state: DerivedState; attention: string | null; counts: { total: number; active: number; done: number; failed: number } } {
+function derivedOf(obj: ObjectiveRow, tasks: TaskRow[]): { state: DerivedState; attention: string | null; counts: { total: number; active: number; done: number; failed: number; handed: number } } {
   if (obj.status === "ACHIEVED") return { state: "achieved", attention: null, counts: countsOf(tasks) };
   if (obj.status === "FAILED") return { state: "failed", attention: null, counts: countsOf(tasks) };
   if (obj.status === "PARKED") return { state: "parked", attention: null, counts: countsOf(tasks) };
@@ -115,6 +116,10 @@ function countsOf(tasks: TaskRow[]) {
     active: tasks.filter((t) => t.status === "READY" || t.status === "RUNNING").length,
     done: tasks.filter((t) => t.status === "COMPLETED").length,
     failed: tasks.filter((t) => t.status === "FAILED" || t.status === "REJECTED").length,
+    // R28 C2: работа переехала в continuation (HANDED_OFF) — считаем отдельно:
+    // это не провал и не готово; продолжение наследует цель, поэтому цель честно on_track,
+    // пока continuation жив (READY/RUNNING), иначе — stalled (fails-closed видит обрыв).
+    handed: tasks.filter((t) => t.status === "HANDED_OFF").length,
   };
 }
 
@@ -122,14 +127,14 @@ export interface WorkGraph {
   ok: true;
   generated_at: string;
   fails_closed: true;
-  objectives: Array<ObjectiveRow & { derived_state: DerivedState; attention: string | null; counts: { total: number; active: number; done: number; failed: number } }>;
+  objectives: Array<ObjectiveRow & { derived_state: DerivedState; attention: string | null; counts: { total: number; active: number; done: number; failed: number; handed: number } }>;
   tasks: Array<{ id: string; title: string; status: string; objective_id: string | null; agent_id: string | null; steps: number; max_steps: number }>;
   orphan_tasks: Array<{ id: string; title: string; status: string }>;
   agents: Array<{ id: string; role: string; status: string; model: string }>;
-  edges: Array<{ from: string; to: string; kind: "objective_task" | "task_agent" }>;
+  edges: Array<{ from: string; to: string; kind: "objective_task" | "task_agent" | "task_handoff" }>;
   stats: {
     objectives_total: number; objectives_active: number; objectives_achieved: number; objectives_failed: number; objectives_parked: number;
-    attention_objectives: number; tasks_linked: number; tasks_orphan: number; agents_total: number; edges: number;
+    attention_objectives: number; tasks_linked: number; tasks_orphan: number; agents_total: number; edges: number; handoffs: number;
   };
 }
 
@@ -155,6 +160,9 @@ export function workGraph(): WorkGraph {
     edges.push({ from: `obj:${t.objective_id}`, to: `task:${t.id}`, kind: "objective_task" });
     if (t.agent_id) edges.push({ from: `task:${t.id}`, to: `agent:${t.agent_id}`, kind: "task_agent" });
   }
+  // R28 C2: рёбра handoff — передачи работы (источник→continuation) видны в проекции
+  const hEdges = handoffEdges();
+  for (const he of hEdges) edges.push({ from: he.from, to: he.to, kind: "task_handoff" });
 
   const byState = (s: DerivedState) => objectives.filter((o) => o.derived_state === s).length;
   const stats = {
@@ -168,6 +176,7 @@ export function workGraph(): WorkGraph {
     tasks_orphan: orphanTasks.length,
     agents_total: agents.length,
     edges: edges.length,
+    handoffs: hEdges.length,
   };
 
   recordSpan("mc.workgraph", { "me2.objectives": objs.length, "me2.tasks_linked": linkedTasks.length, "me2.edges": edges.length, "me2.ms": Date.now() - t0 }, t0);

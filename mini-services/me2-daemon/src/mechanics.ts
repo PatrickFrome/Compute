@@ -25,6 +25,7 @@ import { benchVerdict } from "./bench";
 import { mcpStatus } from "./mcp";
 import { evalVerdict } from "./eval";
 import { objectivesVerdict } from "./objectives";
+import { handoffsVerdict } from "./handoffs";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -164,6 +165,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME23", name: "Mission Control: objectives→tasks→agents проекция + work_graph (C1)", old_ref: "mission-control-projection.mjs (fails-closed, zero-authority)",
       verdict: objectivesVerdict().verdict,
       evidence: objectivesVerdict().evidence + "; GET /objectives | POST /objectives {op:create|status|delete} — статусы только оператором",
+    },
+    {
+      id: "ME24", name: "Handoffs: передача задач между агентами с протоколом (C2)", old_ref: "codex handoffs semantics (протокол done/in_flight/next/context)",
+      verdict: handoffsVerdict().verdict,
+      evidence: handoffsVerdict().evidence + "; POST /tasks/{id}/handoff — через шину (TASK_ENQUEUE+handoff), 47/47",
     },
   ];
 

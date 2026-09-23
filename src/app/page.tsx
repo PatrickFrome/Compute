@@ -34,7 +34,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
+  Activity, AlertTriangle, AppWindow, Archive, ArrowLeftRight, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
   Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, Sparkles, Target, Terminal, Trash2, X, Zap,
 } from "lucide-react";
@@ -107,7 +107,18 @@ type WorkGraphData = {
   ok: boolean; fails_closed: boolean;
   objectives: Array<{ id: string; title: string; spec: string; status: string; priority: number; derived_state: string; attention: string | null; counts: { total: number; active: number; done: number; failed: number } }>;
   orphan_tasks: Array<{ id: string; title: string; status: string }>;
-  stats: { objectives_total: number; objectives_active: number; objectives_achieved: number; objectives_failed: number; objectives_parked: number; attention_objectives: number; tasks_linked: number; tasks_orphan: number; agents_total: number; edges: number };
+  stats: { objectives_total: number; objectives_active: number; objectives_achieved: number; objectives_failed: number; objectives_parked: number; attention_objectives: number; tasks_linked: number; tasks_orphan: number; agents_total: number; edges: number; handoffs: number };
+};
+// R28 C2: handoffs — передача задач между агентами с протоколом (ME24, GET /handoffs)
+type HandoffData = {
+  ok: boolean;
+  handoffs: Array<{
+    id: string; from_task: string; to_task: string; from_role: string | null; to_role: string | null;
+    reason: string; by: string; created_at: string;
+    protocol_parsed: { done?: string; in_flight?: string; next: string; context?: string; open_questions?: string; artifacts?: string };
+    from_title: string | null; to_title: string | null; to_status: string | null;
+  }>;
+  stats: { total: number; last_24h: number; by_to_role: Record<string, number>; last: { id: string; to_role: string | null; created_at: string } | null };
 };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
@@ -141,7 +152,7 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_QUEUED: "text-emerald-400", TASK_LEASED: "text-amber-400", TASK_DONE: "text-emerald-300",
   TASK_COMPLETED: "text-emerald-300", TASK_FAILED: "text-rose-400", TASK_CANCELLED: "text-zinc-400",
   TASK_RETRIED: "text-amber-300", TASK_ARCHIVED: "text-zinc-400", TASK_LISTED: "text-zinc-500",
-  TASK_SCHEDULED: "text-lime-300",
+  TASK_SCHEDULED: "text-lime-300", TASK_HANDOFF: "text-violet-300", TASK_LEASE_VOID: "text-zinc-500",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
   AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400", AGENT_MODEL_SET: "text-cyan-300",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
@@ -159,6 +170,7 @@ const STATUS_BADGE: Record<string, string> = {
   COMPLETED: "bg-emerald-600 text-white", FAILED: "bg-rose-600 text-white",
   CANCELLED: "bg-zinc-600 text-zinc-300", PENDING: "bg-zinc-700 text-zinc-300",
   LEASED: "bg-amber-500/80 text-black", REJECTED: "bg-rose-800 text-rose-200",
+  HANDED_OFF: "bg-violet-700 text-violet-100",
   BUSY: "bg-amber-500/90 text-black", IDLE: "bg-emerald-700 text-emerald-100",
   OFFLINE: "bg-zinc-800 text-zinc-500",
   PAUSED: "bg-amber-700 text-amber-100",
@@ -1203,6 +1215,13 @@ export default function MissionControl() {
   const [wg, setWg] = useState<WorkGraphData | null>(null);
   const [objTitle, setObjTitle] = useState("");
   const [objSpec, setObjSpec] = useState("");
+  // R28 C2: handoffs — форма передачи задачи между агентами (протокол Codex handoffs)
+  const [hoData, setHoData] = useState<HandoffData | null>(null);
+  const [hoTask, setHoTask] = useState("");
+  const [hoRole, setHoRole] = useState("DEBUGGER");
+  const [hoReason, setHoReason] = useState("");
+  const [hoNext, setHoNext] = useState("");
+  const [hoDone, setHoDone] = useState("");
   const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
@@ -1297,6 +1316,10 @@ export default function MissionControl() {
   const loadWg = useCallback(async () => {
     try { const r = await fetch("/workgraph?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setWg(r as WorkGraphData); } catch { /* daemon недоступен */ }
   }, []);
+  // R28 C2: handoffs (GET /handoffs — протоколы передач + статистика)
+  const loadHo = useCallback(async () => {
+    try { const r = await fetch("/handoffs?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setHoData(r as HandoffData); } catch { /* daemon недоступен */ }
+  }, []);
   // BENCH виден в браузерной панели всегда — грузим на mount и обновляем каждые 30с
   useEffect(() => {
     void loadBench();
@@ -1329,13 +1352,26 @@ export default function MissionControl() {
     return null;
   }, [toast]);
 
+  // Передача задачи: POST /tasks/{id}/handoff — через шину (TASK_ENQUEUE+handoff, 47/47)
+  const doHandoff = useCallback(async () => {
+    if (!hoTask.trim() || !hoReason.trim() || !hoNext.trim()) {
+      toast({ title: "handoff ✗", description: "нужны задача, причина и protocol.next — передача без «что дальше» бессмысленна (fails-closed)", variant: "destructive" });
+      return;
+    }
+    const ok = await mcxOp(`tasks/${hoTask.trim()}/handoff`, {
+      to_role: hoRole, reason: hoReason.trim(),
+      protocol: { next: hoNext.trim(), done: hoDone.trim() || undefined },
+    }, "задача передана: протокол записан, continuation в очереди", async () => { await loadHo(); await loadWg(); });
+    if (ok) { setHoReason(""); setHoNext(""); setHoDone(""); }
+  }, [hoTask, hoReason, hoNext, hoDone, hoRole, mcxOp, loadHo, loadWg, toast]);
+
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2117,7 +2153,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2205,6 +2241,72 @@ export default function MissionControl() {
                     )}
                     {!wg && (
                       <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка work_graph…</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* R28 C2: HANDOFFS — передача задач между агентами (ME24, протокол Codex handoffs) */}
+                <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="ME24: передача работы между агентами с протоколом Codex handoffs (done/in_flight/next/context) — через шину (TASK_ENQUEUE+handoff), 47/47; источник закрывается HANDED_OFF, continuation наследует цель и parent; fails-closed: без reason и protocol.next передача отклонена">
+                      <ArrowLeftRight className="h-3 w-3 text-violet-400" aria-hidden /> HANDOFFS
+                    </span>
+                    <span data-testid="ho-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`всего передач; за 24ч: ${hoData?.stats.last_24h ?? 0}`}>передач {hoData?.stats.total ?? "—"}</span>
+                      {hoData?.stats.last && (
+                        <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`последняя передача ${hoData.stats.last.id} в ${hhmmss(hoData.stats.last.created_at)}`}>last →{hoData.stats.last.to_role ?? "любой"}</span>
+                      )}
+                    </span>
+                  </div>
+                  <form onSubmit={(e) => { e.preventDefault(); void doHandoff(); }} className="mb-1.5 space-y-1">
+                    <div className="flex gap-1.5">
+                      <Select value={hoTask || undefined} onValueChange={setHoTask}>
+                        <SelectTrigger className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[10px] text-zinc-300" aria-label="Задача для передачи">
+                          <SelectValue placeholder="задача (READY/RUNNING/FAILED)…" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-56 font-mono text-[10px]">
+                          {(snap?.tasks ?? []).filter((t) => ["READY", "RUNNING", "FAILED", "CANCELLED"].includes(t.status)).slice(0, 50).map((t) => (
+                            <SelectItem key={t.id} value={t.id} title={t.title}>{t.status.slice(0, 4)} · {t.title.slice(0, 44)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={hoRole} onValueChange={setHoRole}>
+                        <SelectTrigger className="h-7 w-[86px] shrink-0 border-zinc-800 bg-zinc-950/60 font-mono text-[10px] text-zinc-300" aria-label="Роль получателя">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="font-mono text-[10px]">
+                          {["IMPLEMENTER", "DEBUGGER", "RESEARCHER", "OPERATOR"].map((r) => (
+                            <SelectItem key={r} value={r}>{r}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Input value={hoReason} onChange={(e) => setHoReason(e.target.value)} placeholder="причина передачи (обязательно)…" className="h-7 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Причина передачи задачи" />
+                    <Textarea value={hoNext} onChange={(e) => setHoNext(e.target.value)} placeholder="protocol.next — что делать дальше (обязательно; получатель читает как бриф)…" rows={2} className="min-h-[38px] border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Что делать дальше (protocol.next)" />
+                    <div className="flex gap-1.5">
+                      <Input value={hoDone} onChange={(e) => setHoDone(e.target.value)} placeholder="protocol.done — что уже сделано (опц.)…" className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]" aria-label="Что уже сделано (protocol.done)" />
+                      <Button type="submit" size="sm" variant="outline" disabled={mcxBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]"><ArrowLeftRight className="mr-1 h-3 w-3" aria-hidden /> передать</Button>
+                    </div>
+                  </form>
+                  <div className="max-h-32 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние передачи задач" data-testid="handoffs-list">
+                    {(hoData?.handoffs ?? []).slice(0, 5).map((h) => (
+                      <div key={h.id} role="listitem" className="rounded bg-zinc-900/50 px-1.5 py-1" title={`${h.id}: ${h.reason} · next: ${h.protocol_parsed.next} · by ${h.by} · ${h.created_at}`}>
+                        <div className="flex items-center gap-1.5 font-mono text-[9px]">
+                          <span className="shrink-0 text-violet-300" aria-hidden>⇄</span>
+                          <span className="min-w-0 flex-1 truncate text-zinc-400">{h.from_role ?? "?"} → {h.to_role ?? "любой"}: {h.reason}</span>
+                          <span className={`shrink-0 rounded px-1 text-[8px] ${h.to_status === "COMPLETED" ? "bg-emerald-950/60 text-emerald-300" : h.to_status === "HANDED_OFF" ? "bg-violet-950/60 text-violet-300" : "bg-amber-950/60 text-amber-300"}`} title="статус continuation-задачи">{(h.to_status ?? "?").toLowerCase()}</span>
+                          <span className="shrink-0 text-zinc-600">{hhmmss(h.created_at)}</span>
+                        </div>
+                        {h.protocol_parsed.next && (
+                          <div className="mt-0.5 truncate font-mono text-[9px] text-zinc-500" title={h.protocol_parsed.next}>next: {h.protocol_parsed.next}</div>
+                        )}
+                      </div>
+                    ))}
+                    {hoData && hoData.handoffs.length === 0 && (
+                      <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">передач ещё не было — выбери задачу, причину и protocol.next</div>
+                    )}
+                    {!hoData && (
+                      <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка передач…</div>
                     )}
                   </div>
                 </div>

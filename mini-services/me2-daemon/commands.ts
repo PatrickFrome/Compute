@@ -13,6 +13,7 @@ import {
 import { WORKSPACE_ROOT } from "./worker";
 import { recordSpan } from "./src/otel";
 import { getObjective } from "./src/objectives";
+import { handoffCreate, type HandoffProtocol } from "./src/handoffs";
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -92,6 +93,21 @@ const handlers: Record<string, Handler> = {
   STATE_SNAPSHOT: () => snapshot() as unknown as Record<string, unknown>,
 
   TASK_ENQUEUE: (p) => {
+    // R28 C2: handoff — передача работы между агентами с протоколом (Codex handoffs).
+    // Исполняется как TASK_ENQUEUE с handoff-блоком: НОВОГО действия в каталоге нет —
+    // 47/47 инвариант не расширяется («handoff = MEMORY-запись + TASK_ENQUEUE с parent»).
+    if (p.handoff && typeof p.handoff === "object") {
+      const h = p.handoff as Record<string, unknown>;
+      const r = handoffCreate({
+        from_task: String(h.from_task ?? ""),
+        to_role: h.to_role ? String(h.to_role) : null,
+        reason: String(h.reason ?? ""),
+        protocol: (h.protocol ?? {}) as HandoffProtocol,
+        max_steps: h.max_steps !== undefined ? Number(h.max_steps) : undefined,
+        by: h.by ? String(h.by) : "operator",
+      });
+      return { task: r.task, handoff: r.handoff };
+    }
     const title = String(p.title ?? "untitled").slice(0, 200);
     const spec = String(p.spec ?? "").slice(0, 20000);
     if (!spec) throw new Error("spec_required");
@@ -572,7 +588,7 @@ export function knownActions(): string[] { return Object.keys(handlers); }
 // ── реестр действий (цель — 47; сейчас 25) — источник для ⌘K и /actions ──
 type ActionMeta = { action: string; lane: Lane; cost: number; desc: string; group: string; args?: string };
 const CATALOG_EXTRA: ActionMeta[] = [
-  { action: "TASK_ENQUEUE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "поставить задачу в очередь (форма N)", group: "Задачи", args: "title, spec, role?, max_steps?" },
+  { action: "TASK_ENQUEUE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "поставить задачу в очередь (форма N; или handoff-передача: handoff{from_task, reason, protocol{next}})", group: "Задачи", args: "title, spec, role?, max_steps? | handoff{from_task, to_role?, reason, protocol{done?,in_flight?,next,context?,open_questions?,artifacts?}}" },
   { action: "TASK_SCHEDULE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "отложенная постановка задачи (ETA)", group: "Задачи", args: "title, spec, delay_sec, role?, max_steps?" },
   { action: "AGENT_SPAWN", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "создать агента роли", group: "Флот", args: "role, model?" },
 ];
