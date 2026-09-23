@@ -10,10 +10,14 @@
  * G4 (R37): река видит и ШАГИ ПУЛА-ИСПОЛНИТЕЛЕЙ (FLEET_STEP — thought/tool/reply/fail
  * от воркеров под lease) — супервизор и браузер видят ходы исполнителей шаг за шагом.
  * G5 (R37): долгоживущие цели чатов (objective) — показ в панели, назначение оператором.
- * REST daemon :3041 через gateway (/agentchat?XTransformPort=3041).
+ * R46 (унификация): чтение — GET /agentchat (read-only через gateway), ВСЕ операции —
+ * socket.io "agentchat:op" (ack) через общий канал приложения (src/lib/me2-socket.ts);
+ * REST POST /agentchat снят — оператор работает только с открытыми чатами-агентами.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
+import { agentChatOp, me2Socket } from "@/lib/me2-socket";
+import { me2Desktop } from "@/lib/me2-desktop";
 import { MessageSquarePlus, SendHorizontal, Trash2, RefreshCw, Brain, Shield, Radio, Zap, Target } from "lucide-react";
 
 type Session = {
@@ -108,65 +112,83 @@ export default function AgentChatPanel() {
     return () => window.removeEventListener("me2:select-chat", onSelect as EventListener);
   }, []);
 
-  // ── G3: река рассуждений — WS-канал daemon (все чаты одновременно, real-time) ──
+  // R46: нативное меню Electron «Создать чат-агента» (единая система: оболочка сама открывает чат)
+  useEffect(() => {
+    return me2Desktop()?.onNativeEvent((p) => {
+      if (String(p?.type ?? "") === "chat-create") void create();
+    });
+  }, []);
+
+  // ── G3: река рассуждений — ОБЩИЙ WS-канал приложения (R46: одна связь daemon⇄UI) ──
   useEffect(() => {
     let s: Socket | null = null;
     let cancelled = false;
+    const onConnect = () => setWsOn(true);
+    const onDis = () => setWsOn(false);
+    const onEvent = (e: { seq?: number; type?: string; at?: string; ts?: string; agent_id?: string; task_id?: string; data?: string }) => {
+      const type = String(e?.type ?? "");
+      // G3+G4: река = рассуждения чатов (AGENT_CHAT*) + шаги пул-исполнителей (FLEET_STEP)
+      if (!type.startsWith("AGENT_CHAT") && type !== "FLEET_STEP") return;
+      let d: Record<string, unknown> = {};
+      try { d = JSON.parse(String(e?.data ?? "{}")) as Record<string, unknown>; } catch { /* без данных */ }
+      const isPool = type === "FLEET_STEP";
+      const sid = isPool ? `pool:${String(d.task_id ?? e?.task_id ?? "")}` : String(d.session_id ?? d.to ?? d.from ?? "");
+      const kind = stepKind(type, String(d.kind ?? ""));
+      const title = isPool
+        ? `⚡${String(d.task_title ?? d.task_id ?? "").slice(0, 22)}`
+        : undefined;
+      setRiver((prev) => [{
+        key: `${e.seq ?? Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        at: String(e?.ts ?? e?.at ?? "").slice(11, 19), // шина несёт ts (R37-фикс: был e.at → всегда --:--:--)
+        type, session_id: sid, kind,
+        tool: typeof d.tool === "string" ? d.tool : null,
+        title,
+        preview: String(d.preview ?? "").slice(0, 160) || (type === "AGENT_CHAT_TURN" ? `ход завершён (${d.steps} шагов, ${d.ms}ms)` : ""),
+      }, ...prev].slice(0, 60));
+    };
     (async () => {
-      const { io: mk } = await import("socket.io-client");
+      s = await me2Socket();
       if (cancelled) return;
-      s = mk("/?XTransformPort=3040", { path: "/", transports: ["websocket", "polling"], reconnectionDelay: 2000, timeout: 8000 }) as Socket;
-      s.on("connect", () => setWsOn(true));
-      s.on("disconnect", () => setWsOn(false));
-      s.on("event", (e: { seq?: number; type?: string; at?: string; ts?: string; agent_id?: string; task_id?: string; data?: string }) => {
-        const type = String(e?.type ?? "");
-        // G3+G4: река = рассуждения чатов (AGENT_CHAT*) + шаги пул-исполнителей (FLEET_STEP)
-        if (!type.startsWith("AGENT_CHAT") && type !== "FLEET_STEP") return;
-        let d: Record<string, unknown> = {};
-        try { d = JSON.parse(String(e?.data ?? "{}")) as Record<string, unknown>; } catch { /* без данных */ }
-        const isPool = type === "FLEET_STEP";
-        const sid = isPool ? `pool:${String(d.task_id ?? e?.task_id ?? "")}` : String(d.session_id ?? d.to ?? d.from ?? "");
-        const kind = stepKind(type, String(d.kind ?? ""));
-        const title = isPool
-          ? `⚡${String(d.task_title ?? d.task_id ?? "").slice(0, 22)}`
-          : undefined;
-        setRiver((prev) => [{
-          key: `${e.seq ?? Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          at: String(e?.ts ?? e?.at ?? "").slice(11, 19), // шина несёт ts (R37-фикс: был e.at → всегда --:--:--)
-          type, session_id: sid, kind,
-          tool: typeof d.tool === "string" ? d.tool : null,
-          title,
-          preview: String(d.preview ?? "").slice(0, 160) || (type === "AGENT_CHAT_TURN" ? `ход завершён (${d.steps} шагов, ${d.ms}ms)` : ""),
-        }, ...prev].slice(0, 60));
-      });
+      s.on("connect", onConnect);
+      s.on("disconnect", onDis);
+      s.on("event", onEvent);
+      if (s.connected) setWsOn(true);
     })();
-    return () => { cancelled = true; s?.disconnect(); };
+    return () => {
+      cancelled = true;
+      if (s) {
+        s.off("connect", onConnect);
+        s.off("disconnect", onDis);
+        s.off("event", onEvent);
+      }
+    };
   }, []);
 
+  // R46: все операции флота — socket.io agentchat:op (REST POST снят)
   const create = async () => {
     setBusy(true);
     try {
-      const j = await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "create", title: newTitle || undefined }) }).then((r) => r.json()) as { ok: boolean; session?: Session };
-      if (j.ok && j.session) { setSel(j.session.id); setNewTitle(""); await loadSessions(); }
+      const j = await agentChatOp({ op: "create", title: newTitle || undefined });
+      if (j.ok && j.session) { setSel(String(j.session.id)); setNewTitle(""); await loadSessions(); }
     } finally { setBusy(false); }
   };
   const send = async () => {
     const text = input.trim(); if (!text || !sel || thinking) return;
     setBusy(true); setInput("");
     try {
-      const j = await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "turn", id: sel, text }) }).then((r) => r.json()) as { ok: boolean; error?: string };
+      const j = await agentChatOp({ op: "turn", id: sel, text });
       if (j.ok) { setThinking(true); void loadMsgs(sel); } else setInput(text);
     } finally { setBusy(false); }
   };
   const close = async (id: string) => {
-    await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "close", id }) });
+    await agentChatOp({ op: "close", id });
     if (sel === id) { setSel(null); setMsgs([]); }
     void loadSessions();
   };
   const tick = async () => {
     setBusy(true);
     try {
-      await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "tick", force: true }) });
+      await agentChatOp({ op: "tick", force: true });
       await loadSessions();
     } finally { setBusy(false); }
   };
@@ -174,7 +196,7 @@ export default function AgentChatPanel() {
   const editObjective = async (id: string, current: string) => {
     const obj = window.prompt("Долгоживущая цель чата (objective):", current);
     if (obj === null) return;
-    await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "objective", id, objective: obj }) });
+    await agentChatOp({ op: "objective", id, objective: obj });
     void loadSessions();
   };
 

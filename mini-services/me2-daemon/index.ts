@@ -65,7 +65,7 @@ import {
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.39.0";
+const VERSION = "0.40.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -707,65 +707,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 400, { ok: false, error: `unknown op ${op} (create|status|delete); статусы: ${OBJECTIVE_STATUSES.join("/")} — только оператор` });
     }
     // ── G1 (R36): флот из полноценных агентных чатов (пересборка механизма старого Electron-браузера) ──
+    // R46 (унификация): операционная поверхность СНЯТА с REST (POST /agentchat удалён) —
+    // вся работа с чат-агентами идёт через socket.io "agentchat:op" (ack) в открытом браузере,
+    // как постановил оператор: «вся работа должна быть с открытыми чатами-агентами прямо в браузере».
+    // GET /agentchat* (read-only) остаётся для дашбордов/eval — он ничего не мутирует.
     if (path === "/agentchat" && req.method === "GET") {
       const status = url.searchParams.get("status") as "ACTIVE" | "CLOSED" | null;
-      return json(res, 200, { ok: true, sessions: agentChatList(status ? { status } : {}), status: agentChatStatus() });
-    }
-    if (path === "/agentchat" && req.method === "POST") {
-      const body = await readBody(req);
-      const op = String(body.op ?? "");
-      try {
-        if (op === "create") {
-          const s = agentChatCreate({
-            agent_id: body.agent_id ? String(body.agent_id) : undefined,
-            role: body.role ? String(body.role) : undefined,
-            title: body.title ? String(body.title) : undefined,
-          });
-          return json(res, 201, { ok: true, session: s });
-        }
-        if (op === "turn") {
-          const id = String(body.id ?? "");
-          const text = String(body.text ?? "").trim();
-          if (!id || !text) return json(res, 400, { ok: false, error: "id_and_text_required" });
-          const cur = agentChatGet(id, 1);
-          if (!cur) return json(res, 404, { ok: false, error: "session_not_found" });
-          if (cur.session.state === "THINKING") return json(res, 409, { ok: false, error: "session_busy", state: cur.session.state });
-          if (cur.session.status !== "ACTIVE") return json(res, 409, { ok: false, error: "session_closed" });
-          agentChatTurnAsync(id, text); // долгий ход — 202 немедленно, UI поллит status (как этот чат)
-          return json(res, 202, { ok: true, id, state: "THINKING", note: "ход выполняется в фоне; GET /agentchat/:id/status" });
-        }
-        if (op === "compact") {
-          const id = String(body.id ?? "");
-          void agentChatCompact(id, { force: body.force === true }).catch(() => { /* фоновая компакция */ });
-          return json(res, 202, { ok: true, id, note: "компакция в фоне" });
-        }
-        if (op === "close") {
-          const ok = agentChatClose(String(body.id ?? ""));
-          return ok ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: "session_not_found" });
-        }
-        if (op === "tick") {
-          // G2: ручной тик супервизоров (перерождение мёртвых + автономные ходы) — force: без ожидания idle
-          const r = agentChatSupervisorTick({ force: body.force === true });
-          return json(res, 200, { ok: true, ...r, in_flight: agentChatStatus().in_flight });
-        }
-        if (op === "send") {
-          // G2: межчат от оператора — сообщение в историю чата (meta.from_chat=operator) + авто-пробуждение получателя
-          const id = String(body.id ?? "");
-          const text = String(body.text ?? "").trim();
-          if (!id || !text) return json(res, 400, { ok: false, error: "id_and_text_required" });
-          const r = interchatDeliver("operator", id, text);
-          return r.ok ? json(res, 200, { ok: true, ...r }) : json(res, 400, { ok: false, error: r.error });
-        }
-        if (op === "objective") {
-          // G5: оператор закрепляет долгоживущую цель чата (супервизоры — через инструмент set_objective)
-          const id = String(body.id ?? "");
-          const r = chatSetObjective(id, String(body.objective ?? ""), { by: body.by ? String(body.by) : undefined });
-          return r.ok ? json(res, 200, { ok: true, ...r }) : json(res, 400, { ok: false, error: r.error });
-        }
-        return json(res, 400, { ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective"] });
-      } catch (e) {
-        return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
-      }
+      return json(res, 200, { ok: true, sessions: agentChatList(status ? { status } : {}), status: agentChatStatus(), ops: "socket.io agentchat:op (REST POST снят в v0.40.0)" });
     }
     if (path.startsWith("/agentchat/") && path.endsWith("/status") && req.method === "GET") {
       const id = path.slice("/agentchat/".length, -"/status".length);
@@ -875,6 +823,74 @@ io.on("connection", (socket) => {
       let result: unknown = null;
       try { result = cmd.result ? JSON.parse(cmd.result) : null; } catch { result = cmd.result; }
       ack?.({ ok: true, deduped: r.deduped, command: cmd, result });
+    } catch (e) {
+      ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // ── R46 (унификация): операционная поверхность чат-агентов — socket.io ack ──
+  // Единственный канал операций флота после снятия REST POST /agentchat: оператор в открытом
+  // браузере (панель БРАУЗЕР), Electron-оболочка, супервизоры — все через "agentchat:op".
+  // Семантика и валидация 1:1 как у снятого REST-семейства (busy/closed/ceiling/not_permitted),
+  // события и hash-chain — без изменений (это тот же agentchat-механизм, сменился только транспорт).
+  socket.on("agentchat:op", (p: Record<string, unknown> = {}, ack?: (r: unknown) => void) => {
+    const op = String(p.op ?? "");
+    try {
+      if (op === "create") {
+        const s = agentChatCreate({
+          agent_id: p.agent_id ? String(p.agent_id) : undefined,
+          role: p.role ? String(p.role) : undefined,
+          title: p.title ? String(p.title) : undefined,
+        });
+        ack?.({ ok: true, session: s });
+        return;
+      }
+      if (op === "turn") {
+        const id = String(p.id ?? "");
+        const text = String(p.text ?? "").trim();
+        if (!id || !text) { ack?.({ ok: false, error: "id_and_text_required" }); return; }
+        const cur = agentChatGet(id, 1);
+        if (!cur) { ack?.({ ok: false, error: "session_not_found" }); return; }
+        if (cur.session.state === "THINKING") { ack?.({ ok: false, error: "session_busy", state: cur.session.state }); return; }
+        if (cur.session.status !== "ACTIVE") { ack?.({ ok: false, error: "session_closed" }); return; }
+        agentChatTurnAsync(id, text); // долгий ход — ack немедленно, UI поллит status (как этот чат)
+        ack?.({ ok: true, id, state: "THINKING", note: "ход выполняется в фоне; GET /agentchat/:id/status" });
+        return;
+      }
+      if (op === "compact") {
+        const id = String(p.id ?? "");
+        void agentChatCompact(id, { force: p.force === true }).catch(() => { /* фоновая компакция */ });
+        ack?.({ ok: true, id, note: "компакция в фоне" });
+        return;
+      }
+      if (op === "close") {
+        const ok = agentChatClose(String(p.id ?? ""));
+        ack?.(ok ? { ok: true } : { ok: false, error: "session_not_found" });
+        return;
+      }
+      if (op === "tick") {
+        // G2: ручной тик супервизоров (перерождение мёртвых + автономные ходы) — force: без ожидания idle
+        const r = agentChatSupervisorTick({ force: p.force === true });
+        ack?.({ ok: true, ...r, in_flight: agentChatStatus().in_flight });
+        return;
+      }
+      if (op === "send") {
+        // G2: межчат от оператора — сообщение в историю чата (meta.from_chat=operator) + авто-пробуждение получателя
+        const id = String(p.id ?? "");
+        const text = String(p.text ?? "").trim();
+        if (!id || !text) { ack?.({ ok: false, error: "id_and_text_required" }); return; }
+        const r = interchatDeliver("operator", id, text);
+        ack?.(r.ok ? { ok: true, ...r } : { ok: false, error: r.error });
+        return;
+      }
+      if (op === "objective") {
+        // G5: оператор закрепляет долгоживущую цель чата (супервизоры — через инструмент set_objective)
+        const id = String(p.id ?? "");
+        const r = chatSetObjective(id, String(p.objective ?? ""), { by: p.by ? String(p.by) : undefined });
+        ack?.(r.ok ? { ok: true, ...r } : { ok: false, error: r.error });
+        return;
+      }
+      ack?.({ ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective"] });
     } catch (e) {
       ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
     }

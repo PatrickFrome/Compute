@@ -1,0 +1,30 @@
+# MetaEngine Desktop — единая Electron-система ME2 (R46)
+appId: me.metaengine.desktop
+productName: MetaEngine
+copyright: ME2 OS · PatrickFrome/Compute
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+extraMetadata:
+  main: dist/main.js
+linux:
+  target:
+    - AppImage
+  category: Development
+  executableName: metaengine
+appImage:
+  artifactName: metaengine-${version}-linux.${arch}.AppImage
+win:
+  target:
+    - nsis
+nsis:
+  artifactName: metaengine-${version}-win32.${arch}.exe
+  oneClick: false
+mac:
+  target:
+    - dmg
+dmg:
+  artifactName: metaengine-${version}-mac.${arch}.dmg

@@ -14,6 +14,8 @@ import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import AgentChatPanel from "@/components/me2/agent-chat-panel";
 import FleetGrid from "@/components/me2/fleet-grid";
+import { agentChatOp } from "@/lib/me2-socket";
+import { me2Desktop } from "@/lib/me2-desktop";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -711,7 +713,35 @@ export default function MissionControl() {
     setPanel(p);
     try { localStorage.setItem("me2.panel.v1", p); } catch { /* приватный режим */ }
     try { history.replaceState(null, "", `#${p}`); } catch { /* ignore */ }
+    // R46 (унификация Electron): синхронизация панели с нативной оболочкой (TabRegistry)
+    try { me2Desktop()?.tabs.setActive("panel", p); } catch { /* мост отсутствует — чистый веб */ }
   }, []);
+
+  // R46: нативные меню/трей/TabRegistry оболочки переключают панели UI (единая система)
+  useEffect(() => {
+    const d = me2Desktop();
+    if (!d) return; // браузерный рантайм — панели самодостаточны
+    const offTabs = d.onTabActivated((p) => {
+      if (p?.kind === "panel" && p.key) switchPanel(p.key as PanelKey);
+    });
+    // меню оболочки: «Открыть сайт вкладкой…», «Проверить обновления», статус процессов
+    const offNative = d.onNativeEvent((p) => {
+      const type = String(p?.type ?? "");
+      if (type === "open-site-prompt") {
+        const url = window.prompt("URL сайта для нативной вкладки (http/https):", "https://");
+        if (url && /^https?:\/\//i.test(url)) void d.tabs.openSite(url).then((r) => {
+          if (!r.ok) toast({ title: "вкладка не открыта", description: r.error ?? "ошибка", variant: "destructive" });
+        });
+      } else if (type === "update-check") {
+        void d.update.check().then((u) => {
+          toast({ title: u.updateAvailable ? `обновление доступно: ${u.latest}` : `актуальная версия (${u.current})`, description: u.updateAvailable ? "Система → применить обновление может только оболочка MetaEngine" : u.error ?? "GitHub Releases" });
+        });
+      } else if (type === "chat-create") {
+        window.dispatchEvent(new CustomEvent("me2:chat-create"));
+      }
+    });
+    return () => { offTabs(); offNative(); };
+  }, [switchPanel, toast]);
 
   // ветки браузера (agent-browser через шину, v0.6.0)
   const [browserTabs, setBrowserTabs] = useState<{ id: string; title: string; url: string; active: boolean }[]>([]);
@@ -1054,7 +1084,7 @@ export default function MissionControl() {
       setCastStat((s) => ({ ...s, connected: false, fps: 0, kbs: null }));
       setCastConsole([]);
     };
-  }, [castOn, castProfile]);
+  }, [castOn, castProfile, castNonce]);
 
   // pair-control: сняли «live» — руль выключается тоже
   useEffect(() => {
@@ -1158,6 +1188,12 @@ export default function MissionControl() {
     });
   }, [toast]);
 
+  // R46-восстановление (потеряно v5-сборкой, страница 500): reconnect стрима :3042 + свежий CDP-кадр
+  const reloadCast = useCallback(() => {
+    setCastNonce((n) => n + 1);
+    setCdpTick((t) => t + 1);
+  }, []);
+
   const spawnAgent = useCallback(async (role: string) => {
     await sendCommand("AGENT_SPAWN", { role, model: "zai:default" }, { successMsg: `агент ${role} создан` });
     setCmdOpen(false);
@@ -1219,11 +1255,8 @@ export default function MissionControl() {
         toast({ title: "флот недоступен", description: "нет активного супервизора — создайте чат-агента", variant: "destructive" });
         return;
       }
-      const r = await fetch("/agentchat?XTransformPort=3041", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ op: "send", id: sup.id, text: `Разбери провал задачи ${t.id} «${t.title}» (статус ${t.status}). Диагноз и урок — reply; фиксацию исхода — report_outcome (outcome-proof).` }),
-      }).then((r) => r.json()) as { ok?: boolean; error?: string };
+      // R46: op:"send" через socket.io ack (REST POST /agentchat снят)
+      const r = await agentChatOp({ op: "send", id: sup.id, text: `Разбери провал задачи ${t.id} «${t.title}» (статус ${t.status}). Диагноз и урок — reply; фиксацию исхода — report_outcome (outcome-proof).` });
       if (r.ok) {
         toast({ title: "провал передан флоту ✓", description: `супервизор «${sup.title}» координирует разбор — река рассуждений покажет ход работы` });
         window.dispatchEvent(new CustomEvent("me2:select-chat", { detail: { id: sup.id } }));
@@ -3649,6 +3682,7 @@ export default function MissionControl() {
                       </Card>
           </section>
         )}
+      </main>
 
       {/* ── СТАТУС-БАР (sticky footer) ── */}
       <footer className="mt-auto flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-zinc-800 bg-zinc-900/80 px-4 py-2 text-[11px] text-zinc-400 backdrop-blur">

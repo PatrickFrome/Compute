@@ -49,12 +49,11 @@ curl -sf --max-time 5 "$B/pool" | j "'live='+str(d['live'])+'/'+str(d['ceiling']
 echo "== POOL lease-exclusivity (synthetic) =="
 curl -s --max-time 10 -X POST "$B/pool" -H "Content-Type: application/json" -d '{"op":"scale","n":2}' | j "'scale='+str(d['scale']), 'created='+str(d['created'])"
 
-echo "== AGENTCHAT (G1+G2: флот агентных чатов + супервизоры) =="
+echo "== AGENTCHAT (G1+G2: флот агентных чатов + супервизоры; R46: REST POST снят) =="
 curl -sf --max-time 5 "$B/agentchat" | j "'сессий='+str(d['status']['total']), 'active='+str(d['status']['active']), 'thinking='+str(d['status']['thinking']), 'супервизоров='+str(d['status']['supervisors']), 'ходов='+str(d['status']['turns_ok'])+'✓/'+str(d['status']['turns_fail'])+'✗', 'в_полёте='+str(d['status']['in_flight']), 'компакций='+str(d['status']['compactions']), 'деградаций='+str(d['status']['degraded'])"
-echo "== AGENTCHAT supervisor tick (G2: перерождение + автономный ход) =="
-curl -s --max-time 10 -X POST "$B/agentchat" -H "Content-Type: application/json" -d '{"op":"tick","force":true}' | j "'ok='+str(d['ok']), 'ensured='+str(d['ensured']['id'])[:14], 'kicked='+str(len(d['kicked'])), 'supervisors='+str(d['supervisors'])"
-echo "== AGENTCHAT G4+G5 (objective-op + ME36 механика: река пула + цели) =="
-curl -s --max-time 10 -X POST "$B/agentchat" -H "Content-Type: application/json" -d '{"op":"objective","id":"noop"}' | j "'objective-op-ответ='+str(d.get('error','ok'))"
+echo "== AGENTCHAT socket-операции (R46: agentchat:op через WS :3040; REST POST больше нет) =="
+bun -e 'import {io} from "socket.io-client"; const s=io("ws://127.0.0.1:3040",{path:"/",transports:["websocket"],timeout:5000}); const done=(r)=>{console.log("tick ok="+(r&&r.ok), "kicked="+((r&&r.kicked)||[]).length, "supervisors="+(r&&r.supervisors)); s.emit("agentchat:op",{op:"objective",id:"noop"},(r2)=>{console.log("objective-op-ответ="+((r2&&r2.error)||"ok")); process.exit(0);});}; s.on("connect",()=>s.emit("agentchat:op",{op:"tick",force:true},done)); s.on("connect_error",()=>{console.log("WS недоступен: "+String(s.io.engine? "":"")); process.exit(1);}); setTimeout(()=>{console.log("ok=SOCKET_TIMEOUT"); process.exit(1);},9000);' 2>/dev/null
+curl -s --max-time 5 -X POST "$B/agentchat" -H "Content-Type: application/json" -d '{"op":"tick","force":true}' | j "'REST-POST-снят-подтверждено='+str(d.get('error')=='no route POST /agentchat' or 'no route' in str(d.get('error','')))"
 curl -sf --max-time 5 "$B/mechanics" | j "'ME36 G4+G5 WORKS='+str(any('ME36'==m['id'] and m['verdict']=='WORKS' for m in d['mechanics']))"
 
 echo "== AUTONOMY v4 (H-линия: liveness/budget/non-bypass/recovery/independence) =="

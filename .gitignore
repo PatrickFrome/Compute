@@ -77,3 +77,8 @@ db/*.db-*
 
 # CI-generated tauri updater config overlay
 /updater-overlay.json
+
+# MetaEngine Desktop (R46)
+desktop/node_modules/
+desktop/dist/
+desktop/release/

@@ -526,3 +526,49 @@ Stage Summary:
 - Мониторинг: VLM-ретрай (429 платформы), Demand·DEBUG анализирует 10 отказов (первая саморождённая задача флота), cooldown-persist в деле.
 - Далее (R44): H2 policy-файл T0/T1/T2 + ledger-поля (роадмап R38 §5); G6 «раздел флот» (сетка чатов с целями); G7 cron-планировщик из чатов; outcome-proof Demand·DEBUG (саморождённый чат обязан отчитаться в реке).
 - Скриншоты: download/r43-g10g11-{desktop,mobile,gov-desktop}.png; VLM: research/2026/r43-vlm-qa1.json (ретрай).
+
+---
+Task ID: R44-R45 (ретро-запись)
+Agent: Z.ai Code (main)
+Task: R44 (H2 policy-файл T0/T1/T2, G6 «раздел флот», G7 cron-планировщик из чатов, outcome-proof, снятие REST API) + R45 (полная пересборка интерфейса в несколько панелей). Записи были утеряны при компакции — код фактически выполнен и закоммичен (eb32fba, 77f5c5b), восстанавливаю документацию задним числом.
+
+Work Log:
+- R44 H2: mini-services/me2-daemon/policy.json (tier'ы T0/T1/T2) + src/policy.ts (policyStatus/policyReload) + REST GET/POST /policy; запреты с ledger-полями, POLICY_DENIED в hash-chain.
+- R44 G7: src/cron.ts (cronStatus/cronTick/cronCancel/cronFire, CRON_TICK_MS) + REST /cron + тик в boot-цикле daemon'а; капы из policy.json; AGENT_CHAT_CRON в chain. Будим чаты по расписаниям, overdue догоняет первым тиком.
+- R44 G6: src/components/me2/fleet-grid.tsx — сетка всех чатов с целями/состояниями/outcome-полями; клик по карточке открывает чат в панели (me2:select-chat).
+- R44 outcome-proof: outcome_status/outcome_proof/outcome_at в сессиях чатов; инструмент report_outcome; UI-чипы ✓proof/blocked в списке чатов.
+- R45: scripts/r45_rebuild_ui.py — перестройка page.tsx (4001 строк) в панельный шелл v5: HEADER с вкладками-панелями (Alt+1..5), БРАУЗЕР (главная: AgentChatPanel-сайдбар + хром браузера с живым сайтом :3042/:3043 и «рулём»), ФЛОТ (FleetGrid+пул+агенты+воркеры), МИССИЯ (ветки+очередь+механики+граф+роадмап+сандбокс+шина), ТЕЛЕМЕТРИЯ (sense/obsv/bench/eval/hygiene/evchain/autonomy/governor-demand/CDP), ЖУРНАЛ (event log). Применено в 77f5c5b.
+
+Stage Summary:
+- Daemon получил policy/cron REST-семейства, UI стал панельным (v5). НО: v5-сборка содержала два дефекта, найденных и убитых в R46: потерян `</main>` (JSX не парсился) и потерян `reloadCast` (Runtime ReferenceError → страница 500). Постфактум-вывод: перестройки page.tsx обязаны проходить lint + браузерную проверку ДО коммита (R46 это закрыл).
+
+---
+Task ID: R46
+Agent: Z.ai Code (main)
+Task: «Мы больше не будем разрабатывать отдельно электрон и me2, необходимо объединить и интегрировать все механики в одну наилучшую систему и собрать полноценную электрон версию metaengine» — умное слияние Electron-оболочки и ME2 в ЕДИНУЮ систему + завершение снятия REST API.
+
+Work Log:
+- R46-0 (аудит): фактическое состояние — R44/R45 код в репо (eb32fba, 77f5c5b), daemon v0.39.0, UI v5 с дефектами сборки; POST /agentchat жив (5 потребителей в UI); Electron-версии нет. План: socket-поверхность операций → desktop/-оболочка → мост UI⇄Electron → верификация.
+- R46-1 (снятие REST-операций, R44-0 финал): index.ts — POST /agentchat УДАЛЕН (ops create/turn/compact/close/tick/send/objective переехали 1:1 на socket.io "agentchat:op" с ack; семантика busy/closed/ceiling/not_permitted сохранена; события/hash-chain без изменений). GET /agentchat* (read-only) остался для дашбордов/eval. autonomy.ts ENFORCED_WRITE_FAMILIES: "/agentchat" снят (двустороннее равенство P1 сохранено). VERSION → 0.40.0.
+- R46-2 (общий WS-клиент): src/lib/me2-socket.ts — me2Socket() (одна socket.io-связь на приложение, :3040 через gateway) + agentChatOp(payload, timeout 10s) — честный таймаут/daemon_unreachable, никакого вечного зависания UI.
+- R46-3 (UI на socket-операции): agent-chat-panel.tsx — create/send/close/tick/objective через agentChatOp; река переведена на общий сокет (одна связь daemon⇄UI вместо двух; корректные off()-отписки, фикс скоупинга обработчиков). page.tsx reflectTask — op:"send" через socket. Потребителей REST POST /agentchat = 0.
+- R46-4 (Electron-оболочка, ядро слияния): desktop/ — полноценный Electron-app: package.json (metaengine-desktop 0.40.0, electron 33, electron-builder), tsconfig, electron-builder.yml (AppImage/NSIS/DMG), README.
+  • src/gateway.ts — ВСТРОЕННЫЙ мини-gateway (замена Caddy на машине оператора): XTransformPort-прокси http + сырой TCP-pipe для ws-upgrade (socket.io/стримы) — ЕДИНЫЙ UI работает без единой правки.
+  • src/daemon-supervisor.ts — вечный супервизор процессов: spawn daemon (bun) + UI (bun), экспоненциальный backoff 1.5s→10м, честный учёт рестартов, кооперация со стражем инкарнации daemon'а (exit 13 = «другой жив» → режим присоединения, без спавн-шторма), health-пинги сбрасывают backoff.
+  • src/tab-registry.ts — TabRegistry (R41): MAIN = UI Mission Control v5; панельные роли (SUPERVISOR→mission и т.д.) доставляются в UI; TabRegistry.create({role:'WEB',url}) — настоящий сайт в WebContentsView поверх UI (G10: браузер сам открывает сайт); resize/close/windowOpen-inside.
+  • src/updater.ts — самообновление из GitHub PatrickFrome/Compute: semver-сравнение релиза, выбор артефакта платформы/arch, staged-скачивание в userData, применение после перезапуска (AppImage — мгновенная замена detached-спавном).
+  • src/preload.ts — contextBridge window.me2 (env/version/panels/tabs/daemon/update/chats/onTabActivated/onProcStatus/onNativeEvent).
+  • src/main.ts — PID-1 системы: single-instance lock → gateway :8137 → супервизор (daemon+ui) → окно Mission Control (1500×940, #09090b) c ожиданием здоровья UI → меню (Панели Ctrl+1..5, Создать чат-агента Ctrl+T, Открыть сайт вкладкой, Рестарт daemon/UI, Проверить обновления Ctrl+U, Журнал оболочки) → трей (сворачивание в трей = флот живёт; Выход = грациозная остановка всей цепочки) → IPC-мост. Логи: userData/logs/me2-desktop.log + кольцо.
+- R46-5 (мост UI⇄Electron): src/lib/me2-desktop.ts (типизированный контракт Me2DesktopBridge, isDesktop(), деградация в no-op в чистом вебе); page.tsx — switchPanel синхронизирует панель с оболочкой (tabs.setActive), подписка onTabActivated (нативное меню переключает панели UI), onNativeEvent: open-site-prompt (prompt URL → tabs.openSite), update-check (тост честного вердикта), chat-create; agent-chat-panel — нативный «Создать чат-агента» через me2:chat-create.
+- R46-6 (починка v5-сборки): (1) потерян `</main>` — JSX-парсинг падал (наследие r45-скрипта: он вырезал старый main вместе с закрывающим тегом) — вставлен перед footer'ом; (2) потерян reloadCast — Runtime ReferenceError → белый экран — восстановлен (castNonce++ + cdpTick++, castNonce добавлен в deps cast-эффекта). Урок: перестройка 4000-строчного page.tsx обязана заканчиваться lint+браузером ДО коммита.
+- R46-7 (верификация): lint 0/0; daemon v0.40.0 перезапущен через start.sh; REST POST /agentchat → "no route" ✓; socket-проба: bad_op/tick/create/close — всё ack'ается ✓; round-verify.sh обновлён (socket-проба bun -e + подтверждение снятия REST): tick ok=true, ME36/37/38 WORKS, liveness=LIVE, non_bypass=NO_BYPASS 28 маршрутов, governor CLOSED, экономия памяти 84.6% на повторной доставке.
+- R46-8 (браузерная QA через :81): главная панель БРАУЗЕР — 5 вкладок, сайдбар 10+ чатов с живыми чипами (10/8, 🛡2, 13✓/112✗, ⌁6, deg2), WS live ✓; create через UI (Enter) — чат R46-Electron создан (socket op) ✓; send → THINKING → река рассуждений живая (💭/🔧 list_chats/report_outcome от чатов И пула) ✓; все 5 панелей рендерятся (fleet 3 карточки, mission 3, telemetry 8, log 1), переключение + hash-персист #log ✓; mobile 390: sw=iw, hscroll=false ✓; скриншоты download/r46-browser-panel.png, r46-panel-fleet.png, r46-panel-mission.png, r46-mobile.png.
+- R46-9 (пруфы оболочки): desktop/ bun install (electron 33.4.11) + tsc --noEmit 0 ошибок; ИНТЕГРАЦИОННЫЙ ПРУФ gateway под Node (рантайм Electron): HTTP-прокси :8137→:3041 (12 сессий) ✓ + WS-прокси socket.io через XTransformPort с agentchat:op ack (supervisors=2) ✓. GUI-запуск Electron в песочнице невозможен (нет дисплея) — честно; сборка: cd desktop && bun run dev/dist.
+- R46-10: worklog (R44/R45 ретро + R46) + push sandbox/me2-os.
+
+Stage Summary:
+- **ЕДИНАЯ СИСТЕМА СОБРАНА: Electron-версия MetaEngine = оболочка (desktop/) + то же ядро ME2 — без раздельной разработки.** PID-1 оболочки порождает gateway+daemon+UI и оживляет их (вечность перенесена на уровень системы); TabRegistry объединяет панели ME2 и нативные вкладки-сайты (R41+G10 изнутри Electron); самообновление из GitHub изнутри приложения; ЕДИНЫЙ UI работает в обоих рантаймах без правок (встроенный gateway заменил Caddy).
+- **API снят окончательно**: операции флота — только socket.io agentchat:op (ack), REST POST удалён, non-bypass аудит зелёный (28 маршрутов, двустороннее равенство). Оператор работает исключительно с открытыми чатами-агентами в браузере/оболочке.
+- Daemon v0.40.0: eval/round-verify зелёные, ME36-38 WORKS, шина нетронута, lint 0/0.
+- Мониторинг: платформенные 429 (governor/breaker держат, honest BREACH budget — телеметрия не подкрашена); VLM-ревью r46-скриншотов — ретрай при окне квоты; GUI-прогон Electron — на машине оператора (bun run dist).
+- Далее: R47-кандидаты — зеркалирование TabRegistry-вкладок в UI-хроме (нативные WEB-вкладки списком в панели БРАУЗЕР), IPC-стрим proc-status в UI-чипы оболочки, H3 outcome-proof-награды, H5 merge-конвейер T1, H6 SQL-контур (роадмап R38 §5).

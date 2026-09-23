@@ -180,7 +180,8 @@ export function budgetStatus(): {
 export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/commands": "ШИНА (главный enforcement): enqueueCommand → полосы EMERGENCY/CONTROL/MUTATION/READ_ONLY + бюджет 24cost/60s + idempotency",
   "/reset": "EMERGENCY kill-switch оператора (полоса 0): ENVIRONMENT_RESET — всегда доступен, root of trust",
-  "/agentchat": "REST-семейство G-линии: валидация op/состояний (busy/closed/ceiling/not_permitted) + события в hash-chain",
+  // R46: "/agentchat" снят — операции флота переехали на socket.io "agentchat:op" (ack),
+  // POST-маршрут удалён из исходника; манифест обязан отражать исходник (двустороннее равенство P1).
   "/demand": "G10 автопилот спроса: op tick|config, гистерезис+cooldown+капы (ME2_DEMAND_MAX/CHAT_CEILING)+breaker-aware, решения в hash-chain (AGENT_CHAT_DEMAND)",
   "/policy": "H2 (R44) policy-файл T0/T1/T2: op reload — перечитывание policy.json, запреты с ledger-полями (POLICY_DENIED в chain)",
   "/cron": "G7 (R44) cron из чатов: op cancel|fire|tick, капы policy.json (crons_per_chat/global/min_minutes), AGENT_CHAT_CRON в chain",
