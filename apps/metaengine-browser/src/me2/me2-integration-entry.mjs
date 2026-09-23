@@ -18,11 +18,13 @@ import { startMe2MissionControl, stopMe2MissionControl, me2MissionControlStatus 
 import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
 import { startMe2SupervisorMeshBridge, stopMe2SupervisorMeshBridge, me2SupervisorMeshBridgeStatus } from './me2-supervisor-mesh-bridge.mjs';
 import { me2FleetTabsHostStatus } from './me2-fleet-tabs-host.mjs';
+import { startMe2UiHost, stopMe2UiHost, me2UiHostStatus } from './me2-ui-host.mjs';
+import { startMe2UiGateway, stopMe2UiGateway, me2UiGatewayStatus } from './me2-ui-gateway.mjs';
 import { me2SocketStatus } from './me2-socket-client.mjs';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
 
 export const ME2_INTEGRATION_SCHEMA = 'metaengine.browser.me2.integration.v1';
-export const ME2_INTEGRATION_VERSION = 'r49-contract-smart-merge-1';
+export const ME2_INTEGRATION_VERSION = 'r50-unified-shell-1';
 
 /** Ожидаемый контракт daemon'а (docs/electron-rebuild-plan.md, фаза A; аналогия — LSP initialize). */
 export const ME2_EXPECTED_CONTRACT = 'me2-daemon-contract.v1';
@@ -76,6 +78,8 @@ export function me2IntegrationStatus() {
     stopped: stoppedFlag,
     contract: contractState,
     socket_client: me2SocketStatus(),
+    ui_host: me2UiHostStatus(),
+    ui_gateway: me2UiGatewayStatus(),
     daemon: me2DaemonStatus(),
     fleet_bridge: me2FleetBridgeStatus(),
     tabs_host: me2FleetTabsHostStatus(),
@@ -99,6 +103,18 @@ export async function startMe2Integration({ app } = {}) {
     await me2ContractHandshake();
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'CONTRACT_HANDSHAKE_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
+  }
+  // R50 (фаза B): хост панелей UI (усыновление/спавн) + встроенный gateway — ЕДИНЫЙ UI
+  // (панели v5) работает внутри браузера без правок; фолбэк Mission Control — GET /ui daemon'а.
+  try {
+    await startMe2UiHost();
+  } catch (e) {
+    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'UI_HOST_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
+  }
+  try {
+    await startMe2UiGateway();
+  } catch (e) {
+    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'UI_GATEWAY_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
   try {
     startMe2FleetBridge();
@@ -135,6 +151,8 @@ export async function startMe2Integration({ app } = {}) {
       stopMe2BrainAdapter();
       stopMe2MissionControl();
       stopMe2FleetBridge();
+      stopMe2UiGateway();
+      stopMe2UiHost({ killChild: false }); // UI переживает закрытие окна — как daemon (наследие R46)
       stopMe2DaemonHost({ killChild: false });
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_STOP' });
     });

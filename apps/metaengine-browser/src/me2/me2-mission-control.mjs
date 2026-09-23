@@ -17,10 +17,12 @@
  */
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
 import { me2FleetTabsGetHost } from './me2-fleet-tabs-host.mjs';
+import { me2UiGatewayStatus } from './me2-ui-gateway.mjs';
 
 export const ME2_MISSION_CONTROL_SCHEMA = 'metaengine.browser.me2.mission-control.v1';
 
-const UI_URL = process.env.ME2_UI_URL || `${ME2_REST_BASE}/ui`;
+const UI_URL_ENV = process.env.ME2_UI_URL || null; // оператор может закрепить любой UI
+const DAEMON_UI_URL = `${ME2_REST_BASE}/ui`; // самодостаточный фолбэк (R49)
 const POLL_MS = Number(process.env.ME2_MISSION_POLL_MS || 30000);
 const FIRST_POLL_DELAY_MS = Number(process.env.ME2_MISSION_FIRST_DELAY_MS || 9000);
 const AGENT_TAB_CEILING = Number(process.env.ME2_AGENT_TAB_CEILING || 12); // сверх FLEET-квоты браузера не прыгаем
@@ -42,11 +44,25 @@ function emitRow(row, { error = false } = {}) {
   else console.log(text);
 }
 
+/**
+ * R50 (фаза B): разрешение UI Mission Control на каждый ensure —
+ * env ME2_UI_URL → живой встроенный gateway (панели v5 + daemon за XTransformPort) →
+ * самодостаточный GET /ui daemon'а (фолбэк R49). Деградация ui-host не ломает вкладки.
+ */
+function resolveUiUrl() {
+  if (UI_URL_ENV) return { url: UI_URL_ENV, mode: 'env' };
+  const g = me2UiGatewayStatus();
+  if (g?.state === 'LIVE' && g.url) return { url: g.url, mode: 'live_gateway' };
+  return { url: DAEMON_UI_URL, mode: 'daemon_fallback' };
+}
+
 function row(event, patch = {}) {
+  const ui = resolveUiUrl();
   return {
     schema: ME2_MISSION_CONTROL_SCHEMA,
     event,
-    ui_url: UI_URL,
+    ui_url: ui.url,
+    ui_mode: ui.mode,
     supervisor_tab_id: supervisorTabId,
     agent_tabs: agentTabs.size,
     ...patch,
@@ -72,6 +88,7 @@ function existingTabByUrlPrefix(urlPrefix, role) {
 async function ensureSupervisorTab() {
   const host = me2FleetTabsGetHost();
   if (!host) return false;
+  const { url: UI_URL } = resolveUiUrl();
   if (supervisorTabId && host.registry.get(supervisorTabId)) return true; // жива
   const existing = existingTabByUrlPrefix(UI_URL, 'SUPERVISOR');
   if (existing) {
@@ -98,6 +115,7 @@ async function ensureSupervisorTab() {
 async function ensureAgentTab(session) {
   const host = me2FleetTabsGetHost();
   if (!host) return;
+  const { url: UI_URL } = resolveUiUrl();
   if (agentTabs.size >= AGENT_TAB_CEILING) return; // честный потолок видимости флота
   const known = agentTabs.get(session.id);
   if (known) {
@@ -190,11 +208,13 @@ export function stopMe2MissionControl() {
 }
 
 export function me2MissionControlStatus() {
+  const ui = resolveUiUrl();
   return {
     schema: ME2_MISSION_CONTROL_SCHEMA,
     started_at: startedAt,
     stopped,
-    ui_url: UI_URL,
+    ui_url: ui.url,
+    ui_mode: ui.mode,
     supervisor_tab_id: supervisorTabId,
     agent_tabs: [...agentTabs.entries()].map(([session_id, t]) => ({ session_id, ...t })),
     last_digest: lastDigest,
