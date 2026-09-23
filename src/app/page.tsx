@@ -972,6 +972,19 @@ export default function MissionControl() {
     return () => clearTimeout(t);
   }, [switchPanel]);
 
+  // R50 (B5): FLEET-вкладка браузера открывает UI c #chat=<session_id> — панель сама
+  // выбирает чат (chain: me2:select-chat → switchPanel("browser") → agent-chat-panel select)
+  useEffect(() => {
+    const openFromHash = () => {
+      const m = window.location.hash.match(/^#chat=([A-Za-z0-9_-]+)/);
+      if (!m) return;
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent("me2:select-chat", { detail: { id: m[1] } })), 300);
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, []);
+
   // v5: вкладки браузера нужны на панелях БРАУЗЕР/МИССИЯ — при входе + редкий поллинг (команда шины дорожает)
   useEffect(() => {
     if (panel !== "browser" && panel !== "mission") return;

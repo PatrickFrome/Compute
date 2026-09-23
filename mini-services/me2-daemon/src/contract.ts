@@ -258,7 +258,22 @@ export function missionUiHtml(): string {
   });
   $("b-tick").addEventListener("click", function(){ op({op:"tick"}, "тик супервизоров выполнен"); });
 
-  loadHead(); loadFleet(); loadRiver(); connectSocket();
+  // R50 (B5): FLEET-вкладка браузера открывает /ui#chat=<id> — сайт сам выбирает агента
+  function openFromHash(){
+    var m=location.hash.match(/^#chat=([A-Za-z0-9_-]+)/);
+    if(!m) return;
+    var id=m[1], tries=0;
+    var trySel=function(){
+      var s=$("chat-sel");
+      var found=chats.some(function(c){ return c.id===id; });
+      if(found){ s.value=id; toast("чат из вкладки: "+id.slice(0,20), "ok"); $("msg").focus(); }
+      else if(++tries<10) setTimeout(trySel, 600); // флот ещё грузится — честная догрузка без шторма
+    };
+    trySel();
+  }
+  window.addEventListener("hashchange", openFromHash);
+
+  loadHead(); loadFleet(); loadRiver(); connectSocket(); openFromHash();
   setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();

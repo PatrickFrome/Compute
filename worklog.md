@@ -643,3 +643,27 @@ Stage Summary:
 - Vault-урок: env-reset снова стёр /home/z/.a2 — система пережила (БД-истина), push/PR токеном из vault'а.
 - Мониторинг: web_search 429 ×2 (ресёрч-док собран внутренним анализом, web-верификация при окне); CI-прогоны #950 — проверить conclusion в R50; VLM-ревью r49-скриншотов — при окне квоты.
 - Далее (R50, фаза B): B4 — авторитетная оболочка apps/metaengine-browser, объединение supervisor-keepalive + desktop/daemon-supervisor (единый страж, exit-13), вывод desktop/updater.ts (K6); B5 — доставка панелей v5 как Mission Control (решение static-vs-live по результату A3 — socket-мосты живы); K7 salt-детект ротаций Supabase-vs-vault.
+
+---
+Task ID: R50-PHASE-B-UNIFIED-SHELL-20260923
+Agent: Z.ai Code (main)
+Task: «Продолжи поэтапную разработку, делай глубокие ресёрчи и аудиты, собирай всё тщательно и аккуратно, проводи тесты, делай ресёрчи по лучшим аналогам на электроне, vs code, курсор и прочие» — фаза B плана: единая оболочка (K2/K6), UI-host + встроенный gateway, ресёрч, тесты.
+
+Work Log:
+- R50-0 (аудит): daemon v0.42.0 здоров (eval v18 53/53); CI #950 (мерж R49) — Fast Verified Dev Release in_progress, релиз ещё не опубликован (контроль перенесён в R51).
+- R50-1 (аудит модулей браузера): me2-daemon-host.mjs — adopt/spawn/backoff (MAX_RESTARTS 8, health 15s), stdout-форд daemon'а; me2-mission-control.mjs — SUPERVISOR/FLEET-вкладки, потолок 12, churn-лимит; UI_URL был const (env→/ui) — стал динамическим; supervisor-keepalive.mjs — страж ОКНА браузера (states ACTIVE..PARKED), R50 его не трогает; entry-порядок: daemon→handshake→(R50: ui-host→gateway)→мосты.
+- R50-2 (ресёрч): web_search 429 (третья сессия подряд — честно, не амплифицировал); research/2026/r50-analogues.md: VS Code «логика вне UI + один владелец рестартов», Chrome browser-process как PID-1 вкладок (зоны стражей разделены: keepalive=окно, ui-host/daemon-host=дочерние сервисы), Cursor fork-дисциплина минимального диффа (наш аналог: вся me2-плоскость в src/me2/* + guarded-вызовы), served-UI паттерн (VS Code Server/code-server/Slack local service) → встроенный gateway; верификационный урок: под Node (рантайм Electron) WS-прокси CONNECTED, под bun — таймаут (пробел bun в node:http upgrade) → целевые пруфы me2-плоскости гоняем под Node.
+- R50-3 (B4a): src/me2/me2-ui-gateway.mjs — порт desktop-гейтвея в me2-плоскость: loopback :8137 (env), дефолт → Next UI :3000, ?XTransformPort=NNNN → daemon/стримы, WS-upgrade сырым TCP-pipe; stats (http_ok/fail, ws_upgrades), честный GATEWAY_FAILED при занятом порте; zero-authority.
+- R50-4 (B4b): src/me2/me2-ui-host.mjs — хост панелей v5: adopt живого UI (health-проба :3000) / спавн bun run start (ME2_UI_DIR → resources/me2-ui → cwd-кандидаты; ME2_UI_DEV=1 → dev), backoff 2s..3m MAX_RESTARTS 6, RESTARTS_EXHAUSTED → DEGRADED + фолбэк /ui; stdout-форд UI-процесса.
+- R50-5 (B5): me2-mission-control.mjs — resolveUiUrl() на каждый ensure: env ME2_UI_URL → живой gateway (панели v5) → самодостаточный /ui daemon'а; ui_mode в row()/status; #chat=<id> для FLEET-вкладок на обоих UI; integration-entry: старт ui-host+gateway до мостов, статус +ui_host/+ui_gateway, will-quit деликатный (killChild:false — переживают закрытие окна), ME2_INTEGRATION_VERSION=r50-unified-shell-1; package.json check +2 модуля.
+- R50-6 (согласование UI-сторон): daemon /ui (contract.ts) — hash-роутинг #chat=<id> (догрузка флота без шторма, 10 попыток × 600мс); Next-панели (page.tsx) — эффект #chat=<id> → dispatch me2:select-chat (chain: switchPanel("browser") → agent-chat-panel select, потребители на месте с R44-G6).
+- R50-7 (тесты): node --check ×4 ✓; lint 0/0; рестарт daemon — eval v18 PASS 53/53; ИНТЕГРАЦИОННЫЙ ПРОГОН gateway под Node против живых сервисов: UI proxy 200 html (53.7KB), daemon XTransformPort proxy 200 v0.42.0, WS socket.io через gateway → CONNECTED (под bun — честно задокументированный таймаут upgrade-совместимости, целевой рантайм Node пройден).
+- R50-8 (доставка): commit ea7e833f7 → push me2/smart-merge-r50 → PR #951 → MERGED в release/self-update-ambiguity-live-v2; CI-конвейер соберёт R50 в следующий dev-релиз.
+- R50-9 (K6 закрытие в исходниках): desktop/src/updater.ts — DEPRECATED-маркер с записью решения (авторитет self-update-runtime-v8+Guardian+CI, запрет подключения, код сохранён как источник механизмов); docs/electron-rebuild-plan.md — статус-блок: фаза A ЗАКРЫТА (R49), фаза B ЗАКРЫТА (R50), фаза C следующая; research/2026/r50-analogues.md.
+
+Stage Summary:
+- **ФАЗА B ЗАКРЫТА: единая оболочка собрана** — авторитетный PID-1: METAENGINE Browser; me2-плоскость несёт UI-host + встроенный gateway, так что панельный UI v5 работает внутри браузера без правок (XTransformPort-контракт), а при отсутствии UI-каталога Mission Control честно деградирует на /ui daemon'а; гонка updaters устранена (DEPRECATED-маркер + решение в плане).
+- Зоны стражей разделены по VS Code/Chrome-паттерну: keepalive — окно, daemon-host/ui-host — дочерние сервисы, никаких вторых стражей окна.
+- Доставка трёх смарт-мержей подряд (R40/R49/R50 → PR #948/#950/#951) подтвердила CI-конвейер: единая система доставляется живым установкам штатным self-update браузера.
+- Мониторинг: CI #950/#951 conclusion — R51; web_search 429 ×3 (веб-верификация ресёрчей при окне); VLM-ревью — при окне.
+- Далее (R51, фаза C): перенос пакетов me2-daemon/me2-ui в release-ветку (apps/me2-daemon, apps/me2-ui — совместимы с resolveUiDir/resources), autorelease-gate с npm run check + eval; после C — фаза D (Supabase-контур, DEPRECATED-реестр 243 RPC, H6 SQL) и E (архивация 1025 веток).

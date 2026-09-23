@@ -2,6 +2,12 @@
 
 Дата: 2026-09-23 · Ветка: `sandbox/me2-os` · daemon v0.41.0 · Ответ: Z.ai Code (main)
 
+> **СТАТУС ПЛАНА (обновляется по раундам):**
+> - **Фаза A — ЗАКРЫТА (R49)**: `CONTRACT_VERSION me2-daemon-contract.v1` + capabilities в `/state`; op `mesh_heartbeat` на socket-поверхности; `GET /ui` self-contained Mission Control; eval v18 53/53; мосты `.mjs` переведены на socket `agentchat:op` (PR #950 merged, me2-socket-client — единственная новая зависимость shell).
+> - **Фаза B — ЗАКРЫТА (R50)**: решение K2/K6 — авторитетная оболочка METAENGINE Browser; встроенный `me2-ui-gateway.mjs` (XTransformPort http+ws) + `me2-ui-host.mjs` (adopt/spawn панелей v5); `resolveUiUrl: env → live_gateway → /ui`; `#chat=<id>` на обоих UI; `desktop/updater.ts` DEPRECATED (PR #951 merged).
+> - **Фаза C (monorepo) — СЛЕДУЮЩАЯ**: перенос пакетов me2-daemon/me2-ui в release-ветку, autorelease-gate с eval; D (Supabase-контур) и E (архивация веток) далее.
+> - CI-конвейер доставки подтверждён: смарт-мержи R40/R49/R50 собираются в dev-релизы автоматически (Fast Verified Dev Release).
+
 ## 0. Метод и источники (всё проверено фактами, не по памяти)
 
 - `git ls-remote origin`: **1164 ветки-головы, 142 тега, 1519 pull-refs**.
