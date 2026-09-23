@@ -572,3 +572,4 @@ Stage Summary:
 - Daemon v0.40.0: eval/round-verify зелёные, ME36-38 WORKS, шина нетронута, lint 0/0.
 - Мониторинг: платформенные 429 (governor/breaker держат, honest BREACH budget — телеметрия не подкрашена); VLM-ревью r46-скриншотов — ретрай при окне квоты; GUI-прогон Electron — на машине оператора (bun run dist).
 - Далее: R47-кандидаты — зеркалирование TabRegistry-вкладок в UI-хроме (нативные WEB-вкладки списком в панели БРАУЗЕР), IPC-стрим proc-status в UI-чипы оболочки, H3 outcome-proof-награды, H5 merge-конвейер T1, H6 SQL-контур (роадмап R38 §5).
+- R46-дополнение (push): токены GitHub утеряны env-reset (/home/z/.ghtoken-sandbox и .github.env отсутствуют, ~/.git-credentials пуст, gh нет) — коммит R46 (eadac82) готов локально; пуш в sandbox/me2-os выполнится сразу после восстановления токена (как в R43-0: /home/z/.a2 восстановить дословно).
