@@ -74,3 +74,6 @@ db/*.db-*
 # секреты-архивы никогда не в репо (push protection R8)
 .a2-backup/
 *.env.*backup*
+
+# CI-generated tauri updater config overlay
+/updater-overlay.json

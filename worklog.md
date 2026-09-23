@@ -165,3 +165,21 @@ Stage Summary:
 - Daemon v0.22.0: матрица **19/19 WORKS**; ME-порт легаси практически завершён по P1: эпистемология эффектов (эталонная механика легаси) + Outcome River + CP-W1 liveness теперь живые и верифицированные end-to-end.
 - Инварианты: шина 47/47 (новые REST вне шины), zero-authority (fence clear — оператор), «safety ahead of liveness» (AMBIGUOUS блокирует повтор).
 - Для оператора: выполнить research/2026/R23-me2-evidence-migration.sql в дашборде облака → evidence-plane LIVE.
+---
+Task ID: R24-AUDIT-RESEARCH-ROADMAP-20260923
+Agent: Z.ai Code (main)
+Task: «Сделай глубокий аудит всей бд supabase и github, найди, что мы ещё не внедрили, сделай детальный анализ старого live браузера, сравни с новым, сделай критический анализ ресёрчи, проанализируй vs code, codex, сделай roadmap по улучшениям, модернизации и оптимизации».
+
+Work Log:
+- R24-1 (Supabase live): heartbeat браузера 00:10:30 — синхронизация идёт прямо сейчас; devices 3 (HTTP-signature v1, активный 00:10:32 — device-auth живой); счётчики: supervisor_command 1833, actuation_lease 4230, enrollment_request 3243, supervisor_state 16, architecture_checkpoint 38; chat_bridge/peer_health пусты; cognitive_cursor/workspace_binding → 42501 RLS; me2_evidence → 404 (миграция не применена; SQL готов с R23).
+- R24-2 (GitHub): ТРЕТИЙ КОРЕНЬ CI найден по логам: «failed to decode pubkey: Invalid symbol 95» — плейсхолдер REPLACE_WITH_TAURI_SIGNER_PUBKEY в tauri.conf.json; фикс: overlay-конфиг с реальным pubkey (ephemeral .pub или секрет TAURI_SIGNING_PUBLIC_KEY) через cargo tauri build --config $TAURI_CI_CONFIG (шаги sidecar/signing из 0334f92 уже зелёные — фиксы ①② подтверждены). Рельса 71d0d42 стабильна.
+- R24-3 (критика ресёрчей, честно): подтверждено практикой 6 артефактов (R19 карта→ME-порт; R20 S1/S2→ME17/18; R22 P1.1/P1.3+P2.4/P2.6→R23; R18 RH→ME15). Слабости: (1) разрыв «ресёрч→измерение» — нет регресс-датасета/eval-харнесса/своих метрик; (2) дрейф роадмапа под директивы (S3/S4 с R20 не исполнены); (3) дублирование ландшафта R20/R24 без живого индекса; (4) снипеты вместо праймари-бенчмарков; (5) нет перф-бейслайнов ME2.
+- R24-4 (VS Code/Codex): 4 web-сва → research/2026/R24-vs{1..4}*.json. VS Code 2026: multi-agent (Claude+Codex+Copilot рядом), agent mode GA, MCP GA во всех IDE. Codex: harness = control plane (agent loop, tool routing, HANDOFFS, APPROVALS, tracing, recovery, run state) — у ME2 нет handoffs и таблицы approval-политик; auto-review (reviewer-агент на границе sandbox) — у нас только RH tier-1; Windows sandbox = SIDs/ACLs. Токен-экономика: browser-инструменты различаются 10x+, tree-first — экономный путь (выбор подтверждён), но нужны СВОИ измерения.
+- R24-5 (роадмап): research/2026/R24-AUDIT-ROADMAP.md §7 — 4 трека: A (MCP: ME2-сервер A1 P1 / клиент A2), B (замкнутый контур: B3 перф-бейслайны P1, B1 регресс-датасет P1, B2 eval-харнесс), C (механики: C1 objectives/work_graph, C2 handoffs, C3 reviewer-agent, C4 approval-политики), D (оптимизация: D1 sense-diffing, D2 obsv→SQLite TTL, D3 screencast, D4 БД-гигиена). Ритм: cron-раунд = 1 пункт сверху; порядок B3→A1→B1→C.
+- R24-6: lint 0/0; push b75848d..; CI-ран fb1726b (с фиксами ①②) в процессе, следующий после этого pushа несёт фикс ③.
+
+Stage Summary:
+- Облако живое и синхронизированное с легаси-браузером (heartbeat секунды свежести, device-auth работает) — «старый live браузер» теперь верифицируется не археологией, а прямым чтением БД.
+- CI: три корня падений найдены и починены (binaries mkdir, GITHUB_ENV delimiter, pubkey placeholder) — зелёность докажет следующий ран.
+- Главный стратегический вывод раунда: индустрия стандартизовала MCP; ME2 должен стать MCP-сервером (A1) — это превращает наш браузерный план в инструмент всей экосистемы агентов.
+- Критика ресёрчей зафиксирована как Track B: ресёрч обязан закрываться измерениями, а не файлами.
