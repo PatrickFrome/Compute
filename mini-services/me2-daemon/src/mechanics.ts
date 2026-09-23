@@ -31,6 +31,7 @@ import { handoffsVerdict } from "./handoffs";
 import { glmVerdict } from "./glm";
 import { reviewerVerdict } from "./reviewer";
 import { evidenceStatus, verifyChain } from "../evidence";
+import { poolStatus } from "./pool";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -215,6 +216,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME32", name: "E2: верифицируемый audit-trail — hash-chain check + тампер-детект + связка evidence↔task↔review (IETF)", old_ref: "— (IETF draft-sharif-agent-audit-trail: third-party verifiability)",
       verdict: (() => { const v = verifyChain(undefined, undefined, 300); return v.ok ? "WORKS" : "CAVEAT"; })(),
       evidence: (() => { const v = verifyChain(undefined, undefined, 300); return v.ok ? `chain ok ${v.checked} событий (${v.from}..${v.to}) за ${v.ms}ms; GET /evidence/verify?from&to | /evidence/query?task_id — тампер меняет хеш (eval-негатив)` : `chain BROKEN at ${v.broken_at}: ${v.reason}`; })(),
+    },
+    {
+      id: "ME33", name: "E3: executor-пул — N живых GLM-контекстов, эксклюзивные lease с heartbeat/reaper, универсальный claim (R34)", old_ref: "M2 task cycle (одиночный агент) → parallel live-GLM pool",
+      verdict: (() => { try { const s = poolStatus(); const canon = s.workers.every((w) => w.model === `zai:${s.canonical}`); return s.workers.length > 0 && canon && s.leases.reaped_total >= 0 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try { const s = poolStatus(); return `scale=${s.scale} live=${s.live}/${s.ceiling}, canonical=${s.canonical}, queue=${s.queue.ready}/${s.queue.running}, concurrency max=${s.concurrency.max_observed}, leases active=${s.leases.active} reaped=${s.leases.reaped_total}, throughput 1ч=${s.throughput.done_1h}✓/${s.throughput.failed_1h}✗; POST /pool {op:scale|burn}`; } catch (e) { return `pool status failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

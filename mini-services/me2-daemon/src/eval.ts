@@ -40,8 +40,10 @@ import { obsvPersistState } from "./obsv";
 import { hygieneStatus } from "./dbhygiene";
 import { evidenceStatus, verifyChain, recomputeHash } from "../evidence";
 import { recordSpan } from "./otel";
+import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
+import { createTask, updateTask, rid } from "../store";
 
-export const EVAL_DATASET_VERSION = 8;
+export const EVAL_DATASET_VERSION = 9;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -95,6 +97,7 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 // v6 (R31) — +sense.diff_api, +obsv.persist_ttl, +db.hygiene = 31.
 // v7 (R32) — +evidence.remote (доставка в облако: LIVE/LIVE-STORAGE или healer активен + outbox ограничен) = 32.
 // v8 (R33) — +evidence.verify (hash-chain на живых данных + тампер-детект на чистой функции, critical) = 33.
+// v9 (R34) — +pool.executors (E3: эксклюзивные lease, reap мёртвого lease, канон-модель воркеров, потолок scale; critical) = 34.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -451,6 +454,32 @@ export const EVAL_DATASET: EvalCheck[] = [
       const link = recomputeHash("abc", "2026-01-01T00:00:00Z", "TAMPER.TEST", null, null, '{"a":1}') !== honest; // смена prev тоже меняет хеш
       const tamperDetected = honest !== tampered && link;
       return { ok: tamperDetected, evidence: `chain ok ${v.checked} событий (${v.from}..${v.to}) за ${v.ms}ms, scheme=${v.scheme.split(",")[0]}, тампер-детект=${tamperDetected ? "ok" : "FAIL"}` };
+    },
+  },
+  {
+    id: "pool.executors",
+    plane: "state",
+    title: "Executor-пул: эксклюзивные lease, reap мёртвого, канон-модель, потолок scale (E3)",
+    critical: true,
+    expect: "scale(2) создаёт живых воркеров на каноническом теге (идемпотентно); второй acquire той же задачи = null; просроченный lease → задача FAILED pool_lease_expired; scale ограничен POOL_MAX",
+    run: () => {
+      // 1) scale idempotent + канон-модель воркеров (живые агенты реестра, drift остаётся 0)
+      poolScale(2, "eval");
+      const again = poolScale(2, "eval");
+      const st = poolStatus();
+      const liveOk = st.live === 2 && again.created === 0;
+      const canonOk = st.workers.every((w) => w.model === `zai:${st.canonical}`);
+      // 2) lease-цикл на синтетической задаче (синхронно — master-loop не вклинится между шагами)
+      const t = createTask({ id: rid("task"), title: "eval pool lease cycle", spec: "eval-only lease mechanics", role: "EXECUTOR", max_steps: 1 } as Parameters<typeof createTask>[0]);
+      const agentId = st.workers.find((w) => w.state === "IDLE")?.agent_id ?? st.workers[0]?.agent_id ?? "";
+      const c = agentId ? poolEvalLeaseCycle(t.id, agentId) : { acquired: false, second_attempt: false, reaped: false };
+      updateTask(t.id, { status: "ARCHIVED" }); // самоочистка (listTasks ARCHIVED не показывает)
+      // 3) потолок масштабирования + возврат к 2
+      const sMax = poolScale(POOL_MAX + 9, "eval");
+      poolScale(2, "eval");
+      const boundOk = sMax.scale === POOL_MAX;
+      const ok = liveOk && canonOk && c.acquired && c.second_attempt && c.reaped && boundOk;
+      return { ok, evidence: `live=${st.live}/2 идемпотент=${again.created === 0}, канон=${canonOk ? "ok" : "FAIL"}, lease: acquired=${c.acquired} second=${c.second_attempt} reaped=${c.reaped}, потолок=${sMax.scale}/${POOL_MAX}` };
     },
   },
   {

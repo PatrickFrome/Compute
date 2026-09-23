@@ -10,6 +10,7 @@
  * Запуск long-run: setsid nohup bun index.ts > daemon.log 2>&1 &
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { Server } from "socket.io";
 import {
   listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
@@ -50,10 +51,11 @@ import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, w
 import { handoffList, handoffStats } from "./src/handoffs";
 import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag } from "./src/glm";
 import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/reviewer";
+import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX } from "./src/pool";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.31.0";
+const VERSION = "0.32.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -150,6 +152,20 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 200, evidenceQuery(tid));
     }
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
+
+    // ── E3 (R34): executor-пул — N живых GLM-контекстов с честными lease (вне шины 47/47) ──
+    if (path === "/pool" && req.method === "GET") return json(res, 200, poolStatus());
+    if (path === "/pool" && req.method === "POST") {
+      try {
+        const body = await readBody(req);
+        const op = String((body as { op?: string }).op ?? "");
+        if (op === "scale") return json(res, 200, poolScale(Number((body as { n?: number }).n ?? 0), "rest"));
+        if (op === "burn") return json(res, 200, { ok: true, ...poolBurn(Number((body as { n?: number }).n ?? 1)) });
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["scale", "burn"], ceiling: POOL_MAX });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
 
     // ── R16: M2 Code Graph v1 (read-only, вне шины — скан не мутирует состояние) ──
     if (path === "/codegraph" && req.method === "GET") return json(res, 200, codegraphSummary(url.searchParams.get("force") === "1"));
@@ -655,7 +671,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -755,6 +771,37 @@ setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметр�
 setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
 // R31 D4: расписание гигиены БД (PASSIVE-checkpoint каждые 10м) + немедленный первый прогон
 try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
+
+// E3 (R34): страж инкарнации — второй экземпляр daemon'а не имеет права мутировать общую SQLite.
+// Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear зомби-lease)
+// и убить lease живого демона, после чего сам умер на EADDRINUSE. Lockfile O_EXCL + kill-0: дубль
+// честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
+const ME2_LOCK_FILE = "/tmp/me2-daemon.lock";
+let poolBootAllowed = true;
+try {
+  if (existsSync(ME2_LOCK_FILE)) {
+    const oldPid = Number(readFileSync(ME2_LOCK_FILE, "utf8").trim());
+    let alive = false;
+    try { process.kill(oldPid, 0); alive = true; } catch { alive = false; }
+    if (alive && oldPid !== process.pid) {
+      console.error(`[guard] me2-daemon уже жив (pid ${oldPid}) — дубль-инкарнация pid ${process.pid} уходит, мутации БД запрещены`);
+      process.exit(13);
+    }
+    unlinkSync(ME2_LOCK_FILE);
+  }
+  const lfd = openSync(ME2_LOCK_FILE, "wx");
+  writeSync(lfd, String(process.pid));
+  closeSync(lfd);
+  process.on("exit", () => { try { if (readFileSync(ME2_LOCK_FILE, "utf8").trim() === String(process.pid)) unlinkSync(ME2_LOCK_FILE); } catch { /* best effort */ } });
+} catch (e) {
+  poolBootAllowed = false; // не смогли доказать единственность — консервативно без boot-мутаций
+  console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — boot-мутации пула отключены`);
+}
+// восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
+if (poolBootAllowed) {
+  try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
+  try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); }
+}
 
 startMasterLoop();
 initEvidence();

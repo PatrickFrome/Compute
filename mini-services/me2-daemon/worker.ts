@@ -8,11 +8,12 @@ import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "n
 import { resolve, join, normalize, dirname } from "node:path";
 import ZAI from "z-ai-web-dev-sdk";
 import {
-  listAgents, listTasks, nextReadyTask, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
+  listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
 import { chat } from "./providers";
 import { recordSpan } from "./src/otel";
 import { reviewTask } from "./src/reviewer";
+import { isPoolAgent, poolAcquire, poolRelease, type PoolLeaseRow } from "./src/pool";
 
 const WORKSPACE_ROOT = "/home/z/my-project/me2-workspace";
 export { WORKSPACE_ROOT };
@@ -282,10 +283,17 @@ function parentMemory(task: TaskRow): string | null {
 }
 
 async function runAgentTask(agent: AgentRow, task: TaskRow) {
+  // E3 (R34): pool-агент берёт задачу только под эксклюзивным lease (анти-двойное-исполнение;
+  // INSERT-гонка решает владение — проигравший честно пропускает)
+  let lease: PoolLeaseRow | null = null;
+  if (isPoolAgent(agent.id)) {
+    lease = poolAcquire(agent.id, task.id);
+    if (!lease) return;
+  }
   running.add(agent.id);
   setAgentStatus(agent.id, "BUSY");
   updateTask(task.id, { status: "RUNNING", agent_id: agent.id });
-  emit("TASK_LEASED", { title: task.title, agent: agent.id, model: agent.model }, agent.id, task.id);
+  emit("TASK_LEASED", { title: task.title, agent: agent.id, model: agent.model, pool_slot: lease?.slot ?? null }, agent.id, task.id);
   // CP-W1 lease liveness: точка отсчёта lease для телеметрии и дедлайна
   const leaseStartedAt = Date.now();
 
@@ -391,6 +399,7 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", error: msg.slice(0, 200) }, agent.id, task.id);
     }
   } finally {
+    if (lease) { try { poolRelease(agent.id, task.id, "run_finished"); } catch { /* release не роняет воркера */ } }
     setAgentStatus(agent.id, "IDLE");
     running.delete(agent.id);
   }
@@ -430,7 +439,8 @@ export function startMasterLoop(intervalMs = 400) {
       for (const agent of listAgents()) {
         if (agent.paused === 1) continue; // пауза: агент не берёт задачи
         if (agent.status !== "IDLE" || running.has(agent.id)) continue;
-        const task = nextReadyTask(agent.role);
+        // E3: pool-исполнители универсальны (nextReadyTaskAny), штатные агенты — по роли
+        const task = isPoolAgent(agent.id) ? nextReadyTaskAny() : nextReadyTask(agent.role);
         if (!task) continue;
         void runAgentTask(agent, task);
       }

@@ -294,6 +294,11 @@ export function nextReadyTask(agentRole: string): TaskRow | null {
     `SELECT * FROM tasks WHERE status='READY' AND (role IS NULL OR role='' OR role=?) ORDER BY created_at LIMIT 1`,
   ).get(agentRole) as TaskRow | null) ?? null;
 }
+/** E3 (R34): pool-исполнители универсальны — берут ЛЮБУЮ READY-задачу (дежурная смена,
+ *  не ролевая матрица); чинит вечное READY узких ролей без агента-носителя. */
+export function nextReadyTaskAny(): TaskRow | null {
+  return (db.query(`SELECT * FROM tasks WHERE status='READY' ORDER BY created_at LIMIT 1`).get() as TaskRow | null) ?? null;
+}
 export function updateTask(id: string, patch: Partial<TaskRow>) {
   const cols = Object.keys(patch);
   if (!cols.length) return;

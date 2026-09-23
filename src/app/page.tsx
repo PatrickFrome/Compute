@@ -91,6 +91,9 @@ type HygData = {
 };
 // R33 E2: верификация hash-chain audit-trail (GET /evidence/verify)
 type ChainVerifyT = { ok: boolean; scheme: string; from: number; to: number; checked: number; broken_at: number | null; reason: string | null; ms: number };
+// R34 E3: executor-пул (живые GLM-воркеры с честными lease)
+type PoolWorkerT = { slot: number; agent_id: string; state: string; paused: number; model: string; agent_status: string; lease: { task_id: string; acquired_at: string; hb_age_s: number; expires_in_s: number } | null };
+type PoolT = { ok: boolean; canonical: string; scale: number; workers_total: number; live: number; ceiling: number; workers: PoolWorkerT[]; queue: { ready: number; running: number }; concurrency: { current: number; max_observed: number }; leases: { active: number; reaped_total: number }; throughput: { done_1h: number; failed_1h: number; avg_ms: number | null; p95_ms: number | null } };
 type BenchProbeT = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
 type BenchData = {
   ok: boolean;
@@ -190,6 +193,8 @@ const EVENT_STYLE: Record<string, string> = {
   TASK_REVIEWED: "text-cyan-300", GLM_PROBE: "text-cyan-400", GLM_LATEST_SET: "text-cyan-300",
   APPROVAL_REQUESTED: "text-amber-400", APPROVAL_APPROVED: "text-emerald-300", APPROVAL_DENIED: "text-rose-300", APPROVAL_CONSUMED: "text-emerald-400", APPROVAL_POLICY_SET: "text-amber-300",
   DB_HYGIENE: "text-teal-300",
+  POOL_SCALED: "text-cyan-300", POOL_WORKER_CREATED: "text-cyan-400", POOL_BURN: "text-lime-300",
+  POOL_LEASE_ACQUIRED: "text-amber-300", POOL_LEASE_RELEASED: "text-emerald-400", POOL_LEASE_REAPED: "text-rose-300",
   AGENT_CREATED: "text-amber-300", AGENT_RETIRED: "text-zinc-500",
   AGENT_PAUSED: "text-amber-400", AGENT_RESUMED: "text-lime-400", AGENT_MODEL_SET: "text-cyan-300",
   COMMAND_ENQUEUED: "text-fuchsia-400", COMMAND_LEASED: "text-fuchsia-300",
@@ -1255,6 +1260,9 @@ export default function MissionControl() {
   // R33 E2: hash-chain verify
   const [evChain, setEvChain] = useState<ChainVerifyT | null>(null);
   const [evChainBusy, setEvChainBusy] = useState(false);
+  // R34 E3: executor-пул
+  const [pool, setPool] = useState<PoolT | null>(null);
+  const [poolBusy, setPoolBusy] = useState(false);
   const [evalBusy, setEvalBusy] = useState(false);
   const [wg, setWg] = useState<WorkGraphData | null>(null);
   const [objTitle, setObjTitle] = useState("");
@@ -1367,6 +1375,20 @@ export default function MissionControl() {
     } catch { toast({ title: "db ✗ daemon недоступен", variant: "destructive" }); }
     finally { setHygBusy(false); }
   }, [loadHyg, toast]);
+  // R34 E3: executor-пул (GET /pool — слоты/lease/пропускная; POST {op:scale|burn})
+  const loadPool = useCallback(async () => {
+    try { const r = await fetch("/pool?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setPool(r as PoolT); } catch { /* daemon недоступен */ }
+  }, []);
+  const poolOp = useCallback(async (op: "scale" | "burn", n: number) => {
+    setPoolBusy(true);
+    try {
+      const r = await fetch("/pool?XTransformPort=3041", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op, n }) }).then((x) => x.json());
+      if (r?.ok) toast({ title: op === "scale" ? `пул: scale ${r.scale} ✓ (создано ${r.created}, снято ${r.drained})` : `burn: ${r.created?.length ?? 0} живых задач в пул ✓` });
+      else toast({ title: `pool ${op} ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
+      await loadPool();
+    } catch { toast({ title: "pool ✗ daemon недоступен", variant: "destructive" }); }
+    finally { setPoolBusy(false); }
+  }, [loadPool, toast]);
   // R33 E2: верификация hash-chain audit-trail (GET /evidence/verify — пересчёт цепи + тампер-детект на eval)
   const loadEvChain = useCallback(async () => {
     try { const r = await fetch("/evidence/verify?XTransformPort=3041&limit=300", { cache: "no-store" }).then((x) => x.json()); setEvChain(r as ChainVerifyT); } catch { /* daemon недоступен */ }
@@ -1430,6 +1452,12 @@ export default function MissionControl() {
     const iv = setInterval(() => void loadHyg(), 60_000);
     return () => clearInterval(iv);
   }, [loadHyg]);
+  // R34 E3: пул — mount + 30с (lease/heartbeat живые)
+  useEffect(() => {
+    void loadPool();
+    const iv = setInterval(() => void loadPool(), 30_000);
+    return () => clearInterval(iv);
+  }, [loadPool]);
   // R33 E2: hash-chain verify — mount + при каждом открытии панели
   useEffect(() => { void loadEvChain(); }, [loadEvChain]);
 
@@ -1481,11 +1509,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2267,7 +2295,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2950,6 +2978,38 @@ export default function MissionControl() {
                     <p className="mt-1 truncate font-mono text-[9px] text-zinc-600" title={evChain.reason ?? evChain.scheme}>
                       scheme {evChain.scheme.split(",")[0]}{evChain.reason ? ` · ${evChain.reason}` : ""} · query: /evidence/query?task_id=…
                     </p>
+                  )}
+                </div>
+                {/* R34 E3: EXECUTOR·POOL — параллельные живые GLM-исполнители с честными lease (ME33, GET/POST /pool) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Пул исполнителей">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="E3/ME33: N живых GLM-исполнителей, каждый — независимый контекст; эксклюзивные lease (UNIQUE task_id) + heartbeat 10с + reap мёртвых; универсальный claim (любая READY-задача); burn — живые дымовые задачи через весь контур">
+                      <Cpu className={`h-3 w-3 ${pool && pool.live > 0 ? "text-cyan-300" : "text-zinc-600"}`} aria-hidden /> EXECUTOR·POOL
+                    </span>
+                    <span data-testid="pool-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className={`rounded border px-1 py-0.5 ${pool && pool.live > 0 ? "border-cyan-900/60 bg-cyan-950/30 text-cyan-300" : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={`канон=${pool?.canonical ?? "—"}, всего слотов=${pool?.workers_total ?? "—"}`}>live {pool?.live ?? "—"}/{pool?.ceiling ?? "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="очередь: READY/RUNNING">q {pool ? `${pool.queue.ready}/${pool.queue.running}` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="одновременных lease сейчас · максимум наблюдённый">∥ {pool ? `${pool.concurrency.current}·${pool.concurrency.max_observed}` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title="за 1ч: завершено✓/провалено✗; средняя длительность lease">{pool ? `${pool.throughput.done_1h}✓/${pool.throughput.failed_1h}✗${pool.throughput.avg_ms !== null ? ` · ${Math.round(pool.throughput.avg_ms / 1000)}s` : ""}` : "—"}</span>
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      <button type="button" onClick={() => void poolOp("scale", Math.min((pool?.live ?? 0) + 1, pool?.ceiling ?? 4))} disabled={poolBusy || !pool || pool.live >= pool.ceiling} aria-label="Добавить живого исполнителя в пул" data-testid="pool-actions" className="rounded border border-cyan-900/60 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300/90 transition hover:bg-zinc-800 disabled:opacity-40">+1</button>
+                      <button type="button" onClick={() => void poolOp("scale", Math.max((pool?.live ?? 0) - 1, 0))} disabled={poolBusy || !pool || pool.live <= 0} aria-label="Снять исполнителя (drain: текущие задачи доработает)" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40">−1</button>
+                      <button type="button" onClick={() => void poolOp("burn", 2)} disabled={poolBusy || !pool || pool.live < 1} aria-label="Живая дымовая проверка: 2 реальные задачи исполнятся живыми GLM-воркерами через весь контур" className="rounded border border-lime-900/60 px-1.5 py-0.5 font-mono text-[9px] text-lime-300/90 transition hover:bg-zinc-800 disabled:opacity-40">burn×2</button>
+                      <button type="button" onClick={() => void loadPool()} aria-label="Обновить статус пула" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800">обновить</button>
+                    </span>
+                  </div>
+                  {pool && pool.workers.length > 0 && (
+                    <ul data-testid="pool-workers" className="mt-1 space-y-0.5" role="status">
+                      {pool.workers.slice(0, 4).map((w) => (
+                        <li key={w.slot} className="flex items-center gap-2 font-mono text-[9px] text-zinc-500" title={`агент ${w.agent_id} · модель ${w.model} (канон-синк пула)${w.lease ? ` · lease ${w.lease.task_id} · hb ${w.lease.hb_age_s}s назад · истекает через ${w.lease.expires_in_s}s` : ""}`}>
+                          <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${w.state === "RUNNING" ? "bg-amber-400" : w.state === "IDLE" ? "bg-emerald-400" : "bg-zinc-600"}`} aria-hidden />
+                          <span className="shrink-0 text-zinc-400">слот {w.slot}</span>
+                          <span className={`shrink-0 ${w.state === "RUNNING" ? "text-amber-300" : w.state === "IDLE" ? "text-emerald-300" : "text-zinc-600"}`}>{w.state}</span>
+                          {w.lease && <span className="truncate text-zinc-500">→ {w.lease.task_id} · hb {w.lease.hb_age_s}s · TTL {w.lease.expires_in_s}s</span>}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
                 {castOn && (
