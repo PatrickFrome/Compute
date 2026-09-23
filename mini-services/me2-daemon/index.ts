@@ -52,6 +52,7 @@ import { handoffList, handoffStats } from "./src/handoffs";
 import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag } from "./src/glm";
 import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/reviewer";
 import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX } from "./src/pool";
+import { autonomyStatus, livenessBrief } from "./src/autonomy";
 import {
   agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
   agentChatTurnAsync, agentChatCompact, agentChatRestore,
@@ -60,7 +61,7 @@ import {
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.36.0";
+const VERSION = "0.37.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -393,6 +394,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
     // ── R31 D4: DB-гигиена (WAL checkpoint / VACUUM / индексы, вне шины — 47/47) ──
     if (path === "/db/hygiene" && req.method === "GET") return json(res, 200, hygieneStatus());
+    // H-линия (R38): плоскость v4 — liveness/deadlock/risk-budget/non-bypass/recovery/independence (read-only)
+    if (path === "/autonomy" && req.method === "GET") return json(res, 200, { ok: true, ...autonomyStatus() });
     if (path === "/db/hygiene" && req.method === "POST") {
       const body = await readBody(req);
       const op = String(body.op ?? "");
@@ -764,7 +767,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

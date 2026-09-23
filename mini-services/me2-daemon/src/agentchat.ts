@@ -49,6 +49,7 @@ import { chat } from "../providers";
 import { agentTag, canonicalGlm } from "./glm";
 import { memBlockEconomy } from "./memory";
 import { poolStatus } from "./pool";
+import { livenessBrief } from "./autonomy";
 
 // ── константы ─────────────────────────────────────────────────────
 const CHAT_ROOT = "/home/z/my-project/me2-workspace";
@@ -207,7 +208,7 @@ function daemonStatus(): string {
   try {
     const p = poolStatus();
     const ev = db.query("SELECT verdict, passed, total FROM eval_runs ORDER BY id DESC LIMIT 1").get() as { verdict: string; passed: number; total: number } | null;
-    return `pool: live=${p.live}/${p.ceiling}, queue=${p.queue.ready}/${p.queue.running}, throughput 1ч=${p.throughput.done_1h}✓/${p.throughput.failed_1h}✗; eval: ${ev ? `${ev.verdict} (${ev.passed}/${ev.total})` : "не запускался"}; время: ${nowIso()}`;
+    return `pool: live=${p.live}/${p.ceiling}, queue=${p.queue.ready}/${p.queue.running}, throughput 1ч=${p.throughput.done_1h}✓/${p.throughput.failed_1h}✗; eval: ${ev ? `${ev.verdict} (${ev.passed}/${ev.total})` : "не запускался"}; ${livenessBrief()}; время: ${nowIso()}`;
   } catch (e) {
     return `daemon_status failed: ${String(e).slice(0, 120)}`;
   }

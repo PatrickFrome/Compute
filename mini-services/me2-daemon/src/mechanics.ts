@@ -33,6 +33,7 @@ import { reviewerVerdict } from "./reviewer";
 import { evidenceStatus, verifyChain } from "../evidence";
 import { poolStatus } from "./pool";
 import { agentChatStatus, fleetDigest } from "./agentchat";
+import { autonomyStatus } from "./autonomy";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -241,6 +242,14 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
         const objs = (db.query("SELECT COUNT(*) c FROM agent_sessions WHERE objective != ''").get() as { c: number }).c;
         return `FLEET_STEP в шине=${steps}, чатов с целью=${objs}; дайджест супервизора: секция «Пул исполнителей» (слоты/lease/последний шаг), цели видны в строках чатов; POST /agentchat {op:objective}`;
       } catch (e) { return `ME36 evidence failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME37", name: "H1 мандат v4: AUTONOMY MUST BE BOTH SAFE AND LIVE — read-only плоскость /autonomy: liveness+deadlock/livelock (P2+P3), cumulative risk-budget (P7), proof-of-non-bypass всех POST-маршрутов исходника (P1), recovery hierarchy L0–L5 (P5), verifier-independence (P4+P8) (R38)", old_ref: "легаси: инварианты — статичный список в доке; живости/циклов/бюджета не существовало; auditor не проверял сам себя",
+      verdict: (() => { try { const a = autonomyStatus(); return a.liveness.verdict === "LIVE" && a.non_bypass.verdict === "NO_BYPASS" ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try {
+        const a = autonomyStatus();
+        return `liveness=${a.liveness.verdict} (предикатов=${a.liveness.checks.length}), budget=${a.budget.state} (${a.budget.score}/${a.budget.breach}), non_bypass=${a.non_bypass.verdict} (${a.non_bypass.post_routes.length} маршрутов), recovery L0–L5=${a.recovery.length} уровней, independence: reviewer-статусы=${a.independence.reviewer_writes_status ? "ПИШЕТ!" : "нет"}, chain=${a.independence.chain_ok}; GET /autonomy`;
+      } catch (e) { return `ME37 evidence failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

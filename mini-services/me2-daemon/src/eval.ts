@@ -46,10 +46,11 @@ import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
   supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
 } from "./agentchat";
-import { rmSync } from "node:fs";
+import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
+import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 13;
+export const EVAL_DATASET_VERSION = 14;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -112,6 +113,9 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 //             +agentchat.interchat (G2: межчатовая связь — доставка в историю цели с meta.from_chat, unread-счётчик, честные ошибки цели; critical) = 39.
 // v13 (R37) — +agentchat.objective (G5: долгоживущая цель чата — set/обновление, чужая цель только для SUPERVISOR, цель в system-prompt хода и в дайджесте флота; critical),
 //             +agentchat.pool_digest (G4: дайджест супервизора видит пул — слоты/lease/последний шаг FLEET_STEP исполнителя) = 41.
+// v14 (R38) — +autonomy.liveness (P2+P3: синтетический RUNNING-перерасход + цикл handoff-графа детектятся; verdict STALLED пока синтетика жива; полный cleanup; critical),
+//             +autonomy.budget (P7: взвешенный blast-radius — синтетические деструктивные события дают точный вклад; critical),
+//             +autonomy.nonbypass (P1: все POST-маршруты из исходника index.ts покрыты enforcement-семействами В ОБЕ стороны; reviewer не пишет статусы; critical) = 44.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -718,6 +722,88 @@ export const EVAL_DATASET: EvalCheck[] = [
         try { db.query("DELETE FROM pool_leases WHERE task_id=?").run(tkId); } catch { /* noop */ }
         try { db.query("DELETE FROM tasks WHERE id=?").run(tkId); } catch { /* noop */ }
       }
+    },
+  },
+  {
+    id: "autonomy.liveness",
+    plane: "autonomy",
+    title: "Autonomy v4 (P2+P3): liveness — RUNNING-перерасход + deadlock-цикл handoff-графа детектятся, verdict STALLED честен",
+    critical: true,
+    expect: "синтетический RUNNING (updated_at 15м назад) → running_overrun stall; handoff-цикл A→B→A → wait_cycles stall; пока синтетика жива verdict=STALLED; после cleanup — предикаты снова ок",
+    run: () => {
+      const tkOver = `tk_ovr${rid()}`;
+      const tkA = `tk_cycA${rid()}`;
+      const tkB = `tk_cycB${rid()}`;
+      try {
+        // синтетический перерасход: RUNNING, обновлён 15 минут назад
+        db.query(`INSERT INTO tasks (id, title, spec, role, status, max_steps, steps, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?)`)
+          .run(tkOver, "eval-liveness-overrun", "", "EXECUTOR", "RUNNING", 2, 0,
+            new Date(Date.now() - 16 * 60_000).toISOString(), new Date(Date.now() - 15 * 60_000).toISOString());
+        // синтетический deadlock-цикл передач A→B→A
+        for (const id of [tkA, tkB]) {
+          db.query(`INSERT INTO tasks (id, title, spec, role, status, max_steps, steps, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)`)
+            .run(id, `eval-${id}`, "", "EXECUTOR", "COMPLETED", 1, 1,
+              new Date().toISOString(), new Date().toISOString());
+        }
+        db.query(`INSERT INTO handoffs (id, from_task, to_task, reason, protocol, by, created_at) VALUES (?,?,?,?,?,?,?)`)
+          .run(`ho_${rid()}`, tkA, tkB, "eval-cycle", "rerere", "eval", new Date().toISOString());
+        db.query(`INSERT INTO handoffs (id, from_task, to_task, reason, protocol, by, created_at) VALUES (?,?,?,?,?,?,?)`)
+          .run(`ho_${rid()}`, tkB, tkA, "eval-cycle", "rerere", "eval", new Date().toISOString());
+        const l = livenessStatus();
+        const overrun = l.checks.find((c) => c.id === "running_overrun");
+        const cycles = l.checks.find((c) => c.id === "wait_cycles");
+        const stalled = l.verdict === "STALLED" && l.stalled_reasons.length >= 2;
+        return { ok: !!(overrun && !overrun.ok && cycles && !cycles.ok && stalled),
+          evidence: `overrun_ok=${overrun?.ok}, цикл=${cycles?.detail.slice(0, 60)}, verdict=${l.verdict} (stall-причин=${l.stalled_reasons.length})` };
+      } finally {
+        for (const id of [tkOver, tkA, tkB]) {
+          try { db.query("DELETE FROM tasks WHERE id=?").run(id); } catch { /* noop */ }
+          try { db.query("DELETE FROM handoffs WHERE from_task=? OR to_task=?").run(id, id); } catch { /* noop */ }
+        }
+      }
+    },
+  },
+  {
+    id: "autonomy.budget",
+    plane: "autonomy",
+    title: "Autonomy v4 (P7): risk budget — синтетические деструктивные события дают точный взвешенный вклад",
+    critical: true,
+    expect: "emit TASK_FAILED(вес 1) + POOL_LEASE_REAPED(вес 2) → score вырос ≥3, contributors содержат оба типа, state ∈ OK/WARN/BREACH, пороги согласованы (warn<breach)",
+    run: () => {
+      const before = budgetStatus().score;
+      emit("TASK_FAILED", { error: "eval-budget-synthetic", cause: "eval" }, "eval-budget", null);
+      emit("POOL_LEASE_REAPED", { task_id: "tk_eval-budget", slot: 1, eval: true }, "eval-budget", null);
+      const b = budgetStatus();
+      const grew = b.score >= before + 3;
+      const types = new Set(b.contributors.map((c) => c.type));
+      const both = types.has("TASK_FAILED") && types.has("POOL_LEASE_REAPED");
+      const stateOk = b.state === "OK" || b.state === "WARN" || b.state === "BREACH";
+      return { ok: grew && both && stateOk && b.warn < b.breach,
+        evidence: `score ${before}→${b.score} (+≥3), оба типа в вкладах=${both}, state=${b.state}, пороги ${b.warn}/${b.breach}` };
+    },
+  },
+  {
+    id: "autonomy.nonbypass",
+    plane: "autonomy",
+    title: "Autonomy v4 (P1+P8): non-bypass — все POST-маршруты исходника покрыты enforcement-семействами в ОБЕ стороны + reviewer zero-authority",
+    critical: true,
+    expect: "nonBypassAudit: verdict NO_BYPASS; множество маршрутов из исходника index.ts === множеству манифеста (и наоборот); ≥25 маршрутов; reviewer.ts не содержит UPDATE tasks SET status; independence.chain_ok",
+    run: () => {
+      const a = nonBypassAudit();
+      const manifest = new Set(Object.keys(ENFORCED_WRITE_FAMILIES));
+      const routes = new Set(a.post_routes);
+      const exact = manifest.size === routes.size && [...manifest].every((r) => routes.has(r));
+      const enough = a.post_routes.length >= 25;
+      let reviewerClean = false;
+      try {
+        const src = readFileSync("/home/z/my-project/mini-services/me2-daemon/src/reviewer.ts", "utf8");
+        reviewerClean = !/UPDATE\s+tasks\s+SET\s+status/i.test(src) && src.includes("review IS NULL");
+      } catch { /* source не читается — честный FAIL */ }
+      const chain = verifyChain(undefined, undefined, 200);
+      const ok = a.verdict === "NO_BYPASS" && exact && enough && reviewerClean && chain.ok;
+      return { ok, evidence: `verdict=${a.verdict}, маршрутов=${a.post_routes.length}, манифест=${manifest.size}, точное_равенство=${exact}, reviewer_не_пишет_статусы=${reviewerClean}, chain=${chain.ok}(${chain.checked})` };
     },
   },
 ];

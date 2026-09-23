@@ -95,6 +95,15 @@ type ChainVerifyT = { ok: boolean; scheme: string; from: number; to: number; che
 // R34 E3: executor-пул (живые GLM-воркеры с честными lease)
 type PoolWorkerT = { slot: number; agent_id: string; state: string; paused: number; model: string; agent_status: string; lease: { task_id: string; acquired_at: string; hb_age_s: number; expires_in_s: number } | null };
 type PoolT = { ok: boolean; canonical: string; scale: number; workers_total: number; live: number; ceiling: number; workers: PoolWorkerT[]; queue: { ready: number; running: number }; concurrency: { current: number; max_observed: number }; leases: { active: number; reaped_total: number }; throughput: { done_1h: number; failed_1h: number; avg_ms: number | null; p95_ms: number | null } };
+// R38 H1: плоскость v4 (GET /autonomy) — liveness/deadlock, risk-budget, non-bypass, recovery L0–L5, independence
+type AutonomyT = {
+  ok: boolean;
+  liveness: { verdict: "LIVE" | "STALLED"; checks: Array<{ id: string; ok: boolean; stall: boolean; detail: string }>; stalled_reasons: string[] };
+  budget: { state: "OK" | "WARN" | "BREACH"; score: number; warn: number; breach: number; window_h: number; contributors: Array<{ type: string; count: number; weight: number; subtotal: number }> };
+  non_bypass: { verdict: "NO_BYPASS" | "UNKNOWN_ROUTE"; post_routes: string[]; classified: number; unknown: string[]; note: string };
+  recovery: Array<{ level: string; component: string; status: string; recovers: string }>;
+  independence: { reviewer_writes_status: boolean; reviewer_guarded: boolean; chain_ok: boolean; chain_checked: number; evidence_producer: string; meta_note: string };
+};
 // R35 E5: token-economy памяти (GET /memory/economy — дельта-доставка вместо полного блока)
 type MemEconConsumerT = { consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number };
 type MemEconT = { ok: boolean; deliveries: number; avg_saved_pct: number; bytes_saved_total: number; by_consumer: MemEconConsumerT[] };
@@ -1269,6 +1278,7 @@ export default function MissionControl() {
   const [evChainBusy, setEvChainBusy] = useState(false);
   // R34 E3: executor-пул
   const [pool, setPool] = useState<PoolT | null>(null);
+  const [autonomy, setAutonomy] = useState<AutonomyT | null>(null);
   const [poolBusy, setPoolBusy] = useState(false);
   const [evalBusy, setEvalBusy] = useState(false);
   const [wg, setWg] = useState<WorkGraphData | null>(null);
@@ -1389,6 +1399,10 @@ export default function MissionControl() {
   const loadPool = useCallback(async () => {
     try { const r = await fetch("/pool?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setPool(r as PoolT); } catch { /* daemon недоступен */ }
   }, []);
+  // R38 H1: плоскость автономии v4 (GET /autonomy — liveness/budget/non-bypass/recovery/independence)
+  const loadAutonomy = useCallback(async () => {
+    try { const r = await fetch("/autonomy?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setAutonomy(r as AutonomyT); } catch { /* daemon недоступен */ }
+  }, []);
   const poolOp = useCallback(async (op: "scale" | "burn", n: number) => {
     setPoolBusy(true);
     try {
@@ -1470,6 +1484,7 @@ export default function MissionControl() {
   }, [loadPool]);
   // R33 E2: hash-chain verify — mount + при каждом открытии панели
   useEffect(() => { void loadEvChain(); }, [loadEvChain]);
+  useEffect(() => { void loadAutonomy(); }, [loadAutonomy]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1519,7 +1534,7 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
@@ -2305,7 +2320,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -3002,6 +3017,24 @@ export default function MissionControl() {
                     <p className="mt-1 truncate font-mono text-[9px] text-zinc-600" title={evChain.reason ?? evChain.scheme}>
                       scheme {evChain.scheme.split(",")[0]}{evChain.reason ? ` · ${evChain.reason}` : ""} · query: /evidence/query?task_id=…
                     </p>
+                  )}
+                </div>
+                {/* R38 H1: AUTONOMY·V4 — плоскость «SAFE AND LIVE» (ME37, GET /autonomy): liveness/deadlock, risk-budget, non-bypass, recovery L0–L5, independence */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Плоскость автономии v4">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="Мандат v4 (R38): AUTONOMY MUST BE BOTH SAFE AND LIVE. liveness — прогресс/голодание/deadlock-циклы/livelock; budget — кумулятивный blast-radius деструктивных событий за 24ч (rate-limit ≠ risk-limit); non-bypass — все POST-маршруты исходника покрыты enforcement-семействами (P1); recovery — иерархия L0–L5 (P5); independence — reviewer не пишет статусы, chain верифицируется (P4+P8)">
+                      <Activity className={`h-3 w-3 ${autonomy ? (autonomy.liveness.verdict === "LIVE" ? "text-emerald-300" : "text-rose-400") : "text-zinc-600"}`} aria-hidden /> AUTONOMY·V4
+                    </span>
+                    <span data-testid="autonomy-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className={`rounded border px-1 py-0.5 ${autonomy ? (autonomy.liveness.verdict === "LIVE" ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300 animate-pulse") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={autonomy ? (autonomy.liveness.stalled_reasons.join("; ") || `предикатов=${autonomy.liveness.checks.length}: ${autonomy.liveness.checks.map((c) => `${c.id}=${c.ok ? "✓" : "✗"}`).join(" ")}`) : "живость системы"}>{autonomy ? autonomy.liveness.verdict : "—"}</span>
+                      <span className={`rounded border px-1 py-0.5 ${autonomy ? (autonomy.budget.state === "OK" ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : autonomy.budget.state === "WARN" ? "border-amber-900/60 bg-amber-950/30 text-amber-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={autonomy ? `кумулятивный blast-radius за ${autonomy.budget.window_h}ч: ${autonomy.budget.score} (WARN≥${autonomy.budget.warn}, BREACH≥${autonomy.budget.breach}); топ: ${autonomy.budget.contributors.slice(0, 3).map((c) => `${c.type}×${c.count}`).join(", ") || "—"}` : "риск-бюджет"}>{autonomy ? `risk ${autonomy.budget.score}/${autonomy.budget.breach} ${autonomy.budget.state}` : "—"}</span>
+                      <span className={`rounded border px-1 py-0.5 ${autonomy ? (autonomy.non_bypass.verdict === "NO_BYPASS" ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-rose-900/60 bg-rose-950/30 text-rose-300") : "border-zinc-800 bg-zinc-900/60 text-zinc-400"}`} title={autonomy ? `${autonomy.non_bypass.note}${autonomy.non_bypass.unknown.length ? ` · НЕ ПОКРЫТЫ: ${autonomy.non_bypass.unknown.join(",")}` : ""}` : "proof-of-non-bypass"}>{autonomy ? `no-bypass ${autonomy.non_bypass.post_routes.length}` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={autonomy ? autonomy.recovery.map((r) => `${r.level} ${r.component}: ${r.status}`).join("\n") : "иерархия восстановления"}>recovery {autonomy ? `L0–L${autonomy.recovery.length - 1}` : "—"}</span>
+                      <span className={`rounded border px-1 py-0.5 ${autonomy && !autonomy.independence.reviewer_writes_status && autonomy.independence.chain_ok ? "border-emerald-900/60 bg-emerald-950/30 text-emerald-300" : "border-amber-900/60 bg-amber-950/30 text-amber-300"}`} title={autonomy ? `${autonomy.independence.evidence_producer}; chain ok=${autonomy.independence.chain_ok} (${autonomy.independence.chain_checked}); ${autonomy.independence.meta_note}` : "независимость аудитора"}>ind ✓</span>
+                    </span>
+                  </div>
+                  {autonomy && autonomy.liveness.stalled_reasons.length > 0 && (
+                    <p className="mt-1 truncate font-mono text-[9px] text-rose-300" role="alert" title={autonomy.liveness.stalled_reasons.join("; ")}>{autonomy.liveness.stalled_reasons.join(" · ")}</p>
                   )}
                 </div>
                 {/* R34 E3: EXECUTOR·POOL — параллельные живые GLM-исполнители с честными lease (ME33, GET/POST /pool) */}

@@ -57,6 +57,10 @@ echo "== AGENTCHAT G4+G5 (objective-op + ME36 механика: река пул�
 curl -s --max-time 10 -X POST "$B/agentchat" -H "Content-Type: application/json" -d '{"op":"objective","id":"noop"}' | j "'objective-op-ответ='+str(d.get('error','ok'))"
 curl -sf --max-time 5 "$B/mechanics" | j "'ME36 G4+G5 WORKS='+str(any('ME36'==m['id'] and m['verdict']=='WORKS' for m in d['mechanics']))"
 
+echo "== AUTONOMY v4 (H-линия: liveness/budget/non-bypass/recovery/independence) =="
+curl -sf --max-time 10 "$B/autonomy" | j "'liveness='+str(d['liveness']['verdict']), 'stall='+str(len(d['liveness']['stalled_reasons'])), 'budget='+str(d['budget']['state'])+' ('+str(d['budget']['score'])+'/'+str(d['budget']['breach'])+')', 'non_bypass='+str(d['non_bypass']['verdict'])+' ('+str(len(d['non_bypass']['post_routes']))+' маршрутов)', 'recovery L0-L5='+str(len(d['recovery'])), 'reviewer_пишет_статусы='+str(d['independence']['reviewer_writes_status']), 'chain='+str(d['independence']['chain_ok'])"
+curl -sf --max-time 5 "$B/mechanics" | j "'ME37 v4 WORKS='+str(any('ME37'==m['id'] and m['verdict']=='WORKS' for m in d['mechanics']))"
+
 echo "== MEMORY ECONOMY (E5) =="
 curl -sf --max-time 5 "$B/memory/economy" | j "'deliveries='+str(d['deliveries']), 'avg_saved='+str(round(d['avg_saved_pct']*100))+'%', 'bytes_saved='+str(d['bytes_saved_total']), 'consumers='+','.join(c['consumer'] for c in d['by_consumer'][:4])"
 echo "== MEMORY economy live delivery ×2 (1-я = базлайн, 2-я = familiar-элиминация) =="
