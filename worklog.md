@@ -716,3 +716,9 @@ Stage Summary:
 - Ресёрч r52-analogues: 5 упаковочных паттернов + «deprecation как данные»; «один SHA → один релиз» принят в конвейер.
 - Мониторинг: CI PR #953 (daemon-gate + ui-gate + ui-build + конвейер браузера) — merge в следующем раунде по вердикту; LIVE-тест sqlmirror после миграции оператора; webDevReview cron 409178 продолжает.
 - Далее (R53, фаза D-исполнение после оператора + фаза E): применение миграций оператором → LIVE-проба зеркала → чтение зеркала из UI с RLS-гейтом; архивация 1025+ веток (archive-2026-09-* теги, правило 14 дней+superseded); VLM/веб-верификация ресёрчей при окне квоты.
+
+R52-FINAL (доставка подтверждена):
+- CI на fix-коммите f7e4bf5ac — ПОЛНЫЙ ЗЕЛЁНЫЙ конвейер: Shell V1 ✓ · Critical Audit ✓ · Final Runtime Activation ✓ (шаг «Build and pack ME2 UI (C7)» => success на windows-раннере — UI реально собран в установщик) · Package Smoke ✓ · Installed Chat Qualification ✓ · Autonomous Soak ✓ · Shell-First Dirty Profile ✓ · ME2 Unified Gate ✓ (daemon-gate + ui-gate + ui-build) · Self Update E2E ✓ → mergeable_state: clean → **PR #953 MERGED (393cb2ba)** в release/self-update-ambiguity-live-v2.
+- Итог фазы C (C6+C7): следующий dev-релиз браузера несёт панели v5 внутри установщика (resources/me2-ui, standalone 69.4 MiB, манифест me2.ui-bundle-manifest.v1); живые установки получат единую систему штатным самообновлением; fail-open фолбэк GET /ui сохранён.
+- Итог D-prep: daemon v0.44.0 sqlmirror (H6, WARMUP живой), RPC-реестр 243 (24/37/182) как данные, K8-матрица в /state + docs. Оператору: psql -f sql/0001 и sql/0002 → LIVE-проба зеркала в R53.
+- Локальный HEAD b54ca136c = remote sandbox/me2-os (верифицировано). Следующий раунд (R53): D-исполнение после миграций оператора + фаза E (архивация 1025+ веток).
