@@ -27,6 +27,14 @@ export type CapabilityContract = {
   rest: { read: string[]; write: string[] };
   memory: string[];
   ui: string;
+  compat: {
+    /** K8 (план §E11): матрица совместимости — живая сторона вычисляет её в /state. */
+    daemon: string;
+    contract: string;
+    ui_fallback: string;
+    browser_expect: string;
+    notes: string[];
+  };
 };
 
 export function capabilitiesJson(): CapabilityContract {
@@ -47,6 +55,17 @@ export function capabilitiesJson(): CapabilityContract {
     },
     memory: ["/memory op:write|delete|economy"],
     ui: "/ui",
+    compat: {
+      daemon: VERSION,
+      contract: CONTRACT_VERSION,
+      ui_fallback: "/ui",
+      browser_expect: ">=0.7.0-dev (me2-плоскость R40+, смарт-мерж PR #948)",
+      notes: [
+        "browser me2-плоскость ожидает ops ['turn','mesh_heartbeat'] и GET /ui (R40-док)",
+        "disconnect контракта → честный DEGRADED у моста, restart-шторма нет (R49 handshake)",
+        "матрица: docs/version-matrix.md (K8)",
+      ],
+    },
   };
 }
 

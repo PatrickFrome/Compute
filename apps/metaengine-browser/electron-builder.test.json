@@ -57,6 +57,13 @@
         "receipt-contract.mjs",
         "semantic-perception-compiler.mjs"
       ]
+    },
+    {
+      "from": "me2-ui-dist",
+      "to": "me2-ui",
+      "filter": [
+        "**/*"
+      ]
     }
   ],
   "publish": [
