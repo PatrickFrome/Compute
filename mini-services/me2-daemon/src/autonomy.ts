@@ -185,6 +185,7 @@ export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/demand": "G10 автопилот спроса: op tick|config, гистерезис+cooldown+капы (ME2_DEMAND_MAX/CHAT_CEILING)+breaker-aware, решения в hash-chain (AGENT_CHAT_DEMAND)",
   "/policy": "H2 (R44) policy-файл T0/T1/T2: op reload — перечитывание policy.json, запреты с ledger-полями (POLICY_DENIED в chain)",
   "/cron": "G7 (R44) cron из чатов: op cancel|fire|tick, капы policy.json (crons_per_chat/global/min_minutes), AGENT_CHAT_CRON в chain",
+  "/tokens": "R47 vault токенов: op set|delete (REST POST /tokens + socket.io tokens:op, T0-плоскость), валидация имени/значения/тира, TOKENS_SET/TOKENS_DELETED в chain, raw-значения наружу не выходят (маска)",
   "/pool": "REST-семейство E3: lease-плоскость (UNIQUE-эксклюзивность) + потолок POOL_MAX + POOL_* в chain",
   "/evidence": "REST-семейство E1: mirror-плоскость, honest-статусы, cap'ы outbox",
   "/memory": "REST-семейство E5: экономная доставка, cap журнала, MEMORY_ECONOMY в chain",

@@ -10,15 +10,14 @@
  *  - journal в SQLite (порт transactional journal v8) + событие SELFUPDATE_APPLIED + span;
  *  - bounded re-probe: check кэшируется 30s, apply можно повторять (урок 13.5h-тупика
  *    одноразового окна квалификации);
- *  - токен читается ТОЛЬКО из /home/z/.a2/.github.env и маскируется во всех выводах.
+ *  - токен читается ТОЛЬКО из БД (vault tokens, R47); маскируется во всех выводах.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { db, emit } from "../store";
 import { recordSpan } from "./otel";
+import { tokenGet } from "./tokens";
 
 const REPO_ROOT = "/home/z/my-project";
-const ENV_FILE = "/home/z/.a2/.github.env";
 const REMOTE_URL_BASE = "https://github.com/PatrickFrome/Compute.git";
 const REMOTE_REF = "sandbox/me2-os";
 const GIT_TIMEOUT_MS = 20_000;
@@ -36,12 +35,9 @@ CREATE TABLE IF NOT EXISTS selfupdate_journal (
 );
 `);
 
+/** R47: токен — из vault'а в БД (bootstrap мигрировал /home/z/.a2/.github.env при первом boot). */
 function readToken(): string | null {
-  try {
-    const txt = readFileSync(ENV_FILE, "utf8");
-    const m = txt.match(/^GITHUB_TOKEN_ADMIN=(.+)$/m);
-    return m ? m[1].trim() : null;
-  } catch { return null; }
+  return tokenGet("GITHUB_TOKEN_ADMIN");
 }
 
 function mask(s: string, token: string | null): string {
@@ -129,7 +125,7 @@ async function suCheckAsyncInner(version: string): Promise<SuCheck> {
     branch: branch.ok ? branch.out.trim() : "?", behind: null, ahead: null,
     dirty_files: dirtyFiles, version, checked_at: Date.now(),
   };
-  if (!token) return { ...base, verdict: "NO_TOKEN", error: "no GITHUB_TOKEN_ADMIN in /home/z/.a2/.github.env" };
+  if (!token) return { ...base, verdict: "NO_TOKEN", error: "no GITHUB_TOKEN_ADMIN in tokens DB (POST /tokens {op:\"set\",name:\"GITHUB_TOKEN_ADMIN\",value:…})" };
   if (!localHead) return { ...base, error: mask(head.err, token).slice(0, 200) || "git_rev_parse_failed" };
 
   const url = remoteUrl(token);
@@ -166,7 +162,7 @@ function suCheckInner(version: string): SuCheck {
     branch: branch.ok ? branch.out.trim() : "?", behind: null, ahead: null,
     dirty_files: dirtyFiles, version, checked_at: Date.now(),
   };
-  if (!token) return { ...base, verdict: "NO_TOKEN", error: "no GITHUB_TOKEN_ADMIN in /home/z/.a2/.github.env" };
+  if (!token) return { ...base, verdict: "NO_TOKEN", error: "no GITHUB_TOKEN_ADMIN in tokens DB (POST /tokens {op:\"set\",name:\"GITHUB_TOKEN_ADMIN\",value:…})" };
   if (!localHead) return { ...base, error: mask(head.err, token).slice(0, 200) || "git_rev_parse_failed" };
 
   const url = remoteUrl(token);

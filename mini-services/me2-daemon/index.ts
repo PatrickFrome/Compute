@@ -57,6 +57,7 @@ import { governorStatus } from "./src/governor";
 import { demandTick, demandStatus, demandConfigSet, DEMAND_TICK_MS } from "./src/demand";
 import { policyStatus, policyReload } from "./src/policy";
 import { cronStatus, cronTick, cronCancel, cronFire, CRON_TICK_MS } from "./src/cron";
+import { tokensEnsure, tokenList, tokenSet, tokenDelete, tokensStatus } from "./src/tokens";
 import {
   agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
   agentChatTurnAsync, agentChatCompact, agentChatRestore,
@@ -65,7 +66,7 @@ import {
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.40.0";
+const VERSION = "0.41.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -105,6 +106,12 @@ function seed() {
   console.log("[seed] agents: 2, tasks: 3");
 }
 seed();
+// R47: vault токенов — bootstrap/миграция из /home/z/.a2 в SQLite при каждой инкарнации
+// (идемпотентно: существующие значения в БД никогда не перезаписываются файлом)
+try {
+  const tk = tokensEnsure();
+  console.log(`[tokens] vault: ${tk.present} в БД, seed=${tk.seeded.length ? tk.seeded.join(",") : "—"}, нет=${tk.missing.length}`);
+} catch (e) { console.log(`[tokens] vault bootstrap failed: ${String(e).slice(0, 120)}`); }
 // R29: директива оператора «все агенты всегда на последней GLM» — при каждой инкарнации
 // флот приводится к каноническому тегу; живая probe бэкенда — async (урок R25: сеть вне boot-пути).
 try {
@@ -433,6 +440,22 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       if (op === "tick") return json(res, 200, { ok: true, ...cronTick({ kick: body.kick !== false }) });
       return json(res, 400, { ok: false, error: "op_required: cancel|fire|tick" });
     }
+    // R47: vault токенов — маскированный список + метаданные (read-only)
+    if (path === "/tokens" && req.method === "GET") return json(res, 200, { ok: true, tokens: tokenList(), status: tokensStatus() });
+    // R47: операции vault'а (T0-плоскость оператора) — set/delete с ledger в hash-chain
+    if (path === "/tokens" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "set") {
+        const r = tokenSet(String(body.name ?? ""), String(body.value ?? ""), body.tier ? String(body.tier) : undefined, body.by ? String(body.by) : "operator");
+        return r.ok ? json(res, 200, { ok: true, tokens: tokenList() }) : json(res, 400, { ok: false, error: r.error });
+      }
+      if (op === "delete") {
+        const r = tokenDelete(String(body.name ?? ""), body.by ? String(body.by) : "operator");
+        return r.ok ? json(res, 200, { ok: true, tokens: tokenList() }) : json(res, 404, { ok: false, error: r.error });
+      }
+      return json(res, 400, { ok: false, error: "op_required: set|delete" });
+    }
     if (path === "/db/hygiene" && req.method === "POST") {
       const body = await readBody(req);
       const op = String(body.op ?? "");
@@ -752,7 +775,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -891,6 +914,29 @@ io.on("connection", (socket) => {
         return;
       }
       ack?.({ ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective"] });
+    } catch (e) {
+      ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // ── R47: vault токенов — socket-поверхность операций (ack), та же T0-плоскость ──
+  // Единый транспорт UI/Electron наряду с REST /tokens; значения НИКОГДА не возвращаются —
+  // только маскированный список. Каждая мутация — TOKENS_SET/TOKENS_DELETED в hash-chain.
+  socket.on("tokens:op", (p: Record<string, unknown> = {}, ack?: (r: unknown) => void) => {
+    const op = String(p.op ?? "");
+    try {
+      if (op === "list") { ack?.({ ok: true, tokens: tokenList(), status: tokensStatus() }); return; }
+      if (op === "set") {
+        const r = tokenSet(String(p.name ?? ""), String(p.value ?? ""), p.tier ? String(p.tier) : undefined, p.by ? String(p.by) : "operator");
+        ack?.(r.ok ? { ok: true, tokens: tokenList() } : { ok: false, error: r.error });
+        return;
+      }
+      if (op === "delete") {
+        const r = tokenDelete(String(p.name ?? ""), p.by ? String(p.by) : "operator");
+        ack?.(r.ok ? { ok: true, tokens: tokenList() } : { ok: false, error: r.error });
+        return;
+      }
+      ack?.({ ok: false, error: "bad_op", allowed: ["list", "set", "delete"] });
     } catch (e) {
       ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
     }

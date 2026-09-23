@@ -52,10 +52,11 @@ import { governorTestReset, governorInject429, governorBreakerState, governorSta
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
 import { policyAllows, policyCheckTool, tierForRole, policyReload, policyStatus, policyCaps } from "./policy";
 import { cronAdd, cronList, cronTick, cronCancel, cronTestReset } from "./cron";
+import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus } from "./tokens";
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 16;
+export const EVAL_DATASET_VERSION = 17;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -945,6 +946,36 @@ export const EVAL_DATASET: EvalCheck[] = [
         return { ok, evidence: `pending-до=${pendingBefore}, bad-status rejected=${!badStatus.ok}, без-пруфа rejected=${!noProof.ok}, fixed принят=${good.ok}, outcome_status=${g?.session.outcome_status}, AGENT_CHAT_OUTCOME=${ev.c}, pending-после=${pendingAfter}` };
       } finally {
         agentChatDelete(s.id);
+      }
+    },
+  },
+  {
+    id: "tokens.in_db",
+    plane: "vault",
+    title: "R47 vault: все токены в БД — set/get/delete через SQLite, raw-значения наружу не выходят (только маска), bootstrap-миграция из /home/z/.a2 идемпотентна, known-ядро присутствует",
+    critical: true,
+    expect: "tokenSet → tokenGet возвращает значение; tokenList НЕ содержит raw-значение, но содержит имя+маску; tokenDelete → tokenGet=null; tokensEnsure второй вызов не дублирует (идемпотент); known_missing не содержит мигрированное ядро",
+    run: () => {
+      const probeName = "EVAL_TOKEN_PROBE";
+      const secret = `probe_secret_${Date.now().toString(36)}_xyz`;
+      try {
+        const set1 = tokenSet(probeName, secret, "T2", "eval");
+        const got = tokenGet(probeName);
+        const list1 = tokenList();
+        const listStr = JSON.stringify(list1);
+        const row1 = list1.find((t) => t.name === probeName);
+        const ensureA = tokensEnsure();
+        const ensureB = tokensEnsure();
+        const st = tokensStatus();
+        const del = tokenDelete(probeName, "eval");
+        const gotAfter = tokenGet(probeName);
+        // known-ядро: GITHUB_TOKEN_ADMIN + SUPABASE_URL должны быть мигрированы (bootstrap из /home/z/.a2)
+        const coreOk = !st.known_missing.includes("GITHUB_TOKEN_ADMIN") && !st.known_missing.includes("SUPABASE_URL");
+        const ok = set1.ok && got === secret && !listStr.includes(secret) && Boolean(row1?.masked) && row1?.masked !== secret
+          && ensureA.present === ensureB.present && del.ok && gotAfter === null && coreOk;
+        return { ok, evidence: `set=${set1.ok}, get=${got === secret}, raw-утечка=${listStr.includes(secret)}, маска=${row1?.masked ?? "—"}, идемпотент=${ensureA.present === ensureB.present} (${ensureB.present} строк), delete=${del.ok}, get-после=${gotAfter === null}, known_missing=${st.known_missing.join("|") || "—"}` };
+      } finally {
+        tokenDelete(probeName, "eval-cleanup");
       }
     },
   },

@@ -8,6 +8,7 @@
 import ZAI from "z-ai-web-dev-sdk";
 import { emit } from "./store";
 import { governorAdmit, governorReport429, governorReportSuccess, type Lane } from "./src/governor";
+import { tokenGet, tokenSet, onTokenChange } from "./src/tokens";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -52,34 +53,42 @@ export async function llmRetry<T>(fn: (attempt: number) => Promise<T>, attempts 
   throw lastErr;
 }
 
-// ── Vercel AI Gateway key (секрет лежит в Supabase — подтверждено 2026-09-21) ──
+// ── Vercel AI Gateway key (R47: key живёт в vault'е БД; добыча из Supabase RPC —
+// единожды: найденный ключ сам падает в tokens через tokenSet, после рестарта — из БД) ──
 let gatewayKey: string | null = null;
 let gatewayKeyTried = false;
 
+// ротация токенов в vault'е сбрасывает кэши (ключ и креды Supabase для RPC)
+onTokenChange((name) => {
+  if (name === "VERCEL_AI_GATEWAY_API_KEY") { gatewayKey = null; gatewayKeyTried = false; }
+  if (name === "SUPABASE_URL" || name === "SUPABASE_SERVICE_ROLE_JWT") gatewayKeyTried = false;
+});
+
 async function loadGatewayKey(): Promise<string | null> {
   if (gatewayKey) return gatewayKey;
+  // 1) vault БД — первоисточник (после первой добычи здесь всегда лежит)
+  const fromDb = tokenGet("VERCEL_AI_GATEWAY_API_KEY");
+  if (fromDb) { gatewayKey = fromDb; return gatewayKey; }
   if (gatewayKeyTried) return null;
   gatewayKeyTried = true;
   try {
-    const envRaw = await Bun.file("/home/z/.a2/supabase-cloud.env").text();
-    const env = Object.fromEntries(
-      envRaw.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
-        const i = l.indexOf("=");
-        let k = l.slice(0, i).trim();
-        if (k.startsWith("export ")) k = k.slice(7).trim();
-        return [k, l.slice(i + 1).trim().replace(/^"|"$/g, "")];
-      }),
-    );
-    const r = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/h205f22_aop1_vercel_gateway_runtime_secret_v1`, {
+    const supabaseUrl = tokenGet("SUPABASE_URL");
+    const serviceJwt = tokenGet("SUPABASE_SERVICE_ROLE_JWT");
+    if (!supabaseUrl || !serviceJwt) {
+      console.log("[providers] gateway key: нет SUPABASE_URL/SERVICE_ROLE_JWT в tokens DB → RPC недоступен");
+      return null;
+    }
+    const r = await fetch(`${supabaseUrl}/rest/v1/rpc/h205f22_aop1_vercel_gateway_runtime_secret_v1`, {
       method: "POST",
-      headers: { apikey: env.SUPABASE_SERVICE_ROLE_JWT, Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_JWT}`, "Content-Type": "application/json" },
+      headers: { apikey: serviceJwt, Authorization: `Bearer ${serviceJwt}`, "Content-Type": "application/json" },
       body: "{}",
     });
     if (r.ok) {
       const j = (await r.json()) as { vercel_ai_gateway_api_key?: string };
       if (j.vercel_ai_gateway_api_key) {
         gatewayKey = j.vercel_ai_gateway_api_key;
-        console.log("[providers] Vercel AI Gateway key loaded from Supabase");
+        const saved = tokenSet("VERCEL_AI_GATEWAY_API_KEY", gatewayKey, "T1", "supabase_rpc");
+        console.log(`[providers] Vercel AI Gateway key loaded from Supabase → tokens DB ${saved.ok ? "сохранён" : "(не сохранён)"}`);
       }
     }
   } catch (e) {
@@ -98,7 +107,7 @@ export async function listProviders(): Promise<Record<string, { ready: boolean; 
   const key = await loadGatewayKey();
   return {
     zai: { ready: true, note: "z-ai-web-dev-sdk (native)" },
-    gateway: { ready: Boolean(key), note: key ? "Vercel AI Gateway (key from Supabase)" : "no key (Supabase RPC unavailable)" },
+    gateway: { ready: Boolean(key), note: key ? "Vercel AI Gateway (key from tokens DB, R47)" : "no key (Supabase RPC unavailable)" },
   };
 }
 

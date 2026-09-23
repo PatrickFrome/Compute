@@ -28,6 +28,7 @@ import { approvalsVerdict } from "./approvals";
 import { evalVerdict } from "./eval";
 import { governorStatus } from "./governor";
 import { demandStatus } from "./demand";
+import { tokensStatus } from "./tokens";
 import { policyStatus } from "./policy";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
@@ -278,6 +279,19 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
         const denied = db.query(`SELECT COUNT(*) AS n FROM events WHERE type='POLICY_DENIED'`).get() as { n: number };
         return `policy v${pol.policy.version} (T0=${pol.policy.tiers.T0.tools.join("/")}, T1=${pol.policy.tiers.T1.tools.length} инструментов, T2=${pol.policy.tiers.T2.tools.length}; капы ${pol.policy.caps.crons_per_chat}/чат, ${pol.policy.caps.crons_global} глобально, ≥${pol.policy.caps.cron_min_minutes}м), POLICY_DENIED в chain=${denied.n}, отказов в счётчике=${pol.counters.denied}; cron активных=${crons.n}, срабатываний=${fired.n}; outcome-исходов=${outcomes.n}; GET /policy, GET /cron`;
       } catch (e) { return `ME39 evidence failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME40", name: "R47 vault токенов: ВСЕ токены в БД (SQLite tokens) — bootstrap-миграция из /home/z/.a2 идемпотентна, потребители (selfupdate/evidence/mirror/providers) читают ТОЛЬКО tokenGet, добытый gateway-ключ сам падает в БД, ротация без рестарта (onTokenChange), raw-значения наружу не выходят (маска), операции set/delete — REST POST /tokens + socket tokens:op (T0), TOKENS_* в chain", old_ref: "легаси: секреты в файлах /home/z/.a2 — env-reset терял их; у vault'а не было ни единой точки чтения, ни ledger-следов",
+      verdict: (() => { try {
+        const st = tokensStatus();
+        const coreOk = !st.known_missing.includes("GITHUB_TOKEN_ADMIN") && !st.known_missing.includes("SUPABASE_URL");
+        return st.ok && st.total >= 4 && coreOk ? "WORKS" : "CAVEAT";
+      } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try {
+        const st = tokensStatus();
+        const ev = db.query(`SELECT COUNT(*) AS n FROM events WHERE type IN ('TOKENS_SEEDED','TOKENS_SET','TOKENS_DELETED')`).get() as { n: number };
+        return `vault: ${st.total}/${st.known_total} known-токенов в БД, по тирам ${JSON.stringify(st.by_tier)}, по источникам ${JSON.stringify(st.by_source)}, known_missing=${st.known_missing.join("|") || "—"}, seeded=${st.seeded_at ?? "—"}, TOKENS_*-событий в chain=${ev.n}; поверхность: ${st.surface.rest} · ${st.surface.socket}; GET /tokens`;
+      } catch (e) { return `ME40 evidence failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

@@ -13,8 +13,8 @@
 import { db, onEvent, getMeta, setMeta, emit } from "./store";
 import { readFileSync } from "node:fs";
 import { createHash, createHmac } from "node:crypto";
+import { tokenGet, onTokenChange } from "./src/tokens";
 
-const ENV_PATH = "/home/z/.a2/supabase-cloud.env";
 const MIGRATION_PATH = new URL("./supabase-migration-me2-evidence.sql", import.meta.url).pathname;
 const BATCH = 40;
 const TICK_MS = 10_000;
@@ -23,25 +23,14 @@ const DDL_RETRY_MS = 15 * 60_000;
 const STORAGE_BUCKET = "me2-evidence";
 
 type Env = { url?: string; key?: string; jwtSecret?: string; ref?: string };
+/** R47: креды — из vault'а в БД (tokenGet); bootstrap мигрировал /home/z/.a2/supabase-cloud.env. */
 function loadEnv(): Env {
   try {
-    const raw = readFileSync(ENV_PATH, "utf8");
-    const env: Record<string, string> = {};
-    for (const line of raw.split("\n")) {
-      if (!line.includes("=") || line.trim().startsWith("#")) continue;
-      const i = line.indexOf("=");
-      let k = line.slice(0, i).trim();
-      if (k.startsWith("export ")) k = k.slice(7).trim();
-      env[k] = line.slice(i + 1).trim().replace(/^"|"$/g, "");
-    }
-    const url = env.SUPABASE_URL;
+    const url = tokenGet("SUPABASE_URL") ?? undefined;
+    const key = tokenGet("SUPABASE_SERVICE_ROLE_JWT") ?? undefined;
+    const jwtSecret = tokenGet("SUPABASE_JWT_SECRET") ?? undefined;
     const ref = url ? (url.match(/https:\/\/([^.]+)\.supabase\.co/) ?? [])[1] : undefined;
-    return {
-      url,
-      key: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_API_KEY_SB || env.SUPABASE_SERVICE_ROLE_JWT,
-      jwtSecret: env.SUPABASE_JWT_SECRET,
-      ref,
-    };
+    return { url, key, jwtSecret, ref };
   } catch {
     return {};
   }
@@ -454,6 +443,10 @@ export function evidenceQuery(taskId: string): {
 /** Инициализация: подписка на события + аплоадер + DDL-хилер (boot+5s, затем каждые 15 мин). */
 export function initEvidence(): void {
   env = loadEnv();
+  // R47: токен обновили в vault'е → env перечитывается немедленно (без рестарта daemon'а)
+  for (const n of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET"]) {
+    onTokenChange((name) => { if (name === n) env = loadEnv(); });
+  }
   onEvent((e) => {
     try {
       db.query(`INSERT OR IGNORE INTO evidence_outbox (seq, payload, created_at) VALUES (?,?,?)`)

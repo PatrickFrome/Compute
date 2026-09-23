@@ -67,6 +67,13 @@ curl -sf --max-time 5 "$B/mechanics" | j "'ME38 WORKS='+str(any('ME38'==m['id'] 
 echo "-- demand tick вручную (честное решение на живом состоянии) --"
 curl -sf --max-time 5 -X POST "$B/demand" -H "content-type: application/json" -d '{"op":"tick"}' | j "'решение='+str(d['decision']['action']), 'signal='+str(d['decision']['signal']), 'detail='+str(d['decision']['detail'][:60])"
 
+echo "== TOKENS VAULT R47 (все токены в БД; наружу — маска) =="
+curl -sf --max-time 5 "$B/tokens" | j "'в_БД='+str(d['status']['total'])+'/'+str(d['status']['known_total']), 'по_тирам='+json.dumps(d['status']['by_tier']), 'known_missing='+str(d['status']['known_missing']), 'seeded='+str(d['status']['seeded_at'] is not None), 'имена='+','.join(t['name'] for t in d['tokens'][:6])"
+curl -sf --max-time 5 "$B/tokens" | j "'raw-утечка-в-списке='+str(any(t['masked'].count('…')==0 and t['masked'].count('len')!=1 for t in d['tokens']))"
+curl -sf --max-time 5 "$B/mechanics" | j "'ME40 VAULT WORKS='+str(any('ME40'==m['id'] and m['verdict']=='WORKS' for m in d['mechanics']))"
+echo "-- tokens:op socket (set probe → list без raw → delete) --"
+bun -e 'import {io} from "socket.io-client"; const s=io("ws://127.0.0.1:3040",{path:"/",transports:["websocket"],timeout:5000}); const sec="probe_"+Date.now().toString(36); s.on("connect",()=>{ s.emit("tokens:op",{op:"set",name:"RV_TOKEN_PROBE",value:sec,tier:"T2",by:"round-verify"},(r1)=>{ if(!r1||!r1.ok){console.log("set ok=false err="+(r1&&r1.error)); process.exit(1);} const leak=JSON.stringify(r1.tokens).includes(sec); s.emit("tokens:op",{op:"delete",name:"RV_TOKEN_PROBE",by:"round-verify"},(r2)=>{ console.log("set ok=true", "raw-утечка="+leak, "delete ok="+(r2&&r2.ok)); process.exit(0); }); }); }); s.on("connect_error",()=>{console.log("ok=SOCKET_FAIL"); process.exit(1);}); setTimeout(()=>{console.log("ok=SOCKET_TIMEOUT"); process.exit(1);},9000);' 2>/dev/null
+
 echo "== MEMORY ECONOMY (E5) =="
 curl -sf --max-time 5 "$B/memory/economy" | j "'deliveries='+str(d['deliveries']), 'avg_saved='+str(round(d['avg_saved_pct']*100))+'%', 'bytes_saved='+str(d['bytes_saved_total']), 'consumers='+','.join(c['consumer'] for c in d['by_consumer'][:4])"
 echo "== MEMORY economy live delivery ×2 (1-я = базлайн, 2-я = familiar-элиминация) =="

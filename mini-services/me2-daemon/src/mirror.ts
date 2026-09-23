@@ -6,23 +6,17 @@
 // ME2_MIRROR_URL env overrides the endpoint. The service key NEVER leaves the
 // daemon process and is never included in snapshots.
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { tokenGet, onTokenChange } from "./tokens";
 
 const DEFAULT_URL =
   "https://xpeibufgzjknrhbhpffp.supabase.co/rest/v1/rpc/me2_ingest_evidence_v1";
-const KEY_FILE = "/home/z/.a2/supabase-cloud.env";
 const MAX_PENDING = 2000;
 const MAX_ATTEMPTS = 50;
 const FLUSH_BATCH = 20;
 
+/** R47: ключ — из vault'а в БД (tokenGet); bootstrap мигрировал SUPABASE_SERVICE_ROLE_JWT. */
 function loadServiceKey(): string {
-  try {
-    const text = readFileSync(KEY_FILE, "utf8");
-    const m = text.match(/^SUPABASE_SERVICE_ROLE_JWT=(.+)$/m);
-    return m ? m[1].trim() : "";
-  } catch {
-    return "";
-  }
+  return tokenGet("SUPABASE_SERVICE_ROLE_JWT") ?? "";
 }
 
 export interface MirrorStatus {
@@ -41,6 +35,8 @@ export class Mirror {
 
   constructor(private db: Database) {
     this.key = loadServiceKey();
+    // R47: токен ротировали в vault'е → ключ перечитывается без пересоздания Mirror
+    onTokenChange((name) => { if (name === "SUPABASE_SERVICE_ROLE_JWT") this.key = loadServiceKey(); });
   }
 
   get endpoint(): string {

@@ -70,3 +70,33 @@ export async function agentChatOp(payload: AgentChatOp, timeoutMs = 10_000): Pro
     return { ok: false, error: "daemon_unreachable" };
   }
 }
+
+// ── R47: vault токенов — socket-поверхность (list/set/delete) с ack ──
+export type TokensOp = { op: "list" | "set" | "delete"; name?: string; value?: string; tier?: string; by?: string };
+export type TokensOpResult = {
+  ok: boolean;
+  error?: string;
+  tokens?: Array<{ name: string; tier: string; known: boolean; desc: string; source: string; masked: string; updated_at: string; updated_by: string }>;
+  status?: { total?: number; known_missing?: string[]; last_ops?: Array<{ at: string; op: string; name: string; by: string; ok: boolean }>; [k: string]: unknown };
+  [k: string]: unknown;
+};
+
+/** Операция vault'а токенов через socket.io ack (T0-плоскость; raw-значения не возвращаются). */
+export async function tokensOp(payload: TokensOp, timeoutMs = 10_000): Promise<TokensOpResult> {
+  try {
+    const s = await me2Socket();
+    return await new Promise<TokensOpResult>((resolve) => {
+      let settled = false;
+      const done = (r: TokensOpResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(r ?? { ok: false, error: "no_ack" });
+      };
+      const timer = setTimeout(() => done({ ok: false, error: "daemon_unreachable" }), timeoutMs);
+      s.emit("tokens:op", payload, (res: TokensOpResult) => done(res));
+    });
+  } catch {
+    return { ok: false, error: "daemon_unreachable" };
+  }
+}

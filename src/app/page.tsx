@@ -14,7 +14,7 @@ import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import AgentChatPanel from "@/components/me2/agent-chat-panel";
 import FleetGrid from "@/components/me2/fleet-grid";
-import { agentChatOp } from "@/lib/me2-socket";
+import { agentChatOp, tokensOp } from "@/lib/me2-socket";
 import { me2Desktop } from "@/lib/me2-desktop";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,7 +39,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, ArrowLeftRight, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
-  Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Globe, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, PanelLeft, Pause, Play, Plus,
+  Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Globe, KeyRound, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, PanelLeft, Pause, Play, Plus,
   Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, ShieldCheck, Sparkles, Target, Terminal, Trash2, X, Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -124,6 +124,12 @@ type DemandT = {
   last_decision: { ts: string; action: string; signal: string | null; role: string | null; session_id: string | null; detail: string } | null;
   decisions: Array<{ ts: string; action: string; signal: string | null; role: string | null; session_id: string | null; detail: string }>;
   snapshot: { ready_count: number; ready_research: number; pool_leases: number; pool_max: number; fails_15m: number; active_chats: number; breaker_open: boolean };
+};
+// R47: vault токенов (GET /tokens) — все секреты в БД, наружу только маска
+type TokensData = {
+  ok: boolean;
+  tokens: Array<{ name: string; tier: string; known: boolean; desc: string; source: string; masked: string; updated_at: string; updated_by: string }>;
+  status: { ok: boolean; total: number; known_total: number; known_missing: string[]; by_tier: Record<string, number>; by_source: Record<string, number>; seeded_at: string | null; last_ops: Array<{ at: string; op: string; name: string; by: string; ok: boolean }>; surface: { rest: string; socket: string; note: string } };
 };
 // R35 E5: token-economy памяти (GET /memory/economy — дельта-доставка вместо полного блока)
 type MemEconConsumerT = { consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number };
@@ -1418,6 +1424,8 @@ export default function MissionControl() {
   const [autonomy, setAutonomy] = useState<AutonomyT | null>(null);
   const [governor, setGovernor] = useState<GovernorT | null>(null);
   const [demand, setDemand] = useState<DemandT | null>(null);
+  const [tokensData, setTokensData] = useState<TokensData | null>(null);
+  const [tokensBusy, setTokensBusy] = useState(false);
   const [poolBusy, setPoolBusy] = useState(false);
   const [evalBusy, setEvalBusy] = useState(false);
   const [wg, setWg] = useState<WorkGraphData | null>(null);
@@ -1557,6 +1565,31 @@ export default function MissionControl() {
     } catch { /* daemon недоступен */ }
     await loadDemand();
   }, [demand, loadDemand, toast]);
+  // R47: vault токенов — GET /tokens (маскированный список) + операции через socket tokens:op
+  const loadTokens = useCallback(async () => {
+    try { const r = await fetch("/tokens?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setTokensData(r as TokensData); } catch { /* daemon недоступен */ }
+  }, []);
+  const tokenSetOp = useCallback(async () => {
+    const name = window.prompt("Имя токена (A-Z_0-9; известные: GITHUB_TOKEN_ADMIN, GITHUB_TOKEN_SANDBOX, SUPABASE_URL, SUPABASE_SERVICE_ROLE_JWT, SUPABASE_JWT_SECRET, VERCEL_AI_GATEWAY_API_KEY):", "");
+    if (!name) return;
+    const value = window.prompt(`Значение токена ${name} (сохранится в БД vault'а; наружу — только маска):`, "");
+    if (!value) return;
+    setTokensBusy(true);
+    try {
+      const r = await tokensOp({ op: "set", name: name.trim(), value: value.trim(), by: "operator-ui" });
+      if (r?.ok) { toast({ title: `токен ${name.trim()} записан в БД vault'а ✓` }); await loadTokens(); }
+      else toast({ title: `tokens set ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
+    } finally { setTokensBusy(false); }
+  }, [loadTokens, toast]);
+  const tokenDeleteOp = useCallback(async (name: string) => {
+    if (!window.confirm(`Удалить токен ${name} из vault'а БД? Потребители (selfupdate/evidence/gateway) потеряют доступ немедленно.`)) return;
+    setTokensBusy(true);
+    try {
+      const r = await tokensOp({ op: "delete", name, by: "operator-ui" });
+      if (r?.ok) { toast({ title: `токен ${name} удалён из БД ✓` }); await loadTokens(); }
+      else toast({ title: `tokens delete ✗ ${String(r?.error ?? "ошибка").slice(0, 60)}`, variant: "destructive" });
+    } finally { setTokensBusy(false); }
+  }, [loadTokens, toast]);
   const poolOp = useCallback(async (op: "scale" | "burn", n: number) => {
     setPoolBusy(true);
     try {
@@ -1639,7 +1672,7 @@ export default function MissionControl() {
   // R33 E2: hash-chain verify — mount + при каждом открытии панели
   useEffect(() => { void loadEvChain(); }, [loadEvChain]);
   useEffect(() => { void loadAutonomy(); }, [loadAutonomy]);
-  useEffect(() => { void loadGovernor(); void loadDemand(); }, [loadGovernor, loadDemand]);
+  useEffect(() => { void loadGovernor(); void loadDemand(); void loadTokens(); }, [loadGovernor, loadDemand, loadTokens]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1689,11 +1722,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand]);
+  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2508,7 +2541,7 @@ export default function MissionControl() {
                             )}
                             <button
                               type="button"
-                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); }}
+                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
                               title="Обновить все механики"
                               aria-label="Обновить все механики"
                               className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -3569,6 +3602,51 @@ export default function MissionControl() {
                         {demand?.last_decision && demand.last_decision.action !== "idle" && (
                           <p data-testid="demand-last" className={`mt-1 truncate font-mono text-[9px] ${demand.last_decision.action === "created" ? "text-emerald-300" : demand.last_decision.action === "suppressed" ? "text-amber-300" : "text-zinc-400"}`} title={demand.decisions.slice(0, 5).map((d) => `${d.ts.slice(11, 19)} ${d.action}${d.signal ? ` [${d.signal}]` : ""}: ${d.detail}`).join("\n")}>
                             {demand.last_decision.ts.slice(11, 19)} {demand.last_decision.action}{demand.last_decision.signal ? ` · ${demand.last_decision.signal}` : ""}{demand.last_decision.role ? ` · ${demand.last_decision.role}` : ""} — {demand.last_decision.detail}
+                          </p>
+                        )}
+                      </div>
+                        </CardContent>
+                      </Card>
+                      <Card className="shrink-0 border-zinc-800 bg-zinc-900/40 card-lift" data-testid="tl-tokens">
+                        <CardContent className="p-3">
+                      {/* R47: VAULT — все токены в БД (SQLite tokens); наружу только маска, операции set/delete — T0-плоскость */}
+                      <div className="space-y-1.5 rounded-lg border border-zinc-800 bg-zinc-950/40" aria-label="Vault токенов (БД)">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="R47 vault: ВСЕ токены системы живут в SQLite (таблица tokens) — bootstrap-миграция из /home/z/.a2 идемпотентна; потребители (selfupdate/evidence/mirror/providers) читают только tokenGet; добытый gateway-ключ сам падает в БД; ротация — без рестарта (onTokenChange); raw-значения наружу не выходят — только маска (первые 5 + последние 3 + длина); операции — REST POST /tokens и socket tokens:op (T0-плоскость оператора, чат-агентам vault недоступен); каждая мутация — TOKENS_SET/TOKENS_DELETED в hash-chain">
+                            <KeyRound className={`h-3 w-3 ${tokensData ? "text-emerald-300" : "text-zinc-600"}`} aria-hidden /> VAULT·R47
+                          </span>
+                          <span data-testid="tokens-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                            <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-300" title="токенов в БД / известных слотов реестра">{tokensData ? `${tokensData.status.total}/${tokensData.status.known_total}` : "—"}</span>
+                            {tokensData && Object.entries(tokensData.status.by_tier).map(([t, n]) => (
+                              <span key={t} className={`rounded border px-1 py-0.5 ${t === "T1" ? "border-amber-900/60 bg-amber-950/30 text-amber-300" : "border-violet-900/60 bg-violet-950/30 text-violet-300"}`} title={`${t}: токенов в vault'е`}>{t}×{n}</span>
+                            ))}
+                            {tokensData && tokensData.status.known_missing.length > 0 && (
+                              <span className="rounded border border-rose-900/60 bg-rose-950/30 px-1 py-0.5 text-rose-300" title={`известные слоты без значения: ${tokensData.status.known_missing.join(", ")}`}>нет {tokensData.status.known_missing.length}</span>
+                            )}
+                          </span>
+                          <span className="ml-auto flex shrink-0 items-center gap-1">
+                            <button type="button" data-testid="tokens-add" onClick={() => void tokenSetOp()} disabled={tokensBusy} className="rounded border border-emerald-900/60 bg-emerald-950/30 px-1.5 py-0.5 font-mono text-[9px] text-emerald-300 transition hover:bg-emerald-950/60 disabled:opacity-40" title="записать/ротировать токен в БД (socket tokens:op {op:set})">＋ токен</button>
+                            <button type="button" onClick={() => void loadTokens()} aria-label="Обновить vault" className="rounded border border-zinc-800 px-1 py-0.5 text-zinc-500 transition hover:text-zinc-200" title="перечитать GET /tokens"><RefreshCw className="h-3 w-3" aria-hidden /></button>
+                          </span>
+                        </div>
+                        <div data-testid="tokens-list" className="mc-scroll max-h-44 space-y-0.5 overflow-y-auto pr-1" role="list" aria-label="Токены в БД (маскированные)">
+                          {(tokensData?.tokens ?? []).map((t) => (
+                            <div key={t.name} role="listitem" className="group flex items-center gap-1.5 rounded px-1 py-0.5 font-mono text-[9px] transition hover:bg-zinc-900/60" title={`${t.desc}\nисточник: ${t.source} · обновлён ${t.updated_at.slice(0, 19)} (${t.updated_by || "—"})`}>
+                              <span className={`shrink-0 rounded border px-0.5 ${t.tier === "T1" ? "border-amber-900/60 text-amber-400" : "border-violet-900/60 text-violet-400"}`}>{t.tier}</span>
+                              <span className="shrink-0 text-zinc-300">{t.name}</span>
+                              <span className="truncate text-zinc-600">{t.masked}</span>
+                              <span className="ml-auto shrink-0 text-zinc-700">{t.source.startsWith("file:") ? "из файла" : t.source === "operator" ? "оператор" : t.source}</span>
+                              <button type="button" onClick={() => void tokenDeleteOp(t.name)} aria-label={`Удалить ${t.name}`} className="shrink-0 rounded p-0.5 text-zinc-700 opacity-0 transition group-hover:opacity-100 hover:bg-rose-950/40 hover:text-rose-300" title="удалить из vault'а (socket tokens:op {op:delete})"><Trash2 className="h-3 w-3" aria-hidden /></button>
+                            </div>
+                          ))}
+                          {tokensData && tokensData.tokens.length === 0 && (
+                            <p className="px-1 font-mono text-[9px] text-rose-300" role="alert">vault пуст — токены не обнаружены ни в БД, ни в /home/z/.a2 (поставь через «＋ токен»)</p>
+                          )}
+                          {!tokensData && <p className="px-1 font-mono text-[9px] text-zinc-600">vault недоступен (daemon офлайн)</p>}
+                        </div>
+                        {tokensData && tokensData.status.last_ops.length > 0 && (
+                          <p data-testid="tokens-last-op" className="truncate font-mono text-[9px] text-zinc-500" title={tokensData.status.last_ops.slice(0, 5).map((o) => `${o.at.slice(11, 19)} ${o.op} · ${o.name} · ${o.by}`).join("\n")}>
+                            {tokensData.status.last_ops[0].at.slice(11, 19)} {tokensData.status.last_ops[0].op} · {tokensData.status.last_ops[0].name} · {tokensData.status.last_ops[0].by}
                           </p>
                         )}
                       </div>
