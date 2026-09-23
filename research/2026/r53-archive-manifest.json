@@ -1,22 +1,15 @@
 {
  "schema": "me2.archive-manifest.v1",
  "repo": "PatrickFrome/Compute",
- "cutoff": "2026-09-09T21:50:09.235895+00:00",
- "generated_at": "2026-09-23T21:50:09.237575+00:00",
+ "cutoff": "2026-09-09T22:08:56.489235+00:00",
+ "generated_at": "2026-09-23T22:08:56.490928+00:00",
  "mode": "apply",
  "counts": {
-  "archive": 168,
   "recent(<14d)": 245,
-  "open-pr": 413
+  "archive": 99,
+  "open-pr": 314
  },
  "branches": [
-  {
-   "branch": "fix/browser-autonomy-hardening-v1",
-   "sha": "8f717ee5797a",
-   "date": "2026-09-02T19:04:56Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-fix__browser-autonomy-hardening-v1"
-  },
   {
    "branch": "fix/chat-qualification-glm-platform",
    "sha": "d0df13420e54",
@@ -28,15 +21,8 @@
    "branch": "fix/devos-070-self-heal-runtime-v1",
    "sha": "d0e987903a78",
    "date": "2026-09-08T18:14:44Z",
-   "decision": "open-pr",
-   "tag": "archive-2026-09-fix__devos-070-self-heal-runtime-v1"
-  },
-  {
-   "branch": "fix/devos-continuous-baseline-refill-v2",
-   "sha": "6e0af4053509",
-   "date": "2026-09-02T18:41:54Z",
    "decision": "archive",
-   "tag": "archive-2026-09-fix__devos-continuous-baseline-refill-v2"
+   "tag": "archive-2026-09-fix__devos-070-self-heal-runtime-v1"
   },
   {
    "branch": "fix/glm-agent-context-concurrency-v1",
@@ -95,25 +81,11 @@
    "tag": "archive-2026-09-fix__ops-audit-closure-v1"
   },
   {
-   "branch": "fix/read-plane-v2.2-plane-separation",
-   "sha": "9377f76d8e26",
-   "date": "2026-08-23T01:21:30Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-fix__read-plane-v2.2-plane-separation"
-  },
-  {
    "branch": "fix/self-update-ambiguous-recovery",
    "sha": "edef6dd17e17",
    "date": "2026-09-12T12:45:22Z",
    "decision": "open-pr",
    "tag": "archive-2026-09-fix__self-update-ambiguous-recovery"
-  },
-  {
-   "branch": "fix/supervisor-foreground-send-v1",
-   "sha": "667e19015bc6",
-   "date": "2026-09-02T18:04:53Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-fix__supervisor-foreground-send-v1"
   },
   {
    "branch": "repair/command-plane-liveness-l1-v1",
@@ -333,83 +305,6 @@
    "tag": "archive-2026-09-repair__supervisor-transitive-process-boundary-r6"
   },
   {
-   "branch": "work/a2-browser-operator-gemini-advisory-v1",
-   "sha": "11f10b38ecbc",
-   "date": "2026-08-29T04:17:19Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-browser-operator-gemini-advisory-v1"
-  },
-  {
-   "branch": "work/a2-browser-operator-r0-source-of-truth",
-   "sha": "c438ebfdddec",
-   "date": "2026-08-27T18:59:22Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-browser-operator-r0-source-of-truth"
-  },
-  {
-   "branch": "work/a2-browser-operator-r1-live-stability",
-   "sha": "06bc0d666742",
-   "date": "2026-08-27T19:19:03Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-browser-operator-r1-live-stability"
-  },
-  {
-   "branch": "work/a2-browser-operator-r2-module-consolidation",
-   "sha": "0365731c7366",
-   "date": "2026-08-27T19:42:12Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-browser-operator-r2-module-consolidation"
-  },
-  {
-   "branch": "work/a2-browser-operator-r3-target-registry",
-   "sha": "a5ad4ff23ad8",
-   "date": "2026-08-27T20:14:52Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-browser-operator-r3-target-registry"
-  },
-  {
-   "branch": "work/a2-browser-operator-v060",
-   "sha": "bd846ed20490",
-   "date": "2026-08-27T08:02:50Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-browser-operator-v060"
-  },
-  {
-   "branch": "work/a2-compute-browser-b2-b3",
-   "sha": "d927d2da8e49",
-   "date": "2026-08-27T23:41:59Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-compute-browser-b2-b3"
-  },
-  {
-   "branch": "work/a2-compute-browser-b2-contexts",
-   "sha": "c50dd08650a8",
-   "date": "2026-08-27T23:58:50Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-compute-browser-b2-contexts"
-  },
-  {
-   "branch": "work/a2-compute-browser-b2-contract-pin-repair",
-   "sha": "1fc383b02f35",
-   "date": "2026-08-28T21:36:50Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-compute-browser-b2-contract-pin-repair"
-  },
-  {
-   "branch": "work/a2-compute-browser-b3-session-scheduler",
-   "sha": "11181e72d8f8",
-   "date": "2026-08-28T05:45:56Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-compute-browser-b3-session-scheduler"
-  },
-  {
-   "branch": "work/a2-realtime-cognitive-bus",
-   "sha": "bfca124352e8",
-   "date": "2026-08-24T11:52:48Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__a2-realtime-cognitive-bus"
-  },
-  {
    "branch": "work/agent-mode-draft-focus-v1",
    "sha": "33b26c0d1cfe",
    "date": "2026-09-21T20:59:59Z",
@@ -417,25 +312,11 @@
    "tag": "archive-2026-09-work__agent-mode-draft-focus-v1"
   },
   {
-   "branch": "work/aop1-autonomous-orchestration",
-   "sha": "879258640969",
-   "date": "2026-08-24T10:36:50Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__aop1-autonomous-orchestration"
-  },
-  {
    "branch": "work/browser-agent-platform-glm-v1",
    "sha": "9907f2a292f9",
    "date": "2026-09-18T17:56:21Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__browser-agent-platform-glm-v1"
-  },
-  {
-   "branch": "work/browser-agentic-workbench-v1",
-   "sha": "55944d5c3b21",
-   "date": "2026-09-03T17:18:13Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-agentic-workbench-v1"
   },
   {
    "branch": "work/browser-always-on-control-v1",
@@ -455,14 +336,14 @@
    "branch": "work/browser-brain-adaptive-fanout-runtime-v1",
    "sha": "be7578f390b6",
    "date": "2026-09-06T06:06:20Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-adaptive-fanout-runtime-v1"
   },
   {
    "branch": "work/browser-brain-adaptive-pressure-v1",
    "sha": "7da341012c57",
    "date": "2026-09-05T22:41:43Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-adaptive-pressure-v1"
   },
   {
@@ -501,13 +382,6 @@
    "tag": "archive-2026-09-work__browser-brain-causal-summary-fastpath-v1"
   },
   {
-   "branch": "work/browser-brain-cell-binding-v1",
-   "sha": "ccc01cc478ec",
-   "date": "2026-09-05T22:36:09Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-brain-cell-binding-v1"
-  },
-  {
    "branch": "work/browser-brain-codeunit-source-order-v1",
    "sha": "145d438145b6",
    "date": "2026-09-11T11:02:15Z",
@@ -518,28 +392,21 @@
    "branch": "work/browser-brain-cognition-fabric-v1",
    "sha": "d8ed6dc5d4c9",
    "date": "2026-09-06T12:24:39Z",
-   "decision": "open-pr",
-   "tag": "archive-2026-09-work__browser-brain-cognition-fabric-v1"
-  },
-  {
-   "branch": "work/browser-brain-cognitive-ingest-v1",
-   "sha": "a0da28a88296",
-   "date": "2026-09-05T22:11:40Z",
    "decision": "archive",
-   "tag": "archive-2026-09-work__browser-brain-cognitive-ingest-v1"
+   "tag": "archive-2026-09-work__browser-brain-cognition-fabric-v1"
   },
   {
    "branch": "work/browser-brain-cohort-resume-acks-v1",
    "sha": "9e10a7d91dd4",
    "date": "2026-09-07T12:01:10Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-cohort-resume-acks-v1"
   },
   {
    "branch": "work/browser-brain-collaboration-fabric-v1",
    "sha": "e089d1135752",
    "date": "2026-09-07T16:32:19Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-collaboration-fabric-v1"
   },
   {
@@ -588,168 +455,168 @@
    "branch": "work/browser-brain-effect-binding-v2-fence",
    "sha": "936447f14a91",
    "date": "2026-09-06T09:02:26Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-effect-binding-v2-fence"
   },
   {
    "branch": "work/browser-brain-event-driven-submit-readback-v1",
    "sha": "af1888f79d7b",
    "date": "2026-09-06T11:33:43Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-event-driven-submit-readback-v1"
   },
   {
    "branch": "work/browser-brain-exact-mutation-router-v1",
    "sha": "cab5bad39b2c",
    "date": "2026-09-05T23:59:08Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-exact-mutation-router-v1"
   },
   {
    "branch": "work/browser-brain-execution-abort-fence-v1",
    "sha": "366f8f766c9e",
    "date": "2026-09-09T11:00:57Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-execution-abort-fence-v1"
   },
   {
    "branch": "work/browser-brain-fanout-capacity-projection-v1",
    "sha": "daeab9c95d67",
    "date": "2026-09-07T13:07:49Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-capacity-projection-v1"
   },
   {
    "branch": "work/browser-brain-fanout-causal-bridge-v1",
    "sha": "dc10b1212cc2",
    "date": "2026-09-07T05:01:41Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-causal-bridge-v1"
   },
   {
    "branch": "work/browser-brain-fanout-checkpoint-delta-v1",
    "sha": "d331091eca7a",
    "date": "2026-09-07T04:02:46Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-checkpoint-delta-v1"
   },
   {
    "branch": "work/browser-brain-fanout-direct-result-materialization-v1",
    "sha": "95c1934f4fb7",
    "date": "2026-09-09T14:01:12Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-direct-result-materialization-v1"
   },
   {
    "branch": "work/browser-brain-fanout-durable-checkpoint-v1",
    "sha": "ba2292a2bad6",
    "date": "2026-09-07T00:59:08Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-durable-checkpoint-v1"
   },
   {
    "branch": "work/browser-brain-fanout-issuance-manifest-v1",
    "sha": "2bea78d9f476",
    "date": "2026-09-07T17:02:27Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-issuance-manifest-v1"
   },
   {
    "branch": "work/browser-brain-fanout-issuance-window-v1",
    "sha": "eb84e867aa17",
    "date": "2026-09-07T16:01:55Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-issuance-window-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-accumulator-v1",
    "sha": "1c9c461e2873",
    "date": "2026-09-07T20:58:21Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-accumulator-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-checkpoint-delta-v1",
    "sha": "1469799189bd",
    "date": "2026-09-08T07:03:59Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-checkpoint-delta-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-delta-batch-append-v1",
    "sha": "e9e53cf126d9",
    "date": "2026-09-08T11:01:58Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-delta-batch-append-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-delta-batch-replay-v1",
    "sha": "f0beb2bf5799",
    "date": "2026-09-08T08:59:26Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-delta-batch-replay-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-delta-fast-append-v1",
    "sha": "7eef34b2620f",
    "date": "2026-09-08T10:02:57Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-delta-fast-append-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-durable-checkpoint-v1",
    "sha": "d100cab94338",
    "date": "2026-09-07T23:01:33Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-durable-checkpoint-v1"
   },
   {
    "branch": "work/browser-brain-fanout-preparation-shards-v1",
    "sha": "6d67c2ecc76a",
    "date": "2026-09-07T18:00:07Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-preparation-shards-v1"
   },
   {
    "branch": "work/browser-brain-fanout-prepared-manifest-v1",
    "sha": "c61866c90249",
    "date": "2026-09-07T19:00:14Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-prepared-manifest-v1"
   },
   {
    "branch": "work/browser-brain-fanout-progress-stream-v1",
    "sha": "651c15ba1eed",
    "date": "2026-09-06T23:58:47Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-progress-stream-v1"
   },
   {
    "branch": "work/browser-brain-fanout-ready-shard-evidence-v1",
    "sha": "21e61fc78322",
    "date": "2026-09-07T21:59:23Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-ready-shard-evidence-v1"
   },
   {
    "branch": "work/browser-brain-fanout-receipt-accumulator-v1",
    "sha": "96c02cca66f1",
    "date": "2026-09-06T22:59:17Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-receipt-accumulator-v1"
   },
   {
    "branch": "work/browser-brain-fanout-receipts-v1",
    "sha": "354e80caa1fe",
    "date": "2026-09-06T21:59:30Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-receipts-v1"
   },
   {
    "branch": "work/browser-brain-fanout-sync-throw-isolation-v1",
    "sha": "35f047a4eb48",
    "date": "2026-09-09T08:59:23Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fanout-sync-throw-isolation-v1"
   },
   {
@@ -791,7 +658,7 @@
    "branch": "work/browser-brain-flat-preflight-aggregate-v1",
    "sha": "66a3f9bcae31",
    "date": "2026-09-09T15:00:59Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-flat-preflight-aggregate-v1"
   },
   {
@@ -805,7 +672,7 @@
    "branch": "work/browser-brain-fresh-snapshot-pressure-v1",
    "sha": "da9d3e1f009e",
    "date": "2026-09-09T20:49:25Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-fresh-snapshot-pressure-v1"
   },
   {
@@ -826,161 +693,154 @@
    "branch": "work/browser-brain-native-semantic-adapter-v1",
    "sha": "fb11d27512c0",
    "date": "2026-09-06T15:03:35Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-native-semantic-adapter-v1"
   },
   {
    "branch": "work/browser-brain-native-semantic-callsite-v1",
    "sha": "b3e3f6dc46e7",
    "date": "2026-09-06T20:04:04Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-native-semantic-callsite-v1"
   },
   {
    "branch": "work/browser-brain-native-semantic-wiring-v1",
    "sha": "c6912b03b966",
    "date": "2026-09-06T17:01:25Z",
-   "decision": "open-pr",
-   "tag": "archive-2026-09-work__browser-brain-native-semantic-wiring-v1"
-  },
-  {
-   "branch": "work/browser-brain-o1-scheduler-v1",
-   "sha": "5179501ed18f",
-   "date": "2026-09-05T22:38:34Z",
    "decision": "archive",
-   "tag": "archive-2026-09-work__browser-brain-o1-scheduler-v1"
+   "tag": "archive-2026-09-work__browser-brain-native-semantic-wiring-v1"
   },
   {
    "branch": "work/browser-brain-observation-bulk-delta-resume-v1",
    "sha": "2b9c09fdc5fc",
    "date": "2026-09-09T06:03:43Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-bulk-delta-resume-v1"
   },
   {
    "branch": "work/browser-brain-observation-cohort-caller-order-v1",
    "sha": "abdc4f750d58",
    "date": "2026-09-09T03:01:00Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cohort-caller-order-v1"
   },
   {
    "branch": "work/browser-brain-observation-cohort-direct-membership-v1",
    "sha": "a66f51681a74",
    "date": "2026-09-09T04:03:17Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cohort-direct-membership-v1"
   },
   {
    "branch": "work/browser-brain-observation-cohort-direct-work-v1",
    "sha": "acdffd7181cb",
    "date": "2026-09-09T00:58:14Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cohort-direct-work-v1"
   },
   {
    "branch": "work/browser-brain-observation-cohort-single-pass-changed-v1",
    "sha": "281472b2c6ee",
    "date": "2026-09-09T04:58:50Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cohort-single-pass-changed-v1"
   },
   {
    "branch": "work/browser-brain-observation-cohort-work-index-v1",
    "sha": "cd766f4684f3",
    "date": "2026-09-09T00:00:12Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cohort-work-index-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-batch-checkpoint-v1",
    "sha": "d4becfec36b1",
    "date": "2026-09-08T11:59:17Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-batch-checkpoint-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-batch-resume-v1",
    "sha": "6c481425b27d",
    "date": "2026-09-08T13:58:54Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-batch-resume-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-cohort-delta-resume-v1",
    "sha": "4326475c86b6",
    "date": "2026-09-08T21:23:50Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-cohort-delta-resume-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-cohort-fanout-v1",
    "sha": "986699aa405e",
    "date": "2026-09-08T22:57:44Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-cohort-fanout-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-cohort-routing-v1",
    "sha": "56f8b6bdecc9",
    "date": "2026-09-08T22:01:44Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-cohort-routing-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-conditional-resume-v1",
    "sha": "2373047af7cf",
    "date": "2026-09-08T19:01:23Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-conditional-resume-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-delta-resume-v1",
    "sha": "f523ce8aea8e",
    "date": "2026-09-08T19:58:32Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-delta-resume-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-fast-restore-v1",
    "sha": "2074a1f803e5",
    "date": "2026-09-08T13:02:52Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-fast-restore-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-full-capacity-restore-v1",
    "sha": "f91de88bcd68",
    "date": "2026-09-08T15:01:47Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-full-capacity-restore-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursor-full-capacity-resume-v1",
    "sha": "ace0b55ffc27",
    "date": "2026-09-08T16:02:38Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursor-full-capacity-resume-v1"
   },
   {
    "branch": "work/browser-brain-observation-cursors-v1",
    "sha": "16b52034af5c",
    "date": "2026-09-07T07:06:59Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-cursors-v1"
   },
   {
    "branch": "work/browser-brain-observation-resume-acks-v1",
    "sha": "795f65289e01",
    "date": "2026-09-07T11:01:51Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-resume-acks-v1"
   },
   {
    "branch": "work/browser-brain-observation-resume-cohorts-v1",
    "sha": "e339f0208525",
    "date": "2026-09-07T08:59:26Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-observation-resume-cohorts-v1"
   },
   {
@@ -994,28 +854,28 @@
    "branch": "work/browser-brain-parallel-admission-preflight-v1",
    "sha": "74608841854b",
    "date": "2026-09-09T07:58:40Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-parallel-admission-preflight-v1"
   },
   {
    "branch": "work/browser-brain-parallel-fanout-resolver-preflight-v1",
    "sha": "ef940ed70377",
    "date": "2026-09-09T07:01:16Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-parallel-fanout-resolver-preflight-v1"
   },
   {
    "branch": "work/browser-brain-parallel-fanout-v1",
    "sha": "bc6184cddefe",
    "date": "2026-09-06T05:04:43Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-parallel-fanout-v1"
   },
   {
    "branch": "work/browser-brain-persistent-cdp-effect-path-v1",
    "sha": "2c706ec938f6",
    "date": "2026-09-06T00:40:06Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-persistent-cdp-effect-path-v1"
   },
   {
@@ -1043,7 +903,7 @@
    "branch": "work/browser-brain-preflight-abort-race-v1",
    "sha": "b68666bc25c7",
    "date": "2026-09-09T12:02:53Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-preflight-abort-race-v1"
   },
   {
@@ -1057,7 +917,7 @@
    "branch": "work/browser-brain-preflight-sync-throw-isolation-v1",
    "sha": "3cb3314cdf91",
    "date": "2026-09-09T10:00:39Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-preflight-sync-throw-isolation-v1"
   },
   {
@@ -1078,35 +938,35 @@
    "branch": "work/browser-brain-provider-neutral-fanout-v1",
    "sha": "d2b3b13d613d",
    "date": "2026-09-06T21:01:29Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-provider-neutral-fanout-v1"
   },
   {
    "branch": "work/browser-brain-realtime-command-wake-v1",
    "sha": "da2a9a49b2b5",
    "date": "2026-09-06T10:05:45Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-realtime-command-wake-v1"
   },
   {
    "branch": "work/browser-brain-realtime-observation-bridge-v1",
    "sha": "2770f1a12c65",
    "date": "2026-09-05T23:05:23Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-realtime-observation-bridge-v1"
   },
   {
    "branch": "work/browser-brain-realtime-observation-window-v1",
    "sha": "2ebbe5bac651",
    "date": "2026-09-07T05:59:30Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-realtime-observation-window-v1"
   },
   {
    "branch": "work/browser-brain-realtime-pressure-bridge-v1",
    "sha": "3ee3d0cd483c",
    "date": "2026-09-06T10:58:32Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-realtime-pressure-bridge-v1"
   },
   {
@@ -1134,49 +994,49 @@
    "branch": "work/browser-brain-runtime-fence-v1",
    "sha": "3c1472040270",
    "date": "2026-09-05T23:16:38Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-runtime-fence-v1"
   },
   {
    "branch": "work/browser-brain-semantic-coverage-reuse-v1",
    "sha": "97bdaa5c81d2",
    "date": "2026-09-09T16:03:02Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-semantic-coverage-reuse-v1"
   },
   {
    "branch": "work/browser-brain-semantic-fast-path-v1",
    "sha": "1a7cd8ef6815",
    "date": "2026-09-06T14:03:38Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-semantic-fast-path-v1"
   },
   {
    "branch": "work/browser-brain-semantic-runtime-v1",
    "sha": "8ce05dfe2c63",
    "date": "2026-09-06T18:59:52Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-semantic-runtime-v1"
   },
   {
    "branch": "work/browser-brain-semantic-target-cache-v1",
    "sha": "5f585d3186e7",
    "date": "2026-09-06T13:07:22Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-semantic-target-cache-v1"
   },
   {
    "branch": "work/browser-brain-shared-observation-resume-reads-v1",
    "sha": "a18a7f5f7ad0",
    "date": "2026-09-07T10:02:38Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-shared-observation-resume-reads-v1"
   },
   {
    "branch": "work/browser-brain-single-pass-coverage-v1",
    "sha": "e9bede062573",
    "date": "2026-09-09T18:57:59Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-single-pass-coverage-v1"
   },
   {
@@ -1239,7 +1099,7 @@
    "branch": "work/browser-brain-stream-clock-v1",
    "sha": "4b031cbd2ecd",
    "date": "2026-09-06T12:01:40Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-brain-stream-clock-v1"
   },
   {
@@ -1334,13 +1194,6 @@
    "tag": "archive-2026-09-work__browser-brain-zero-live-cell-fence-v1"
   },
   {
-   "branch": "work/browser-cell-isolation-pilot-current-v1",
-   "sha": "7c92997e023e",
-   "date": "2026-09-05T04:26:40Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-cell-isolation-pilot-current-v1"
-  },
-  {
    "branch": "work/browser-ci-latest-head-concurrency-v1",
    "sha": "549b6d04b5a6",
    "date": "2026-09-19T16:35:02Z",
@@ -1383,48 +1236,6 @@
    "tag": "archive-2026-09-work__browser-command-wake-observability-v1"
   },
   {
-   "branch": "work/browser-context-packs-shell-v1",
-   "sha": "c04e63019f5d",
-   "date": "2026-09-03T17:04:00Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-context-packs-shell-v1"
-  },
-  {
-   "branch": "work/browser-control-command-contract-v1",
-   "sha": "063ef0bfee87",
-   "date": "2026-08-30T06:48:24Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-control-command-contract-v1"
-  },
-  {
-   "branch": "work/browser-control-input-view-v1",
-   "sha": "a18d9c654d8b",
-   "date": "2026-08-30T06:43:37Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-control-input-view-v1"
-  },
-  {
-   "branch": "work/browser-control-max-v1",
-   "sha": "624b4dbe3103",
-   "date": "2026-08-30T06:26:37Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-control-max-v1"
-  },
-  {
-   "branch": "work/browser-control-plane-brain-fusion-v1",
-   "sha": "c8b8af769c39",
-   "date": "2026-09-05T12:36:51Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-control-plane-brain-fusion-v1"
-  },
-  {
-   "branch": "work/browser-control-runtime-v1",
-   "sha": "e74a1e33e144",
-   "date": "2026-08-30T06:36:56Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-control-runtime-v1"
-  },
-  {
    "branch": "work/browser-detached-capture-readiness-v2",
    "sha": "2b8c8bca244a",
    "date": "2026-09-14T00:30:53Z",
@@ -1437,20 +1248,6 @@
    "date": "2026-09-18T01:34:26Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__browser-developer-emergency-command-admission-v1"
-  },
-  {
-   "branch": "work/browser-devos-root-transport-bootstrap-v1",
-   "sha": "4c1c6daeff03",
-   "date": "2026-09-02T15:29:55Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-devos-root-transport-bootstrap-v1"
-  },
-  {
-   "branch": "work/browser-dp-pr-head-provenance-v2",
-   "sha": "59a9b9a6969d",
-   "date": "2026-09-02T07:41:31Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-dp-pr-head-provenance-v2"
   },
   {
    "branch": "work/browser-fallback-console-v1",
@@ -2156,15 +1953,8 @@
    "branch": "work/browser-final-integration-v1",
    "sha": "2ba3bc2e5696",
    "date": "2026-09-09T21:49:00Z",
-   "decision": "open-pr",
-   "tag": "archive-2026-09-work__browser-final-integration-v1"
-  },
-  {
-   "branch": "work/browser-final-optimization-v1",
-   "sha": "ddae15a340bf",
-   "date": "2026-09-02T09:49:13Z",
    "decision": "archive",
-   "tag": "archive-2026-09-work__browser-final-optimization-v1"
+   "tag": "archive-2026-09-work__browser-final-integration-v1"
   },
   {
    "branch": "work/browser-final-runtime-package-closure-v1",
@@ -2177,7 +1967,7 @@
    "branch": "work/browser-final-shell-v1",
    "sha": "11f488d80ef8",
    "date": "2026-09-06T12:58:05Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-final-shell-v1"
   },
   {
@@ -2214,13 +2004,6 @@
    "date": "2026-09-11T12:15:38Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__browser-final-v2-vef-consumer-v1"
-  },
-  {
-   "branch": "work/browser-fleet-capacity-core-split-v1",
-   "sha": "75b81f3e65c3",
-   "date": "2026-09-02T18:11:40Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-fleet-capacity-core-split-v1"
   },
   {
    "branch": "work/browser-fleet-experience-driven-v1",
@@ -2303,7 +2086,7 @@
    "branch": "work/browser-immutable-emergency-trust-root-v1",
    "sha": "1298f338df13",
    "date": "2026-09-09T20:27:40Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-immutable-emergency-trust-root-v1"
   },
   {
@@ -2314,13 +2097,6 @@
    "tag": "archive-2026-09-work__browser-live-check-observability-v1"
   },
   {
-   "branch": "work/browser-live-control-recovery-v1",
-   "sha": "f68bb00c8e0b",
-   "date": "2026-09-02T11:18:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-live-control-recovery-v1"
-  },
-  {
    "branch": "work/browser-mesh-continuity-guard-convergence-v1",
    "sha": "2afe886e199f",
    "date": "2026-09-17T23:38:38Z",
@@ -2328,39 +2104,11 @@
    "tag": "archive-2026-09-work__browser-mesh-continuity-guard-convergence-v1"
   },
   {
-   "branch": "work/browser-mesh-foreground-send-v1",
-   "sha": "6e0a2fea0f7e",
-   "date": "2026-09-02T19:00:26Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-mesh-foreground-send-v1"
-  },
-  {
    "branch": "work/browser-mesh-wake-convergence-v1",
    "sha": "2127341e107a",
    "date": "2026-09-18T00:02:08Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__browser-mesh-wake-convergence-v1"
-  },
-  {
-   "branch": "work/browser-meta-orchestrator-v1",
-   "sha": "c0e3d3c277c4",
-   "date": "2026-09-01T06:48:24Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-meta-orchestrator-v1"
-  },
-  {
-   "branch": "work/browser-native-split-view-v1-stacked",
-   "sha": "8a2c42f88578",
-   "date": "2026-09-03T16:16:20Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-native-split-view-v1-stacked"
-  },
-  {
-   "branch": "work/browser-orchestra-hotfix-convergence-v1",
-   "sha": "d91e94b307ed",
-   "date": "2026-08-31T17:44:54Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-orchestra-hotfix-convergence-v1"
   },
   {
    "branch": "work/browser-postgres-notify-command-wake-v1",
@@ -2405,46 +2153,11 @@
    "tag": "archive-2026-09-work__browser-release-workflow-auth-preflight-wiring-v1"
   },
   {
-   "branch": "work/browser-runtime-compatibility-dp-provenance-v1",
-   "sha": "da5f2d7b05e5",
-   "date": "2026-09-02T10:58:49Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-runtime-compatibility-dp-provenance-v1"
-  },
-  {
-   "branch": "work/browser-runtime-compatibility-v2",
-   "sha": "59883c598147",
-   "date": "2026-09-01T20:46:17Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-runtime-compatibility-v2"
-  },
-  {
    "branch": "work/browser-self-update-double-handoff-recovery-v1",
    "sha": "cb0269d13018",
    "date": "2026-09-09T23:05:52Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__browser-self-update-double-handoff-recovery-v1"
-  },
-  {
-   "branch": "work/browser-self-update-heartbeat-liveness-v2",
-   "sha": "f0da6fb15423",
-   "date": "2026-09-02T18:39:25Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-self-update-heartbeat-liveness-v2"
-  },
-  {
-   "branch": "work/browser-self-update-successor-recovery-v1",
-   "sha": "72321beb0b8a",
-   "date": "2026-09-02T18:57:29Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-self-update-successor-recovery-v1"
-  },
-  {
-   "branch": "work/browser-self-update-successor-recovery-v2",
-   "sha": "83b362c4d082",
-   "date": "2026-09-02T19:05:14Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-self-update-successor-recovery-v2"
   },
   {
    "branch": "work/browser-semantic-ref-revision-v1",
@@ -2454,25 +2167,11 @@
    "tag": "archive-2026-09-work__browser-semantic-ref-revision-v1"
   },
   {
-   "branch": "work/browser-shell-design-system-v1",
-   "sha": "a482ff791317",
-   "date": "2026-09-02T07:52:03Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-shell-design-system-v1"
-  },
-  {
    "branch": "work/browser-shell-quantum-console-v1",
    "sha": "d1c0de553f42",
    "date": "2026-09-20T10:59:10Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__browser-shell-quantum-console-v1"
-  },
-  {
-   "branch": "work/browser-sovereign-fabric-hardening-v1",
-   "sha": "fc40ae8a4bf5",
-   "date": "2026-09-05T04:19:47Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-sovereign-fabric-hardening-v1"
   },
   {
    "branch": "work/browser-startup-retry-authority-contract-v1",
@@ -2485,21 +2184,21 @@
    "branch": "work/browser-successor-batch-receipt-bounds-v1",
    "sha": "e0f3dd983338",
    "date": "2026-09-08T19:02:12Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-successor-batch-receipt-bounds-v1"
   },
   {
    "branch": "work/browser-successor-convergence-all-fixes-v1",
    "sha": "4df132c410f3",
    "date": "2026-09-08T22:16:04Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-successor-convergence-all-fixes-v1"
   },
   {
    "branch": "work/browser-successor-recovery-sentinel-v1",
    "sha": "933eadb215e9",
    "date": "2026-09-08T18:22:40Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-successor-recovery-sentinel-v1"
   },
   {
@@ -2510,20 +2209,6 @@
    "tag": "archive-2026-09-work__browser-supervisor-mesh-start-recovery-v1"
   },
   {
-   "branch": "work/browser-supervisor-send-and-update-liveness-v1",
-   "sha": "5037e2a96b07",
-   "date": "2026-09-02T16:34:27Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-supervisor-send-and-update-liveness-v1"
-  },
-  {
-   "branch": "work/browser-supervisor-send-positive-readback-v1",
-   "sha": "301cfafa6d1b",
-   "date": "2026-09-02T16:26:37Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-supervisor-send-positive-readback-v1"
-  },
-  {
    "branch": "work/browser-tier1-closed-loop-wave1-v1",
    "sha": "57f132f31a87",
    "date": "2026-09-20T06:33:55Z",
@@ -2531,17 +2216,10 @@
    "tag": "archive-2026-09-work__browser-tier1-closed-loop-wave1-v1"
   },
   {
-   "branch": "work/browser-typed-workspaces-v1",
-   "sha": "9f0dec20a747",
-   "date": "2026-09-02T09:27:15Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-typed-workspaces-v1"
-  },
-  {
    "branch": "work/browser-windows-soak-optimization-v1",
    "sha": "739ba8196f0e",
    "date": "2026-09-06T20:07:56Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__browser-windows-soak-optimization-v1"
   },
   {
@@ -2552,417 +2230,11 @@
    "tag": "archive-2026-09-work__browser-work-graph-unified-v1"
   },
   {
-   "branch": "work/browser-workbench-layout-v2",
-   "sha": "23d2ea1545f2",
-   "date": "2026-09-02T08:28:48Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-workbench-layout-v2"
-  },
-  {
-   "branch": "work/browser-workspace-reincarnation-v1",
-   "sha": "74961c5a3aac",
-   "date": "2026-09-02T09:59:09Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__browser-workspace-reincarnation-v1"
-  },
-  {
-   "branch": "work/c0-integration-provenance-fence-v1",
-   "sha": "62bb2edc088b",
-   "date": "2026-09-01T03:47:33Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-integration-provenance-fence-v1"
-  },
-  {
-   "branch": "work/c0-post-successor-continuity-persistence-v1",
-   "sha": "bf00dc64a909",
-   "date": "2026-09-01T18:47:59Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-post-successor-continuity-persistence-v1"
-  },
-  {
-   "branch": "work/c0-post-successor-continuity-readback-v1",
-   "sha": "fcafa16592ac",
-   "date": "2026-09-01T16:50:45Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-post-successor-continuity-readback-v1"
-  },
-  {
-   "branch": "work/c0-post-successor-continuity-readback-v2",
-   "sha": "33f90339ff87",
-   "date": "2026-09-01T19:47:53Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-post-successor-continuity-readback-v2"
-  },
-  {
-   "branch": "work/c0-recovery-admission-gate-v1",
-   "sha": "708b4c677cef",
-   "date": "2026-09-02T00:48:43Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-admission-gate-v1"
-  },
-  {
-   "branch": "work/c0-recovery-admission-proof-persistence-v1",
-   "sha": "ee17748f5a52",
-   "date": "2026-09-02T01:47:07Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-admission-proof-persistence-v1"
-  },
-  {
-   "branch": "work/c0-recovery-admission-proof-readback-v1",
-   "sha": "948b3453c1c9",
-   "date": "2026-09-02T02:47:27Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-admission-proof-readback-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-effect-intent-proof-persistence-v1",
-   "sha": "0eba456f8a37",
-   "date": "2026-09-02T07:46:10Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-effect-intent-proof-persistence-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-effect-intent-proof-readback-v1",
-   "sha": "108459528986",
-   "date": "2026-09-02T08:48:02Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-effect-intent-proof-readback-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-effect-intent-v1",
-   "sha": "fce356e6797c",
-   "date": "2026-09-02T06:49:40Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-effect-intent-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-final-admission-v1",
-   "sha": "4cdb05c0819b",
-   "date": "2026-09-02T09:46:49Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-final-admission-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-precondition-proof-persistence-v1",
-   "sha": "fb98c3b8c731",
-   "date": "2026-09-02T04:48:02Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-precondition-proof-persistence-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-precondition-proof-readback-v1",
-   "sha": "bb48e38f55dc",
-   "date": "2026-09-02T05:47:11Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-precondition-proof-readback-v1"
-  },
-  {
-   "branch": "work/c0-recovery-restart-precondition-v1",
-   "sha": "0320fe96bfd4",
-   "date": "2026-09-02T03:46:10Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-restart-precondition-v1"
-  },
-  {
-   "branch": "work/c0-recovery-resume-gate-v1",
-   "sha": "947477997561",
-   "date": "2026-09-01T20:47:58Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-resume-gate-v1"
-  },
-  {
-   "branch": "work/c0-recovery-resume-proof-persistence-v1",
-   "sha": "b8e45fd08f7a",
-   "date": "2026-09-01T22:47:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-resume-proof-persistence-v1"
-  },
-  {
-   "branch": "work/c0-recovery-resume-proof-readback-v1",
-   "sha": "01a1feacfdb4",
-   "date": "2026-09-01T23:47:24Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-recovery-resume-proof-readback-v1"
-  },
-  {
-   "branch": "work/c0-restart-actuator-precondition-v1",
-   "sha": "5afd8ad4a027",
-   "date": "2026-09-01T10:46:11Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-actuator-precondition-v1"
-  },
-  {
-   "branch": "work/c0-restart-effect-receipt-persistence-v1",
-   "sha": "c64006525e4a",
-   "date": "2026-09-01T12:47:36Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-effect-receipt-persistence-v1"
-  },
-  {
-   "branch": "work/c0-restart-effect-receipt-readback-v1",
-   "sha": "6623e51020fe",
-   "date": "2026-09-01T13:50:45Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-effect-receipt-readback-v1"
-  },
-  {
-   "branch": "work/c0-restart-effect-receipt-v1",
-   "sha": "532aba6c85be",
-   "date": "2026-09-01T11:47:27Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-effect-receipt-v1"
-  },
-  {
-   "branch": "work/c0-restart-intent-persistence-v1",
-   "sha": "0dc064555ccc",
-   "date": "2026-09-01T08:52:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-intent-persistence-v1"
-  },
-  {
-   "branch": "work/c0-restart-intent-readback-v1",
-   "sha": "a8535199c7f1",
-   "date": "2026-09-01T09:48:15Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-intent-readback-v1"
-  },
-  {
-   "branch": "work/c0-restart-intent-v1",
-   "sha": "3acd2836794e",
-   "date": "2026-09-01T07:49:20Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-intent-v1"
-  },
-  {
-   "branch": "work/c0-restart-readiness-v1",
-   "sha": "873d658fea3f",
-   "date": "2026-09-01T06:45:44Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-restart-readiness-v1"
-  },
-  {
-   "branch": "work/c0-rollover-checkpoint-envelope-v1",
-   "sha": "f48fb1ddb737",
-   "date": "2026-09-01T01:50:11Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-rollover-checkpoint-envelope-v1"
-  },
-  {
-   "branch": "work/c0-rollover-generation-provenance-v1",
-   "sha": "242a24751cd0",
-   "date": "2026-09-01T02:50:37Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-rollover-generation-provenance-v1"
-  },
-  {
-   "branch": "work/c0-rollover-read-boundary-v1",
-   "sha": "2f7c958e7bbb",
-   "date": "2026-08-31T22:51:45Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-rollover-read-boundary-v1"
-  },
-  {
-   "branch": "work/c0-successor-acceptance-v1",
-   "sha": "2d9921ea6581",
-   "date": "2026-09-01T04:49:12Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-successor-acceptance-v1"
-  },
-  {
-   "branch": "work/c0-successor-readback-v1",
-   "sha": "69aaef3cb50d",
-   "date": "2026-09-01T05:51:29Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-successor-readback-v1"
-  },
-  {
-   "branch": "work/c0-supervisor-rollover-decision-v1",
-   "sha": "96dcf897d7ec",
-   "date": "2026-08-31T21:52:38Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-supervisor-rollover-decision-v1"
-  },
-  {
-   "branch": "work/c0-unified-source-snapshot-minimal-v1",
-   "sha": "c7acce95ed88",
-   "date": "2026-08-31T19:47:54Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-unified-source-snapshot-minimal-v1"
-  },
-  {
-   "branch": "work/c0-unified-source-snapshot-v1",
-   "sha": "93a7a04b999c",
-   "date": "2026-08-31T18:48:29Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-unified-source-snapshot-v1"
-  },
-  {
-   "branch": "work/c0-verified-restart-successor-continuity-v1",
-   "sha": "38cbafb84826",
-   "date": "2026-09-01T14:49:35Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c0-verified-restart-successor-continuity-v1"
-  },
-  {
-   "branch": "work/c3-supervisor-rpc-acl-hardening-v1",
-   "sha": "24c889fb5383",
-   "date": "2026-08-30T21:50:09Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c3-supervisor-rpc-acl-hardening-v1"
-  },
-  {
-   "branch": "work/c3-supervisor-table-rls-hardening-v1",
-   "sha": "17dc68c789db",
-   "date": "2026-08-31T01:50:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c3-supervisor-table-rls-hardening-v1"
-  },
-  {
-   "branch": "work/c5-browser-fleet-composition-v1",
-   "sha": "ebb5963a376f",
-   "date": "2026-08-31T12:51:20Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-browser-fleet-composition-v1"
-  },
-  {
-   "branch": "work/c5-browser-main-composition-v1",
-   "sha": "bf8cf6eec031",
-   "date": "2026-08-31T13:56:25Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-browser-main-composition-v1"
-  },
-  {
-   "branch": "work/c5-browser-main-transport-wiring-v1",
-   "sha": "8a2ea11dc883",
-   "date": "2026-08-31T11:52:32Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-browser-main-transport-wiring-v1"
-  },
-  {
-   "branch": "work/c5-browser-runtime-transport-composition-v1",
-   "sha": "484452ce0893",
-   "date": "2026-08-31T10:50:14Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-browser-runtime-transport-composition-v1"
-  },
-  {
-   "branch": "work/c5-fleet-provisioner-revalidation",
-   "sha": "791590e3b2cc",
-   "date": "2026-08-31T07:00:32Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-fleet-provisioner-revalidation"
-  },
-  {
-   "branch": "work/c5-fleet-state-revalidation-transaction-v1",
-   "sha": "cfab281ae59f",
-   "date": "2026-08-31T05:53:20Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-fleet-state-revalidation-transaction-v1"
-  },
-  {
-   "branch": "work/c5-fleet-target-revalidation-v1",
-   "sha": "c6a871b0fac8",
-   "date": "2026-08-31T02:47:26Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-fleet-target-revalidation-v1"
-  },
-  {
-   "branch": "work/c5-incarnation-pinned-dispatch-v1",
-   "sha": "a524a192f3a0",
-   "date": "2026-08-29T17:56:51Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-incarnation-pinned-dispatch-v1"
-  },
-  {
-   "branch": "work/c5-local-target-observer-v1",
-   "sha": "74e0d08edfa0",
-   "date": "2026-08-31T03:50:22Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-local-target-observer-v1"
-  },
-  {
-   "branch": "work/c5-local-transport-observer-v1",
-   "sha": "e87d4bc5f79d",
-   "date": "2026-08-31T08:50:27Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-local-transport-observer-v1"
-  },
-  {
-   "branch": "work/c5-persisted-target-revalidation-v1",
-   "sha": "3940f9f2f567",
-   "date": "2026-08-31T04:49:23Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-persisted-target-revalidation-v1"
-  },
-  {
-   "branch": "work/c5-revalidation-transport-proof-e2e",
-   "sha": "04c9bc7d30bb",
-   "date": "2026-08-31T07:47:32Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-revalidation-transport-proof-e2e"
-  },
-  {
-   "branch": "work/c5-server-lease-verifier-quality-repair-v1",
-   "sha": "38d4f6e61105",
-   "date": "2026-08-31T17:51:34Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-server-lease-verifier-quality-repair-v1"
-  },
-  {
-   "branch": "work/c5-server-lease-verifier-v1",
-   "sha": "2024408e1d71",
-   "date": "2026-08-31T16:51:09Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-server-lease-verifier-v1"
-  },
-  {
-   "branch": "work/c5-supervisor-lease-promotion-gate-v1",
-   "sha": "fc7ed9d5e3b9",
-   "date": "2026-08-31T15:50:19Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-supervisor-lease-promotion-gate-v1"
-  },
-  {
-   "branch": "work/c5-transport-proof-restart-fence-v1",
-   "sha": "3d7432e31c2d",
-   "date": "2026-08-30T23:50:55Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-transport-proof-restart-fence-v1"
-  },
-  {
-   "branch": "work/c5-trusted-transport-promotion-v1",
-   "sha": "73f2d7f67958",
-   "date": "2026-08-31T09:48:46Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__c5-trusted-transport-promotion-v1"
-  },
-  {
-   "branch": "work/chat-control-plane-browser-bridge",
-   "sha": "b0f1b66bc283",
-   "date": "2026-08-26T14:20:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__chat-control-plane-browser-bridge"
-  },
-  {
-   "branch": "work/chatgpt-rate-backpressure-v1",
-   "sha": "5e1c5bc73bdf",
-   "date": "2026-09-02T18:14:02Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__chatgpt-rate-backpressure-v1"
-  },
-  {
    "branch": "work/checkpoint-ledger-integrity-v1",
    "sha": "ba11da12ccac",
    "date": "2026-09-14T00:18:00Z",
    "decision": "open-pr",
    "tag": "archive-2026-09-work__checkpoint-ledger-integrity-v1"
-  },
-  {
-   "branch": "work/ci-electron-cache-benchmark-v1",
-   "sha": "506db9e45174",
-   "date": "2026-08-29T21:45:19Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__ci-electron-cache-benchmark-v1"
   },
   {
    "branch": "work/ci-superseded-head-cancellation-v1",
@@ -2979,34 +2251,6 @@
    "tag": "archive-2026-09-work__control-plane-wedge-hardening-v1"
   },
   {
-   "branch": "work/convergence-browser-liveness-v1",
-   "sha": "7a2d0911cc5a",
-   "date": "2026-08-29T15:24:37Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__convergence-browser-liveness-v1"
-  },
-  {
-   "branch": "work/convergence-global-observer-memory-v1",
-   "sha": "37a698918cf7",
-   "date": "2026-08-29T17:20:32Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__convergence-global-observer-memory-v1"
-  },
-  {
-   "branch": "work/convergence-supervisor-keepalive-v1",
-   "sha": "7e76db4ef3e0",
-   "date": "2026-08-29T15:36:31Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__convergence-supervisor-keepalive-v1"
-  },
-  {
-   "branch": "work/convergence-update-channel-v1",
-   "sha": "57a647895f02",
-   "date": "2026-08-29T15:31:32Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__convergence-update-channel-v1"
-  },
-  {
    "branch": "work/detached-cdp-persistent-session-proof-v1",
    "sha": "0ce825287b94",
    "date": "2026-09-14T00:37:17Z",
@@ -3014,94 +2258,24 @@
    "tag": "archive-2026-09-work__detached-cdp-persistent-session-proof-v1"
   },
   {
-   "branch": "work/dev-auto-update-control-v1",
-   "sha": "36d29e6055b3",
-   "date": "2026-08-30T06:47:46Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__dev-auto-update-control-v1"
-  },
-  {
-   "branch": "work/devbrowser-background-submit-click-v1",
-   "sha": "535bd40a223b",
-   "date": "2026-08-31T14:08:11Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-background-submit-click-v1"
-  },
-  {
-   "branch": "work/devbrowser-roadmap-v1",
-   "sha": "9a82c20a574a",
-   "date": "2026-08-31T13:32:42Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-roadmap-v1"
-  },
-  {
-   "branch": "work/devbrowser-transport-foreground-v1",
-   "sha": "6cc5ca95ae92",
-   "date": "2026-08-31T14:18:52Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-transport-foreground-v1"
-  },
-  {
-   "branch": "work/devbrowser-transport-runtime-wire-v1",
-   "sha": "3fe825cabd88",
-   "date": "2026-08-31T14:44:53Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-transport-runtime-wire-v1"
-  },
-  {
-   "branch": "work/devbrowser-transport-two-phase-v1",
-   "sha": "f1385df0ac47",
-   "date": "2026-08-31T14:29:48Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-transport-two-phase-v1"
-  },
-  {
-   "branch": "work/devbrowser-workspace-git-hardening-v1",
-   "sha": "c77e991c76df",
-   "date": "2026-08-31T14:20:29Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-workspace-git-hardening-v1"
-  },
-  {
-   "branch": "work/devbrowser-workspace-manager-v1",
-   "sha": "53ba3459e5c5",
-   "date": "2026-08-31T14:17:21Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devbrowser-workspace-manager-v1"
-  },
-  {
    "branch": "work/devos-clean-genesis-batch-v1",
    "sha": "f43c48caab39",
    "date": "2026-09-08T15:42:09Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__devos-clean-genesis-batch-v1"
   },
   {
    "branch": "work/devos-convergence-live-opt-v1",
    "sha": "4e52a1334bc8",
    "date": "2026-09-08T14:07:10Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__devos-convergence-live-opt-v1"
-  },
-  {
-   "branch": "work/devos-expired-result-successor-adoption-v1",
-   "sha": "6e87a50039fa",
-   "date": "2026-09-02T12:47:41Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-expired-result-successor-adoption-v1"
-  },
-  {
-   "branch": "work/devos-expired-result-successor-readback-v1",
-   "sha": "e59ad090eaec",
-   "date": "2026-09-02T13:51:50Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-expired-result-successor-readback-v1"
   },
   {
    "branch": "work/devos-fleet-causal-readback-v1",
    "sha": "136c145662e6",
    "date": "2026-09-08T21:50:41Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__devos-fleet-causal-readback-v1"
   },
   {
@@ -3168,13 +2342,6 @@
    "tag": "archive-2026-09-work__devos-idle-admission-observability-v2"
   },
   {
-   "branch": "work/devos-maintenance-bug-hunter-g4",
-   "sha": "7aa3f6fc0aec",
-   "date": "2026-09-02T15:27:51Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-maintenance-bug-hunter-g4"
-  },
-  {
    "branch": "work/devos-maintenance-cooldown-after-completion-v1",
    "sha": "7f2abd2727c3",
    "date": "2026-09-18T21:43:19Z",
@@ -3182,53 +2349,11 @@
    "tag": "archive-2026-09-work__devos-maintenance-cooldown-after-completion-v1"
   },
   {
-   "branch": "work/devos-maintenance-research-adopt-g2",
-   "sha": "e7df7790679b",
-   "date": "2026-09-02T10:51:33Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-maintenance-research-adopt-g2"
-  },
-  {
-   "branch": "work/devos-meta-governor-verify-g1",
-   "sha": "7b9f33ef9d40",
-   "date": "2026-09-02T15:20:45Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-meta-governor-verify-g1"
-  },
-  {
-   "branch": "work/devos-native-two-phase-dispatch-v1",
-   "sha": "3312dcb21457",
-   "date": "2026-08-31T14:58:15Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-native-two-phase-dispatch-v1"
-  },
-  {
-   "branch": "work/devos-result-ready-expiry-falsifier-g1",
-   "sha": "9191d9b76bdc",
-   "date": "2026-09-02T15:02:11Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-result-ready-expiry-falsifier-g1"
-  },
-  {
-   "branch": "work/devos-result-ready-expiry-repair-g1",
-   "sha": "c26acd76a2d0",
-   "date": "2026-09-02T14:54:09Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-result-ready-expiry-repair-g1"
-  },
-  {
    "branch": "work/devos-runtime-stall-observability-v1",
    "sha": "1dfdd23778dd",
    "date": "2026-09-18T21:35:23Z",
    "decision": "open-pr",
    "tag": "archive-2026-09-work__devos-runtime-stall-observability-v1"
-  },
-  {
-   "branch": "work/devos-supervisor-mesh-epoch-fence-v1",
-   "sha": "c66fa24b76ea",
-   "date": "2026-08-30T16:48:20Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__devos-supervisor-mesh-epoch-fence-v1"
   },
   {
    "branch": "work/devos-transport-admission-observability-convergence-v1",
@@ -3252,46 +2377,11 @@
    "tag": "archive-2026-09-work__dispatch-conversation-seed-bootstrap-v1"
   },
   {
-   "branch": "work/emergency-maintenance-policy-v1",
-   "sha": "8bda0d977a96",
-   "date": "2026-09-09T16:03:32Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__emergency-maintenance-policy-v1"
-  },
-  {
    "branch": "work/emergency-maintenance-runtime-v1",
    "sha": "8bb729ce2c1a",
    "date": "2026-09-09T16:09:53Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__emergency-maintenance-runtime-v1"
-  },
-  {
-   "branch": "work/f1-live-federation",
-   "sha": "a84a6cec0bc1",
-   "date": "2026-08-23T16:08:22Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__f1-live-federation"
-  },
-  {
-   "branch": "work/f1-multimodel-vercel-gateway-v1",
-   "sha": "df1459478a4d",
-   "date": "2026-08-29T11:19:25Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__f1-multimodel-vercel-gateway-v1"
-  },
-  {
-   "branch": "work/federated-autonomy-runtime-v1",
-   "sha": "a21c9e241718",
-   "date": "2026-08-30T09:06:42Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__federated-autonomy-runtime-v1"
-  },
-  {
-   "branch": "work/federated-autonomy-v1",
-   "sha": "e8f3a482831c",
-   "date": "2026-08-30T08:34:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__federated-autonomy-v1"
   },
   {
    "branch": "work/fleet-census-derived-ceiling-v1",
@@ -3299,48 +2389,6 @@
    "date": "2026-09-17T22:52:35Z",
    "decision": "open-pr",
    "tag": "archive-2026-09-work__fleet-census-derived-ceiling-v1"
-  },
-  {
-   "branch": "work/fleet-core-capacity-backpressure-v2",
-   "sha": "2fea39a9f82f",
-   "date": "2026-09-02T18:42:48Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__fleet-core-capacity-backpressure-v2"
-  },
-  {
-   "branch": "work/fleet-core-capacity-backpressure-v3",
-   "sha": "62880e6307b4",
-   "date": "2026-09-02T19:06:39Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__fleet-core-capacity-backpressure-v3"
-  },
-  {
-   "branch": "work/fleet-owned-tab-lifecycle-v1",
-   "sha": "c12a9d2c3500",
-   "date": "2026-08-29T18:53:25Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__fleet-owned-tab-lifecycle-v1"
-  },
-  {
-   "branch": "work/fleet-restart-stale-history-bound-v1",
-   "sha": "56fe5d09bb27",
-   "date": "2026-09-09T15:45:29Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__fleet-restart-stale-history-bound-v1"
-  },
-  {
-   "branch": "work/gate-disable-all-dev-rls-v1",
-   "sha": "3281ba08e334",
-   "date": "2026-08-30T16:49:49Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__gate-disable-all-dev-rls-v1"
-  },
-  {
-   "branch": "work/gate-disable-all-dev-v1",
-   "sha": "1f0c29107395",
-   "date": "2026-08-30T13:11:57Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__gate-disable-all-dev-v1"
   },
   {
    "branch": "work/glm-supervisor-session-v1",
@@ -3378,20 +2426,6 @@
    "tag": "archive-2026-09-work__jscpd-gate-rsi-recalibration-v1"
   },
   {
-   "branch": "work/keepalive-worker-lost-edge-dedupe-v1",
-   "sha": "2a8bf8204d31",
-   "date": "2026-08-29T16:59:05Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__keepalive-worker-lost-edge-dedupe-v1"
-  },
-  {
-   "branch": "work/max-reasoning-policy-v1",
-   "sha": "0c6f3083e5c7",
-   "date": "2026-08-29T18:52:07Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__max-reasoning-policy-v1"
-  },
-  {
    "branch": "work/metaengine-browser-analysis-stack-v1",
    "sha": "46dcf7d4a718",
    "date": "2026-09-13T11:58:25Z",
@@ -3402,7 +2436,7 @@
    "branch": "work/metaengine-browser-dark-workspace-v2",
    "sha": "0ceedb4470e5",
    "date": "2026-09-08T10:59:32Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-browser-dark-workspace-v2"
   },
   {
@@ -3416,70 +2450,63 @@
    "branch": "work/metaengine-browser-security-negative-gate-v1",
    "sha": "c97241599dcd",
    "date": "2026-09-08T09:31:23Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-browser-security-negative-gate-v1"
   },
   {
    "branch": "work/metaengine-browser-self-update-proof-liveness-v1",
    "sha": "ccc44b8a99db",
    "date": "2026-09-08T10:07:30Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-browser-self-update-proof-liveness-v1"
   },
   {
    "branch": "work/metaengine-devos-multisurface-v1",
    "sha": "d5f1b881b694",
    "date": "2026-09-08T12:48:38Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-devos-multisurface-v1"
   },
   {
    "branch": "work/metaengine-devos-now-v1",
    "sha": "02eb49a92ee4",
    "date": "2026-09-08T06:14:54Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-devos-now-v1"
   },
   {
    "branch": "work/metaengine-devos-presentation-focus-v1",
    "sha": "692ef029fa6e",
    "date": "2026-09-08T04:51:31Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-devos-presentation-focus-v1"
   },
   {
    "branch": "work/metaengine-devos-presentation-focus-wire-v1",
    "sha": "0f18ce5265bd",
    "date": "2026-09-08T05:15:26Z",
-   "decision": "open-pr",
-   "tag": "archive-2026-09-work__metaengine-devos-presentation-focus-wire-v1"
-  },
-  {
-   "branch": "work/metaengine-devos-session-focus-v1",
-   "sha": "c6679a3bc243",
-   "date": "2026-09-08T04:47:20Z",
    "decision": "archive",
-   "tag": "archive-2026-09-work__metaengine-devos-session-focus-v1"
+   "tag": "archive-2026-09-work__metaengine-devos-presentation-focus-wire-v1"
   },
   {
    "branch": "work/metaengine-devos-session-surface-activation-v1",
    "sha": "3e6f6b878504",
    "date": "2026-09-08T06:45:59Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-devos-session-surface-activation-v1"
   },
   {
    "branch": "work/metaengine-devos-session-surface-ui-v1",
    "sha": "8079b3f420fa",
    "date": "2026-09-08T08:54:00Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-devos-session-surface-ui-v1"
   },
   {
    "branch": "work/metaengine-devos-shell-renderer-v1",
    "sha": "b7f4e489e5b9",
    "date": "2026-09-08T05:24:46Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__metaengine-devos-shell-renderer-v1"
   },
   {
@@ -5425,7 +4452,7 @@
    "branch": "work/native-capture-surface-contract-v1",
    "sha": "449a48df7c75",
    "date": "2026-09-08T20:34:42Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__native-capture-surface-contract-v1"
   },
   {
@@ -5439,7 +4466,7 @@
    "branch": "work/native-supervisor-issuer-contract-v1",
    "sha": "a0027d56fdb4",
    "date": "2026-09-08T20:46:39Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__native-supervisor-issuer-contract-v1"
   },
   {
@@ -5448,13 +4475,6 @@
    "date": "2026-09-20T16:20:38Z",
    "decision": "recent(<14d)",
    "tag": "archive-2026-09-work__pigsty-db-integration-v1"
-  },
-  {
-   "branch": "work/pr83-self-update-diagnostics-v1",
-   "sha": "dfe56fc83da4",
-   "date": "2026-08-30T05:46:06Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__pr83-self-update-diagnostics-v1"
   },
   {
    "branch": "work/rsi/result-delivery-stall-after-effect-binding-b71075d3-7be6f274",
@@ -5506,34 +4526,6 @@
    "tag": "archive-2026-09-work__runtime-identity-state-revision-v1"
   },
   {
-   "branch": "work/same-point-duel-v4-a2-cognitive-bus",
-   "sha": "85570df184b7",
-   "date": "2026-08-29T04:28:53Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__same-point-duel-v4-a2-cognitive-bus"
-  },
-  {
-   "branch": "work/same-point-duel-v4-a2-interactive-v2",
-   "sha": "e4b2844e5174",
-   "date": "2026-08-24T22:48:39Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__same-point-duel-v4-a2-interactive-v2"
-  },
-  {
-   "branch": "work/same-point-duel-v4-legacy-upstream-provenance",
-   "sha": "367b7fbd51c1",
-   "date": "2026-08-29T05:30:07Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__same-point-duel-v4-legacy-upstream-provenance"
-  },
-  {
-   "branch": "work/same-point-duel-v4-read-plane-hardening",
-   "sha": "927182c79cdc",
-   "date": "2026-08-24T13:58:33Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__same-point-duel-v4-read-plane-hardening"
-  },
-  {
    "branch": "work/same-point-duel-v4-rsi-governance-contract-v2-gpt",
    "sha": "42c48779d838",
    "date": "2026-09-19T15:55:06Z",
@@ -5562,27 +4554,6 @@
    "tag": "archive-2026-09-work__same-point-duel-v4-rsi-merge-governance"
   },
   {
-   "branch": "work/same-point-duel-v4-upstream-provenance",
-   "sha": "9af19936336d",
-   "date": "2026-08-29T04:31:02Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__same-point-duel-v4-upstream-provenance"
-  },
-  {
-   "branch": "work/self-update-autonomous-actuator-v1",
-   "sha": "e173b8346098",
-   "date": "2026-08-30T06:00:47Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-autonomous-actuator-v1"
-  },
-  {
-   "branch": "work/self-update-continuous-dev-v1",
-   "sha": "0c7b94109983",
-   "date": "2026-08-30T05:59:33Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-continuous-dev-v1"
-  },
-  {
    "branch": "work/self-update-contract-repair-v1",
    "sha": "7694936b6e55",
    "date": "2026-09-15T01:11:18Z",
@@ -5597,102 +4568,18 @@
    "tag": "archive-2026-09-work__self-update-fast-loop-v1"
   },
   {
-   "branch": "work/self-update-finalization-v1",
-   "sha": "4217b7f22504",
-   "date": "2026-08-29T18:31:52Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-finalization-v1"
-  },
-  {
-   "branch": "work/self-update-health-qualification-v1",
-   "sha": "8b50e2e7aec0",
-   "date": "2026-08-30T10:15:45Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-health-qualification-v1"
-  },
-  {
-   "branch": "work/self-update-live-observability-v1",
-   "sha": "26a60cba26c0",
-   "date": "2026-08-29T18:49:26Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-live-observability-v1"
-  },
-  {
    "branch": "work/self-update-persistent-ambiguous-supersede-v1",
    "sha": "2f8cbed1bc4c",
    "date": "2026-09-08T20:21:39Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__self-update-persistent-ambiguous-supersede-v1"
-  },
-  {
-   "branch": "work/self-update-qualification-v1",
-   "sha": "4507f31e789d",
-   "date": "2026-08-30T09:53:26Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-qualification-v1"
-  },
-  {
-   "branch": "work/self-update-raw-metadata-integrity-v1",
-   "sha": "afdeb3fffa06",
-   "date": "2026-08-30T05:58:14Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-raw-metadata-integrity-v1"
-  },
-  {
-   "branch": "work/self-update-restart-safe-v1",
-   "sha": "0974f2733e1e",
-   "date": "2026-08-30T07:36:23Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-restart-safe-v1"
-  },
-  {
-   "branch": "work/self-update-sentinel-handoff-v1",
-   "sha": "55c4432c33fa",
-   "date": "2026-08-30T09:40:49Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-sentinel-handoff-v1"
-  },
-  {
-   "branch": "work/self-update-session-resume-v1",
-   "sha": "912d9f0a4b92",
-   "date": "2026-08-30T08:07:45Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-session-resume-v1"
-  },
-  {
-   "branch": "work/self-update-signed-health-v1",
-   "sha": "07a5dbe86353",
-   "date": "2026-08-30T10:24:43Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-signed-health-v1"
-  },
-  {
-   "branch": "work/self-update-transactional-v2",
-   "sha": "ce0dcd644cb5",
-   "date": "2026-08-30T09:44:41Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-transactional-v2"
-  },
-  {
-   "branch": "work/self-update-trusted-history-v1",
-   "sha": "4fd4a32ddf60",
-   "date": "2026-08-30T06:10:11Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__self-update-trusted-history-v1"
   },
   {
    "branch": "work/sentinel-successor-journal-reconcile-v1",
    "sha": "41acd5d3a7e8",
    "date": "2026-09-08T19:23:35Z",
-   "decision": "open-pr",
-   "tag": "archive-2026-09-work__sentinel-successor-journal-reconcile-v1"
-  },
-  {
-   "branch": "work/sentinel-worker-recovery-v1",
-   "sha": "990bd6462e04",
-   "date": "2026-09-02T18:16:21Z",
    "decision": "archive",
-   "tag": "archive-2026-09-work__sentinel-worker-recovery-v1"
+   "tag": "archive-2026-09-work__sentinel-successor-journal-reconcile-v1"
   },
   {
    "branch": "work/state-revision-same-document-nav-v1",
@@ -5700,55 +4587,6 @@
    "date": "2026-09-14T01:13:34Z",
    "decision": "open-pr",
    "tag": "archive-2026-09-work__state-revision-same-document-nav-v1"
-  },
-  {
-   "branch": "work/supervisor-continuity-terminal-retirement-v2",
-   "sha": "af07b5584537",
-   "date": "2026-08-31T15:30:30Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-continuity-terminal-retirement-v2"
-  },
-  {
-   "branch": "work/supervisor-liveness-telemetry-v1",
-   "sha": "9778a120ae43",
-   "date": "2026-08-29T15:47:06Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-liveness-telemetry-v1"
-  },
-  {
-   "branch": "work/supervisor-mesh-rls-hardening-v1",
-   "sha": "dff12134d872",
-   "date": "2026-08-30T08:51:58Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-mesh-rls-hardening-v1"
-  },
-  {
-   "branch": "work/supervisor-mesh-runtime-v1",
-   "sha": "e7416011e3e5",
-   "date": "2026-08-30T06:49:15Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-mesh-runtime-v1"
-  },
-  {
-   "branch": "work/supervisor-mesh-v1",
-   "sha": "32b836890363",
-   "date": "2026-08-30T06:48:15Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-mesh-v1"
-  },
-  {
-   "branch": "work/supervisor-owner-safety-gate-repair-v1",
-   "sha": "718164493578",
-   "date": "2026-09-02T18:30:56Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-owner-safety-gate-repair-v1"
-  },
-  {
-   "branch": "work/supervisor-rollover-atomic-bind-recovery-v1",
-   "sha": "77180b2b8431",
-   "date": "2026-09-05T13:27:59Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__supervisor-rollover-atomic-bind-recovery-v1"
   },
   {
    "branch": "work/supervisor-root-seed-first-selfheal-v1",
@@ -5768,22 +4606,8 @@
    "branch": "work/verified-download-first-hop-v1",
    "sha": "cbb7158f2c8f",
    "date": "2026-09-09T17:34:36Z",
-   "decision": "open-pr",
+   "decision": "archive",
    "tag": "archive-2026-09-work__verified-download-first-hop-v1"
-  },
-  {
-   "branch": "work/w1-linux-worker-safety",
-   "sha": "961ae65c4d3e",
-   "date": "2026-08-24T13:51:34Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__w1-linux-worker-safety"
-  },
-  {
-   "branch": "work/w1-provider-neutral-lifecycle-v2",
-   "sha": "e73a6524fb8b",
-   "date": "2026-08-25T04:08:13Z",
-   "decision": "archive",
-   "tag": "archive-2026-09-work__w1-provider-neutral-lifecycle-v2"
   },
   {
    "branch": "work/world-model-scene-revision-v1",

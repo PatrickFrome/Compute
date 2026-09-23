@@ -2,948 +2,683 @@
  "schema": "me2.pr-close-manifest.v1",
  "repo": "PatrickFrome/Compute",
  "mode": "apply",
- "cutoff": "2026-09-09T21:42:59.954096+00:00",
- "generated_at": "2026-09-23T21:44:18.691857+00:00",
- "open_pr_total": 569,
- "stale_total": 249,
- "batch": 150,
+ "cutoff": "2026-09-09T22:06:00.488065+00:00",
+ "generated_at": "2026-09-23T22:06:53.924631+00:00",
+ "open_pr_total": 416,
+ "stale_total": 97,
+ "batch": 97,
  "closed": {
-  "50": {
-   "title": "feat(w1): prepare-only locked regression",
+  "336": {
+   "title": "perf(browser): persistent CDP effects an",
    "close": "http_200",
    "comment": "http_201"
   },
-  "51": {
-   "title": "fix(read-plane): restrict privileged bar",
+  "338": {
+   "title": "feat(browser): add bounded parallel Brow",
    "close": "http_200",
    "comment": "http_201"
   },
-  "48": {
-   "title": "A2: realtime cognitive bus observer cons",
+  "333": {
+   "title": "feat(browser): bridge realtime observati",
    "close": "http_200",
    "comment": "http_201"
   },
-  "12": {
-   "title": "AOP1: autonomous orchestration plane (no",
+  "334": {
+   "title": "browser: runtime mutation fence + event-",
    "close": "http_200",
    "comment": "http_201"
   },
-  "37": {
-   "title": "fix(read-plane): fingerprint v2.2 — plan",
+  "335": {
+   "title": "browser: exact BrowserCell mutation rout",
    "close": "http_200",
    "comment": "http_201"
   },
-  "52": {
-   "title": "A2: DB-enforced interactive dual-round +",
+  "337": {
+   "title": "feat(browser): seal runtime generation b",
    "close": "http_200",
    "comment": "http_201"
   },
-  "53": {
-   "title": "W1: provider-neutral lifecycle evidence ",
+  "339": {
+   "title": "feat(browser): bridge adaptive pressure ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "57": {
-   "title": "A2 Browser Operator v0.6.0 — P0/P1 opera",
+  "341": {
+   "title": "perf(browser): broadcast command availab",
    "close": "http_200",
    "comment": "http_201"
   },
-  "54": {
-   "title": "A2: dual web-chat bridge for GPT/GLM (PR",
+  "340": {
+   "title": "browser brain: project realtime process ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "58": {
-   "title": "A2 Browser Operator V1 R0 — source-of-tr",
+  "342": {
+   "title": "feat(browser): compose always-on Browser",
    "close": "http_200",
    "comment": "http_201"
   },
-  "59": {
-   "title": "A2 Browser Operator V1 R1 — live runtime",
+  "344": {
+   "title": "feat(browser): add bounded causal cognit",
    "close": "http_200",
    "comment": "http_201"
   },
-  "60": {
-   "title": "A2 Browser Operator V1 R2 — canonical mo",
+  "343": {
+   "title": "feat(browser): add bounded realtime stre",
    "close": "http_200",
    "comment": "http_201"
   },
-  "63": {
-   "title": "feat(browser-compute): add fail-closed B",
+  "346": {
+   "title": "perf(browser): add generation-fenced sem",
    "close": "http_200",
    "comment": "http_201"
   },
-  "61": {
-   "title": "R3: Target Registry v1 and per-target ob",
+  "348": {
+   "title": "perf(browser): compose generation-fenced",
    "close": "http_200",
    "comment": "http_201"
   },
-  "64": {
-   "title": "feat(browser-compute): add bounded B3/R4",
+  "345": {
+   "title": "feat(browser-ui): converge final chat-fi",
    "close": "http_200",
    "comment": "http_201"
   },
-  "49": {
-   "title": "A2: realtime multi-agent cognitive bus",
+  "349": {
+   "title": "perf(browser): bridge native debugger id",
    "close": "http_200",
    "comment": "http_201"
   },
-  "65": {
-   "title": "fix(contracts): derive manifest version ",
+  "351": {
+   "title": "perf(browser): share native semantic run",
    "close": "http_200",
    "comment": "http_201"
   },
-  "67": {
-   "title": "fix(duel-v4): preserve upstream tariff a",
+  "350": {
+   "title": "perf(browser): add native semantic hot-p",
    "close": "http_200",
    "comment": "http_201"
   },
-  "69": {
-   "title": "fix(sovereign-legacy): preserve upstream",
+  "347": {
+   "title": "perf(browser): harden exact-target admis",
    "close": "http_200",
    "comment": "http_201"
   },
-  "66": {
-   "title": "feat(f1): prepare zero-spend multi-model",
+  "352": {
+   "title": "perf(browser): fence shared semantic cac",
    "close": "http_200",
    "comment": "http_201"
   },
-  "72": {
-   "title": "METAENGINE Browser Privacy-Safe Tab Live",
+  "354": {
+   "title": "feat(browser): add provider-neutral boun",
    "close": "http_200",
    "comment": "http_201"
   },
-  "75": {
-   "title": "Fix repeated WORKER_LOST wake spam",
+  "356": {
+   "title": "perf(browser): accumulate fanout receipt",
    "close": "http_200",
    "comment": "http_201"
   },
-  "73": {
-   "title": "METAENGINE Browser Dev Update Channel Al",
+  "355": {
+   "title": "feat(browser): add bounded fanout receip",
    "close": "http_200",
    "comment": "http_201"
   },
-  "74": {
-   "title": "Browser liveness telemetry: exact render",
+  "357": {
+   "title": "perf(browser): stream fanout progress in",
    "close": "http_200",
    "comment": "http_201"
   },
-  "78": {
-   "title": "C5: pin autonomous dispatch to exact wor",
+  "358": {
+   "title": "feat(browser): add durable fanout checkp",
    "close": "http_200",
    "comment": "http_201"
   },
-  "79": {
-   "title": "Observe live Browser self-update state s",
+  "360": {
+   "title": "feat(browser): bridge fanout progress in",
    "close": "http_200",
    "comment": "http_201"
   },
-  "77": {
-   "title": "Finalize Browser self-update with in-pla",
+  "359": {
+   "title": "perf(browser): add append-only fanout ch",
    "close": "http_200",
    "comment": "http_201"
   },
-  "82": {
-   "title": "Enforce maximum available reasoning acro",
+  "361": {
+   "title": "feat(browser): add bounded realtime obse",
    "close": "http_200",
    "comment": "http_201"
   },
-  "80": {
-   "title": "C5: protect fleet-owned Browser tabs fro",
+  "362": {
+   "title": "feat(browser): add durable realtime obse",
    "close": "http_200",
    "comment": "http_201"
   },
-  "84": {
-   "title": "Benchmark persistent Electron builder ca",
+  "363": {
+   "title": "perf(browser): cohort realtime observati",
    "close": "http_200",
    "comment": "http_201"
   },
-  "85": {
-   "title": "Diagnose PR #83 packaged singleton verif",
+  "364": {
+   "title": "perf(browser): share realtime observatio",
    "close": "http_200",
    "comment": "http_201"
   },
-  "86": {
-   "title": "Fix trusted dev metadata raw-byte verifi",
+  "365": {
+   "title": "feat(browser): fence realtime resume ack",
    "close": "http_200",
    "comment": "http_201"
   },
-  "81": {
-   "title": "Add autonomous verified downloads and ty",
+  "366": {
+   "title": "perf(browser): compress realtime resume ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "87": {
-   "title": "Make verified dev self-update continuous",
+  "368": {
+   "title": "perf(browser): add bounded fanout issuan",
    "close": "http_200",
    "comment": "http_201"
   },
-  "89": {
-   "title": "Persist trusted dev release anti-rollbac",
+  "367": {
+   "title": "perf(browser): project bounded fanout ca",
    "close": "http_200",
    "comment": "http_201"
   },
-  "92": {
-   "title": "Wire Browser Control Plane capabilities ",
+  "353": {
+   "title": "feat(browser): add autonomous collaborat",
    "close": "http_200",
    "comment": "http_201"
   },
-  "91": {
-   "title": "Define maximum typed Browser Control Pla",
+  "369": {
+   "title": "perf(browser): bind fanout issuance targ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "93": {
-   "title": "Add typed keyboard and isolated per-tab ",
+  "370": {
+   "title": "perf(browser): shard fanout preparation ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "83": {
-   "title": "Add autonomous Browser dev-update comman",
+  "371": {
+   "title": "perf(browser): bind prepared fanout dige",
    "close": "http_200",
    "comment": "http_201"
   },
-  "94": {
-   "title": "Add versioned command contract for Brows",
+  "372": {
+   "title": "perf(browser): accumulate parallel fanou",
    "close": "http_200",
    "comment": "http_201"
   },
-  "88": {
-   "title": "Add multi-supervisor mesh with shared ac",
+  "374": {
+   "title": "perf(browser): stream exact ready-shard ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "90": {
-   "title": "Complete multi-supervisor mesh runtime a",
+  "380": {
+   "title": "feat(browser): wire explicit DevOS prese",
    "close": "http_200",
    "comment": "http_201"
   },
-  "95": {
-   "title": "Make self-update nonblocking for active ",
+  "375": {
+   "title": "feat(browser): persist restart-safe fano",
    "close": "http_200",
    "comment": "http_201"
   },
-  "100": {
-   "title": "Add owner-overridable METAENGINE safety ",
+  "381": {
+   "title": "feat(browser): render DevOS Now Sessions",
    "close": "http_200",
    "comment": "http_201"
   },
-  "101": {
-   "title": "Harden supervisor mesh tables with fail-",
+  "382": {
+   "title": "feat(browser): centralize DevOS Now syst",
    "close": "http_200",
    "comment": "http_201"
   },
-  "102": {
-   "title": "Add federated autonomy runtime and geome",
+  "383": {
+   "title": "feat(browser): activate exact Session su",
    "close": "http_200",
    "comment": "http_201"
   },
-  "104": {
-   "title": "Add Chromium/Firefox-style durable updat",
+  "385": {
+   "title": "perf(browser): batch preparation delta r",
    "close": "http_200",
    "comment": "http_201"
   },
-  "105": {
-   "title": "Qualify self-update successor only after",
+  "376": {
+   "title": "perf(browser): append preparation checkp",
    "close": "http_200",
    "comment": "http_201"
   },
-  "106": {
-   "title": "Qualify self-update successor only after",
+  "384": {
+   "title": "feat(browser): add Session-first DevOS s",
    "close": "http_200",
    "comment": "http_201"
   },
-  "114": {
-   "title": "Enable GATE_DISABLE_ALL_DEV development ",
+  "386": {
+   "title": "ci(browser): make negative security gate",
    "close": "http_200",
    "comment": "http_201"
   },
-  "115": {
-   "title": "Fail-close Development OS gate policy st",
+  "387": {
+   "title": "ci(browser): harden self-update proof li",
    "close": "http_200",
    "comment": "http_201"
   },
-  "107": {
-   "title": "Require accepted signed heartbeat before",
+  "388": {
+   "title": "perf(browser): append preparation deltas",
    "close": "http_200",
    "comment": "http_201"
   },
-  "116": {
-   "title": "Fail-close privileged supervisor RPC exe",
+  "389": {
+   "title": "feat(browser): add dark browser-first wo",
    "close": "http_200",
    "comment": "http_201"
   },
-  "113": {
-   "title": "Fence Development OS supervisor coordina",
+  "390": {
+   "title": "perf(browser): batch preparation delta a",
    "close": "http_200",
    "comment": "http_201"
   },
-  "118": {
-   "title": "Fail-close supervisor table RLS and dire",
+  "393": {
+   "title": "perf(browser): restore observation curso",
    "close": "http_200",
    "comment": "http_201"
   },
-  "117": {
-   "title": "Falsify persisted fleet transport proof ",
+  "392": {
+   "title": "feat(devos): complete physical multi-sur",
    "close": "http_200",
    "comment": "http_201"
   },
-  "119": {
-   "title": "Add zero-authority fresh fleet target re",
+  "391": {
+   "title": "perf(browser): batch realtime observatio",
    "close": "http_200",
    "comment": "http_201"
   },
-  "121": {
-   "title": "Persist Browser-local fleet target reval",
+  "395": {
+   "title": "perf(browser): batch observation cursor ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "120": {
-   "title": "Bind fleet target revalidation to Browse",
+  "396": {
+   "title": "DevOS convergence: quiescent runtime, Br",
    "close": "http_200",
    "comment": "http_201"
   },
-  "122": {
-   "title": "C5: transact fleet-state target revalida",
+  "399": {
+   "title": "perf(browser): resume full observation c",
    "close": "http_200",
    "comment": "http_201"
   },
-  "124": {
-   "title": "C5: require fresh transport proof after ",
+  "398": {
+   "title": "DevOS Clean Genesis: batch-required cont",
    "close": "http_200",
    "comment": "http_201"
   },
-  "123": {
-   "title": "C5: wire zero-authority target revalidat",
+  "401": {
+   "title": "Self-update: reconcile stale ambiguous j",
    "close": "http_200",
    "comment": "http_201"
   },
-  "125": {
-   "title": "C5: derive transport proof only from Bro",
+  "397": {
+   "title": "fix(browser): restore full-capacity obse",
    "close": "http_200",
    "comment": "http_201"
   },
-  "126": {
-   "title": "C5: gate transport promotion behind Brow",
+  "402": {
+   "title": "Browser successor: exact recovery identi",
    "close": "http_200",
    "comment": "http_201"
   },
-  "127": {
-   "title": "C5: compose transport promotion behind B",
+  "403": {
+   "title": "Browser successor: bound batch receipts ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "128": {
-   "title": "C5: add restricted Browser main-process ",
+  "400": {
+   "title": "perf(browser): gate full cursor resume b",
    "close": "http_200",
    "comment": "http_201"
   },
-  "130": {
-   "title": "DevBrowser: add autonomous Development B",
+  "405": {
+   "title": "perf(browser): resume only observation c",
    "close": "http_200",
    "comment": "http_201"
   },
-  "133": {
-   "title": "Fleet: bind background submit to exact S",
+  "404": {
+   "title": "Browser successor: reconcile Sentinel jo",
    "close": "http_200",
    "comment": "http_201"
   },
-  "129": {
-   "title": "C5: hide raw FleetProvisioner behind Bro",
+  "406": {
+   "title": "Browser successor: reconcile persisted s",
    "close": "http_200",
    "comment": "http_201"
   },
-  "134": {
-   "title": "C5: fail before background fleet send ef",
+  "407": {
+   "title": "Browser successor: fail closed on empty ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "135": {
-   "title": "DBR1: harden worktree identity with porc",
+  "408": {
+   "title": "Browser control plane: make command repl",
    "close": "http_200",
    "comment": "http_201"
   },
-  "132": {
-   "title": "DBR1: add exact-identity Workspace Manag",
+  "409": {
+   "title": "perf(browser): cohort observation delta ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "136": {
-   "title": "C5: split fleet dispatch into foreground",
+  "410": {
+   "title": "Browser Fleet: require physical capture ",
    "close": "http_200",
    "comment": "http_201"
   },
-  "137": {
-   "title": "C5: wire exact-bound two-phase fleet dis",
+  "411": {
+   "title": "perf(browser): route cohort delta reques",
    "close": "http_200",
    "comment": "http_201"
   },
-  "138": {
-   "title": "C5: require exact actuation lease before",
+  "412": {
+   "title": "Browser successor: converge all fixes fo",
    "close": "http_200",
    "comment": "http_201"
   },
-  "131": {
-   "title": "C5: wire restricted fleet composition in",
+  "413": {
+   "title": "perf(browser): add direct observation co",
    "close": "http_200",
    "comment": "http_201"
   },
-  "143": {
-   "title": "C5: harden server lease verifier CI supp",
+  "414": {
+   "title": "perf(browser): index changed observation",
    "close": "http_200",
    "comment": "http_201"
   },
-  "141": {
-   "title": "C5: verify transport promotion lease on ",
+  "415": {
+   "title": "perf(browser): expose direct changed obs",
    "close": "http_200",
    "comment": "http_201"
   },
-  "145": {
-   "title": "C0: restore canonical unified source sna",
+  "416": {
+   "title": "perf(browser): preserve changed caller o",
    "close": "http_200",
    "comment": "http_201"
   },
-  "146": {
-   "title": "C0: minimize unified source snapshot to ",
+  "418": {
+   "title": "perf(browser): collect changed cohorts d",
    "close": "http_200",
-   "comment": "http_201"
-  },
-  "147": {
-   "title": "C0: derive zero-authority supervisor rol",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "148": {
-   "title": "C0: make rollover evidence a stable stat",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "149": {
-   "title": "C0: compose and durably persist zero-aut",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "150": {
-   "title": "C0: fence rollover checkpoints by proces",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "151": {
-   "title": "C0: bind rollover checkpoints to canonic",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "152": {
-   "title": "C0: gate successor identity from durable",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "154": {
-   "title": "C0: compose zero-authority restart readi",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "144": {
-   "title": "Browser: add zero-authority Meta-Orchest",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "153": {
-   "title": "C0: verify fresh successor heartbeat and",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "155": {
-   "title": "C0: bind restart intent to verified roll",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "156": {
-   "title": "C0: persist zero-authority restart inten",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "157": {
-   "title": "C0: verify durable restart intent readba",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "158": {
-   "title": "C0: fence restart consumption behind typ",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "160": {
-   "title": "C0: persist typed restart effect receipt",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "159": {
-   "title": "C0: verify typed restart effect receipts",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "162": {
-   "title": "C0: compose verified restart with succes",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "161": {
-   "title": "C0: verify durable restart effect receip",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "163": {
-   "title": "C0: verify post-successor continuity rea",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "164": {
-   "title": "C0: persist post-successor continuity pr",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "165": {
-   "title": "C0: verify durable post-successor contin",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "167": {
-   "title": "C0: gate recovery resume on durable and ",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "169": {
-   "title": "C0: verify durable recovery resume proof",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "168": {
-   "title": "C0: persist recovery resume proof durabl",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "170": {
-   "title": "C0: gate recovery admission on fresh qui",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "171": {
-   "title": "C0: persist recovery admission proof dur",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "172": {
-   "title": "C0: verify durable recovery admission pr",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "173": {
-   "title": "C0: compose recovery admission with type",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "174": {
-   "title": "C0: persist recovery restart preconditio",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "175": {
-   "title": "C0: verify durable recovery restart prec",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "176": {
-   "title": "C0: bind durable recovery proof to resta",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "179": {
-   "title": "Browser shell v0.6.4 design system and v",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "178": {
-   "title": "C0: persist recovery restart effect inte",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "181": {
-   "title": "C0: verify durable recovery restart effe",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "180": {
-   "title": "Browser Workbench V2: native context rai",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "182": {
-   "title": "Browser Typed Workspaces V1: durable wor",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "185": {
-   "title": "Browser Final Optimization V1: linear wo",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "184": {
-   "title": "C0: verify final restart admission witho",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "183": {
-   "title": "Browser Workspace Reincarnation V1: opti",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "191": {
-   "title": "DevOS: add successor adoption for expire",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "189": {
-   "title": "Browser Live Control Recovery V1: enroll",
-   "close": "http_200",
    "comment": "http_403"
   },
-  "194": {
-   "title": "test(devos): falsify result-ready expiry",
+  "417": {
+   "title": "perf(browser): remove changed cohort fla",
    "close": "http_200",
-   "comment": "http_403"
-  },
-  "193": {
-   "title": "DevOS: verify expired-result successor r",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "190": {
-   "title": "Browser runtime: port exact PR-head Deve",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "195": {
-   "title": "test(devos): falsify continuity liveness",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "192": {
-   "title": "fix(browser): bootstrap root DevOS worke",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "186": {
-   "title": "DevOS: fence expired RESULT_READY and BL",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "201": {
-   "title": "fix(browser): decouple self-update verif",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "197": {
-   "title": "fix(browser): exact supervisor tab activ",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "208": {
-   "title": "fix(devos): make ChatGPT rate limits bou",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "199": {
-   "title": "fix(browser): foreground-bind supervisor",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "203": {
-   "title": "fix(browser): recover dead crash-sentine",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "210": {
-   "title": "fix(browser): restore fleet wrapper/core",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "205": {
-   "title": "fix(browser): isolate exact self-update ",
-   "close": "http_200",
-   "comment": "http_403"
-  },
-  "213": {
-   "title": "fix(browser): restore fleet wrapper/core",
-   "close": "http_200",
-   "comment": "http_403"
+   "comment": "http_201"
   },
-  "214": {
-   "title": "fix(devos): persist continuous current-b",
+  "419": {
+   "title": "perf(browser): route observation cohort ",
    "close": "http_200",
    "comment": "http_403"
   },
-  "217": {
-   "title": "fix(browser): recover unresolved success",
+  "421": {
+   "title": "perf(browser): parallelize BrowserCell f",
    "close": "http_200",
    "comment": "http_403"
   },
-  "216": {
-   "title": "fix(browser): keep fleet capacity backpr",
+  "422": {
+   "title": "perf(browser): overlap fanout pressure a",
    "close": "http_200",
    "comment": "http_403"
   },
-  "218": {
-   "title": "fix(browser): foreground-fence superviso",
+  "424": {
+   "title": "perf(browser): isolate synchronous fanou",
    "close": "http_200",
    "comment": "http_403"
   },
-  "219": {
-   "title": "fix(browser): close successor and mesh c",
+  "423": {
+   "title": "fix(browser): isolate synchronous fanout",
    "close": "http_200",
    "comment": "http_403"
   },
-  "221": {
-   "title": "fix(browser): restore owner-gated fleet ",
+  "426": {
+   "title": "fix(browser): fence fanout peers on exec",
    "close": "http_200",
    "comment": "http_403"
   },
-  "220": {
-   "title": "fix(browser): resume stalled verified su",
+  "427": {
+   "title": "perf(browser): fail fast on fanout prefl",
    "close": "http_200",
    "comment": "http_403"
   },
-  "270": {
-   "title": "feat(browser): add explicit Context Pack",
+  "428": {
+   "title": "perf(browser): materialize fanout result",
    "close": "http_200",
    "comment": "http_403"
   },
-  "268": {
-   "title": "feat(browser): add Agentic Workbench V1",
+  "429": {
+   "title": "perf(browser): flatten fanout preflight ",
    "close": "http_200",
    "comment": "http_403"
   },
-  "269": {
-   "title": "feat(browser): add exact-target native S",
+  "431": {
+   "title": "perf(browser): reuse process coverage ac",
    "close": "http_200",
    "comment": "http_403"
   },
-  "318": {
-   "title": "feat(browser): fuse live process plane w",
+  "433": {
+   "title": "Harden verified download redirect first-",
    "close": "http_200",
    "comment": "http_403"
   },
-  "8": {
-   "title": "F1: live external federation evidence (d",
+  "435": {
+   "title": "perf(browser): compute process coverage ",
    "close": "http_200",
    "comment": "http_403"
   },
-  "319": {
-   "title": "fix(browser): preserve rollover attempt ",
+  "434": {
+   "title": "Bind emergency maintenance to immutable ",
    "close": "http_200",
    "comment": "http_403"
   },
-  "329": {
-   "title": "feat(browser): make cognitive ingest dur",
+  "439": {
+   "title": "Converge Browser Brain hot-path optimiza",
    "close": "http_200",
    "comment": "http_403"
   },
-  "330": {
-   "title": "feat(browser): bind BrowserCells to exac",
+  "436": {
+   "title": "fix(browser): refresh pressure on fresh ",
    "close": "http_200",
    "comment": "http_403"
   },
-  "331": {
-   "title": "perf(browser): make command causal bookk",
+  "441": {
+   "title": "METAENGINE Browser final integration sta",
    "close": "http_200",
    "comment": "http_403"
   }
  },
- "errors": 70,
+ "errors": 17,
  "stale_preview": [
   {
-   "n": 37,
-   "head": "fix/read-plane-v2.2-plane-separation",
-   "base": "main",
-   "updated": "2026-08-23T01:25:13Z"
+   "n": 333,
+   "head": "work/browser-brain-realtime-observation-bridge-v1",
+   "base": "work/browser-brain-adaptive-pressure-v1",
+   "updated": "2026-09-05T23:07:32Z"
   },
   {
-   "n": 12,
-   "head": "work/aop1-autonomous-orchestration",
-   "base": "main",
-   "updated": "2026-08-24T10:37:40Z"
+   "n": 334,
+   "head": "work/browser-brain-runtime-fence-v1",
+   "base": "work/browser-brain-adaptive-pressure-v1",
+   "updated": "2026-09-05T23:18:32Z"
   },
   {
-   "n": 48,
-   "head": "work/a2-realtime-cognitive-bus",
-   "base": "main",
-   "updated": "2026-08-24T11:53:34Z"
+   "n": 335,
+   "head": "work/browser-brain-exact-mutation-router-v1",
+   "base": "work/browser-brain-runtime-fence-v1",
+   "updated": "2026-09-06T00:01:24Z"
   },
   {
-   "n": 50,
-   "head": "work/w1-linux-worker-safety",
-   "base": "main",
-   "updated": "2026-08-24T13:52:26Z"
+   "n": 336,
+   "head": "work/browser-brain-persistent-cdp-effect-path-v1",
+   "base": "work/browser-brain-adaptive-pressure-v1",
+   "updated": "2026-09-06T00:42:49Z"
   },
   {
-   "n": 51,
-   "head": "work/same-point-duel-v4-read-plane-hardening",
-   "base": "main",
-   "updated": "2026-08-24T13:59:04Z"
+   "n": 338,
+   "head": "work/browser-brain-parallel-fanout-v1",
+   "base": "work/browser-brain-effect-binding-v2-fence",
+   "updated": "2026-09-06T05:06:29Z"
   },
   {
-   "n": 52,
-   "head": "work/same-point-duel-v4-a2-interactive-v2",
-   "base": "work/same-point-duel-v4-a2-cognitive-bus",
-   "updated": "2026-08-24T22:49:15Z"
+   "n": 339,
+   "head": "work/browser-brain-adaptive-fanout-runtime-v1",
+   "base": "work/browser-brain-parallel-fanout-v1",
+   "updated": "2026-09-06T06:08:44Z"
   },
   {
-   "n": 53,
-   "head": "work/w1-provider-neutral-lifecycle-v2",
-   "base": "main",
-   "updated": "2026-08-25T04:08:44Z"
+   "n": 337,
+   "head": "work/browser-brain-effect-binding-v2-fence",
+   "base": "work/browser-brain-persistent-cdp-effect-path-v1",
+   "updated": "2026-09-06T09:04:45Z"
   },
   {
-   "n": 54,
-   "head": "work/chat-control-plane-browser-bridge",
-   "base": "main",
-   "updated": "2026-08-26T14:23:26Z"
+   "n": 341,
+   "head": "work/browser-brain-realtime-command-wake-v1",
+   "base": "work/browser-brain-effect-binding-v2-fence",
+   "updated": "2026-09-06T10:07:50Z"
   },
   {
-   "n": 57,
-   "head": "work/a2-browser-operator-v060",
-   "base": "main",
-   "updated": "2026-08-27T08:03:57Z"
+   "n": 340,
+   "head": "work/browser-brain-realtime-pressure-bridge-v1",
+   "base": "work/browser-brain-adaptive-fanout-runtime-v1",
+   "updated": "2026-09-06T11:00:43Z"
   },
   {
-   "n": 58,
-   "head": "work/a2-browser-operator-r0-source-of-truth",
-   "base": "main",
-   "updated": "2026-08-27T19:03:25Z"
+   "n": 342,
+   "head": "work/browser-brain-event-driven-submit-readback-v1",
+   "base": "work/browser-brain-realtime-command-wake-v1",
+   "updated": "2026-09-06T11:41:09Z"
   },
   {
-   "n": 59,
-   "head": "work/a2-browser-operator-r1-live-stability",
-   "base": "main",
-   "updated": "2026-08-27T19:23:25Z"
+   "n": 343,
+   "head": "work/browser-brain-stream-clock-v1",
+   "base": "work/browser-brain-event-driven-submit-readback-v1",
+   "updated": "2026-09-06T12:05:04Z"
   },
   {
-   "n": 60,
-   "head": "work/a2-browser-operator-r2-module-consolidation",
-   "base": "work/a2-browser-operator-r1-live-stability",
-   "updated": "2026-08-27T19:45:07Z"
+   "n": 344,
+   "head": "work/browser-brain-cognition-fabric-v1",
+   "base": "work/browser-brain-stream-clock-v1",
+   "updated": "2026-09-06T12:26:41Z"
   },
   {
-   "n": 61,
-   "head": "work/a2-browser-operator-r3-target-registry",
-   "base": "work/a2-browser-operator-r2-module-consolidation",
-   "updated": "2026-08-27T20:32:37Z"
+   "n": 345,
+   "head": "work/browser-final-shell-v1",
+   "base": "work/browser-brain-cognition-fabric-v1",
+   "updated": "2026-09-06T13:00:17Z"
   },
   {
-   "n": 63,
-   "head": "work/a2-compute-browser-b2-contexts",
-   "base": "work/a2-compute-browser-b2-b3",
-   "updated": "2026-08-28T00:02:15Z"
+   "n": 346,
+   "head": "work/browser-brain-semantic-target-cache-v1",
+   "base": "work/browser-brain-stream-clock-v1",
+   "updated": "2026-09-06T13:11:02Z"
   },
   {
-   "n": 64,
-   "head": "work/a2-compute-browser-b3-session-scheduler",
-   "base": "work/a2-compute-browser-b2-contexts",
-   "updated": "2026-08-28T05:48:35Z"
+   "n": 348,
+   "head": "work/browser-brain-semantic-fast-path-v1",
+   "base": "work/browser-brain-semantic-target-cache-v1",
+   "updated": "2026-09-06T14:06:00Z"
   },
   {
-   "n": 65,
-   "head": "work/a2-compute-browser-b2-contract-pin-repair",
-   "base": "work/a2-compute-browser-b2-contexts",
-   "updated": "2026-08-28T21:38:12Z"
+   "n": 349,
+   "head": "work/browser-brain-native-semantic-adapter-v1",
+   "base": "work/browser-brain-semantic-fast-path-v1",
+   "updated": "2026-09-06T15:06:00Z"
   },
   {
-   "n": 49,
-   "head": "work/same-point-duel-v4-a2-cognitive-bus",
-   "base": "main",
-   "updated": "2026-08-29T04:30:20Z"
+   "n": 350,
+   "head": "work/browser-brain-native-semantic-wiring-v1",
+   "base": "work/browser-brain-native-semantic-adapter-v1",
+   "updated": "2026-09-06T17:03:55Z"
   },
   {
-   "n": 67,
-   "head": "work/same-point-duel-v4-upstream-provenance",
-   "base": "main",
-   "updated": "2026-08-29T04:32:14Z"
+   "n": 351,
+   "head": "work/browser-brain-semantic-runtime-v1",
+   "base": "work/browser-brain-native-semantic-wiring-v1",
+   "updated": "2026-09-06T19:02:44Z"
   },
   {
-   "n": 69,
-   "head": "work/same-point-duel-v4-legacy-upstream-provenance",
-   "base": "main",
-   "updated": "2026-08-29T05:31:24Z"
+   "n": 352,
+   "head": "work/browser-brain-native-semantic-callsite-v1",
+   "base": "work/browser-brain-semantic-runtime-v1",
+   "updated": "2026-09-06T20:07:33Z"
   },
   {
-   "n": 66,
-   "head": "work/f1-multimodel-vercel-gateway-v1",
-   "base": "main",
-   "updated": "2026-08-29T11:20:11Z"
+   "n": 347,
+   "head": "work/browser-windows-soak-optimization-v1",
+   "base": "work/browser-final-shell-v1",
+   "updated": "2026-09-06T20:10:12Z"
   },
   {
-   "n": 72,
-   "head": "work/convergence-browser-liveness-v1",
-   "base": "work/convergence-supervisor-keepalive-v1",
-   "updated": "2026-08-29T15:27:17Z"
+   "n": 354,
+   "head": "work/browser-brain-provider-neutral-fanout-v1",
+   "base": "work/browser-brain-native-semantic-callsite-v1",
+   "updated": "2026-09-06T21:03:30Z"
   },
   {
-   "n": 73,
-   "head": "work/convergence-update-channel-v1",
-   "base": "work/convergence-supervisor-keepalive-v1",
-   "updated": "2026-08-29T15:33:54Z"
+   "n": 355,
+   "head": "work/browser-brain-fanout-receipts-v1",
+   "base": "work/browser-brain-provider-neutral-fanout-v1",
+   "updated": "2026-09-06T22:03:21Z"
   },
   {
-   "n": 74,
-   "head": "work/supervisor-liveness-telemetry-v1",
-   "base": "work/convergence-supervisor-keepalive-v1",
-   "updated": "2026-08-29T15:48:42Z"
+   "n": 356,
+   "head": "work/browser-brain-fanout-receipt-accumulator-v1",
+   "base": "work/browser-brain-fanout-receipts-v1",
+   "updated": "2026-09-06T23:02:04Z"
   },
   {
-   "n": 75,
-   "head": "work/keepalive-worker-lost-edge-dedupe-v1",
-   "base": "work/convergence-supervisor-keepalive-v1",
-   "updated": "2026-08-29T17:01:24Z"
+   "n": 357,
+   "head": "work/browser-brain-fanout-progress-stream-v1",
+   "base": "work/browser-brain-fanout-receipt-accumulator-v1",
+   "updated": "2026-09-07T00:01:05Z"
   },
   {
-   "n": 78,
-   "head": "work/c5-incarnation-pinned-dispatch-v1",
-   "base": "work/convergence-global-observer-memory-v1",
-   "updated": "2026-08-29T17:58:30Z"
+   "n": 358,
+   "head": "work/browser-brain-fanout-durable-checkpoint-v1",
+   "base": "work/browser-brain-fanout-progress-stream-v1",
+   "updated": "2026-09-07T01:02:29Z"
   },
   {
-   "n": 77,
-   "head": "work/self-update-finalization-v1",
-   "base": "work/keepalive-worker-lost-edge-dedupe-v1",
-   "updated": "2026-08-29T18:49:48Z"
+   "n": 359,
+   "head": "work/browser-brain-fanout-checkpoint-delta-v1",
+   "base": "work/browser-brain-fanout-durable-checkpoint-v1",
+   "updated": "2026-09-07T04:04:47Z"
   },
   {
-   "n": 79,
-   "head": "work/self-update-live-observability-v1",
-   "base": "work/self-update-finalization-v1",
-   "updated": "2026-08-29T18:50:56Z"
+   "n": 360,
+   "head": "work/browser-brain-fanout-causal-bridge-v1",
+   "base": "work/browser-brain-fanout-checkpoint-delta-v1",
+   "updated": "2026-09-07T05:04:05Z"
   },
   {
-   "n": 80,
-   "head": "work/fleet-owned-tab-lifecycle-v1",
-   "base": "work/self-update-finalization-v1",
-   "updated": "2026-08-29T18:55:52Z"
+   "n": 361,
+   "head": "work/browser-brain-realtime-observation-window-v1",
+   "base": "work/browser-brain-fanout-causal-bridge-v1",
+   "updated": "2026-09-07T06:03:04Z"
   },
   {
-   "n": 82,
-   "head": "work/max-reasoning-policy-v1",
-   "base": "work/self-update-finalization-v1",
-   "updated": "2026-08-29T19:04:30Z"
+   "n": 362,
+   "head": "work/browser-brain-observation-cursors-v1",
+   "base": "work/browser-brain-realtime-observation-window-v1",
+   "updated": "2026-09-07T07:09:31Z"
   },
   {
-   "n": 84,
-   "head": "work/ci-electron-cache-benchmark-v1",
-   "base": "work/self-update-autonomous-actuator-v1",
-   "updated": "2026-08-29T21:46:29Z"
+   "n": 363,
+   "head": "work/browser-brain-observation-resume-cohorts-v1",
+   "base": "work/browser-brain-observation-cursors-v1",
+   "updated": "2026-09-07T09:02:03Z"
   }
  ],
  "comment_retry": {
-  "delivered": 69,
-  "undelivered": 1
+  "delivered": 12,
+  "undelivered": 5
  }
 }

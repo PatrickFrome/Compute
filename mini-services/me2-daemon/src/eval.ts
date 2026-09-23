@@ -51,7 +51,7 @@ import {
   outcomeReport, outcomePending, meshHeartbeatApply,
 } from "./agentchat";
 import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
-import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt } from "./supabase-jwt";
+import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt, anonRegisteredJwt } from "./supabase-jwt";
 import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
@@ -62,7 +62,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 20;
+export const EVAL_DATASET_VERSION = 21;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1118,19 +1118,23 @@ export const EVAL_DATASET: EvalCheck[] = [
       const svc = serviceRoleLegacyJwt();
       const secret = tokenGet("SUPABASE_JWT_SECRET") ?? "";
       if (!svc || !secret) return { ok: true, evidence: `skip-ok: legacy=${svc ? "есть" : "нет"}, secret=${secret ? "есть" : "нет"} — пары нет, проверять нечего` };
-      const parts = svc.split(".");
-      if (parts.length !== 3) return { ok: false, evidence: `legacy JWT malformed: ${parts.length} сегментов` };
-      let claims: Record<string, unknown> = {};
-      try { claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return { ok: false, evidence: "legacy JWT payload не парсится" }; }
-      const roleOk = claims.role === "service_role";
       const b64u = (s: string) => s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      const h = new Bun.CryptoHasher("sha256", secret);
-      h.update(`${parts[0]}.${parts[1]}`);
-      const calc = b64u(Buffer.from(h.digest()).toString("base64"));
-      const sigOk = calc === parts[2];
-      const expOk = typeof claims.exp === "number" && claims.exp > Math.floor(Date.now() / 1000);
-      const ok = roleOk && sigOk && expOk;
-      return { ok, evidence: `HMAC=${sigOk ? "подпись сходится" : "подпись НЕ сходится"}, role=${String(claims.role)}, exp-fresh=${expOk}, ref=${String(claims.ref ?? "-")}` };
+      const verifyPair = (jwt: string, expectRole: string) => {
+        const parts = jwt.split(".");
+        if (parts.length !== 3) return { ok: false, why: "malformed", role: "", ref: "" };
+        let claims: Record<string, unknown> = {};
+        try { claims = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return { ok: false, why: "payload", role: "", ref: "" }; }
+        const h = new Bun.CryptoHasher("sha256", secret);
+        h.update(`${parts[0]}.${parts[1]}`);
+        const sigOk = b64u(Buffer.from(h.digest()).toString("base64")) === parts[2];
+        const expOk = typeof claims.exp === "number" && claims.exp > Math.floor(Date.now() / 1000);
+        return { ok: sigOk && expOk && claims.role === expectRole, why: sigOk ? (expOk ? "role?" : "expired") : "sig", role: String(claims.role ?? ""), ref: String(claims.ref ?? "") };
+      };
+      const svcV = verifyPair(svc, "service_role");
+      const anon = anonRegisteredJwt();
+      const anonV = anon ? verifyPair(anon, "anon") : null;
+      const ok = svcV.ok && (anonV === null || anonV.ok);
+      return { ok, evidence: `service_role: HMAC=${svcV.ok}, ref=${svcV.ref}; anon: ${anonV === null ? "слота нет (ok)" : `HMAC=${anonV.ok}, ref=${anonV.ref}`} — обе пары против одного секрета` };
     },
   },
   {

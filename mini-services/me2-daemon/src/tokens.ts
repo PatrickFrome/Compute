@@ -87,10 +87,11 @@ function parseEnvFile(path: string): Record<string, string> {
 }
 
 const SEED_FILES = [
-  // R54: +SUPABASE_SERVICE_ROLE_JWT_LEGACY (операторский legacy service_role JWT, HMAC-верифицирован
-  // против SUPABASE_JWT_SECRET; облако принимает точную строку зарегистрированного ключа — пробы E2/E5)
-  // и +SUPABASE_ANON_JWT (слот на будущее: зарегистрированный legacy anon-ключ → канонический RLS-гейт).
-  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_ANON_JWT"] },
+  // R54/R55: +SUPABASE_SERVICE_ROLE_JWT_LEGACY (операторский legacy service_role JWT, HMAC-верифицирован
+  // против SUPABASE_JWT_SECRET; облако принимает точную строку зарегистрированного ключа — пробы E2/E5);
+  // R55: +SUPABASE_PUBLISHABLE_KEY и +SUPABASE_ANON_JWT (публичные-по-дизайну ключи; живая проба R55:
+  // PGRST205 на таблице = аутентификация прошла → канонический RLS-гейт из UI РАБОТАЕТ).
+  { path: "/home/z/.a2/supabase-cloud.env", keys: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_JWT", "SUPABASE_JWT_SECRET", "SUPABASE_SERVICE_ROLE_JWT_LEGACY", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_ANON_JWT"] },
   { path: "/home/z/.a2/.github.env", keys: ["GITHUB_TOKEN_ADMIN"] },
 ];
 

@@ -765,3 +765,25 @@ Stage Summary:
 - Фаза E раунд-2: 150 устаревших PR закрыты с честными комментариями + 168 веток заархивированы тегами (0 ошибок); «1025+» сжато до 708 голов; данные восстановимы (reopen/теги), манифесты сохранены.
 - Единственный оставшийся блокер LIVE: SUPABASE_DB_URL (pooler) — появится в supabase-cloud.env → система применит sql/0001..0003 сама (start.sh) и зеркало сам перейдёт WARMUP→LIVE.
 - Далее (R55): смарт-мерж R54-модулей в release-ветку (unified gate); фаза E раунд-3 (батч оставшихся 99 stale-PR); LIVE-проба зеркала при появлении SUPABASE_DB_URL; anon_registered при появлении публичного ключа; VLM-верификация скриншотов при окне квоты.
+---
+Task ID: R55-PUBLISHABLE-GOTRUE-E3-20260924
+Agent: Z.ai Code (main)
+Task: Оператор прислал публичные ключи (sb_publishable + legacy anon JWT + публичная ссылка) — приёмка, живые пробы, канонический RLS-гейт из UI; ограниченный GoTrue-эксперимент; фаза E раунд-3; ресёрч аналогов; cron-циклы прекращены по приказу.
+
+Work Log:
+- R55-0 (приёмка ключей): sb_publishable_T1S5nHp1t-… (публичен по дизайну) и legacy anon JWT (ref xpeibufgzjknrhbhpffp, role anon, iat/exp = тем же, что у service_role) сохранены дословно в /home/z/.a2/supabase-cloud.env (SUPABASE_PUBLISHABLE_KEY / SUPABASE_ANON_JWT); SEED_FILES tokens.ts расширен (6 ключей supabase + github). Офлайн HMAC: anon_sig_match=TRUE — обе legacy-пары подписаны одним секретом.
+- R55-1 (решающие пробы): sb_publishable → таблица зеркала = PGRST205 (НЕ «Invalid API key»!) — публичный ключ ПРИНЯТ; точная строка anon JWT = PGRST205 — принят тоже (загадка A1 снята: наш минт отличался байтом, не секрет); облако подсказывает живую таблицу metaengine_peer_health_h205f22. ИТОГ: канонический RLS-гейт из UI РАЗБЛОКИРОВАН.
+- R55-2 (канал publishable активен): рестарт daemon → /sqlmirror/ui-token = {channel:publishable, role:anon, token: публичный}; verify ok; eval v20→v21 (+anon-pair HMAC в contract.supabase_legacy) → PASS 56/56; lint 0/0.
+- R55-3 (панель гибрид): loadMirror переписан — ДАННЫЕ через /sqlmirror/feed (service-канал daemon'а, UI без приватных ключей), RLS-гейт — ЖИВАЯ проба облака публичным токеном (после DDL: anon → 200 · 0 строк = fail-closed ✓; PGRST205 = WARMUP-честно; leak-вердикт сохранён). Браузерная QA через :81: панель «канал publishable…», mobile ок, скриншот download/r55-mirror-publishable.png.
+- R55-4 (ограниченный GoTrue-эксперимент, ≤5 проб): signup с me2-ui@metaengine.invalid → 400 email_address_invalid (валидация честно записана, чужие домены не занимали); admin-API (service_role) создал сервис-аккаунт eb9b7510-… (aud=authenticated) — валидация обойдена канонически; креденшалы в vault (SUPABASE_UI_ACCOUNT_EMAIL/PASSWORD); вход password → настоящий GoTrue access_token (806 зн., claims: iss=/auth/v1, sub, aud, role=authenticated, aal, amr, session_id) → REST-проба таблицы = PGRST205 — ГЕЙТ ПРИНИМАЕТ НАСТОЯЩИЕ GOTRUE-ТОКЕНЫ! R56-созрело: канал gotrue в uiTokenBundle (вход daemon'ом, кэш токена TTL 3600с, рефетч; UI читает строки ПОЛИТИКОЙ authenticated, не обходя RLS).
+- R55-5 (cron — приказ оператора): «Перестань создавать длинные cron циклы» — удалён 409629 (409578 удалён ранее), НОВЫЕ НЕ СОЗДАЮТСЯ; работа продолжается только в явных раундах оператора.
+- R55-6 (фаза E раунд-3): 97 PR закрыто (0 провалов закрытия; комментарии: 12/17 доставлено ретраем, 5 честно в манифесте) → 99 веток заархивировано тегами (0 ошибок). Кумулятивно фаза E: 559 веток (292+168+99), голов 1168→~609.
+- R55-7 (ресёрч): research/2026/r55-analogues.md — Electron contextIsolation/preload-мост и VS Code keytar/safeStorage («публичный идентификатор у рендерера, секрет в main»), Cursor backend-прокси, Supabase publishable ≈ Firebase apiKey + RLS ≈ rules; гибрид-модель чтения зеркала зафиксирована; R56-gotrue спроектирован.
+- Инварианты: шина 47/47, eval PASS 56/56 v21, lint 0/0, daemon v0.44.0, секреты не печатались (значения — только в vault/env), web_search не амплифицировался.
+
+Stage Summary:
+- Канонический RLS-гейт из UI работает: канал publishable активен (публичный токен в UI — по дизайну), панель показывает живую пробу облака; данные — через daemon-прокси с честной маркировкой. Остался единственный блокер данных: DDL оператора (SUPABASE_DB_URL → система применит sql/0001..0003 сама → WARMUP→LIVE).
+- Доказано: настоящие GoTrue-токены гейт принимает → authenticated-чтение строк из UI (по политике, не обходя RLS) созрело для R56 (канал gotrue: вход сервис-аккаунтом из vault'а, кэш+рефетч короткоживущего токена).
+- Фаза E: 559/1025+ веток заархивировано кумулятивно; остаток — свежие PR/ветки, стареющие к следующим окнам.
+- Cron-циклы прекращены по приказу оператора (обе джобы удалены) — развитие только в явных раундах.
+- Далее (R56, следующий явный раунд): канал gotrue (uiTokenBundle + verify + eval v22 + панель-режим); смарт-мерж R54+R55-модулей в release-ветку (me2/smart-merge-r56); LIVE-проба зеркала при появлении SUPABASE_DB_URL; фаза E раунд-4 по мере старения; VLM-верификация скриншотов при окне квоты.

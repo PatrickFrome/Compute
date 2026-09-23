@@ -258,47 +258,37 @@ export function missionUiHtml(): string {
   }
 
   function loadMirror(){
-    // R54: каналы чтения по приоритету daemon'а — publishable/anon_registered (RLS-гейт канонический,
-    // токен в UI) → service_proxy (читает сам daemon, ключ не покидает сервер — честная маркировка
-    // «RLS-демонстрация ждёт publishable/anon») → mint (облако отвергает сам-минт — покажем живой 401).
+    // R55: гибрид — ДАННЫЕ доставляет daemon (/sqlmirror/feed, service-канал; UI не держит приватных
+    // ключей), а RLS-гейт демонстрируется ЖИВОЙ пробой облака публичным токеном (publishable/anon —
+    // публичны по дизайну): после DDL anon обязан видеть 0 строк (fail-closed sql/0003).
     fetch(api("/sqlmirror/ui-token")).then(function(r){ return r.json(); }).then(function(j){
       var box=$("mirror");
-      if(!j.ok){ box.innerHTML='<div class="row sub">RLS-канал честно недоступен: '+esc(j.reason)+" · зеркало state="+esc(j.mirror_state||"?")+" (секрет JWT не в vault'е)</div>"; $("mirror-n").textContent="канал n/a"; return; }
-      var direct=function(tok){
-        return fetch(j.rest+"/"+j.table+"?select=seq,ts,type,actor,subject&order=seq.desc&limit=12", {headers:{apikey:tok,Authorization:"Bearer "+tok}})
+      if(!j.ok){ box.innerHTML='<div class="row sub">RLS-канал честно недоступен: '+esc(j.reason)+" · зеркало state="+esc(j.mirror_state||"?")+" (ключей нет в vault'е)</div>"; $("mirror-n").textContent="канал n/a"; return; }
+      var probe=function(tok){
+        // живая RLS-проба облака публичным токеном (гейт-демонстрация)
+        return fetch(j.rest+"/"+j.table+"?select=seq&limit=3", {headers:{apikey:tok,Authorization:"Bearer "+tok}})
           .then(function(r){ return r.text().then(function(t){ return {code:r.status,body:t}; }); });
       };
-      var proxy=function(){
-        return fetch(api("/sqlmirror/feed?limit=12")).then(function(r){ return r.json(); });
-      };
-      var anonProbe=function(){
-        // anon-проба (fail-closed-демонстрация) только при каналах с публичным токеном;
-        // в service_proxy публичного токена нет — вердикт честно словами.
-        if(j.channel!=="publishable"&&j.channel!=="anon_registered"&&j.channel!=="mint"){ return Promise.resolve(null); }
-        return direct(j.anon_token||j.token).then(function(r){ return r; });
-      };
-      var readP = (j.channel==="service_proxy") ? proxy().then(function(f){
-        if(!f.ok) return {code:f.http||0, body:JSON.stringify({message:f.error}), proxyError:f.error};
-        return {code:200, body:JSON.stringify(f.rows), proxy:true};
-      }) : direct(j.token);
-      Promise.all([readP, anonProbe()]).then(function(rs){
-        var auth=rs[0], anon=rs[1];
-        var rows=null; try { rows=JSON.parse(auth.body); } catch(e){}
+      var feedP=fetch(api("/sqlmirror/feed?limit=12")).then(function(r){ return r.json(); });
+      var probeP=(j.channel==="publishable"||j.channel==="anon_registered"||j.channel==="mint")
+        ? probe(j.anon_token||j.token) : Promise.resolve(null);
+      Promise.all([feedP, probeP]).then(function(rs){
+        var f=rs[0], anon=rs[1];
+        var rows=f&&f.ok?f.rows:null;
         var anonRows=null; if(anon){ try { anonRows=JSON.parse(anon.body); } catch(e){} }
         var leak=!!anon && anon.code===200 && Array.isArray(anonRows) && anonRows.length>0;
         var chLine='канал '+esc(j.channel||"?")+(j.ttl?" · ttl "+j.ttl+"с":"");
-        var gateLine;
-        if(j.channel==="service_proxy"){ gateLine="гейт RLS: НЕ демонстрируется (cloud точ-матчит зарегистрированные ключи — сам-минт отклонён пробами R54); демонстрация — при sb_publishable / зарегистрированном legacy anon (vault SUPABASE_ANON_JWT)"; }
-        else { gateLine="гейт RLS: строки видны только по политикам sql/0003"; }
-        var html='<div class="row sub">state='+esc(j.mirror_state)+" · "+esc(j.table)+" · "+chLine+(j.note?" · "+esc(j.note):"")+"</div>";
-        html+='<div class="row sub">'+gateLine+"</div>";
-        if(auth.code===404||auth.proxyError==="table_missing_ddl_pending"){ html+='<div class="row sub">таблица отсутствует в облаке — миграции sql/0001..0003 не применены (WARMUP: зеркалирование ждёт DDL оператора)</div>'; }
-        else if(auth.code===401||auth.code===403){ html+='<div class="row sub">облако отвергло read-канал ('+auth.code+') — нужен sb_publishable_…, зарегистрированный legacy anon JWT или service-канал (legacy service-ключ в vault)</div>'; }
-        else if(auth.code===0){ html+='<div class="row sub">канал service_proxy недоступен: '+esc(auth.proxyError||"?")+"</div>"; }
-        else if(Array.isArray(rows)){ html+=rows.map(function(r){ return '<div class="ev"><div class="ty">'+esc(r.type)+" · seq "+esc(r.seq)+" · "+esc(r.actor||"daemon")+(r.subject?" · "+esc(String(r.subject).slice(0,28)):"")+'</div><div class="pl">'+ago(r.ts)+" назад</div></div>"; }).join("")||'<div class="row sub">зеркало живо, строк пока нет</div>'; }
-        else html+='<div class="row sub">неожиданный ответ зеркала: '+esc(String(auth.body).slice(0,120))+"</div>";
-        if(!anon){ html+='<div class="row sub">RLS-гейт: anon-проба в канале service_proxy не выполняется (публичного токена нет) — ключ не утекает, но и fail-closed не демонстрируется; ожидается sb_publishable / legacy anon</div>'; }
-        else html+='<div class="row sub">'+(leak?"⚠ anon ПРОЧИТАЛ строки — RLS-гейт НЕ работает (проверить sql/0003)":"RLS-гейт: anon → код "+anon.code+" "+esc(String(anon.body).slice(0,50))+" — fail-closed ✓")+"</div>";
+        var html='<div class="row sub">state='+esc(j.mirror_state||"?")+" · "+esc(j.table||"?")+" · "+chLine+" · данные — через daemon (/sqlmirror/feed), приватных ключей в UI нет</div>";
+        // живой вердикт RLS-гейта
+        if(!anon){ html+='<div class="row sub">RLS-проба: публичного токена нет ('+esc(j.channel||"?")+") — демонстрация гейта словами, не делом</div>"; }
+        else if(anon.code===404 || String(anon.body).indexOf("PGRST205")>=0){ html+='<div class="row sub">RLS-проба: облако отвечает PGRST205 — таблицы ещё нет (WARMUP: DDL оператора); аутентификация ПУБЛИЧНОГО ключа прошла ✓</div>'; }
+        else if(anon.code===401||anon.code===403){ html+='<div class="row sub">облако отвергло публичный токен ('+anon.code+") — неожиданно; проверить ключи vault'а</div>"; }
+        else if(anon.code===200){ html+='<div class="row sub">'+(leak?"⚠ anon ПРОЧИТАЛ строки — RLS-гейт НЕ работает (проверить sql/0003)":"RLS-гейт: anon → 200 · 0 строк — fail-closed ✓ (политики sql/0003: чтение только authenticated)")+"</div>"; }
+        else html+='<div class="row sub">RLS-проба: неожиданный ответ облака ('+anon.code+") "+esc(String(anon.body).slice(0,60))+"</div>";
+        // данные (service-канал daemon'а)
+        if(f&&f.ok===false){ html+='<div class="row sub">данных нет: '+(f.error==="table_missing_ddl_pending"?"таблица не создана (DDL оператора) — канал daemon'а при этом жив":"feed: "+esc(String(f.error||"?").slice(0,90)))+"</div>"; }
+        else if(Array.isArray(rows)){ html+=rows.map(function(r){ return '<div class="ev"><div class="ty">'+esc(r.type)+" · seq "+esc(r.seq)+" · "+esc(r.actor||"daemon")+(r.subject?" · "+esc(String(r.subject).slice(0,28)):"")+'</div><div class="pl">'+ago(r.ts)+" назад</div></div>"; }).join("")||'<div class="row sub">канал жив, событий пока нет</div>'; }
+        else html+='<div class="row sub">feed недоступен</div>';
         box.innerHTML=html;
         $("mirror-n").textContent=Array.isArray(rows)?(rows.length+" строк(и)"):"—";
       }).catch(function(){ $("mirror-n").textContent="ошибка облака"; });
