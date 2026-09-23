@@ -42,10 +42,11 @@ import { mechanicsMatrix } from "./src/mechanics";
 import { senseNow, senseList, senseAct } from "./src/sense";
 import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
+import { evalRun, evalStatus } from "./src/eval";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.23.0";
+const VERSION = "0.24.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -466,6 +467,12 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     }
     // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
     if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
+    // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
+    if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
+    if (path === "/eval/run" && req.method === "POST") {
+      const report = evalRun(VERSION);
+      return json(res, 200, report);
+    }
     if (path === "/mcp" && req.method === "POST") {
       const body = await readBody(req);
       const out = await mcpHandle(body);
@@ -482,7 +489,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -578,6 +585,8 @@ setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
+// R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
+setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
 
 startMasterLoop();
 initEvidence();

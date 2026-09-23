@@ -1,0 +1,377 @@
+/**
+ * ME2 daemon — eval-харнесс / регресс-датасет (R26, пункт B1 из research/2026/R24-AUDIT-ROADMAP.md §7).
+ *
+ * Зачем: R24-критика — «ресёрч обязан закрываться измерениями», но ME-матрица считает
+ * вердикты ad hoc, а регрессии между версиями никто не ловит: после каждого порта
+ * мы проверяли руками. Это замкнутый контур:
+ *
+ *  - ДАТАСЕТ (versioned): N декларативных проверок золотого пути, каждая — read-only,
+ *    быстрая (<20ms), идемпотентная, без сети и spawnSync (урок R25: сетевое — только async);
+ *  - ХАРНЕСС: прогон всех чеков с таймингами, вердикт PASS/WARN/FAIL
+ *    (FAIL = упал хотя бы один critical, WARN — только некритичные);
+ *  - ИСТОРИЯ в SQLite (eval_runs, cap 100): регрессии видны в динамике между версиями;
+ *  - АВТОПРОГОН при каждой инкарнации (boot+2.5s) — история накапливается сама;
+ *  - REST: GET /eval (каталог + последний прогон + история), POST /eval/run (прогнать).
+ *
+ * Датасет — это КОНТРАКТ: bus=47 действий, MCP tools=7, пороги B3 и т.д. Если контракт
+ * меняется осознанно — меняем датасет и поднимаем EVAL_DATASET_VERSION (история хранит
+ * версию датасета, старые прогоны интерпретируются в контексте своей версии).
+ *
+ * REST вне шины (47/47 инвариант). Механика ME22.
+ */
+import { db, emit } from "../store";
+import { knownActions, actionCatalog } from "../commands";
+import { lastSeq, lastEventHash, listAgents, listTasks, getMeta } from "../store";
+import { memoryStatus } from "./memory";
+import { fleetList, fleetOutcomeCount } from "./fleet";
+import { verdictStats, fenceCheck } from "./effect";
+import { obsvStatus } from "./obsv";
+import { mcpStatus } from "./mcp";
+import { benchSnapshot, BENCH_THRESHOLDS } from "./bench";
+import { codegraphSummary } from "./codegraph";
+import { otelStatus } from "./otel";
+import { recordSpan } from "./otel";
+
+export const EVAL_DATASET_VERSION = 1;
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  verdict TEXT NOT NULL,
+  passed INTEGER NOT NULL,
+  warned INTEGER NOT NULL,
+  failed INTEGER NOT NULL,
+  total INTEGER NOT NULL,
+  version TEXT NOT NULL,
+  dataset_version INTEGER NOT NULL,
+  results TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_at ON eval_runs(started_at);
+`);
+
+export interface EvalCheckResult {
+  id: string; plane: string; critical: boolean;
+  ok: boolean; ms: number; evidence: string; expect: string;
+}
+
+export interface EvalReport {
+  ok: true;
+  dataset_version: number;
+  run_id: string;
+  started_at: string;
+  duration_ms: number;
+  verdict: "PASS" | "WARN" | "FAIL";
+  passed: number; warned: number; failed: number; total: number;
+  version: string;
+  results: EvalCheckResult[];
+}
+
+export interface EvalCheck {
+  id: string; plane: string; title: string;
+  critical: boolean; expect: string;
+  run: () => { ok: boolean; evidence: string };
+}
+
+const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_EFFECT", "FENCED", "AMBIGUOUS"]);
+
+// ── ДАТАСЕТ v1: золотой путь daemon (read-only, без сети, без spawn) ──
+export const EVAL_DATASET: EvalCheck[] = [
+  // — шина —
+  {
+    id: "bus.actions_contract", plane: "bus", title: "Контракт шины: 47 действий",
+    critical: true, expect: "knownActions().length === 47 (контракт M1)",
+    run: () => {
+      const n = knownActions().length;
+      return { ok: n === 47, evidence: `actions=${n}/47` };
+    },
+  },
+  {
+    id: "bus.lanes", plane: "bus", title: "4 полосы представлены в каталоге",
+    critical: true, expect: "EMERGENCY/CONTROL/MUTATION/READ_ONLY ∈ actionCatalog()",
+    run: () => {
+      const lanes = new Set(actionCatalog().map((a) => a.lane));
+      const need = ["EMERGENCY", "CONTROL", "MUTATION", "READ_ONLY"];
+      const missing = need.filter((l) => !lanes.has(l));
+      return { ok: missing.length === 0, evidence: missing.length ? `missing=${missing.join(",")}` : `lanes=${[...lanes].join("/")}` };
+    },
+  },
+  // — state —
+  {
+    id: "events.hashchain", plane: "state", title: "Event-log hash-chain жив",
+    critical: true, expect: "seq>0 и hash непуст",
+    run: () => {
+      const seq = lastSeq(); const h = lastEventHash();
+      return { ok: seq > 0 && !!h, evidence: `seq=${seq}, hash=${h ? h.slice(0, 12) + "…" : "null"}` };
+    },
+  },
+  {
+    id: "meta.boot_version", plane: "state", title: "meta: boot+version записаны",
+    critical: true, expect: "getMeta('boot') и getMeta('version') непусты",
+    run: () => {
+      const b = getMeta("boot"); const v = getMeta("version");
+      return { ok: !!b && !!v, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}` };
+    },
+  },
+  // — агенты/задачи —
+  {
+    id: "agents.schema", plane: "agents", title: "Схема агентов/задач читаема",
+    critical: true, expect: "listAgents()/listTasks() массивы, у задач строковый статус",
+    run: () => {
+      const ag = listAgents(); const tk = listTasks();
+      const badStatus = tk.filter((t) => typeof t.status !== "string" || !t.status).length;
+      return { ok: Array.isArray(ag) && Array.isArray(tk) && badStatus === 0, evidence: `agents=${ag.length}, tasks=${tk.length}, bad_status=${badStatus}` };
+    },
+  },
+  // — память —
+  {
+    id: "memory.rows", plane: "memory", title: "Память непуста (persistence-пруф)",
+    critical: true, expect: "memoryStatus().rows > 0",
+    run: () => {
+      const m = memoryStatus();
+      return { ok: m.rows > 0, evidence: `rows=${m.rows} (episodic=${m.by_kind.episodic ?? 0})` };
+    },
+  },
+  {
+    id: "memory.db_file", plane: "memory", title: "SQLite-файл жив и растёт",
+    critical: true, expect: "db_bytes > 1KB",
+    run: () => {
+      const m = memoryStatus();
+      return { ok: m.db_bytes > 1024, evidence: `db=${Math.round(m.db_bytes / 1024)}KB` };
+    },
+  },
+  // — флот —
+  {
+    id: "fleet.self_alive", plane: "fleet", title: "Self-нода флота жива (не LOST)",
+    critical: true, expect: "self ≠ null и freshness ∈ {ACTIVE, STALE}",
+    run: () => {
+      const f = fleetList();
+      const s = f.self;
+      const ok = !!s && (s.freshness === "ACTIVE" || s.freshness === "STALE");
+      const selfAge = f.nodes.find((n) => n.id === s?.id)?.age_s;
+      return { ok, evidence: s ? `self=${s.freshness}, age=${selfAge ?? "?"}s, nodes=${f.nodes.length}` : "self=null" };
+    },
+  },
+  {
+    id: "fleet.outcome_api", plane: "fleet", title: "Outcome River API (ME6) валиден",
+    critical: true, expect: "fleetOutcomeCount(): total≥0, fails≥0, fails≤total",
+    run: () => {
+      const c = fleetOutcomeCount();
+      const ok = Number.isFinite(c.total) && Number.isFinite(c.fails) && c.total >= 0 && c.fails >= 0 && c.fails <= c.total;
+      return { ok, evidence: `outcomes=${c.total}, fails=${c.fails}` };
+    },
+  },
+  // — effect-эпистемология —
+  {
+    id: "effect.stats_shape", plane: "effect", title: "Эпистемология (ME19): статусы каноничны",
+    critical: true, expect: "by_status ⊆ {CONFIRMED,NO_EFFECT_PROVEN,FAILED_PRE_EFFECT,FENCED,AMBIGUOUS}",
+    run: () => {
+      const s = verdictStats();
+      const foreign = Object.keys(s.by_status).filter((k) => !CANONICAL_EFFECT.has(k));
+      return { ok: foreign.length === 0, evidence: `verdicts=${s.total}, statuses=${Object.keys(s.by_status).join("+") || "—"}, fences_active=${s.fences_active}${foreign.length ? `, FOREIGN=${foreign.join(",")}` : ""}` };
+    },
+  },
+  {
+    id: "effect.fence_api", plane: "effect", title: "Fence API (ME19) читаем, таблица жива",
+    critical: true, expect: "fenceCheck('…') → {fenced:boolean}; таблица effect_fences в SQLite",
+    run: () => {
+      const t = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='effect_fences'`).get();
+      const probe = fenceCheck("__eval_probe_nonexistent__");
+      const ok = !!t && typeof probe.fenced === "boolean" && probe.fenced === false;
+      return { ok, evidence: `table=${t ? "yes" : "no"}, probe.fenced=${probe.fenced}` };
+    },
+  },
+  // — obsv —
+  {
+    id: "obsv.status_shape", plane: "browser", title: "OBSV (ME18) статус-форма валидна",
+    critical: false, expect: "obsvStatus(): attached:boolean, captured≥0 (atтач — факультативен)",
+    run: () => {
+      const s = obsvStatus();
+      const ok = typeof s.attached === "boolean" && s.captured >= 0;
+      return { ok, evidence: `attached=${s.attached}, captured=${s.captured}, gen=${s.generation}` };
+    },
+  },
+  // — MCP —
+  {
+    id: "mcp.tools_contract", plane: "mcp", title: "Контракт MCP (ME21): 7 инструментов",
+    critical: true, expect: "mcpStatus().tools === 7",
+    run: () => {
+      const s = mcpStatus();
+      return { ok: s.tools === 7, evidence: `tools=${s.tools}, calls=${s.calls}, errors=${s.errors}, last=${s.lastTool || "—"}` };
+    },
+  },
+  // — перф-бейслайны —
+  {
+    id: "perf.rest_p95", plane: "perf", title: "B3: REST hot p95 в пороге",
+    critical: true, expect: `rest p95 ≤ ${BENCH_THRESHOLDS.rest_p95_ms}ms при n≥${BENCH_THRESHOLDS.min_samples} (иначе WARMUP-ok)`,
+    run: () => {
+      const b = benchSnapshot();
+      const r = b.probes.rest;
+      if (r.n < BENCH_THRESHOLDS.min_samples) return { ok: true, evidence: `WARMUP: rest n=${r.n}<${BENCH_THRESHOLDS.min_samples}` };
+      const ok = (r.p95 ?? 0) <= BENCH_THRESHOLDS.rest_p95_ms;
+      return { ok, evidence: `rest p95=${r.p95}ms ≤ ${BENCH_THRESHOLDS.rest_p95_ms} (n=${r.n})` };
+    },
+  },
+  {
+    id: "perf.boot", plane: "perf", title: "B3: boot в пороге",
+    critical: true, expect: `boot_ms ≤ ${BENCH_THRESHOLDS.boot_max_ms} (null = ещё не замерен)`,
+    run: () => {
+      const b = benchSnapshot();
+      const ok = b.boot_ms === null || b.boot_ms <= BENCH_THRESHOLDS.boot_max_ms;
+      return { ok, evidence: `boot=${b.boot_ms ?? "null"}ms` };
+    },
+  },
+  {
+    id: "perf.obsv_mem", plane: "perf", title: "B3: obsv-буферы в бюджете памяти",
+    critical: true, expect: `obsv_est ≤ ${BENCH_THRESHOLDS.obsv_max_mb}MB`,
+    run: () => {
+      const b = benchSnapshot();
+      const ok = b.memory.obsv_est_mb <= BENCH_THRESHOLDS.obsv_max_mb;
+      return { ok, evidence: `obsv_est=${b.memory.obsv_est_mb}MB, rss=${b.memory.rss_mb}MB` };
+    },
+  },
+  {
+    id: "perf.rss_guard", plane: "perf", title: "Страж RSS процесса",
+    critical: false, expect: "rss < 500MB (некритично, сигнал для Track D)",
+    run: () => {
+      const b = benchSnapshot();
+      return { ok: b.memory.rss_mb < 500, evidence: `rss=${b.memory.rss_mb}MB, heap=${b.memory.heap_mb}MB, sqlite=${b.memory.sqlite_mb}MB` };
+    },
+  },
+  // — вспомогательные модули —
+  {
+    id: "codegraph.callable", plane: "meta", title: "Code Graph (ME9) читаем",
+    critical: false, expect: "codegraphSummary(): files≥0, edges≥0",
+    run: () => {
+      const c = codegraphSummary();
+      return { ok: c.files >= 0 && c.edges >= 0, evidence: `files=${c.files}, edges=${c.edges}` };
+    },
+  },
+  {
+    id: "spans.otel_ring", plane: "meta", title: "OTel-lite ring (ME12) жив",
+    critical: false, expect: "otelStatus(): spans≥0 (наполнение — вопрос времени инкарнации)",
+    run: () => {
+      const s = otelStatus();
+      return { ok: s.spans >= 0 && Array.isArray(s.stats), evidence: `spans=${s.spans}, stats=${s.stats.length}` };
+    },
+  },
+  {
+    id: "selfupdate.journal", plane: "meta", title: "Self-update журнал (ME7) в схеме",
+    critical: false, expect: "таблица selfupdate_journal существует; verdict кэша — в evidence",
+    run: () => {
+      const t = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='selfupdate_journal'`).get();
+      const rows = t ? (db.query(`SELECT COUNT(*) AS n FROM selfupdate_journal`).get() as { n: number }).n : -1;
+      return { ok: !!t, evidence: `table=${t ? "yes" : "no"}, journal_rows=${rows}` };
+    },
+  },
+];
+
+// ── ХАРНЕСС ────────────────────────────────────────────────────────
+export function evalRun(version: string): EvalReport {
+  const t0 = Date.now();
+  const startedAt = new Date(t0).toISOString();
+  const results: EvalCheckResult[] = [];
+
+  for (const chk of EVAL_DATASET) {
+    const ct0 = Date.now();
+    let ok = false;
+    let evidence = "";
+    try {
+      const r = chk.run();
+      ok = r.ok; evidence = r.evidence;
+    } catch (e) {
+      ok = false;
+      evidence = `exception: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200);
+    }
+    results.push({
+      id: chk.id, plane: chk.plane, critical: chk.critical, ok,
+      ms: Date.now() - ct0, evidence, expect: chk.expect,
+    });
+  }
+
+  const failed = results.filter((r) => !r.ok && r.critical).length;
+  const warned = results.filter((r) => !r.ok && !r.critical).length;
+  const passed = results.length - failed - warned;
+  const verdict: EvalReport["verdict"] = failed > 0 ? "FAIL" : warned > 0 ? "WARN" : "PASS";
+  const duration = Date.now() - t0;
+
+  const report: EvalReport = {
+    ok: true,
+    dataset_version: EVAL_DATASET_VERSION,
+    run_id: `ev_${t0.toString(36)}`,
+    started_at: startedAt,
+    duration_ms: duration,
+    verdict, passed, warned, failed, total: results.length,
+    version,
+    results,
+  };
+
+  try {
+    db.query(`INSERT INTO eval_runs (run_id, started_at, duration_ms, verdict, passed, warned, failed, total, version, dataset_version, results)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(report.run_id, startedAt, duration, verdict, passed, warned, failed, results.length, version, EVAL_DATASET_VERSION, JSON.stringify(results));
+    db.query(`DELETE FROM eval_runs WHERE id NOT IN (SELECT id FROM eval_runs ORDER BY id DESC LIMIT 100)`).run();
+  } catch { /* история не критична для вердикта */ }
+
+  try { emit("EVAL_RUN", { run_id: report.run_id, verdict, passed, warned, failed, total: results.length, duration_ms: duration, dataset_version: EVAL_DATASET_VERSION }, null, null); } catch { /* шина не критична */ }
+  recordSpan("eval.run", { "me2.verdict": verdict, "me2.failed": failed, "me2.warned": warned, "me2.total": results.length, "me2.ms": duration }, t0,
+    verdict === "FAIL" ? { status: "ERROR", message: `critical failures: ${results.filter((r) => !r.ok && r.critical).map((r) => r.id).join(", ")}` } : {});
+  return report;
+}
+
+export interface EvalHistoryRow {
+  run_id: string; started_at: string; duration_ms: number;
+  verdict: string; passed: number; warned: number; failed: number; total: number;
+  version: string; dataset_version: number;
+}
+
+export function evalStatus(version: string): {
+  ok: true; dataset_version: number;
+  dataset: Array<{ id: string; plane: string; title: string; critical: boolean; expect: string }>;
+  last: EvalReport | null; history: EvalHistoryRow[]; runs_total: number;
+} {
+  const rows = db.query(`SELECT run_id, started_at, duration_ms, verdict, passed, warned, failed, total, version, dataset_version FROM eval_runs ORDER BY id DESC LIMIT 10`)
+    .all() as EvalHistoryRow[];
+  const cnt = db.query(`SELECT COUNT(*) AS n FROM eval_runs`).get() as { n: number };
+  let last: EvalReport | null = null;
+  if (rows.length) {
+    const full = db.query(`SELECT results FROM eval_runs WHERE run_id=?`).get(rows[0].run_id) as { results: string } | undefined;
+    try {
+      const results = full ? (JSON.parse(full.results) as EvalCheckResult[]) : [];
+      last = {
+        ok: true, dataset_version: rows[0].dataset_version, run_id: rows[0].run_id,
+        started_at: rows[0].started_at, duration_ms: rows[0].duration_ms,
+        verdict: rows[0].verdict as EvalReport["verdict"],
+        passed: rows[0].passed, warned: rows[0].warned, failed: rows[0].failed, total: rows[0].total,
+        version: rows[0].version, results,
+      };
+    } catch { last = null; }
+  }
+  return {
+    ok: true,
+    dataset_version: EVAL_DATASET_VERSION,
+    dataset: EVAL_DATASET.map((c) => ({ id: c.id, plane: c.plane, title: c.title, critical: c.critical, expect: c.expect })),
+    last, history: rows, runs_total: Number(cnt.n),
+  };
+}
+
+/** Вердикт для механики ME22: WORKS только если последний прогон PASS. */
+export function evalVerdict(): { verdict: "WORKS" | "CAVEAT"; evidence: string } {
+  const rows = db.query(`SELECT verdict, passed, warned, failed, total, duration_ms, started_at FROM eval_runs ORDER BY id DESC LIMIT 1`).all() as Array<{
+    verdict: string; passed: number; warned: number; failed: number; total: number; duration_ms: number; started_at: string;
+  }>;
+  if (!rows.length) return { verdict: "CAVEAT", evidence: "не запускался (авто-прогон на boot+2.5s или POST /eval/run)" };
+  const r = rows[0];
+  if (r.verdict === "PASS") {
+    return {
+      verdict: "WORKS",
+      evidence: `last=PASS ${r.passed}/${r.total} за ${r.duration_ms}ms (dataset v${EVAL_DATASET_VERSION})`,
+    };
+  }
+  return {
+    verdict: "CAVEAT",
+    evidence: `last=${r.verdict}: passed=${r.passed}, warned=${r.warned}, failed=${r.failed}/${r.total} — POST /eval/run после починки`,
+  };
+}

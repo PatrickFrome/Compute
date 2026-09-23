@@ -23,6 +23,7 @@ import { verdictStats } from "./effect";
 import { fleetOutcomeCount } from "./fleet";
 import { benchVerdict } from "./bench";
 import { mcpStatus } from "./mcp";
+import { evalVerdict } from "./eval";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -152,6 +153,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME21", name: "MCP-сервер: stdio + Streamable HTTP, 7 инструментов (A1)", old_ref: "— (R24: индустрия стандартизовала MCP)",
       verdict: mcpStatus().calls > 0 ? "WORKS" : "CAVEAT",
       evidence: `tools=${mcpStatus().tools}, protocol=${mcpStatus().protocol}, initialized=${mcpStatus().initialized}, calls=${mcpStatus().calls}, errors=${mcpStatus().errors}, last=${mcpStatus().lastTool || "—"}; POST /mcp | bun mcp-stdio.ts`,
+    },
+    {
+      id: "ME22", name: "Eval-харнесс: регресс-датасет + история прогонов (B1)", old_ref: "— (R24-критика: регрессии между версиями никто не ловил)",
+      verdict: evalVerdict().verdict,
+      evidence: evalVerdict().evidence + "; GET /eval | POST /eval/run",
     },
   ];
 

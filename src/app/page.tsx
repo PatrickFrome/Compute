@@ -34,7 +34,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import {
-  Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, Clock, Cloud, CloudOff,
+  Activity, AlertTriangle, AppWindow, Archive, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, Pause, Play, Plus,
   Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
@@ -87,6 +87,20 @@ type BenchData = {
   verdict: "PASS" | "WARMUP" | "FAIL";
   fails: string[];
   mcp: { tools: number; protocol: string; initialized: number; calls: number; errors: number; lastTool: string };
+};
+// R26 B1: регресс-датасет + eval-харнесс (ME22, GET /eval | POST /eval/run)
+type EvalResultT = { id: string; plane: string; critical: boolean; ok: boolean; ms: number; evidence: string; expect: string };
+type EvalData = {
+  ok: boolean; dataset_version: number;
+  dataset: Array<{ id: string; plane: string; title: string; critical: boolean; expect: string }>;
+  last: {
+    run_id: string; started_at: string; duration_ms: number;
+    verdict: "PASS" | "WARN" | "FAIL";
+    passed: number; warned: number; failed: number; total: number;
+    version: string; results: EvalResultT[];
+  } | null;
+  history: Array<{ run_id: string; started_at: string; duration_ms: number; verdict: string; passed: number; warned: number; failed: number; total: number; version: string; dataset_version: number }>;
+  runs_total: number;
 };
 type Worker = { id: string; role: string; kind: string; state: string; generation: number; created_at: string; heartbeat_at: string };
 type Command = {
@@ -1177,6 +1191,8 @@ export default function MissionControl() {
   const [obsvBusy, setObsvBusy] = useState(false);
   const [obsvOpen, setObsvOpen] = useState(false);
   const [bench, setBench] = useState<BenchData | null>(null);
+  const [evalData, setEvalData] = useState<EvalData | null>(null);
+  const [evalBusy, setEvalBusy] = useState(false);
   const [lastEffect, setLastEffect] = useState<string | null>(null);
   const [mech, setMech] = useState<MechData | null>(null);
   const [mcxBusy, setMcxBusy] = useState(false);
@@ -1251,12 +1267,34 @@ export default function MissionControl() {
   const loadBench = useCallback(async () => {
     try { const r = await fetch("/bench?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setBench(r as BenchData); } catch { /* daemon недоступен */ }
   }, []);
+  // R26 B1: eval-харнесс (GET /eval — последний прогон + история регресс-датасета)
+  const loadEval = useCallback(async () => {
+    try { const r = await fetch("/eval?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setEvalData(r as EvalData); } catch { /* daemon недоступен */ }
+  }, []);
+  // Прогнать регресс-датасет (POST /eval/run) — золотой путь daemon, read-only чеки
+  const runEval = useCallback(async () => {
+    setEvalBusy(true);
+    try {
+      const r = await fetch("/eval/run?XTransformPort=3041", { method: "POST" }).then((x) => x.json());
+      if (r?.ok) {
+        toast({ title: `eval ${r.verdict}`, description: `${r.passed}/${r.total} за ${r.duration_ms}ms${r.failed ? ` · critical fails: ${r.failed}` : r.warned ? ` · warns: ${r.warned}` : ""}` });
+        await loadEval();
+      }
+    } catch { toast({ title: "eval ✗", description: "daemon недоступен", variant: "destructive" }); }
+    finally { setEvalBusy(false); }
+  }, [loadEval, toast]);
   // BENCH виден в браузерной панели всегда — грузим на mount и обновляем каждые 30с
   useEffect(() => {
     void loadBench();
     const iv = setInterval(() => void loadBench(), 30_000);
     return () => clearInterval(iv);
   }, [loadBench]);
+  // R26 B1: EVAL виден в браузерной панели всегда — грузим на mount и обновляем каждые 60с
+  useEffect(() => {
+    void loadEval();
+    const iv = setInterval(() => void loadEval(), 60_000);
+    return () => clearInterval(iv);
+  }, [loadEval]);
 
   const mcxOp = useCallback(async (path: string, body: Record<string, unknown>, okMsg: string, after: () => Promise<void>) => {
     setMcxBusy(true);
@@ -1279,11 +1317,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench();
+      void loadMech(); void loadMem(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench]);
+  }, [mcxOpen, loadMech, loadMem, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2065,7 +2103,7 @@ export default function MissionControl() {
                 )}
                 <button
                   type="button"
-                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); }}
+                  onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); }}
                   title="Обновить все механики"
                   aria-label="Обновить все механики"
                   className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2449,6 +2487,33 @@ export default function MissionControl() {
                   </div>
                   {bench?.verdict === "FAIL" && (
                     <p className="mt-1 font-mono text-[9px] text-rose-300/90" role="status">пороги нарушены: {bench.fails.join(" · ")}</p>
+                  )}
+                </div>
+                {/* R26 B1: EVAL — регресс-датасет + eval-харнесс (ME22, GET /eval | POST /eval/run) */}
+                <div className="shrink-0 border-b border-zinc-800/60 bg-black/20 px-3 py-2" aria-label="Регресс-датасет и eval-харнесс daemon">
+                  <div className="flex items-center gap-2">
+                    <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME22 (B1): золотой путь daemon — read-only чеки контрактов (bus 47, MCP 7, пороги B3, эпистемология, флот); автопрогон на каждой инкарнации, история в SQLite">
+                      <ClipboardCheck className={`h-3 w-3 ${evalData?.last?.verdict === "PASS" ? "text-lime-300" : evalData?.last?.verdict === "FAIL" ? "text-rose-400" : evalData?.last?.verdict === "WARN" ? "text-amber-300" : "text-zinc-600"}`} aria-hidden /> EVAL
+                    </span>
+                    <span data-testid="eval-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`последний прогон ${evalData?.last?.run_id ?? "—"}: ${evalData?.last?.started_at ?? "—"}; dataset v${evalData?.dataset_version ?? "—"}`}>last {evalData?.last ? `${evalData.last.verdict} ${evalData.last.passed}/${evalData.last.total}` : "—"}</span>
+                      <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`длительность последнего прогона; всего прогонов в истории: ${evalData?.runs_total ?? 0}`}>{evalData?.last ? `${evalData.last.duration_ms}ms` : "—"} · runs {evalData?.runs_total ?? "—"}</span>
+                      {evalData?.last?.warned ? <span className="rounded border border-amber-900 bg-amber-950/40 px-1 py-0.5 text-amber-300" title={`некритичные warn-чеки: ${evalData.last.results.filter((r) => !r.ok && !r.critical).map((r) => r.id).join(", ")}`}>warn {evalData.last.warned}</span> : null}
+                      {evalData?.last?.failed ? <span className="rounded border border-rose-900 bg-rose-950/40 px-1 py-0.5 text-rose-300" title={`critical-чеки упали: ${evalData.last.results.filter((r) => !r.ok && r.critical).map((r) => r.id).join(", ")}`}>fail {evalData.last.failed}</span> : null}
+                    </span>
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      <button type="button" onClick={() => void runEval()} disabled={evalBusy} aria-label="Прогнать регресс-датасет" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-50">{evalBusy ? "…" : "прогнать"}</button>
+                      <button type="button" onClick={() => void loadEval()} aria-label="Обновить eval" className="rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500 transition hover:bg-zinc-800">обновить</button>
+                    </span>
+                  </div>
+                  {evalData?.last && evalData.last.verdict !== "PASS" && (
+                    <ul className="mt-1 space-y-0.5" role="status">
+                      {evalData.last.results.filter((r) => !r.ok).slice(0, 5).map((r) => (
+                        <li key={r.id} className={`font-mono text-[9px] ${r.critical ? "text-rose-300/90" : "text-amber-300/80"}`} title={`ожидание: ${r.expect}`}>
+                          {r.critical ? "✗" : "⚠"} {r.id}: {r.evidence}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
                 {castOn && (
