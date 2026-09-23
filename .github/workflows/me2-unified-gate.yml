@@ -1,10 +1,12 @@
-name: ME2 Unified Gate (daemon boot+eval, UI deps)
+name: ME2 Unified Gate (daemon boot+eval, UI deps+build+pack)
 
 # R51 (фаза C, план C6-C7): контрактный гейт единой системы.
 # daemon-gate: изолированный инстанс (свежая SQLite, свои порты, ME2_BOOT_MODE=probe)
 #   должен подняться и дать eval verdict=PASS — тот же probe, что проверен локально.
 # ui-gate: разрешение зависимостей панельного UI (frozen lockfile).
-# R52 (C7): сюда же войдёт `next build` и упаковка в resources/me2-ui autorelease'ом.
+# R52 (C7): ui-build — полная production-сборка панелей + упаковка me2-ui-dist
+#   (контракт me2-ui-host: package.json+start, health GET /, манифест me2.ui-bundle-manifest.v1)
+#   и выкладка артефактом; тот же pack-скрипт, что в autorelease-конвейере («один SHA → один релиз»).
 on:
   pull_request:
     branches: [release/self-update-ambiguity-live-v2]
@@ -38,3 +40,53 @@ jobs:
       - name: Install UI deps (frozen)
         working-directory: apps/me2-ui
         run: bun install --frozen-lockfile
+
+  ui-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install UI deps (frozen)
+        working-directory: apps/me2-ui
+        run: bun install --frozen-lockfile
+      - name: Production build (Next standalone)
+        working-directory: apps/me2-ui
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: bun run build
+      - name: Pack me2-ui-dist (ui-host contract)
+        working-directory: apps/me2-ui
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: bun run pack
+      - name: Verify bundle contract
+        working-directory: apps/me2-ui
+        run: |
+          set -euo pipefail
+          test -f me2-ui-dist/server.js
+          test -f me2-ui-dist/.next/BUILD_ID
+          test -d me2-ui-dist/.next/static
+          test -f me2-ui-dist/me2-ui-manifest.json
+          node -e "const m=require('./me2-ui-dist/me2-ui-manifest.json'); if(m.schema!=='me2.ui-bundle-manifest.v1') process.exit(1); if(m.git_sha!=='${{ github.sha }}') { console.error('manifest sha mismatch'); process.exit(1);} console.log('manifest OK:', m.build_id, m.git_sha);"
+      - name: Smoke start (server responds HTML on PORT)
+        working-directory: apps/me2-ui/me2-ui-dist
+        run: |
+          set -euo pipefail
+          PORT=3210 NODE_ENV=production bun server.js > server-smoke.log 2>&1 &
+          SRV=$!
+          for i in $(seq 1 30); do
+            sleep 1
+            if curl -sf http://127.0.0.1:3210/ -o /tmp/ui-smoke.html; then break; fi
+          done
+          kill $SRV 2>/dev/null || true
+          grep -qi "<html" /tmp/ui-smoke.html || { echo "smoke: no HTML response" >&2; tail -20 server-smoke.log; exit 1; }
+          echo "smoke OK: standalone server answered HTML"
+      - name: Upload me2-ui-dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: me2-ui-dist-${{ github.sha }}
+          path: apps/me2-ui/me2-ui-dist/
+          retention-days: 14
