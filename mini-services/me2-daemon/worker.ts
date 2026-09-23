@@ -467,7 +467,7 @@ export function startMasterLoop(intervalMs = 400) {
         // E3: pool-исполнители универсальны (nextReadyTaskAny), штатные агенты — по роли
         const task = isPoolAgent(agent.id) ? nextReadyTaskAny() : nextReadyTask(agent.role);
         if (!task) continue;
-        void runAgentTask(agent, task);
+        void runAgentTask(agent, task).catch((e) => { console.error(`[worker] runAgentTask rejection: ${String(e).slice(0, 160)}`); });
       }
     } catch (e) {
       console.error(`[master-loop] tick error: ${String(e)}`);

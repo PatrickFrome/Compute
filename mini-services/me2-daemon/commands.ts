@@ -158,7 +158,7 @@ const handlers: Record<string, Handler> = {
     // пока потомок ещё в очереди: к моменту lease память будет полной.
     // R13: A/B — авто-урок только treatment-группе; control копит честную базу
     // «без авто-урока» (операторский ✦ остаётся доступен — crossover виден в /metrics)
-    if (abGroupOf(id) === "treatment") void autoReflect(orig);
+    if (abGroupOf(id) === "treatment") void autoReflect(orig).catch(() => { /* R38: рефлексия не роняет процесс */ });
     return { task };
   },
 

@@ -497,3 +497,7 @@ Stage Summary:
 - Мета-наблюдение (P8 в действии): risk-budget честно показал BREACH в день, когда сам этот раунд нагенерировал сотни ретраев — телеметрия не подогнана под «красивый» вердикт.
 - Daemon v0.37.0, eval v14 44/44 PASS, матрица 37 строк (ME37), шина 47/47, lint 0/0.
 - Далее (роадмап в R38-MANDATE-V4-MAPPING.md §5): H2 policy-файл T0/T1/T2 + circuit breaker + ledger-поля; H3 objective outcome proof (P6); G7 cron-планировщик из чатов (концепт п.7); H4 двухпроходный meta-audit; H5 merge-конвейер T1; H6 SQL-контур.
+
+R38-дополнение (post-верификация, тот же раунд):
+- Найдена и убита ROOT-CAUSE рестартов daemon'а после 429-штормов: fire-and-forget `void promise` БЕЗ .catch (agentChatCompact — компакция при переполнении контекста звала chat() → 429 после 4 ретраев → throw → необработанный rejection → Bun-процесс падал; в daemon.log — crash-футер Bun, watchdog его перезапускал). Изоляция (P5/L0: отказ ретрая ≠ падение процесса) применена во ВСЕХ 6 местах: agentChatCompact, runAgentTask, glmProbe, autoReflect, evidence tick/probeDdl ×3, drainCommands. Класс отказов «необработанный rejection» закрыт.
+- Мета-вывод (P8 работает): liveness-монитор не был бы виноват — но crash-футер в daemon.log + watchdog-спавны в dev.log, замеченные при рутинной проверке после пуша, дали real fix. Мандат v4 именно об этом: аудит не останавливается на зелёном eval.

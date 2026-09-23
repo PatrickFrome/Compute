@@ -659,7 +659,7 @@ export async function agentChatTurn(sessionId: string, userText: string): Promis
   // авто-компакция на пороге (не блокирует ответ — фоновая)
   try {
     const total = qMessages(sessionId, 500).reduce((a: number, m) => a + String(m.content).length, 0);
-    if (total >= COMPACT_THRESHOLD_CHARS) void agentChatCompact(sessionId, {});
+    if (total >= COMPACT_THRESHOLD_CHARS) void agentChatCompact(sessionId, {}).catch(() => { /* R38: отказ компакции (429-шторм) не должен ронять процесс — необработанный rejection в Bun = crash */ });
   } catch { /* компакция не ломает ход */ }
 
   return { session_id: sessionId, reply, steps, tool_calls: toolCalls, ok, error: hardError };

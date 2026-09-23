@@ -210,7 +210,7 @@ export async function probeDdl(manual = false): Promise<{ applied: boolean; atte
       method = null;
       setMeta("evidence_method", "");
       backoffUntil = 0;
-      void tick(); // немедленный дренаж накопленного outbox
+      void tick().catch(() => { /* R38: дренаж не роняет процесс */ }); // немедленный дренаж накопленного outbox
     }
     // журнал кап 200
     db.query(`DELETE FROM evidence_ddl_attempts WHERE id NOT IN (SELECT id FROM evidence_ddl_attempts ORDER BY id DESC LIMIT 200)`).run();
@@ -460,8 +460,8 @@ export function initEvidence(): void {
         .run(e.seq, JSON.stringify(e), e.ts);
     } catch { /* outbox не роняет emit */ }
   });
-  if (!timer) timer = setInterval(() => { void tick(); }, TICK_MS);
-  setTimeout(() => { void probeDdl(false); }, 5_000);
-  if (!ddlTimer) ddlTimer = setInterval(() => { void probeDdl(false); }, DDL_RETRY_MS);
+  if (!timer) timer = setInterval(() => { void tick().catch(() => { /* R38 */ }); }, TICK_MS);
+  setTimeout(() => { void probeDdl(false).catch(() => { /* R38 */ }); }, 5_000);
+  if (!ddlTimer) ddlTimer = setInterval(() => { void probeDdl(false).catch(() => { /* R38 */ }); }, DDL_RETRY_MS);
   console.log(`[evidence] mirror v2 init: ${env?.url ? env.url : "no env → OFF"} (batch ${BATCH}/${TICK_MS / 1000}s; storage=${STORAGE_BUCKET}; ddl-healer каждые ${DDL_RETRY_MS / 60_000}м)`);
 }

@@ -107,7 +107,7 @@ try {
   const up = upgradeAgents();
   console.log(`[glm] canonical=${agentTag()} upgraded=${up.upgraded} already=${up.already}`);
 } catch (e) { console.log(`[glm] upgrade failed: ${String(e).slice(0, 120)}`); }
-setTimeout(() => { void glmProbe(); }, 3_000);
+setTimeout(() => { void glmProbe().catch(() => { /* R38: проба не роняет процесс */ }); }, 3_000);
 
 // ── REST API (:3041) ──────────────────────────────────────────────
 function json(res: ServerResponse, code: number, body: unknown) {
@@ -849,7 +849,7 @@ setInterval(() => {
   try { io.emit("snapshot", snapshot()); } catch { /* console может быть offline */ }
 }, 2000);
 setInterval(() => {
-  try { void drainCommands(8); } catch (e) { console.error(`[drain] ${String(e)}`); }
+  try { void drainCommands(8).catch((e) => { console.error(`[drain] rejection: ${String(e).slice(0, 160)}`); }); } catch (e) { console.error(`[drain] ${String(e)}`); }
 }, 1000);
 setInterval(() => {
   try { reapStaleWorkers(); } catch { /* noop */ }
