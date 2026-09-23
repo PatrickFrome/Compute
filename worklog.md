@@ -203,3 +203,21 @@ Stage Summary:
 - ME2 = MCP-сервер (A1): браузерный план ME2 (sense/act/obsv+fleet+memory+tasks) доступен любому MCP-клиенту (VS Code/Codex/Claude) — HTTP :3041/mcp или stdio mcp-stdio.ts; матрица 21 механика (ME20=B3, ME21=A1).
 - Пороги B3 в /mechanics evidence; классы латентности честные (hot/admin/browser), вердикт только на реальной выборке.
 - Backlog: suApply → async; act p95 ждёт первых sense_act вызовов через MCP (порог 2000ms); далее по роадмапу B1 (регресс-датасет) → C-линия (C1 objectives/work_graph).
+---
+Task ID: R26
+Agent: Z.ai Code (main)
+Task: «продолжи разработку… long run task, task review, vlm, github…» — исполнено как R26: пункт B1 роадмапа R24 (порядок B3→A1→B1→C) — регресс-датасет + eval-харнесс.
+
+Work Log:
+- R26-1 (B1, P1): mini-services/me2-daemon/src/eval.ts — регресс-датасет v1 (20 read-only чеков золотого пути, каждый <20ms, без сети и spawnSync): bus.actions_contract (47), bus.lanes (4 полосы), events.hashchain, meta.boot_version, agents.schema, memory.rows/db_file, fleet.self_alive (не LOST), fleet.outcome_api, effect.stats_shape (статусы ⊆ канонических 5), effect.fence_api, obsv.status_shape, mcp.tools_contract (7), perf.rest_p95/boot/obsv_mem (пороги B3; WARMUP-ok при n<5), perf.rss_guard, codegraph.callable, spans.otel_ring, selfupdate.journal. Критичность: FAIL при критичном, WARN при некритичном.
+- R26-2 (харнесс + история): SQLite eval_runs (cap 100, dataset_version в каждой строке), вердикты PASS/WARN/FAIL, span eval.run + событие EVAL_RUN в шину; АВТОПРОГОН каждой инкарнации (boot+2.5s) — история копится сама; REST GET /eval (каталог+last+history) и POST /eval/run — вне шины (47/47), /eval в BENCH_ADMIN_PREFIXES (класс rest_admin).
+- R26-3 (ME22 + UI): строка ME22 в mechanics.ts (WORKS только при last=PASS); блок EVAL в page.tsx после BENCH: чипы last/duration·runs (data-testid=eval-chips), warn/fail бейджи с тултипами, список упавших чеков (≤5) при не-PASS, кнопки «прогнать»/«обновить», toast с вердиктом; loadEval на mount + 60s + во всех refresh-all.
+- R26-4 (верификация): daemon v0.24.0; первый прогон PASS 20/20 за 3ms (авто на boot), ручной POST → PASS 20/20 за 2-3ms; история 2-3 прогона копится; MCP initialize+tools/call по HTTP → ME21 WORKS; obsv attach → ME18 WORKS; **матрица 22/22 WORKS** (ME7 восстановился по async-чеку). UI: agent-browser 1440px и 390px — EVAL-блок рендерится, клик «прогнать» → toast «eval PASS 20/20», чипы обновились; overflow нет (scrollWidth=390=innerWidth, eval-chips right=249). VLM qa1: чипы читаемы, контраст ок; находка «развернутый список на мобайле» ОПРОВЕРГНУТА программно (get text блока = только чипы+2 кнопки) + кроп-qa2 «компактная строка, наложений нет» (урок №4 снова подтверждён). lint 0/0; secrets-guard чист; мусорный файл от element-screenshot удалён.
+- R26-5 (CI закрыт, отложенная задача R24/R22): tauri-build на 0274106 (R25) = **SUCCESS** — все три корня подтверждены починенными (binaries mkdir, GITHUB_ENV delimiter, pubkey overlay). Ран 04df7ca (R26) in_progress.
+
+Stage Summary:
+- ME2 = самопроверяющаяся система: замкнут контур «изменение → автопрогон регресс-датасета → история → вердикт»; каждое осознанное изменение контракта (шина 47, MCP 7, пороги B3) требует поднятия EVAL_DATASET_VERSION — датасет стал живым контрактом.
+- Daemon v0.24.0, матрица 22/22 WORKS; push 04df7ca (sandbox/me2-os).
+- Инструментальный урок: agent-browser element-screenshot пишет файл в CWD сессии браузера, а не в заданный путь при селекторе с кириллицей — использовать кроп PIL или текст-пруф.
+- Далее по роадмапу R24: C-линия — C1 (objectives→tasks проекция + work_graph fails-closed) → C2 (handoffs) → C3 (reviewer-agent) → C4 (approval-политики); Track D: D1 sense-diffing, D2 obsv→SQLite TTL, D4 БД-гигиена. suApply → async в backlog.
+- Оператору: me2_evidence SQL (research/2026/R23-me2-evidence-migration.sql) всё ещё не применён — evidence DEGRADED 404 ждёт.
