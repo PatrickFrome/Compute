@@ -7,7 +7,7 @@
  * оператор видит, какие механики живут, а какие — CAVEAT/DECOR.
  */
 import { knownActions, actionCatalog } from "../commands";
-import { lastEventHash, lastSeq, listAgents, listTasks, getMeta } from "../store";
+import { db, lastEventHash, lastSeq, listAgents, listTasks, getMeta } from "../store";
 import { memoryStatus, memoryEconStatus } from "./memory";
 import { fleetList } from "./fleet";
 import { rsiList } from "./rsi";
@@ -32,7 +32,7 @@ import { glmVerdict } from "./glm";
 import { reviewerVerdict } from "./reviewer";
 import { evidenceStatus, verifyChain } from "../evidence";
 import { poolStatus } from "./pool";
-import { agentChatStatus } from "./agentchat";
+import { agentChatStatus, fleetDigest } from "./agentchat";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -231,7 +231,16 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     {
       id: "ME35", name: "G1+G2: флот из полноценных агентных чатов — постоянные сессии с tool-циклом, компакцией, workspace, вечно-живущие супервизоры (перерождение), межчатовая связь, real-time шаги (пересборка механизма старого Electron-браузера) (R36)", old_ref: "легаси: вкладки chat.z.ai + actuation_lease fleet.transport-promotion → чат = первичный объект daemon + супервизор-тик",
       verdict: (() => { try { const s = agentChatStatus(); return s.total > 0 && s.turns_ok > 0 && s.supervisors > 0 ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
-      evidence: (() => { try { const s = agentChatStatus(); return `сессий=${s.total} (active=${s.active}, thinking=${s.thinking}, супервизоров=${s.supervisors}), ходов ok/fail=${s.turns_ok}/${s.turns_fail}, в полёте=${s.in_flight}, компакций=${s.compactions}, деградаций=${s.degraded}, последний ход=${s.last_turn_at ?? "—"}; GET /agentchat | POST /agentchat {op:create|turn|compact|close|tick}; шаги хода = AGENT_CHAT_STEP в шину (real-time)`; } catch (e) { return `agentchat status failed: ${String(e).slice(0, 80)}`; } })(),
+      evidence: (() => { try { const s = agentChatStatus(); return `сессий=${s.total} (active=${s.active}, thinking=${s.thinking}, супервизоров=${s.supervisors}), ходов ok/fail=${s.turns_ok}/${s.turns_fail}, в полёте=${s.in_flight}, компакций=${s.compactions}, деградаций=${s.degraded}, последний ход=${s.last_turn_at ?? "—"}; GET /agentchat | POST /agentchat {op:create|turn|compact|close|tick|send|objective}; шаги хода = AGENT_CHAT_STEP в шину (real-time)`; } catch (e) { return `agentchat status failed: ${String(e).slice(0, 80)}`; } })(),
+    },
+    {
+      id: "ME36", name: "G4+G5: полная видимость флота — шаги пул-исполнителей в реке рассуждений (FLEET_STEP: thought/tool/reply/fail, супервизор и браузер видят ходы исполнителей шаг за шагом) + долгоживущие цели чатов (objective: назначает оператор/супервизор set_objective, видна в промпте хода, дайджесте и UI) (R37)", old_ref: "легаси: Outcome River видел только вкладки-чаты, исполнители невидимы; цели чатов не существовали (контекст терялся при перезагрузке вкладки)",
+      verdict: (() => { try { const d = fleetDigest(); return d.includes("Пул исполнителей") ? "WORKS" : "CAVEAT"; } catch { return "CAVEAT"; } })(),
+      evidence: (() => { try {
+        const steps = (db.query("SELECT COUNT(*) c FROM events WHERE type='FLEET_STEP'").get() as { c: number }).c;
+        const objs = (db.query("SELECT COUNT(*) c FROM agent_sessions WHERE objective != ''").get() as { c: number }).c;
+        return `FLEET_STEP в шине=${steps}, чатов с целью=${objs}; дайджест супервизора: секция «Пул исполнителей» (слоты/lease/последний шаг), цели видны в строках чатов; POST /agentchat {op:objective}`;
+      } catch (e) { return `ME36 evidence failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
 

@@ -7,31 +7,36 @@
  * (chat_send), эластичное создание чатов агентами.
  * G3: РЕКА РАССУЖДЕНИЙ — все шаги всех чатов одновременно в реальном времени
  * (socket.io :3040 через gateway, события AGENT_CHAT_STEP/MSG/TURN*).
+ * G4 (R37): река видит и ШАГИ ПУЛА-ИСПОЛНИТЕЛЕЙ (FLEET_STEP — thought/tool/reply/fail
+ * от воркеров под lease) — супервизор и браузер видят ходы исполнителей шаг за шагом.
+ * G5 (R37): долгоживущие цели чатов (objective) — показ в панели, назначение оператором.
  * REST daemon :3041 через gateway (/agentchat?XTransformPort=3041).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
-import { MessageSquarePlus, SendHorizontal, Trash2, RefreshCw, Brain, Shield, Radio, Zap } from "lucide-react";
+import { MessageSquarePlus, SendHorizontal, Trash2, RefreshCw, Brain, Shield, Radio, Zap, Target } from "lucide-react";
 
 type Session = {
   id: string; agent_id: string; title: string; status: "ACTIVE" | "CLOSED";
   state: "IDLE" | "THINKING"; summary: string; compactions: number;
   turns_ok: number; turns_fail: number; fail_streak: number; model: string; role: string;
-  created_at: string; updated_at: string;
+  objective: string; created_at: string; updated_at: string;
 };
 type Msg = { id: number; session_id: string; role: "user" | "assistant" | "tool" | "system"; content: string; meta: Record<string, unknown>; at: string };
 type Status = { total: number; active: number; thinking: number; supervisors: number; turns_ok: number; turns_fail: number; compactions: number; degraded: number; in_flight: number };
 type RiverItem = {
   key: string; at: string; type: string; session_id: string; kind: string;
-  tool: string | null; preview: string;
+  tool: string | null; preview: string; title?: string;
 };
 
 const R = (p: string, init?: RequestInit) => fetch(`${p}${p.includes("?") ? "&" : "?"}XTransformPort=3041`, { cache: "no-store", ...init });
 
-const STEP_ICON: Record<string, string> = { thought: "💭", tool: "🔧", reply: "💬", msg: "📨", turn: "✅", fail: "⚠️", created: "✦", closed: "✕", compacted: "⌁", degraded: "🩸" };
+const STEP_ICON: Record<string, string> = { thought: "💭", tool: "🔧", reply: "💬", msg: "📨", turn: "✅", fail: "⚠️", created: "✦", closed: "✕", compacted: "⌁", degraded: "🩸", objective: "🎯" };
 function stepKind(type: string, kind: string): string {
   if (type === "AGENT_CHAT_STEP") return kind === "tool" ? "tool" : kind === "reply" ? "reply" : "thought";
+  if (type === "FLEET_STEP") return kind === "tool" ? "tool" : kind === "reply" ? "reply" : kind === "fail" ? "fail" : "thought"; // G4: шаги пула в ту же реку
   if (type === "AGENT_CHAT_MSG") return "msg";
+  if (type === "AGENT_CHAT_OBJECTIVE") return "objective";
   if (type === "AGENT_CHAT_TURN") return "turn";
   if (type === "AGENT_CHAT_TURN_FAILED" || type === "AGENT_CHAT_DEGRADED") return "fail";
   if (type === "AGENT_CHAT_CREATED") return "created";
@@ -99,18 +104,24 @@ export default function AgentChatPanel() {
       s = mk("/?XTransformPort=3040", { path: "/", transports: ["websocket", "polling"], reconnectionDelay: 2000, timeout: 8000 }) as Socket;
       s.on("connect", () => setWsOn(true));
       s.on("disconnect", () => setWsOn(false));
-      s.on("event", (e: { seq?: number; type?: string; at?: string; data?: string }) => {
+      s.on("event", (e: { seq?: number; type?: string; at?: string; ts?: string; agent_id?: string; task_id?: string; data?: string }) => {
         const type = String(e?.type ?? "");
-        if (!type.startsWith("AGENT_CHAT")) return;
+        // G3+G4: река = рассуждения чатов (AGENT_CHAT*) + шаги пул-исполнителей (FLEET_STEP)
+        if (!type.startsWith("AGENT_CHAT") && type !== "FLEET_STEP") return;
         let d: Record<string, unknown> = {};
         try { d = JSON.parse(String(e?.data ?? "{}")) as Record<string, unknown>; } catch { /* без данных */ }
-        const sid = String(d.session_id ?? d.to ?? d.from ?? "");
+        const isPool = type === "FLEET_STEP";
+        const sid = isPool ? `pool:${String(d.task_id ?? e?.task_id ?? "")}` : String(d.session_id ?? d.to ?? d.from ?? "");
         const kind = stepKind(type, String(d.kind ?? ""));
+        const title = isPool
+          ? `⚡${String(d.task_title ?? d.task_id ?? "").slice(0, 22)}`
+          : undefined;
         setRiver((prev) => [{
           key: `${e.seq ?? Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          at: String(e?.at ?? "").slice(11, 19),
+          at: String(e?.ts ?? e?.at ?? "").slice(11, 19), // шина несёт ts (R37-фикс: был e.at → всегда --:--:--)
           type, session_id: sid, kind,
           tool: typeof d.tool === "string" ? d.tool : null,
+          title,
           preview: String(d.preview ?? "").slice(0, 160) || (type === "AGENT_CHAT_TURN" ? `ход завершён (${d.steps} шагов, ${d.ms}ms)` : ""),
         }, ...prev].slice(0, 60));
       });
@@ -144,6 +155,13 @@ export default function AgentChatPanel() {
       await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "tick", force: true }) });
       await loadSessions();
     } finally { setBusy(false); }
+  };
+  // G5: оператор назначает/меняет долгоживущую цель чата
+  const editObjective = async (id: string, current: string) => {
+    const obj = window.prompt("Долгоживущая цель чата (objective):", current);
+    if (obj === null) return;
+    await R("/agentchat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "objective", id, objective: obj }) });
+    void loadSessions();
   };
 
   const selSession = sessions.find((s) => s.id === sel);
@@ -219,7 +237,7 @@ export default function AgentChatPanel() {
               <div key={it.key} className="flex items-start gap-1 font-mono text-[8px] leading-snug">
                 <span className="shrink-0 text-zinc-700">{it.at || "--:--:--"}</span>
                 <button type="button" onClick={() => it.session_id && setSel(it.session_id)} className={`shrink-0 font-semibold ${STEP_COLOR[it.kind] ?? "text-zinc-400"} hover:underline`} title={`перейти к чату ${it.session_id}`}>
-                  {STEP_ICON[it.kind] ?? "·"} {titleOf(it.session_id)}
+                  {STEP_ICON[it.kind] ?? "·"} {it.title ?? titleOf(it.session_id)}
                 </button>
                 <span className="min-w-0 flex-1 truncate text-zinc-500" title={it.preview}>
                   {it.tool && <span className="text-amber-500/70">[{it.tool}] </span>}{it.preview || it.type}
@@ -229,6 +247,18 @@ export default function AgentChatPanel() {
           </div>
         )}
       </div>
+
+      {/* цель выбранного чата (G5: долгоживущий objective — виден всегда, редактирует оператор) */}
+      {sel && (
+        <div className="mt-1 flex items-start gap-1 rounded border border-amber-900/40 bg-amber-950/20 px-1.5 py-1" data-testid="agentchat-objective">
+          <Target className="mt-0.5 h-3 w-3 shrink-0 text-amber-300" aria-hidden />
+          <p className="min-w-0 flex-1 font-mono text-[9px] leading-snug text-amber-200/90" title="Долгоживущая цель чата: назначается оператором или супервизором (set_objective), видна агенту в каждом ходу и во всех обзорах флота">
+            {selSession?.objective || "цель не задана — клик «изменить» или супервизор назначит сам"}
+          </p>
+          <button type="button" onClick={() => sel && void editObjective(sel, selSession?.objective ?? "")} aria-label="Изменить цель чата" data-testid="agentchat-objective-edit"
+            className="shrink-0 rounded border border-amber-900/50 px-1 py-0.5 font-mono text-[8px] text-amber-300/90 transition hover:bg-zinc-800">изменить</button>
+        </div>
+      )}
 
       {/* лента сообщений выбранной сессии */}
       {sel && (

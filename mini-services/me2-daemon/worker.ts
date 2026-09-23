@@ -30,6 +30,24 @@ function leaseAlive(id: string): boolean {
   const cur = getTask(id);
   return !!cur && cur.status === "RUNNING";
 }
+
+// G4 (R37): шаги pool-исполнителя — в реку рассуждений флота (FLEET_STEP).
+// Супервизоры и браузер видят ходы исполнителей ШАГ ЗА ШАГОМ в реальном времени,
+// как шаги агентных чатов (AGENT_CHAT_STEP). Эмит только под lease — дежурные
+// не-пул-агенты не шумят (их шаги и так видны в шине TASK_*/TOOL_*).
+function fleetStep(
+  lease: PoolLeaseRow | null,
+  task: TaskRow,
+  agentId: string,
+  kind: "thought" | "tool" | "reply" | "fail",
+  payload: { step: number; tool?: string | null; preview: string },
+): void {
+  if (!lease) return;
+  emit("FLEET_STEP", {
+    source: "pool", slot: lease.slot, task_id: task.id, task_title: task.title.slice(0, 80),
+    step: payload.step, kind, tool: payload.tool ?? null, preview: payload.preview.slice(0, 140),
+  }, agentId, task.id);
+}
 let zaiInstance: Awaited<ReturnType<typeof ZAI.create>> | null = null;
 
 type ToolDef = { name: string; description: string; args: Record<string, string> };
@@ -336,6 +354,8 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       const tool = parsed.action.tool;
       const args = parsed.action.args ?? {};
       emit("TOOL_CALL", { step, tool, args: JSON.stringify(args).slice(0, 500), thought: parsed.thought ?? "" }, agent.id, task.id);
+      // G4: рассуждение исполнителя — в реку флота
+      fleetStep(lease, task, agent.id, "thought", { step, preview: parsed.thought ?? "" });
       const callRec = { tool, sig: `${tool}:${JSON.stringify(args).slice(0, 200)}`, err: false };
       toolCalls.push(callRec);
 
@@ -345,6 +365,7 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         // финальные записи воркера НЕ затирают честный HANDED_OFF (передача старше lease).
         if (leaseAlive(task.id)) {
           emit("TASK_DONE", { steps: step, result: result.slice(0, 1500) }, agent.id, task.id);
+          fleetStep(lease, task, agent.id, "reply", { step, preview: result });
           updateTask(task.id, { status: "COMPLETED", result, steps: step });
           // R29 C3: антифальшь-ревью результата против спека (zero-authority, async, квотировано);
           // улики — телеметрия lease (writes/tool_calls/parse_fails)
@@ -370,6 +391,8 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       const observation = await execTool(tool, args, task.id);
       callRec.err = observation.startsWith("ERROR:");
       emit("TOOL_RESULT", { step, tool, output: observation.slice(0, 1200) }, agent.id, task.id);
+      // G4: наблюдение инструмента — в реку флота
+      fleetStep(lease, task, agent.id, "tool", { step, tool, preview: observation });
       messages.push({ role: "assistant", content: reply.slice(0, 2000) });
       messages.push({ role: "user", content: `observation (${tool}): ${observation}` });
       updateTask(task.id, { steps: step });
@@ -383,6 +406,7 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
         let cause: string | undefined;
         try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
         emit("TASK_FAILED", { error: errMsg, cause, lease_age_ms: Date.now() - leaseStartedAt }, agent.id, task.id);
+        fleetStep(lease, task, agent.id, "fail", { step: task.max_steps, preview: errMsg });
       } else {
         emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", error: errMsg }, agent.id, task.id);
       }
@@ -395,6 +419,7 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
       let cause: string | undefined;
       try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
       emit("TASK_FAILED", { error: msg.slice(0, 300), cause }, agent.id, task.id);
+      fleetStep(lease, task, agent.id, "fail", { step: 0, preview: msg });
     } else {
       emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", error: msg.slice(0, 200) }, agent.id, task.id);
     }

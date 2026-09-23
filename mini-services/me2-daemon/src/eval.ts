@@ -44,12 +44,12 @@ import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
 import { createTask, updateTask, rid } from "../store";
 import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
-  supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList,
+  supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
 } from "./agentchat";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 12;
+export const EVAL_DATASET_VERSION = 13;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -110,6 +110,8 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 //             Живой GLM-ход — НЕ в sync-харнесе (урок R25: сеть только async): доказывается живым REST-ходом в раунде (worklog).
 // v12 (R36) — +agentchat.supervisor (G2: вечно-живущий супервизор — идемпотентный ensure, перерождение после смерти с новым id, роль SUPERVISOR; critical),
 //             +agentchat.interchat (G2: межчатовая связь — доставка в историю цели с meta.from_chat, unread-счётчик, честные ошибки цели; critical) = 39.
+// v13 (R37) — +agentchat.objective (G5: долгоживущая цель чата — set/обновление, чужая цель только для SUPERVISOR, цель в system-prompt хода и в дайджесте флота; critical),
+//             +agentchat.pool_digest (G4: дайджест супервизора видит пул — слоты/lease/последний шаг FLEET_STEP исполнителя) = 41.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -648,6 +650,73 @@ export const EVAL_DATASET: EvalCheck[] = [
       } finally {
         if (a) agentChatDelete(a.id);
         if (b) agentChatDelete(b.id);
+      }
+    },
+  },
+  {
+    id: "agentchat.objective",
+    plane: "agentchat",
+    title: "AgentChat (G5): долгоживущая цель чата — set/обновление, чужая цель только для SUPERVISOR, цель в промпте и дайджесте",
+    critical: true,
+    expect: "chatSetObjective(свой) ok и виден в сессии/дайджесте; чужая цель от CHAT-чата = not_permitted; от SUPERVISOR = ok; systemPrompt содержит цель; tool set_objective работает",
+    run: () => {
+      let chat: ReturnType<typeof agentChatCreate> | null = null;
+      let sup: string | null = null;
+      try {
+        chat = agentChatCreate({ role: "CHAT", title: "eval-obj-chat", model: "glm-eval-stub" });
+        const ensured = supervisorEnsure("eval-obj-super");
+        sup = ensured.id;
+        const s1 = chatSetObjective(chat.id, "довести экономию памяти до −30%", {});
+        const after = agentChatGet(chat.id, 1)?.session.objective ?? "";
+        // чужая цель: SUPERVISOR может назначить (ок), обычный CHAT — нет (not_permitted)
+        const supAssign = chat ? chatSetObjective(chat.id, "цель от супервизора", { by: sup ?? "" }) : null;
+        let notPermitted = "";
+        const other = agentChatCreate({ role: "CHAT", title: "eval-obj-other", model: "glm-eval-stub" });
+        try {
+          const r2 = chatSetObjective(chat!.id, "попытка чужой цели", { by: other.id });
+          notPermitted = r2.error ?? "";
+        } catch (e) { notPermitted = String(e).slice(0, 40); }
+        agentChatDelete(other.id);
+        const ctx = chat ? buildChatContext({ ...agentChatGet(chat.id, 1)!.session }, "CHAT") : [];
+        const sys = ctx.filter((m) => m.role === "system").map((m) => m.content).join("\n");
+        const toolSet = chat ? execChatToolSync("set_objective", { objective: "цель через инструмент" }, chat.id) : "";
+        const digest = fleetDigest();
+        const inDigest = digest.includes("цель через инструмент");
+        // R37: нормализация модели — двойной префикс из старых сессий не должен доживать до LLM
+        const normOk = normalizeChatModel("zai:zai:glm-5.3") === "zai:glm-5.3" && normalizeChatModel("zai:glm-5.3") === "zai:glm-5.3";
+        const supSess = sup ? agentChatGet(sup, 1)?.session.model ?? "" : "";
+        const ok = s1.ok && after.includes("экономию памяти") && supAssign!.ok && notPermitted === "not_permitted" && sys.includes("ДОЛГОЖИВУЩАЯ ЦЕЛЬ") && toolSet.startsWith("OK:") && inDigest && normOk && !supSess.includes("zai:zai:");
+        return { ok, evidence: `set=${s1.ok}, в_сессии=${after.slice(0, 24)}, sup-назначил=${supAssign!.ok}, not_permitted=${notPermitted}, в_промпте=${sys.includes("ДОЛГОЖИВУЩАЯ ЦЕЛЬ")}, tool=${toolSet.slice(0, 18)}, в_дайджесте=${inDigest}, норм-модели=${normOk}, сессия_супа_чиста=${supSess || "—"}` };
+      } finally {
+        if (chat) agentChatDelete(chat.id);
+        if (sup) { try { agentChatDelete(sup); } catch { /* noop */ } }
+      }
+    },
+  },
+  {
+    id: "agentchat.pool_digest",
+    plane: "agentchat",
+    title: "AgentChat (G4): дайджест супервизора видит пул — секция исполнителей с последним шагом FLEET_STEP",
+    critical: true,
+    expect: "fleetDigest содержит секцию «Пул исполнителей»; синтетический FLEET_STEP исполнителя под lease виден в дайджесте (супервизор видит ходы пул-исполнителей шаг за шагом); cleanup полный",
+    run: () => {
+      const tkId = `tk_evalfd${rid()}`;
+      try {
+        // синтетический lease-контур (паттерн pool.evalLeaseCycle, R34): lease + задача + FLEET_STEP
+        createTask({ id: tkId, title: "eval-fleet-digest-smoke", spec: "синтетическая задача для дайджеста", role: "EXECUTOR", max_steps: 2 } as Parameters<typeof createTask>[0]);
+        updateTask(tkId, { status: "RUNNING", agent_id: "eval-fd-agent" });
+        db.query("INSERT OR REPLACE INTO pool_leases (task_id, agent_id, slot, acquired_at, expires_at, hb_at, done) VALUES (?,?,?,?,?,?,0)")
+          .run(tkId, "eval-fd-agent", 4, new Date().toISOString(), Date.now() + 30_000, new Date().toISOString());
+        emit("FLEET_STEP", { source: "pool", slot: 4, task_id: tkId, task_title: "eval-fleet-digest-smoke", step: 1, kind: "tool", tool: "write_file", preview: "OK: wrote eval-fd.txt" }, "eval-fd-agent", tkId);
+        const digest = fleetDigest();
+        const hasSection = digest.includes("Пул исполнителей");
+        const hasTask = digest.includes("eval-fleet-digest-smoke");
+        const hasStep = digest.includes("write_file") && digest.includes("eval-fd.txt");
+        const ok = hasSection && hasTask && hasStep;
+        return { ok, evidence: `секция_пула=${hasSection}, задача_видна=${hasTask}, последний_шаг_виден=${hasStep}, len=${digest.length}` };
+      } finally {
+        try { db.query("DELETE FROM pool_leases WHERE task_id=?").run(tkId); } catch { /* noop */ }
+        try { db.query("DELETE FROM tasks WHERE id=?").run(tkId); } catch { /* noop */ }
       }
     },
   },

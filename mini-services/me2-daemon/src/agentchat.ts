@@ -46,7 +46,7 @@ import { spawn } from "node:child_process";
 import { dirname, join, normalize, resolve } from "node:path";
 import { db, emit, nowIso, createAgent, createTask, type AgentRow } from "../store";
 import { chat } from "../providers";
-import { agentTag } from "./glm";
+import { agentTag, canonicalGlm } from "./glm";
 import { memBlockEconomy } from "./memory";
 import { poolStatus } from "./pool";
 
@@ -65,6 +65,13 @@ const SUPERVISOR_IDLE_MS = 300_000;  // автономный ход суперв
 const SUPERVISOR_TITLE = "Супервизор флота";
 const CHAT_CEILING = Number(process.env.ME2_CHAT_CEILING ?? 24); // эластичный потолок само-создания
 const CHAT_MAX_INFLIGHT = 8;         // глобальный конкурентный предел ходов (бережём LLM-слот)
+const OBJECTIVE_MAX_CHARS = 600;     // долгоживущая цель чата (G5)
+
+/** Нормализация модели: однократный префикс zai: (лечит zai:zai:… — R37, хил сессий R36 был неполный). */
+export function normalizeChatModel(m: string): string {
+  const s = String(m ?? "").trim();
+  return s ? s.replace(/^(zai:)+/, "zai:") : s;
+}
 
 // ── схема ─────────────────────────────────────────────────────────
 let schemaReady = false;
@@ -84,6 +91,7 @@ function ensureSchema(): void {
       fail_streak INTEGER NOT NULL DEFAULT 0,
       last_error TEXT,
       model TEXT NOT NULL DEFAULT '',
+      objective TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -98,6 +106,10 @@ function ensureSchema(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_messages_session ON agent_messages(session_id);
   `);
+  // миграция существующей БД (G5, R37): колонка objective
+  try { db.query("ALTER TABLE agent_sessions ADD COLUMN objective TEXT NOT NULL DEFAULT ''").run(); } catch { /* уже есть */ }
+  // хил двойного префикса в СЕССИЯХ (R37: R36 вылечил реестр, но не персистентные session-строки)
+  try { db.query("UPDATE agent_sessions SET model=? WHERE model LIKE 'zai:zai:%'").run("zai:" + canonicalGlm()); } catch { /* noop */ }
   schemaReady = true;
 }
 
@@ -106,7 +118,7 @@ export interface AgentChatSession {
   id: string; agent_id: string; title: string; status: "ACTIVE" | "CLOSED";
   state: "IDLE" | "THINKING"; summary: string; compactions: number;
   turns_ok: number; turns_fail: number; fail_streak: number;
-  last_error: string | null; model: string; created_at: string; updated_at: string;
+  last_error: string | null; model: string; objective: string; created_at: string; updated_at: string;
   role: string; // роль флота (из агента реестра): CHAT/SUPERVISOR/EXECUTOR/…
 }
 export interface AgentChatMessage {
@@ -127,7 +139,7 @@ function rowToSession(r: Record<string, unknown>): AgentChatSession {
     summary: String(r.summary ?? ""), compactions: Number(r.compactions ?? 0),
     turns_ok: Number(r.turns_ok ?? 0), turns_fail: Number(r.turns_fail ?? 0),
     fail_streak: Number(r.fail_streak ?? 0), last_error: (r.last_error as string) ?? null,
-    model: String(r.model ?? ""), created_at: String(r.created_at), updated_at: String(r.updated_at),
+    model: String(r.model ?? ""), objective: String(r.objective ?? ""), created_at: String(r.created_at), updated_at: String(r.updated_at),
     role,
   };
 }
@@ -164,7 +176,7 @@ function safeJoin(cwd: string, p: string): string {
 // ── инструменты чата (JSON-протокол, как worker, + chat-специфика) ─
 export type ChatToolName =
   | "list_dir" | "read_file" | "write_file" | "shell" | "web_search"
-  | "daemon_status" | "create_task" | "list_chats" | "chat_send" | "create_chat" | "reply";
+  | "daemon_status" | "create_task" | "list_chats" | "chat_send" | "create_chat" | "set_objective" | "reply";
 const CHAT_TOOLS: Array<{ name: ChatToolName; description: string; args: Record<string, string> }> = [
   { name: "list_dir", description: "Список файлов workspace чата", args: { path: "string" } },
   { name: "read_file", description: "Прочитать файл из workspace чата", args: { path: "string" } },
@@ -176,6 +188,7 @@ const CHAT_TOOLS: Array<{ name: ChatToolName; description: string; args: Record<
   { name: "list_chats", description: "Обзор ВСЕХ чатов флота: состояния, ходы, деградации, последние ошибки", args: {} },
   { name: "chat_send", description: "Отправить сообщение другому чату флота (межчатовая координация; супервизор увидит и отреагирует)", args: { session_id: "string", text: "string" } },
   { name: "create_chat", description: "Создать нового чата-агента флота (эластичное масштабирование, потолок 24)", args: { title: "string", role: "string" } },
+  { name: "set_objective", description: "Долгоживущая ЦЕЛЬ чата: закрепить/обновить (супервизор может назначить другому, передав session_id)", args: { objective: "string", session_id: "string?" } },
   { name: "reply", description: "ФИНАЛЬНЫЙ ответ пользователю (завершает ход)", args: { text: "string" } },
 ];
 
@@ -200,17 +213,48 @@ function daemonStatus(): string {
   }
 }
 
-/** Полный обзор флота для супервизоров (полная видимость системы). */
+/** Полный обзор флота для супервизоров (полная видимость системы, включая пул — G4). */
 export function fleetDigest(): string {
   try {
     const rows = agentChatList().filter((s) => s.status === "ACTIVE").slice(0, 24);
     const lines = rows.map((s) =>
-      `- ${s.id} «${s.title}» role=${s.role} ${s.state} ходы=${s.turns_ok}/${s.turns_fail} компакций=${s.compactions}${s.fail_streak >= 2 ? ` ⚠DEGRADED(${s.fail_streak})` : ""}${s.last_error ? ` last_err=${s.last_error.slice(0, 60)}` : ""}`);
+      `- ${s.id} «${s.title}» role=${s.role} ${s.state} ходы=${s.turns_ok}/${s.turns_fail} компакций=${s.compactions}${s.fail_streak >= 2 ? ` ⚠DEGRADED(${s.fail_streak})` : ""}${s.objective ? ` 🎯${s.objective.slice(0, 80)}` : ""}${s.last_error ? ` last_err=${s.last_error.slice(0, 60)}` : ""}`);
+    // G4: пул исполнителей с ТЕКУЩИМИ задачами и последним шагом (супервизор видит ходы исполнителей шаг за шагом)
+    const poolLines: string[] = [];
+    try {
+      const leases = db.query(`SELECT l.agent_id, l.slot, l.task_id, t.title, t.status FROM pool_leases l LEFT JOIN tasks t ON t.id = l.task_id ORDER BY l.slot`).all() as
+        Array<{ agent_id: string; slot: number; task_id: string | null; title: string | null; status: string | null }>;
+      for (const l of leases) {
+        let lastStep = "";
+        if (l.task_id) {
+          const ev = db.query(`SELECT data FROM events WHERE type='FLEET_STEP' AND task_id=? ORDER BY seq DESC LIMIT 1`).get(l.task_id) as { data: string } | undefined;
+          if (ev) { try { const d = JSON.parse(ev.data) as { kind?: string; tool?: string; preview?: string }; lastStep = `${d.kind === "tool" ? "🔧" : d.kind === "reply" ? "💬" : "💭"} ${d.tool ? `[${d.tool}] ` : ""}${String(d.preview ?? "").slice(0, 90)}`; } catch { /* без шага */ } }
+        }
+        poolLines.push(`- слот ${l.slot} [${l.agent_id.slice(0, 8)}] задача=${l.task_id ?? "—"} «${l.title ?? ""}» ${l.status ?? ""}${lastStep ? ` — последний шаг: ${lastStep}` : ""}`);
+      }
+    } catch { /* пул не блокирует дайджест */ }
     const tasks = db.query("SELECT status, COUNT(*) AS n FROM tasks GROUP BY status ORDER BY n DESC").all() as Array<{ status: string; n: number }>;
-    return `Флот (${rows.length} активных чатов):\n${lines.join("\n") || "(пусто)"}\nЗадачи workgraph: ${tasks.map((t) => `${t.status}=${t.n}`).join(", ") || "нет"}\n${daemonStatus()}`;
+    return `Флот (${rows.length} активных чатов):\n${lines.join("\n") || "(пусто)"}\nПул исполнителей:\n${poolLines.join("\n") || "(слотов без lease)"}\nЗадачи workgraph: ${tasks.map((t) => `${t.status}=${t.n}`).join(", ") || "нет"}\n${daemonStatus()}`;
   } catch (e) {
     return `fleetDigest failed: ${String(e).slice(0, 120)}`;
   }
+}
+
+/** G5: долгоживущая цель чата. Свою — любой; чужую — только SUPERVISOR (или оператор через REST). */
+export function chatSetObjective(sessionId: string, objective: string, opts: { by?: string } = {}): { ok: boolean; error?: string; objective?: string } {
+  ensureSchema();
+  const r = qSession(sessionId);
+  if (!r) return { ok: false, error: "session_not_found" };
+  if (String(r.status) === "CLOSED") return { ok: false, error: "session_closed" };
+  const obj = String(objective ?? "").trim().slice(0, OBJECTIVE_MAX_CHARS);
+  const by = opts.by ? String(opts.by) : sessionId;
+  if (by !== sessionId) {
+    const caller = db.query("SELECT a.role FROM agent_sessions s JOIN agents a ON a.id = s.agent_id WHERE s.id=?").get(by) as { role?: string } | null;
+    if (caller?.role !== "SUPERVISOR") return { ok: false, error: "not_permitted" };
+  }
+  db.query("UPDATE agent_sessions SET objective=?, updated_at=? WHERE id=?").run(obj, nowIso(), sessionId);
+  emit("AGENT_CHAT_OBJECTIVE", { session_id: sessionId, by, chars: obj.length, preview: obj.slice(0, 100) }, String(r.agent_id), null);
+  return { ok: true, objective: obj };
 }
 
 /** Синхронные инструменты — переиспользуются eval-харнесом (без сети). */
@@ -251,6 +295,11 @@ export function execChatToolSync(name: ChatToolName, args: Record<string, unknow
         if (active >= CHAT_CEILING) return `ERROR: chat_ceiling_reached (${active}/${CHAT_CEILING}) — эластичный потолок, масштабируй существующих (chat_send), а не плодить`;
         const s = agentChatCreate({ title: String(args.title ?? "Новый чат флота").slice(0, 160), role: String(args.role ?? "CHAT").slice(0, 32) });
         return `OK: создан чат ${s.id} «${s.title}» role=${s.role} — отправь ему вводные через chat_send`;
+      }
+      case "set_objective": {
+        const target = String(args.session_id ?? "") || sessionId;
+        const r = chatSetObjective(target, String(args.objective ?? ""), { by: sessionId });
+        return r.ok ? `OK: цель закреплена для ${target}: ${String(r.objective).slice(0, 80)}` : `ERROR: ${r.error}`;
       }
       default:
         return `ERROR: tool "${name}" требует async-контекст хода (shell/web_search/create_task) или неизвестен`;
@@ -364,15 +413,17 @@ function systemPrompt(sess: AgentChatSession, role: string): string {
     `Сообщение пользователя с ролью "tool" содержит результат предыдущего действия (observation).`,
     `Ты можешь выполнять реальную работу (файлы, shell, поиск) и ставить задачи в workgraph daemon'а (create_task).`,
   ];
+  if (sess.objective) base.push(``, `Твоя ДОЛГОЖИВУЩАЯ ЦЕЛЬ (objective) — держи её в голове, каждый ход приближает её:\n${sess.objective}`);
   if (role === "SUPERVISOR") {
     base.push(
       ``,
       `ТЫ — СУПЕРВИЗОР ФЛОТА (вечно-живущий координатор). Твои обязанности:`,
-      `1. Полный обзор системы: регулярно вызывай list_chats и daemon_status — ты видишь ВСЕ чаты, пул исполнителей, задачи, eval.`,
+      `1. Полный обзор системы: регулярно вызывай list_chats и daemon_status — ты видишь ВСЕ чаты, пул исполнителей (слоты, текущие задачи, ПОСЛЕДНИЙ ШАГ каждого исполнителя), задачи, eval.`,
       `2. Координация: деградировавшим чатам (fail_streak>=2) — разберись в причине (chat_send с вопросом), при системной проблеме ставь задачу (create_task).`,
       `3. Специализация: если разработке не хватает экспертизы — create_chat с ясной ролью (например CODE, RESEARCH, DEBUG) и передай вводные chat_send'ом.`,
-      `4. Автономность: ты получаешь системные тики без человека — работай по ним сам (обзор → выводы → действия → reply с кратким отчётом).`,
-      `5. Экономия: не дублируй работу других чатов; если всё спокойно — короткий отчёт без действий.`,
+      `4. ЦЕЛИ (G5): каждый чат живёт ради своей цели — назначай долгоживущие цели через set_objective (свою или чужую по session_id); цель видна во всех обзорах, чат держит её в голове.`,
+      `5. Автономность: ты получаешь системные тики без человека — работай по ним сам (обзор → выводы → действия → reply с кратким отчётом).`,
+      `6. Экономия: не дублируй работу других чатов; если всё спокойно — короткий отчёт без действий.`,
     );
   }
   return base.join("\n");
@@ -429,11 +480,11 @@ export function agentChatCreate(opts: { agent_id?: string; role?: string; title?
     if (!r) throw new Error("agent_not_found");
     agent = r as unknown as AgentRow;
   } else {
-    agent = createAgent(String(opts.role ?? "CHAT"), opts.model ? `zai:${opts.model}` : agentTag());
+    agent = createAgent(String(opts.role ?? "CHAT"), opts.model ? normalizeChatModel(`zai:${String(opts.model).replace(/^(zai:)+/, "")}`) : agentTag());
     emit("AGENT_CREATED", { role: agent.role, model: agent.model, by: "agentchat" }, agent.id, null);
   }
   const id = `ac_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-  const model = opts.model ? `zai:${opts.model}` : String(agent.model || agentTag());
+  const model = normalizeChatModel(opts.model ? `zai:${String(opts.model).replace(/^(zai:)+/, "")}` : String(agent.model || agentTag()));
   const now = nowIso();
   db.query(`INSERT INTO agent_sessions (id, agent_id, title, status, state, summary, compactions, turns_ok, turns_fail, fail_streak, model, created_at, updated_at)
     VALUES (?,?,?,'ACTIVE','IDLE','',0,0,0,0,?,?,?)`)
@@ -519,7 +570,7 @@ export async function agentChatCompact(id: string, opts: { force?: boolean } = {
   }
   const older = msgs.slice(0, msgs.length - COMPACT_KEEP_LAST);
   const transcript = older.map((m) => `${m.role}: ${m.content.slice(0, 600)}`).join("\n").slice(0, 14000);
-  const model = sess.model || `zai:${agentTag()}`;
+  const model = normalizeChatModel(sess.model) || `zai:${agentTag()}`;
   const raw = await chat(model, [
     { role: "system", content: "Ты — архивариус агентных чатов. Сожми диалог в плотную сводку: факты, решения, результаты инструментов, незакрытые вопросы. Без воды, до 1200 символов." },
     { role: "user", content: transcript },
@@ -556,7 +607,7 @@ export async function agentChatTurn(sessionId: string, userText: string): Promis
   let hardError: string | undefined;
 
   try {
-    const model = sess.model || `zai:${agentTag()}`;
+    const model = normalizeChatModel(sess.model) || `zai:${agentTag()}`;
     const history = buildChatContext({ ...sess, state: "THINKING" }, role);
     for (let step = 0; step < MAX_STEPS; step++) {
       if (Date.now() - t0 > TURN_DEADLINE_MS) { hardError = "turn_deadline"; break; }

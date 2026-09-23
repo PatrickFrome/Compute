@@ -55,12 +55,12 @@ import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX 
 import {
   agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
   agentChatTurnAsync, agentChatCompact, agentChatRestore,
-  agentChatSupervisorTick, supervisorEnsure, SUPERVISOR_TICK_MS, interchatDeliver,
+  agentChatSupervisorTick, supervisorEnsure, SUPERVISOR_TICK_MS, interchatDeliver, chatSetObjective,
 } from "./src/agentchat";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.35.0";
+const VERSION = "0.36.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -716,7 +716,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           const r = interchatDeliver("operator", id, text);
           return r.ok ? json(res, 200, { ok: true, ...r }) : json(res, 400, { ok: false, error: r.error });
         }
-        return json(res, 400, { ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send"] });
+        if (op === "objective") {
+          // G5: оператор закрепляет долгоживущую цель чата (супервизоры — через инструмент set_objective)
+          const id = String(body.id ?? "");
+          const r = chatSetObjective(id, String(body.objective ?? ""), { by: body.by ? String(body.by) : undefined });
+          return r.ok ? json(res, 200, { ok: true, ...r }) : json(res, 400, { ok: false, error: r.error });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) });
       }
