@@ -45,8 +45,9 @@ import { createTask, updateTask, rid } from "../store";
 import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
   supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
-  outcomeReport, outcomePending,
+  outcomeReport, outcomePending, meshHeartbeatApply,
 } from "./agentchat";
+import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
@@ -56,7 +57,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 17;
+export const EVAL_DATASET_VERSION = 18;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -976,6 +977,76 @@ export const EVAL_DATASET: EvalCheck[] = [
         return { ok, evidence: `set=${set1.ok}, get=${got === secret}, raw-утечка=${listStr.includes(secret)}, маска=${row1?.masked ?? "—"}, идемпотент=${ensureA.present === ensureB.present} (${ensureB.present} строк), delete=${del.ok}, get-после=${gotAfter === null}, known_missing=${st.known_missing.join("|") || "—"}` };
       } finally {
         tokenDelete(probeName, "eval-cleanup");
+      }
+    },
+  },
+  {
+    id: "contract.handshake",
+    plane: "contract",
+    title: "R49 фаза A: capabilities-handshake daemon⇄браузер — CONTRACT_VERSION, полный список ops (вкл. mesh_heartbeat), ui, memory-поверхность; withContract аддитивен",
+    critical: true,
+    expect: "capabilitiesJson: contract=CONTRACT_VERSION, ops содержит все 8 ops и mesh_heartbeat, ui=/ui, transport socket agentchat:op; withContract добавляет contract+capabilities, не трогая базовые поля",
+    run: () => {
+      const cap = capabilitiesJson();
+      const needOps = ["create", "turn", "compact", "close", "tick", "send", "objective", "mesh_heartbeat"];
+      const opsOk = needOps.every((o) => cap.ops.includes(o));
+      const merged = withContract({ v: "probe", ts: 1 });
+      const ok = cap.contract === CONTRACT_VERSION && opsOk && cap.ui === "/ui"
+        && cap.transport.socket === "agentchat:op" && cap.transport.path === "/"
+        && cap.memory.some((m) => m.includes("economy"))
+        && (merged as Record<string, unknown>).v === "probe"
+        && (merged as Record<string, unknown>).contract === CONTRACT_VERSION
+        && Boolean((merged as Record<string, unknown>).capabilities);
+      return { ok, evidence: `contract=${cap.contract}, ops=${cap.ops.length}/8 (mesh_heartbeat=${cap.ops.includes("mesh_heartbeat")}), ui=${cap.ui}, socket=${cap.transport.socket}, аддитивность v/ts=${(merged as Record<string, unknown>).v}/${(merged as Record<string, unknown>).ts}` };
+    },
+  },
+  {
+    id: "mission.ui_contract",
+    plane: "mission",
+    title: "R49 фаза A: GET /ui — самодостаточная Mission Control: 0 сборки, 0 внешних зависимостей, socket-клиент только с daemon'а, операции через agentchat:op",
+    critical: true,
+    expect: "HTML содержит fleet/river/toast-узлы и data-testid; fetch только относительных read-only путей (/agentchat,/events,/health,/state); операции — socket emit agentchat:op; никаких внешних http-ресурсов (кроме self-hosted socket.io с daemon'а); размер разумный (<64KB)",
+    run: () => {
+      const html = missionUiHtml();
+      const markersOk = ['data-testid="mc-fleet"', 'data-testid="mc-river"', 'data-testid="mc-contract"', "agentchat:op", "/agentchat", "/events?limit=60", "/health", "/state"]
+        .every((m) => html.includes(m));
+      // самодостаточность: единственный абсолютный src — socket.io с самого daemon'а (:3040)
+      const srcs = [...html.matchAll(/src="(https?:\/\/[^"\s]{6,})"/g)].map((m) => m[1]);
+      const external = srcs.filter((s) => !s.includes(":3040/socket.io.js"));
+      const noExternalAssets = external.length === 0 && !/href="https?:/.test(html);
+      // честная проверка: страница не шлёт REST-POST/PUT (метод в fetch отсутствует)
+      const noRestWrites = !/method\s*:\s*["'](POST|PUT)/.test(html);
+      const fetchPaths = [...html.matchAll(/fetch\((?:api\()?"([^"?]+)/g)].map((m) => m[1]);
+      const readOnly = fetchPaths.length >= 3 && fetchPaths.every((p) => p.startsWith("/"));
+      const ok = markersOk && noExternalAssets && noRestWrites && readOnly && html.length < 64 * 1024 && html.includes("<!doctype html>");
+      return { ok, evidence: `маркеры=${markersOk}, абсолютных-src=${srcs.length} внешних=${external.length} (socket self-hosted только), no-REST-write=${noRestWrites}, fetch-only-relative=${readOnly}, размер=${(html.length / 1024).toFixed(1)}KB` };
+    },
+  },
+  {
+    id: "mission.mesh_tick",
+    plane: "mission",
+    title: "R49 фаза A: op mesh_heartbeat — epoch-фенс, meta mesh_last_heartbeat персистентен, MESH_HEARTBEAT в hash-chain, в ответе последний supervisor_tick (честно null до тика)",
+    critical: true,
+    expect: "без mesh_epoch → honest error; с epoch → ok, meta mesh_last_heartbeat записан, событие MESH_HEARTBEAT в chain, смена epoch → mesh_epoch_advanced=true, supervisor_tick = null-или-объект; cleanup meta-хвостов",
+    run: () => {
+      const noEpoch = meshHeartbeatApply({});
+      const e1 = `eval-mesh-${Date.now().toString(36)}`;
+      try {
+        // изоляция (урок №6): пред-состояние epoch-фенса не должно влиять на прогон
+        db.query(`DELETE FROM meta WHERE key IN ('mesh_last_heartbeat','mesh_epoch_last')`).run();
+        const r1 = meshHeartbeatApply({ mesh_epoch: e1, coordinator: "eval", supervisors: ["sup-1"] });
+        const r2 = meshHeartbeatApply({ mesh_epoch: e1, coordinator: "eval", supervisors: ["sup-1"] });
+        const r3 = meshHeartbeatApply({ mesh_epoch: e1 + "-v2", coordinator: "eval", supervisors: ["sup-1", "sup-2"] });
+        const meta = JSON.parse(getMeta("mesh_last_heartbeat") ?? "{}");
+        const ev = db.query(`SELECT COUNT(*) AS c FROM events WHERE type='MESH_HEARTBEAT' AND ts>=?`).get(new Date(Date.now() - 60_000).toISOString()) as { c: number };
+        const ok = !noEpoch.ok && noEpoch.error === "mesh_epoch_required"
+          && r1.ok && r2.ok && r1.mesh_epoch_advanced === false && r3.mesh_epoch_advanced === true
+          && meta.mesh_epoch === e1 + "-v2" && meta.coordinator === "eval" && meta.supervisors_n === 2
+          && ev.c >= 3
+          && (r1.supervisor_tick === null || (typeof r1.supervisor_tick === "object" && r1.supervisor_tick !== null));
+        return { ok, evidence: `no-epoch rejected=${!noEpoch.ok}, heartbeat ok=${r1.ok}/${r2.ok}/${r3.ok}, advanced=${r1.mesh_epoch_advanced}/${r3.mesh_epoch_advanced}, meta=${meta.mesh_epoch}, MESH_HEARTBEAT=${ev.c}, supervisor_tick=${r1.supervisor_tick === null ? "null(честно)" : "объект"}` };
+      } finally {
+        db.query(`DELETE FROM meta WHERE key IN ('mesh_last_heartbeat','mesh_epoch_last')`).run();
       }
     },
   },

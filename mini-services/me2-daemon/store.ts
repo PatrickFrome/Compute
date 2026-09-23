@@ -17,6 +17,9 @@ import { dirname, join } from "node:path";
 const HERE = join(dirname(fileURLToPath(import.meta.url)), "data");
 mkdirSync(HERE, { recursive: true });
 
+/** Версия daemon'а — единый источник (R49): health, /state.capabilities, eval, UI. */
+export const VERSION = "0.42.0";
+
 export const db = new Database(join(HERE, "me2.db"));
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA synchronous = NORMAL;");

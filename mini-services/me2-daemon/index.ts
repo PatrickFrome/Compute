@@ -16,7 +16,7 @@ import {
   listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
   enqueueCommand, budgetWindow, listCommands, listWorkers, upsertWorker,
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
-  createAgent, createTask, nowIso, setTaskReflectionLlm,
+  createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
 } from "./store";
 import { listProviders } from "./providers";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
@@ -58,15 +58,16 @@ import { demandTick, demandStatus, demandConfigSet, DEMAND_TICK_MS } from "./src
 import { policyStatus, policyReload } from "./src/policy";
 import { cronStatus, cronTick, cronCancel, cronFire, CRON_TICK_MS } from "./src/cron";
 import { tokensEnsure, tokenList, tokenSet, tokenDelete, tokensStatus } from "./src/tokens";
+import { withContract, missionUiHtml } from "./src/contract";
 import {
   agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
   agentChatTurnAsync, agentChatCompact, agentChatRestore,
   agentChatSupervisorTick, supervisorEnsure, SUPERVISOR_TICK_MS, interchatDeliver, chatSetObjective,
+  meshHeartbeatApply,
 } from "./src/agentchat";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.41.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
@@ -146,7 +147,13 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
         last_seq: lastSeq(), actions: knownActions().length, ts: nowIso(),
       });
     }
-    if (path === "/state" && req.method === "GET") return json(res, 200, snapshot());
+    if (path === "/state" && req.method === "GET") return json(res, 200, withContract(snapshot()));
+    // ── R49 (фаза A): GET /ui — самодостаточная Mission Control (0 сборки, 0 зависимостей).
+    // Читает read-only REST того же origin; операции — socket agentchat:op (REST-операций нет).
+    if (path === "/ui" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+      return res.end(missionUiHtml());
+    }
     if (path === "/budget" && req.method === "GET") return json(res, 200, { ok: true, ...budgetWindow() });
     if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, count: actionCatalog().length, total_target: 47, actions: actionCatalog() });
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
@@ -913,7 +920,15 @@ io.on("connection", (socket) => {
         ack?.(r.ok ? { ok: true, ...r } : { ok: false, error: r.error });
         return;
       }
-      ack?.({ ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective"] });
+      if (op === "mesh_heartbeat") {
+        // R49 (фаза A): мост supervisor-mesh браузера (me2-supervisor-mesh-bridge.mjs) —
+        // штатный heartbeat mesh ⇄ агентный тик. meta mesh_last_heartbeat + MESH_HEARTBEAT в chain,
+        // в ответ — последний supervisor_tick (meta supervisor_tick_last, честно null до первого тика).
+        const r = meshHeartbeatApply(p);
+        ack?.(r.ok ? { ok: true, mesh_epoch_advanced: r.mesh_epoch_advanced, supervisor_tick: r.supervisor_tick } : { ok: false, error: r.error });
+        return;
+      }
+      ack?.({ ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective", "mesh_heartbeat"] });
     } catch (e) {
       ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
     }

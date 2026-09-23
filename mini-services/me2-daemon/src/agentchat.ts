@@ -833,7 +833,40 @@ export function agentChatSupervisorTick(opts: { force?: boolean } = {}): { ensur
     agentChatTurnAsync(p.session_id, `Ты отчитался об успехе («${p.preview.slice(0, 80)}»), но исход НЕ зафиксирован. Урок системы: заявление ≠ решение. Вызови инструмент report_outcome {status: fixed|done|blocked, proof: что именно сделано и как проверено}. Если работа не завершена — честно продолжи.`);
     outcome_nudged.push(p.session_id);
   }
+  // R49 (фаза A): последний тик супервизора — контрактовое поле для моста mesh
+  // (me2-supervisor-mesh-bridge.mjs читает его в ответе op mesh_heartbeat)
+  setMeta("supervisor_tick_last", JSON.stringify({ ts: nowIso(), kicked: kicked.length, supervisors: sups.length, outcome_nudged: outcome_nudged.length }));
   return { ensured, kicked, supervisors: sups.length, outcome_nudged };
+}
+
+/**
+ * R49 (фаза A): применение heartbeat'а supervisor-mesh браузера (op mesh_heartbeat).
+ * Аналог bindCoordinationFence/assertCoordinationFenceCurrent браузера: epoch сверяется,
+ * meta mesh_last_heartbeat / mesh_epoch_last — персистентны, событие MESH_HEARTBEAT — в hash-chain.
+ * В ответе — последний supervisor_tick (meta supervisor_tick_last) или честный null.
+ */
+export function meshHeartbeatApply(p: {
+  mesh_epoch?: unknown; coordinator?: unknown; supervisors?: unknown; fence?: unknown;
+}): { ok: boolean; error?: string; mesh_epoch_advanced?: boolean; supervisor_tick?: unknown } {
+  ensureSchema();
+  const epoch = String(p.mesh_epoch ?? "").trim();
+  if (!epoch) return { ok: false, error: "mesh_epoch_required" };
+  if (epoch.length > 128) return { ok: false, error: "mesh_epoch_too_long" };
+  const coordinator = String(p.coordinator ?? "").slice(0, 128);
+  const sups = (Array.isArray(p.supervisors) ? p.supervisors : p.supervisors != null ? [p.supervisors] : [])
+    .map((s) => String(s).slice(0, 128)).slice(0, 64);
+  const prev = getMeta("mesh_epoch_last");
+  const advanced = prev !== null && prev !== epoch;
+  setMeta("mesh_epoch_last", epoch);
+  setMeta("mesh_last_heartbeat", JSON.stringify({
+    ts: nowIso(), mesh_epoch: epoch, coordinator, supervisors_n: sups.length, fence_present: p.fence != null,
+  }));
+  try {
+    emit("MESH_HEARTBEAT", { mesh_epoch: epoch, coordinator, supervisors_n: sups.length, mesh_epoch_advanced: advanced, verdict: advanced ? "epoch_advanced" : "heartbeat" }, null, null);
+  } catch { /* chain не критичен */ }
+  let tick: unknown = null;
+  try { tick = JSON.parse(getMeta("supervisor_tick_last") ?? "null"); } catch { tick = null; }
+  return { ok: true, mesh_epoch_advanced: advanced, supervisor_tick: tick };
 }
 
 // G7-мост: cron.ts шлёт сообщения и будит чаты без цикла импортов (cron импортирует только типы)
