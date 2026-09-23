@@ -159,7 +159,7 @@ type Command = {
 };
 type Event = { seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string };
 type ActionMeta = { action: string; lane: string; cost: number; desc: string; group: string; args?: string };
-type Mirror = { mode: string; pending: number; method: string | null; last_error: string | null; last_sent_seq: number };
+type Mirror = { mode: string; pending: number; method: string | null; last_error: string | null; last_sent_seq: number; storage?: { ok: boolean; bucket: string; objects: number }; ddl?: { last_result: string | null; retry_every_min: number; next_retry_at: string | null; attempts_total: number } };
 type Snapshot = {
   ok: boolean; ts: string; agents: Agent[]; tasks: Task[]; archived?: Task[]; workers: Worker[];
   commands: Command[]; events: Event[];
@@ -761,7 +761,7 @@ export default function MissionControl() {
     const ev = setInterval(() => {
       fetch("/evidence?XTransformPort=3041")
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (d?.ok) setMirror({ mode: d.mode, pending: d.pending, method: d.method, last_error: d.last_error, last_sent_seq: d.last_sent_seq }); })
+        .then((d) => { if (d?.ok) setMirror({ mode: d.mode, pending: d.pending, method: d.method, last_error: d.last_error, last_sent_seq: d.last_sent_seq, storage: d.storage, ddl: d.ddl }); })
         .catch(() => { /* зеркало недоступно */ });
     }, 10_000);
     const tick = setInterval(() => setNowMs(Date.now()), 1000);
@@ -1646,7 +1646,7 @@ export default function MissionControl() {
   const etaOf = (c: Command) => `${Math.max(1, Math.ceil(((c.run_after ?? 0) - nowMs) / 1000))}s`;
 
   const mirrorMode = mirror?.mode ?? "…";
-  const mirrorColor = mirrorMode === "LIVE" ? "text-emerald-400" : mirrorMode === "DEGRADED" ? "text-amber-400" : "text-zinc-500";
+  const mirrorColor = mirrorMode === "LIVE" || mirrorMode === "LIVE-STORAGE" ? "text-emerald-400" : mirrorMode === "DEGRADED" ? "text-amber-400" : "text-zinc-500";
   const laneChip = (lane: string) =>
     lane === "EMERGENCY" ? "border-rose-800 text-rose-400"
       : lane === "CONTROL" ? "border-amber-800 text-amber-400"
@@ -1672,10 +1672,10 @@ export default function MissionControl() {
           <span className="hidden xl:flex" aria-label="Активность"><Sparkline events={events} /></span>
           <span
             className={`hidden items-center gap-1.5 lg:flex ${mirrorColor}`}
-            title={mirror?.last_error ? `Зеркало: ${mirror.last_error}` : "Evidence-mirror → Supabase"}
+            title={mirror?.last_error ? `Зеркало: ${mirror.last_error}` : mirror?.ddl?.last_result ? `Зеркало v2 · ${mirrorMode}${mirror.storage?.ok ? ` · storage ${mirror.storage.objects} объектов` : ""} · DDL: ${mirror.ddl.last_result} (ретрай ${mirror.ddl.retry_every_min}м)` : "Evidence-mirror → Supabase"}
           >
-            {mirrorMode === "OFF" ? <CloudOff className="h-3.5 w-3.5" /> : <Cloud className={`h-3.5 w-3.5 ${mirrorMode === "LIVE" ? "mirror-live" : ""}`} />}
-            {mirrorMode}{mirror && mirror.pending > 0 ? ` · ${mirror.pending}` : ""}
+            {mirrorMode === "OFF" ? <CloudOff className="h-3.5 w-3.5" /> : <Cloud className={`h-3.5 w-3.5 ${mirrorMode.startsWith("LIVE") ? "mirror-live" : ""}`} />}
+            {mirrorMode}{mirror && mirror.pending > 0 ? ` · ${mirror.pending}` : ""}{mirror?.storage?.ok ? ` · s${mirror.storage.objects}` : ""}
           </span>
           <span className="hidden items-center gap-1.5 md:flex" aria-live="polite">
             <Dot on={connected} pulse /> {connected ? "WS LIVE" : "WS OFFLINE"}

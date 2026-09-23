@@ -30,6 +30,7 @@ import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
 import { glmVerdict } from "./glm";
 import { reviewerVerdict } from "./reviewer";
+import { evidenceStatus } from "../evidence";
 import type { SuCheck } from "./selfupdate";
 
 export interface MechanicRow {
@@ -204,6 +205,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME30", name: "DB-гигиена: WAL checkpoint + VACUUM-окно + индексы горячих запросов (D4)", old_ref: "— (R24 §D4: SQLite-гигиена долгоживущего daemon)",
       verdict: hygieneVerdict().verdict,
       evidence: hygieneVerdict().evidence + "; GET /db/hygiene | POST {op:checkpoint|vacuum} — PASSIVE по расписанию 10м, TRUNCATE/VACUUM оператором",
+    },
+    {
+      id: "ME31", name: "Evidence-зеркало v2: storage-доставка + DDL-хилер с авто-применением миграции (R32)", old_ref: "M5 evidence-plane (outbox → Supabase; DEGRADED ждал DDL)",
+      verdict: (() => { const st = evidenceStatus(); return st.mode === "LIVE" || st.mode === "LIVE-STORAGE" ? "WORKS" : st.mode === "DEGRADED" ? "CAVEAT" : "DECOR"; })(),
+      evidence: (() => { const st = evidenceStatus(); return `mode=${st.mode}, pending=${st.pending}, storage=${st.storage.ok ? "ok/" + st.storage.objects + " объектов" : "—"}, ddl=${st.ddl.last_result ?? "—"} (ретрай ${st.ddl.retry_every_min}м); POST /evidence {op:probe_ddl|probe_storage}`; })(),
     },
   ];
 

@@ -38,9 +38,10 @@ import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
 import { senseDiffs } from "./sense";
 import { obsvPersistState } from "./obsv";
 import { hygieneStatus } from "./dbhygiene";
+import { evidenceStatus } from "../evidence";
 import { recordSpan } from "./otel";
 
-export const EVAL_DATASET_VERSION = 6;
+export const EVAL_DATASET_VERSION = 7;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -91,6 +92,8 @@ const CANONICAL_EFFECT = new Set(["CONFIRMED", "NO_EFFECT_PROVEN", "FAILED_PRE_E
 //            +handoff.table_api = 24. Осознанное изменение контракта → версия поднята.
 // v4 (R29) — +glm.currency (канон+drift флота), +reviewer.api (колонка/статистика) = 26.
 // v5 (R30) — +approval.policies_canonical, +approval.gate_api (живой гейт-цикл с самоочисткой) = 28.
+// v6 (R31) — +sense.diff_api, +obsv.persist_ttl, +db.hygiene = 31.
+// v7 (R32) — +evidence.remote (доставка в облако: LIVE/LIVE-STORAGE или healer активен + outbox ограничен) = 32.
 export const EVAL_DATASET: EvalCheck[] = [
   // — шина —
   {
@@ -417,6 +420,19 @@ export const EVAL_DATASET: EvalCheck[] = [
       if (st.flushed_total === 0) return { ok: ttlOk, evidence: `WARMUP: флешей не было (ttl=${st.ttl_min}м, queue=${st.queue}) — подожди трафик вкладки` };
       const ok = ttlOk && !st.last_error && st.queue < 800;
       return { ok, evidence: `rows=${st.rows} (TTL ${st.ttl_min}м, кап 5000), флешей=${st.flushed_total}, queue=${st.queue}${st.last_error ? `, err=${st.last_error}` : ""}` };
+    },
+  },
+  {
+    id: "evidence.remote",
+    plane: "state",
+    title: "Evidence-зеркало: доставка в Supabase жива или само-заживление активно (R32)",
+    critical: false,
+    expect: "mode LIVE/LIVE-STORAGE, ЛИБО честный DEGRADED с активным DDL-хилером и ограниченным outbox (<500)",
+    run: () => {
+      const st = evidenceStatus();
+      if (st.mode === "LIVE" || st.mode === "LIVE-STORAGE") return { ok: true, evidence: `mode=${st.mode}, method=${st.method}, pending=${st.pending}, storage.objects=${st.storage.objects}` };
+      const healing = st.mode === "DEGRADED" && st.pending < 500 && st.ddl.retry_every_min > 0;
+      return { ok: healing, evidence: `mode=${st.mode}, pending=${st.pending}, ddl.last=${st.ddl.last_result ?? "—"}, healer=${st.ddl.retry_every_min}м${st.last_error ? ", err=" + String(st.last_error).slice(0, 80) : ""}` };
     },
   },
   {
