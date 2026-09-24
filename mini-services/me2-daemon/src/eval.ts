@@ -38,6 +38,8 @@ import { handoffList, handoffStats } from "./handoffs";
 import { glmStatus, canonicalGlm, agentTag } from "./glm";
 import { reviewStats } from "./reviewer";
 import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
+import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck } from "./sandbox2";
+import { sandboxEligible, FS_RULES } from "./review";
 import { senseDiffs } from "./sense";
 import { obsvPersistState } from "./obsv";
 import { hygieneStatus } from "./dbhygiene";
@@ -68,7 +70,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 27;
+export const EVAL_DATASET_VERSION = 28;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1037,7 +1039,7 @@ export const EVAL_DATASET: EvalCheck[] = [
       // R62 P0-a: + /exec (TERMINAL_RUN) и /file (FILE_EDIT); R63 P0-b: + /review (approve/deny/config)
       const writes = [...html.matchAll(/fetch\(api\("([^"?]+)"\),\s*\{\s*method:\s*["']([A-Z]+)/g)]
         .map((m) => m[1] + " " + m[2]);
-      const SANCTIONED = new Set(["/exthost/run POST", "/exec POST", "/file POST", "/review POST"]);
+      const SANCTIONED = new Set(["/exthost/run POST", "/exec POST", "/file POST", "/review POST", "/sandbox POST"]);
       const sanctioned = writes.every((w) => SANCTIONED.has(w));
       const fetchPaths = [...html.matchAll(/fetch\((?:api\()?"([^"?]+)/g)].map((m) => m[1]);
       const readOnly = fetchPaths.length >= 3 && fetchPaths.every((p) => p.startsWith("/"));
@@ -1360,6 +1362,58 @@ export const EVAL_DATASET: EvalCheck[] = [
       const cfgOk = off.enabled === false && restored.enabled === true && baseCfg.enabled === true && baseCfg.timeout_ms >= 500 && baseCfg.queue_max >= 1 && typeof baseCfg.model === "string" && baseCfg.model.length > 0;
       const ok = planOk && seriesOk && cfgOk;
       return { ok, evidence: `план=${planOk} (allow×2 ✓; ask: redirect/secret-path/push/install/reset/clean по именованным правилам ✓; block: force-push ✓; config on/off/on ✓), серия 20 → ${JSON.stringify(dist)} (block=${dist.block ?? 0}, ask=${dist.ask ?? 0}), очередь approve/deny + ask-fail-closed LLM — живые REST-ходы раунда (worklog R63)` };
+    },
+  },
+  {
+    id: "contract.sandbox2",
+    plane: "contract",
+    title: "R64 P0-2 OS-sandbox: fs/syscall-конфайнмент (канон Cursor Landlock+seccomp) — слоистый дизайн (ns на ядре 5.10: userns+mountns+seccomp; Landlock ≥5.13), strict fail-closed (обязательные слои не применились → команда НЕ исполнена), seccomp-bpf единый источник для launcher и eval (buildSeccompFilter), default-deny INET при net=deny, конфигурация как данные (policy.json sandbox)",
+    critical: false,
+    expect: "planSandbox: пустой cmd → отказ; curl (tier-1) → отказ; cwd вне корней → отказ; неабсолютный hide → отказ; хороший план → argv содержит bash -c и seccomp net=deny с mount/unshare/io_uring_setup/ptrace; strictCheck: полные слои → ok; make_private=false → fail; verdict=null → fail; sandboxEligible: fs-правило + auto → true; external_state + auto → false; config on/off/on",
+    run: () => {
+      const dir = "/home/z/me2-sandboxes";
+      // plan-инварианты (канон R25: без spawn в sync-харнесе; живые прогоны — REST-ходы раунда)
+      const neg1 = planSandbox("", dir);
+      const neg2 = planSandbox("curl https://example.com", dir);   // tier-1: вне белого списка (non-bypass)
+      const neg3 = planSandbox("ls", "/home/z/my-project");         // cwd вне управляемых корней
+      const neg4 = planSandbox("ls", dir, { hide: ["relative"] }); // hide не абсолютный
+      const negatives = [neg1, neg2, neg3, neg4].filter((p) => !p.ok).length;
+      const good = planSandbox("echo ok > probe.txt", dir);
+      const planOk = good.ok
+        && good.argv!.includes("-c") && good.argv!.includes("/bin/bash")
+        && good.profile!.net === "deny" && good.profile!.landlock === false // ABI-проба R64: ядро 5.10
+        && good.profile!.hide.includes("/home/z/.a2")                       // секреты скрыты по умолчанию
+        && good.profile!.env.ME2_SANDBOX === "1" && !good.profile!.env.PATH.includes("=" )
+        && good.profile!.rlimits.as === 4294967296; // канон R62 (V8 CodeRange)
+      // BPF-программа: один источник для launcher и eval (инвариант целостности)
+      const secOk = good.ok && good.seccomp!.net === "deny"
+        && good.seccomp!.deny_syscalls.includes("mount") && good.seccomp!.deny_syscalls.includes("unshare")
+        && good.seccomp!.deny_syscalls.includes("io_uring_setup") && good.seccomp!.deny_syscalls.includes("ptrace")
+        && good.seccomp!.len > 40; // arch+LD+34 deny+socket-блок+clone-блок+ALLOW
+      // strict-матрица: fail-closed без обязательных слоёв (живые негативы — probe в REST-ходах раунда)
+      const full = { make_private: true, ro_root: true, rw_rebinds: true, secrets_hidden: true, seccomp: "installed", rlimit_as: true, rlimit_nofile: true, rlimit_core: true, net: "deny" };
+      const m1 = strictCheck(full as never, "deny", true).ok === true;
+      const m2 = strictCheck({ ...full, make_private: false } as never, "deny", true).ok === false;
+      const m3 = strictCheck(null, "deny", true).ok === false;
+      const m4 = strictCheck({ ...full, seccomp: "install_failed" } as never, "deny", true).ok === false;
+      const strictMatrix = m1 && m2 && m3 && m4;
+      // канон D02: sandbox-ability резолвит fs-риски ДО classifier (элегибельность)
+      const elig = sandboxEligible("redirect_outside_roots", true, "sandboxable") === true
+        && sandboxEligible("external_state", true, "sandboxable") === false   // git push — НЕ fs-риск
+        && sandboxEligible("path_outside_roots", false, "sandboxable") === false // auto off → ask (R63-поведение)
+        && sandboxEligible("redirect_outside_roots", true, "unsandboxed") === false; // без сандбокса — ask
+      const fsRulesOk = FS_RULES.has("redirect_outside_roots") && FS_RULES.has("path_outside_roots") && FS_RULES.has("var_expansion_path") && FS_RULES.size === 3;
+      // конфиг-плоскость (config as data)
+      const baseCfg = sandboxConfig();
+      const off = sandboxSetOverride({ auto_sandbox: true, net: "allow" });
+      sandboxSetOverride({ auto_sandbox: baseCfg.auto_sandbox, net: baseCfg.net });
+      const restored = sandboxConfig();
+      const cfgOk = off.auto_sandbox === true && off.net === "allow" && restored.net === baseCfg.net && restored.auto_sandbox === baseCfg.auto_sandbox
+        && typeof baseCfg.strict === "boolean" && typeof baseCfg.tmp_size === "string";
+      // офлайн-проба модуля (двойная проверка тем же харнесом)
+      const probeOff = sandboxProbeOffline();
+      const ok = negatives === 4 && planOk && secOk && strictMatrix && elig && fsRulesOk && cfgOk && probeOff.ok;
+      return { ok, evidence: `негативы plan=${negatives}/4 ✓; argv+rlimit-as-4GiB+hide-.a2 ✓; BPF=${secOk ? "mount/unshare/io_uring_setup/ptrace, len=" + good.seccomp!.len : "FAIL"}; strict-матрица ${strictMatrix ? "ok/fail/fail/fail ✓" : "FAIL"}; sandboxEligible (fs×auto×caps) ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}; живые негативы/эскале-детектор — probe в REST-ходах раунда` };
     },
   },
 ];

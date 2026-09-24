@@ -31,6 +31,7 @@ import { startSelfAuditLoop } from "./src/self-audit";
 import { exthostStatus, runExtension, exthostStartEventLoop, setMirrorFeedProvider } from "./src/exthost";
 import { execStatus, runTerminalAsync, runApprovedAsync, execProbeOffline, planExec } from "./src/exec";
 import { reviewStatus, reviewPlan, classifyDry, queueTake, queueResolve, queueDeny, classifierSetOverride, type ReviewInput } from "./src/review";
+import { sandboxStatus, sandboxProbe, runSandboxedAsync, sandboxSetOverride } from "./src/sandbox2";
 import { editStatus, applyEditAsync, rollbackEdit, editProbeOffline } from "./src/edit";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
@@ -263,11 +264,11 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R62 P0-a «exec/edit tools»: TERMINAL_RUN + FILE_EDIT для агентного harness ──
     // Канон Cursor terminal/edit-files (корпус R61, трек A); enforcement = allowlist по
     // сегментам → prlimit → таймаут → env-белый-список; cwd/цель — только управляемые
-    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 33.
+    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 34.
     if (path === "/exec" && req.method === "GET") return json(res, 200, execStatus());
     if (path === "/exec" && req.method === "POST") {
       try {
-        const body = await readBody(req) as { op?: string; mode?: string; cmd?: string; cwd?: string; timeout_ms?: number };
+        const body = await readBody(req) as { op?: string; mode?: string; cmd?: string; cwd?: string; timeout_ms?: number; sandbox?: boolean };
         if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
         // Run Mode «plan» (канон Cursor Plan Mode): план + вердикт тира-3 БЕЗ spawn и БЕЗ очереди
         if (body?.op === "plan" || body.mode === "plan") {
@@ -277,14 +278,45 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           return json(res, 200, { ok: true, schema: "me2.exec.v1", mode: "plan", planned: { segments: plan.segments, binaries: plan.binaries }, cwd: plan.cwd, timeout_ms: plan.timeout_ms, review: reviewPlan(input) });
         }
         if (body?.op !== "run") return json(res, 400, { ok: false, error: "bad_op", allowed: ["run", "plan"] });
-        return json(res, 200, await runTerminalAsync(body.cmd, body.cwd, body.timeout_ms, "rest"));
+        // R64 P0-2: sandbox:true → fs-риски гасит конфайнмент (канон D02), не очередь
+        return json(res, 200, await runTerminalAsync(body.cmd, body.cwd, body.timeout_ms, "rest", { sandbox: body.sandbox === true }));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R64 P0-2 «OS-sandbox»: fs/syscall-конфайнмент (канон Cursor Landlock+seccomp) ──
+    // Слои: ns (userns+mountns: ro-root, rw-rebind корней, tmpfs /tmp, hide секретов)
+    // + seccomp-bpf (deny-лист + default-deny INET); strict fail-closed; Landlock ≥5.13.
+    // Вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/sandbox" && req.method === "GET") return json(res, 200, sandboxStatus());
+    if (path === "/sandbox" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; net?: "deny" | "allow"; auto_sandbox?: boolean; strict?: boolean };
+        if (body?.op === "probe") {
+          return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", op: "probe", ...(await sandboxProbe("rest")) });
+        }
+        if (body?.op === "run") {
+          if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+          return json(res, 200, await runSandboxedAsync(body.cmd, body.cwd, { net: body.net, timeout: body.timeout_ms, source: "rest" }));
+        }
+        if (body?.op === "config") {
+          const patch: Record<string, unknown> = {};
+          if (typeof body.auto_sandbox === "boolean") patch.auto_sandbox = body.auto_sandbox;
+          if (typeof body.strict === "boolean") patch.strict = body.strict;
+          if (body.net === "deny" || body.net === "allow") patch.net = body.net;
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: "nothing_to_set", fields: ["auto_sandbox", "strict", "net"] });
+          const cfg = sandboxSetOverride(patch as never);
+          try { emit("SANDBOX_CONFIG", { patch, effective: { auto_sandbox: cfg.auto_sandbox, net: cfg.net, strict: cfg.strict } }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json sandbox" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe", "run", "config"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
       }
     }
     // ── R63 P0-b «classifier tier»: Run Modes + пре-исполнение (канон Cursor Auto-review) ──
-    // Тир-3: allowlist (exec) → prlimit → classifier; ask → очередь одобрений оператора.
-    // Классификатор НЕ security boundary (канон D02); вне шины (47-инвариант); манифест non-bypass 33.
+    // Тир-3: allowlist (exec) → sandbox-ability (P0-2) → classifier; ask → очередь одобрений оператора.
+    // Классификатор НЕ security boundary (канон D02); вне шины (47-инвариант); манифест non-bypass 34.
     if (path === "/review" && req.method === "GET") return json(res, 200, reviewStatus());
     if (path === "/review" && req.method === "POST") {
       try {
@@ -972,7 +1004,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

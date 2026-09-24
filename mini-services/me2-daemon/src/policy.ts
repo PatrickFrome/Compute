@@ -41,6 +41,7 @@ export interface PolicyFile {
     cron_min_minutes: number; // G7: минимальный интервал every-задания (анти-шторм)
   };
   classifier: ClassifierPolicy; // R63 P0-b: тир-3 классификатор пре-исполнения (/review)
+  sandbox: SandboxPolicy;       // R64 P0-2: OS-сандбокс (/sandbox) — sec.sandbox-config как данные
 }
 
 export interface ClassifierPolicy {
@@ -49,6 +50,15 @@ export interface ClassifierPolicy {
   timeout_ms: number;      // потолок LLM-вызова классификатора
   queue_max: number;       // потолок pending-очереди одобрений (переполнение → block, fail-closed)
   model: string;           // модель LLM-классификатора (канон Cursor: малая модель)
+}
+
+export interface SandboxPolicy {
+  // R64 P0-2 (sec.sandbox-config — «конфигурация как данные», канон Cursor):
+  auto_sandbox: boolean;   // классификатор выдаёт вердикт «sandbox» на fs-риски (tier-2 реален); false → ask (R63-поведение)
+  net: "deny" | "allow";   // режим сети сандбокса (canon: default-deny + allowlist; доменный allowlist = P1)
+  extra_hide: string[];    // дополнительные каталоги под tmpfs-RO (сверх /home/z/.a2)
+  strict: boolean;         // strict fail-closed: обязательные слои не применились → команда НЕ исполняется
+  tmp_size: string;        // размер приватного tmpfs /tmp (перезатирает общий)
 }
 
 const POLICY_PATH = join(import.meta.dir, "..", "policy.json");
@@ -70,6 +80,7 @@ const DEFAULTS: PolicyFile = {
   },
   caps: { crons_per_chat: 8, crons_global: 48, cron_min_minutes: 5 },
   classifier: { enabled: true, llm_enabled: false, timeout_ms: 3000, queue_max: 20, model: "zai" },
+  sandbox: { auto_sandbox: false, net: "deny", extra_hide: [], strict: true, tmp_size: "64m" },
 };
 
 let cache: PolicyFile | null = null;
@@ -85,6 +96,7 @@ export function loadPolicy(force = false): PolicyFile {
     }
     raw.caps = { ...DEFAULTS.caps, ...(raw.caps ?? {}) };
     raw.classifier = { ...DEFAULTS.classifier, ...(raw.classifier ?? {}) };
+    raw.sandbox = { ...DEFAULTS.sandbox, ...(raw.sandbox ?? {}) };
     cache = raw;
     loadError = null;
   } catch (e) {
@@ -97,6 +109,7 @@ export function loadPolicy(force = false): PolicyFile {
     }
     cache = JSON.parse(JSON.stringify(DEFAULTS)) as PolicyFile;
     cache.classifier = { ...DEFAULTS.classifier };
+    cache.sandbox = { ...DEFAULTS.sandbox };
   }
   return cache;
 }

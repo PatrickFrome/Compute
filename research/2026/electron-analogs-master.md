@@ -101,6 +101,8 @@ keytar/safeStorage для секретов. Урок: secrets НИКОГДА в 
 | ~~Workbench-лэйаут панелей (сворачивание/скрытие)~~ | VS Code workbench | ✔ R60 (тогглы+dblclick+персист localStorage; SQLite-персист R61+) |
 | ~~Extension-host аналог: изоляция skills в подпроцессе~~ | VS Code extension host | ✔ R60 (prlimit+stdio-only+caps-медиация; long-lived R61+) — сверка: research/2026/r60-analogues.md §2 |
 | ~~Exec/edit инструменты агентного harness (TERMINAL_RUN+FILE_EDIT)~~ | Cursor terminal/edit-files/checkpoints | ✔ R62 (src/exec.ts+src/edit.ts; P0-a из R61-GAP-ANALYSIS; классификатор=P0-1, Landlock/egress=P0-2) — сверка: research/2026/r62-analogues.md |
+| ~~Run Modes + классификатор пре-исполнения (тир-3)~~ | Cursor auto-review/run-modes | ✔ R63 (src/review.ts: эвристика 8 правил + LLM opt-in, ask-очередь; канон D02) — сверка: research/2026/r63-analogues.md |
+| ~~OS-сандбокс (fs/syscall-конфайнмент + default-deny сеть)~~ | Cursor Sandbox (D08/D09/D11: Landlock+seccomp / Seatbelt / bwrap; sandbox.json; SSRF-блок) | ✔ R64 (src/sandbox2.ts + launcher: ns user+mount через util-linux (Landlock ≥5.13 — честный skip на 5.10) + seccomp-bpf 28-deny + net=deny; strict fail-closed; probe 4/4; вердикт «sandbox» классификатора реален) — сверка: research/2026/r64-analogues.md |
 | Device-flow вход оператора в панели | Cursor/gh-cli | R61 |
 | Remote-профиль установщика (daemon локально, UI где угодно) | VS Code Remote | R61+ |
 
@@ -113,5 +115,8 @@ SQLite-истина, манифестный self-update, контрактный 
 non-bypass шина + «политики как данные» + периодический самоаудит с переходными
 событиями + изоляция расширений строже канона (п.10 инвентаря). Следующий прирост —
 device-flow вход (R61) и long-lived exthost / SQLite-персист лэйаута (R61+); exec/edit
-инструменты Cursor-parity закрыты R62 (P0-a, 15 P0 гэпов R61 → первый в коде); полный
-разбор R60 — research/2026/r60-analogues.md, R62 — research/2026/r62-analogues.md.
+инструменты Cursor-parity закрыты R62 (P0-a, 15 P0 гэпов R61 → первый в коде),
+классификатор R63 (P0-b), OS-сандбокс R64 (P0-2: userns+mountns+seccomp со строгим
+fail-closed — Landlock честно skip на ядре 5.10); полный
+разбор R60 — research/2026/r60-analogues.md, R62 — research/2026/r62-analogues.md,
+R63 — research/2026/r63-analogues.md, R64 — research/2026/r64-analogues.md.

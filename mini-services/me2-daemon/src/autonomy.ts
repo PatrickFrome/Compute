@@ -50,6 +50,7 @@ const BUDGET_WEIGHTS: Record<string, number> = {
   AGENT_CHAT_DEGRADED: 3, TASK_REWARD_HACK: 5, EVAL_FAIL: 2, COMMAND_DENIED: 2,
   EXEC_DENIED: 2, EDIT_ROLLBACK: 3, // R62 P0-a: отказы терминала и авто/ручные откаты правок в blast-radius
   CLASSIFIER_BLOCK: 2, CLASSIFIER_DENIED: 1, // R63 P0-b: блоки тира-3 в blast-radius; операторские дени очереди — шум меньше
+  SANDBOX_FAILED: 2, SANDBOX_ESCAPE: 3, // R64 P0-2: strict-отказы честнее в blast-radius; эскале конфайнмента — максимальный сигнал
 };
 
 // ── P2+P3: liveness / deadlock / livelock ─────────────────────────
@@ -218,6 +219,7 @@ export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/exec": "R62 P0-a exec-плоскость (TERMINAL_RUN): белые списки бинарей ПО СЕГМЕНТАМ + prlimit (as/nofile/core) + таймаут + env-белый-список + cwd только в управляемых корнях; журнал exec_runs + TERMINAL_RUN/EXEC_DENIED в chain; вне шины (47-инвариант)",
   "/file": "R62 P0-a edit-плоскость (FILE_EDIT): unified-diff с dry-run-валидацией + durable-бэкап в журнале file_edits + rollback; цель только в управляемых корнях, single-file, без .git/удалений; EDIT_APPLIED/EDIT_DENIED/EDIT_ROLLBACK в chain",
   "/review": "R63 P0-b classifier-плоскость (тир-3 auto-review): approve|deny очереди classifier_ask + classify (dry, без spawn) + config (enabled/llm); классификатор НЕ security boundary; события CLASSIFIER_BLOCK/ASK/APPROVED/DENIED/CONFIG в chain; approve исполняет runApprovedAsync (tier-1 не скипается)",
+  "/sandbox": "R64 P0-2 OS-sandbox-плоскость: probe (живой негатив/позитив конфайнмента + SANDBOX_ESCAPE при эскале) + run (tier-1 planExec обязателен → ns+seccomp, strict fail-closed: слои не применились → команда НЕ исполнена) + config (auto_sandbox/net/strict); Landlock ≥5.13; события SANDBOX_APPLIED/FAILED/PROBE/ESCAPE/CONFIG в chain",
 };
 export function nonBypassAudit(): {
   verdict: "NO_BYPASS" | "UNKNOWN_ROUTE"; post_routes: string[]; classified: number;

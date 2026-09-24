@@ -50,8 +50,8 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost", "/exec", "/file", "/review"],
-      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run|plan,cmd,cwd,timeout_ms?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях; plan — без spawn)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)", "/review {op:approve|deny|classify|config} (P0-b: тир-3 классификатор, очередь одобрений ask)"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost", "/exec", "/file", "/review", "/sandbox"],
+      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run|plan,cmd,cwd,timeout_ms?,sandbox?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях; plan — без spawn; sandbox:true — R64 P0-2)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)", "/review {op:approve|deny|classify|config} (P0-b: тир-3 классификатор, очередь одобрений ask)", "/sandbox {op:probe|run|config} (R64 P0-2: OS-конфайнмент ns+seccomp, strict fail-closed)"],
     },
     memory: ["/memory op:write|delete|economy"],
     ui: "/ui",
@@ -71,6 +71,7 @@ export function capabilitiesJson(): CapabilityContract {
         "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run, /exec, /file)",
         "R62 P0-a exec/edit tools (гэп P0-0 R61): TERMINAL_RUN — allowlist бинарей по сегментам, prlimit as/nofile/core, таймаут, env-белый-список, cwd только в песочницах/worktrees; FILE_EDIT — unified-diff с dry-run-валидацией и durable-rollback из журнала; манифест non-bypass 30→32 (eval v26)",
         "R63 P0-b classifier tier (гэп P0-1 R61): Run Modes (run|plan) + тир-3 классификатор пре-исполнения по канону Cursor D02 (allowlist → prlimit → classifier); вердикты allow/ask/block; ask → очередь одобрений оператора (POST /review approve|deny); эвристика детерминированная, LLM — opt-in (policy.json classifier, таймаут → ask fail-closed); классификатор честно НЕ security boundary; манифест non-bypass 32→33 (eval v27)",
+        "R64 P0-2 OS-sandbox (гэп P0-2 R61): fs/syscall-конфайнмент канона Cursor — слоистый дизайн: Landlock (ядро ≥5.13; на 5.10 ENOSYS — честный skip) + ns (userns+mountns: ro-root, rw-rebind управляемых корней, tmpfs /tmp, tmpfs-RO поверх /home/z/.a2) + seccomp-bpf (deny-лист mount/unshare/io_uring/ptrace… + default-deny INET, единый билдер launcher/eval); strict fail-closed — слои не применились → команда НЕ исполнена; verdict «sandbox» классификатора теперь реален (sandbox.auto_sandbox, канон D02); манифест non-bypass 33 (eval v28)",
       ],
     },
   };
@@ -224,8 +225,25 @@ export function missionUiHtml(): string {
     <div class="scroll" id="review" data-testid="mc-review" style="max-height:22vh" aria-live="polite"></div>
     </div>
   </section>
+  <section aria-label="OS-сандбокс P0-2" style="grid-column:1/-1" id="wb-sandbox">
+    <h2>Sandbox (P0-2 · OS-конфайнмент) <span class="n" id="sbox-n">—</span><button class="wb-toggle" id="wb-toggle-sandbox" aria-expanded="true" aria-controls="wb-body-sandbox" data-testid="mc-sbox-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-sandbox">
+    <div class="row sub" id="sbox-caps" data-testid="mc-sbox-caps" style="margin:6px 6px 0">sandbox: загрузка…</div>
+    <div class="row sub" id="sbox-probe" style="margin:0 6px">probe: не запускался</div>
+    <div class="scroll" id="sbox" data-testid="mc-sbox" style="max-height:20vh" aria-live="polite"></div>
+    <div class="ops">
+      <div class="line"><input id="sbox-cmd" aria-label="Команда в сандбоксе" placeholder="команда (белый список): echo, git, node, ls…"></div>
+      <div class="line"><input id="sbox-cwd" aria-label="cwd в управляемом корне" placeholder="cwd: каталог внутри песочницы или worktree…"></div>
+      <div class="line">
+        <button id="b-sbox-run" title="Запуск в сандбоксе: unshare userns+mountns → ro-root + rw-rebind + hide-секретов → seccomp deny-лист + net=deny (POST /sandbox op:run — tier-1 план обязателен)">В сандбоксе</button>
+        <button id="b-sbox-probe" class="ghost" title="Живая верификация конфайнмента: запись внутрь ok · запись в секреты отказ · сеть EPERM · контроль net=allow (POST /sandbox op:probe)">Probe</button>
+        <span id="sbox-out" class="sub" style="align-self:center; white-space:pre-wrap; max-height:64px; overflow-y:auto"></span>
+      </div>
+    </div>
+    </div>
+  </section>
 </main>
-<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run · /exec · /file · /review)</footer>
+<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run · /exec · /file · /review · /sandbox)</footer>
 <div id="toast" class="toast" role="alert"></div>
 <script>
 (function(){
@@ -398,7 +416,7 @@ export function missionUiHtml(): string {
   // лэйаута силами daemon'а — кандидат R61+). Порядок секций не меняется (урок R12/R16):
   // только видимостью, кнопка в заголовке + dblclick по заголовку, aria-expanded/controls.
   var WB_KEY = "me2.ui.workbench.v1";
-  var WB_IDS = ["fleet", "river", "mirror", "ext", "exec", "review"];
+  var WB_IDS = ["fleet", "river", "mirror", "ext", "exec", "review", "sandbox"];
   function wbLoad(){ try { return JSON.parse(localStorage.getItem(WB_KEY) || "{}") || {}; } catch(e){ return {}; } }
   function wbSave(s){ try { localStorage.setItem(WB_KEY, JSON.stringify(s)); } catch(e){} }
   function wbSet(id, col, save){
@@ -589,6 +607,61 @@ export function missionUiHtml(): string {
       .catch(function(){ toast("сеть недоступна", "err"); });
   }
 
+  // R64 P0-2 OS-sandbox: слои конфайнмента (ns+seccomp; Landlock ≥5.13 — честный skip
+  // на 5.10) + probe (живой негатив/позитив, эскале-детектор) + запуск в конфайнменте.
+  // Кнопки — санкционированные записи POST /sandbox {op:probe|run} (белый список eval).
+  function loadSandbox(){
+    fetch(api("/sandbox")).then(function(r){ return r.json(); }).then(function(j){
+      var caps = $("sbox-caps"), box = $("sbox"); if(!caps || !box) return;
+      if(!j.ok){ caps.textContent = "sandbox: недоступен"; $("sbox-n").textContent = "—"; return; }
+      var c = j.caps || {}, cf = j.config || {}, ct = j.counters || {};
+      caps.innerHTML = 'landlock ABI ' + esc(String(c.landlock_abi)) + ' · userns ' + esc(String(c.userns_max)) + ' · seccomp ' + esc(String(c.seccomp_mode)) + ' · слои <b style="color:#6ee7b7">' + esc((c.layers_available||[]).join("+")) + '</b> · net ' + esc(cf.net||"?") + ' · auto ' + (cf.auto_sandbox ? "вкл" : "выкл") + ' · strict ' + (cf.strict ? "fail-closed" : "soft") + ' · прогонов ' + esc(String(ct.runs||0)) + ' / отказов ' + esc(String(ct.failed||0)) + ' / эскале ' + esc(String(ct.escapes||0));
+      box.textContent = "";
+      (j.recent||[]).forEach(function(r){
+        var d = document.createElement("div"); d.className = "ev " + (r.ok ? "step" : "degraded");
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = (r.ok ? ("exit " + r.exit) : (r.reason || "fail")) + " · sandbox · " + esc(String(r.ms||0)) + "мс";
+        var pl = document.createElement("div"); pl.className = "pl"; pl.textContent = "$ " + r.cmd;
+        d.appendChild(ty); d.appendChild(pl); box.appendChild(d);
+      });
+      if(!(j.recent||[]).length) box.innerHTML = '<div class="row sub">sandbox-прогонов ещё не было — Probe верифицирует конфайнмент живыми негативами (секреты/сеть)</div>';
+      $("sbox-n").textContent = c.verdict === "sandboxable" ? "sandboxable" : "unsandboxed";
+    }).catch(function(){ var el = $("sbox-n"); if(el) el.textContent = "ошибка"; });
+  }
+  $("b-sbox-run").addEventListener("click", function(){
+    var cmd = $("sbox-cmd").value.trim(), cwd = $("sbox-cwd").value.trim();
+    if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
+    var b = this, out = $("sbox-out"); b.disabled = true; out.textContent = "…";
+    fetch(api("/sandbox"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "run", cmd: cmd, cwd: cwd }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        var NL = String.fromCharCode(10);
+        if(v.ok){
+          var layers = Object.keys(v.sandbox && v.sandbox.layers || {}).filter(function(k){ return v.sandbox.layers[k] === true || v.sandbox.layers[k] === "installed"; });
+          out.textContent = "exit " + v.exit + " · " + v.duration + "мс · net " + (v.sandbox && v.sandbox.net) + NL + "слои: " + layers.join(", ");
+          toast("sandbox run ok", "ok"); return;
+        }
+        var failed = v.sandbox && v.sandbox.strict_ok === false;
+        out.textContent = (failed ? "sandbox_failed (strict): " : "отказ: ") + (v.reason || ("exit " + v.exit)) + NL + (v.stderr_tail || "").slice(0, 200);
+        toast(failed ? "sandbox_failed — команда НЕ исполнена" : "прогон в сандбоксе: exit " + v.exit, failed ? "err" : "ok");
+      })
+      .catch(function(){ out.textContent = "сеть недоступна"; })
+      .then(function(){ b.disabled = false; loadSandbox(); });
+  });
+  $("b-sbox-probe").addEventListener("click", function(){
+    var b = this, out = $("sbox-probe"); b.disabled = true; out.textContent = "probe: …";
+    fetch(api("/sandbox"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "probe" }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        var c = v.checks || {};
+        out.textContent = "probe " + (v.ok ? "✓ 4/4" : "✗") + (v.escape ? " · ЭСКАПИРОВАНО!" : "") + " · внутрь " + (c.write_inside && c.write_inside.ok ? "✓" : "✗") + " · секреты " + (c.write_outside_denied && c.write_outside_denied.ok ? "скрыты ✓" : "✗") + " · сеть " + (c.net_denied && c.net_denied.ok ? "EPERM ✓" : "✗") + " · контроль " + (c.net_allow_control && c.net_allow_control.ok ? "✓" : "✗") + " · " + esc(String(v.ms||0)) + "мс";
+        toast(v.ok ? "probe: конфайнмент подтверждён (4/4)" : "probe: НАРУШЕНИЕ — смотри лог", v.ok ? "ok" : "err");
+        loadSandbox();
+      })
+      .catch(function(){ out.textContent = "probe: сеть недоступна"; })
+      .then(function(){ b.disabled = false; });
+  });
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -630,8 +703,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); loadExec(); loadReview(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000); setInterval(loadReview, 30000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); loadExec(); loadReview(); loadSandbox(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000); setInterval(loadReview, 30000); setInterval(loadSandbox, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>

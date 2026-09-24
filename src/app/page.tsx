@@ -41,7 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, ArrowLeftRight, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Globe, KeyRound, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, PanelLeft, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, ShieldCheck, Sparkles, Target, Terminal, Trash2, X, Zap,
+  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, ShieldCheck, Sparkles, Target, Terminal, Trash2, X, Zap, Lock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -66,6 +66,9 @@ type SandboxRun = { id: string; cmd: string; exitCode: number; ok: boolean; ms: 
 const EXEC_DEFAULT_DIFF = `--- /dev/null\n+++ p0a-demo.js\n@@ -0,0 +1,2 @@\n+console.log("me2-p0a: edit-run-green");\n+console.log("agent loop live");\n`;
 type ExecData = { ok: boolean; allowlist: string[]; roots: string[]; deny_rules: string[]; caps: { prlimit: boolean; timeout_max_ms: number; cmd_max_len: number; substitution: string }; counters: { runs: number; denied: number }; recent: { id: number; cmd: string; ok: boolean; exit: number | null; reason: string | null; ms: number | null; source: string }[] };
 type ReviewData = { ok: boolean; config: { enabled: boolean; llm_enabled: boolean; timeout_ms: number; queue_max: number; model: string }; stats_24h: Record<string, number>; queue: { pending: { id: number; cmd: string; cwd: string; reason: string; engine: string; created_at: number }[]; recent: { id: number; cmd: string; status: string; verdict: string; engine: string; run_ok: number | null; run_exit: number | null }[] } };
+// R64 P0-2: OS-сандбокс (ns+seccomp; Landlock ≥5.13 — честный skip на 5.10)
+type SandboxData = { ok: boolean; caps: { landlock_abi: number; userns_max: number; unshare_bin: boolean; seccomp_mode: number; fs_confinement: string; layers_available: string[]; verdict: string }; config: { auto_sandbox: boolean; net: string; strict: boolean; tmp_size: string }; counters: { runs: number; failed: number; escapes: number }; recent: { id: number; cmd: string; ok: boolean; exit: number | null; reason: string | null; ms: number | null }[] };
+type SandboxProbeT = { ok: boolean; escape: boolean; ms: number; checks: { write_inside: { ok: boolean; detail: string }; write_outside_denied: { ok: boolean; detail: string }; net_denied: { ok: boolean; detail: string }; net_allow_control: { ok: boolean; detail: string } } };
 type FileData = { ok: boolean; counters: { applied: number; denied: number; rollbacks: number }; recent: { id: number; path: string; op: string; ok: boolean; reason: string | null; hunks: number | null; rollback_done: boolean; has_backup: boolean }[] };
 type ToolVerdict = { ok: boolean; exit?: number | null; stdout_tail?: string; stderr_tail?: string; duration?: number; sandboxed?: boolean; limit?: string; reason?: string; detail?: string; rollback_at?: number | null; hunks?: number; applied?: boolean };
 // R19: МЕХАНИКИ (порт старых механик A2 → ME2)
@@ -1542,6 +1545,46 @@ export default function MissionControl() {
       return () => clearInterval(iv);
     }
   }, [rvOpen, loadRv]);
+
+  // R64 P0-2: SANDBOX-карточка (слои ns+seccomp, probe-верификация, запуск в конфайнменте)
+  const [sbxOpen, setSbxOpen] = useState(false);
+  const [sbx, setSbx] = useState<SandboxData | null>(null);
+  const [sbxProbeRes, setSbxProbeRes] = useState<SandboxProbeT | null>(null);
+  const [sbxBusy, setSbxBusy] = useState(false);
+  const [sbxCmd, setSbxCmd] = useState("echo sandbox-ok");
+  const [sbxCwd, setSbxCwd] = useState("");
+  const loadSbx = useCallback(async () => {
+    try {
+      const r = await fetch("/sandbox?XTransformPort=3041", { cache: "no-store" }).then((res) => res.json()) as SandboxData;
+      if (r?.ok) setSbx(r);
+    } catch { /* daemon недоступен */ }
+  }, []);
+  const sbxAction = useCallback(async (op: "probe" | "run", cmd?: string, cwd?: string) => {
+    setSbxBusy(true);
+    try {
+      const body = op === "probe" ? { op: "probe" } : { op: "run", cmd, cwd };
+      const v = await fetch("/sandbox?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then((r) => r.json()) as SandboxProbeT & ToolVerdict & { sandbox?: { strict_ok: boolean; net: string; layers: Record<string, string | boolean> } };
+      if (op === "probe") {
+        setSbxProbeRes(v as SandboxProbeT);
+        toast({ title: (v as SandboxProbeT).ok ? "probe: конфайнмент подтверждён (4/4)" : (v as SandboxProbeT).escape ? "probe: ЭСКАПИРОВАНО!" : "probe: есть провалы — смотри детали", variant: (v as SandboxProbeT).ok ? "default" : "destructive" });
+      } else {
+        const strictFail = v.sandbox && v.sandbox.strict_ok === false;
+        toast({ title: strictFail ? "sandbox_failed — команда НЕ исполнена" : v.ok ? `sandbox run ok · exit ${v.exit} · ${v.duration}мс` : `прогон в сандбоксе: exit ${v.exit}`, description: (v.stdout_tail || v.stderr_tail || "").slice(0, 140) || v.detail, variant: strictFail ? "destructive" : v.ok ? "default" : "destructive" });
+      }
+      await loadSbx();
+    } catch { toast({ title: "sandbox ✗", description: "daemon недоступен", variant: "destructive" }); }
+    finally { setSbxBusy(false); }
+  }, [loadSbx, toast]);
+  useEffect(() => {
+    if (sbxOpen) {
+      void loadSbx();
+      const iv = setInterval(() => void loadSbx(), 15_000);
+      return () => clearInterval(iv);
+    }
+  }, [sbxOpen, loadSbx]);
 
   // ── R19: панель МЕХАНИКИ (порт старых механик A2: memory/brain/fleet/self-update/rsi) ──
   const [mcxOpen, setMcxOpen] = useState(false);
@@ -3680,6 +3723,121 @@ export default function MissionControl() {
                                 </div>
                               </div>
                             )}
+                          </div>
+                        )}
+                      </Card>
+                      {/* R64 P0-2: SANDBOX-карточка — OS-конфайнмент ns+seccomp (канон Cursor Landlock+seccomp) */}
+                      <Card className="min-h-0 overflow-hidden border-zinc-800 bg-zinc-900/40 card-lift lg:max-h-[36vh]">
+                        <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setSbxOpen((o) => !o)}
+                            aria-expanded={sbxOpen}
+                            aria-controls="sandbox-body"
+                            className="flex min-w-0 items-center gap-2 text-left"
+                          >
+                            <Lock className="h-4 w-4 shrink-0 text-teal-400" aria-hidden />
+                            <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                              SANDBOX{sbx ? ` · ${sbx.caps.verdict === "sandboxable" ? "sandboxable" : "unsandboxed"}` : ""}
+                            </span>
+                          </button>
+                          <span className="flex shrink-0 items-center gap-2">
+                            {sbx && (
+                              <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="слои R64: ns (userns+mountns: ro-root, rw-rebind, hide-секретов) + seccomp (deny-лист + net=deny); Landlock ≥5.13 — честный skip на 5.10; strict fail-closed">
+                                слои {sbx.caps.layers_available.join("+")} · net {sbx.config.net} · runs {sbx.counters.runs}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void loadSbx()}
+                              title="Обновить статус сандбокса"
+                              aria-label="Обновить статус sandbox"
+                              className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${sbxBusy ? "animate-spin" : ""}`} aria-hidden />
+                            </button>
+                            <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${sbxOpen ? "" : "-rotate-90"}`} aria-hidden />
+                          </span>
+                        </CardHeader>
+                        {sbxOpen && (
+                          <div id="sandbox-body" className="space-y-2.5 p-3">
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-zinc-600" title="Landlock появился в ядре 5.13 — здесь 5.10 → честный skip; конфайнмент несёт ns+seccomp; strict: обязательные слои не применились → команда НЕ исполнена">
+                              <span>landlock ABI {sbx?.caps.landlock_abi ?? "—"}</span>
+                              <span>userns {sbx?.caps.userns_max ?? "—"}</span>
+                              <span>seccomp {sbx?.caps.seccomp_mode ?? "—"}</span>
+                              <span>fs {sbx?.caps.fs_confinement ?? "—"}</span>
+                              <span className={sbx?.config.strict ? "text-emerald-500/80" : "text-amber-500/80"}>strict fail-closed {sbx?.config.strict ? "вкл" : "выкл"}</span>
+                              <span className={sbx?.config.auto_sandbox ? "text-teal-400/90" : "text-zinc-600"} title="канон D02: tier-2 sandbox-ability резолвит fs-риски до classifier">auto_sandbox {sbx?.config.auto_sandbox ? "вкл" : "выкл"}</span>
+                              <span className={(sbx?.counters.escapes ?? 0) > 0 ? "text-rose-400" : "text-zinc-600"}>escape {sbx?.counters.escapes ?? 0}</span>
+                            </div>
+
+                            {sbxProbeRes && (
+                              <div className={`rounded border px-2 py-1.5 font-mono text-[9px] ${sbxProbeRes.ok ? "border-teal-900/50 bg-teal-950/20 text-teal-300/90" : "border-rose-900/50 bg-rose-950/20 text-rose-300/90"}`}>
+                                probe {sbxProbeRes.ok ? "✓ 4/4" : "✗"}{sbxProbeRes.escape ? " · ЭСКАПИРОВАНО!" : ""} · {sbxProbeRes.ms}мс ·{" "}
+                                <span title={sbxProbeRes.checks.write_inside.detail}>внутрь {sbxProbeRes.checks.write_inside.ok ? "✓" : "✗"}</span> ·{" "}
+                                <span title={sbxProbeRes.checks.write_outside_denied.detail}>секреты {sbxProbeRes.checks.write_outside_denied.ok ? "скрыты ✓" : "✗"}</span> ·{" "}
+                                <span title={sbxProbeRes.checks.net_denied.detail}>сеть {sbxProbeRes.checks.net_denied.ok ? "EPERM ✓" : "✗"}</span> ·{" "}
+                                <span title={sbxProbeRes.checks.net_allow_control.detail}>контроль {sbxProbeRes.checks.net_allow_control.ok ? "✓" : "✗"}</span>
+                              </div>
+                            )}
+
+                            <div className="space-y-1">
+                              <div className="flex gap-1.5">
+                                <input
+                                  value={sbxCmd}
+                                  onChange={(e) => setSbxCmd(e.target.value)}
+                                  placeholder="команда (белый список)…"
+                                  aria-label="Команда для запуска в сандбоксе"
+                                  className="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900"
+                                />
+                                <input
+                                  value={sbxCwd}
+                                  onChange={(e) => setSbxCwd(e.target.value)}
+                                  placeholder="cwd…"
+                                  aria-label="cwd в управляемом корне"
+                                  list="exec-roots"
+                                  className="w-28 shrink-0 rounded border border-zinc-800 bg-zinc-950/60 px-2 py-1 font-mono text-[10px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-teal-900 sm:w-40"
+                                />
+                              </div>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => void sbxAction("run", sbxCmd, sbxCwd)}
+                                  disabled={sbxBusy || !sbxCmd || !sbxCwd}
+                                  title="Запуск в сандбоксе: tier-1 план → unshare userns+mountns → ro-root/rw-rebind/hide → seccomp net=deny (POST /sandbox op:run)"
+                                  className="rounded border border-teal-800/60 px-2 py-1 text-[10px] text-teal-300 transition hover:bg-teal-950/40 disabled:opacity-40"
+                                >
+                                  В сандбоксе
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void sbxAction("probe")}
+                                  disabled={sbxBusy}
+                                  title="Живая верификация: запись внутрь ok · запись в секреты отказ · сеть EPERM · контроль net=allow (POST /sandbox op:probe)"
+                                  className="rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-40"
+                                >
+                                  Probe
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="text-[9px] uppercase tracking-wider text-zinc-600">sandbox-прогоны (exec_runs sandboxed=1)</div>
+                              <div tabIndex={0} role="region" aria-label="Журнал sandbox-прогонов" className="max-h-24 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                                {(sbx?.recent ?? []).map((r) => (
+                                  <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.ok ? "bg-teal-400" : "bg-rose-500"}`} aria-hidden />
+                                    <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.cmd}>$ {r.cmd}</span>
+                                    <span className="shrink-0 text-zinc-600">{r.ok ? `exit ${r.exit}` : r.reason || "fail"} · {r.ms ?? 0}мс</span>
+                                  </div>
+                                ))}
+                                {(sbx?.recent.length ?? 0) === 0 && (
+                                  <div className="rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5 font-mono text-[9px] text-zinc-600">
+                                    прогов ещё не было — Probe верифицирует конфайнмент живыми негативами (секреты/сеть)
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </Card>

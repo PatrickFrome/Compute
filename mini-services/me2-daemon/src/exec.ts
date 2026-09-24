@@ -28,7 +28,8 @@ import { db, emit, VERSION } from "../store";
 import { recordSpan } from "./otel";
 import { sandboxCaps, SB_ROOT } from "./sandbox";
 import { WORKTREE_ROOT } from "./worktrees";
-import { classifyGate, classifierConfig, type ReviewResult } from "./review";
+import { classifyGate, classifierConfig, FS_RULES, type ReviewResult } from "./review";
+import { planSandbox, runSandboxedAsync, sandboxStatus, probeSandboxCaps } from "./sandbox2";
 
 export const EXEC_SCHEMA = "me2.exec.v1";
 
@@ -151,6 +152,8 @@ export interface ExecVerdict {
   detail?: string;
   review?: ReviewResult;     // R63 P0-b: вердикт тира-3 (classifier), если гейт сработал
   queue_id?: number;         // R63: для classifier_ask — id в очереди одобрений
+  sandbox_layers?: Record<string, string | boolean>; // R64 P0-2: слои OS-сандбокса (ns+seccomp)
+  sandbox_net?: string;      // R64: режим сети сандбокса (deny/allow)
 }
 
 let counter = { runs: 0, denied: 0 };
@@ -183,8 +186,30 @@ function deniedVerdict(rawCmd: string, rawCwd: string, planReason: string, planD
   };
 }
 
-/** Тело исполнения для ПРОШЕДШЕГО план (и, в runTerminalAsync, гейт) — spawn-часть. */
-async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, t0: number): Promise<ExecVerdict> {
+/** Тело исполнения для ПРОШЕДШЕГО план (и, в runTerminalAsync, гейт) — spawn-часть.
+ *  R64 P0-2: sandbox=true → исполнение через OS-сандбокс (ns+seccomp, strict fail-closed). */
+async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, t0: number, sandbox = false): Promise<ExecVerdict> {
+  if (sandbox) {
+    // канон Cursor: sandbox blocks unauthorized file access and network —
+    // план tier-1 уже отработал; вердикт сандбокса мапится в ExecVerdict
+    const s2 = await runSandboxedAsync(rawCmd, plan.cwd!, { timeout: plan.timeout_ms, source: source === "rest" ? "exec-sandbox" : source });
+    // NB семантика: strict-провал (слои не применились) = sandbox_failed (риск);
+    // exit≠0 ВНУТРИ корректного сандбокса — обычный отказ исполнения (сандбокс
+    // сделал свою работу: EROFS/EPERM — канон «sandbox blocks access»), не риск.
+    try { emit(s2.ok ? "TERMINAL_RUN" : "EXEC_DENIED", { cmd: rawCmd.slice(0, 120), cwd: plan.cwd, exit: s2.exit, ms: s2.duration, sandboxed: true, net: s2.sandbox.net, source }, null, null); } catch { /* шина */ }
+    return {
+      ok: s2.ok, schema: EXEC_SCHEMA,
+      planned: { segments: plan.segments!, binaries: plan.binaries! },
+      cmd: rawCmd, cwd: plan.cwd!,
+      exit: s2.exit, stdout_tail: s2.stdout_tail, stderr_tail: s2.stderr_tail,
+      duration: s2.duration, timed_out: s2.timed_out, sandboxed: true,
+      env_keys: s2.env_keys,
+      limit: s2.sandbox.strict_ok ? `ns+seccomp net=${s2.sandbox.net} (rlimit as=4GiB nofile=256 core=0)` : "sandbox_failed (strict fail-closed)",
+      ...(s2.sandbox.strict_ok ? {} : { reason: "sandbox_failed", detail: s2.detail }),
+      sandbox_layers: s2.sandbox.layers,
+      sandbox_net: s2.sandbox.net,
+    };
+  }
   const usePrlimit = sandboxCaps().rlimit;
   // NB: RLIMIT_NPROC per-UID не трогаем (урок R17); изоляция: as/nofile/core + таймаут→kill.
   // --as=4GiB (не 1GiB как в sandbox.ts): V8 (node/bun) резервирует большой виртуальный
@@ -238,7 +263,7 @@ async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, t0: 
   return verdict;
 }
 
-export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeout: number | undefined, source = "rest"): Promise<ExecVerdict> {
+export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeout: number | undefined, source = "rest", opts: { sandbox?: boolean } = {}): Promise<ExecVerdict> {
   const t0 = Date.now();
   const plan = planExec(rawCmd, rawCwd, rawTimeout);
   if (!plan.ok) return deniedVerdict(rawCmd, rawCwd, plan.reason ?? "plan_denied", plan.detail, source, t0);
@@ -250,6 +275,16 @@ export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeou
   );
   if (gate.verdict === "block") {
     return deniedVerdict(rawCmd, rawCwd, "classifier_blocked", gate.result.reason, source, t0, gate.result);
+  }
+  // ── R64 P0-2: sandbox-ability резолвит fs-риски ДО очереди (канон D02):
+  // (a) вердикт «sandbox» от классификатора (sandbox.auto_sandbox=true) →
+  // (b) явный sandbox:true оператора + fs-риск (FS_RULES) → конфайнмент вместо
+  //     дёрганья оператора; внешние состояния (git push, npm i) sandbox НЕ гасит → очередь.
+  if (gate.verdict === "sandbox") {
+    return spawnPlanned(rawCmd, plan, source, t0, true);
+  }
+  if (gate.verdict === "ask" && opts.sandbox === true && FS_RULES.has(gate.result.rule ?? "")) {
+    return spawnPlanned(rawCmd, plan, source, t0, true);
   }
   if (gate.verdict === "ask") {
     // fail-closed к оператору: команда НЕ исполняется, ждёт одобрения в очереди
@@ -263,7 +298,7 @@ export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeou
     };
   }
 
-  return spawnPlanned(rawCmd, plan, source, t0);
+  return spawnPlanned(rawCmd, plan, source, t0, opts.sandbox === true);
 }
 
 /** R63: исполнение ОДОБРЕННОЙ оператором команды из очереди classifier_ask.
@@ -287,6 +322,7 @@ export interface ExecStatus {
   deny_rules: string[];
   caps: { prlimit: boolean; timeout_default_ms: number; timeout_max_ms: number; cmd_max_len: number; substitution: "denied" };
   classifier: { enabled: boolean; llm_enabled: boolean; model: string; queue_max: number; note: string }; // R63 P0-b (тир-3)
+  sandbox2: { verdict: string; layers: string[]; net: string; auto_sandbox: boolean; strict: boolean; landlock_abi: number }; // R64 P0-2
   counters: { runs: number; denied: number };
   recent: Array<{ id: number; cmd: string; ok: boolean; exit: number | null; reason: string | null; ms: number | null; source: string; at: number }>;
   note?: string;
@@ -300,6 +336,8 @@ export function execStatus(): ExecStatus {
   } catch { /* журнал может отсутствовать в probe */ }
   const probe = process.env.ME2_BOOT_MODE === "probe";
   const cfg = classifierConfig();
+  const s2caps = probeSandboxCaps();
+  const s2cfg = sandboxStatus();
   return {
     ok: true, schema: EXEC_SCHEMA, mode: probe ? "probe_offline" : "live",
     allowlist: [...ALLOWED_BINARIES].sort(),
@@ -307,6 +345,7 @@ export function execStatus(): ExecStatus {
     deny_rules: HOSTILE_PATTERNS.map(([, n]) => n).concat(["substitution_denied", "env_assign_denied", "segment_allowlist"]),
     caps: { prlimit: sandboxCaps().rlimit, timeout_default_ms: DEFAULT_TIMEOUT_MS, timeout_max_ms: MAX_TIMEOUT_MS, cmd_max_len: CMD_MAX_LEN, substitution: "denied" },
     classifier: { enabled: cfg.enabled, llm_enabled: cfg.llm_enabled, model: cfg.model, queue_max: cfg.queue_max, note: "тир-3 после allowlist/prlimit: ask → очередь одобрений POST /review; НЕ security boundary" },
+    sandbox2: { verdict: s2caps.verdict, layers: s2caps.layers_available, net: s2cfg.config.net, auto_sandbox: s2cfg.config.auto_sandbox, strict: s2cfg.config.strict, landlock_abi: s2caps.landlock_abi },
     counters: { ...counter },
     recent,
     ...(probe ? { note: "probe-режим: живые прогоны отключены; planExec-инварианты проверяются офлайн" } : {}),

@@ -28,6 +28,7 @@ import { chat } from "../providers";
 import { loadPolicy, type ClassifierPolicy } from "./policy";
 import { SB_ROOT } from "./sandbox";
 import { WORKTREE_ROOT } from "./worktrees";
+import { sandboxConfig, probeSandboxCaps } from "./sandbox2";
 
 export const REVIEW_SCHEMA = "me2.review.v1";
 
@@ -66,11 +67,20 @@ export function classifierSetOverride(patch: Partial<ClassifierPolicy>): Classif
 }
 
 // ── управляемые корни + честный белый список системных путей ──────────
-// prlimit не даёт FS-конфайнмента (P0-2 в будущем), поэтому пути ВНЕ корней
-// классифицируются как риск (ask) — канон Cursor «sandbox blocks unauthorized
-// file access», у нас до P0-2 та же гарантия достигается классификатором.
+// prlimit не даёт FS-конфайнмента; с R64 (P0-2) конфайнмент несёт OS-сандбокс
+// (ns+seccomp, /sandbox): при sandbox.auto_sandbox=true риски из FS_RULES
+// получают канонический вердикт «sandbox» (tier-2 реально гасит риск), иначе —
+// как в R63 — честный ask оператору (fail-open к человеку, не к исполнению).
 const SYS_READABLE = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/proc", "/sys", "/var", "/opt", "/dev", "/tmp"];
 const DEV_EXACT = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/urandom"]);
+
+/** Риски, которые РЕАЛЬНО гасит OS-сандбокс (канон tier-2 между allowlist и classifier). */
+export const FS_RULES: ReadonlySet<string> = new Set(["redirect_outside_roots", "path_outside_roots", "var_expansion_path"]);
+
+/** Канон D02: sandbox-ability резolves до classifier — элегибельность вердикта «sandbox» (чистая, eval). */
+export function sandboxEligible(rule: string | undefined, autoSandbox: boolean, capsVerdict: string): boolean {
+  return autoSandbox && !!rule && FS_RULES.has(rule) && capsVerdict === "sandboxable";
+}
 
 function pathInsideManaged(p: string): boolean {
   if (DEV_EXACT.has(p)) return true;
@@ -232,6 +242,16 @@ export async function classifyGate(
     ? await llmClassify(input, cfg)
     : reviewPlan(input);
 
+  // R64 P0-2: канон D02 — tier-2 sandbox-ability резolves ДО tier-3 ask:
+  // fs-риски (redirect/path/var вне корней) при sandbox.auto_sandbox=true и
+  // живом сандбоксе получают вердикт «sandbox» (исполнение в ns+seccomp) —
+  // оператора не дёргаем тем, что конфайнмент гасит честно.
+  if (result.verdict === "ask" && sandboxEligible(result.rule, sandboxConfig().auto_sandbox, probeSandboxCaps().verdict)) {
+    result = { ...result, verdict: "sandbox", reason: `${result.reason} — исполняется В САНДБОКСЕ (ns+seccomp, net=${sandboxConfig().net})` };
+    try { emit("CLASSIFIER_SANDBOX", { cmd: input.cmd.slice(0, 120), rule: result.rule, engine: result.engine }, null, null); } catch { /* шина */ }
+    return { verdict: "sandbox", result };
+  }
+
   if (result.verdict === "ask") {
     // ask → очередь оператора (кап queue_max; переполнение = block, fail-closed)
     const pending = (db.query(`SELECT COUNT(*) c FROM review_queue WHERE status='pending'`).get() as { c: number }).c;
@@ -280,10 +300,10 @@ export function reviewStatus(): {
   return {
     ok: true, schema: REVIEW_SCHEMA,
     config: classifierConfig(), override: runtimeOverride,
-    tier_order: ["allowlist (planExec, сегменты бинарей)", "sandbox-ability (prlimit as/nofile/core; FS-конфайнмент = P0-2)", "classifier (heuristic | llm, ask → очередь оператора)"],
+    tier_order: ["allowlist (planExec, сегменты бинарей)", "sandbox-ability (R64 P0-2: ns+seccomp конфайнмент /sandbox; Landlock ≥5.13)", "classifier (heuristic | llm, ask → очередь оператора)"],
     honest_limits: [
-      "классификатор НЕ security boundary (канон Cursor; security = tier-1 + prlimit + P0-2)",
-      "вердикт «sandbox» не выдаётся до P0-2 (нет FS-конфайнмента) — канонический ask вместо fail-open",
+      "классификатор НЕ security boundary (канон Cursor; security = tier-1 + prlimit + OS-сандбокс P0-2)",
+      "вердикт «sandbox» выдаётся только при sandbox.auto_sandbox=true и живом конфайнменте; иначе канонический ask",
       "LLM-путь ≤3с; таймаут/невалидный ответ → ask (fail-closed к оператору)",
     ],
     stats_24h: stats,
