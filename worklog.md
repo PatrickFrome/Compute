@@ -897,3 +897,110 @@ Stage Summary:
 - Указание оператора R60 «UI не обязан быть read only» встроено как узор «санкционированных записей»: белый список в eval + именование в capabilities — eval-харнесс сразу поймал оба регресса (ui_contract, nonbypass) до попадания в git — контур регрессий работает как задуман.
 - Инварианты: шина 47/47, non-bypass 30/30 классифицировано, eval v25 PASS 61/61, lint 0/0, секреты не напечатаны (env-белый-список exthost'а — новый слой той же гарантии), web_search/VLM не амплифицированы (10-я сессия закрытых окон).
 - Далее (R61, следующий явный раунд): device-flow вход оператора в панели (Cursor/gh-cli канон); long-lived exthost с ping-супервизией и SQLite-персист лэйаута (разборы готовы r60-analogues §1/§2); смарт-мерж R60 → release; VLM-верификация r56–r60 при окне квоты; фаза E — ТОЛЬКО по явной команде оператора.
+
+---
+Task ID: R61-C2
+Agent: research-track-C2 (general-purpose)
+Task: Cursor CLI + automations + git delivery + integrations research
+
+Work Log:
+- read corpus track C2 files (cli/*, cloud-agent automations+api, worktrees, permissions, integrations, origin/*, blogs cli/automations/builds/jetbrains-acp)
+- wrote tool-results/r61/tracks/C2-cli-automation.md (54 capabilities)
+
+Stage Summary:
+- Cursor CLI is a full automation plane: -p headless w/ json/stream-json output, --force/--yolo, token permissions (Shell/Read/Write/WebFetch/Mcp), sandbox, ACP JSON-RPC server, agent worker (private pools w/ wake hooks), persistent sessions, hooks w/ Claude-Code-format responses; Automations (GA Mar 2026) = cron + GitHub/GitLab/Bitbucket/Slack/webhook/Linear/Sentry/PagerDuty triggers running L4 cloud agents w/ PR tools, memories, computer-use; Cloud Agents API v1 (public beta) = create/list/runs/cancel/SSE/usage/artifacts + v0 workers-pools claim/watch autoscaler API; outbound webhooks legacy-only statusChange; KEY FINDING: Origin = Cursor own git forge (early beta) — origin.cursor.com remotes, browse/search, PR review/merge w/ branch rules, GitHub mirror mode (GitHub stays source of truth, /local forge-local branches for GitHub outages), Enterprise-only CloneKit 15-min-token fast clone for Buildkite/GHActions, Origin Apps + Ed25519-JWT installation-token API; gap: no /v1 PR-merge or webhook v1 yet, CLI has no built-in scheduler.
+
+---
+Task ID: R61-C1
+Agent: research-track-C1 (general-purpose)
+Task: Cursor cloud agents + environment + self-hosted research
+
+Work Log:
+- read corpus track C1 files (docs/cloud-agent*.txt x16, blogs x8)
+- wrote tool-results/r61/tracks/C1-cloud-env.md (61 capabilities)
+
+Stage Summary:
+- C1-каталог: 61 возможность (env/lifecycle/self-hosted/security/artifacts/handoff); VM = Firecracker microVM (отдельный AWS-аккаунт, Ubuntu, docker через fuse-overlayfs+iptables-legacy), интернет по умолчанию ON с 3 egress-режимами (allow-all / default+allowlist / allowlist-only + Enterprise lock) и ips.json; запуск из web/IDE/iOS/Slack/GitHub/Linear/API, follow-ups + subscriptions (event-wake до 180 дней, автo-CI-fix с капом 10); lifecycle = Build/snapshot + hibernate/resume/fork на Temporal (>50M actions/day, >2 девяток); self-hosted GA: worker outbound-only HTTPS (api2/api2direct/artifacts-S3), My Machines (200/user) vs Team Pools (1000/team, очередь pending-requests + SSE + claim/release, --spawn/--warm-idle контроллер, hibernation через workerReadyTimeoutSeconds, any-repo pools + --mint-github-token), k8s-оператор DEPRECATED → anysphere/k8s-workers; лимиты UNKNOWN: макс. параллельные агенты облака и CPU/RAM VM не опубликованы; long-running = Ultra/Teams/Enterprise (не для multi-repo), multi-repo env = GA.
+
+---
+Task ID: R61-B
+Agent: research-track-B (general-purpose)
+Task: Cursor extensibility research (rules/skills/subagents/hooks/mcp/plugins/sdk)
+
+Work Log:
+- read corpus track B files (14 docs + 4 blogs + sdk changelog + blog changelog)
+- wrote tool-results/r61/tracks/B-extensibility.md (57 capabilities)
+
+Stage Summary:
+- Cursor extensibility = ONE harness layered: rules (prompt-only guidance, Team>Project>User precedence, nested AGENTS.md) + skills (SKILL.md open standard, auto-discovery incl. .claude/.codex compat dirs, scripts) + subagents (own context window, depth-2 nesting, worktree isolation, readonly flag) + hooks (21 events, JSON-stdio processes, deny>ask>allow merge, fail-open default w/ failClosed, 30-min enterprise sync) + MCP (3 transports, approval default, enterprise allowlist) + plugins (Cursor + Agent-Plugins open standard, manually reviewed marketplace, Default Off/On/Required modes) + SDKs (TS/Python public beta = headless L4 auto-approve by default, sandbox/autoReview opt-in, custom tools via hidden MCP server custom-user-tools, bridge sdk.v1 Connect/protobuf for other languages); key gap-lever for ME2-OS: hooks are the only hard enforcement layer and rules explicitly disclaim security role.
+
+---
+Task ID: R61-A
+Agent: research-track-A (general-purpose)
+Task: Cursor core agent/harness/tools research
+
+Work Log:
+- read corpus track A files (15 docs + 3 blogs, 2 supplementary peeks: subagents, run-modes)
+- wrote tool-results/r61/tracks/A-core.md (53 capabilities)
+
+Stage Summary:
+- Cursor agent surface decomposed into 53 capabilities (agent-core/planning/projects/tool/ux/harness). Key finding: parity edge concentrates in (1) coordinator Projects with subscriptions + shared context (L3-L4, cloud-only, no Enterprise yet) and (2) harness-level per-model customization (training-native edit formats, mid-chat model-switch takeover instructions); GA benchmark for ME2-OS = Plan/Debug/Design modes, checkpoints, steering at tool-call boundary, Agent Review (auto-after-commit + BUGBOT.md rules), Auto-review run-mode (sandbox + classifier: Claude 4.5 Haiku / GPT-5.4 Mini), and hooks-driven self-looping agents.
+
+---
+Task ID: R61-D
+Agent: research-track-D (general-purpose)
+Task: Cursor security/sandbox/approvals/computer-use research
+
+Work Log:
+- read corpus track D files (9 docs security/approvals/bugbot/browser/canvas, 12 grok-bot docs, self-hosted computer-use, 6 enterprise docs, 9 blog posts)
+- wrote tool-results/r61/tracks/D-security-computeruse.md (45 capabilities)
+
+Stage Summary:
+- Track D (research-only): cataloged 45 capabilities across security/sandbox/approvals/computer-use/browser/bugbot/enterprise-controls. Key findings: (1) sandbox = OS subprocess-tree confinement — Seatbelt/sandbox-exec on macOS, Landlock+seccomp+overlay-remap on Linux (Bubblewrap fallback, UID-namespace remap, CURSOR_ORIG_UID), WSL2 on Windows; config-as-data sandbox.json, merge user<repo<team<hardcoded, default-deny network (RFC1918 + 169.254.169.254 SSRF-blocked, ~100-domain package-manager default allowlist, domain/wildcard/CIDR patterns); (2) approvals = 3-tier: allowlist -> sandbox-ability check -> Auto-review LLM classifier (Claude 4.5 Haiku / GPT-5.4 Mini, agentic, in-RPC-stream subagent-like, blocks ~4 pct of actions, feedback-to-agent over user prompts; explicitly NOT a security boundary; paired with deterministic failClosed hooks for secret redaction/DLP); (3) computer-use = 4 surfaces: local sandboxed shell; Cloud Agent VMs (desktop recording, artifacts, remote-desktop takeover, >30 pct of Cursor PRs); Grok Bot = SEPARATE product on per-user Firecracker microVMs (own kernel per user, shared by that user's Bots, one screen per Bot, one CU-task per screen, human takeover for credentials/2FA/CAPTCHA, US-hosted, shared static egress IPs, Action Recording scrubbed: shell secret-scrubbed, CU sessions = counts+duration only); self-hosted workers via `agent worker --computer-use` (macOS signed helper app + TCC Accessibility/ScreenRecording, Linux X11/TigerVNC/xdotool/xfce4, Chrome for browser CU) and `--share-desktop` (Linux-only view|view_and_control, fail-closed input filter, clipboard blocked, no inbound ports); (4) Bugbot GA since Jul 2025, agentic (8 parallel passes + majority voting -> full agent loop), resolution rate 78.13 pct vs CodeRabbit 48.96, learned rules (44k rules / 110k repos, @cursor remember), Autofix GA (spawns Cloud Agent, max 3 commit-to-branch attempts, provider matrix), Enterprise API (dryRun without SCM side effects); (5) Security Agents: Security Reviewer (PR gate) + Vulnerability Scanner (cron) + 4 templates (Agentic Security Review with blocking CI gate, Vuln Hunter, Anybump auto-dependency-PRs, Invariant Sentinel daily drift via subagents+memory); (6) approval-agents = PR Routing & Approval: risk-score threshold + APPROVAL_POLICY.md discovery + Bugbot/Security review contexts, self-hardening (policy-file edits in the PR use the base-branch version); (7) enterprise: enforceable Privacy Mode/ZDR, CMEK, US-residency (10 pct uplift), audit logs (no code content) + SIEM streaming + OTel export (cursor.surface=grok_bot), endpoint AV/EDR exclusions, proxy/SSL-inspection exemptions incl. nested *.*.cursorvm.com (two-level wildcard required).
+
+---
+---
+Task ID: R61-E1
+Agent: research-track-E1 (general-purpose)
+Task: Cursor model routing/context/evals research
+
+Work Log:
+- read corpus track E1 files (9 docs + 18 blogs + supplementary greps of models__*/enterprise/request-based docs)
+- wrote tool-results/r61/tracks/E1-models-context.md (44 capabilities)
+
+Stage Summary:
+- E1-каталог: 44 возможности (routing 12 / context-eng 11 / semsearch+indexing 4 / self-summarization 1 / shadow-workspace 1 / apply 2 / own-models 7 / evals 7 / memory 1). Каталог моделей: 55 моделей / 7 семейств провайдеров; контексты 200k–300k default, max до 1M (Grok 4.7 500k, Composer max не опубликован). Router (GA, Teams/Enterprise, июль 2026) решает ДВУХСТУПЕНЧАТО: Compass предсказывает удовлетворённость пользователя как прокси сложности (0..1, порог τ; 96% top vs 71% bottom positive-signal) -> дешёвая модель (Grok 4.6 обязателен) vs таксономия domains/tasks/modifiers, где кандидат допускается только при 75%-уверенности в аплифте и оптимизатор держит budget per-turn режима (Cost/Balance/Intelligence); обучен на 600k+ живых запросов, cache-aware, метрики = satisfaction (AFC) + keep rate, A/B на миллионах запросов: Intelligence ≈ Fable −68% cost, Balance > Opus 4.8 −41%. Context: dynamic context discovery (5 паттернов «файл-как-примитив», MCP-лэйзи −46.9% токенов), Merkle-tree индекс + simhash-переиспользование индексов команды (p99 4.03ч->21с, content-proofs против утечек), кастомный embedding на agent-трейсах (+12.5% точности), self-summarization как train-in-loop компакция Composer (−50% ошибки, ×5 меньше токенов). Own models: Composer 2.5 (Kimi K2.5 base, targeted textual feedback RL, 25x synthetic tasks, Sharded Muon/HSDP, CursorBench 61.3, $0.50/$2.50), real-time RL = чекпоинт каждые 5 часов за Auto (L4 closed loop). Evals: CursorBench 3.1 (внутренний, из Cursor Blame), reward-hacking аудит (63% SWE-bench Pro успехов Opus 4.8 Max = подсмотренный фикс; strict harness: history isolation + egress proxy), SDK-эвалы реальным агентным лупом. KEY GAPS: memory-система на поверхности E1 ОТСУТСТВУЕТ (UNKNOWN — только session-scoped state в саммари), blog long-context-retrieval ПУСТОЙ (173 байта), текущий apply-механизм 2026 и судьба shadow-workspace не подтверждены корпусом.
+
+Task ID: R61-E2
+Agent: research-track-E2 (general-purpose)
+Task: Cursor multi-agent research + changelog timeline
+
+Work Log:
+- read corpus track E2 files incl. full changelog
+- wrote tool-results/r61/tracks/E2-fleet-changelog.md (46 capabilities + timeline)
+
+Stage Summary:
+- Fleet/multi-agent: Cursor swarm = recursive planner/worker trees + handoff-doc protocol + custom agent VCS (1000 commits/s) + neutral merge-umpire agent + stacked review lenses + agent-owned Field Guide; empirically: locks/integrators/judges all REMOVED — context-efficiency of role separation (planner never implements) is the scaling mechanism, prompts matter more than harness. Model economics: frontier-planner + cheap-worker mix = equal quality at ~8x lower cost ($1,339 Opus4.8+Composer2.5 vs $10,565 GPT-5.5 solo; workers >=69% tokens, planners dominate $). Multi-agent kernels (NVIDIA): planner rebalances workers by perf metrics, whole coordination protocol = ONE markdown file, 38% geomean speedup over 3 fully-autonomous weeks (L4). MoK = open-source TRAINING megakernel (2.37x, Aug 2026) — NOT inference (inference = warp decode Apr 2026, 1.8x). CHANGELOG CAVEAT: corpus changelog.txt contains ONLY Sep 23 2026 entry (Rollouts + Security Review bots) — full version-numbered IDE changelog NOT in corpus; timeline 2024-09→2026-09 rebuilt from blog date headers + CLI changelog (May-Aug 2026) + SDK 1.0.x + stated versions (2.0 Oct 2025, 2.2 Dec 2025, 3.0 Apr 2026, 3.1 Apr 2026). Handoff/UX: iOS public beta (Jun 2026) w/ Remote Control of LOCAL agents + merge-PR-from-phone; Cursor 3 local<->cloud session transfer; canvases can render UIs to MANAGE other agents; Auto-review classifier = autonomy dial (7% chat interruption). Milestones: cloud agents Oct 30 2025; long-running preview Feb 5-12 2026; Cursor 3 Apr 2 2026; swarm-v2+agent-VCS Jul 20 2026; SpaceX acquisition Aug 14 2026.
+---
+Task ID: R61-CURSOR-CAPABILITY-PARITY
+Agent: Z.ai Code (main)
+Task: Директива оператора R61 — «METAENGINE — CURSOR CAPABILITY PARITY»: глубокое актуальное систематическое исследование Cursor и всей agentic-экосистемы строго по официальным источникам → полный capability-каталог → parity matrix → gap analysis → dependency DAG → implementation roadmap → verification/benchmark план. Архивация (фаза E) — по-прежнему отложена оператором.
+
+Work Log:
+- R61-0 (аудит): R60 закрыт (PR #956, daemon v0.48.0, eval v25 61/61, шина 47/47). Живо: /health ok, зеркало LIVE pending=0 (дренаж R56 подтверждён заново). web_search и page_reader → 429 (11-я сессия подряд; по одной пробе, не амплифицированы).
+- R61-1 (канал ресёрча): найден рабочий канал — прямой curl к cursor.com; скачаны sitemap'ы (docs 338 loc + main 192 loc) и ПОЛНЫЙ официальный корпус: 329 страниц (207 docs + 122 blog/security/changelog), 3.5MB чистого текста, 0 отказов, bs4-экстракция; скрипт tool-results/r61/fetch-corpus.py — корпус воспроизводим.
+- R61-2 (7 параллельных треков по корпусу, все только-официальные): A-core (53), B-extensibility (57), C1-cloud-env (61), C2-cli-automation (54), D-security-computeruse (45), E1-models-context (44), E2-fleet-changelog (46+timeline) = 360 capabilities, каждая со статусом GA/BETA/PREVIEW/ANNOUNCED/DEPRECATED/RESEARCH, уровнем автономии L0..L4, точными цитатами, confidence. Трек-файлы — в worklog по отдельности (R61-A..R61-E2).
+- R61-3 (синтез): parity-матрица как ДАННЫЕ research/2026/r61-parity-matrix.json (138 строк, статусы PARITY/PARTIAL/MISSING/SUPERIOR/UNKNOWN/N/A + приоритеты) → MD генерируется скриптом (R61-PARITY-MATRIX.md). Итог: PARITY 18 · PARTIAL 76 · MISSING 34 · SUPERIOR 6 · N/A 4; гэпов 110 (P0:15 · P1:36 · P2:44 · P3:15).
+- R61-4 (deliverables в research/2026/): R61-CAPABILITY-ENCYCLOPEDIA.md (индекс+сводные выводы), R61-SOURCE-REGISTRY.md (329 источников, методика, уровни доверия, честный журнал каналов), R61-ARCHITECTURE-MODEL.md (подтверждённые свойства: единый harness, 4 поверхности исполнения, роутер Compass+таксономия, swarm-выводы, UNKNOWN-список — ничего не выдумано), R61-GAP-ANALYSIS.md (все 15 P0 в полном формате §24: root cause→архитектура→модули→контракты→тесты→evidence; P1 таблицей), R61-ROADMAP.md (P0..P9 DAG, slices с контрактами/негативами/evidence, verification+benchmark планы, beyond-Cursor).
+- R61-5 (ключевые открытия): (1) единый harness rules/skills/subagents/hooks/MCP поверх IDE+CLI+Cloud+SDK — паритетить надо контракт, не UI; (2) enforcement Cursor = allowlist→OS-сандбокс (Seatbelt/Landlock)→auto-review классификатор (малая модель, пре-исполнение, сам Cursor называет его «не security boundary»); (3) cloud = Firecracker microVM + environment.json + Builds + egress-политики + Cloud Doctor/autoinstall + Temporal-подобный durable execution; (4) Automations = cron+12 типов GitHub-триггеров+Slack/Linear/webhooks; (5) swarm-research: planner→worker деревья + handoff-документы + кастомный agent VCS (1000 коммитов/с); locks/integrators/judges — отброшены; масштаб = экономия контекста ролей; (6) роутер: Compass P(satisfaction)→таксономия→бюджет per-turn, real-time RL чекпоинт ~5ч; (7) персистентной памяти агентов в корпусе НЕ найдено — у ME2 memory.ts уже есть.
+- R61-6 (SUPERIOR, только corpus-negative + repo-evidence): персист-память (memory.ts), tamper-evident trace (hash-chain+OTel+non-bypass), non-bypass шина с eval-гейтом, «аудит как цикл» (переходные события), exthost строже канона R60, Supabase state-plane RLS fail-closed+reconcile-хеш 243.
+- R61-7 (P0-ядро гэпов, dependency-порядок): exec/edit инструменты → classifier-тир → OS-сандбокс → ingress (внешние триггеры) → durable execution → swarm-протокол → plan-mode → envspec → mcp-client → hooks-пользовательские. Каждый — слайс на 1 раунд с негативными тестами и evidence-шаблоном (R61-GAP-ANALYSIS/R61-ROADMAP).
+- R61-8 (worklog-гигиена): параллельные аппенды треков дали дубль-блок E1 (оборванный) — удалён байт-точно, полный блок восстановлен; 7 трек-блоков + этот блок.
+- R61-9: git-sync (этот коммит).
+
+Stage Summary:
+- **Миссия R61 выполнена в полном объёме deliverables (§33 миссии)**: Encyclopedia (7 треков, 360 capabilities) + Source Registry (329 офиц. источников) + Architecture Model + Parity Matrix (138 строк, JSON=источник истины) + Gap Analysis (110 гэпов, 15 P0 разобраны полностью) + Implementation DAG (P0–P9) + Execution Slices + Verification Plan + Benchmark Plan + Beyond-Cursor Roadmap.
+- Каналы честности: web_search/page_reader 429 (по 1 пробе), curl-канал — единственный, задокументирован в source registry; корпус воспроизводим скриптом; независимая верификация НЕ выполнена (помечено) — окно web_search.
+- Инварианты раунда не тронуты: шина 47/47, daemon v0.48.0, eval v25 61/61, зеркало LIVE pending=0; изменены только research-артефакты + worklog.
+- Главный стратегический вывод: паритетить нужно harness-контракт (единый для IDE/CLI/cloud/SDK), а не UI; у ME2 уже есть 18 строк PARITY и 6 доказуемых SUPERIOR; P0-ядро (10 слайсов) — реалистичный путь к полному паритету за ~10–15 раундов.
+- Далее (R62, следующий явный раунд): по DAG — slice P0-a exec/edit tools (TERMINAL_RUN+FILE_EDIT с prlimit-сандбоксом, манифест non-bypass 30→32, eval v26) и/или P0-e ingress (webhooks-in+GitHub poller); при окне web_search — дифф-сверка корпуса; VLM r60-скриншотов при окне квоты; фаза E — ТОЛЬКО по явной команде оператора.
