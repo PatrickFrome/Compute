@@ -101,13 +101,15 @@ case "$OP" in
         console.log(JSON.stringify({ id: j.id, active: j.active, url: j.config?.url, events: j.events }));')
       echo "CREATE → $RES"
     fi
-    echo "далее: HOOK_ID=<id> bash scripts/webhook-register.sh ping  (GitHub отправит ping → HOOK_PING в event-log → облако)"
+    echo "далее: HOOK_ID=<id> bash scripts/webhook-register.sh ping  (тест-доставка; для repo-webhook GitHub шлёт последний PUSH)"
     ;;
   ping)
     HID="${HOOK_ID:?задай HOOK_ID=<id>}"
     CODE=$(gh -o /dev/null -w '%{http_code}' -X POST "$API/$HID/tests")
-    echo "ping-тест хука #$HID → HTTP $CODE (204 = GitHub отправил ping на WEBHOOK_URL)"
-    echo "проверка: curl http://localhost:3041/hooks | jq '.deliveries'  — ожидай event=ping"
+    echo "тест-доставка хука #$HID → HTTP $CODE (204 = отправлено)"
+    echo "внимание (проверено R69.1 по delivery-log GitHub): для repo-webhook /tests шлёт НЕ ping,"
+    echo "а ПОСЛЕДНИЙ PUSH (наш GIT_PUSH); ping приходит только при создании хука"
+    echo "проверка: curl http://localhost:3041/hooks | jq '.deliveries'  — ожидай event=push/ping"
     ;;
   *)
     echo "операции: list | register (нужен WEBHOOK_URL) | ping (нужен HOOK_ID)"; exit 1 ;;
