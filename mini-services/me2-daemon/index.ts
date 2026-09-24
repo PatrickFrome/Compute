@@ -28,6 +28,7 @@ import { SqlMirror } from "./src/sqlmirror";
 import { runRlsAuditAsync } from "./src/rls-audit";
 import { runRpcReconcileAsync } from "./src/rpc-reconcile";
 import { startSelfAuditLoop } from "./src/self-audit";
+import { exthostStatus, runExtension, exthostStartEventLoop, setMirrorFeedProvider } from "./src/exthost";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
@@ -243,6 +244,18 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/sqlmirror/rpc-reconcile" && req.method === "GET") {
       const url = new URL(req.url || "", "http://local");
       return json(res, 200, await runRpcReconcileAsync(url.searchParams.get("force") === "1"));
+    }
+    // ── R60 «extension host»: каталог расширений + изолированный прогон (prlimit, stdio-only) ──
+    // Канон VS Code exthost; caps-медиация; расширение не видит ни секретов, ни сети. Вне шины (47-инвариант).
+    if (path === "/exthost" && req.method === "GET") return json(res, 200, exthostStatus());
+    if (path === "/exthost/run" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { id?: string };
+        if (!body?.id || typeof body.id !== "string") return json(res, 400, { ok: false, error: "id_required" });
+        return json(res, 200, await runExtension(body.id, undefined, "rest"));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
     }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
@@ -869,7 +882,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -1156,6 +1169,12 @@ if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (
 if (!PROBE_MODE && sqlMirror.status().configured) {
   try { startSelfAuditLoop(); console.log("[me2-daemon] self-audit loop on (RLS + RPC-реестр, 20мин, события на переходах)"); } catch (e) { console.error(`[me2-daemon] self-audit loop failed: ${String(e)}`); }
 }
+// R60: exthost — caps-медиация зеркала (расширение сети не видит: данные доставляет daemon)
+// и activation events по шине (опрос 30с, level-triggered, курсор с головы шины — старьё не спамится)
+try {
+  setMirrorFeedProvider(() => sqlMirror.readFeed(20));
+  if (!PROBE_MODE) { exthostStartEventLoop(); console.log("[me2-daemon] exthost event loop on (30с, activation bus:*, caps-медиация зеркала)"); }
+} catch (e) { console.error(`[me2-daemon] exthost init failed: ${String(e)}`); }
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
 

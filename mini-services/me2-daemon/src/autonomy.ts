@@ -212,6 +212,7 @@ export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/selfupdate": "self-update: verify→apply→health→rollback, ff-only барьер, подпись",
   "/db/hygiene": "DB-гигиена: WAL checkpoint/PRAGMA, без деструктива домена",
   "/mcp": "MCP-шлюз: JSON-RPC поверх тех же REST-семейств (отдельного пути нет)",
+  "/exthost/run": "R60 exthost-плоскость: изолированный прогон расширения (spawn prlimit as/nofile/core + env-белый-список + caps-медиация), журнал exthost_runs + EXT_RUN в chain; расширение не пишет в домен",
 };
 export function nonBypassAudit(): {
   verdict: "NO_BYPASS" | "UNKNOWN_ROUTE"; post_routes: string[]; classified: number;

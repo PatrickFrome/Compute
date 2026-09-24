@@ -55,6 +55,7 @@ import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, pu
 import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { RLS_EXPECTED_DML, RLS_EXPECTED_POLICIES, RLS_EXPECTED_FLAGS, rlsAuditProbeOffline } from "./rls-audit";
 import { RPC_EXPECTED_TOTAL, RPC_EXPECTED_TIERS, rpcReconcileProbeOffline } from "./rpc-reconcile";
+import { capsAllowed, CAPS_WHITELIST, exthostProbeOffline } from "./exthost";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
@@ -64,7 +65,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 24;
+export const EVAL_DATASET_VERSION = 25;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1017,9 +1018,9 @@ export const EVAL_DATASET: EvalCheck[] = [
   {
     id: "mission.ui_contract",
     plane: "mission",
-    title: "R49 фаза A: GET /ui — самодостаточная Mission Control: 0 сборки, 0 внешних зависимостей, socket-клиент только с daemon'а, операции через agentchat:op",
+    title: "R49 фаза A + R60 ruling: GET /ui — самодостаточная Mission Control: 0 сборки, 0 внешних зависимостей, socket-клиент только с daemon'а, ходы через agentchat:op; указание оператора R60 «UI не обязан быть read only» — REST-записи разрешены, но ТОЛЬКО санкционированные (/exthost/run)",
     critical: true,
-    expect: "HTML содержит fleet/river/toast-узлы и data-testid; fetch только относительных read-only путей (/agentchat,/events,/health,/state); операции — socket emit agentchat:op; никаких внешних http-ресурсов (кроме self-hosted socket.io с daemon'а); размер разумный (<64KB)",
+    expect: "HTML содержит fleet/river/toast-узлы и data-testid; fetch только относительных путей (/agentchat,/events,/health,/state,...); REST-записи (fetch с method POST/PUT) — только из белого списка санкционированных (POST /exthost/run), каждая именована в capabilities.rest.write; операции флота — socket emit agentchat:op; никаких внешних http-ресурсов (кроме self-hosted socket.io с daemon'а); размер разумный (<64KB)",
     run: () => {
       const html = missionUiHtml();
       const markersOk = ['data-testid="mc-fleet"', 'data-testid="mc-river"', 'data-testid="mc-contract"', "agentchat:op", "/agentchat", "/events?limit=60", "/health", "/state"]
@@ -1028,12 +1029,16 @@ export const EVAL_DATASET: EvalCheck[] = [
       const srcs = [...html.matchAll(/src="(https?:\/\/[^"\s]{6,})"/g)].map((m) => m[1]);
       const external = srcs.filter((s) => !s.includes(":"+WS_PORT+"/socket.io.js"));
       const noExternalAssets = external.length === 0 && !/href="https?:/.test(html);
-      // честная проверка: страница не шлёт REST-POST/PUT (метод в fetch отсутствует)
-      const noRestWrites = !/method\s*:\s*["'](POST|PUT)/.test(html);
+      // R60 (указание оператора: «UI не обязан быть read only»): REST-записи разрешены,
+      // но только санкционированные — каждая именована, белый список короче — крепче поводок
+      const writes = [...html.matchAll(/fetch\(api\("([^"?]+)"\),\s*\{\s*method:\s*["']([A-Z]+)/g)]
+        .map((m) => m[1] + " " + m[2]);
+      const SANCTIONED = new Set(["/exthost/run POST"]);
+      const sanctioned = writes.every((w) => SANCTIONED.has(w));
       const fetchPaths = [...html.matchAll(/fetch\((?:api\()?"([^"?]+)/g)].map((m) => m[1]);
       const readOnly = fetchPaths.length >= 3 && fetchPaths.every((p) => p.startsWith("/"));
-      const ok = markersOk && noExternalAssets && noRestWrites && readOnly && html.length < 64 * 1024 && html.includes("<!doctype html>");
-      return { ok, evidence: `маркеры=${markersOk}, абсолютных-src=${srcs.length} внешних=${external.length} (socket self-hosted только), no-REST-write=${noRestWrites}, fetch-only-relative=${readOnly}, размер=${(html.length / 1024).toFixed(1)}KB` };
+      const ok = markersOk && noExternalAssets && sanctioned && readOnly && html.length < 64 * 1024 && html.includes("<!doctype html>");
+      return { ok, evidence: `маркеры=${markersOk}, абсолютных-src=${srcs.length} внешних=${external.length} (socket self-hosted только), записей=${writes.length} санкционированных=${sanctioned} (${writes.join("|") || "—"} · белый список: POST /exthost/run), fetch-only-relative=${readOnly}, размер=${(html.length / 1024).toFixed(1)}KB` };
     },
   },
   {
@@ -1226,6 +1231,47 @@ export const EVAL_DATASET: EvalCheck[] = [
       } catch { /* probe/CI-раскладка: файл может отсутствовать — честный частичный проход */ }
       const ok = markers && noSecretInHtml && noLongLivedKeys && tableOk;
       return { ok, evidence: `маркеры=${markers}, no-вшитых-jwt=${noSecretInHtml}, no-service-role=${noLongLivedKeys}, ${tableCross}` };
+    },
+  },
+  {
+    id: "mission.workbench_ui",
+    plane: "mission",
+    title: "R60 «workbench»: GET /ui несёт сворачиваемые секции (toggle-кнопки с aria-expanded/controls + dblclick по заголовку), персист лэйаута в localStorage (me2.ui.workbench.v1 — аналог state.vscdb VS Code), кнопку сброса и секцию exthost; порядок секций не меняется (урок R12/R16)",
+    critical: true,
+    expect: "HTML содержит wb-toggle-кнопки для всех четырёх секций (fleet/river/mirror/ext) с aria-expanded и aria-controls и телами wb-body, класс-механизм wb-collapsed, ключ персиста me2.ui.workbench.v1 + localStorage, кнопку сброса wb-reset; в HTML нет вшитых JWT",
+    run: () => {
+      const html = missionUiHtml();
+      const toggles = ["fleet", "river", "mirror", "ext"].every((id) =>
+        html.includes('id="wb-' + id + '"') && html.includes('id="wb-toggle-' + id + '"') && html.includes('id="wb-body-' + id + '"'));
+      const aria = html.includes("aria-expanded") && html.includes("aria-controls");
+      const persist = html.includes("me2.ui.workbench.v1") && html.includes("localStorage");
+      const reset = html.includes('id="wb-reset"');
+      const collapse = html.includes("wb-collapsed") && html.includes("wb-body");
+      const noSecretInHtml = !/eyJ[A-Za-z0-9_-]{20,}/.test(html);
+      const ok = toggles && aria && persist && reset && collapse && noSecretInHtml;
+      return { ok, evidence: `тогглы 4/4=${toggles}, aria=${aria}, персист localStorage=${persist}, сброс=${reset}, collapse-механизм=${collapse}, no-вшитых-jwt=${noSecretInHtml}` };
+    },
+  },
+  {
+    id: "contract.exthost",
+    plane: "contract",
+    title: "R60 «extension host»: расширения skills/ext/* — изоляция в подпроцессе (prlimit-канон sandbox, stdio-only, env-белый-список), caps-медиация с честным отказом вне белого списка, activation manual/bus:*, честный офлайн probe-режим",
+    critical: false,
+    expect: "манифест skills/ext/mirror-digest/ext.json парсится (id=имени каталога, entry *.js); entry main.js существует и не содержит require/import/fetch (API-поверхность = только stdio); capsAllowed(['mirror.feed.read'])=true и capsAllowed(['fs.write'])=false и capsAllowed(строка)=false (fail-closed); probe_offline честный",
+    run: () => {
+      let manOk = false; let entryOk = false; let entryPure = false;
+      try {
+        const man = JSON.parse(readFileSync(join(import.meta.dir, "..", "skills", "ext", "mirror-digest", "ext.json"), "utf8")) as { id?: string; entry?: string; caps?: string[]; activation?: string[] };
+        manOk = man.id === "mirror-digest" && man.entry === "main.js" && Array.isArray(man.caps) && Array.isArray(man.activation);
+        const entry = readFileSync(join(import.meta.dir, "..", "skills", "ext", "mirror-digest", "main.js"), "utf8");
+        entryOk = entry.length > 400;
+        entryPure = !/\brequire\s*\(/.test(entry) && !/^\s*import\s/m.test(entry) && !/fetch\s*\(/.test(entry) && !/node:/i.test(entry);
+      } catch { manOk = false; }
+      const capsOk = capsAllowed(["mirror.feed.read"]) && !capsAllowed(["fs.write"]) && !capsAllowed("mirror.feed.read") && CAPS_WHITELIST.length === 1;
+      const probe = exthostProbeOffline();
+      const probeOk = probe.ok && probe.mode === "probe_offline" && probe.exts.some((x) => x.id === "mirror-digest" && x.caps_ok) && probe.errors === 0;
+      const ok = manOk && entryOk && entryPure && capsOk && probeOk;
+      return { ok, evidence: `манифест=${manOk}, entry=${entryOk}, stdio-only(без require/import/fetch)=${entryPure}, caps-белый-список=${capsOk} (${CAPS_WHITELIST.join(",")}), probe_offline=${probeOk}` };
     },
   },
 ];

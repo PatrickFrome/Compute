@@ -80,6 +80,9 @@ keytar/safeStorage для секретов. Урок: secrets НИКОГДА в 
    версионируется, но bypass-аудита нет). ✔✔ (наше превосходство)
 9. «Аудит как цикл» — периодический level-аудит + переходные события (K8s/AWS Config
    узор; у аналогов-приложений этого нет). ✔ (R59: RLS + сверка реестра 243, хеш 337ccab1d17f)
+10. Изоляция расширений строже канона: prlimit (--as=1GiB --nofile=256 --core=0) +
+   env-белый-список + caps-медиация (у VS Code exthost наследует env целиком и без rlimit;
+   расширение видит только stdio — сети нет по построению). ✔ (R60: src/exthost.ts)
 
 ## 5. Пробелы против канона (честно) → дорожная карта
 
@@ -87,8 +90,8 @@ keytar/safeStorage для секретов. Урок: secrets НИКОГДА в 
 |---|---|---|
 | ~~Периодический RLS-аудит из daemon-цикла~~ | AWS Config rules | ✔ R59 (src/self-audit.ts) |
 | ~~Сверка реестра RPC 243 против облака (count+хеш)~~ | Terraform drift | ✔ R59 (rpc-reconcile) |
-| Workbench-лэйаут панелей (перетаскивание/скрытие) | VS Code workbench | R60+ (разбор: r59-analogues §3) |
-| Extension-host аналог: изоляция skills в подпроцессе | VS Code extension host | R60+ (разбор: r59-analogues §2) |
+| ~~Workbench-лэйаут панелей (сворачивание/скрытие)~~ | VS Code workbench | ✔ R60 (тогглы+dblclick+персист localStorage; SQLite-персист R61+) |
+| ~~Extension-host аналог: изоляция skills в подпроцессе~~ | VS Code extension host | ✔ R60 (prlimit+stdio-only+caps-медиация; long-lived R61+) — сверка: research/2026/r60-analogues.md §2 |
 | Device-flow вход оператора в панели | Cursor/gh-cli | R61 |
 | Remote-профиль установщика (daemon локально, UI где угодно) | VS Code Remote | R61+ |
 
@@ -96,8 +99,9 @@ keytar/safeStorage для секретов. Урок: secrets НИКОГДА в 
 
 Канон лучших Electron-приложений подтверждает архитектуру ME2: main-side secrets,
 SQLite-истина, манифестный self-update, контрактный хендшейк, стриминговые ленты,
-«аудит как цикл» (R59). Уникальные преимущества ME2 против аналогов: hash-chain событий
-+ SQL-зеркало с RLS-гейтом + non-bypass шина + «политики как данные» + периодический
-самоаудит с переходными событиями. Следующий прирост — workbench-лэйаут и extension-host
-изоляция (R60, разборы в r59-analogues §2–§3), наблюдение первого self-update живых
-установок на v0.45+.
+«аудит как цикл» (R59), workbench-лэйаут и exthost-изоляция (R60). Уникальные
+преимущества ME2 против аналогов: hash-chain событий + SQL-зеркало с RLS-гейтом +
+non-bypass шина + «политики как данные» + периодический самоаудит с переходными
+событиями + изоляция расширений строже канона (п.10 инвентаря). Следующий прирост —
+device-flow вход (R61) и long-lived exthost / SQLite-персист лэйаута (R61+); полный
+разбор R60 — research/2026/r60-analogues.md.
