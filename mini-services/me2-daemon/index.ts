@@ -29,6 +29,8 @@ import { runRlsAuditAsync } from "./src/rls-audit";
 import { runRpcReconcileAsync } from "./src/rpc-reconcile";
 import { startSelfAuditLoop } from "./src/self-audit";
 import { exthostStatus, runExtension, exthostStartEventLoop, setMirrorFeedProvider } from "./src/exthost";
+import { execStatus, runTerminalAsync, execProbeOffline } from "./src/exec";
+import { editStatus, applyEditAsync, rollbackEdit, editProbeOffline } from "./src/edit";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
@@ -47,7 +49,7 @@ import { suCheckAsync, suApply, suCached, selfupdateStatus } from "./src/selfupd
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
 import { senseNow, senseList, senseAct } from "./src/sense";
-import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
+import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict, benchSuspend, benchResetRings } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
 import { senseDiffs } from "./src/sense";
@@ -253,6 +255,38 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
         const body = await readBody(req) as { id?: string };
         if (!body?.id || typeof body.id !== "string") return json(res, 400, { ok: false, error: "id_required" });
         return json(res, 200, await runExtension(body.id, undefined, "rest"));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R62 P0-a «exec/edit tools»: TERMINAL_RUN + FILE_EDIT для агентного harness ──
+    // Канон Cursor terminal/edit-files (корпус R61, трек A); enforcement = allowlist по
+    // сегментам → prlimit → таймаут → env-белый-список; cwd/цель — только управляемые
+    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 32.
+    if (path === "/exec" && req.method === "GET") return json(res, 200, execStatus());
+    if (path === "/exec" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number };
+        if (body?.op !== "run") return json(res, 400, { ok: false, error: "bad_op", allowed: ["run"] });
+        if (typeof body.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+        return json(res, 200, await runTerminalAsync(body.cmd, body.cwd, body.timeout_ms, "rest"));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    if (path === "/file" && req.method === "GET") return json(res, 200, editStatus());
+    if (path === "/file" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; path?: string; diff?: string; edit_id?: number };
+        if (body?.op === "apply") {
+          if (typeof body.path !== "string" || typeof body.diff !== "string") return json(res, 400, { ok: false, error: "path_and_diff_required" });
+          return json(res, 200, await applyEditAsync(body.path, body.diff, "rest"));
+        }
+        if (body?.op === "rollback") {
+          if (typeof body.edit_id !== "number") return json(res, 400, { ok: false, error: "edit_id_required" });
+          return json(res, 200, rollbackEdit(body.edit_id, "rest"));
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["apply", "rollback"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
       }
@@ -809,7 +843,10 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
     if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
     if (path === "/eval/run" && req.method === "POST") {
-      const report = evalRun(VERSION);
+      benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
+      benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
+      let report: ReturnType<typeof evalRun>;
+      try { report = evalRun(VERSION); } finally { benchSuspend(false); }
       return json(res, 200, report);
     }
     // ── R27 C1: Mission Control — objectives + work_graph (fails-closed, zero-authority) ──
@@ -882,7 +919,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

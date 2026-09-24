@@ -62,6 +62,11 @@ type WorktreeData = { ok: boolean; head: string; branch: string; worktrees: { wo
 type RoadmapData = { ok: boolean; verdict: string; done: number; total: number; closedAt: string | null; milestones: { key: string; title: string; status: string; evidence: string; checks: { name: string; pass: boolean }[]; verifiedAt: string }[] };
 type SandboxData = { ok: boolean; sandboxes: { id: string; status: string; provider: string; createdAt: string; head: string; cmds: number; lastCmd: string | null; lastExit: number | null; diskKb?: number }[]; providers: Record<string, string>; snapshots: { file: string; sandboxId: string; bytes: number; sha256: string; createdAt: string }[] };
 type SandboxRun = { id: string; cmd: string; exitCode: number; ok: boolean; ms: number; stdout: string; stderr: string; truncated: boolean; limit: string };
+// R62 P0-a: exec/edit-плоскости (TERMINAL_RUN + FILE_EDIT) для агентного harness
+const EXEC_DEFAULT_DIFF = `--- /dev/null\n+++ p0a-demo.js\n@@ -0,0 +1,2 @@\n+console.log("me2-p0a: edit-run-green");\n+console.log("agent loop live");\n`;
+type ExecData = { ok: boolean; allowlist: string[]; roots: string[]; deny_rules: string[]; caps: { prlimit: boolean; timeout_max_ms: number; cmd_max_len: number; substitution: string }; counters: { runs: number; denied: number }; recent: { id: number; cmd: string; ok: boolean; exit: number | null; reason: string | null; ms: number | null; source: string }[] };
+type FileData = { ok: boolean; counters: { applied: number; denied: number; rollbacks: number }; recent: { id: number; path: string; op: string; ok: boolean; reason: string | null; hunks: number | null; rollback_done: boolean; has_backup: boolean }[] };
+type ToolVerdict = { ok: boolean; exit?: number | null; stdout_tail?: string; stderr_tail?: string; duration?: number; sandboxed?: boolean; limit?: string; reason?: string; detail?: string; rollback_at?: number | null; hunks?: number; applied?: boolean };
 // R19: МЕХАНИКИ (порт старых механик A2 → ME2)
 type MemRowT = { id: number; kind: string; key: string; content: string; tags: string; importance: number; hits: number; score?: number };
 type MemData = { ok: boolean; rows: MemRowT[]; status: { rows: number; by_kind: Record<string, number>; db_bytes: number } };
@@ -1376,6 +1381,15 @@ export default function MissionControl() {
   const [sbId, setSbId] = useState("");
   const [sbCmd, setSbCmd] = useState("");
   const [sbRun, setSbRun] = useState<SandboxRun | null>(null);
+  // R62 P0-a: exec/edit-карточка (TERMINAL_RUN + FILE_EDIT, санкционированные записи POST /exec + /file)
+  const [exOpen, setExOpen] = useState(false);
+  const [ex, setEx] = useState<ExecData | null>(null);
+  const [fx, setFx] = useState<FileData | null>(null);
+  const [exBusy, setExBusy] = useState(false);
+  const [exCmd, setExCmd] = useState("node --version");
+  const [exCwd, setExCwd] = useState("");
+  const [exOut, setExOut] = useState<string | null>(null);
+  const [exOk, setExOk] = useState<boolean | null>(null);
   const loadSb = useCallback(async () => {
     try {
       const r = await fetch("/sandboxes?XTransformPort=3041", { cache: "no-store" }).then((res) => res.json());
@@ -1409,6 +1423,84 @@ export default function MissionControl() {
       return () => clearInterval(iv);
     }
   }, [sbOpen, loadSb]);
+
+  // ── R62 P0-a: exec/edit (TERMINAL_RUN + FILE_EDIT) ──
+  const loadEx = useCallback(async () => {
+    try {
+      const [e, f] = await Promise.all([
+        fetch("/exec?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/file?XTransformPort=3041", { cache: "no-store" }).then((r) => r.json()),
+      ]);
+      if (e?.ok) setEx(e as ExecData);
+      if (f?.ok) setFx(f as FileData);
+    } catch { /* daemon недоступен */ }
+  }, []);
+  const exRun = useCallback(async (cmd: string, cwd: string, label: string) => {
+    setExBusy(true); setExOut(null);
+    try {
+      const v = await fetch("/exec?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "run", cmd, cwd }),
+      }).then((r) => r.json()) as ToolVerdict;
+      if (v?.ok) {
+        setExOk(true);
+        setExOut(`exit ${v.exit} · ${v.duration}мс · ${v.limit}\n${v.stdout_tail || "(stdout пуст)"}${v.stderr_tail ? `\n[stderr] ${v.stderr_tail}` : ""}`);
+        toast({ title: label });
+      } else {
+        setExOk(false);
+        setExOut(`отказ: ${v?.reason}${v?.detail ? `\n${v.detail}` : ""}`);
+        toast({ title: `${label} ✗ · ${v?.reason}`, description: v?.detail, variant: "destructive" });
+      }
+      await loadEx();
+      return v;
+    } catch {
+      setExOk(false); setExOut("daemon недоступен");
+      toast({ title: "exec ✗", description: "daemon недоступен", variant: "destructive" });
+      return null;
+    } finally { setExBusy(false); }
+  }, [loadEx, toast]);
+  const fileApply = useCallback(async (path: string, diff: string, label: string) => {
+    setExBusy(true);
+    try {
+      const v = await fetch("/file?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "apply", path, diff }),
+      }).then((r) => r.json()) as ToolVerdict;
+      if (v?.ok) { toast({ title: `${label} · hunks ${v.hunks ?? "—"}` }); await loadEx(); return v; }
+      toast({ title: `${label} ✗ · ${v?.reason}`, description: v?.detail, variant: "destructive" });
+      return null;
+    } catch { toast({ title: "file ✗", description: "daemon недоступен", variant: "destructive" }); return null; }
+    finally { setExBusy(false); }
+  }, [loadEx, toast]);
+  const fileRollback = useCallback(async (editId: number) => {
+    setExBusy(true);
+    try {
+      const v = await fetch("/file?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "rollback", edit_id: editId }),
+      }).then((r) => r.json()) as ToolVerdict;
+      if (v?.ok) { toast({ title: "rollback выполнен (байт-в-байт из журнала)" }); await loadEx(); }
+      else toast({ title: `rollback ✗ · ${v?.reason}`, description: v?.detail, variant: "destructive" });
+    } catch { toast({ title: "rollback ✗", description: "daemon недоступен", variant: "destructive" }); }
+    finally { setExBusy(false); }
+  }, [loadEx, toast]);
+  const exDemo = useCallback(async () => {
+    const cwd = exCwd.trim();
+    if (!cwd) { toast({ title: "нужен cwd (управляемый корень)", description: "каталог внутри песочницы или worktree", variant: "destructive" }); return; }
+    const fname = `p0a-demo-${Date.now().toString(36)}.js`;
+    const diff = EXEC_DEFAULT_DIFF.replace("p0a-demo.js", fname);
+    const applied = await fileApply(`${cwd}/${fname}`, diff, "FILE_EDIT create");
+    if (!applied) return;
+    const run = await exRun(`node ${fname}`, cwd, "TERMINAL_RUN node");
+    if (run?.ok) toast({ title: "edit→run→green ✓", description: applied.rollback_at ? `rollback доступен (edit_id ${applied.rollback_at})` : undefined });
+  }, [exCwd, fileApply, exRun, toast]);
+  useEffect(() => {
+    if (exOpen) {
+      void loadEx();
+      const iv = setInterval(() => void loadEx(), 15_000);
+      return () => clearInterval(iv);
+    }
+  }, [exOpen, loadEx]);
 
   // ── R19: панель МЕХАНИКИ (порт старых механик A2: memory/brain/fleet/self-update/rsi) ──
   const [mcxOpen, setMcxOpen] = useState(false);
@@ -3322,6 +3414,132 @@ export default function MissionControl() {
                                 {Object.entries(sb.providers).map(([k, v]) => (
                                   <span key={k}><span className="text-zinc-500">{k}</span> = {v}</span>
                                 ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </Card>
+                      <Card className="min-h-0 overflow-hidden border-zinc-800 bg-zinc-900/40 card-lift lg:max-h-[38vh]">
+                        <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setExOpen((o) => !o)}
+                            aria-expanded={exOpen}
+                            aria-controls="exec-body"
+                            className="flex min-w-0 items-center gap-2 text-left"
+                          >
+                            <Terminal className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden />
+                            <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                              EXEC/EDIT{ex ? ` · ${ex.allowlist.length} бин.` : ""}
+                            </span>
+                          </button>
+                          <span className="flex shrink-0 items-center gap-2">
+                            {ex && (
+                              <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="белый список бинарей по сегментам · prlimit as=4GiB/nofile=256/core=0 · cwd только в песочницах/worktrees">
+                                run {ex.counters.runs} · отказ {ex.counters.denied}{fx ? ` · edit ${fx.counters.applied}` : ""}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void loadEx()}
+                              title="Обновить статус exec/edit-плоскостей"
+                              aria-label="Обновить статус exec/edit"
+                              className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${exBusy ? "animate-spin" : ""}`} aria-hidden />
+                            </button>
+                            <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${exOpen ? "" : "-rotate-90"}`} aria-hidden />
+                          </span>
+                        </CardHeader>
+                        {exOpen && (
+                          <div id="exec-body" className="space-y-2.5 p-3">
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-zinc-600" title="Enforcement-цепочка P0-a: allowlist по сегментам → prlimit → таймаут → env-белый-список">
+                              <span className={ex?.caps.prlimit ? "text-emerald-500/80" : "text-rose-400"}>prlimit {ex?.caps.prlimit ? "✓ as=4GiB·nofile=256·core=0" : "✗"}</span>
+                              <span>timeout ≤ {ex ? ex.caps.timeout_max_ms / 1000 : "?"}с</span>
+                              <span>подстановки $() {ex?.caps.substitution === "denied" ? "запрещены" : "?"}</span>
+                              <span className="hidden sm:inline" title={(ex?.allowlist ?? []).join(", ")}>allowlist {ex?.allowlist.length ?? "—"}</span>
+                            </div>
+
+                            <form
+                              onSubmit={(e) => { e.preventDefault(); const cmd = exCmd.trim(); const cwd = exCwd.trim(); if (cmd && cwd) void exRun(cmd, cwd, "TERMINAL_RUN"); }}
+                              className="space-y-1.5"
+                            >
+                              <Input
+                                value={exCmd}
+                                onChange={(e) => setExCmd(e.target.value)}
+                                placeholder="команда: git status | node --version | bun test (curl/bash/$() отклоняются)"
+                                className="h-7 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]"
+                                aria-label="Команда TERMINAL_RUN (белый список бинарей)"
+                              />
+                              <div className="flex gap-2">
+                                <Input
+                                  value={exCwd}
+                                  onChange={(e) => setExCwd(e.target.value)}
+                                  placeholder="cwd: /home/z/me2-sandboxes/<id> или /home/z/me2-worktrees/<name>"
+                                  className="h-7 flex-1 border-zinc-800 bg-zinc-950/60 font-mono text-[11px]"
+                                  aria-label="Рабочий каталог (управляемый корень)"
+                                  list="exec-roots"
+                                />
+                                <datalist id="exec-roots">
+                                  {(sb?.sandboxes ?? []).map((s) => (
+                                    <option key={s.id} value={`/home/z/me2-sandboxes/${s.id}`} />
+                                  ))}
+                                </datalist>
+                                <Button type="submit" size="sm" variant="outline" disabled={exBusy} className="h-7 shrink-0 border-zinc-700 px-2 text-[10px]">
+                                  <Play className="mr-1 h-3 w-3" aria-hidden /> run
+                                </Button>
+                                <Button type="button" size="sm" variant="ghost" disabled={exBusy} onClick={() => void exDemo()} className="h-7 shrink-0 border border-zinc-700 px-2 text-[10px]" title="FILE_EDIT создаёт p0a-demo.js → TERMINAL_RUN node → зелёный вывод (петля Cursor edit→run→green)">
+                                  demo
+                                </Button>
+                              </div>
+                            </form>
+
+                            {exOut !== null && (
+                              <div className={`rounded-md border p-2 font-mono text-[10px] ${exOk ? "border-zinc-800 bg-zinc-950/60" : "border-rose-900/50 bg-rose-950/20"}`} aria-live="polite">
+                                <div tabIndex={0} role="region" aria-label="Вывод команды" className={`max-h-28 overflow-y-auto whitespace-pre-wrap ${exOk ? "text-zinc-500" : "text-rose-400/80"} [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700`}>
+                                  {exOut}
+                                </div>
+                              </div>
+                            )}
+
+                            {(ex?.recent.length ?? 0) > 0 && (
+                              <div className="space-y-1">
+                                <div className="text-[9px] uppercase tracking-wider text-zinc-600">последние прогоны (журнал exec_runs)</div>
+                                <div tabIndex={0} role="region" aria-label="Журнал прогонов" className="max-h-24 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                                  {ex?.recent.slice(0, 6).map((r) => (
+                                    <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.ok ? "bg-emerald-400" : "bg-rose-500"}`} aria-hidden />
+                                      <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.cmd}>$ {r.cmd}</span>
+                                      <span className="shrink-0 text-zinc-600">{r.ok ? `exit ${r.exit}` : r.reason} · {r.ms}мс</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {(fx?.recent.length ?? 0) > 0 && (
+                              <div className="space-y-1">
+                                <div className="text-[9px] uppercase tracking-wider text-zinc-600">правки (журнал file_edits · durable rollback)</div>
+                                <div tabIndex={0} role="region" aria-label="Журнал правок" className="max-h-24 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                                  {fx?.recent.slice(0, 6).map((r) => (
+                                    <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.ok ? (r.rollback_done ? "bg-zinc-500" : "bg-cyan-400") : "bg-rose-500"}`} aria-hidden />
+                                      <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.path}>{r.path.split("/").pop()}</span>
+                                      <span className="shrink-0 text-zinc-600">{r.op}{r.hunks ? ` · ${r.hunks}h` : ""}{r.ok && !r.rollback_done && r.op === "apply" ? (r.has_backup ? " · backup жив" : " · создание (без бэкапа)") : r.rollback_done ? " · откачено" : ""}</span>
+                                      {r.ok && r.op === "apply" && !r.rollback_done && r.has_backup && (
+                                        <button
+                                          type="button"
+                                          onClick={() => void fileRollback(r.id)}
+                                          disabled={exBusy}
+                                          title="Восстановить исходное содержимое байт-в-байт из журнала (durable-rollback)"
+                                          className="shrink-0 rounded border border-zinc-700 px-1.5 py-0.5 text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40"
+                                        >
+                                          ↩ откат
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>

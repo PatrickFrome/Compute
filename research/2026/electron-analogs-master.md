@@ -83,6 +83,14 @@ keytar/safeStorage для секретов. Урок: secrets НИКОГДА в 
 10. Изоляция расширений строже канона: prlimit (--as=1GiB --nofile=256 --core=0) +
    env-белый-список + caps-медиация (у VS Code exthost наследует env целиком и без rlimit;
    расширение видит только stdio — сети нет по построению). ✔ (R60: src/exthost.ts)
+11. Durable rollback правок строже checkpoint'ов Cursor: бэкап исходника в SQLite-журнале
+   (агент не может подменить бэкап-файл на диске), восстановление байт-в-байт, события
+   EDIT_APPLIED/EDIT_ROLLBACK в hash-chain; у Cursor checkpoints — локальные файлы
+   «stored locally, separate from Git». ✔ (R62: src/edit.ts)
+12. Allowlist терминала по СЕГМЕНТАМ конвейера (split | ; && || \n — каждый бинарь против
+   белого списка) строже канона Cursor Run-Mode (allowlist на уровне команды): «echo hi &&
+   curl evil» отсекается вторым сегментом; подстановки $()/env= — явный отказ. ✔
+   (R62: src/exec.ts — сверка research/2026/r62-analogues.md)
 
 ## 5. Пробелы против канона (честно) → дорожная карта
 
@@ -92,6 +100,7 @@ keytar/safeStorage для секретов. Урок: secrets НИКОГДА в 
 | ~~Сверка реестра RPC 243 против облака (count+хеш)~~ | Terraform drift | ✔ R59 (rpc-reconcile) |
 | ~~Workbench-лэйаут панелей (сворачивание/скрытие)~~ | VS Code workbench | ✔ R60 (тогглы+dblclick+персист localStorage; SQLite-персист R61+) |
 | ~~Extension-host аналог: изоляция skills в подпроцессе~~ | VS Code extension host | ✔ R60 (prlimit+stdio-only+caps-медиация; long-lived R61+) — сверка: research/2026/r60-analogues.md §2 |
+| ~~Exec/edit инструменты агентного harness (TERMINAL_RUN+FILE_EDIT)~~ | Cursor terminal/edit-files/checkpoints | ✔ R62 (src/exec.ts+src/edit.ts; P0-a из R61-GAP-ANALYSIS; классификатор=P0-1, Landlock/egress=P0-2) — сверка: research/2026/r62-analogues.md |
 | Device-flow вход оператора в панели | Cursor/gh-cli | R61 |
 | Remote-профиль установщика (daemon локально, UI где угодно) | VS Code Remote | R61+ |
 
@@ -103,5 +112,6 @@ SQLite-истина, манифестный self-update, контрактный 
 преимущества ME2 против аналогов: hash-chain событий + SQL-зеркало с RLS-гейтом +
 non-bypass шина + «политики как данные» + периодический самоаудит с переходными
 событиями + изоляция расширений строже канона (п.10 инвентаря). Следующий прирост —
-device-flow вход (R61) и long-lived exthost / SQLite-персист лэйаута (R61+); полный
-разбор R60 — research/2026/r60-analogues.md.
+device-flow вход (R61) и long-lived exthost / SQLite-персист лэйаута (R61+); exec/edit
+инструменты Cursor-parity закрыты R62 (P0-a, 15 P0 гэпов R61 → первый в коде); полный
+разбор R60 — research/2026/r60-analogues.md, R62 — research/2026/r62-analogues.md.

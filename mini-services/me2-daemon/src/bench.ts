@@ -32,7 +32,16 @@ const rings = new Map<BenchProbe, number[]>();
 const coldRings = new Map<BenchProbe, number[]>();
 
 /** Наблюдение латентности (ms). Вызывается из горячего пути — O(1) амортизированно. */
+// R62: замер приостанавливается на время тяжёлых in-process батчей (evalRun) — иначе
+// очередь запросов в момент батча пишется в кольцо как «медленные» сэмплы и вечно
+// портит p95 (узор исключения бутстрапа/батча из замера, канон практик нагрузочного теста).
+let benchSuspended = false;
+export function benchSuspend(on: boolean): void { benchSuspended = on; }
+/** R62: дренаж колец — свежее окно измерения на каждый eval-прогон. */
+export function benchResetRings(): void { rings.clear(); coldRings.clear(); }
+
 export function benchObserve(probe: BenchProbe, ms: number): void {
+  if (benchSuspended) return;
   if (!Number.isFinite(ms) || ms < 0) return;
   const v = Math.round(ms);
   if (Date.now() - bootT0 < COLD_WINDOW_MS) {

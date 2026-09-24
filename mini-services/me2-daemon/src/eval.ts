@@ -56,16 +56,18 @@ import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { RLS_EXPECTED_DML, RLS_EXPECTED_POLICIES, RLS_EXPECTED_FLAGS, rlsAuditProbeOffline } from "./rls-audit";
 import { RPC_EXPECTED_TOTAL, RPC_EXPECTED_TIERS, rpcReconcileProbeOffline } from "./rpc-reconcile";
 import { capsAllowed, CAPS_WHITELIST, exthostProbeOffline } from "./exthost";
+import { planExec, execProbeOffline, execRoots, ALLOWED_BINARIES, evalTmpPrepare, evalTmpCleanup } from "./exec";
+import { planEdit, editProbeOffline, editEvalTmpDir } from "./edit";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
 import { policyAllows, policyCheckTool, tierForRole, policyReload, policyStatus, policyCaps } from "./policy";
 import { cronAdd, cronList, cronTick, cronCancel, cronTestReset } from "./cron";
 import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus } from "./tokens";
-import { rmSync, readFileSync } from "node:fs";
+import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 25;
+export const EVAL_DATASET_VERSION = 26;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1030,10 +1032,11 @@ export const EVAL_DATASET: EvalCheck[] = [
       const external = srcs.filter((s) => !s.includes(":"+WS_PORT+"/socket.io.js"));
       const noExternalAssets = external.length === 0 && !/href="https?:/.test(html);
       // R60 (указание оператора: «UI не обязан быть read only»): REST-записи разрешены,
-      // но только санкционированные — каждая именована, белый список короче — крепче поводок
+      // но только санкционированные — каждая именована, белый список короче — крепче поводок;
+      // R62 P0-a: + /exec (TERMINAL_RUN) и /file (FILE_EDIT) — санкционированные записи
       const writes = [...html.matchAll(/fetch\(api\("([^"?]+)"\),\s*\{\s*method:\s*["']([A-Z]+)/g)]
         .map((m) => m[1] + " " + m[2]);
-      const SANCTIONED = new Set(["/exthost/run POST"]);
+      const SANCTIONED = new Set(["/exthost/run POST", "/exec POST", "/file POST"]);
       const sanctioned = writes.every((w) => SANCTIONED.has(w));
       const fetchPaths = [...html.matchAll(/fetch\((?:api\()?"([^"?]+)/g)].map((m) => m[1]);
       const readOnly = fetchPaths.length >= 3 && fetchPaths.every((p) => p.startsWith("/"));
@@ -1272,6 +1275,48 @@ export const EVAL_DATASET: EvalCheck[] = [
       const probeOk = probe.ok && probe.mode === "probe_offline" && probe.exts.some((x) => x.id === "mirror-digest" && x.caps_ok) && probe.errors === 0;
       const ok = manOk && entryOk && entryPure && capsOk && probeOk;
       return { ok, evidence: `манифест=${manOk}, entry=${entryOk}, stdio-only(без require/import/fetch)=${entryPure}, caps-белый-список=${capsOk} (${CAPS_WHITELIST.join(",")}), probe_offline=${probeOk}` };
+    },
+  },
+  {
+    id: "contract.exec_tool",
+    plane: "contract",
+    title: "R62 P0-a exec-tool (TERMINAL_RUN): белый список бинарей ПО СЕГМЕНТАМ (default-deny), отказ подстановок $()/env-присваиваний, hostile-паттерны, cwd только в управляемых корнях (realpath), prlimit-канон, env-белый-список без секретов; живой прогон echo в песочнице (probe → офлайн-инварианты)",
+    critical: false,
+    expect: "planExec: git/bun/node разрешены; curl/sudo — отказ; «echo hi && curl evil» — отказ (2-й сегмент); «echo $(x)» — substitution_denied; «FOO=1 ls» — env_assign_denied; cwd=/home/z/my-project — root_denied; ALLOWED_BINARIES не содержит bash/sh/curl; живой run: exit 0, stdout содержит маркер, env_keys без PATH-секретов (OFFLINE: execProbeOffline negatives=6)",
+    run: () => {
+      // чистые инварианты планировщика (без spawn — R25: живой прогон доказывается REST-ходом в раунде)
+      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const dir = evalTmpPrepare().dir;
+      const pos = planExec("git status && bun --version", dir);
+      const negBin = planExec("curl https://x", dir);
+      const negSeg = planExec("echo hi && curl evil", dir);
+      const negSub = planExec("echo $(whoami)", dir);
+      const negEnv = planExec("FOO=1 ls", dir);
+      const negRoot = planExec("ls", "/home/z/my-project");
+      evalTmpCleanup();
+      const noShell = !ALLOWED_BINARIES.has("bash") && !ALLOWED_BINARIES.has("sh") && !ALLOWED_BINARIES.has("curl") && !ALLOWED_BINARIES.has("sudo");
+      const planOk = pos.ok && !negBin.ok && !negSeg.ok && !negSub.ok && !negEnv.ok && !negRoot.ok && noShell;
+      const po = execProbeOffline();
+      const ok = planOk && po.ok;
+      return { ok, evidence: `план=${planOk} (git/bun ✓; curl/2-й-сегмент/$()/env=/root — отказы; bash/sh/curl/sudo вне белого списка=${noShell}), probe=${po.ok} (негативов=${po.negatives}), allowlist=${po.allowlist_size}, прлимит/таймаут/env-белый-список — живой вердикт раунда (REST-ход, worklog R62)` };
+    },
+  },
+  {
+    id: "contract.edit_tool",
+    plane: "contract",
+    title: "R62 P0-a edit-tool (FILE_EDIT): unified-diff → dry-run валидация → применение с durable-бэкапом (журнал file_edits) → байт-в-байт rollback; single-file заголовки, отказ .git-целей/удалений/traversal/root-побега; OFFLINE — негативы планировщика по именованным причинам",
+    critical: false,
+    expect: "OFFLINE (editProbeOffline): root_denied, bad_diff_headers, diff_required, file_deletion_denied, no_hunks — каждая негативная причина попана; patch бинарь найден; LIVE: apply создаёт файл (applied, hunks≥1, sha256_after), содержимое совпадает, rollback восстанавливает байт-в-байт и rollback_done=1",
+    run: () => {
+      // живой цикл apply→rollback — НЕ в sync-харнесе (R25): доказывается REST-ходом в раунде (worklog R62);
+      // здесь чистые plan-инварианты по именованным причинам + офлайн-проба
+      const po = editProbeOffline();
+      const dir = editEvalTmpDir();
+      try { mkdirSync(dir, { recursive: true }); } catch { /* уже есть */ }
+      const creating = planEdit(dir + "/t.txt", "--- /dev/null\n+++ t.txt\n@@ -0,0 +1,1 @@\n+x\n");
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* уборка */ }
+      const ok = po.ok && creating.ok && creating.creating === true && (creating.patch_argv ?? []).includes("-p0");
+      return { ok, evidence: `OFFLINE негативы=${po.negatives.length}✓ (${po.negatives.map((n) => n.reason).join(",")}), patch=${po.patch_binary}, план создания=${creating.ok} (-p0 при --- /dev/null без b/-префикса — живая проба R62), apply/rollback байт-в-байт — REST-ход раунда (worklog R62)` };
     },
   },
 ];

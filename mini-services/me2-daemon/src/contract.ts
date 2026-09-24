@@ -50,8 +50,8 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost"],
-      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost", "/exec", "/file"],
+      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run,cmd,cwd,timeout_ms?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)"],
     },
     memory: ["/memory op:write|delete|economy"],
     ui: "/ui",
@@ -68,7 +68,8 @@ export function capabilitiesJson(): CapabilityContract {
         "R58: политики как данные — GET /sqlmirror/rls-audit сверяет живой каталог Postgres с ожидаемой матрицей sql/0003+0004 (DML строго; платформенные дефолты Supabase — info)",
         "R60: workbench-лэйаут /ui — collapse/expand секций с персистом localStorage (канон VS Code workbench, порядок секций не меняется)",
         "R60: exthost — расширения skills/ext/* исполняются в подпроцессе под prlimit, только stdio-JSON, caps-медиация (неизвестная cap — честный отказ), activation manual/bus:*",
-        "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run)",
+        "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run, /exec, /file)",
+        "R62 P0-a exec/edit tools (гэп P0-0 R61): TERMINAL_RUN — allowlist бинарей по сегментам, prlimit as/nofile/core, таймаут, env-белый-список, cwd только в песочницах/worktrees; FILE_EDIT — unified-diff с dry-run-валидацией и durable-rollback из журнала; манифест non-bypass 30→32 (eval v26)",
       ],
     },
   };
@@ -136,6 +137,8 @@ export function missionUiHtml(): string {
   textarea:focus-visible, select:focus-visible, button:focus-visible { outline:2px solid #10b981; outline-offset:1px; }
   .line { display:flex; gap:8px; }
   select { flex:1; background:#09090b; color:#e4e4e7; border:1px solid #3f3f46; border-radius:8px; padding:7px 9px; font:inherit; }
+  .ops input { flex:1; background:#09090b; color:#e4e4e7; border:1px solid #3f3f46; border-radius:8px; padding:7px 9px; font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .ops input:focus-visible { outline:2px solid #10b981; outline-offset:1px; }
   button { background:#059669; border:1px solid #047857; color:#ecfdf5; border-radius:8px; padding:7px 14px; font:inherit; font-weight:600; cursor:pointer; min-height:32px; }
   button:hover { background:#047857; }
   button:disabled { opacity:.45; cursor:default; }
@@ -195,8 +198,24 @@ export function missionUiHtml(): string {
     <div class="scroll" id="ext" data-testid="mc-ext" style="max-height:26vh" aria-live="polite"></div>
     </div>
   </section>
+  <section aria-label="Exec/Edit инструменты P0-a" style="grid-column:1/-1" id="wb-exec">
+    <h2>Exec/Edit (P0-a · прелимит · белые списки) <span class="n" id="exec-n">—</span><button class="wb-toggle" id="wb-toggle-exec" aria-expanded="true" aria-controls="wb-body-exec" data-testid="mc-exec-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-exec">
+    <div class="row sub" id="exec-caps" data-testid="mc-exec-caps" style="margin:6px 6px 0">exec: загрузка…</div>
+    <div class="scroll" id="exec" data-testid="mc-exec" style="max-height:20vh" aria-live="polite"></div>
+    <div class="ops">
+      <div class="line"><input id="exec-cmd" aria-label="Команда (белый список)" placeholder="команда: git, node, bun, ls, cat, grep… (подстановки $() и env= отклоняются)" value="node --version"></div>
+      <div class="line"><input id="exec-cwd" aria-label="cwd в управляемом корне" placeholder="cwd: каталог внутри песочницы или worktree…"></div>
+      <div class="line">
+        <button id="b-exec" title="TERMINAL_RUN: allowlist по сегментам → prlimit → таймаут (санкционированная запись POST /exec)">Выполнить</button>
+        <button id="b-demo" class="ghost" title="Демо петли Cursor: FILE_EDIT создаёт p0a-demo.js → TERMINAL_RUN node p0a-demo.js → зелёный вывод (POST /file + /exec)">Demo: edit→run→green</button>
+        <span id="exec-out" class="sub" style="align-self:center; white-space:pre-wrap; max-height:64px; overflow-y:auto"></span>
+      </div>
+    </div>
+    </div>
+  </section>
 </main>
-<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run)</footer>
+<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run · /exec · /file)</footer>
 <div id="toast" class="toast" role="alert"></div>
 <script>
 (function(){
@@ -369,7 +388,7 @@ export function missionUiHtml(): string {
   // лэйаута силами daemon'а — кандидат R61+). Порядок секций не меняется (урок R12/R16):
   // только видимостью, кнопка в заголовке + dblclick по заголовку, aria-expanded/controls.
   var WB_KEY = "me2.ui.workbench.v1";
-  var WB_IDS = ["fleet", "river", "mirror", "ext"];
+  var WB_IDS = ["fleet", "river", "mirror", "ext", "exec"];
   function wbLoad(){ try { return JSON.parse(localStorage.getItem(WB_KEY) || "{}") || {}; } catch(e){ return {}; } }
   function wbSave(s){ try { localStorage.setItem(WB_KEY, JSON.stringify(s)); } catch(e){} }
   function wbSet(id, col, save){
@@ -431,6 +450,68 @@ export function missionUiHtml(): string {
     }).catch(function(){ var el = $("ext-n"); if(el) el.textContent = "ошибка"; });
   }
 
+  // R62 P0-a exec/edit: терминал + правки файлов для агентного harness (канон Cursor
+  // terminal/edit-files, корпус R61). Кнопки — санкционированные записи POST /exec и
+  // POST /file (белый список в eval mission.ui_contract v26). Демо = петля Cursor:
+  // edit (создание файла диффом) → run (node) → зелёный вывод.
+  function loadExec(){
+    fetch(api("/exec")).then(function(r){ return r.json(); }).then(function(j){
+      var caps = $("exec-caps"); var box = $("exec"); if(!caps||!box) return;
+      if(!j.ok){ caps.textContent = "exec: честно недоступен (" + esc(j.reason||"?") + ")"; $("exec-n").textContent = "—"; return; }
+      caps.innerHTML = 'allowlist ' + esc(String(j.allowlist.length)) + ' бин. · ' + (j.caps.prlimit ? 'prlimit ✓ (as=4GiB nofile=256 core=0)' : 'prlimit ✗') + ' · timeout ≤ ' + esc(String(j.caps.timeout_max_ms/1000)) + 'с · подстановки $() ' + esc(j.caps.substitution) + ' · cwd: ' + esc(j.roots.join(" | ")) + ' · прогонов ' + esc(String(j.counters.runs)) + ' / отказов ' + esc(String(j.counters.denied));
+      box.textContent = "";
+      (j.recent||[]).forEach(function(r){
+        var d = document.createElement("div"); d.className = "ev " + (r.ok ? "step" : "degraded");
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = (r.ok ? ("exit " + r.exit) : (r.reason || "fail")) + " · " + esc(r.source) + " · " + esc(String(r.ms||0)) + "мс";
+        var pl = document.createElement("div"); pl.className = "pl";
+        pl.textContent = "$ " + r.cmd;
+        d.appendChild(ty); d.appendChild(pl); box.appendChild(d);
+      });
+      if(!(j.recent||[]).length) box.innerHTML = '<div class="row sub">прогонов ещё не было — команда исполняется под prlimit с таймаутом, каждый сегмент против белого списка</div>';
+      $("exec-n").textContent = j.counters.runs + "/" + j.counters.denied;
+    }).catch(function(){ var el=$("exec-n"); if(el) el.textContent = "ошибка"; });
+  }
+  function execRun(cmd, cwd, into){
+    var out = into || $("exec-out");
+    out.textContent = "…";
+    return fetch(api("/exec"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "run", cmd: cmd, cwd: cwd }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        var NL = String.fromCharCode(10);
+        if(v.ok){ out.textContent = "exit " + v.exit + " · " + v.duration + "мс" + NL + (v.stdout_tail || "").slice(0, 400); return v; }
+        out.textContent = "отказ: " + (v.reason || "?") + (v.detail ? NL + String(v.detail).slice(0, 240) : "");
+        throw new Error(v.reason || "exec_failed");
+      });
+  }
+  $("b-exec").addEventListener("click", function(){
+    var cmd = $("exec-cmd").value.trim(), cwd = $("exec-cwd").value.trim();
+    if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
+    var b = this; b.disabled = true;
+    execRun(cmd, cwd).then(function(){ toast("exec ok", "ok"); loadExec(); })
+      .catch(function(e){ toast("exec отказ: " + e.message, "err"); loadExec(); })
+      .then(function(){ b.disabled = false; });
+  });
+  $("b-demo").addEventListener("click", function(){
+    var cwd = $("exec-cwd").value.trim();
+    if(!cwd){ toast("нужен cwd (управляемый корень) — demo создаст там p0a-demo.js", "err"); return; }
+    var b = this; b.disabled = true;
+    var fname = "p0a-demo-" + Date.now().toString(36) + ".js";
+    var diff = ['--- /dev/null', '+++ ' + fname, '@@ -0,0 +1,2 @@', '+console.log("me2-p0a: edit-run-green");', '+console.log("agent loop live");'].join(String.fromCharCode(10));
+    var out = $("exec-out");
+    fetch(api("/file"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "apply", path: cwd + "/" + fname, diff: diff }) })
+      .then(function(r){ return r.json(); })
+      .then(function(e){
+        if(!e.ok) throw new Error("edit: " + (e.reason || "?") + (e.detail ? " · " + String(e.detail).slice(0, 100) : ""));
+        return execRun("node " + fname, cwd).then(function(v){
+          toast("edit→run→green ✓ · edit_id=" + e.rollback_at + " · exit=" + v.exit + (e.hunks ? "" : "") + " · откат правок существующих файлов — из журнала", "ok");
+          loadExec();
+        });
+      })
+      .catch(function(e){ out.textContent = String(e.message || e).slice(0, 300); toast("demo отказ: " + e.message, "err"); loadExec(); })
+      .then(function(){ b.disabled = false; });
+  });
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -472,8 +553,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); loadExec(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>
