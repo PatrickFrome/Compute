@@ -53,6 +53,8 @@ export interface SqlMirrorStatus {
   last_error: string | null;
   last_ok_at: number | null;
   last_probe_at: number | null;
+  boot_epoch: number;
+  epoch_n: number;
 }
 
 // ── R70: персистентное операторское решение «зеркало включено» ──
@@ -86,6 +88,23 @@ function persistGate(db: Database, on: boolean): void {
   }
 }
 
+// ── R73: поколенио-безопасные seq'и зеркала БЕЗ DDL ──
+// Проблема (R71 §16, детектор подтвердил ×12): таблица зеркала РАЗДЕЛЯЕТСЯ поколениями
+// песочниц; PK seq — глобальный, чужие строки занимают наши seq → ignore-duplicates молча
+// роняет наши события. sql/0004 (UNIQUE(boot_id,seq)) ждёт оператора, но фикс возможен
+// ЧИСТО клиентски: зеркалируем seq' = boot_epoch + local_seq, где boot_epoch = epoch_n × 10^7,
+// а epoch_n — персистентный счётчик бутов (meta sqlmirror_epoch_n). Каждая инкарнация daemon'а
+// пишет в СВОЁ 10^7-окно → перекрытие поколений физически невозможно (локальные seq ≪ 10^7).
+// Маппинг обратим: local_seq = seq' − boot_epoch, boot_epoch = ⌊seq'/10^7⌋ × 10^7.
+// Деградация: meta недоступна → epoch_n=0 → seq'=local_seq (legacy-режим, честно).
+export const EPOCH_STRIDE = 10_000_000;
+const EPOCH_KEY = "sqlmirror_epoch_n";
+
+/** Зеркальный seq: окно бута + локальный seq. */
+export function mirrorSeq(epochN: number, localSeq: number): number {
+  return Math.max(0, epochN) * EPOCH_STRIDE + localSeq;
+}
+
 export class SqlMirror {
   private key = "";
   private state: SqlMirrorState = "OFF";
@@ -101,6 +120,9 @@ export class SqlMirror {
   private running = false;
   private collisions = 0;
   private lastCollisionSeq: number | null = null;
+  // R73: поколенио-безопасные seq'и зеркала (см. EPOCH_STRIDE ниже)
+  private epochN = 0;
+  private bootEpoch = 0;
 
   constructor(private db: Database) {
     this.key = pickCredential();
@@ -122,6 +144,21 @@ export class SqlMirror {
 
   get configured(): boolean {
     return process.env.ME2_SQL_MIRROR === "1" && this.key.length > 0;
+  }
+
+  /** R73: выделение окна поколений этому буту (однократно, персистентно, до первой пачки). */
+  private ensureEpoch(): void {
+    if (this.bootEpoch > 0 || !this.configured) return;
+    try {
+      const cur = this.db.query("SELECT value FROM meta WHERE key=?").get(EPOCH_KEY) as { value: string } | undefined;
+      this.epochN = (Number(cur?.value) || 0) + 1;
+      this.bootEpoch = this.epochN * EPOCH_STRIDE;
+      this.db.query("INSERT INTO meta (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(EPOCH_KEY, String(this.epochN));
+      console.log(`[sqlmirror] boot_epoch=${this.bootEpoch} (epoch_n=${this.epochN}) — зеркальные seq' = boot_epoch + local_seq (поколенио-безопасно, R73)`);
+    } catch {
+      this.epochN = 0;
+      this.bootEpoch = 0; // meta недоступна — legacy-режим seq'=local_seq (честная деградация)
+    }
   }
 
   private recomputeGate(): void {
@@ -196,8 +233,9 @@ export class SqlMirror {
       }>;
       if (rows.length === 0) return;
       const version = (this.db.query("SELECT value FROM meta WHERE key='version'").get() as { value: string } | undefined)?.value ?? "";
+      this.ensureEpoch(); // R73: окно поколений выделяется ДО первой отправки пачки
       const body = rows.map((e) => ({
-        seq: e.seq,
+        seq: mirrorSeq(this.epochN, e.seq),
         ts: e.ts,
         type: e.type,
         actor: e.agent_id ?? "daemon",
@@ -253,7 +291,8 @@ export class SqlMirror {
   private async verifyBatchTail(last: { seq: number; hash: string | null }): Promise<void> {
     if (!this.key) return;
     try {
-      const r = await fetch(`${restBase()}/${TABLE}?seq=eq.${last.seq}&select=hash`, {
+      const remoteSeq = mirrorSeq(this.epochN, last.seq);
+      const r = await fetch(`${restBase()}/${TABLE}?seq=eq.${remoteSeq}&select=hash`, {
         headers: { apikey: this.key, Authorization: `Bearer ${this.key}` },
         signal: AbortSignal.timeout(8000),
       });
@@ -263,31 +302,9 @@ export class SqlMirror {
       if (remote && remote !== (last.hash ?? "")) {
         this.collisions += 1;
         this.lastCollisionSeq = last.seq;
-        console.log(`[sqlmirror] MIRROR_COLLISION seq=${last.seq} — в зеркале чужая строка (другое поколение daemon), наша потеряна молча; оператору: sql/0004 (UNIQUE(boot_id,seq))`);
+        console.log(`[sqlmirror] MIRROR_COLLISION local_seq=${last.seq} mirror_seq=${remoteSeq} — в зеркале чужая строка, наша потеряна молча; оператору: sql/0004 (UNIQUE(boot_id,seq))`);
         try {
-          emit("MIRROR_COLLISION", { seq: last.seq, expected: (last.hash ?? "").slice(0, 12), got: remote.slice(0, 12) });
-        } catch { /* zero-authority: событие не критично */ }
-      }
-    } catch { /* сеть/таймаут — не мешает каналу */ }
-  }
-
-  /** R71: детект межпоколенческих коллизий (hash последней строки ≠ локальному). */
-  private async verifyBatchTail(last: { seq: number; hash: string | null }): Promise<void> {
-    if (!this.key) return;
-    try {
-      const r = await fetch(`${restBase()}/${TABLE}?seq=eq.${last.seq}&select=hash`, {
-        headers: { apikey: this.key, Authorization: `Bearer ${this.key}` },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!r.ok) return; // проба не мешает каналу — ошибка доставки уже видна в статусе
-      const rows = (await r.json()) as Array<{ hash: string }>;
-      const remote = rows[0]?.hash ?? "";
-      if (remote && remote !== (last.hash ?? "")) {
-        this.collisions += 1;
-        this.lastCollisionSeq = last.seq;
-        console.log(`[sqlmirror] MIRROR_COLLISION seq=${last.seq} — в зеркале чужая строка (другое поколение daemon), наша потеряна молча; оператору: sql/0004 (UNIQUE(boot_id,seq))`);
-        try {
-          emit("MIRROR_COLLISION", { seq: last.seq, expected: (last.hash ?? "").slice(0, 12), got: remote.slice(0, 12) });
+          emit("MIRROR_COLLISION", { seq: last.seq, mirror_seq: remoteSeq, expected: (last.hash ?? "").slice(0, 12), got: remote.slice(0, 12) });
         } catch { /* zero-authority: событие не критично */ }
       }
     } catch { /* сеть/таймаут — не мешает каналу */ }
@@ -326,6 +343,10 @@ export class SqlMirror {
 
   start(): void {
     this.recomputeGate();
+    // R73: ensureEpoch НЕ здесь — платформенный watchdog (me2-watchdog.ts, stdio:ignore)
+    // спавнит дубль-инкарнации, которые умирают по EADDRINUSE/guard ПОСЛЕ start(), но
+    // успевали зря сжигать окна (эмпирика R73: +2 окна за рестарт). Инкремент — в tick()
+    // перед первой ПАЧКОЙ: до него доживают только реально живые процессы (listen прошёл).
     if (this.timer) return;
     this.timer = setInterval(() => { void this.tick(); }, INTERVAL_MS);
     this.timer.unref?.();
@@ -354,6 +375,8 @@ export class SqlMirror {
       last_error: this.lastError,
       last_ok_at: this.lastOkAt,
       last_probe_at: this.lastProbeAt,
+      boot_epoch: this.bootEpoch,
+      epoch_n: this.epochN,
     };
   }
 }

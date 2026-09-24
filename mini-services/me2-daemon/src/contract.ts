@@ -50,7 +50,7 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/hooks", "/exthost", "/exec", "/file", "/review", "/sandbox"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/hooks", "/llm", "/exthost", "/exec", "/file", "/review", "/sandbox"],
       write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run|plan,cmd,cwd,timeout_ms?,sandbox?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях; plan — без spawn; sandbox:true — R64 P0-2)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)", "/review {op:approve|deny|classify|config} (P0-b: тир-3 классификатор, очередь одобрений ask)", "/sandbox {op:probe|run|config} (R64 P0-2: OS-конфайнмент ns+seccomp, strict fail-closed)"],
     },
     memory: ["/memory op:write|delete|economy"],
@@ -73,6 +73,7 @@ export function capabilitiesJson(): CapabilityContract {
         "R62 P0-a exec/edit tools (гэп P0-0 R61): TERMINAL_RUN — allowlist бинарей по сегментам, prlimit as/nofile/core, таймаут, env-белый-список, cwd только в песочницах/worktrees; FILE_EDIT — unified-diff с dry-run-валидацией и durable-rollback из журнала; манифест non-bypass 30→32 (eval v26)",
         "R63 P0-b classifier tier (гэп P0-1 R61): Run Modes (run|plan) + тир-3 классификатор пре-исполнения по канону Cursor D02 (allowlist → prlimit → classifier); вердикты allow/ask/block; ask → очередь одобрений оператора (POST /review approve|deny); эвристика детерминированная, LLM — opt-in (policy.json classifier, таймаут → ask fail-closed); классификатор честно НЕ security boundary; манифест non-bypass 32→33 (eval v27)",
         "R64 P0-2 OS-sandbox (гэп P0-2 R61): fs/syscall-конфайнмент канона Cursor — слоистый дизайн: Landlock (ядро ≥5.13; на 5.10 ENOSYS — честный skip) + ns (userns+mountns: ro-root, rw-rebind управляемых корней, tmpfs /tmp, tmpfs-RO поверх /home/z/.a2) + seccomp-bpf (deny-лист mount/unshare/io_uring/ptrace… + default-deny INET, единый билдер launcher/eval); strict fail-closed — слои не применились → команда НЕ исполнена; verdict «sandbox» классификатора теперь реален (sandbox.auto_sandbox, канон D02); манифест non-bypass 33 (eval v28)",
+        "R72/R73: LLM Quota-Resilience (GET /llm) — 4 уровня без обхода квоты: L1 pacing (глобальный min-gap стартов), L2 response-cache (SQLite llm_cache, дедуп детерминированных промптов), L3 failover zai↔gateway (TLS-проба исключает мёртвый канал, LLM_FAILOVER в chain), L4 park-and-resume (квотная/инфра ошибка → READY+not_before_ms, бюджет PARK_MAX=8, 45с→600с; FAILED только после бюджета); R73: зеркало пишет поколенио-безопасные seq' (boot_epoch = epoch_n×10^7, meta sqlmirror_epoch_n) — перекрытие поколений песочниц устранено без DDL; relay-watchdog (me2-webhook-relay/watchdog.sh, автостарт в start.sh)",
       ],
     },
   };

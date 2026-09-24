@@ -1299,3 +1299,41 @@ Stage Summary:
 - eval PASS 69/69 (v30), lint 0/0, инвариант 47/47, mirror LIVE err=0, RSS 102MB.
 - Оператору: quotа сама не станет бесконечной — но теперь штормы гасятся до сети, дедуп экономит вызовы, второй канал готов к употреблению (как только vercel TLS оживёт — автоматически), и НИ ОДНА задача не умирает из-за квоты в пределах бюджета парков.
 - Бэклог R73: UI-карточка LLM-QUOTA в MC (статус /llm уже готов); sql/0004 (оператор); мониторы vercel-gateway TLS (авто-проба в /llm).
+
+---
+Task ID: R73-FIX-ALL-FULL-REAUDIT
+Agent: Z.ai (main)
+Task: «Устрани все оставшиеся проблемы и запусти полный аудит заново» — R73: закрытие долгов R70–R72 + независимый полный аудит
+
+Work Log:
+- РЕЕСТР ДОЛГОВ собран из worklog (R70–R72): ① MIRROR_COLLISION (общая таблица поколений, без DDL); ② vercel-gateway TLS вниз, failover тратил ретраи; ③ relay watchdog (долг R69.1/R70); ④ UI-карточка LLM-QUOTA; ⑤ soak ≥30 мин никогда не гонялся; ⑥ duplicate verifyBatchTail в sqlmirror.ts (найдено при ревизии — вторая копия молча переопределяла первую).
+
+FIXES (каждый верифицирован):
+1. Mirror boot-epoch БЕЗ DDL: зеркальные seq' = boot_epoch + local_seq, boot_epoch = epoch_n × 10^7, счётчик персистентен в meta sqlmirror_epoch_n. Каждая инкарнация пишет в СВОЁ окно 10^7 → перекрытие поколений физически невозможно (легаси-строки чужих поколений ≤ 23335). Маппинг обратим; деградация: meta недоступна → legacy seq'=local_seq. Верификация: облако вернуло свежие строки seq 10010668–670 (включая TASK_PARKED) в окне epoch 1; после серии рестартов boot_epoch=8×10^7, collisions=0. Мик-фикс поверх: ensureEpoch перенесён из start() в tick() перед первой пачкой — платформенный watchdog (next-server me2-watchdog.ts, stdio ignore) спавнит дубль-инкарнации, которые умирали по EADDRINUSE/guard и сжигали окна (эмпирика: +2 окна за рестарт); после фикса — строго +1 (7→8 проверено двумя рестартами).
+2. Gateway TLS-проба (providers.ts): кэш здоровья канала 5 мин (HEAD к ai.gateway.vercel.dev, любой HTTP-ответ = жив, сетевое исключение = вниз); мёртвый канал исключается из failover-цепочки (providerChain(model, gatewayAlive)); статус в /llm (gateway_tls) и в UI-чипе «каналы: zai+gw⨯» (боево подтверждён: проба честно показала канал вниз).
+3. Relay watchdog (me2-webhook-relay/watchdog.sh): каждые 30с health :3044, при падении setsid-рестарт (без --hot — урок R70), журнал watchdog.log; автостарт добавлен в start.sh daemon'а (pgrep-защита от дублей); watchdog запущен и жив.
+4. UI-карточка LLM-QUOTA в свёртке МЕХАНИКИ Mission Control (page.tsx): чипы pace/кэш(хиты,%)/failover/park(база–кап · всего)/каналы(zai+gw✓|gw⨯) + строка последнего failover; loadLlm mount+60с+refresh-all; контракт: read-роут /llm + note R72/R73; agent-browser: карточка в DOM, мобильный 390px hscroll=false cardW=340; скриншот download/r73-llm-quota-mobile.png.
+5. Duplicate verifyBatchTail удалён (объединён в один метод; mirror_seq в запросе).
+- Daemon v0.57.1; eval dataset v31: + кейс state.sqlmirror_epoch (окна бутов, шаг 10^7) → PASS 70/70; lint 0/0.
+
+ПОЛНЫЙ АУДИТ ЗАНОВО (независимый, R73):
+- Инвентарь: 67 GET-маршрутов (уникальных), 64 → 200; 3 честных не-200: /evidence/query и /codegraph/impact → 400 без обязательных параметров (с параметрами 200), /mcp GET → 405 (POST JSON-RPC → 200). Дефектов нет. POST-маршрутов 34 — non-bypass eval двустороннее равенство PASS.
+- Eval: PASS 70/70 (v31, критические зелёные), инвариант 47/47 (actions=47 в /health).
+- Webhook selftest: PASS (F1/F2 401 fail-closed, T1 ping 200+HOOK_PING, T2 dedupe, T3 push 200+GIT_PUSH; verdict LIVE, secret=vault).
+- Идемпотентность шины: 12 параллельных POST /commands same-key → 1 исполнение, 11 deduped.
+- Concurrency webhooks: 10 раундов × (1 уникальный + 3 рейс-дубликата same-GUID + 1 bad-sig) параллельно: ровно 10 событий HOOK_PING (0 двойных эмиссий, SQL-проверка), ровно 10 записей hook_deliveries (дедуп не плодит строк), bad-sig 10/10 → 401.
+- Hash-chain: последние 60 событий LINKED; после kill -9 — LINKED (на стыке инкарнаций тоже).
+- CHAOS: kill -9 daemon → авто-восстановление (watchdog платформы + start.sh) → seq непрерывен, персистентный дедуп жив (109 записей), eval после рестарта 70/70, mirror LIVE в новом окне без коллизий.
+- Security: /hooks secret=vault (значение не отдаётся), /ui HTML без JWT-паттернов, /llm без ключ-паттернов.
+- CI: tauri-build @354f5e6 (R72-коммит) completed SUCCESS (+ @7f9f19c, @699c5ad SUCCESS).
+
+ИНЦИДЕНТ-РАССЛЕДОВАНИЕ R73 (диагностический урок):
+- «Потеря байтов» в диагностике: канал вывода Bash-инструмента глотает последовательности квадратная-скобка+m и квадратная-скобка+h (артефакт ANSI-санитизации вывода) — из-за этого wg-диагностика полчаса показывала ложные «синтаксически битые» строки (const cxOpen / ooksData / aster-loop) в ЗДОРОВЫХ файлах. Байт-точный Read/Bun.Transpiler показали: page.tsx синтаксически валиден, git цел. Урок: при диагностике подозрительных «потерь символов» сверяться с Read-каналом/транспайлером, не доверять grep-выводу для паттернов со скобкой+буквой.
+- Ложная «NOT FOUND» карточки: свёртка МЕХАНИКИ закрыта по умолчанию (mcxOpen=false) — карточки рендерятся после клика по заголовку секции (aria-controls=mechanics-body). QA-протокол дополнить: открыть секцию перед поиском data-testid.
+- Soak-скрипт v1 умер после 1 сэмпла (хрупкий shell-парсер) — переписан (soak2, python-парсер по файлам), запущен на 30 мин; итог — в следующей записи (сырые данные /tmp/r73-soak/log2.csv).
+
+Stage Summary:
+- Все долги R70–R72, устранимые на стороне песочницы, закрыты: mirror-коллизии устранены насовсем (без DDL, операторский sql/0004 остаётся опциональным каноническим решением), gateway-канал больше не тратит время, relay под watchdog'ом, квота-панель в UI.
+- Daemon v0.57.1: eval PASS 70/70 (v31), lint 0/0, инвариант 47/47, mirror LIVE collisions=0, дедуп/chain пережили kill -9, CI SUCCESS.
+- Аудит-вердикт: REST-шина, webhooks-in, персистентность, worker-lifecycle, quota-resilience (pacing/cache/failover/park) — ПРОДАКШН-ВЕРИФИЦИРОВАНЫ в этом раунде независимо.
+- Честные ограничения: vercel-gateway TLS вниз на уровне сети песочницы (внешне, не чинится изнутри — проба исключает его из цепочки); Electron/CDP-плоскость вне песочницы; soak ≥30 мин — итог отдельно.

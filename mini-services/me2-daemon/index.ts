@@ -18,7 +18,7 @@ import {
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
   createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
 } from "./store";
-import { listProviders } from "./providers";
+import { listProviders, gatewayTlsStatus } from "./providers";
 import { llmQuotaStatus } from "./src/quota";
 import { ciPollMs, ciStatus, ciTick } from "./src/ci";
 import { hooksStatus, handleGithubWebhook } from "./src/hooks";
@@ -433,7 +433,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 200, evidenceQuery(tid));
     }
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
-    if (path === "/llm" && req.method === "GET") return json(res, 200, { ok: true, ...llmQuotaStatus(), providers: await listProviders() });
+    if (path === "/llm" && req.method === "GET") return json(res, 200, { ok: true, ...llmQuotaStatus(), gateway_tls: gatewayTlsStatus(), providers: await listProviders() });
 
     // ── E3 (R34): executor-пул — N живых GLM-контекстов с честными lease (вне шины 47/47) ──
     if (path === "/pool" && req.method === "GET") return json(res, 200, poolStatus());

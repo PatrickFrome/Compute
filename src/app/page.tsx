@@ -86,6 +86,16 @@ type CiData = { ok: boolean; schema: string; repo: string; branch: string; token
 // R68: P0-e webhooks-in (push) — POST /hooks/github (HMAC-SHA256)
 type HooksDeliveryT = { delivery: string; event: string; action: string | null; emitted: string[]; at: string };
 type HooksData = { ok: boolean; schema: string; secret: "vault" | "env-dev" | "missing"; received_total: number; verified_total: number; rejected_total: number; events_emitted_total: number; rejected_last_reason: string | null; dedupe_size: number; dedupe_persistent: boolean; gateway: { path: string; via: string; secret_header: string }; events_supported: string[]; last_delivery_at: string | null; deliveries: HooksDeliveryT[]; verdict: "LIVE" | "DEV_SECRET" | "NO_SECRET" | "WARMUP" };
+// R72/R73: LLM Quota-Resilience (GET /llm) — pacing/cache/failover/park + TLS-канала gateway
+type LlmQ = {
+  ok: boolean;
+  pacing: { min_gap_ms: number };
+  cache: { entries: number; cap: number; ttl_ms: number; hits_total: number; session_hits: number; session_misses: number; hit_rate: number | null };
+  failover: { total: number; last: { from: string; to: string; error: string; at: string } | null };
+  park: { max: number; active: number; total_events: number; base_s: number; cap_s: number };
+  gateway_tls?: { ok: boolean | null; checked_at: string | null; ttl_ms: number };
+  providers: Record<string, { ready: boolean; note: string }>;
+};
 type SenseTargetT = { ref: string; role: string; name: string };
 type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
 type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
@@ -1611,6 +1621,8 @@ export default function MissionControl() {
   const [ciData, setCiData] = useState<CiData | null>(null);
   // R68: webhooks-in (GET /hooks) — статус push-канала внешних событий
   const [hooksData, setHooksData] = useState<HooksData | null>(null);
+  // R73: LLM Quota-Resilience (GET /llm) — квота = пауза, а не смерть
+  const [llmQ, setLlmQ] = useState<LlmQ | null>(null);
   // R31 Track D: последний диф перцепции + DB-гигиена
   const [lastDiff, setLastDiff] = useState<SenseDiffT | null>(null);
   const [hyg, setHyg] = useState<HygData | null>(null);
@@ -1733,6 +1745,10 @@ export default function MissionControl() {
   // R68: webhooks-in (GET /hooks) — статус push-канала (HMAC)
   const loadHooks = useCallback(async () => {
     try { const r = await fetch("/hooks?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setHooksData(r as HooksData); } catch { /* daemon недоступен */ }
+  }, []);
+  // R73: LLM Quota-Resilience (GET /llm) — парки/кэш/failover/TLS gateway
+  const loadLlm = useCallback(async () => {
+    try { const r = await fetch("/llm?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setLlmQ(r as LlmQ); } catch { /* daemon недоступен */ }
   }, []);
   // R31 D4: DB-гигиена (GET /db/hygiene — WAL, freelist, индексы, журнал операций)
   const loadHyg = useCallback(async () => {
@@ -1876,6 +1892,12 @@ export default function MissionControl() {
     const iv = setInterval(() => void loadHooks(), 120_000);
     return () => clearInterval(iv);
   }, [loadHooks]);
+  // R73: LLM-QUOTA — mount + 60с (живой пульс парков/кэша)
+  useEffect(() => {
+    void loadLlm();
+    const iv = setInterval(() => void loadLlm(), 60_000);
+    return () => clearInterval(iv);
+  }, [loadLlm]);
   // R31 D4: DB-гигиена видна в браузерной панели — mount + 60с
   useEffect(() => {
     void loadHyg();
@@ -1941,11 +1963,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadHooks(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadHooks(); void loadLlm(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadCi, loadHooks, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
+  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadCi, loadHooks, loadLlm, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2761,7 +2783,7 @@ export default function MissionControl() {
                             )}
                             <button
                               type="button"
-                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadHooks(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
+                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadHooks(); void loadLlm(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
                               title="Обновить все механики"
                               aria-label="Обновить все механики"
                               className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2864,6 +2886,38 @@ export default function MissionControl() {
                                 </>
                               ) : (
                                 <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка статуса webhook…</div>
+                              )}
+                            </div>
+
+                            {/* R73: LLM-QUOTA — квота = пауза, а не смерть (pacing/cache/failover/park + TLS gateway) */}
+                            <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2" data-testid="llm-quota">
+                              <div className="mb-1.5 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="R72/R73 Quota-Resilience: L1 pacing (глобальный min-gap стартов — шторм не рождается) · L2 cache (дедуп детерминированных промптов, квота не тратится) · L3 failover (zai↔gateway, мёртвый TLS-канал исключается пробой) · L4 park (квотная ошибка паркует задачу в READY с not_before — доживает до окна квоты, FAILED только после бюджета парков)">
+                                  <Brain className="h-3 w-3 text-teal-400" aria-hidden /> LLM-QUOTA
+                                </span>
+                                {llmQ && (
+                                  <span className={`rounded px-1.5 py-px font-mono text-[9px] ${(llmQ.park.active ?? 0) > 0 ? "bg-amber-500/15 text-amber-400" : "bg-emerald-500/15 text-emerald-400"}`} title={`${llmQ.park.active} задач в парке (дожидаются окна квоты) · всего парков: ${llmQ.park.total_events} · бюджет: ${llmQ.park.max}`}>{(llmQ.park.active ?? 0) > 0 ? `парк: ${llmQ.park.active}` : "квота: норма"}</span>
+                                )}
+                              </div>
+                              {llmQ ? (
+                                <>
+                                  <div className="mb-1 flex flex-wrap gap-1">
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="L1: глобальный min-gap между стартами LLM-вызовов (ME2_LLM_MIN_GAP_MS) — burst'ы размываются до сети">pace: {llmQ.pacing.min_gap_ms}ms</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="L2: response-cache — дедуп детерминированных промптов (TTL 24ч, cap 500); hits = сэкономленные вызовы">кэш: {llmQ.cache.entries}/{llmQ.cache.cap} · хиты {llmQ.cache.hits_total}{llmQ.cache.hit_rate !== null ? ` (${Math.round(llmQ.cache.hit_rate * 100)}%)` : ""}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="L3: авто-переход на альтернативного провайдера после исчерпанного 429 (LLM_FAILOVER в hash-chain)">failover: {llmQ.failover.total}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="L4: park-and-resume — база/кап задержки парковки (экспоненциально, +jitter)">park: {llmQ.park.base_s}–{llmQ.park.cap_s}с · {llmQ.park.total_events}</span>
+                                    <span className={`rounded px-1.5 py-px font-mono text-[9px] ${llmQ.providers?.gateway?.ready ? (llmQ.gateway_tls?.ok === false ? "bg-rose-500/15 text-rose-400" : "bg-emerald-500/15 text-emerald-400") : "bg-zinc-500/15 text-zinc-500"}`} title={`каналы: zai=${llmQ.providers?.zai?.ready ? "готов" : "?"}, gateway=${llmQ.providers?.gateway?.ready ? "ключ в vault" : "нет ключа"}${llmQ.gateway_tls ? `, TLS-проба: ${llmQ.gateway_tls.ok === null ? "не проводилась" : llmQ.gateway_tls.ok ? "жив" : "ВНИЗ (исключён из failover)"}` : ""}`}>каналы: zai+{llmQ.providers?.gateway?.ready ? (llmQ.gateway_tls?.ok === false ? "gw⨯" : "gw✓") : "gw—"}</span>
+                                  </div>
+                                  <div className="rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px] text-zinc-500" title="последний failover (исчерпанный 429 → альтернативный провайдер)">
+                                    {llmQ.failover.last ? (
+                                      <span className="min-w-0 truncate">{llmQ.failover.last.from} → <span className="text-teal-400">{llmQ.failover.last.to}</span> · {llmQ.failover.last.error.slice(0, 70)} · {llmQ.failover.last.at.slice(11, 19)}</span>
+                                    ) : (
+                                      <span>failover ещё не потребовался (первичный канал держит)</span>
+                                    )}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка статуса LLM-квоты…</div>
                               )}
                             </div>
 

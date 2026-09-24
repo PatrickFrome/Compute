@@ -69,10 +69,11 @@ import { cronAdd, cronList, cronTick, cronCancel, cronTestReset } from "./cron";
 import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus } from "./tokens";
 import { quotaCacheKey, quotaCacheGet, quotaCachePut, isQuotaError, parkDelayMs, parkTaskQuota, PARK_MAX } from "./quota";
 import { providerChain, gatewayReady } from "../providers";
+import { mirrorSeq, EPOCH_STRIDE } from "./sqlmirror";
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 30;
+export const EVAL_DATASET_VERSION = 31;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -938,6 +939,25 @@ export const EVAL_DATASET: EvalCheck[] = [
       } catch { /* source не читается — честный FAIL */ }
       const ok = cls && delayOk && parkedOk && hidden && notPicked && visible && pc === 2 && workerSrcOk;
       return { ok, evidence: `классификация=${cls}, delay ${Math.round(d0 / 1000)}с→${Math.round(d5 / 1000)}с (cap: ${Math.round(d50 / 1000)}с≤${capS}с)=${delayOk}, park#1 (+${p1.delay_s}с) → READY/not_before=${parkedOk}, скрыта=${hidden}/${notPicked}, окно открылось → видна=${visible}, park_count=${pc}/${PARK_MAX}, worker.ts-ветка=${workerSrcOk}` };
+    },
+  },
+  {
+    id: "state.sqlmirror_epoch",
+    plane: "state",
+    title: "SQL-зеркало: поколенио-безопасные seq' без DDL (R73) — окна бутов по 10^7",
+    critical: true,
+    expect: "meta sqlmirror_epoch_n персистентен (≥1 при включённом зеркале); mirrorSeq(n, local) = n×10^7 + local; окно другого бута даёт другой seq' → перекрытие поколений физически невозможно",
+    run: () => {
+      const m = db.query("SELECT value FROM meta WHERE key='sqlmirror_epoch_n'").get() as { value: string } | undefined;
+      const n = Number(m?.value) || 0;
+      const gate = db.query("SELECT value FROM meta WHERE key='sqlmirror_gate'").get() as { value: string } | undefined;
+      const mirrorOn = gate?.value === "1";
+      const a = mirrorSeq(n, 42);
+      const otherBoot = mirrorSeq(n + 1, 42);
+      const strideOk = otherBoot - a === EPOCH_STRIDE;
+      const persistOk = !mirrorOn || n >= 1; // зеркало включено → окно уже выделено (ensureEpoch на буте)
+      const ok = a === n * EPOCH_STRIDE + 42 && strideOk && persistOk;
+      return { ok, evidence: `mirror_on=${mirrorOn}, epoch_n=${n}, mirrorSeq(42)=${a} (=n×10^7+42), соседний бут → ${otherBoot} (шаг ${EPOCH_STRIDE}), перекрытие исключено=${strideOk}, персистентность=${persistOk}` };
     },
   },
   {

@@ -118,14 +118,49 @@ export async function listProviders(): Promise<Record<string, { ready: boolean; 
 // ── v0.57.0 L3 failover: цепочка провайдеров — квота ×2 вместо одной точки отказа ──
 export interface ProviderChoice { provider: "zai" | "gateway"; modelId: string; label: string }
 
+// ── R73: TLS-проба канала gateway (боевой случай R72: сеть песочницы режет TLS до
+// ai.gateway.vercel.dev — failover тратил 2 ретрая на заведомо мёртвый канал каждый раз).
+// Кэш здоровья 5 мин: любая HTTP-ответка (даже 401/404) = TLS жив; сетевое исключение =
+// канал вниз → цепочка строится без него (не тратим время), /llm показывает tls_ok.
+const GW_PROBE_TTL_MS = 300_000;
+let gwTlsOk: boolean | null = null;
+let gwTlsCheckedAt = 0;
+let gwTlsInflight: Promise<boolean | null> | null = null;
+
+export async function gatewayTlsProbe(force = false): Promise<boolean | null> {
+  if (!force && gwTlsCheckedAt && Date.now() - gwTlsCheckedAt < GW_PROBE_TTL_MS) return gwTlsOk;
+  if (gwTlsInflight) return gwTlsInflight;
+  gwTlsInflight = (async () => {
+    try {
+      const r = await fetch("https://ai.gateway.vercel.dev/v1/chat/completions", {
+        method: "HEAD",
+        signal: AbortSignal.timeout(6000),
+      });
+      gwTlsOk = true; // любой HTTP-ответ (405/401/404…) = TLS-хендшейк жив
+    } catch {
+      gwTlsOk = false; // сертификат/eof/таймаут — канал вниз на сетевом уровне
+    }
+    gwTlsCheckedAt = Date.now();
+    return gwTlsOk;
+  })();
+  const out = await gwTlsInflight;
+  gwTlsInflight = null;
+  return out;
+}
+
+export function gatewayTlsStatus(): { ok: boolean | null; checked_at: string | null; ttl_ms: number } {
+  return { ok: gwTlsOk, checked_at: gwTlsCheckedAt ? new Date(gwTlsCheckedAt).toISOString() : null, ttl_ms: GW_PROBE_TTL_MS };
+}
+
 /** Готовность gateway: кэш модуля или vault (tokenGet — sync SQLite; RPC-добыча отдельно в loadGatewayKey). */
 export function gatewayReady(): boolean {
   return Boolean(gatewayKey || tokenGet("VERCEL_AI_GATEWAY_API_KEY"));
 }
 
-/** Failover-цепочка: первичный по префиксу модели + альтернативный провайдер (если готов).
+/** Failover-цепочка: первичный по префиксу модели + альтернативный провайдер (если готов
+ *  И канал жив — R73: TLS-проба исключает мёртвый gateway из цепочки).
  *  zai:default → [zai, gateway?]; gateway:x → [gateway, zai] (zai всегда готов — нативный SDK). */
-export function providerChain(model: string): ProviderChoice[] {
+export function providerChain(model: string, gatewayAlive = true): ProviderChoice[] {
   const sep = model.indexOf(":");
   const provider = sep === -1 ? "zai" : model.slice(0, sep);
   const modelId = sep === -1 ? "" : model.slice(sep + 1);
@@ -133,7 +168,7 @@ export function providerChain(model: string): ProviderChoice[] {
   const mk = (p: "zai" | "gateway"): ProviderChoice => ({ provider: p, modelId, label: `${p}:${modelId || "default"}` });
   const chain: ProviderChoice[] = [mk(primary)];
   if (primary === "zai") {
-    if (gatewayReady()) chain.push(mk("gateway"));
+    if (gatewayReady() && gatewayAlive) chain.push(mk("gateway"));
   } else {
     chain.push(mk("zai"));
   }
@@ -156,7 +191,8 @@ export async function chat(model: string, messages: ChatMessage[], opts: { tempe
     const r = await llmSlot(async () => {
       await quotaPace(); // L1: ≤1 старт за ME2_LLM_MIN_GAP_MS глобально
       await loadGatewayKey(); // дёшево после первой добычи; делает providerChain честной
-      const chain = providerChain(model);
+      const gwAlive = gatewayReady() ? ((await gatewayTlsProbe()) !== false) : false; // R73: мёртвый канал не в цепочке
+      const chain = providerChain(model, gwAlive);
       const ck = opts.cache === true ? quotaCacheKey(model, messages, opts.temperature) : null;
       if (ck) {
         const hit = quotaCacheGet(ck);
