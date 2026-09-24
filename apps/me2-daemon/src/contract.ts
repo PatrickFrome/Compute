@@ -50,8 +50,8 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit"],
-      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost"],
+      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}"],
     },
     memory: ["/memory op:write|delete|economy"],
     ui: "/ui",
@@ -66,6 +66,9 @@ export function capabilitiesJson(): CapabilityContract {
         "матрица: docs/version-matrix.md (K8)",
         "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
         "R58: политики как данные — GET /sqlmirror/rls-audit сверяет живой каталог Postgres с ожидаемой матрицей sql/0003+0004 (DML строго; платформенные дефолты Supabase — info)",
+        "R60: workbench-лэйаут /ui — collapse/expand секций с персистом localStorage (канон VS Code workbench, порядок секций не меняется)",
+        "R60: exthost — расширения skills/ext/* исполняются в подпроцессе под prlimit, только stdio-JSON, caps-медиация (неизвестная cap — честный отказ), activation manual/bus:*",
+        "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run)",
       ],
     },
   };
@@ -78,8 +81,10 @@ export function withContract(base: Record<string, unknown>): Record<string, unkn
 
 // ── GET /ui — самодостаточная Mission Control (наследие R41-дока, реализовано в R49) ──
 // Требования контракта: 0 сборки, 0 внешних зависимостей; socket.io-клиент берётся
-// с самого daemon'а (:3040, path "/"); данные — read-only REST того же origin.
-// Операторские ходы — через socket agentchat:op (ack), REST-операций не существует.
+// с самого daemon'а (:3040, path "/"); данные — REST того же origin.
+// Операторские ходы — через socket agentchat:op (ack). R60, указание оператора: «UI не
+// обязан быть read only» — REST-записи разрешены, но ТОЛЬКО санкционированные (белый
+// список в eval mission.ui_contract, каждая именована в capabilities.rest.write).
 export function missionUiHtml(): string {
   return `<!doctype html>
 <html lang="ru">
@@ -102,8 +107,16 @@ export function missionUiHtml(): string {
   main { display:grid; grid-template-columns:minmax(300px,420px) 1fr; gap:12px; padding:12px 16px; max-width:1400px; margin:0 auto; }
   @media (max-width: 900px) { main { grid-template-columns:1fr; } }
   section { border:1px solid #27272a; border-radius:12px; background:#111113; overflow:hidden; display:flex; flex-direction:column; min-height:180px; }
-  section h2 { margin:0; padding:10px 14px; font-size:12.5px; font-weight:600; color:#d4d4d8; letter-spacing:.4px; text-transform:uppercase; border-bottom:1px solid #27272a; display:flex; gap:8px; align-items:center; }
+  section h2 { margin:0; padding:10px 14px; font-size:12.5px; font-weight:600; color:#d4d4d8; letter-spacing:.4px; text-transform:uppercase; border-bottom:1px solid #27272a; display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none; }
   section h2 .n { margin-left:auto; color:#71717a; font-weight:500; text-transform:none; }
+  /* R60 workbench (канон VS Code): каждая секция сворачиваема, состояние переживает перезапуск */
+  .wb-toggle { margin-left:2px; background:none; border:0; color:#71717a; width:22px; height:22px; min-height:0; padding:0; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; border-radius:6px; font-size:11px; line-height:1; }
+  .wb-toggle:hover { color:#e4e4e7; background:#27272a; }
+  .wb-toggle:focus-visible { outline:2px solid #10b981; outline-offset:1px; }
+  section.wb-collapsed .wb-body { display:none; }
+  section.wb-collapsed h2 { color:#71717a; border-bottom-color:transparent; }
+  .wb-reset { background:#18181b; border:1px solid #3f3f46; color:#d4d4d8; min-height:0; padding:3px 10px; font-size:11.5px; font-weight:500; cursor:pointer; border-radius:8px; }
+  .wb-reset:hover { background:#27272a; }
   .scroll { overflow-y:auto; max-height:46vh; padding:6px; }
   .row { display:flex; gap:8px; align-items:flex-start; padding:8px 10px; border-radius:8px; border:1px solid transparent; }
   .row:hover { border-color:#3f3f46; background:#18181b; }
@@ -141,10 +154,12 @@ export function missionUiHtml(): string {
   <span class="chip" id="ch-socket" data-testid="mc-socket"><span class="dot"></span>socket …</span>
   <span class="chip" id="ch-mesh" data-testid="mc-mesh">mesh: …</span>
   <span class="chip ghost" id="ch-upd" data-testid="mc-updated">…</span>
+  <button class="wb-reset" id="wb-reset" title="Сбросить лэйаут панелей (localStorage)">лэйаут ↺</button>
 </header>
 <main>
-  <section aria-label="Флот чат-агентов">
-    <h2>Флот <span class="n" id="fleet-n">—</span></h2>
+  <section aria-label="Флот чат-агентов" id="wb-fleet">
+    <h2>Флот <span class="n" id="fleet-n">—</span><button class="wb-toggle" id="wb-toggle-fleet" aria-expanded="true" aria-controls="wb-body-fleet" data-testid="mc-fleet-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-fleet">
     <div class="scroll" id="fleet" role="list" data-testid="mc-fleet" aria-live="polite"></div>
     <div class="ops">
       <div class="line">
@@ -158,19 +173,30 @@ export function missionUiHtml(): string {
       </div>
       <div id="op-status" role="status" aria-live="polite"></div>
     </div>
+    </div>
   </section>
-  <section aria-label="Река событий">
-    <h2>Река <span class="n" id="river-n">—</span></h2>
+  <section aria-label="Река событий" id="wb-river">
+    <h2>Река <span class="n" id="river-n">—</span><button class="wb-toggle" id="wb-toggle-river" aria-expanded="true" aria-controls="wb-body-river" data-testid="mc-river-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-river">
     <div class="scroll" id="river" data-testid="mc-river" aria-live="polite"></div>
+    </div>
   </section>
-  <section aria-label="SQL-зеркало с гейтом RLS" style="grid-column:1/-1">
-    <h2>Зеркало SQL (Supabase · RLS) <span class="n" id="mirror-n">—</span></h2>
+  <section aria-label="SQL-зеркало с гейтом RLS" style="grid-column:1/-1" id="wb-mirror">
+    <h2>Зеркало SQL (Supabase · RLS) <span class="n" id="mirror-n">—</span><button class="wb-toggle" id="wb-toggle-mirror" aria-expanded="true" aria-controls="wb-body-mirror" data-testid="mc-mirror-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-mirror">
     <div class="row sub" id="rls-audit" data-testid="mc-rls-audit" style="margin:6px 6px 0">аудит политик: загрузка…</div>
     <div class="row sub" id="rpc-reconcile" data-testid="mc-rpc-reconcile" style="margin:6px 6px 0">сверка реестра: загрузка…</div>
     <div class="scroll" id="mirror" data-testid="mc-mirror" style="max-height:32vh" aria-live="polite"></div>
+    </div>
+  </section>
+  <section aria-label="Расширения exthost" style="grid-column:1/-1" id="wb-ext">
+    <h2>Расширения (exthost · prlimit) <span class="n" id="ext-n">—</span><button class="wb-toggle" id="wb-toggle-ext" aria-expanded="true" aria-controls="wb-body-ext" data-testid="mc-ext-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-ext">
+    <div class="scroll" id="ext" data-testid="mc-ext" style="max-height:26vh" aria-live="polite"></div>
+    </div>
   </section>
 </main>
-<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — read-only REST</footer>
+<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run)</footer>
 <div id="toast" class="toast" role="alert"></div>
 <script>
 (function(){
@@ -338,6 +364,73 @@ export function missionUiHtml(): string {
     }).catch(function(){ var el=$("rpc-reconcile"); if(el){ el.textContent="сверка реестра: сеть недоступна"; el.style.color="#fcd34d"; } });
   }
 
+  // R60 workbench (канон VS Code workbench): collapse/expand секций + персист
+  // localStorage (аналог state.vscdb у VS Code; /ui самодостаточен — SQLite-персист
+  // лэйаута силами daemon'а — кандидат R61+). Порядок секций не меняется (урок R12/R16):
+  // только видимостью, кнопка в заголовке + dblclick по заголовку, aria-expanded/controls.
+  var WB_KEY = "me2.ui.workbench.v1";
+  var WB_IDS = ["fleet", "river", "mirror", "ext"];
+  function wbLoad(){ try { return JSON.parse(localStorage.getItem(WB_KEY) || "{}") || {}; } catch(e){ return {}; } }
+  function wbSave(s){ try { localStorage.setItem(WB_KEY, JSON.stringify(s)); } catch(e){} }
+  function wbSet(id, col, save){
+    var sec = $("wb-" + id); if(!sec) return;
+    sec.classList.toggle("wb-collapsed", !!col);
+    var b = $("wb-toggle-" + id);
+    if(b){ b.setAttribute("aria-expanded", col ? "false" : "true"); b.textContent = col ? "\u25b8" : "\u25be"; }
+    if(save){ var s = wbLoad(); s[id] = !!col; wbSave(s); }
+  }
+  function wbApply(){ var s = wbLoad(); WB_IDS.forEach(function(id){ wbSet(id, s[id] === true, false); }); }
+  function wbReset(){ try { localStorage.removeItem(WB_KEY); } catch(e){} WB_IDS.forEach(function(id){ wbSet(id, false, false); }); toast("лэйаут сброшен", "ok"); }
+  WB_IDS.forEach(function(id){
+    var b = $("wb-toggle-" + id);
+    if(b) b.addEventListener("click", function(ev){ ev.stopPropagation(); wbSet(id, !$("wb-" + id).classList.contains("wb-collapsed"), true); });
+    var sec = $("wb-" + id);
+    if(sec){
+      var h2 = sec.querySelector("h2");
+      if(h2) h2.addEventListener("dblclick", function(ev){ if(ev.target && ev.target.closest && ev.target.closest(".wb-toggle")) return; wbSet(id, !sec.classList.contains("wb-collapsed"), true); });
+    }
+  });
+  var rb = $("wb-reset");
+  if(rb) rb.addEventListener("click", wbReset);
+  wbApply();
+
+  // R60 exthost: каталог расширений (манифесты + журнал прогонов) + живой изолированный
+  // прогон кнопкой — санкционированная REST-запись (указание оператора R60: UI не обязан
+  // быть read only). Расширение исполняется в дочернем процессе под prlimit, видит только
+  // stdio — данные зеркала доставляет daemon (caps-медиация).
+  function loadExt(){
+    fetch(api("/exthost")).then(function(r){ return r.json(); }).then(function(j){
+      var box = $("ext"); if(!box) return;
+      if(!j.ok || !Array.isArray(j.exts)){ box.innerHTML = '<div class="row sub">exthost: честно недоступен (' + esc(j.reason || "?") + ')</div>'; $("ext-n").textContent = "—"; return; }
+      box.textContent = "";
+      j.exts.forEach(function(x){
+        var r = document.createElement("div"); r.className = "row";
+        var left = document.createElement("div"); left.style.flex = "1";
+        var t = document.createElement("div"); t.className = "t"; t.textContent = x.title || x.id;
+        var sub = document.createElement("div"); sub.className = "sub";
+        var last = x.last ? (x.last.ok ? "последний прогон: ok · " + esc(String(x.last.source||"")) + " · " + esc(String(x.last.ms||0)) + "мс" : "последний прогон: " + esc(x.last.reason || "fail") + " (" + esc(String(x.last.source||"")) + ")") : "прогонов ещё не было";
+        sub.innerHTML = '<span class="id">' + esc(x.id) + '</span> · v' + esc(x.version || "?") + ' · caps ' + esc((x.caps || []).join(",") || "—") + ' · активация ' + esc((x.activation || []).join(",")) + ' · ' + last + (x.caps_ok === false ? ' · <b>⚠ caps вне белого списка — запуск отказан</b>' : '');
+        left.appendChild(t); left.appendChild(sub); r.appendChild(left);
+        var b = document.createElement("button"); b.className = "ghost"; b.textContent = "Запустить"; b.title = "Изолированный прогон: prlimit + stdio-only (санкционированная запись POST /exthost/run)";
+        b.addEventListener("click", function(){
+          b.disabled = true;
+          fetch(api("/exthost/run"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: x.id }) })
+            .then(function(r2){ return r2.json(); })
+            .then(function(o){
+              if(o.ok){ toast("ext ok · " + JSON.stringify(o.result).slice(0, 140), "ok"); }
+              else { toast("ext отказ: " + (o.reason || "?") + (o.detail ? " · " + String(o.detail).slice(0, 80) : ""), "err"); }
+              loadExt();
+            })
+            .catch(function(){ toast("ext: сеть недоступна", "err"); })
+            .then(function(){ b.disabled = false; });
+        });
+        r.appendChild(b); box.appendChild(r);
+      });
+      if(!j.exts.length) box.innerHTML = '<div class="row sub">расширений нет (skills/ext пуст)</div>';
+      $("ext-n").textContent = j.exts.length + " расп.";
+    }).catch(function(){ var el = $("ext-n"); if(el) el.textContent = "ошибка"; });
+  }
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -379,8 +472,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>
