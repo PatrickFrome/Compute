@@ -65,6 +65,7 @@ type SandboxRun = { id: string; cmd: string; exitCode: number; ok: boolean; ms: 
 // R62 P0-a: exec/edit-плоскости (TERMINAL_RUN + FILE_EDIT) для агентного harness
 const EXEC_DEFAULT_DIFF = `--- /dev/null\n+++ p0a-demo.js\n@@ -0,0 +1,2 @@\n+console.log("me2-p0a: edit-run-green");\n+console.log("agent loop live");\n`;
 type ExecData = { ok: boolean; allowlist: string[]; roots: string[]; deny_rules: string[]; caps: { prlimit: boolean; timeout_max_ms: number; cmd_max_len: number; substitution: string }; counters: { runs: number; denied: number }; recent: { id: number; cmd: string; ok: boolean; exit: number | null; reason: string | null; ms: number | null; source: string }[] };
+type ReviewData = { ok: boolean; config: { enabled: boolean; llm_enabled: boolean; timeout_ms: number; queue_max: number; model: string }; stats_24h: Record<string, number>; queue: { pending: { id: number; cmd: string; cwd: string; reason: string; engine: string; created_at: number }[]; recent: { id: number; cmd: string; status: string; verdict: string; engine: string; run_ok: number | null; run_exit: number | null }[] } };
 type FileData = { ok: boolean; counters: { applied: number; denied: number; rollbacks: number }; recent: { id: number; path: string; op: string; ok: boolean; reason: string | null; hunks: number | null; rollback_done: boolean; has_backup: boolean }[] };
 type ToolVerdict = { ok: boolean; exit?: number | null; stdout_tail?: string; stderr_tail?: string; duration?: number; sandboxed?: boolean; limit?: string; reason?: string; detail?: string; rollback_at?: number | null; hunks?: number; applied?: boolean };
 // R19: МЕХАНИКИ (порт старых механик A2 → ME2)
@@ -1501,6 +1502,46 @@ export default function MissionControl() {
       return () => clearInterval(iv);
     }
   }, [exOpen, loadEx]);
+
+  // R63 P0-b: REVIEW-карточка (тир-3 классификатор + очередь одобрений, POST /review)
+  const [rvOpen, setRvOpen] = useState(false);
+  const [rv, setRv] = useState<ReviewData | null>(null);
+  const [rvBusy, setRvBusy] = useState(false);
+  const loadRv = useCallback(async () => {
+    try {
+      const r = await fetch("/review?XTransformPort=3041", { cache: "no-store" }).then((res) => res.json()) as ReviewData;
+      if (r?.ok) setRv(r);
+    } catch { /* daemon недоступен */ }
+  }, []);
+  const rvDecide = useCallback(async (op: "approve" | "deny", id: number) => {
+    setRvBusy(true);
+    try {
+      const v = await fetch("/review?XTransformPort=3041", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op, id }),
+      }).then((r) => r.json()) as ToolVerdict & { approved?: boolean; denied?: boolean; run?: ToolVerdict };
+      if (v?.ok) {
+        if (op === "approve" && v.run) {
+          const r = v.run;
+          toast({ title: r.ok ? `одобрено · exit ${r.exit} · ${r.duration}мс` : `одобрено, прогон не удался: ${r.reason ?? "?"}`, description: r.ok ? (r.stdout_tail || undefined).slice(0, 120) : r.detail, variant: r.ok ? "default" : "destructive" });
+        } else {
+          toast({ title: `#${id} отклонено` });
+        }
+      } else {
+        toast({ title: "review ✗", description: String(v?.reason ?? v?.detail ?? "ошибка"), variant: "destructive" });
+      }
+      await loadRv();
+      await loadEx();
+    } catch { toast({ title: "review ✗", description: "daemon недоступен", variant: "destructive" }); }
+    finally { setRvBusy(false); }
+  }, [loadRv, loadEx, toast]);
+  useEffect(() => {
+    if (rvOpen) {
+      void loadRv();
+      const iv = setInterval(() => void loadRv(), 12_000);
+      return () => clearInterval(iv);
+    }
+  }, [rvOpen, loadRv]);
 
   // ── R19: панель МЕХАНИКИ (порт старых механик A2: memory/brain/fleet/self-update/rsi) ──
   const [mcxOpen, setMcxOpen] = useState(false);
@@ -3537,6 +3578,103 @@ export default function MissionControl() {
                                           ↩ откат
                                         </button>
                                       )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </Card>
+                      <Card className="min-h-0 overflow-hidden border-zinc-800 bg-zinc-900/40 card-lift lg:max-h-[32vh]">
+                        <CardHeader className="flex-row items-center justify-between space-y-0 border-b border-zinc-800 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setRvOpen((o) => !o)}
+                            aria-expanded={rvOpen}
+                            aria-controls="review-body"
+                            className="flex min-w-0 items-center gap-2 text-left"
+                          >
+                            <ShieldCheck className="h-4 w-4 shrink-0 text-amber-400" aria-hidden />
+                            <span className="truncate text-xs font-semibold tracking-widest text-zinc-400">
+                              RUN MODES / REVIEW{rv ? ` · тир-3 ${rv.config.enabled ? "вкл" : "выкл"}` : ""}
+                            </span>
+                          </button>
+                          <span className="flex shrink-0 items-center gap-2">
+                            {rv && (
+                              <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="канон Cursor D02: allowlist → prlimit → classifier; классификатор НЕ security boundary; ask ждёт оператора">
+                                ask {rv.stats_24h.CLASSIFIER_ASK ?? 0} · block {rv.stats_24h.CLASSIFIER_BLOCK ?? 0} · ✓{rv.stats_24h.CLASSIFIER_APPROVED ?? 0} ✗{rv.stats_24h.CLASSIFIER_DENIED ?? 0}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => void loadRv()}
+                              title="Обновить статус классификатора и очереди одобрений"
+                              aria-label="Обновить статус review"
+                              className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${rvBusy ? "animate-spin" : ""}`} aria-hidden />
+                            </button>
+                            <ChevronDown className={`h-4 w-4 text-zinc-500 transition-transform ${rvOpen ? "" : "-rotate-90"}`} aria-hidden />
+                          </span>
+                        </CardHeader>
+                        {rvOpen && (
+                          <div id="review-body" className="space-y-2.5 p-3">
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[9px] text-zinc-600" title="Канон Cursor Auto-review (корпус R61 D02): вердикты allow/ask/block; эвристика детерминированная; LLM — opt-in (policy.json classifier), таймаут → ask (fail-closed)">
+                              <span className={rv?.config.enabled ? "text-emerald-500/80" : "text-zinc-600"}>тир-3 {rv?.config.enabled ? "вкл" : "выкл (policy)"}</span>
+                              <span>LLM {rv?.config.llm_enabled ? `вкл (${rv.config.model}, ≤${rv.config.timeout_ms}мс)` : "выкл (эвристика)"}</span>
+                              <span>очередь ≤ {rv?.config.queue_max ?? "—"}</span>
+                              <span className="text-amber-500/70" title="Cursor: «explicitly NOT a security boundary»; security = tier-1 allowlist + prlimit + P0-2">не security boundary</span>
+                            </div>
+
+                            {(rv?.queue.pending.length ?? 0) > 0 ? (
+                              <div className="space-y-1">
+                                <div className="text-[9px] uppercase tracking-wider text-amber-500/80">ждут оператора (ask → одобрение; канон Approvals UI Cursor)</div>
+                                <div tabIndex={0} role="region" aria-label="Очередь одобрений" className="max-h-28 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                                  {rv?.queue.pending.map((p) => (
+                                    <div key={p.id} className="rounded border border-amber-900/40 bg-amber-950/10 px-2 py-1.5 font-mono text-[9px]">
+                                      <div className="flex items-center gap-2">
+                                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" aria-hidden />
+                                        <span className="min-w-0 flex-1 truncate text-zinc-400" title={p.cmd}>$ {p.cmd}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => void rvDecide("approve", p.id)}
+                                          disabled={rvBusy}
+                                          title="Исполнить команду (POST /review op:approve — tier-1 остаётся)"
+                                          className="shrink-0 rounded border border-emerald-800/60 px-1.5 py-0.5 text-[9px] text-emerald-400 transition hover:bg-emerald-950/40 disabled:opacity-40"
+                                        >
+                                          ✓
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void rvDecide("deny", p.id)}
+                                          disabled={rvBusy}
+                                          title="Отклонить команду (POST /review op:deny)"
+                                          className="shrink-0 rounded border border-rose-900/60 px-1.5 py-0.5 text-[9px] text-rose-400 transition hover:bg-rose-950/40 disabled:opacity-40"
+                                        >
+                                          ✗
+                                        </button>
+                                      </div>
+                                      <div className="mt-0.5 truncate text-zinc-600" title={p.reason}>{p.engine} · {p.reason}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5 font-mono text-[9px] text-zinc-600">
+                                очередь пуста — команды ask из /exec попадают сюда на одобрение; block отказывается сразу (CLASSIFIER_BLOCK в hash-chain)
+                              </div>
+                            )}
+
+                            {(rv?.queue.recent.filter((r) => r.status !== "pending").length ?? 0) > 0 && (
+                              <div className="space-y-1">
+                                <div className="text-[9px] uppercase tracking-wider text-zinc-600">разрешения (журнал review_queue)</div>
+                                <div tabIndex={0} role="region" aria-label="Журнал очереди" className="max-h-24 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                                  {rv?.queue.recent.filter((r) => r.status !== "pending").slice(0, 6).map((r) => (
+                                    <div key={r.id} className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-950/40 px-2 py-1 font-mono text-[9px]">
+                                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.status === "executed" ? "bg-emerald-400" : r.status === "denied" ? "bg-rose-500" : "bg-zinc-500"}`} aria-hidden />
+                                      <span className="min-w-0 flex-1 truncate text-zinc-500" title={r.cmd}>$ {r.cmd}</span>
+                                      <span className="shrink-0 text-zinc-600">{r.status}{r.status === "executed" ? ` · exit ${r.run_exit}` : ""} · {r.engine}</span>
                                     </div>
                                   ))}
                                 </div>

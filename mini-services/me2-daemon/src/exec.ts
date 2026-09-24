@@ -28,6 +28,7 @@ import { db, emit, VERSION } from "../store";
 import { recordSpan } from "./otel";
 import { sandboxCaps, SB_ROOT } from "./sandbox";
 import { WORKTREE_ROOT } from "./worktrees";
+import { classifyGate, classifierConfig, type ReviewResult } from "./review";
 
 export const EXEC_SCHEMA = "me2.exec.v1";
 
@@ -148,6 +149,8 @@ export interface ExecVerdict {
   limit?: string;
   reason?: string;           // для отказов планирования (spawn не состоялся)
   detail?: string;
+  review?: ReviewResult;     // R63 P0-b: вердикт тира-3 (classifier), если гейт сработал
+  queue_id?: number;         // R63: для classifier_ask — id в очереди одобрений
 }
 
 let counter = { runs: 0, denied: 0 };
@@ -159,26 +162,29 @@ function journal(cmd: string, cwd: string, ok: boolean, exitCode: number | null,
   } catch { /* журнал не критичен для вердикта */ }
 }
 
-/** TERMINAL_RUN: план → prlimit+bash (async spawn, event-loop не блокируется — канон exthost/R25) → вердикт. Никогда не бросает. */
+/** TERMINAL_RUN: план → тир-3 классификатор (R63 P0-b) → prlimit+bash (async spawn,
+ *  event-loop не блокируется — канон exthost/R25) → вердикт. Никогда не бросает.
+ *  Порядок канона Cursor (корпус R61 D02): allowlist → sandbox-ability → classifier. */
 function killTree(child: ReturnType<typeof spawn>): void {
   try { child.kill("SIGTERM"); } catch { /* уже мёртв */ }
   setTimeout(() => { try { if (child.exitCode === null && !child.killed) child.kill("SIGKILL"); } catch { /* гонка на выходе */ } }, 800).unref();
 }
 
-export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeout: number | undefined, source = "rest"): Promise<ExecVerdict> {
-  const t0 = Date.now();
-  const plan = planExec(rawCmd, rawCwd, rawTimeout);
-  if (!plan.ok) {
-    counter.denied++;
-    journal(String(rawCmd ?? "").trim(), String(rawCwd ?? "").trim(), false, null, plan.reason ?? "plan_denied", Date.now() - t0, false, false, source, null, plan.detail ?? null);
-    try { emit("EXEC_DENIED", { reason: plan.reason, detail: plan.detail, cmd: String(rawCmd ?? "").slice(0, 120), source }, null, null); } catch { /* шина не критична */ }
-    try { recordSpan("exec.run", { "me2.exec.ok": 0, "me2.exec.reason": plan.reason ?? "?" }, t0, { status: "ERROR", message: plan.reason }); } catch { /* телеметрия */ }
-    return {
-      ok: false, schema: EXEC_SCHEMA, cmd: String(rawCmd ?? "").trim().slice(0, 200), cwd: String(rawCwd ?? "").trim().slice(0, 200),
-      exit: null, stdout_tail: "", stderr_tail: "", duration: Date.now() - t0, timed_out: false, sandboxed: false,
-      env_keys: [], reason: plan.reason, detail: plan.detail,
-    };
-  }
+/** Планирование + журнал отказа (общий для tier-1 отказов и гейта). */
+function deniedVerdict(rawCmd: string, rawCwd: string, planReason: string, planDetail: string | undefined, source: string, t0: number, review?: ReviewResult, queueId?: number): ExecVerdict {
+  counter.denied++;
+  journal(String(rawCmd ?? "").trim(), String(rawCwd ?? "").trim(), false, null, planReason, Date.now() - t0, false, false, source, null, planDetail ?? null);
+  try { emit("EXEC_DENIED", { reason: planReason, detail: planDetail, cmd: String(rawCmd ?? "").slice(0, 120), source }, null, null); } catch { /* шина не критична */ }
+  try { recordSpan("exec.run", { "me2.exec.ok": 0, "me2.exec.reason": planReason }, t0, { status: "ERROR", message: planReason }); } catch { /* телеметрия */ }
+  return {
+    ok: false, schema: EXEC_SCHEMA, cmd: String(rawCmd ?? "").trim().slice(0, 200), cwd: String(rawCwd ?? "").trim().slice(0, 200),
+    exit: null, stdout_tail: "", stderr_tail: "", duration: Date.now() - t0, timed_out: false, sandboxed: false,
+    env_keys: [], reason: planReason, detail: planDetail, ...(review ? { review } : {}), ...(queueId ? { queue_id: queueId } : {}),
+  };
+}
+
+/** Тело исполнения для ПРОШЕДШЕГО план (и, в runTerminalAsync, гейт) — spawn-часть. */
+async function spawnPlanned(rawCmd: string, plan: ExecPlan, source: string, t0: number): Promise<ExecVerdict> {
   const usePrlimit = sandboxCaps().rlimit;
   // NB: RLIMIT_NPROC per-UID не трогаем (урок R17); изоляция: as/nofile/core + таймаут→kill.
   // --as=4GiB (не 1GiB как в sandbox.ts): V8 (node/bun) резервирует большой виртуальный
@@ -232,6 +238,44 @@ export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeou
   return verdict;
 }
 
+export async function runTerminalAsync(rawCmd: string, rawCwd: string, rawTimeout: number | undefined, source = "rest"): Promise<ExecVerdict> {
+  const t0 = Date.now();
+  const plan = planExec(rawCmd, rawCwd, rawTimeout);
+  if (!plan.ok) return deniedVerdict(rawCmd, rawCwd, plan.reason ?? "plan_denied", plan.detail, source, t0);
+
+  // ── R63 P0-b: тир-3 классификатор (канон D02: allowlist → sandbox-ability → classifier) ──
+  const gate = await classifyGate(
+    { cmd: String(rawCmd), cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! },
+    plan.timeout_ms,
+  );
+  if (gate.verdict === "block") {
+    return deniedVerdict(rawCmd, rawCwd, "classifier_blocked", gate.result.reason, source, t0, gate.result);
+  }
+  if (gate.verdict === "ask") {
+    // fail-closed к оператору: команда НЕ исполняется, ждёт одобрения в очереди
+    counter.denied++;
+    journal(String(rawCmd), String(plan.cwd!), false, null, "classifier_ask", Date.now() - t0, false, false, source, null, gate.result.reason);
+    return {
+      ok: false, schema: EXEC_SCHEMA, cmd: String(rawCmd).slice(0, 200), cwd: plan.cwd!,
+      exit: null, stdout_tail: "", stderr_tail: "", duration: Date.now() - t0, timed_out: false, sandboxed: false,
+      env_keys: [], reason: "classifier_ask", detail: gate.result.reason,
+      review: gate.result, queue_id: gate.result.queue_id,
+    };
+  }
+
+  return spawnPlanned(rawCmd, plan, source, t0);
+}
+
+/** R63: исполнение ОДОБРЕННОЙ оператором команды из очереди classifier_ask.
+ *  Tier-1 (planExec) НЕ скипается (non-bypass); скипается только тир-3 —
+ *  оператор уже заменил классификатор собой (канон Cursor Approvals UI). */
+export async function runApprovedAsync(rawCmd: string, rawCwd: string, rawTimeout: number | undefined, source = "review-approve"): Promise<ExecVerdict> {
+  const t0 = Date.now();
+  const plan = planExec(rawCmd, rawCwd, rawTimeout);
+  if (!plan.ok) return deniedVerdict(rawCmd, rawCwd, plan.reason ?? "plan_denied", plan.detail, source, t0);
+  return spawnPlanned(rawCmd, plan, source, t0);
+}
+
 // ── статус / probe ────────────────────────────────────────────────────
 
 export interface ExecStatus {
@@ -242,6 +286,7 @@ export interface ExecStatus {
   roots: string[];
   deny_rules: string[];
   caps: { prlimit: boolean; timeout_default_ms: number; timeout_max_ms: number; cmd_max_len: number; substitution: "denied" };
+  classifier: { enabled: boolean; llm_enabled: boolean; model: string; queue_max: number; note: string }; // R63 P0-b (тир-3)
   counters: { runs: number; denied: number };
   recent: Array<{ id: number; cmd: string; ok: boolean; exit: number | null; reason: string | null; ms: number | null; source: string; at: number }>;
   note?: string;
@@ -254,12 +299,14 @@ export function execStatus(): ExecStatus {
     for (const r of rows) recent.push({ id: r.id, cmd: r.cmd, ok: r.ok === 1, exit: r.exit_code, reason: r.reason, ms: r.ms, source: r.source, at: r.at });
   } catch { /* журнал может отсутствовать в probe */ }
   const probe = process.env.ME2_BOOT_MODE === "probe";
+  const cfg = classifierConfig();
   return {
     ok: true, schema: EXEC_SCHEMA, mode: probe ? "probe_offline" : "live",
     allowlist: [...ALLOWED_BINARIES].sort(),
     roots: execRoots(),
     deny_rules: HOSTILE_PATTERNS.map(([, n]) => n).concat(["substitution_denied", "env_assign_denied", "segment_allowlist"]),
     caps: { prlimit: sandboxCaps().rlimit, timeout_default_ms: DEFAULT_TIMEOUT_MS, timeout_max_ms: MAX_TIMEOUT_MS, cmd_max_len: CMD_MAX_LEN, substitution: "denied" },
+    classifier: { enabled: cfg.enabled, llm_enabled: cfg.llm_enabled, model: cfg.model, queue_max: cfg.queue_max, note: "тир-3 после allowlist/prlimit: ask → очередь одобрений POST /review; НЕ security boundary" },
     counters: { ...counter },
     recent,
     ...(probe ? { note: "probe-режим: живые прогоны отключены; planExec-инварианты проверяются офлайн" } : {}),

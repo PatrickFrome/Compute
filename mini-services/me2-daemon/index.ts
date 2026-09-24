@@ -29,7 +29,8 @@ import { runRlsAuditAsync } from "./src/rls-audit";
 import { runRpcReconcileAsync } from "./src/rpc-reconcile";
 import { startSelfAuditLoop } from "./src/self-audit";
 import { exthostStatus, runExtension, exthostStartEventLoop, setMirrorFeedProvider } from "./src/exthost";
-import { execStatus, runTerminalAsync, execProbeOffline } from "./src/exec";
+import { execStatus, runTerminalAsync, runApprovedAsync, execProbeOffline, planExec } from "./src/exec";
+import { reviewStatus, reviewPlan, classifyDry, queueTake, queueResolve, queueDeny, classifierSetOverride, type ReviewInput } from "./src/review";
 import { editStatus, applyEditAsync, rollbackEdit, editProbeOffline } from "./src/edit";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
@@ -262,14 +263,66 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R62 P0-a «exec/edit tools»: TERMINAL_RUN + FILE_EDIT для агентного harness ──
     // Канон Cursor terminal/edit-files (корпус R61, трек A); enforcement = allowlist по
     // сегментам → prlimit → таймаут → env-белый-список; cwd/цель — только управляемые
-    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 32.
+    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 33.
     if (path === "/exec" && req.method === "GET") return json(res, 200, execStatus());
     if (path === "/exec" && req.method === "POST") {
       try {
-        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number };
-        if (body?.op !== "run") return json(res, 400, { ok: false, error: "bad_op", allowed: ["run"] });
-        if (typeof body.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+        const body = await readBody(req) as { op?: string; mode?: string; cmd?: string; cwd?: string; timeout_ms?: number };
+        if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+        // Run Mode «plan» (канон Cursor Plan Mode): план + вердикт тира-3 БЕЗ spawn и БЕЗ очереди
+        if (body?.op === "plan" || body.mode === "plan") {
+          const plan = planExec(body.cmd, body.cwd, body.timeout_ms);
+          if (!plan.ok) return json(res, 200, { ok: false, schema: "me2.exec.v1", reason: plan.reason, detail: plan.detail, mode: "plan" });
+          const input: ReviewInput = { cmd: body.cmd, cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! };
+          return json(res, 200, { ok: true, schema: "me2.exec.v1", mode: "plan", planned: { segments: plan.segments, binaries: plan.binaries }, cwd: plan.cwd, timeout_ms: plan.timeout_ms, review: reviewPlan(input) });
+        }
+        if (body?.op !== "run") return json(res, 400, { ok: false, error: "bad_op", allowed: ["run", "plan"] });
         return json(res, 200, await runTerminalAsync(body.cmd, body.cwd, body.timeout_ms, "rest"));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R63 P0-b «classifier tier»: Run Modes + пре-исполнение (канон Cursor Auto-review) ──
+    // Тир-3: allowlist (exec) → prlimit → classifier; ask → очередь одобрений оператора.
+    // Классификатор НЕ security boundary (канон D02); вне шины (47-инвариант); манифест non-bypass 33.
+    if (path === "/review" && req.method === "GET") return json(res, 200, reviewStatus());
+    if (path === "/review" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; id?: number; enabled?: boolean; llm?: boolean };
+        if (body?.op === "classify") {
+          if (typeof body.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+          const plan = planExec(body.cmd, body.cwd, body.timeout_ms);
+          if (!plan.ok) return json(res, 200, { ok: false, schema: "me2.review.v1", stage: "tier1_allowlist", reason: plan.reason, detail: plan.detail });
+          const input: ReviewInput = { cmd: body.cmd, cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! };
+          return json(res, 200, { ok: true, schema: "me2.review.v1", stage: "tier3_classifier", review: await classifyDry(input), planned: { binaries: plan.binaries } });
+        }
+        if (body?.op === "approve") {
+          if (typeof body.id !== "number") return json(res, 400, { ok: false, error: "id_required" });
+          const taken = queueTake(body.id);
+          if (!taken) return json(res, 404, { ok: false, error: "not_found_or_not_pending" });
+          const verdict = await runApprovedAsync(taken.cmd, taken.cwd, taken.timeout_ms, "review-approve");
+          queueResolve(body.id, verdict.ok, verdict.exit, verdict.duration);
+          try { emit("CLASSIFIER_APPROVED", { id: body.id, cmd: taken.cmd.slice(0, 120), ok: verdict.ok, exit: verdict.exit, ms: verdict.duration, source: "review-approve" }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", approved: true, run: verdict });
+        }
+        if (body?.op === "deny") {
+          if (typeof body.id !== "number") return json(res, 400, { ok: false, error: "id_required" });
+          const denied = queueDeny(body.id);
+          if (!denied) return json(res, 404, { ok: false, error: "not_found_or_not_pending" });
+          try { emit("CLASSIFIER_DENIED", { id: body.id, cmd: null, source: "review-queue" }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", denied: true });
+        }
+        if (body?.op === "config") {
+          const patch: Record<string, unknown> = {};
+          if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+          if (typeof body.llm === "boolean") patch.llm_enabled = body.llm;
+          if (typeof body.timeout_ms === "number" && body.timeout_ms >= 500 && body.timeout_ms <= 30000) patch.timeout_ms = body.timeout_ms;
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: "nothing_to_set", fields: ["enabled", "llm", "timeout_ms"] });
+          const cfg = classifierSetOverride(patch as never);
+          try { emit("CLASSIFIER_CONFIG", { patch, effective: cfg }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json classifier" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["classify", "approve", "deny", "config"] });
       } catch (e) {
         return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
       }

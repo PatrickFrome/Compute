@@ -40,6 +40,15 @@ export interface PolicyFile {
     crons_global: number;    // G7: глобальный потолок активных cron-заданий
     cron_min_minutes: number; // G7: минимальный интервал every-задания (анти-шторм)
   };
+  classifier: ClassifierPolicy; // R63 P0-b: тир-3 классификатор пре-исполнения (/review)
+}
+
+export interface ClassifierPolicy {
+  enabled: boolean;        // тир-3 включён (false → команды идут без классификации, честно "off")
+  llm_enabled: boolean;    // LLM-путь (агентная модель, <=timeout_ms; таймаут → ask)
+  timeout_ms: number;      // потолок LLM-вызова классификатора
+  queue_max: number;       // потолок pending-очереди одобрений (переполнение → block, fail-closed)
+  model: string;           // модель LLM-классификатора (канон Cursor: малая модель)
 }
 
 const POLICY_PATH = join(import.meta.dir, "..", "policy.json");
@@ -60,6 +69,7 @@ const DEFAULTS: PolicyFile = {
     },
   },
   caps: { crons_per_chat: 8, crons_global: 48, cron_min_minutes: 5 },
+  classifier: { enabled: true, llm_enabled: false, timeout_ms: 3000, queue_max: 20, model: "zai" },
 };
 
 let cache: PolicyFile | null = null;
@@ -74,6 +84,7 @@ export function loadPolicy(force = false): PolicyFile {
       if (!raw.tiers?.[t]?.tools) throw new Error(`tier ${t} отсутствует или пуст`);
     }
     raw.caps = { ...DEFAULTS.caps, ...(raw.caps ?? {}) };
+    raw.classifier = { ...DEFAULTS.classifier, ...(raw.classifier ?? {}) };
     cache = raw;
     loadError = null;
   } catch (e) {
@@ -85,6 +96,7 @@ export function loadPolicy(force = false): PolicyFile {
       try { emit("POLICY_LOAD_ERROR", { error: msg.slice(0, 160), fallback: "defaults" }, null, null); } catch { /* chain не критичен */ }
     }
     cache = JSON.parse(JSON.stringify(DEFAULTS)) as PolicyFile;
+    cache.classifier = { ...DEFAULTS.classifier };
   }
   return cache;
 }

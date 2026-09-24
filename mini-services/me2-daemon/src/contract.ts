@@ -50,8 +50,8 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost", "/exec", "/file"],
-      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run,cmd,cwd,timeout_ms?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost", "/exec", "/file", "/review"],
+      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run|plan,cmd,cwd,timeout_ms?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях; plan — без spawn)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)", "/review {op:approve|deny|classify|config} (P0-b: тир-3 классификатор, очередь одобрений ask)"],
     },
     memory: ["/memory op:write|delete|economy"],
     ui: "/ui",
@@ -70,6 +70,7 @@ export function capabilitiesJson(): CapabilityContract {
         "R60: exthost — расширения skills/ext/* исполняются в подпроцессе под prlimit, только stdio-JSON, caps-медиация (неизвестная cap — честный отказ), activation manual/bus:*",
         "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run, /exec, /file)",
         "R62 P0-a exec/edit tools (гэп P0-0 R61): TERMINAL_RUN — allowlist бинарей по сегментам, prlimit as/nofile/core, таймаут, env-белый-список, cwd только в песочницах/worktrees; FILE_EDIT — unified-diff с dry-run-валидацией и durable-rollback из журнала; манифест non-bypass 30→32 (eval v26)",
+        "R63 P0-b classifier tier (гэп P0-1 R61): Run Modes (run|plan) + тир-3 классификатор пре-исполнения по канону Cursor D02 (allowlist → prlimit → classifier); вердикты allow/ask/block; ask → очередь одобрений оператора (POST /review approve|deny); эвристика детерминированная, LLM — opt-in (policy.json classifier, таймаут → ask fail-closed); классификатор честно НЕ security boundary; манифест non-bypass 32→33 (eval v27)",
       ],
     },
   };
@@ -207,15 +208,24 @@ export function missionUiHtml(): string {
       <div class="line"><input id="exec-cmd" aria-label="Команда (белый список)" placeholder="команда: git, node, bun, ls, cat, grep… (подстановки $() и env= отклоняются)" value="node --version"></div>
       <div class="line"><input id="exec-cwd" aria-label="cwd в управляемом корне" placeholder="cwd: каталог внутри песочницы или worktree…"></div>
       <div class="line">
-        <button id="b-exec" title="TERMINAL_RUN: allowlist по сегментам → prlimit → таймаут (санкционированная запись POST /exec)">Выполнить</button>
+        <button id="b-exec" title="TERMINAL_RUN: allowlist по сегментам → классификатор → prlimit → таймаут (санкционированная запись POST /exec)">Выполнить</button>
+        <button id="b-plan" class="ghost" title="Run Mode plan: план + вердикт классификатора БЕЗ исполнения (POST /exec op:plan)">План</button>
         <button id="b-demo" class="ghost" title="Демо петли Cursor: FILE_EDIT создаёт p0a-demo.js → TERMINAL_RUN node p0a-demo.js → зелёный вывод (POST /file + /exec)">Demo: edit→run→green</button>
         <span id="exec-out" class="sub" style="align-self:center; white-space:pre-wrap; max-height:64px; overflow-y:auto"></span>
       </div>
     </div>
     </div>
   </section>
+  <section aria-label="Run Modes и классификатор пре-исполнения P0-b" style="grid-column:1/-1" id="wb-review">
+    <h2>Run Modes (P0-b · классификатор) <span class="n" id="review-n">—</span><button class="wb-toggle" id="wb-toggle-review" aria-expanded="true" aria-controls="wb-body-review" data-testid="mc-review-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-review">
+    <div class="row sub" id="review-caps" data-testid="mc-review-caps" style="margin:6px 6px 0">classifier: загрузка…</div>
+    <div class="row sub" id="review-stats" style="margin:0 6px">статистика 24ч: —</div>
+    <div class="scroll" id="review" data-testid="mc-review" style="max-height:22vh" aria-live="polite"></div>
+    </div>
+  </section>
 </main>
-<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run · /exec · /file)</footer>
+<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run · /exec · /file · /review)</footer>
 <div id="toast" class="toast" role="alert"></div>
 <script>
 (function(){
@@ -388,7 +398,7 @@ export function missionUiHtml(): string {
   // лэйаута силами daemon'а — кандидат R61+). Порядок секций не меняется (урок R12/R16):
   // только видимостью, кнопка в заголовке + dblclick по заголовку, aria-expanded/controls.
   var WB_KEY = "me2.ui.workbench.v1";
-  var WB_IDS = ["fleet", "river", "mirror", "ext", "exec"];
+  var WB_IDS = ["fleet", "river", "mirror", "ext", "exec", "review"];
   function wbLoad(){ try { return JSON.parse(localStorage.getItem(WB_KEY) || "{}") || {}; } catch(e){ return {}; } }
   function wbSave(s){ try { localStorage.setItem(WB_KEY, JSON.stringify(s)); } catch(e){} }
   function wbSet(id, col, save){
@@ -488,8 +498,23 @@ export function missionUiHtml(): string {
     var cmd = $("exec-cmd").value.trim(), cwd = $("exec-cwd").value.trim();
     if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
     var b = this; b.disabled = true;
-    execRun(cmd, cwd).then(function(){ toast("exec ok", "ok"); loadExec(); })
-      .catch(function(e){ toast("exec отказ: " + e.message, "err"); loadExec(); })
+    execRun(cmd, cwd).then(function(){ toast("exec ok", "ok"); loadExec(); loadReview(); })
+      .catch(function(e){ toast("exec отказ: " + e.message, "err"); loadExec(); loadReview(); })
+      .then(function(){ b.disabled = false; });
+  });
+  // R63 P0-b: Run Mode «plan» — план + вердикт классификатора без исполнения (канон Cursor Plan Mode)
+  $("b-plan").addEventListener("click", function(){
+    var cmd = $("exec-cmd").value.trim(), cwd = $("exec-cwd").value.trim();
+    if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
+    var b = this, out = $("exec-out"); b.disabled = true; out.textContent = "…";
+    fetch(api("/exec"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "plan", cmd: cmd, cwd: cwd }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        if(!v.ok){ out.textContent = "план отказ: " + (v.reason || "?") + (v.detail ? String.fromCharCode(10) + String(v.detail).slice(0, 240) : ""); return; }
+        var rv = v.review || {};
+        out.textContent = "план ok · сегментов " + (v.planned ? v.planned.segments.length : "?") + " · классификатор: " + (rv.verdict || "?") + (rv.rule ? " (" + rv.rule + ")" : "") + " · " + (rv.reason || "") + String.fromCharCode(10) + "bin: " + ((v.planned ? v.planned.binaries : []) || []).join(" ");
+      })
+      .catch(function(){ out.textContent = "план: сеть недоступна"; })
       .then(function(){ b.disabled = false; });
   });
   $("b-demo").addEventListener("click", function(){
@@ -511,6 +536,58 @@ export function missionUiHtml(): string {
       .catch(function(e){ out.textContent = String(e.message || e).slice(0, 300); toast("demo отказ: " + e.message, "err"); loadExec(); })
       .then(function(){ b.disabled = false; });
   });
+
+  // R63 P0-b classifier tier: очередь одобрений (ask) + статистика вердиктов. Кнопки ✓/✗ —
+  // санкционированная запись POST /review {op:approve|deny} (канон Cursor Approvals UI:
+  // Allow once / Deny; классификатор НЕ security boundary — решение оператора финальное).
+  function loadReview(){
+    fetch(api("/review")).then(function(r){ return r.json(); }).then(function(j){
+      var caps = $("review-caps"), st = $("review-stats"), box = $("review"); if(!caps || !box) return;
+      if(!j.ok){ caps.textContent = "classifier: честно недоступен"; $("review-n").textContent = "—"; return; }
+      var c = j.config || {};
+      caps.innerHTML = 'тир-3 ' + (c.enabled ? '<b style="color:#6ee7b7">вкл</b>' : 'выкл') + ' · LLM ' + (c.llm_enabled ? '<b>вкл (' + esc(c.model || "?") + ', ≤' + esc(String(c.timeout_ms || 3000)) + 'мс)</b>' : 'выкл (эвристика)') + ' · очередь ≤ ' + esc(String(c.queue_max || 20)) + ' · не security boundary';
+      var s = j.stats_24h || {};
+      st.textContent = 'статистика 24ч: block=' + (s.CLASSIFIER_BLOCK || 0) + ' · ask=' + (s.CLASSIFIER_ASK || 0) + ' · одобрено=' + (s.CLASSIFIER_APPROVED || 0) + ' · отклонено=' + (s.CLASSIFIER_DENIED || 0);
+      box.textContent = "";
+      var q = j.queue || {};
+      (q.pending || []).forEach(function(p){
+        var d = document.createElement("div"); d.className = "ev degraded";
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = "#" + p.id + " · ask · " + esc(p.engine) + " · ждёт оператора";
+        var pl = document.createElement("div"); pl.className = "pl"; pl.textContent = "$ " + p.cmd + " · cwd " + p.cwd;
+        var rs = document.createElement("div"); rs.className = "sub"; rs.textContent = "причина: " + p.reason;
+        var ops = document.createElement("div"); ops.style.marginTop = "4px";
+        var ba = document.createElement("button"); ba.className = "ghost"; ba.textContent = "✓ одобрить"; ba.title = "Исполнить команду (POST /review op:approve — tier-1 остаётся)";
+        var bd = document.createElement("button"); bd.className = "ghost"; bd.textContent = "✗ отклонить"; bd.title = "Отклонить команду из очереди (POST /review op:deny)";
+        ba.addEventListener("click", function(){ reviewDecide("approve", p.id); });
+        bd.addEventListener("click", function(){ reviewDecide("deny", p.id); });
+        ops.appendChild(ba); ops.appendChild(bd);
+        d.appendChild(ty); d.appendChild(pl); d.appendChild(rs); d.appendChild(ops);
+        box.appendChild(d);
+      });
+      (q.recent || []).slice(0, 6).forEach(function(r){
+        if(r.status === "pending") return;
+        var d = document.createElement("div"); d.className = "ev " + (r.status === "executed" ? "step" : "degraded");
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = "#" + r.id + " · " + r.status + (r.run_ok ? " · exit " + r.run_exit : "");
+        var pl = document.createElement("div"); pl.className = "pl"; pl.textContent = "$ " + r.cmd;
+        d.appendChild(ty); d.appendChild(pl); box.appendChild(d);
+      });
+      if(!(q.pending || []).length && !(q.recent || []).some(function(r){ return r.status !== "pending"; })) box.innerHTML = '<div class="row sub">очередь пуста — ask попадает сюда на одобрение (канон Approvals UI Cursor)</div>';
+      $("review-n").textContent = (q.pending || []).length + " ждёт";
+    }).catch(function(){ var el = $("review-n"); if(el) el.textContent = "ошибка"; });
+  }
+  function reviewDecide(dec, id){
+    fetch(api("/review"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: dec, id: id }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        if(v.ok && dec === "approve"){ var ex = v.run || {}; toast(ex.ok ? "одобрено · exit " + ex.exit + " · " + ex.duration + "мс" : "одобрено, прогон не удался: " + (ex.reason || "?"), ex.ok ? "ok" : "err"); }
+        else if(v.ok){ toast("отклонено (#" + id + ")", "ok"); }
+        else { toast("отказ: " + (v.error || "?"), "err"); }
+        loadReview(); loadExec();
+      })
+      .catch(function(){ toast("сеть недоступна", "err"); });
+  }
 
   function connectSocket(){
     var s=document.createElement("script");
@@ -553,8 +630,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); loadExec(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); loadExec(); loadReview(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000); setInterval(loadReview, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>
