@@ -20,6 +20,7 @@ import {
 } from "./store";
 import { listProviders } from "./providers";
 import { ciPollMs, ciStatus, ciTick } from "./src/ci";
+import { hooksStatus, handleGithubWebhook } from "./src/hooks";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
@@ -190,6 +191,23 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
     // R67: P0-e ingress (pull) — статус поллера GitHub Actions + последние runs ветки.
     if (path === "/ci" && req.method === "GET") return json(res, 200, ciStatus());
+    // R68: P0-e webhooks-in (push) — HMAC-верифицированный вход внешних событий.
+    // Секрет НЕ логируем и НЕ возвращаем; подпись — над RAW-телом (важно для HMAC).
+    if (path === "/hooks/github" && req.method === "POST") {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      const h = req.headers;
+      const out = handleGithubWebhook(
+        {
+          delivery: typeof h["x-github-delivery"] === "string" ? h["x-github-delivery"] : null,
+          event: typeof h["x-github-event"] === "string" ? h["x-github-event"] : null,
+          signature: typeof h["x-hub-signature-256"] === "string" ? h["x-hub-signature-256"] : null,
+        },
+        Buffer.concat(chunks),
+      );
+      return json(res, out.status, out.body);
+    }
+    if (path === "/hooks" && req.method === "GET") return json(res, 200, hooksStatus());
     // R53 (фаза D-исполнение): короткоживущие JWT для чтения зеркала из UI с гейтом RLS.
     // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
     // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
@@ -1007,7 +1025,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci", "/hooks"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

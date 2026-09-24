@@ -29,6 +29,7 @@ import { evalVerdict } from "./eval";
 import { governorStatus } from "./governor";
 import { demandStatus } from "./demand";
 import { tokensStatus } from "./tokens";
+import { hooksStatus } from "./hooks";
 import { policyStatus } from "./policy";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
@@ -386,6 +387,18 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     evidence: `desktop/src: ${cs.present}/${cs.total} модулей, electron-builder: ${cs.builder ? "да" : "нет"}, CI: ${cs.ci ? "да" : "нет"}; tauri: ${cs.tauri ? "есть (альтернатива)" : "нет"}; GUI-run в песочнице невозможен — сборка=CI`,
     cursor_ref: "VS Code fork shell (полный продукт)",
     parity: cs.desktop ? "PARTIAL" : "MISSING",
+  });
+
+  // ME42: webhooks-in (R68 — push-фаза P0-e; вход внешних событий поверх pull-канала R67)
+  const hs = hooksStatus();
+  rows.push({
+    id: "ME42",
+    name: "Webhooks-in: POST /hooks/github — HMAC-SHA256 (X-Hub-Signature-256, timing-safe), dedupe X-GitHub-Delivery, HOOK_PING/GIT_PUSH/CI_HOOK_RUN_* → event-log → облако",
+    old_ref: "— (внешние события были только pull; push-канала не существовало)",
+    verdict: hs.secret !== "missing" && hs.verified_total > 0 ? "WORKS" : "CAVEAT",
+    evidence: `secret: ${hs.secret}, verdict: ${hs.verdict}, received: ${hs.received_total}, verified: ${hs.verified_total}, rejected: ${hs.rejected_total} (посл. причина: ${hs.rejected_last_reason ?? "—"}), событий: ${hs.events_emitted_total}`,
+    cursor_ref: "— (нет публичного подтверждения; сверка с корпусом R61 продолжается)",
+    parity: "UNKNOWN",
   });
 
   // Остаточные UNKNOWN (строки без parityMap-входа) — §34: честно UNKNOWN, не «у Cursor нет»

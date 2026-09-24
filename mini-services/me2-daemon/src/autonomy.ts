@@ -220,6 +220,7 @@ export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/file": "R62 P0-a edit-плоскость (FILE_EDIT): unified-diff с dry-run-валидацией + durable-бэкап в журнале file_edits + rollback; цель только в управляемых корнях, single-file, без .git/удалений; EDIT_APPLIED/EDIT_DENIED/EDIT_ROLLBACK в chain",
   "/review": "R63 P0-b classifier-плоскость (тир-3 auto-review): approve|deny очереди classifier_ask + classify (dry, без spawn) + config (enabled/llm); классификатор НЕ security boundary; события CLASSIFIER_BLOCK/ASK/APPROVED/DENIED/CONFIG в chain; approve исполняет runApprovedAsync (tier-1 не скипается)",
   "/sandbox": "R64 P0-2 OS-sandbox-плоскость: probe (живой негатив/позитив конфайнмента + SANDBOX_ESCAPE при эскале) + run (tier-1 planExec обязателен → ns+seccomp, strict fail-closed: слои не применились → команда НЕ исполнена) + config (auto_sandbox/net/strict); Landlock ≥5.13; события SANDBOX_APPLIED/FAILED/PROBE/ESCAPE/CONFIG в chain",
+  "/hooks/github": "R68 P0-e webhooks-in (push): enforcement = HMAC-SHA256 над RAW-телом (X-Hub-Signature-256, timing-safe) ДО любой обработки + дедуп X-GitHub-Delivery; без подписи/с ключом неверным → 401, событие НЕ создаётся; zero-authority: только наблюдения HOOK_PING/GIT_PUSH/CI_HOOK_RUN_*/HOOK_EVENT в event-log (никогда не команды шины); секрет в vault (GITHUB_WEBHOOK_SECRET), без секрета 503",
 };
 export function nonBypassAudit(): {
   verdict: "NO_BYPASS" | "UNKNOWN_ROUTE"; post_routes: string[]; classified: number;

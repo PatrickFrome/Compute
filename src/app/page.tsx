@@ -41,7 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Activity, AlertTriangle, AppWindow, Archive, ArrowLeftRight, Bot, Boxes, Brain, Check, CheckCircle2, ChevronDown, ClipboardCheck, Clock, Cloud, CloudOff,
   Crosshair, Cpu, Database, Download, Gauge, GitBranch, GitMerge, Globe, KeyRound, Layers, ListChecks, MonitorPlay, MousePointerClick, Network, PanelLeft, Pause, Play, Plus,
-  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, ShieldCheck, Sparkles, Target, Terminal, Trash2, X, Zap, Lock,
+  Radar, RefreshCw, RotateCcw, Rocket, ScanEye, Search, Server, ShieldCheck, Sparkles, Target, Terminal, Trash2, Webhook, X, Zap, Lock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -83,6 +83,9 @@ type RsiData = { ok: boolean; proposals: RsiP[]; stats: { total: number; propose
 type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id: string; name: string; old_ref: string; verdict: string; evidence: string; cursor_ref?: string; parity?: string }[]; gaps: { id: string; title: string; status: string; closure: string }[] };
 // R67: P0-e ingress (pull) — GitHub Actions poller (ветка sandbox/me2-os)
 type CiData = { ok: boolean; schema: string; repo: string; branch: string; token: "present" | "missing"; verdict: "LIVE" | "NO_TOKEN" | "ERROR" | "WARMUP"; runs: { id: number; name: string; head_sha7: string; status: string; conclusion: string | null; created_at: string | null }[]; polls_total: number; events_emitted_total: number; last_seen_run_id: number; last_error: string | null };
+// R68: P0-e webhooks-in (push) — POST /hooks/github (HMAC-SHA256)
+type HooksDeliveryT = { delivery: string; event: string; action: string | null; emitted: string[]; at: string };
+type HooksData = { ok: boolean; schema: string; secret: "vault" | "env-dev" | "missing"; received_total: number; verified_total: number; rejected_total: number; events_emitted_total: number; rejected_last_reason: string | null; dedupe_size: number; last_delivery_at: string | null; deliveries: HooksDeliveryT[]; verdict: "LIVE" | "DEV_SECRET" | "NO_SECRET" | "WARMUP" };
 type SenseTargetT = { ref: string; role: string; name: string };
 type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
 type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
@@ -1606,6 +1609,8 @@ export default function MissionControl() {
   const [evalData, setEvalData] = useState<EvalData | null>(null);
   // R67: CI-ingress статус (P0-e, pull-канал GitHub Actions)
   const [ciData, setCiData] = useState<CiData | null>(null);
+  // R68: webhooks-in (GET /hooks) — статус push-канала внешних событий
+  const [hooksData, setHooksData] = useState<HooksData | null>(null);
   // R31 Track D: последний диф перцепции + DB-гигиена
   const [lastDiff, setLastDiff] = useState<SenseDiffT | null>(null);
   const [hyg, setHyg] = useState<HygData | null>(null);
@@ -1724,6 +1729,10 @@ export default function MissionControl() {
   // R67: CI-ingress (GET /ci) — статус pull-канала GitHub Actions
   const loadCi = useCallback(async () => {
     try { const r = await fetch("/ci?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setCiData(r as CiData); } catch { /* daemon недоступен */ }
+  }, []);
+  // R68: webhooks-in (GET /hooks) — статус push-канала (HMAC)
+  const loadHooks = useCallback(async () => {
+    try { const r = await fetch("/hooks?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setHooksData(r as HooksData); } catch { /* daemon недоступен */ }
   }, []);
   // R31 D4: DB-гигиена (GET /db/hygiene — WAL, freelist, индексы, журнал операций)
   const loadHyg = useCallback(async () => {
@@ -1861,6 +1870,12 @@ export default function MissionControl() {
     const iv = setInterval(() => void loadCi(), 120_000);
     return () => clearInterval(iv);
   }, [loadCi]);
+  // R68: webhooks-in — mount + 120с (синхронно с CI-каналом)
+  useEffect(() => {
+    void loadHooks();
+    const iv = setInterval(() => void loadHooks(), 120_000);
+    return () => clearInterval(iv);
+  }, [loadHooks]);
   // R31 D4: DB-гигиена видна в браузерной панели — mount + 60с
   useEffect(() => {
     void loadHyg();
@@ -1926,11 +1941,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadHooks(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadCi, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
+  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadCi, loadHooks, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2746,7 +2761,7 @@ export default function MissionControl() {
                             )}
                             <button
                               type="button"
-                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
+                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadHooks(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
                               title="Обновить все механики"
                               aria-label="Обновить все механики"
                               className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2814,6 +2829,41 @@ export default function MissionControl() {
                                 </>
                               ) : (
                                 <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка CI-статуса…</div>
+                              )}
+                            </div>
+
+                            {/* R68: WEBHOOKS-IN (P0-e push) — POST /hooks/github (HMAC-SHA256) → события → облако */}
+                            <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2" data-testid="hooks-in">
+                              <div className="mb-1.5 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="P0-e webhooks-in (push): POST /hooks/github — HMAC-SHA256 X-Hub-Signature-256 (timing-safe) над RAW-телом; дедуп X-GitHub-Delivery; события HOOK_PING/GIT_PUSH/CI_HOOK_RUN_* → event-log → sqlmirror в облако. Секрет — vault (GITHUB_WEBHOOK_SECRET)">
+                                  <Webhook className="h-3 w-3 text-amber-400" aria-hidden /> WEBHOOKS-IN
+                                </span>
+                                {hooksData && (
+                                  <span className={`rounded px-1.5 py-px font-mono text-[9px] ${hooksData.verdict === "LIVE" ? "bg-emerald-500/15 text-emerald-400" : hooksData.verdict === "NO_SECRET" ? "bg-rose-500/15 text-rose-400" : hooksData.verdict === "DEV_SECRET" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-500"}`} title={`verdict: ${hooksData.verdict} · секрет: ${hooksData.secret} · получено: ${hooksData.received_total} · верифицировано: ${hooksData.verified_total}${hooksData.rejected_last_reason ? " · посл. отказ: " + hooksData.rejected_last_reason : ""}`}>{hooksData.verdict}</span>
+                                )}
+                              </div>
+                              {hooksData ? (
+                                <>
+                                  <div className="mb-1 flex flex-wrap gap-1">
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="источник секрета HMAC (vault — канон; env-dev — только самотест)">secret: {hooksData.secret}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="всего событий сгенерировано каналом в event-log (зеркалятся в облако)">событий: {hooksData.events_emitted_total}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="отклонено: подпись отсутствует/неверна (fail-closed)">отклон: {hooksData.rejected_total}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="размер окна дедупликации X-GitHub-Delivery (in-memory, честно очищается рестартом)">dedupe: {hooksData.dedupe_size}</span>
+                                  </div>
+                                  <div className="max-h-28 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние доставки webhook">
+                                    {hooksData.deliveries.map((d, i) => (
+                                      <div key={`${d.delivery}-${i}`} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]" title={`${d.event}${d.action ? " · " + d.action : ""} · delivery ${d.delivery} · ${d.at}`}>
+                                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${d.emitted.length > 0 ? "bg-emerald-400" : "bg-zinc-600"}`} aria-hidden />
+                                        <span className="w-20 shrink-0 truncate text-zinc-400">{d.event}</span>
+                                        <span className="shrink-0 text-zinc-600">{d.delivery}</span>
+                                        <span className="min-w-0 flex-1 truncate text-zinc-500">{d.emitted.join(", ") || "dedupe"}</span>
+                                      </div>
+                                    ))}
+                                    {hooksData.deliveries.length === 0 && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">доставок нет (ping не приходил)</div>}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка статуса webhook…</div>
                               )}
                             </div>
 

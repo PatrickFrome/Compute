@@ -50,7 +50,7 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost", "/exec", "/file", "/review", "/sandbox"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/hooks", "/exthost", "/exec", "/file", "/review", "/sandbox"],
       write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run|plan,cmd,cwd,timeout_ms?,sandbox?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях; plan — без spawn; sandbox:true — R64 P0-2)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)", "/review {op:approve|deny|classify|config} (P0-b: тир-3 классификатор, очередь одобрений ask)", "/sandbox {op:probe|run|config} (R64 P0-2: OS-конфайнмент ns+seccomp, strict fail-closed)"],
     },
     memory: ["/memory op:write|delete|economy"],
@@ -66,6 +66,7 @@ export function capabilitiesJson(): CapabilityContract {
         "матрица: docs/version-matrix.md (K8)",
         "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
         "R58: политики как данные — GET /sqlmirror/rls-audit сверяет живой каталог Postgres с ожидаемой матрицей sql/0003+0004 (DML строго; платформенные дефолты Supabase — info)",
+        "R68: webhooks-in (push-фаза P0-e) — POST /hooks/github, HMAC-SHA256 X-Hub-Signature-256 (timing-safe), дедуп X-GitHub-Delivery; события HOOK_PING/GIT_PUSH/CI_HOOK_RUN_* → event-log → облако; секрет в vault (GITHUB_WEBHOOK_SECRET), без него — честный 503",
         "R60: workbench-лэйаут /ui — collapse/expand секций с персистом localStorage (канон VS Code workbench, порядок секций не меняется)",
         "R60: exthost — расширения skills/ext/* исполняются в подпроцессе под prlimit, только stdio-JSON, caps-медиация (неизвестная cap — честный отказ), activation manual/bus:*",
         "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run, /exec, /file)",
@@ -191,6 +192,7 @@ export function missionUiHtml(): string {
     <div class="wb-body" id="wb-body-mirror">
     <div class="row sub" id="rls-audit" data-testid="mc-rls-audit" style="margin:6px 6px 0">аудит политик: загрузка…</div>
     <div class="row sub" id="rpc-reconcile" data-testid="mc-rpc-reconcile" style="margin:6px 6px 0">сверка реестра: загрузка…</div>
+    <div class="row sub" id="hooks-in" data-testid="mc-hooks-in" style="margin:6px 6px 0">webhooks-in: загрузка…</div>
     <div class="scroll" id="mirror" data-testid="mc-mirror" style="max-height:32vh" aria-live="polite"></div>
     </div>
   </section>
@@ -418,6 +420,19 @@ export function missionUiHtml(): string {
       el.innerHTML="сверка реестра RPC ("+chan+"): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · ожидание "+g.expected_total+" · факт "+g.actual_total+" · ACTIVE "+g.per_tier_actual.ACTIVE+"/"+g.per_tier_expected.ACTIVE+" · CONTROL_PLANE "+g.per_tier_actual.CONTROL_PLANE+"/"+g.per_tier_expected.CONTROL_PLANE+" · FREEZE "+g.per_tier_actual.FREEZE+"/"+g.per_tier_expected.FREEZE+" · нет "+g.missing_count+" · лишних "+g.extra_count+" · тир-дрейф "+g.tier_mismatch_count+oa+(j.cached?" · кэш 60с":"");
       el.style.color = v ? "#6ee7b7" : "#fca5a5";
     }).catch(function(){ var el=$("rpc-reconcile"); if(el){ el.textContent="сверка реестра: сеть недоступна"; el.style.color="#fcd34d"; } });
+  }
+
+  // R68 «webhooks-in (push)»: статус HMAC-канала внешних событий (P0-e вторая фаза).
+  function loadHooks(){
+    fetch(api("/hooks")).then(function(r){ return r.json(); }).then(function(j){
+      var el=$("hooks-in");
+      if(!j.ok){ el.textContent="webhooks-in: недоступен"; el.style.color="#fcd34d"; return; }
+      var vr=String(j.verdict||"?");
+      var live=(vr==="LIVE");
+      var lab=live?"LIVE ✓":(vr==="DEV_SECRET"?"DEV-СЕКРЕТ":(vr==="NO_SECRET"?"СЕКРЕТА НЕТ":"ОЖИДАНИЕ"));
+      el.innerHTML="webhooks-in (push, HMAC): <b>"+lab+"</b> · secret "+esc(j.secret||"?")+" · получено "+j.received_total+" · верифицировано "+j.verified_total+" · отклонено "+j.rejected_total+(j.rejected_last_reason?" ("+esc(j.rejected_last_reason)+")":"")+" · событий "+j.events_emitted_total+" · дедуп "+j.dedupe_size;
+      el.style.color = live ? "#6ee7b7" : (vr==="NO_SECRET" ? "#fca5a5" : "#fcd34d");
+    }).catch(function(){ var el=$("hooks-in"); if(el){ el.textContent="webhooks-in: сеть недоступна"; el.style.color="#fcd34d"; } });
   }
 
   // R60 workbench (канон VS Code workbench): collapse/expand секций + персист
@@ -712,8 +727,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); loadExec(); loadReview(); loadSandbox(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000); setInterval(loadReview, 30000); setInterval(loadSandbox, 30000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadHooks(); loadExt(); loadExec(); loadReview(); loadSandbox(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadHooks, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000); setInterval(loadReview, 30000); setInterval(loadSandbox, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>
