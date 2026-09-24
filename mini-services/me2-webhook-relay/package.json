@@ -1,0 +1,9 @@
+{
+  "name": "me2-webhook-relay",
+  "version": "0.1.0",
+  "module": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot index.ts"
+  }
+}

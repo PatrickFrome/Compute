@@ -167,6 +167,19 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
+  // R69.1: капчу публичного origin из живого трафика — Host, с которым платформенный
+  // preview-прокси стучится через Caddy (x-forwarded-host / host). Нужно для боевого
+  // URL GitHub-webhook без ручного ввода оператора. Список кандидатов (кап 20) в meta.
+  try {
+    const hh = String(req.headers.host ?? "");
+    const xfh = String(req.headers["x-forwarded-host"] ?? "");
+    const cand = ((xfh || hh).split(",")[0] ?? "").trim();
+    if (cand && !cand.startsWith("localhost") && !cand.startsWith("127.0.0.1") && !cand.startsWith("[::1]")) {
+      const seen = new Set<string>(JSON.parse(getMeta("host_candidates") || "[]") as string[]);
+      if (!seen.has(cand) && seen.size < 20) { seen.add(cand); setMeta("host_candidates", JSON.stringify([...seen])); }
+      setMeta("public_origin_last", `${cand} @ ${new Date().toISOString()}`);
+    }
+  } catch { /* капча не критична */ }
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
 

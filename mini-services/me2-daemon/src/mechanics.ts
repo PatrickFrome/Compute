@@ -396,7 +396,7 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     name: "Webhooks-in: POST /hooks/github — HMAC-SHA256 (X-Hub-Signature-256, timing-safe), персистентный дедуп X-GitHub-Delivery, HOOK_PING/GIT_PUSH/GIT_PR_*/CI_HOOK_RUN_* → event-log → облако",
     old_ref: "— (внешние события были только pull; push-канала не существовало)",
     verdict: hs.secret !== "missing" && hs.verified_total > 0 ? "WORKS" : "CAVEAT",
-    evidence: `secret: ${hs.secret}, verdict: ${hs.verdict}, received: ${hs.received_total}, verified: ${hs.verified_total}, rejected: ${hs.rejected_total} (посл. причина: ${hs.rejected_last_reason ?? "—"}), событий: ${hs.events_emitted_total}, дедуп: sqlite-персистентный (${hs.dedupe_size} GUID, переживает рестарт — R69), gateway: ${hs.gateway.via}, события: ${hs.events_supported.join("/")}, регистрация: scripts/webhook-register.sh`,
+    evidence: `secret: ${hs.secret}, verdict: ${hs.verdict}, received: ${hs.received_total}, verified: ${hs.verified_total}, rejected: ${hs.rejected_total} (посл. причина: ${hs.rejected_last_reason ?? "—"}), событий: ${hs.events_emitted_total}, дедуп: sqlite-персистентный (${hs.dedupe_size} GUID, переживает рестарт — R69), gateway: ${hs.gateway.via}, события: ${hs.events_supported.join("/")}, внешний канал: smee-релей (mini-services/me2-webhook-relay :3044→smee.io, outbound-SSE) — хук 685103637 зарегистрирован в репо, ПЕРВЫЙ внешний HOOK_PING seq 5846 (zen-цитата GitHub, hook_id совпал, last_response 200) — R69.1`,
     cursor_ref: "— (нет публичного подтверждения; сверка с корпусом R61 продолжается)",
     parity: "UNKNOWN",
   });

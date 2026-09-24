@@ -12,6 +12,8 @@
 #   bash scripts/webhook-register.sh list                     # список хуков репо (наши помечены)
 #   WEBHOOK_URL="https://<public>/hooks/github?XTransformPort=3041" \
 #     bash scripts/webhook-register.sh register               # создать/обновить СВОЙ хук (idempotent)
+#   bash scripts/webhook-register.sh auto                     # origin из живых наблюдений daemon'а (host_candidates);
+#                                                             # подходит только НЕ-guarded хост (fcapp.run отфильтрован)
 #   HOOK_ID=<id> bash scripts/webhook-register.sh ping        # тестовая доставка ping из GitHub
 #
 # Идемпотентность: свой хук ищется по точному совпадению config.url с WEBHOOK_URL
@@ -26,7 +28,7 @@ TOKEN="${GITHUB_TOKEN_ADMIN:?нет GITHUB_TOKEN_ADMIN в /home/z/.a2/.github.en
 gh() { curl -sS -m 20 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
 
 # секрет из vault (bun sqlite, только в переменную — не печатаем)
-SECRET=$(ME2_DB="$HERE/../data/me2.db" bun -e '
+SECRET=$(ME2_DB="$HERE/../mini-services/me2-daemon/data/me2.db" bun -e '
 import { Database } from "bun:sqlite";
 const db = new Database(process.env.ME2_DB!, { readonly: true });
 try {
@@ -41,6 +43,28 @@ echo "vault: GITHUB_WEBHOOK_SECRET найден (значение скрыто)"
 
 OP="${1:-list}"
 case "$OP" in
+  auto)
+    # R69.1: публичный origin из капчи живого трафика daemon'а (meta host_candidates).
+    # fcapp.run-кандидаты НЕ годятся: публичный URL платформенного FC-шлюза отключён
+    # («function internet URL is disabled»), VPC-алиас требует x-session-id.
+    CAND=$(ME2_DB="$HERE/../mini-services/me2-daemon/data/me2.db" bun -e '
+      import { Database } from "bun:sqlite";
+      const db = new Database(process.env.ME2_DB!, { readonly: true });
+      try {
+        const raw = db.query("SELECT value FROM meta WHERE key=?").get("host_candidates")?.value ?? "[]";
+        const list = JSON.parse(raw) as string[];
+        const ok = list.find((h) => h && !h.includes("fcapp.run") && !/^localhost/.test(h) && !h.startsWith("127.0.0.1"));
+        process.stdout.write(ok ?? "");
+      } finally { db.close(false); }
+    ')
+    if [ -z "$CAND" ]; then
+      echo "auto: наблюдаемых публичных origin НЕТ (fcapp.run-кандидаты отфильтрованы — они guarded)."
+      echo "Открой preview-панель (или передай WEBHOOK_URL вручную) — капча в daemon'е постоянна, повтори через ~2 мин."
+      exit 2
+    fi
+    echo "auto: найден наблюдённый origin: $CAND"
+    WEBHOOK_URL="https://${CAND}/hooks/github?XTransformPort=3041" exec bash "$0" register
+    ;;
   list)
     gh "$API" | ME2_API="$API" bun -e '
       const j = await new Response(Bun.stdin.stream()).json();

@@ -70,7 +70,7 @@ export type HooksStatus = {
   rejected_last_reason: string | null;
   dedupe_size: number;
   dedupe_persistent: boolean;
-  gateway: { path: string; via: string; secret_header: string };
+  gateway: { path: string; via: string; secret_header: string; observed_origin: string | null; observed_candidates: string[] };
   events_supported: string[];
   last_delivery_at: string | null;
   deliveries: HookDelivery[];
@@ -78,6 +78,19 @@ export type HooksStatus = {
 };
 
 const deliveries: HookDelivery[] = [];
+
+// R69.1: сеем дисплей-историю из персистентной таблицы при старте — карточка сразу
+// показывает последние доставки (в т.ч. внешние), а не «доставок нет» после рестарта
+function seedDeliveriesFromDb(): void {
+  try {
+    ensureSchema();
+    const rows = db.query("SELECT guid, event, at FROM hook_deliveries ORDER BY rowid DESC LIMIT 8").all() as { guid: string; event: string | null; at: string }[];
+    for (const r of rows.reverse()) {
+      deliveries.push({ delivery: r.guid.slice(0, 16), event: r.event ?? "unknown", action: null, emitted: ["persisted"], at: r.at });
+    }
+  } catch { /* посев не критичен */ }
+}
+seedDeliveriesFromDb();
 
 function secretSource(): { secret: string; source: "vault" | "env-dev" } | null {
   const v = tokenGet("GITHUB_WEBHOOK_SECRET");
@@ -246,7 +259,14 @@ export function hooksStatus(): HooksStatus {
     last_delivery_at: getMeta("hooks_last_delivery_at") || null,
     deliveries: [...deliveries],
     dedupe_persistent: true,
-    gateway: { path: "/hooks/github", via: ":81 /hooks/github?XTransformPort=3041 (Caddy reverse_proxy — тело и заголовки прозрачны, HMAC сохраняется)", secret_header: "X-Hub-Signature-256" },
+    gateway: {
+      path: "/hooks/github",
+      via: ":81 /hooks/github?XTransformPort=3041 (Caddy reverse_proxy — тело и заголовки прозрачны, HMAC сохраняется)",
+      secret_header: "X-Hub-Signature-256",
+      // R69.1: публичный origin, наблюдённый в живом трафике через preview-прокси (мета public_origin_last / host_candidates)
+      observed_origin: getMeta("public_origin_last") || null,
+      observed_candidates: (() => { try { return JSON.parse(getMeta("host_candidates") || "[]") as string[]; } catch { return []; } })(),
+    },
     events_supported: ["ping", "push", "pull_request", "workflow_run"],
     verdict,
   };
