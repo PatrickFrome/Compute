@@ -50,7 +50,7 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit"],
       write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron"],
     },
     memory: ["/memory op:write|delete|economy"],
@@ -65,6 +65,7 @@ export function capabilitiesJson(): CapabilityContract {
         "disconnect контракта → честный DEGRADED у моста, restart-шторма нет (R49 handshake)",
         "матрица: docs/version-matrix.md (K8)",
         "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
+        "R58: политики как данные — GET /sqlmirror/rls-audit сверяет живой каталог Postgres с ожидаемой матрицей sql/0003+0004 (DML строго; платформенные дефолты Supabase — info)",
       ],
     },
   };
@@ -164,6 +165,8 @@ export function missionUiHtml(): string {
   </section>
   <section aria-label="SQL-зеркало с гейтом RLS" style="grid-column:1/-1">
     <h2>Зеркало SQL (Supabase · RLS) <span class="n" id="mirror-n">—</span></h2>
+    <div class="row sub" id="rls-audit" data-testid="mc-rls-audit" style="margin:6px 6px 0">аудит политик: загрузка…</div>
+    <div class="row sub" id="rpc-reconcile" data-testid="mc-rpc-reconcile" style="margin:6px 6px 0">сверка реестра: загрузка…</div>
     <div class="scroll" id="mirror" data-testid="mc-mirror" style="max-height:32vh" aria-live="polite"></div>
   </section>
 </main>
@@ -308,6 +311,33 @@ export function missionUiHtml(): string {
     }).catch(function(){ $("mirror-n").textContent="ошибка"; });
   }
 
+  // R58 «политики как данные»: строка RLS-самоаудита (живой каталог против sql/0003+0004).
+  // Кэш daemon'а 60с; опрос панели 120с — psql-канал не штормится.
+  function loadAudit(){
+    fetch(api("/sqlmirror/rls-audit")).then(function(r){ return r.json(); }).then(function(j){
+      var el=$("rls-audit");
+      if(!j.ok){ el.textContent="аудит политик: честно недоступен ("+esc(j.reason||"?")+")"; el.style.color="#fcd34d"; return; }
+      if(j.mode==="probe_offline"){ el.textContent="аудит политик: офлайн (probe) — матрица ожиданий "+j.expected.dml_rows+" DML / "+j.expected.policies+" политик / anon 0:0"; el.style.color="#a1a1aa"; return; }
+      var v=(j.verdict==="PASS");
+      var anonOk=(j.anon.dml_grants===0&&j.anon.policies===0);
+      el.innerHTML="аудит политик (psql, живой каталог): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · DML-гранты "+(j.grants.mismatch?"РАСХОЖДЕНИЕ с sql/0004":"= sql/0004 ✓")+" · политики "+(j.policies.mismatch?"РАСХОЖДЕНИЕ с sql/0003":"= sql/0003 ✓")+" · RLS-флаги включены · anon fail-closed "+(anonOk?"✓ (DML="+j.anon.dml_grants+", политик="+j.anon.policies+")":"⚠ DML="+j.anon.dml_grants+", политик="+j.anon.policies)+" · платформенных дефолтов (info): "+(j.grants.platform_extra||[]).length+(j.cached?" · кэш 60с":"");
+      el.style.color = (v&&anonOk) ? "#6ee7b7" : "#fca5a5";
+    }).catch(function(){ var el=$("rls-audit"); if(el){ el.textContent="аудит политик: сеть недоступна"; el.style.color="#fcd34d"; } });
+  }
+
+  // R59 «реестр как данные»: строка сверки RPC-реестра (живой каталог против классификации R52).
+  // Кэш daemon'а 60с; опрос панели 120с — psql-канал не штормится.
+  function loadReconcile(){
+    fetch(api("/sqlmirror/rpc-reconcile")).then(function(r){ return r.json(); }).then(function(j){
+      var el=$("rpc-reconcile");
+      if(!j.ok){ el.textContent="сверка реестра: честно недоступна ("+esc(j.reason||"?")+")"; el.style.color="#fcd34d"; return; }
+      if(j.mode==="probe_offline"){ el.textContent="сверка реестра: офлайн (probe) — ожидание "+j.expected.total+" RPC ("+j.expected.tiers.ACTIVE+"/"+j.expected.tiers.CONTROL_PLANE+"/"+j.expected.tiers.FREEZE+")"; el.style.color="#a1a1aa"; return; }
+      var v=(j.verdict==="PASS"); var g=j.registry;
+      el.innerHTML="сверка реестра RPC (psql, живой каталог): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · ожидание "+g.expected_total+" · факт "+g.actual_total+" · ACTIVE "+g.per_tier_actual.ACTIVE+"/"+g.per_tier_expected.ACTIVE+" · CONTROL_PLANE "+g.per_tier_actual.CONTROL_PLANE+"/"+g.per_tier_expected.CONTROL_PLANE+" · FREEZE "+g.per_tier_actual.FREEZE+"/"+g.per_tier_expected.FREEZE+" · нет "+g.missing_count+" · лишних "+g.extra_count+" · тир-дрейф "+g.tier_mismatch_count+" · хеш "+esc(g.hash_actual)+(j.cached?" · кэш 60с":"");
+      el.style.color = v ? "#6ee7b7" : "#fca5a5";
+    }).catch(function(){ var el=$("rpc-reconcile"); if(el){ el.textContent="сверка реестра: сеть недоступна"; el.style.color="#fcd34d"; } });
+  }
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -349,8 +379,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>

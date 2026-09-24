@@ -25,6 +25,9 @@ import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evid
 import { startScreencastServer } from "./src/screencast";
 import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
 import { SqlMirror } from "./src/sqlmirror";
+import { runRlsAuditAsync } from "./src/rls-audit";
+import { runRpcReconcileAsync } from "./src/rpc-reconcile";
+import { startSelfAuditLoop } from "./src/self-audit";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
@@ -228,6 +231,18 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       const url = new URL(req.url || "", "http://local");
       const limit = Number(url.searchParams.get("limit") || 50);
       return json(res, 200, await sqlMirror.readFeed(limit));
+    }
+    // ── R58 «Политики как данные»: RLS-самоаудит облака против ожидаемой матрицы (sql/0003+0004) ──
+    // read-only интроспекция psql-каналом, кэш 60с, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/rls-audit" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      return json(res, 200, await runRlsAuditAsync(url.searchParams.get("force") === "1"));
+    }
+    // ── R59 «реестр как данные»: сверка живого RPC-реестра облака с классификацией R52 ──
+    // read-only сверка psql-каналом, кэш 60с, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/rpc-reconcile" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      return json(res, 200, await runRpcReconcileAsync(url.searchParams.get("force") === "1"));
     }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
@@ -1135,6 +1150,12 @@ sqlMirror.start();
 // панель при неудаче честно покажет auth.last_error)
 void gotrueToken().catch(() => { /* honest degradation */ });
 if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
+// R59: периодический самоаудит (RLS-политики + сверка RPC-реестра) — внутренний цикл daemon'а
+// (не внешний cron; приказ R55-5 про cron-джобы не трогает внутренние интервалы). События
+// только на переходах (FAIL/RECOVERED) — узор Kubernetes reconcile, ровный PASS не шумит.
+if (!PROBE_MODE && sqlMirror.status().configured) {
+  try { startSelfAuditLoop(); console.log("[me2-daemon] self-audit loop on (RLS + RPC-реестр, 20мин, события на переходах)"); } catch (e) { console.error(`[me2-daemon] self-audit loop failed: ${String(e)}`); }
+}
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
 restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
 
