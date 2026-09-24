@@ -19,6 +19,7 @@ import {
   createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
 } from "./store";
 import { listProviders } from "./providers";
+import { llmQuotaStatus } from "./src/quota";
 import { ciPollMs, ciStatus, ciTick } from "./src/ci";
 import { hooksStatus, handleGithubWebhook } from "./src/hooks";
 import { sqlmirrorGatePersisted } from "./src/sqlmirror";
@@ -432,6 +433,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 200, evidenceQuery(tid));
     }
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
+    if (path === "/llm" && req.method === "GET") return json(res, 200, { ok: true, ...llmQuotaStatus(), providers: await listProviders() });
 
     // ── E3 (R34): executor-пул — N живых GLM-контекстов с честными lease (вне шины 47/47) ──
     if (path === "/pool" && req.method === "GET") return json(res, 200, poolStatus());
@@ -1041,7 +1043,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci", "/hooks"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci", "/hooks", "/llm"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";

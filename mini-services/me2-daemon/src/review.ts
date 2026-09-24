@@ -172,7 +172,7 @@ async function llmClassify(input: ReviewInput, cfg: ClassifierPolicy): Promise<R
   const fallback: ReviewResult = { verdict: "ask", reason: "классификатор LLM недоступен/таймаут — fail-closed к оператору (не к allow)", rule: "llm_unavailable", engine: "llm", model: cfg.model, ms: Date.now() - t0 };
   try {
     const res = await Promise.race([
-      chat(cfg.model, llmPrompt(input, recentRuns(3)), { temperature: 0, lane: "P2" }),
+      chat(cfg.model, llmPrompt(input, recentRuns(3)), { temperature: 0, lane: "P2", cache: true }), // v0.57.0: дедуп детерминированных промптов экономит квоту
       new Promise<never>((_, rej) => setTimeout(() => rej(new Error("classifier_timeout")), Math.max(500, cfg.timeout_ms))),
     ]);
     const m = String(res).match(/\{[\s\S]*\}/);

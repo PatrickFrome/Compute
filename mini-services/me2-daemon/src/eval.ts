@@ -46,7 +46,7 @@ import { hygieneStatus } from "./dbhygiene";
 import { evidenceStatus, verifyChain, recomputeHash } from "../evidence";
 import { recordSpan } from "./otel";
 import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
-import { createTask, updateTask, rid } from "../store";
+import { createTask, updateTask, rid, getTask, nextReadyTaskAny } from "../store";
 import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
   supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
@@ -67,10 +67,12 @@ import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestRese
 import { policyAllows, policyCheckTool, tierForRole, policyReload, policyStatus, policyCaps } from "./policy";
 import { cronAdd, cronList, cronTick, cronCancel, cronTestReset } from "./cron";
 import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus } from "./tokens";
+import { quotaCacheKey, quotaCacheGet, quotaCachePut, isQuotaError, parkDelayMs, parkTaskQuota, PARK_MAX } from "./quota";
+import { providerChain, gatewayReady } from "../providers";
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 29;
+export const EVAL_DATASET_VERSION = 30;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -863,6 +865,79 @@ export const EVAL_DATASET: EvalCheck[] = [
       const closed = governorBreakerState();
       const ok = after2 === "CLOSED" && after3 === "OPEN" && trips1 === 1 && trips2 === 1 && ev.c >= 1 && closed === "CLOSED" && lanesOk;
       return { ok, evidence: `2×429→${after2}, 3×429→${after3} (trips=${trips1}, повтор не триггерит=${trips2 === 1}), GOVERNOR_TRIP в шине=${ev.c}, cooldown=${cooldown1}мс, reset→${closed}, полосы P0/P1/P2=${lanesOk}` };
+    },
+  },
+  {
+    id: "llm.quota_cache",
+    plane: "llm",
+    title: "Quota-Resilience L2 (v0.57.0): response-cache — дедуп детерминированных промптов экономит квоту",
+    critical: false,
+    expect: "put→get возвращает ответ и растит hits; другой ключ → miss; TTL-просрочка → miss и самоочистка; llm_cache персистентна в SQLite",
+    run: () => {
+      const msgs = [{ role: "user" as const, content: "eval-cache-fixed-prompt" }];
+      const k1 = quotaCacheKey("test:model", msgs, 0);
+      const putOk = quotaCachePut(k1, "test:model", "RESP-A");
+      const g1 = quotaCacheGet(k1);
+      const g2 = quotaCacheGet(k1);
+      const k2 = quotaCacheKey("test:model", [{ role: "user" as const, content: "eval-cache-другой-промпт" }], 0);
+      const missOther = quotaCacheGet(k2);
+      db.query(`UPDATE llm_cache SET created_at=? WHERE hash=?`).run(Date.now() - 86_500_000, k1); // старше TTL 24ч
+      const expired = quotaCacheGet(k1);
+      const ok = putOk && g1 === "RESP-A" && g2 === "RESP-A" && missOther === null && expired === null;
+      return { ok, evidence: `put=${putOk}, hit1/hit2=${g1}/${g2}, другой-ключ→miss=${missOther === null}, TTL-просрочка→miss=${expired === null} (дедуп = квота не тратится)` };
+    },
+  },
+  {
+    id: "llm.failover_chain",
+    plane: "llm",
+    title: "Quota-Resilience L3 (v0.57.0): failover-цепочка провайдеров zai↔gateway — квота ×2 вместо одной точки отказа",
+    critical: true,
+    expect: "providerChain('zai:default') начинается с zai и содержит gateway ⇔ ключ реально доступен (честное соответствие, не выдумка); providerChain('gateway:foo') начинается с gateway и всегда содержит zai-альтернативу",
+    run: () => {
+      const c1 = providerChain("zai:default");
+      const c2 = providerChain("gateway:foo");
+      const primaryOk = c1[0]?.provider === "zai" && c2[0]?.provider === "gateway";
+      const gwInChain = c1.some((p) => p.provider === "gateway");
+      const ready = gatewayReady();
+      const consistent = gwInChain === ready && (ready ? c1.length === 2 : c1.length === 1);
+      const zaiAlt = c2.length === 2 && c2[1]?.provider === "zai";
+      const ok = primaryOk && consistent && zaiAlt;
+      return { ok, evidence: `zai:default → [${c1.map((p) => p.provider).join(",")}] (gateway=${gwInChain}, ключ доступен=${ready}, соответствие=${consistent}); gateway:foo → [${c2.map((p) => p.provider).join(",")}], zai-альтернатива=${zaiAlt}` };
+    },
+  },
+  {
+    id: "worker.quota_park",
+    plane: "worker",
+    title: "Quota-Resilience L4 (v0.57.0): park-and-resume — квотная ошибка паркует задачу вместо смерти (R71 сценарий A: FAILED был терминальным)",
+    critical: true,
+    expect: "isQuotaError ловит governor_open/429/rate-limit и не ловит runtime; park → READY+not_before>now, скрыта от master-loop'а (WHERE-предикат + nextReadyTaskAny); сброс срока → видна; park_count инкрементится (бюджет PARK_MAX); delay растёт с cap; worker.ts содержит ветку парка",
+    run: () => {
+      const cls = isQuotaError("governor_open (39s): LLM-вызов отклонён Governor (lane P1)")
+        && isQuotaError("gateway HTTP 429: too many requests")
+        && isQuotaError("rate limit exceeded (retry-after: 30s)")
+        && !isQuotaError("path_escape_blocked")
+        && !isQuotaError("max_steps_exhausted");
+      const d0 = parkDelayMs(0), d5 = parkDelayMs(5), d50 = parkDelayMs(50);
+      const capS = Math.max(5, Number(process.env.ME2_TASK_PARK_CAP_S ?? 600));
+      const delayOk = d5 > d0 && d50 <= (capS * 1000) + 5_500; // cap + jitter ≤5с
+      const t = createTask({ id: rid("task"), title: "eval quota park", spec: "eval-only park mechanics", role: "EXECUTOR", max_steps: 1 } as Parameters<typeof createTask>[0]);
+      const p1 = parkTaskQuota(t.id, 0, "governor_open (60s)", null);
+      const after = getTask(t.id);
+      const parkedOk = after?.status === "READY" && (after?.not_before_ms ?? 0) > Date.now() && after?.park_count === 1;
+      const hidden = !db.query(`SELECT id FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? AND id=?`).get(Date.now(), t.id);
+      const notPicked = nextReadyTaskAny()?.id !== t.id; // очередь может содержать другие задачи — припаркованная не берётся
+      updateTask(t.id, { not_before_ms: 0 }); // окно квоты «открылось»
+      const visible = !!db.query(`SELECT id FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? AND id=?`).get(Date.now(), t.id);
+      parkTaskQuota(t.id, 1, "HTTP 429", null);
+      const pc = getTask(t.id)?.park_count;
+      updateTask(t.id, { status: "ARCHIVED" }); // самоочистка (listTasks ARCHIVED не показывает)
+      let workerSrcOk = false;
+      try {
+        const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../worker.ts"), "utf8");
+        workerSrcOk = src.includes("isQuotaError") && src.includes("parkTaskQuota") && src.includes("PARK_MAX");
+      } catch { /* source не читается — честный FAIL */ }
+      const ok = cls && delayOk && parkedOk && hidden && notPicked && visible && pc === 2 && workerSrcOk;
+      return { ok, evidence: `классификация=${cls}, delay ${Math.round(d0 / 1000)}с→${Math.round(d5 / 1000)}с (cap: ${Math.round(d50 / 1000)}с≤${capS}с)=${delayOk}, park#1 (+${p1.delay_s}с) → READY/not_before=${parkedOk}, скрыта=${hidden}/${notPicked}, окно открылось → видна=${visible}, park_count=${pc}/${PARK_MAX}, worker.ts-ветка=${workerSrcOk}` };
     },
   },
   {

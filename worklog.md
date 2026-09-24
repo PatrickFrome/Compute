@@ -1266,3 +1266,36 @@ Stage Summary:
 - daemon v0.56.1 (+коллизия-детектор): eval PASS 66/66, lint 0/0, инвариант 47/47, mirror LIVE (detector armed, collisions 0), CI @699c5ad3 SUCCESS
 - Capability-матрица R71: REST-шина PV; webhooks-in PV (вкл. рейс-дедуп); персистентность PV (kill -9, R70); worker-lifecycle PV (Scenario G полный); agent-loop PV-механизм / PARTIAL-провайдер (429 внешняя); RLS FAIL-CLOSED подтверждён (401 на mint, row-level для authenticated UNKNOWN до sb_publishable); Me2Core UNUSED (помечен); mirror-поколения: риск ЗАМЕЧЕН + детектор ЖИВОЙ
 - Бэклог R72: sql/0004 (UNIQUE(boot_id,seq)) оператору; sb_publishable от оператора для RLS-канала; P0-4 durable execution; P1 core.agent-loop harness; LLM-квота
+
+---
+Task ID: R72-LLM-QUOTA-RESILIENCE
+Agent: Z.ai (main)
+Task: «Можем ли мы сделать llm так, чтобы никогда не упираться в квоту» — v0.57.0 Quota-Resilience Layer (4 уровня защиты, без обхода квоты платформы)
+
+Work Log:
+- Честный ответ оператору зафиксирован в коде: «никогда» против одного внешнего провайдера не обещает никто (квота принадлежит апстриму); но система построена так, чтобы квота практически не останавливала работу — 4 уровня:
+- L1 PACING (src/quota.ts): глобальный min-gap между СТАРТАМИ LLM-вызовов (ME2_LLM_MIN_GAP_MS=800, сериализован цепочкой промисов) — burst'ы размываются до сети, 429 предотвращается формированием спроса, а не лечится ретраями.
+- L2 CACHE: response-cache в SQLite llm_cache (TTL 24ч, cap 500, hits считаются честно), opt-in opts.cache для детерминированных промптов (temperature=0); подключен к /review классификатору; hits/misses видны в /llm (к концу раунда session_hits=4/8).
+- L3 FAILOVER (providers.ts): providerChain() — zai:default → [zai, gateway?], gateway:x → [gateway, zai]; исчерпанный 429 первичного → автоматический переход на альтернативу (2 ретрая), LLM_FAILOVER в hash-chain; gateway-ключ из vault (R47) живой — /llm: gateway ready=true; в chat() честно: после 429 zai пытался gateway (боевое наблюдение ниже).
+- L4 PARK-AND-RESUME (worker.ts + quota.ts): квотная/инфра ошибка больше НЕ убивает задачу (FAILED был терминальным — R71 сценарий A) — задача паркуется: READY + not_before_ms (master-loop не видит до срока: WHERE COALESCE(not_before_ms,0)<=now в nextReadyTask/nextReadyTaskAny) + park_count (бюджет PARK_MAX=8, ME2_TASK_PARK_MAX), задержка 45с→90с→…→cap 600с (+jitter); TASK_PARKED в hash-chain; после бюджета — честный FAILED с рефлексией (вечный карусель исключён); reflection НЕ пишется (это не провал спецификации).
+- RETRYABLE/isQuotaError расширены транзиентными сетевыми сбоями: certificate verification / fetch failed / econnrefused / etimedout / socket hang up / unexpected eof (боевой случай ниже — паркуемая инфра-ошибка, задача не виновата); честные ошибки задачи (path_escape, max_steps, protocol) по-прежнему FAILED сразу.
+- store.ts v0.57.0: tasks.not_before_ms/park_count (ALTER, defaults 0), TaskRow/NewTask обновлены; index.ts: GET /llm (pacing+cache+failover+park+providers, rest_admin).
+- eval: +3 кейса (llm.quota_cache, llm.failover_chain, worker.quota_park — крит), dataset v29→v30 → PASS 69/69; lint 0/0.
+
+БОЕВОЕ ДОКАЗАТЕЛЬСТВО (без моков, живой контур):
+- seq 9637/9638 (19:33, сразу после бута): задача governor_open → park#1 (+49с) → повтор → HTTP 429 → park#2 (+95с) — вместо FAILED (в R71 на этом месте задача умирала).
+- Прямой SDK-тест из Bun: api.z.ai отвечает честный 429 «Too many requests» (квота исчерпана) — TLS жив.
+- vercel-gateway: TLS-плоскость сломана ВНЕШНЕ («unexpected eof» → в Bun = «unknown certificate verification error»); curl к api.z.ai OK — проблема канал-специфичная; failover честно попробовал второй канал.
+- ФИНАЛЬНАЯ ПРОБА tk_mufxq42b9rgrev: QUEUED → LEASED → STEP_START → TASK_PARKED park#1 (+47с) → повторная попытка → park#2 (+90с, экспонента работает) → снова READY, жива; /llm: park active=1, total_events=10. Задачи доживают до окна квоты (~27+ минут суммарного покрытия 8 парков), потом честный FAILED.
+- Ресурсы: RSS 102MB (базлайн ~117MB не деградировал); mirror LIVE (last_sent_seq 10129, err=0); инвариант 47/47.
+
+Ограничения (честно):
+- MIRROR_COLLISION×12: детектор R71 фиксирует чужие строки других поколений песочниц в общей me2_event_mirror (известный P1-риск R71, НЕ регресс раунда) — оператору: sql/0004 UNIQUE(boot_id,seq).
+- vercel-gateway TLS сломан на уровне сети песочницы — failover на него бесполезен, пока сеть чинит не мы; zai-канал — единственный боевой (квота общая с платформенным чатом).
+- Кэш покрывает только детерминированные повторяющиеся промпты (opt-in); агентные ходы с растущим контекстом не дедуплицируются (правильно).
+
+Stage Summary:
+- daemon v0.57.0: Quota-Resilience Layer — L1 pace / L2 cache / L3 failover / L4 park; «квота = пауза, а не смерть»: смерть задачи от 429/governor_open/инфра-сбоев УСТРАНЕНА (доказано боем: 4 парка вместо 2 FAILED).
+- eval PASS 69/69 (v30), lint 0/0, инвариант 47/47, mirror LIVE err=0, RSS 102MB.
+- Оператору: quotа сама не станет бесконечной — но теперь штормы гасятся до сети, дедуп экономит вызовы, второй канал готов к употреблению (как только vercel TLS оживёт — автоматически), и НИ ОДНА задача не умирает из-за квоты в пределах бюджета парков.
+- Бэклог R73: UI-карточка LLM-QUOTA в MC (статус /llm уже готов); sql/0004 (оператор); мониторы vercel-gateway TLS (авто-проба в /llm).
