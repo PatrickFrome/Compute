@@ -1479,3 +1479,8 @@ Stage Summary:
 - Клик-агент = выбор его z.ai-вкладки в скринкасте (match id→title→единственная z.ai), с честным отказом вместо тихого ничегонеделания.
 - Инварианты: относительные fetch + XTransformPort, testid page-command/agent-sidebar/browser-*, кэш-бюджет шины (CONTROL quiet), секреты не затронуты.
 - Честно не сделано: 3 pre-existing tsc-ошибки в legacy-либах (browser-tools/fallback-console) — вне рендер-пути; Radix useId dev-шум; пер-воркспейс персист раскладок командного центра не нужен после упрощения (сайдбар булев).
+
+### R75 addendum (git-topology):
+- origin/main = посторонняя (RSI) линия: PR #821 (85767548) и ci(operator)-коммиты, merge-base с нашей историей ОТСУТСТВУЕТ (попытка rebase попробовала переложить все 109 коммитов — прервано `git rebase --abort`, состояние восстановлено чисто).
+- Правильная интеграция: каноническая рабочая ветка sandbox/me2-os = cfdd5d50 (R74) на remote → push main:sandbox/me2-os = fast-forward cfdd5d50..d9d42a13 (R75 опубликован). origin/main не тронут — слияние двух несвязанных историй = решение оператора.
+- PAT-паттерн: set-url с токеном из /home/z/.a2/.github.env → push → немедленный set-url на чистый URL + unset (значение не в логах).
