@@ -49,6 +49,9 @@ jobs:
         run: |
           cd mini-services/me2-daemon
           bun install --frozen-lockfile || bun install
+          # git не хранит пустые каталоги: без mkdir bun build --compile падает
+          # ENOENT "could not open output directory ../../src-tauri/binaries" на всех ОС
+          mkdir -p ../../src-tauri/binaries
           EXT="${{ runner.os == 'Windows' && '.exe' || '' }}"
           bun build --compile index.ts --outfile "../../src-tauri/binaries/me2-daemon-${{ matrix.target }}${EXT}"
 
@@ -61,35 +64,46 @@ jobs:
       # Формат minisign-ключа Tauri требует строку "untrusted comment: ...".
       # Битый секрет (нет комментария) ронял сборку: "failed to decode secret key:
       # Missing comment in secret key" (run 4d54a72). Фолбэк — ephemeral-ключ:
-      # артефакты подписаны и билд зелёный; для СТАБИЛЬНЫХ обновлений задать
-      # секрет TAURI_SIGNING_PRIVATE_KEY = вывод `cargo tauri signer generate`.
+      # артефакты подписаны и билд зелёный; для СТАБИЛЬНЫХ обновлений задать секреты
+      # TAURI_SIGNING_PRIVATE_KEY + TAURI_SIGNING_PUBLIC_KEY = вывод `cargo tauri signer generate`.
+      # R23-фикс: pubkey из tauri.conf.json был плейсхолдером «REPLACE_WITH_...» →
+      # «failed to decode pubkey: Invalid symbol 95» (run 0334f92). Решение: overlay-конфиг
+      # через --config с РЕАЛЬНЫМ pubkey сгенерированной/секретной пары.
       - name: Provision updater signing key (repo secret if well-formed, else ephemeral)
         shell: bash
         env:
           REPO_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PUB_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
         run: |
-          if printf '%s' "$REPO_KEY" | head -n1 | grep -q "untrusted comment"; then
-            echo "updater: using repo secret key"
+          OVERLAY="$GITHUB_WORKSPACE/updater-overlay.json"
+          if printf '%s' "$REPO_KEY" | head -n1 | grep -q "untrusted comment" && printf '%s' "$PUB_KEY" | grep -qE '^[A-Za-z0-9+/=]{40,}$'; then
+            echo "updater: using repo secret keypair"
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
             {
-              echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY<<ME2KEYEOF"
               printf '%s\n' "$REPO_KEY"
-              echo "KEYEOF"
+              echo "ME2KEYEOF"
             } >> "$GITHUB_ENV"
+            printf '{"plugins":{"updater":{"pubkey":"%s"}}}' "$PUB_KEY" > "$OVERLAY"
           else
-            echo "updater: repo secret missing/malformed -> ephemeral keypair (build-only)"
+            echo "updater: repo secrets missing/malformed -> ephemeral keypair (build-only)"
             cargo tauri signer generate -w /tmp/me2-updater.key --password me2-ci-ephemeral --force
+            PUB=$(tr -d '\n\r' < /tmp/me2-updater.key.pub)
+            printf '{"plugins":{"updater":{"pubkey":"%s"}}}' "$PUB" > "$OVERLAY"
             {
-              echo "TAURI_SIGNING_PRIVATE_KEY<<KEYEOF"
-              cat /tmp/me2-updater.key
-              echo "KEYEOF"
+              echo "TAURI_SIGNING_PRIVATE_KEY<<ME2KEYEOF"
+              # printf гарантирует ровно один завершающий \n — иначе последняя строка base64
+              # склеивается с делимитером и GitHub роняет шаг: "Matching delimiter not found"
+              printf '%s\n' "$(cat /tmp/me2-updater.key)"
+              echo "ME2KEYEOF"
               echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=me2-ci-ephemeral"
             } >> "$GITHUB_ENV"
           fi
+          echo "TAURI_CI_CONFIG=$OVERLAY" >> "$GITHUB_ENV"
 
       - name: Build ME2 OS bundles (updater artifacts signed)
         shell: bash
-        run: cargo tauri build --target ${{ matrix.target }}
+        run: cargo tauri build --config "$TAURI_CI_CONFIG" --target ${{ matrix.target }}
 
       - name: Upload bundles (workflow artifact)
         uses: actions/upload-artifact@v4

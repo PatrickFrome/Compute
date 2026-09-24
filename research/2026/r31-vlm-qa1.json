@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) **Нет**, блок DB·HYG с чипами wal/db/free/idx не виден на данном скриншоте.\n2) **Нет**, чип 'diff' с процентом токенов в блоке SENSE не виден.\n3) **Нет**, чип 'sql ... TTL30м' в блоке OBSV не виден.\n4) **Да**, присутствует обрезка содержимого (нижняя часть панели консоли и блока WORKERS обрезана краем экрана). Горизонтального скролла или явных наложений текста не наблюдается.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1790130893,
+  "id": "20260923103450474f1ac20b7c408d",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260923103450474f1ac20b7c408d",
+  "usage": {
+    "completion_tokens": 129,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 517,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 646
+  }
+}

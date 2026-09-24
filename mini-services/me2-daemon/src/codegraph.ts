@@ -7,10 +7,14 @@
 //
 // Read-only скан репо; кэш по mtime-подписи + TTL 30s; лимит 400 файлов (анти-цикл).
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, dirname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO = "/home/z/my-project";
-const ROOTS = [join(REPO, "src"), join(REPO, "mini-services", "me2-daemon")];
+// R51: корень UI — env (CI/monorepo), корень daemon — относительно пакета; несуществующие руты пропускаются
+const REPO = process.env.ME2_REPO_ROOT ?? "/home/z/my-project";
+const PKG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOTS = [join(REPO, "src"), PKG_DIR];
 const SKIP_DIRS = new Set(["node_modules", ".next", "data", "db", "browser-data", "browser-data-hf", ".git"]);
 const MAX_FILES = 400;
 const TTL_MS = 30_000;
@@ -99,7 +103,7 @@ function scanFiles(force: boolean): Cache {
 
   // mtime-подпись: count+sum мтимов (дёшево, детерминированно)
   const paths: string[] = [];
-  for (const r of ROOTS) walk(r, paths);
+  for (const r of ROOTS) { if (existsSync(r)) walk(r, paths); } // R51: отсутствующий рут не валим
   let sig = `${paths.length}:`;
   let sigSum = 0;
   for (const p of paths) { try { sigSum = (sigSum + statSync(p).mtimeMs) % Number.MAX_SAFE_INTEGER; } catch { /* skip */ } }

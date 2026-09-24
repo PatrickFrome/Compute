@@ -12,6 +12,9 @@ import {
 } from "./store";
 import { WORKSPACE_ROOT } from "./worker";
 import { recordSpan } from "./src/otel";
+import { getObjective } from "./src/objectives";
+import { handoffCreate, type HandoffProtocol } from "./src/handoffs";
+import { agentTag } from "./src/glm";
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 type Handler = (payload: Record<string, unknown>) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -91,16 +94,40 @@ const handlers: Record<string, Handler> = {
   STATE_SNAPSHOT: () => snapshot() as unknown as Record<string, unknown>,
 
   TASK_ENQUEUE: (p) => {
+    // R28 C2: handoff — передача работы между агентами с протоколом (Codex handoffs).
+    // Исполняется как TASK_ENQUEUE с handoff-блоком: НОВОГО действия в каталоге нет —
+    // 47/47 инвариант не расширяется («handoff = MEMORY-запись + TASK_ENQUEUE с parent»).
+    if (p.handoff && typeof p.handoff === "object") {
+      const h = p.handoff as Record<string, unknown>;
+      const r = handoffCreate({
+        from_task: String(h.from_task ?? ""),
+        to_role: h.to_role ? String(h.to_role) : null,
+        reason: String(h.reason ?? ""),
+        protocol: (h.protocol ?? {}) as HandoffProtocol,
+        max_steps: h.max_steps !== undefined ? Number(h.max_steps) : undefined,
+        by: h.by ? String(h.by) : "operator",
+      });
+      return { task: r.task, handoff: r.handoff };
+    }
     const title = String(p.title ?? "untitled").slice(0, 200);
     const spec = String(p.spec ?? "").slice(0, 20000);
     if (!spec) throw new Error("spec_required");
     const role = p.role ? String(p.role).toUpperCase().slice(0, 32) : null;
     const maxSteps = Math.min(Math.max(Number(p.max_steps ?? 8), 1), 24);
+    // R27 C1 fails-closed: задача с objective_id не может молча оторваться от миссии —
+    // несуществующая цель = ошибка постановки, а не orphan.
+    let objectiveId: string | null = null;
+    if (p.objective_id != null && String(p.objective_id).trim()) {
+      const obj = getObjective(String(p.objective_id).trim());
+      if (!obj) throw new Error(`objective_not_found: ${String(p.objective_id).slice(0, 40)}`);
+      if (obj.status !== "ACTIVE") throw new Error(`objective_not_active: ${obj.status}`);
+      objectiveId = obj.id;
+    }
     const task = createTask({
       id: `tk_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-      title, spec, role, max_steps: maxSteps,
+      title, spec, role, max_steps: maxSteps, objective_id: objectiveId,
     });
-    emit("TASK_QUEUED", { title, role, max_steps: maxSteps, via: "command_bus" }, null, task.id);
+    emit("TASK_QUEUED", { title, role, max_steps: maxSteps, objective_id: objectiveId, via: "command_bus" }, null, task.id);
     return { task };
   },
 
@@ -131,7 +158,7 @@ const handlers: Record<string, Handler> = {
     // пока потомок ещё в очереди: к моменту lease память будет полной.
     // R13: A/B — авто-урок только treatment-группе; control копит честную базу
     // «без авто-урока» (операторский ✦ остаётся доступен — crossover виден в /metrics)
-    if (abGroupOf(id) === "treatment") void autoReflect(orig);
+    if (abGroupOf(id) === "treatment") void autoReflect(orig).catch(() => { /* R38: рефлексия не роняет процесс */ });
     return { task };
   },
 
@@ -152,7 +179,8 @@ const handlers: Record<string, Handler> = {
 
   AGENT_SPAWN: (p) => {
     const role = String(p.role ?? "IMPLEMENTER").toUpperCase().slice(0, 32);
-    const model = String(p.model ?? "zai:default").slice(0, 64);
+    // R29: директива «все агенты всегда на последней GLM» — дефолт модели = канонический тег
+    const model = String(p.model ?? agentTag()).slice(0, 64);
     const agent = createAgent(role, model);
     emit("AGENT_CREATED", { role, model }, agent.id, null);
     return { agent };
@@ -562,7 +590,7 @@ export function knownActions(): string[] { return Object.keys(handlers); }
 // ── реестр действий (цель — 47; сейчас 25) — источник для ⌘K и /actions ──
 type ActionMeta = { action: string; lane: Lane; cost: number; desc: string; group: string; args?: string };
 const CATALOG_EXTRA: ActionMeta[] = [
-  { action: "TASK_ENQUEUE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "поставить задачу в очередь (форма N)", group: "Задачи", args: "title, spec, role?, max_steps?" },
+  { action: "TASK_ENQUEUE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "поставить задачу в очередь (форма N; или handoff-передача: handoff{from_task, reason, protocol{next}})", group: "Задачи", args: "title, spec, role?, max_steps? | handoff{from_task, to_role?, reason, protocol{done?,in_flight?,next,context?,open_questions?,artifacts?}}" },
   { action: "TASK_SCHEDULE", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "отложенная постановка задачи (ETA)", group: "Задачи", args: "title, spec, delay_sec, role?, max_steps?" },
   { action: "AGENT_SPAWN", lane: "MUTATION", cost: LANES.MUTATION.cost, desc: "создать агента роли", group: "Флот", args: "role, model?" },
 ];

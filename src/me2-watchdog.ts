@@ -7,7 +7,10 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const DAEMON_DIR = "/home/z/my-project/mini-services/me2-daemon";
-const HEALTH = "http://127.0.0.1:3021/health";
+// R34-фикс: порт здоровья был 3021 (устаревший) при фактическом REST :3041 — watchdog вечно
+// считал daemon «нездоровым» и спавнил дубли каждые 8с (дубль-инкарнации ловятся стражем
+// /tmp/me2-daemon.lock, но это был источник инцидента убийства lease в 04:17:43).
+const HEALTH = "http://127.0.0.1:3041/health";
 const SPAWN_FILE = "/tmp/me2-daemon-last-spawn";
 const MIN_SPAWN_INTERVAL_MS = 8000;
 

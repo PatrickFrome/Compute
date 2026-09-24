@@ -4,6 +4,7 @@
 // Это гейт закрытия роадмапа: фаза DONE ⇔ её evidence-проверка прошла СЕЙЧАС.
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { WS_PORT, REST_PORT } from "./ports";
 import { knownActions } from "../commands";
 import { listTasks } from "../store";
 import { codegraphSummary } from "./codegraph";
@@ -11,7 +12,7 @@ import { otelStatus } from "./otel";
 import { listSandboxes, sandboxCaps } from "./sandbox";
 import { listWorktrees, rerereStatus } from "./worktrees";
 
-const REPO_ROOT = "/home/z/my-project";
+const REPO_ROOT = process.env.ME2_REPO_ROOT ?? "/home/z/my-project"; // R51
 
 export type RoadmapStatus = "DONE" | "PARTIAL" | "MISSING";
 
@@ -55,7 +56,7 @@ export function roadmapVerdict(): {
     ];
     ms.push({
       key: "M1", title: "Daemon core: command bus + SQLite event-log + CDP",
-      status: verdictOf(checks), evidence: `actions=${actions}/47, WS :3040 + REST :3041 + screencast :3042`,
+      status: verdictOf(checks), evidence: `actions=${actions}/47, WS :${WS_PORT} + REST :${REST_PORT} + screencast :3042`,
       checks, verifiedAt: now,
     });
   }

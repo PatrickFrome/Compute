@@ -74,3 +74,13 @@ db/*.db-*
 # секреты-архивы никогда не в репо (push protection R8)
 .a2-backup/
 *.env.*backup*
+
+# CI-generated tauri updater config overlay
+/updater-overlay.json
+
+# MetaEngine Desktop (R46)
+desktop/node_modules/
+desktop/dist/
+desktop/release/
+--set-viewport
+--width

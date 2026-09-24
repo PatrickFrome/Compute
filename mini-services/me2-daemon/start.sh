@@ -28,6 +28,14 @@ done
 # 4) старт — AGENT_BROWSER_STREAM_PORT наследуется daemon'ом и его agent-browser-детьми:
 #    при любом респавне agent-browser стрим сам поднимется на :3042 (дока стрима, "pins the port for the whole daemon")
 export AGENT_BROWSER_STREAM_PORT=3042
+# R53 (инструкция оператора): SQL-зеркало включено — daemon держит WARMUP до DDL и сам
+# перейдёт LIVE, как только применятся sql/0001..0003 (проба ≤ раз в 10 мин, без штормов).
+export ME2_SQL_MIRROR="${ME2_SQL_MIRROR:-1}"
+# R53: самоприменение миграций, когда оператор положит SUPABASE_DB_URL в supabase-cloud.env
+# (идемпотентно; без URL — честный HONEST-SKIP, старт не блокируется)
+if [ -f /home/z/.a2/supabase-cloud.env ] && grep -qE '^SUPABASE_DB_URL=' /home/z/.a2/supabase-cloud.env 2>/dev/null; then
+  bash "$(pwd)/scripts/apply-sql-migrations.sh" || echo "[start] apply-sql: честный провал — см. лог выше (старт продолжается, WARMUP-протокол держит)"
+fi
 setsid nohup bun index.ts >> daemon.log 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 

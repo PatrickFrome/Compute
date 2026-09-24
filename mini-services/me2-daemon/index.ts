@@ -3,25 +3,38 @@
  * API-native agent runtime: агенты = контексты + инструменты, НЕ вкладки браузера.
  * Горячий путь: локальный SQLite + command bus (single-writer).
  *
- * Порты (через gateway XTransformPort):
+ * Порты (через gateway XTransformPort; дефолты, переопределяются env ME2_WS_PORT/ME2_REST_PORT — R51):
  *   :3040 — socket.io, path '/' (WS-канал: snapshot push + события + команды)
  *   :3041 — REST API (health/state/commands/tasks/agents/workers/budget/reset)
  *
  * Запуск long-run: setsid nohup bun index.ts > daemon.log 2>&1 &
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
 import { Server } from "socket.io";
 import {
   listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
   enqueueCommand, budgetWindow, listCommands, listWorkers, upsertWorker,
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
-  createAgent, createTask, nowIso, setTaskReflectionLlm,
+  createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
 } from "./store";
 import { listProviders } from "./providers";
-import { startMasterLoop } from "./worker";
+import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
-import { initEvidence, evidenceStatus } from "./evidence";
+import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
 import { startScreencastServer } from "./src/screencast";
+import { obsvStart, obsvSnapshot, obsvReset, obsvStop, obsvSetTtl } from "./src/obsv";
+import { SqlMirror } from "./src/sqlmirror";
+import { runRlsAuditAsync } from "./src/rls-audit";
+import { runRpcReconcileAsync } from "./src/rpc-reconcile";
+import { startSelfAuditLoop } from "./src/self-audit";
+import { exthostStatus, runExtension, exthostStartEventLoop, setMirrorFeedProvider } from "./src/exthost";
+import { execStatus, runTerminalAsync, runApprovedAsync, execProbeOffline, planExec } from "./src/exec";
+import { reviewStatus, reviewPlan, classifyDry, queueTake, queueResolve, queueDeny, classifierSetOverride, type ReviewInput } from "./src/review";
+import { sandboxStatus, sandboxProbe, runSandboxedAsync, sandboxSetOverride } from "./src/sandbox2";
+import { editStatus, applyEditAsync, rollbackEdit, editProbeOffline } from "./src/edit";
+import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
+import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
 import { otelStatus, toOtlp, onDaemonEvent, recordSpan } from "./src/otel";
 import { listWorktrees, repoHead, rerereStatus, rerereEnable, rerereRemaining } from "./src/worktrees";
@@ -30,22 +43,64 @@ import {
 } from "./src/sandbox";
 import { roadmapVerdict } from "./src/roadmap";
 import {
-  memSearch, memWrite, memDelete, memoryStatus, memBlock, onMemoryEvent,
+  memSearch, memWrite, memDelete, memoryStatus, memBlock, memBlockEconomy, memoryEconStatus, onMemoryEvent,
 } from "./src/memory";
 import { brainThink, brainStatus } from "./src/brain";
-import { fleetList, fleetBeat, fleetSelfTick, fleetGc } from "./src/fleet";
-import { suCheck, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
+import { fleetList, fleetBeat, fleetSelfTick, fleetGc, fleetTick } from "./src/fleet";
+import { suCheckAsync, suApply, suCached, selfupdateStatus } from "./src/selfupdate";
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
 import { senseNow, senseList, senseAct } from "./src/sense";
+import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict, benchSuspend, benchResetRings } from "./src/bench";
+import { mcpHandle, mcpStatus } from "./src/mcp";
+import { evalRun, evalStatus } from "./src/eval";
+import { senseDiffs } from "./src/sense";
+import { hygieneStatus, hygieneCheckpoint, hygieneVacuum, startHygieneLoop } from "./src/dbhygiene";
+import { gateCheck, approvalsStatus, approvalRequest, approvalDecide, policySet } from "./src/approvals";
+import { listObjectives, createObjective, setObjectiveStatus, deleteObjective, workGraph, OBJECTIVE_STATUSES } from "./src/objectives";
+import { handoffList, handoffStats } from "./src/handoffs";
+import { glmStatus, glmProbe, upgradeAgents, setLatestGlm, glmVerdict, agentTag } from "./src/glm";
+import { reviewList, reviewStats, reviewTask, reviewerVerdict } from "./src/reviewer";
+import { poolStatus, poolScale, poolBurn, poolRestore, startPoolLoops, POOL_MAX } from "./src/pool";
+import { autonomyStatus, livenessBrief } from "./src/autonomy";
+import { governorStatus } from "./src/governor";
+import { demandTick, demandStatus, demandConfigSet, DEMAND_TICK_MS } from "./src/demand";
+import { policyStatus, policyReload } from "./src/policy";
+import { cronStatus, cronTick, cronCancel, cronFire, CRON_TICK_MS } from "./src/cron";
+import * as ports from "./src/ports";
+import { tokensEnsure, tokenList, tokenSet, tokenDelete, tokensStatus } from "./src/tokens";
+import { withContract, missionUiHtml } from "./src/contract";
+import {
+  agentChatList, agentChatCreate, agentChatGet, agentChatStatus, agentChatClose,
+  agentChatTurnAsync, agentChatCompact, agentChatRestore,
+  agentChatSupervisorTick, supervisorEnsure, SUPERVISOR_TICK_MS, interchatDeliver, chatSetObjective,
+  meshHeartbeatApply,
+} from "./src/agentchat";
 
-const WS_PORT = 3040;
-const REST_PORT = 3041;
-const VERSION = "0.21.0";
+// R51 (фаза C): порты вынесены в src/ports.ts (env ME2_WS_PORT/ME2_REST_PORT для gate-probe)
+// ME2_BOOT_MODE=probe — инкарнация «только контракт»: REST+socket+eval подняты,
+// LLM-приводы (worker/GLM-проба/demand/cron/supervisor-тики/selfupdate) отключены —
+// gate в CI проверяет здоровье без сетевых зависимостей и без расхода квот.
+const PROBE_MODE = process.env.ME2_BOOT_MODE === "probe";
+const WS_PORT = ports.WS_PORT;
+const REST_PORT = ports.REST_PORT;
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
+benchBootStart(BOOT_T0); // B3: baseline boot-длительности стартует с началом процесса
 setMeta("boot", BOOT_TS);
 setMeta("version", VERSION);
+
+// R51 (фаза C): boot-запись памяти — persistence-пруф с первой секунды инкарнации
+// (eval memory.rows не должен зависеть от того, «повезёт» ли с ранними событиями на девственной DB).
+try {
+  memWrite({
+    kind: "episodic",
+    key: `incarnation:${BOOT_TS}`,
+    content: `daemon v${VERSION} инкарнация начата (seq=${lastSeq()}, ws:${WS_PORT} rest:${REST_PORT})`,
+    tags: ["boot", "incarnation"],
+    importance: 0.4,
+  });
+} catch (e) { console.log(`[memory] boot row skipped: ${String(e).slice(0, 80)}`); }
 
 // ── seed (однократно) ─────────────────────────────────────────────
 function seed() {
@@ -80,6 +135,19 @@ function seed() {
   console.log("[seed] agents: 2, tasks: 3");
 }
 seed();
+// R47: vault токенов — bootstrap/миграция из /home/z/.a2 в SQLite при каждой инкарнации
+// (идемпотентно: существующие значения в БД никогда не перезаписываются файлом)
+try {
+  const tk = tokensEnsure();
+  console.log(`[tokens] vault: ${tk.present} в БД, seed=${tk.seeded.length ? tk.seeded.join(",") : "—"}, нет=${tk.missing.length}`);
+} catch (e) { console.log(`[tokens] vault bootstrap failed: ${String(e).slice(0, 120)}`); }
+// R29: директива оператора «все агенты всегда на последней GLM» — при каждой инкарнации
+// флот приводится к каноническому тегу; живая probe бэкенда — async (урок R25: сеть вне boot-пути).
+try {
+  const up = upgradeAgents();
+  console.log(`[glm] canonical=${agentTag()} upgraded=${up.upgraded} already=${up.already}`);
+} catch (e) { console.log(`[glm] upgrade failed: ${String(e).slice(0, 120)}`); }
+if (!PROBE_MODE) setTimeout(() => { void glmProbe().catch(() => { /* R38: проба не роняет процесс */ }); }, 3_000);
 
 // ── REST API (:3041) ──────────────────────────────────────────────
 function json(res: ServerResponse, code: number, body: unknown) {
@@ -94,7 +162,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
   catch { return {}; }
 }
 
-const restServer = createServer(async (req, res) => {
+async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
@@ -107,11 +175,240 @@ const restServer = createServer(async (req, res) => {
         last_seq: lastSeq(), actions: knownActions().length, ts: nowIso(),
       });
     }
-    if (path === "/state" && req.method === "GET") return json(res, 200, snapshot());
+    if (path === "/state" && req.method === "GET") return json(res, 200, withContract(snapshot()));
+    // ── R49 (фаза A): GET /ui — самодостаточная Mission Control (0 сборки, 0 зависимостей).
+    // Читает read-only REST того же origin; операции — socket agentchat:op (REST-операций нет).
+    if (path === "/ui" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+      return res.end(missionUiHtml());
+    }
     if (path === "/budget" && req.method === "GET") return json(res, 200, { ok: true, ...budgetWindow() });
     if (path === "/actions" && req.method === "GET") return json(res, 200, { ok: true, count: actionCatalog().length, total_target: 47, actions: actionCatalog() });
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
+    // ── R52 (фаза D, H6): статус SQL-контура (read-only, вне шины; 47-инвариант не тронут) ──
+    if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
+    // R53 (фаза D-исполнение): короткоживущие JWT для чтения зеркала из UI с гейтом RLS.
+    // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
+    // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/ui-token" && req.method === "GET") {
+      // R57: gotrue-канал — best-effort логин/рефреш сервис-аккаунта ДО сборки bundle (кэш+анти-шторм).
+      // Пароль/email не покидают daemon; в bundle уходит только короткоживущий access_token пользователя.
+      try { await gotrueToken(); } catch { /* честная деградация — статус в auth */ }
+      const bundle = uiTokenBundle();
+      if (!bundle.ok) return json(res, 200, { ...bundle, auth: gotrueStatus(), mirror_state: sqlMirror.status().state });
+      return json(res, 200, { ...bundle, auth: gotrueStatus(), mirror_state: sqlMirror.status().state });
+    }
+    if (path === "/sqlmirror/ui-token/verify" && req.method === "GET") {
+      // само-проверка канала: daemon сам валидирует выдачу (подпись+срок+роль либо префиксы/режимы).
+      // R54: service_proxy не выдаёт токен вовсе — его verify идёт через живую пробу облака (readFeed).
+      const b = uiTokenBundle();
+      if (b.channel === "service_proxy") {
+        const feed = await sqlMirror.readFeed(1);
+        return json(res, 200, { ok: feed.ok || feed.error === "table_missing_ddl_pending", channel: "service_proxy",
+                                cloud: feed.ok ? "readable" : feed.error, schema: b.schema, table: b.table });
+      }
+      if (!b.ok || !b.token) return json(res, 200, { ok: false, reason: b.reason ?? "mint_failed" });
+      if (b.channel === "publishable") {
+        const ok = String(b.token).startsWith("sb_publishable_");
+        const auth = b.auth_token ? gotrueVerifyShape(String(b.auth_token)) : null;
+        return json(res, 200, { ok, channel: "publishable", note: ok ? "публичный read-ключ (роль anon, видимость диктует RLS)" : "неожиданный формат",
+                                auth: auth ? { shape_ok: auth.ok, reason: auth.reason, role: auth.role, iss: auth.iss, aal: auth.aal } : "нет gotrue-токена (креденшалы/сеть)",
+                                schema: b.schema, table: b.table });
+      }
+      if (b.channel === "gotrue") {
+        const v = gotrueVerifyShape(String(b.token));
+        return json(res, 200, { ok: v.ok, channel: "gotrue", shape: v, note: b.note, schema: b.schema, table: b.table });
+      }
+      if (b.channel === "anon_registered") {
+        // R54: зарегистрированный legacy anon — проверяем форму JWT (3 сегмента, роль anon в claims)
+        const tok = String(b.token);
+        let role = ""; let shape = tok.split(".").length === 3 && tok.length > 60;
+        try { role = String(JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).role ?? ""); } catch { shape = false; }
+        return json(res, 200, { ok: shape && role === "anon", channel: "anon_registered", shape, role, note: "зарегистрированный legacy anon-ключ — RLS-гейт канонический", schema: b.schema, table: b.table });
+      }
+      const v = verifySupabaseJwt(String(b.token), "authenticated");
+      const va = b.anon_token ? verifySupabaseJwt(String(b.anon_token), "anon") : { ok: false, reason: "no_anon" };
+      return json(res, 200, { ok: v.ok && va.ok, channel: "mint", authenticated: v, anon: va, schema: b.schema, table: b.table });
+    }
+    // R54: read-прокси зеркала (канал service_proxy) — daemon читает облако сам, service-ключ не покидает сервер.
+    // Read-only SELECT, лимит ≤ 200, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/feed" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      const limit = Number(url.searchParams.get("limit") || 50);
+      return json(res, 200, await sqlMirror.readFeed(limit));
+    }
+    // ── R58 «Политики как данные»: RLS-самоаудит облака против ожидаемой матрицы (sql/0003+0004) ──
+    // read-only интроспекция psql-каналом, кэш 60с, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/rls-audit" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      return json(res, 200, await runRlsAuditAsync(url.searchParams.get("force") === "1"));
+    }
+    // ── R59 «реестр как данные»: сверка живого RPC-реестра облака с классификацией R52 ──
+    // read-only сверка psql-каналом, кэш 60с, вне шины (47-инвариант не тронут).
+    if (path === "/sqlmirror/rpc-reconcile" && req.method === "GET") {
+      const url = new URL(req.url || "", "http://local");
+      return json(res, 200, await runRpcReconcileAsync(url.searchParams.get("force") === "1"));
+    }
+    // ── R60 «extension host»: каталог расширений + изолированный прогон (prlimit, stdio-only) ──
+    // Канон VS Code exthost; caps-медиация; расширение не видит ни секретов, ни сети. Вне шины (47-инвариант).
+    if (path === "/exthost" && req.method === "GET") return json(res, 200, exthostStatus());
+    if (path === "/exthost/run" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { id?: string };
+        if (!body?.id || typeof body.id !== "string") return json(res, 400, { ok: false, error: "id_required" });
+        return json(res, 200, await runExtension(body.id, undefined, "rest"));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R62 P0-a «exec/edit tools»: TERMINAL_RUN + FILE_EDIT для агентного harness ──
+    // Канон Cursor terminal/edit-files (корпус R61, трек A); enforcement = allowlist по
+    // сегментам → prlimit → таймаут → env-белый-список; cwd/цель — только управляемые
+    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/exec" && req.method === "GET") return json(res, 200, execStatus());
+    if (path === "/exec" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; mode?: string; cmd?: string; cwd?: string; timeout_ms?: number; sandbox?: boolean };
+        if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+        // Run Mode «plan» (канон Cursor Plan Mode): план + вердикт тира-3 БЕЗ spawn и БЕЗ очереди
+        if (body?.op === "plan" || body.mode === "plan") {
+          const plan = planExec(body.cmd, body.cwd, body.timeout_ms);
+          if (!plan.ok) return json(res, 200, { ok: false, schema: "me2.exec.v1", reason: plan.reason, detail: plan.detail, mode: "plan" });
+          const input: ReviewInput = { cmd: body.cmd, cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! };
+          return json(res, 200, { ok: true, schema: "me2.exec.v1", mode: "plan", planned: { segments: plan.segments, binaries: plan.binaries }, cwd: plan.cwd, timeout_ms: plan.timeout_ms, review: reviewPlan(input) });
+        }
+        if (body?.op !== "run") return json(res, 400, { ok: false, error: "bad_op", allowed: ["run", "plan"] });
+        // R64 P0-2: sandbox:true → fs-риски гасит конфайнмент (канон D02), не очередь
+        return json(res, 200, await runTerminalAsync(body.cmd, body.cwd, body.timeout_ms, "rest", { sandbox: body.sandbox === true }));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R64 P0-2 «OS-sandbox»: fs/syscall-конфайнмент (канон Cursor Landlock+seccomp) ──
+    // Слои: ns (userns+mountns: ro-root, rw-rebind корней, tmpfs /tmp, hide секретов)
+    // + seccomp-bpf (deny-лист + default-deny INET); strict fail-closed; Landlock ≥5.13.
+    // Вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/sandbox" && req.method === "GET") return json(res, 200, sandboxStatus());
+    if (path === "/sandbox" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; net?: "deny" | "allow"; auto_sandbox?: boolean; strict?: boolean };
+        if (body?.op === "probe") {
+          return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", op: "probe", ...(await sandboxProbe("rest")) });
+        }
+        if (body?.op === "run") {
+          if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+          return json(res, 200, await runSandboxedAsync(body.cmd, body.cwd, { net: body.net, timeout: body.timeout_ms, source: "rest" }));
+        }
+        if (body?.op === "config") {
+          const patch: Record<string, unknown> = {};
+          if (typeof body.auto_sandbox === "boolean") patch.auto_sandbox = body.auto_sandbox;
+          if (typeof body.strict === "boolean") patch.strict = body.strict;
+          if (body.net === "deny" || body.net === "allow") patch.net = body.net;
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: "nothing_to_set", fields: ["auto_sandbox", "strict", "net"] });
+          const cfg = sandboxSetOverride(patch as never);
+          try { emit("SANDBOX_CONFIG", { patch, effective: { auto_sandbox: cfg.auto_sandbox, net: cfg.net, strict: cfg.strict } }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json sandbox" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe", "run", "config"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R63 P0-b «classifier tier»: Run Modes + пре-исполнение (канон Cursor Auto-review) ──
+    // Тир-3: allowlist (exec) → sandbox-ability (P0-2) → classifier; ask → очередь одобрений оператора.
+    // Классификатор НЕ security boundary (канон D02); вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/review" && req.method === "GET") return json(res, 200, reviewStatus());
+    if (path === "/review" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; id?: number; enabled?: boolean; llm?: boolean };
+        if (body?.op === "classify") {
+          if (typeof body.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+          const plan = planExec(body.cmd, body.cwd, body.timeout_ms);
+          if (!plan.ok) return json(res, 200, { ok: false, schema: "me2.review.v1", stage: "tier1_allowlist", reason: plan.reason, detail: plan.detail });
+          const input: ReviewInput = { cmd: body.cmd, cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! };
+          return json(res, 200, { ok: true, schema: "me2.review.v1", stage: "tier3_classifier", review: await classifyDry(input), planned: { binaries: plan.binaries } });
+        }
+        if (body?.op === "approve") {
+          if (typeof body.id !== "number") return json(res, 400, { ok: false, error: "id_required" });
+          const taken = queueTake(body.id);
+          if (!taken) return json(res, 404, { ok: false, error: "not_found_or_not_pending" });
+          const verdict = await runApprovedAsync(taken.cmd, taken.cwd, taken.timeout_ms, "review-approve");
+          queueResolve(body.id, verdict.ok, verdict.exit, verdict.duration);
+          try { emit("CLASSIFIER_APPROVED", { id: body.id, cmd: taken.cmd.slice(0, 120), ok: verdict.ok, exit: verdict.exit, ms: verdict.duration, source: "review-approve" }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", approved: true, run: verdict });
+        }
+        if (body?.op === "deny") {
+          if (typeof body.id !== "number") return json(res, 400, { ok: false, error: "id_required" });
+          const denied = queueDeny(body.id);
+          if (!denied) return json(res, 404, { ok: false, error: "not_found_or_not_pending" });
+          try { emit("CLASSIFIER_DENIED", { id: body.id, cmd: null, source: "review-queue" }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", denied: true });
+        }
+        if (body?.op === "config") {
+          const patch: Record<string, unknown> = {};
+          if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+          if (typeof body.llm === "boolean") patch.llm_enabled = body.llm;
+          if (typeof body.timeout_ms === "number" && body.timeout_ms >= 500 && body.timeout_ms <= 30000) patch.timeout_ms = body.timeout_ms;
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: "nothing_to_set", fields: ["enabled", "llm", "timeout_ms"] });
+          const cfg = classifierSetOverride(patch as never);
+          try { emit("CLASSIFIER_CONFIG", { patch, effective: cfg }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json classifier" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["classify", "approve", "deny", "config"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    if (path === "/file" && req.method === "GET") return json(res, 200, editStatus());
+    if (path === "/file" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; path?: string; diff?: string; edit_id?: number };
+        if (body?.op === "apply") {
+          if (typeof body.path !== "string" || typeof body.diff !== "string") return json(res, 400, { ok: false, error: "path_and_diff_required" });
+          return json(res, 200, await applyEditAsync(body.path, body.diff, "rest"));
+        }
+        if (body?.op === "rollback") {
+          if (typeof body.edit_id !== "number") return json(res, 400, { ok: false, error: "edit_id_required" });
+          return json(res, 200, rollbackEdit(body.edit_id, "rest"));
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["apply", "rollback"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    if (path === "/evidence" && req.method === "POST") {
+      const body = await readBody(req) as { op?: string };
+      if (body?.op === "probe_ddl") return json(res, 200, { ok: true, ...(await probeDdl(true)) });
+      if (body?.op === "probe_storage") return json(res, 200, await probeStorage());
+      return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe_ddl", "probe_storage"] });
+    }
+    // ── E2 (R33): верификация hash-chain + связка evidence↔task↔review (read-only, вне шины) ──
+    if (path === "/evidence/verify" && req.method === "GET") {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 500) || 500, 2000);
+      return json(res, 200, verifyChain(from ? Number(from) : undefined, to ? Number(to) : undefined, limit));
+    }
+    if (path === "/evidence/query" && req.method === "GET") {
+      const tid = url.searchParams.get("task_id");
+      if (!tid) return json(res, 400, { ok: false, error: "task_id_required" });
+      return json(res, 200, evidenceQuery(tid));
+    }
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
+
+    // ── E3 (R34): executor-пул — N живых GLM-контекстов с честными lease (вне шины 47/47) ──
+    if (path === "/pool" && req.method === "GET") return json(res, 200, poolStatus());
+    if (path === "/pool" && req.method === "POST") {
+      try {
+        const body = await readBody(req);
+        const op = String((body as { op?: string }).op ?? "");
+        if (op === "scale") return json(res, 200, poolScale(Number((body as { n?: number }).n ?? 0), "rest"));
+        if (op === "burn") return json(res, 200, { ok: true, ...poolBurn(Number((body as { n?: number }).n ?? 1)) });
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["scale", "burn"], ceiling: POOL_MAX });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
 
     // ── R16: M2 Code Graph v1 (read-only, вне шины — скан не мутирует состояние) ──
     if (path === "/codegraph" && req.method === "GET") return json(res, 200, codegraphSummary(url.searchParams.get("force") === "1"));
@@ -184,6 +481,8 @@ const restServer = createServer(async (req, res) => {
       const budget = Number(url.searchParams.get("budget") ?? 1400);
       return json(res, 200, { ok: true, ...memBlock(n, budget) });
     }
+    // ── R35 E5: token-economy памяти — агрегат + живая доставка ──
+    if (path === "/memory/economy" && req.method === "GET") return json(res, 200, memoryEconStatus());
     if (path === "/memory" && req.method === "POST") {
       const body = await readBody(req);
       const op = String(body.op ?? "write");
@@ -198,7 +497,11 @@ const restServer = createServer(async (req, res) => {
           return json(res, 201, { ok: true, row });
         }
         if (op === "delete") return json(res, 200, { ok: true, deleted: memDelete(Number(body.id)) });
-        return json(res, 400, { ok: false, error: "op_required: write|delete" });
+        if (op === "economy") {
+          const d = memBlockEconomy(String(body.consumer ?? "rest"), Number(body.n ?? 5), Number(body.budget ?? 1400));
+          return json(res, 200, { ok: true, ...d });
+        }
+        return json(res, 400, { ok: false, error: "op_required: write|delete|economy" });
       } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
     }
 
@@ -234,8 +537,13 @@ const restServer = createServer(async (req, res) => {
       const body = await readBody(req);
       const op = String(body.op ?? "check");
       try {
-        if (op === "check") return json(res, 200, { ok: true, check: suCheck(VERSION, true) });
-        if (op === "apply") return json(res, 200, suApply(VERSION));
+        if (op === "check") return json(res, 200, { ok: true, check: await suCheckAsync(VERSION, true) });
+        if (op === "apply") {
+          // R30 C4: authority-гейт — selfupdate меняет живой код daemon (один approve = один apply)
+          const g = gateCheck("authority_effect", "selfupdate:apply", "Self-update daemon (apply) — смена живого кода");
+          if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "authority_effect", approval_id: g.approval_id ?? null });
+          return json(res, 200, suApply(VERSION));
+        }
         return json(res, 400, { ok: false, error: "op_required: check|apply" });
       } catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
     }
@@ -247,7 +555,13 @@ const restServer = createServer(async (req, res) => {
       const op = String(body.op ?? "propose");
       try {
         if (op === "propose") return json(res, 201, { ok: true, proposal: await rsiPropose({ auto: body.auto !== false, hint: body.hint ? String(body.hint) : undefined }) });
-        if (op === "adopt") return json(res, 200, { ok: true, proposal: rsiAdopt(String(body.id ?? "")) });
+        if (op === "adopt") {
+          // R30 C4: RSI-гейт — принятие предложения пишет артефакт в skills/ (один approve = один adopt)
+          const pid = String(body.id ?? "");
+          const g = gateCheck("rsi_adopt", `rsi:${pid}`, `RSI adopt ${pid}`);
+          if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "rsi_adopt", approval_id: g.approval_id ?? null });
+          return json(res, 200, { ok: true, proposal: rsiAdopt(pid) });
+        }
         if (op === "reject") return json(res, 200, { ok: true, proposal: rsiReject(String(body.id ?? "")) });
         if (op === "rollback") return json(res, 200, { ok: true, proposal: rsiRollback(String(body.id ?? "")) });
         return json(res, 400, { ok: false, error: "op_required: propose|adopt|reject|rollback" });
@@ -284,6 +598,131 @@ const restServer = createServer(async (req, res) => {
         });
         return json(res, 200, r);
       } catch (e) { return json(res, 400, { ok: false, error: (e as Error).message }); }
+    }
+
+    // ── R21: BROWSER-OBSV (S2: CDP network/console/exceptions сенсоры, вне шины — 47/47) ──
+    if (path === "/browser/obsv" && req.method === "GET") {
+      obsvStart(); // ленивый старт колектора (идемпотентно)
+      const limit = parseInt(url.searchParams.get("limit") ?? "", 10);
+      // R31 D2: source=history — чтение SQLite-истории с TTL (переживает кольца памяти)
+      return json(res, 200, obsvSnapshot({
+        limit: Number.isFinite(limit) ? limit : 40,
+        level: url.searchParams.get("level") ?? undefined,
+        filter: url.searchParams.get("filter") ?? undefined,
+        source: url.searchParams.get("source") === "history" ? "history" : undefined,
+      }));
+    }
+    if (path === "/browser/obsv" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "reset") { obsvReset(); return json(res, 200, { ok: true, op: "reset" }); }
+      if (op === "stop") { obsvStop(); return json(res, 200, { ok: true, op: "stop" }); }
+      if (op === "attach") { obsvStart(); return json(res, 200, { ok: true, op: "attach" }); }
+      // R31 D2: конфигурация TTL истории (1..1440 минут)
+      if (op === "ttl") return json(res, 200, { ok: true, op: "ttl", persist: obsvSetTtl(Number(body.minutes ?? 30)) });
+      return json(res, 400, { ok: false, error: "op_required: attach|reset|stop|ttl" });
+    }
+
+    // ── R31 D1: история дифов перцепции (sense-diffing, вне шины — 47/47) ──
+    if (path === "/browser/sense/diffs" && req.method === "GET") {
+      const limit = parseInt(url.searchParams.get("limit") ?? "", 10);
+      return json(res, 200, senseDiffs(url.searchParams.get("tab") ?? undefined, Number.isFinite(limit) ? limit : 10));
+    }
+
+    // ── R31 D4: DB-гигиена (WAL checkpoint / VACUUM / индексы, вне шины — 47/47) ──
+    if (path === "/db/hygiene" && req.method === "GET") return json(res, 200, hygieneStatus());
+    // H-линия (R38): плоскость v4 — liveness/deadlock/risk-budget/non-bypass/recovery/independence (read-only)
+    if (path === "/autonomy" && req.method === "GET") return json(res, 200, { ok: true, ...autonomyStatus() });
+    // G11: телеметрия LLM-Governor (полосы/bucket/breaker) — read-only
+    if (path === "/governor" && req.method === "GET") return json(res, 200, { ok: true, ...governorStatus() });
+    // G10: автопилот спроса — статус/конфиг/ручной тик
+    if (path === "/demand" && req.method === "GET") return json(res, 200, { ok: true, ...demandStatus() });
+    if (path === "/demand" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "tick") return json(res, 200, { ok: true, decision: demandTick() });
+      if (op === "config") return json(res, 200, { ok: true, config: demandConfigSet({ enabled: typeof body.enabled === "boolean" ? body.enabled : undefined, max: typeof body.max === "number" ? body.max : undefined }) });
+      return json(res, 400, { ok: false, error: "op_required: tick|config" });
+    }
+    // H2 (R44): policy-файл T0/T1/T2 — эффективная политика + ledger-счётчики
+    if (path === "/policy" && req.method === "GET") return json(res, 200, policyStatus());
+    if (path === "/policy" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "reload") return json(res, 200, { ok: true, policy: policyReload() });
+      return json(res, 400, { ok: false, error: "op_required: reload" });
+    }
+    // G7 (R44): cron-планировщик из чатов — список/отмена/ручное срабатывание
+    if (path === "/cron" && req.method === "GET") return json(res, 200, cronStatus());
+    if (path === "/cron" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      const id = Number(body.id ?? 0);
+      if (op === "cancel") return cronCancel(id) ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: "cron_not_active" });
+      if (op === "fire") {
+        const r = cronFire(id, body.kick !== false);
+        return r.ok ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: r.error });
+      }
+      if (op === "tick") return json(res, 200, { ok: true, ...cronTick({ kick: body.kick !== false }) });
+      return json(res, 400, { ok: false, error: "op_required: cancel|fire|tick" });
+    }
+    // R47: vault токенов — маскированный список + метаданные (read-only)
+    if (path === "/tokens" && req.method === "GET") return json(res, 200, { ok: true, tokens: tokenList(), status: tokensStatus() });
+    // R47: операции vault'а (T0-плоскость оператора) — set/delete с ledger в hash-chain
+    if (path === "/tokens" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "set") {
+        const r = tokenSet(String(body.name ?? ""), String(body.value ?? ""), body.tier ? String(body.tier) : undefined, body.by ? String(body.by) : "operator");
+        return r.ok ? json(res, 200, { ok: true, tokens: tokenList() }) : json(res, 400, { ok: false, error: r.error });
+      }
+      if (op === "delete") {
+        const r = tokenDelete(String(body.name ?? ""), body.by ? String(body.by) : "operator");
+        return r.ok ? json(res, 200, { ok: true, tokens: tokenList() }) : json(res, 404, { ok: false, error: r.error });
+      }
+      return json(res, 400, { ok: false, error: "op_required: set|delete" });
+    }
+    if (path === "/db/hygiene" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "checkpoint") return json(res, 200, { ok: true, op, ...hygieneCheckpoint(body.mode === "TRUNCATE" ? "TRUNCATE" : "PASSIVE") });
+      if (op === "vacuum") return json(res, 200, { ok: true, op, ...hygieneVacuum(body.force === true) });
+      return json(res, 400, { ok: false, error: "op_required: checkpoint|vacuum" });
+    }
+
+    // ── R23: EFFECT-плоскость (5 статусов + durable fences, вне шины — 47/47) ──
+    if (path === "/browser/effect" && req.method === "GET") {
+      return json(res, 200, { ok: true, fences: fenceList(60), stats: verdictStats() });
+    }
+    if (path === "/browser/effect" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      if (op === "clear") {
+        const key = String(body.effect_key ?? "");
+        if (!key) return json(res, 400, { ok: false, error: "effect_key_required" });
+        // R30 C4: fence-гейт — снятие durable fence требует живого согласия (один approve = одно снятие)
+        const g = gateCheck("fence_clear", `fence:${key}`, `Снятие fence ${key}`);
+        if (!g.allowed) return json(res, 403, { ok: false, error: g.reason, gate: "fence_clear", approval_id: g.approval_id ?? null });
+        const cleared = fenceClear(key, body.note ? String(body.note) : undefined);
+        return json(res, cleared ? 200 : 404, { ok: cleared, op: "clear", effect_key: key });
+      }
+      return json(res, 400, { ok: false, error: "op_required: clear" });
+    }
+
+    // ── R30 C4: APPROVAL-ПОЛИТИКИ (гейты мутирующих операций в одном месте, вне шины — 47/47) ──
+    if (path === "/approvals" && req.method === "GET") return json(res, 200, approvalsStatus());
+    if (path === "/approvals" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "");
+      try {
+        if (op === "request") return json(res, 201, { ok: true, approval: approvalRequest(String(body.gate ?? ""), String(body.subject ?? ""), String(body.label ?? body.subject ?? "")) });
+        if (op === "approve") return json(res, 200, { ok: true, approval: approvalDecide(String(body.id ?? ""), "APPROVED", body.note ? String(body.note) : undefined) });
+        if (op === "deny") return json(res, 200, { ok: true, approval: approvalDecide(String(body.id ?? ""), "DENIED", body.note ? String(body.note) : undefined) });
+        if (op === "policy") return json(res, 200, { ok: true, policy: policySet(String(body.gate ?? ""), String(body.mode ?? "")) });
+        return json(res, 400, { ok: false, error: "op_required: request|approve|deny|policy" });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: (e as Error).message });
+      }
     }
 
     // ── command bus: единственная точка мутаций ──
@@ -336,15 +775,75 @@ const restServer = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (path === "/tasks" && req.method === "GET") return json(res, 200, { ok: true, tasks: listTasks() });
-    if (path === "/tasks" && req.method === "POST") {
+    // ── R28 C2: handoffs — передача задач между агентами (протокол Codex handoffs) ──
+    if (path === "/handoffs" && req.method === "GET") {
+      return json(res, 200, { ok: true, handoffs: handoffList(20), stats: handoffStats() });
+    }
+    // ── R29: GLM currency plane (директива «агенты всегда на последней версии») ──
+    if (path === "/glm" && req.method === "GET") return json(res, 200, glmStatus());
+    if (path === "/glm" && req.method === "POST") {
       const body = await readBody(req);
+      const op = String(body.op ?? "");
+      try {
+        if (op === "probe") return json(res, 200, { ok: true, probe: await glmProbe() });
+        if (op === "upgrade") return json(res, 200, { ok: true, ...upgradeAgents() });
+        if (op === "set_latest") return json(res, 200, { ok: true, result: setLatestGlm(String(body.model ?? "")) });
+        return json(res, 400, { ok: false, error: "op_required: probe|upgrade|set_latest" });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: (e as Error).message });
+      }
+    }
+    // ── R29 C3: reviewer-agent (антифальшь-ревью результатов против спека) ──
+    if (path === "/reviews" && req.method === "GET") {
+      return json(res, 200, { ok: true, reviews: reviewList(20), stats: reviewStats() });
+    }
+    if (path === "/reviews/run" && req.method === "POST") {
+      const body = await readBody(req);
+      const id = String(body.task_id ?? "").trim();
+      if (!id) return json(res, 400, { ok: false, error: "task_id_required" });
+      try {
+        const r = reviewTask(id);
+        return json(res, 202, { ok: true, scheduled: true, idempotent: r === null ? undefined : false, note: "ревью асинхронное — вердикт появится в TASK_REVIEWED и GET /reviews" });
+      } catch (e) {
+        return json(res, (e as Error).message === "task_not_found" ? 404 : 400, { ok: false, error: (e as Error).message });
+      }
+    }
+    if (path.startsWith("/tasks/") && path.endsWith("/handoff") && req.method === "POST") {
+      const id = path.split("/")[2];
+      const body = await readBody(req);
+      // Через шину (TASK_ENQUEUE+handoff) — 47/47 инвариант; ошибка шины доходит до оператора (fails-closed)
       const r = enqueueCommand({
         action: "TASK_ENQUEUE",
-        payload: { title: body.title, spec: body.spec, role: body.role, max_steps: body.max_steps },
+        payload: {
+          handoff: {
+            from_task: id,
+            to_role: body.to_role ?? null,
+            reason: body.reason,
+            protocol: body.protocol ?? { next: body.next ?? "" },
+            max_steps: body.max_steps,
+            by: body.by ?? "operator",
+          },
+        },
         idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
       });
       if (!r.ok) return json(res, 429, { ok: false, error: r.error });
       const cmd = await runOne(r.command);
+      if (cmd.status === "FAILED") return json(res, 400, { ok: false, error: cmd.error ?? "handoff_command_failed", command: cmd.id });
+      let parsed: { task?: unknown; handoff?: unknown } | null = null;
+      try { parsed = cmd.result ? JSON.parse(cmd.result) as { task?: unknown; handoff?: unknown } : null; } catch { parsed = null; }
+      return json(res, 201, { ok: true, task: parsed?.task ?? null, handoff: parsed?.handoff ?? null, command: cmd.id });
+    }
+    if (path === "/tasks" && req.method === "POST") {
+      const body = await readBody(req);
+      const r = enqueueCommand({
+        action: "TASK_ENQUEUE",
+        payload: { title: body.title, spec: body.spec, role: body.role, max_steps: body.max_steps, objective_id: body.objective_id ?? null },
+        idempotency_key: body.idempotency_key ? String(body.idempotency_key) : null,
+      });
+      if (!r.ok) return json(res, 429, { ok: false, error: r.error });
+      const cmd = await runOne(r.command);
+      // fails-closed: ошибка шины (например objective_not_found) обязана дойти до оператора
+      if (cmd.status === "FAILED") return json(res, 400, { ok: false, error: cmd.error ?? "task_command_failed", command: cmd.id });
       const parsed = cmd.result ? (JSON.parse(cmd.result) as { task?: unknown }) : null;
       return json(res, 201, { ok: true, task: parsed?.task ?? null, command: cmd.id });
     }
@@ -424,9 +923,99 @@ const restServer = createServer(async (req, res) => {
       await runOne(r.command);
       return json(res, 200, { ok: true });
     }
+    // ── R25 B3: перф-бейслайны (GET /bench) + R25 A1: MCP-сервер (POST /mcp) ──
+    if (path === "/bench" && req.method === "GET") return json(res, 200, benchSnapshot());
+    // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
+    if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
+    if (path === "/eval/run" && req.method === "POST") {
+      benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
+      benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
+      let report: ReturnType<typeof evalRun>;
+      try { report = evalRun(VERSION); } finally { benchSuspend(false); }
+      return json(res, 200, report);
+    }
+    // ── R27 C1: Mission Control — objectives + work_graph (fails-closed, zero-authority) ──
+    if (path === "/workgraph" && req.method === "GET") return json(res, 200, workGraph());
+    if (path === "/objectives" && req.method === "GET") return json(res, 200, { ok: true, objectives: listObjectives() });
+    if (path === "/objectives" && req.method === "POST") {
+      const body = await readBody(req);
+      const op = String(body.op ?? "create");
+      if (op === "create") {
+        try {
+          const obj = createObjective(String(body.title ?? ""), String(body.spec ?? ""), Number(body.priority ?? 0));
+          return json(res, 201, { ok: true, objective: obj });
+        } catch (e) { return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) }); }
+      }
+      if (op === "status") {
+        try {
+          const obj = setObjectiveStatus(String(body.id ?? ""), String(body.status ?? "") as never, body.result ? String(body.result) : undefined);
+          return json(res, 200, { ok: true, objective: obj });
+        } catch (e) { return json(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) }); }
+      }
+      if (op === "delete") {
+        const ok = deleteObjective(String(body.id ?? ""));
+        return ok ? json(res, 200, { ok: true }) : json(res, 404, { ok: false, error: "objective_not_found" });
+      }
+      return json(res, 400, { ok: false, error: `unknown op ${op} (create|status|delete); статусы: ${OBJECTIVE_STATUSES.join("/")} — только оператор` });
+    }
+    // ── G1 (R36): флот из полноценных агентных чатов (пересборка механизма старого Electron-браузера) ──
+    // R46 (унификация): операционная поверхность СНЯТА с REST (POST /agentchat удалён) —
+    // вся работа с чат-агентами идёт через socket.io "agentchat:op" (ack) в открытом браузере,
+    // как постановил оператор: «вся работа должна быть с открытыми чатами-агентами прямо в браузере».
+    // GET /agentchat* (read-only) остаётся для дашбордов/eval — он ничего не мутирует.
+    if (path === "/agentchat" && req.method === "GET") {
+      const status = url.searchParams.get("status") as "ACTIVE" | "CLOSED" | null;
+      return json(res, 200, { ok: true, sessions: agentChatList(status ? { status } : {}), status: agentChatStatus(), ops: "socket.io agentchat:op (REST POST снят в v0.40.0)" });
+    }
+    if (path.startsWith("/agentchat/") && path.endsWith("/status") && req.method === "GET") {
+      const id = path.slice("/agentchat/".length, -"/status".length);
+      const data = agentChatGet(id, 3);
+      if (!data) return json(res, 404, { ok: false, error: "session_not_found" });
+      const { session, messages } = data;
+      return json(res, 200, {
+        ok: true, id: session.id, state: session.state, status: session.status,
+        turns_ok: session.turns_ok, turns_fail: session.turns_fail, fail_streak: session.fail_streak,
+        compactions: session.compactions, last_error: session.last_error, updated_at: session.updated_at,
+        last_message: messages.length ? { role: messages[messages.length - 1].role, at: messages[messages.length - 1].at } : null,
+        global: agentChatStatus(),
+      });
+    }
+    if (path.startsWith("/agentchat/") && req.method === "GET") {
+      const id = path.slice("/agentchat/".length);
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 200) || 200, 500);
+      const data = agentChatGet(id, limit);
+      if (!data) return json(res, 404, { ok: false, error: "session_not_found" });
+      return json(res, 200, { ok: true, ...data });
+    }
+
+    if (path === "/mcp" && req.method === "POST") {
+      const body = await readBody(req);
+      const out = await mcpHandle(body);
+      if (!out) { res.writeHead(202, { "Access-Control-Allow-Origin": "*" }); return res.end(); }
+      return json(res, out.status, out.json);
+    }
+    if (path === "/mcp" && req.method === "GET")
+      return json(res, 405, { ok: false, error: "MCP: POST /mcp (Streamable HTTP JSON-RPC); stdio: bun mcp-stdio.ts" });
     return json(res, 404, { ok: false, error: `no route ${req.method} ${path}` });
   } catch (e) {
     return json(res, 500, { ok: false, error: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+// B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
+// vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review"];
+const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
+function benchClassOf(p: string): BenchProbeName {
+  if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
+  if (BENCH_BROWSER_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_browser";
+  return "rest";
+}
+type BenchProbeName = Parameters<typeof benchObserve>[0];
+const restServer = createServer(async (req, res) => {
+  const t0 = Date.now();
+  try { await restHandler(req, res); } finally {
+    benchObserve(benchClassOf((req.url ?? "/").split("?")[0]), Date.now() - t0);
   }
 });
 
@@ -490,6 +1079,105 @@ io.on("connection", (socket) => {
       ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
     }
   });
+
+  // ── R46 (унификация): операционная поверхность чат-агентов — socket.io ack ──
+  // Единственный канал операций флота после снятия REST POST /agentchat: оператор в открытом
+  // браузере (панель БРАУЗЕР), Electron-оболочка, супервизоры — все через "agentchat:op".
+  // Семантика и валидация 1:1 как у снятого REST-семейства (busy/closed/ceiling/not_permitted),
+  // события и hash-chain — без изменений (это тот же agentchat-механизм, сменился только транспорт).
+  socket.on("agentchat:op", (p: Record<string, unknown> = {}, ack?: (r: unknown) => void) => {
+    const op = String(p.op ?? "");
+    try {
+      if (op === "create") {
+        const s = agentChatCreate({
+          agent_id: p.agent_id ? String(p.agent_id) : undefined,
+          role: p.role ? String(p.role) : undefined,
+          title: p.title ? String(p.title) : undefined,
+        });
+        ack?.({ ok: true, session: s });
+        return;
+      }
+      if (op === "turn") {
+        const id = String(p.id ?? "");
+        const text = String(p.text ?? "").trim();
+        if (!id || !text) { ack?.({ ok: false, error: "id_and_text_required" }); return; }
+        const cur = agentChatGet(id, 1);
+        if (!cur) { ack?.({ ok: false, error: "session_not_found" }); return; }
+        if (cur.session.state === "THINKING") { ack?.({ ok: false, error: "session_busy", state: cur.session.state }); return; }
+        if (cur.session.status !== "ACTIVE") { ack?.({ ok: false, error: "session_closed" }); return; }
+        agentChatTurnAsync(id, text); // долгий ход — ack немедленно, UI поллит status (как этот чат)
+        ack?.({ ok: true, id, state: "THINKING", note: "ход выполняется в фоне; GET /agentchat/:id/status" });
+        return;
+      }
+      if (op === "compact") {
+        const id = String(p.id ?? "");
+        void agentChatCompact(id, { force: p.force === true }).catch(() => { /* фоновая компакция */ });
+        ack?.({ ok: true, id, note: "компакция в фоне" });
+        return;
+      }
+      if (op === "close") {
+        const ok = agentChatClose(String(p.id ?? ""));
+        ack?.(ok ? { ok: true } : { ok: false, error: "session_not_found" });
+        return;
+      }
+      if (op === "tick") {
+        // G2: ручной тик супервизоров (перерождение мёртвых + автономные ходы) — force: без ожидания idle
+        const r = agentChatSupervisorTick({ force: p.force === true });
+        ack?.({ ok: true, ...r, in_flight: agentChatStatus().in_flight });
+        return;
+      }
+      if (op === "send") {
+        // G2: межчат от оператора — сообщение в историю чата (meta.from_chat=operator) + авто-пробуждение получателя
+        const id = String(p.id ?? "");
+        const text = String(p.text ?? "").trim();
+        if (!id || !text) { ack?.({ ok: false, error: "id_and_text_required" }); return; }
+        const r = interchatDeliver("operator", id, text);
+        ack?.(r.ok ? { ok: true, ...r } : { ok: false, error: r.error });
+        return;
+      }
+      if (op === "objective") {
+        // G5: оператор закрепляет долгоживущую цель чата (супервизоры — через инструмент set_objective)
+        const id = String(p.id ?? "");
+        const r = chatSetObjective(id, String(p.objective ?? ""), { by: p.by ? String(p.by) : undefined });
+        ack?.(r.ok ? { ok: true, ...r } : { ok: false, error: r.error });
+        return;
+      }
+      if (op === "mesh_heartbeat") {
+        // R49 (фаза A): мост supervisor-mesh браузера (me2-supervisor-mesh-bridge.mjs) —
+        // штатный heartbeat mesh ⇄ агентный тик. meta mesh_last_heartbeat + MESH_HEARTBEAT в chain,
+        // в ответ — последний supervisor_tick (meta supervisor_tick_last, честно null до первого тика).
+        const r = meshHeartbeatApply(p);
+        ack?.(r.ok ? { ok: true, mesh_epoch_advanced: r.mesh_epoch_advanced, supervisor_tick: r.supervisor_tick } : { ok: false, error: r.error });
+        return;
+      }
+      ack?.({ ok: false, error: "bad_op", allowed: ["create", "turn", "compact", "close", "tick", "send", "objective", "mesh_heartbeat"] });
+    } catch (e) {
+      ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  // ── R47: vault токенов — socket-поверхность операций (ack), та же T0-плоскость ──
+  // Единый транспорт UI/Electron наряду с REST /tokens; значения НИКОГДА не возвращаются —
+  // только маскированный список. Каждая мутация — TOKENS_SET/TOKENS_DELETED в hash-chain.
+  socket.on("tokens:op", (p: Record<string, unknown> = {}, ack?: (r: unknown) => void) => {
+    const op = String(p.op ?? "");
+    try {
+      if (op === "list") { ack?.({ ok: true, tokens: tokenList(), status: tokensStatus() }); return; }
+      if (op === "set") {
+        const r = tokenSet(String(p.name ?? ""), String(p.value ?? ""), p.tier ? String(p.tier) : undefined, p.by ? String(p.by) : "operator");
+        ack?.(r.ok ? { ok: true, tokens: tokenList() } : { ok: false, error: r.error });
+        return;
+      }
+      if (op === "delete") {
+        const r = tokenDelete(String(p.name ?? ""), p.by ? String(p.by) : "operator");
+        ack?.(r.ok ? { ok: true, tokens: tokenList() } : { ok: false, error: r.error });
+        return;
+      }
+      ack?.({ ok: false, error: "bad_op", allowed: ["list", "set", "delete"] });
+    } catch (e) {
+      ack?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
 });
 
 // периодический snapshot push + дренаж команд + reaper
@@ -497,23 +1185,130 @@ setInterval(() => {
   try { io.emit("snapshot", snapshot()); } catch { /* console может быть offline */ }
 }, 2000);
 setInterval(() => {
-  try { void drainCommands(8); } catch (e) { console.error(`[drain] ${String(e)}`); }
+  try { void drainCommands(8).catch((e) => { console.error(`[drain] rejection: ${String(e).slice(0, 160)}`); }); } catch (e) { console.error(`[drain] ${String(e)}`); }
 }, 1000);
 setInterval(() => {
   try { reapStaleWorkers(); } catch { /* noop */ }
+  try { watchdogStaleTasks(); } catch { /* noop */ }
 }, 30_000);
 // R19: self-node в fleet (liveness-проекция, урок CP-W1) + GC LOST-нод раз в час
 fleetSelfTick(VERSION);
 setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_000);
+// R23: Outcome River (деградации freshness = исходы) + reliability-ordered retirement
+setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
-setTimeout(() => { try { suCheck(VERSION); } catch { /* noop */ } }, 4_000);
+if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
+// R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
+setTimeout(() => { try { evalRun(VERSION); } catch (e) { console.error(`[eval] boot run failed: ${String(e)}`); } }, 2_500);
+// R31 D4: расписание гигиены БД (PASSIVE-checkpoint каждые 10м) + немедленный первый прогон
+try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${String(e)}`); }
 
-startMasterLoop();
+// E3 (R34): страж инкарнации — второй экземпляр daemon'а не имеет права мутировать общую SQLite.
+// Урок R34: дубль, стартованный мимо start.sh, успел выполнить poolRestore (boot-clear зомби-lease)
+// и убить lease живого демона, после чего сам умер на EADDRINUSE. Lockfile O_EXCL + kill-0: дубль
+// честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
+// R51 (фаза C): путь lockfile переопределяется env ME2_LOCK_FILE — изолированный gate-probe
+// рядом с production-daemon'ом получает собственный lock (в CI дефолт не используется вторым).
+const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || "/tmp/me2-daemon.lock";
+let poolBootAllowed = true;
+try {
+  if (existsSync(ME2_LOCK_FILE)) {
+    const oldPid = Number(readFileSync(ME2_LOCK_FILE, "utf8").trim());
+    let alive = false;
+    try { process.kill(oldPid, 0); alive = true; } catch { alive = false; }
+    if (alive && oldPid !== process.pid) {
+      console.error(`[guard] me2-daemon уже жив (pid ${oldPid}) — дубль-инкарнация pid ${process.pid} уходит, мутации БД запрещены`);
+      process.exit(13);
+    }
+    unlinkSync(ME2_LOCK_FILE);
+  }
+  const lfd = openSync(ME2_LOCK_FILE, "wx");
+  writeSync(lfd, String(process.pid));
+  closeSync(lfd);
+  process.on("exit", () => { try { if (readFileSync(ME2_LOCK_FILE, "utf8").trim() === String(process.pid)) unlinkSync(ME2_LOCK_FILE); } catch { /* best effort */ } });
+} catch (e) {
+  poolBootAllowed = false; // не смогли доказать единственность — консервативно без boot-мутаций
+  console.error(`[guard] lock failed: ${String(e).slice(0, 120)} — boot-мутации пула отключены`);
+}
+// восстановление пула после рестарта + lease-циклы (heartbeat/reaper/liveness) — только каноническая инкарнация
+if (poolBootAllowed) {
+  try { const pr = poolRestore(); if (pr.restored || pr.cleared) console.log(`[pool] restored ${pr.restored} live worker(s), cleared ${pr.cleared} zombie lease(s)`); } catch (e) { console.error(`[pool] restore failed: ${String(e)}`); }
+  if (!PROBE_MODE) { try { startPoolLoops(); } catch (e) { console.error(`[pool] loops failed: ${String(e)}`); } }
+  try { const ar = agentChatRestore(); if (ar.healed || ar.sessions) console.log(`[agentchat] sessions=${ar.sessions}, healed THINKING=${ar.healed}`); } catch (e) { console.error(`[agentchat] restore failed: ${String(e)}`); }
+  // G2: вечно-живущий супервизор флота — гарантия при boot + тик каждые 60с (перерождение + автономные ходы)
+  try { const se = supervisorEnsure(); console.log(`[agentchat] supervisor ${se.created ? "created" : "alive"} (${se.id})`); } catch (e) { console.error(`[agentchat] supervisorEnsure failed: ${String(e)}`); }
+  if (!PROBE_MODE) setInterval(() => {
+    try {
+      const r = agentChatSupervisorTick();
+      if (r.kicked.length) console.log(`[agentchat] supervisor tick: kicked=${r.kicked.join(",")} supervisors=${r.supervisors}`);
+    } catch (e) { console.error(`[agentchat] supervisor tick failed: ${String(e)}`); }
+  }, SUPERVISOR_TICK_MS);
+  // G10: автопилот спроса — демон сам создаёт чат-агентов под живой спрос (гистерезис 2 тика, cooldown, caps)
+  if (!PROBE_MODE) setInterval(() => {
+    try {
+      const d = demandTick();
+      if (d.action !== "idle") console.log(`[demand] ${d.action} signal=${d.signal} role=${d.role} sid=${d.session_id} — ${d.detail}`);
+    } catch (e) { console.error(`[demand] tick failed: ${String(e).slice(0, 160)}`); }
+  }, DEMAND_TICK_MS);
+  // G7 (R44): cron-планировщик из чатов — будим чаты по их расписаниям (overdue догоняет первым тиком)
+  if (!PROBE_MODE) setInterval(() => {
+    try {
+      const r = cronTick();
+      if (r.fired) console.log(`[cron] fired=${r.fired} postponed=${r.postponed}`);
+    } catch (e) { console.error(`[cron] tick failed: ${String(e).slice(0, 160)}`); }
+  }, CRON_TICK_MS);
+}
+
+if (!PROBE_MODE) startMasterLoop();
 initEvidence();
 // boot-span: телеметрия холодного старта (M7-проверка «ring живой» перестаёт быть ложной после рестарта)
 try { recordSpan("daemon.boot", { "me2.version": VERSION, "service.name": "me2-daemon" }, BOOT_T0); } catch { /* телеметрия не ломает старт */ }
 try { startScreencastServer(); } catch (e) { console.error(`[me2-daemon] screencast failed: ${String(e)}`); }
+// ── R52 (фаза D, H6): SQL-контур — зеркало hash-chain событий в Supabase SQL (operator-gated) ──
+// ME2_SQL_MIRROR=1 включает; без таблицы (миграция sql/0001 у оператора) — честный WARMUP, без штормов.
+// R56: гейт оператора обязан держаться на ЛЮБОМ пути бута (start.sh / ui-host-респавн / Electron PID-1).
+// Решение оператора R53 было зашито только в start.sh; ui-host (supervisor-keepalive R50) респавнит
+// daemon БЕЗ наследования этого env → зеркало молча уходило в OFF. Восстанавливаем решение из того
+// же условия, что и start.sh: SUPABASE_DB_URL в supabase-cloud.env = операторское решение активно.
+if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase-cloud.env")) {
+  try {
+    if (/^SUPABASE_DB_URL=/m.test(readFileSync("/home/z/.a2/supabase-cloud.env", "utf8"))) {
+      process.env.ME2_SQL_MIRROR = "1";
+      console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
+    }
+  } catch { /* честный отказ: гейт остаётся выключенным */ }
+}
+const sqlMirror = new SqlMirror(db);
+sqlMirror.start();
+// R57: gotrue-канал — разогрев кэша токена сервис-аккаунта (best-effort; анти-шторм держит,
+// панель при неудаче честно покажет auth.last_error)
+void gotrueToken().catch(() => { /* honest degradation */ });
+if (sqlMirror.status().configured) console.log("[me2-daemon] sqlmirror enabled (ME2_SQL_MIRROR=1): WARMUP → LIVE после миграции оператора");
+// R59: периодический самоаудит (RLS-политики + сверка RPC-реестра) — внутренний цикл daemon'а
+// (не внешний cron; приказ R55-5 про cron-джобы не трогает внутренние интервалы). События
+// только на переходах (FAIL/RECOVERED) — узор Kubernetes reconcile, ровный PASS не шумит.
+if (!PROBE_MODE && sqlMirror.status().configured) {
+  try { startSelfAuditLoop(); console.log("[me2-daemon] self-audit loop on (RLS + RPC-реестр, 20мин, события на переходах)"); } catch (e) { console.error(`[me2-daemon] self-audit loop failed: ${String(e)}`); }
+}
+// R60: exthost — caps-медиация зеркала (расширение сети не видит: данные доставляет daemon)
+// и activation events по шине (опрос 30с, level-triggered, курсор с головы шины — старьё не спамится)
+try {
+  setMirrorFeedProvider(() => sqlMirror.readFeed(20));
+  if (!PROBE_MODE) { exthostStartEventLoop(); console.log("[me2-daemon] exthost event loop on (30с, activation bus:*, caps-медиация зеркала)"); }
+} catch (e) { console.error(`[me2-daemon] exthost init failed: ${String(e)}`); }
 wsHttpServer.listen(WS_PORT, () => console.log(`[me2-daemon] v${VERSION} WS on :${WS_PORT} (path '/')`));
-restServer.listen(REST_PORT, () => console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`));
+restServer.listen(REST_PORT, () => { benchBootDone(); console.log(`[me2-daemon] v${VERSION} REST on :${REST_PORT}`); });
+
+// R34: legacy health-mirror na :3021 - zhivoy next-server derzhit staryy me2-watchdog s HEALTH=3021
+// (iskhodnik uzhe ispravlen na :3041, no reinkarnatsiya next-server nevmozhna iznutri). Bez zerkala
+// watchdog vechno "nezdorov" -> spawn dubley kazhdye 8s (ikh lovit strazh inkarnatsii, no eto fork-shum).
+const LEGACY_MIRROR_PORT = Number(process.env.ME2_LEGACY_MIRROR_PORT ?? 3021);
+try {
+  createServer((_rq, rs) => {
+    rs.writeHead(200, { "Content-Type": "application/json" });
+    rs.end(JSON.stringify({ ok: true, service: "me2-daemon", version: VERSION, mirror: LEGACY_MIRROR_PORT, ts: nowIso() }));
+  }).listen(LEGACY_MIRROR_PORT);
+  console.log(`e2-daemon] legacy health mirror on :${LEGACY_MIRROR_PORT} (watchdog-compat)`);
+} catch (e) { console.error(`[me2-daemon] legacy mirror :${LEGACY_MIRROR_PORT} failed: ${String(e).slice(0, 100)}`); }
 console.log(`[me2-daemon] lanes: EMERGENCY/CONTROL/MUTATION/READ_ONLY, budget 24/60s, actions: ${knownActions().length} (boot ${BOOT_TS})`);

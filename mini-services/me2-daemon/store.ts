@@ -14,10 +14,16 @@ import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const HERE = join(dirname(fileURLToPath(import.meta.url)), "data");
+// R51 (фаза C): ME2_DATA_DIR позволяет поднять изолированный инстанс (gate-probe CI,
+// песочницы) без конфликтов с production-каталогом. По умолчанию — как раньше.
+const HERE = process.env.ME2_DATA_DIR || join(dirname(fileURLToPath(import.meta.url)), "data");
 mkdirSync(HERE, { recursive: true });
 
-export const db = new Database(join(HERE, "me2.db"));
+/** Версия daemon'а — единый источник (R49): health, /state.capabilities, eval, UI. */
+export const VERSION = "0.51.0";
+
+export const DB_FILE = join(HERE, "me2.db");
+export const db = new Database(DB_FILE);
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA synchronous = NORMAL;");
 db.exec("PRAGMA busy_timeout = 5000;");
@@ -104,6 +110,10 @@ const taskCols = (db.query(`PRAGMA table_info(tasks)`).all() as Array<{ name: st
 if (!taskCols.includes("parent_id")) db.exec(`ALTER TABLE tasks ADD COLUMN parent_id TEXT`);
 // v0.9.0: рефлексия провала (паттерн Reflexion) — детерминированный диагноз, child-ретрай читает как эпизодическую память
 if (!taskCols.includes("reflection")) db.exec(`ALTER TABLE tasks ADD COLUMN reflection TEXT`);
+// R27 C1: Mission Control — проекция objectives→tasks→agents→effects (fails-closed, zero-authority)
+if (!taskCols.includes("objective_id")) db.exec(`ALTER TABLE tasks ADD COLUMN objective_id TEXT`);
+// R29 C3: reviewer-agent — LLM-ревью результата против спека (антифальшь, директива оператора)
+if (!taskCols.includes("review")) db.exec(`ALTER TABLE tasks ADD COLUMN review TEXT`);
 
 export type AgentRow = {
   id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
@@ -111,7 +121,7 @@ export type AgentRow = {
 export type TaskRow = {
   id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
-  error: string | null; reflection: string | null; created_at: string; updated_at: string;
+  error: string | null; reflection: string | null; objective_id: string | null; review: string | null; created_at: string; updated_at: string;
 };
 export type EventRow = {
   seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string;
@@ -267,12 +277,12 @@ export function deleteAgent(id: string) {
 }
 
 // ── tasks ─────────────────────────────────────────────────────────
-export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "reflection" | "created_at" | "updated_at" | "parent_id"> & { parent_id?: string | null; reflection?: string | null };
+export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "reflection" | "created_at" | "updated_at" | "parent_id" | "objective_id"> & { parent_id?: string | null; objective_id?: string | null; reflection?: string | null };
 export function createTask(t: NewTask): TaskRow {
-  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, reflection: t.reflection ?? null, created_at: nowIso(), updated_at: nowIso() };
-  db.query(`INSERT INTO tasks (id,title,spec,role,parent_id,status,agent_id,max_steps,steps,result,error,reflection,created_at,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(row.id, row.title, row.spec, row.role, row.parent_id, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.reflection, row.created_at, row.updated_at);
+  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, objective_id: t.objective_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, reflection: t.reflection ?? null, created_at: nowIso(), updated_at: nowIso() };
+  db.query(`INSERT INTO tasks (id,title,spec,role,parent_id,status,agent_id,max_steps,steps,result,error,reflection,objective_id,created_at,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(row.id, row.title, row.spec, row.role, row.parent_id, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.reflection, row.objective_id, row.created_at, row.updated_at);
   return row;
 }
 export function listTasks(opts: { includeArchived?: boolean } = {}): TaskRow[] {
@@ -289,6 +299,11 @@ export function nextReadyTask(agentRole: string): TaskRow | null {
   return (db.query(
     `SELECT * FROM tasks WHERE status='READY' AND (role IS NULL OR role='' OR role=?) ORDER BY created_at LIMIT 1`,
   ).get(agentRole) as TaskRow | null) ?? null;
+}
+/** E3 (R34): pool-исполнители универсальны — берут ЛЮБУЮ READY-задачу (дежурная смена,
+ *  не ролевая матрица); чинит вечное READY узких ролей без агента-носителя. */
+export function nextReadyTaskAny(): TaskRow | null {
+  return (db.query(`SELECT * FROM tasks WHERE status='READY' ORDER BY created_at LIMIT 1`).get() as TaskRow | null) ?? null;
 }
 export function updateTask(id: string, patch: Partial<TaskRow>) {
   const cols = Object.keys(patch);

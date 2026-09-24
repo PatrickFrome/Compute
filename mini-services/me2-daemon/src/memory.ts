@@ -11,8 +11,9 @@
  *
  * Слои: episodic (что случилось) / semantic (факты-уроки) / procedural (как делать).
  */
-import { db, emit, nowIso } from "../store";
+import { db, emit, nowIso, DB_FILE } from "../store";
 import { statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -135,7 +136,7 @@ export function memoryStatus(): {
     oldest = oldest === null ? r.oldest : Math.min(oldest, r.oldest);
     lastWrite = lastWrite === null ? r.last_write : Math.max(lastWrite, r.last_write);
   }
-  const dbPath = join(dirname(fileURLToPath(import.meta.url)), "..", "data", "me2.db");
+  const dbPath = DB_FILE; // R51: единый источник пути (ME2_DATA_DIR-совместимый, фикс gate-probe)
   let dbBytes = 0;
   try { dbBytes = statSync(dbPath).size; } catch { /* noop */ }
   return { ok: true, rows: total, by_kind: byKind, db_bytes: dbBytes, oldest, last_write: lastWrite, db_path: "data/me2.db" };
@@ -191,6 +192,189 @@ export function importReflectionLesson(taskId: string, title: string, lesson: st
       tags: ["lesson", "reflexion"], importance: 0.8,
     });
   } catch { /* noop */ }
+}
+
+/**
+ * E5 (R35) — MEMORY TOKEN ECONOMY: дельта-доставка памяти вместо полного блока
+ * (расширение sense-diffing D1 на слой памяти; тренд 2026: progressive disclosure / context economy).
+ *
+ * Честность (без обмана LLM):
+ *  - STICKY-ядро: критичные SEMANTIC-уроки (importance ≥ 0.85) НЕ элиминируются никогда;
+ *  - элиминация только для записей, уже доставленных ЭТОМУ consumer'у БЕЗ ИЗМЕНЕНИЙ в окно TTL (30м)
+ *    — у продолжающего контекста они уже в истории; элиминированные ключи видны одной строкой;
+ *  - любое изменение контента (hash) возвращает запись в «свежие» — тампер памяти не теряется;
+ *  - самодескриптивный заголовок блока + полная доставка при первом контакте consumer'а.
+ * Метрики: bytes_full (канонический полный блок) vs bytes_compact, saved_pct ∈ [0..0.95], журнал 200.
+ */
+export const ECON_TTL_MS = 30 * 60_000;
+export const STICKY_IMPORTANCE = 0.85;
+const ECON_JOURNAL_CAP = 200;
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS memory_delivery (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  consumer TEXT NOT NULL,
+  mem_id INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  delivered_at INTEGER NOT NULL,
+  UNIQUE(consumer, mem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memdel_consumer ON memory_delivery(consumer, delivered_at);
+CREATE TABLE IF NOT EXISTS memory_economy (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  consumer TEXT NOT NULL,
+  full_n INTEGER NOT NULL, compact_n INTEGER NOT NULL,
+  sticky_n INTEGER NOT NULL, fresh_n INTEGER NOT NULL, familiar_n INTEGER NOT NULL,
+  bytes_full INTEGER NOT NULL, bytes_compact INTEGER NOT NULL,
+  saved_pct REAL NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memecon_at ON memory_economy(at);
+`);
+
+function memContentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+export interface MemEconMetrics {
+  consumer: string; full_n: number; compact_n: number;
+  sticky_n: number; fresh_n: number; familiar_n: number;
+  bytes_full: number; bytes_compact: number; saved_pct: number;
+}
+
+export interface MemEconDelivery { block: string; used: MemRow[]; metrics: MemEconMetrics }
+
+/**
+ * Экономная доставка памяти consumer'у.
+ * opts.ids — детерминированная выборка (eval); по умолчанию глобальный score-топ (memSearch).
+ */
+export function memBlockEconomy(
+  consumerRaw: string, n = 5, budgetChars = 1400, opts: { ids?: number[] } = {},
+): MemEconDelivery {
+  const consumer = String(consumerRaw ?? "").trim().slice(0, 64) || "default";
+  const take = Math.max(1, Math.min(50, Math.floor(Number(n) || 5)));
+  const budget = Math.max(200, Math.min(8000, Math.floor(Number(budgetChars) || 1400)));
+
+  let sel: MemRow[];
+  if (opts.ids && opts.ids.length) {
+    sel = opts.ids
+      .map((id) => db.query(`SELECT * FROM memory WHERE id=?`).get(Number(id)) as MemRow | undefined)
+      .filter((r): r is MemRow => Boolean(r))
+      .slice(0, take);
+  } else {
+    sel = memSearch({ limit: take }).slice(0, take);
+  }
+
+  const now = Date.now();
+  const delivered = db.query(
+    `SELECT mem_id, content_hash, delivered_at FROM memory_delivery WHERE consumer=?`,
+  ).all(consumer) as Array<{ mem_id: number; content_hash: string; delivered_at: number }>;
+  const delMap = new Map(delivered.map((d) => [d.mem_id, d]));
+
+  const sticky: MemRow[] = [];
+  const fresh: MemRow[] = [];
+  const familiar: MemRow[] = [];
+  for (const m of sel) {
+    const h = memContentHash(m.content);
+    const d = delMap.get(m.id);
+    // STICKY = критичные SEMANTIC-уроки (review-вердикты, reward-hack, уроки ≥0.85) —
+    // не элиминируются никогда. Эпизоды (kind=episodic, даже FAILED 0.85) — история:
+    // их уроки уже извлечены в semantic-слой, эпизод честно элиминируем.
+    if (m.kind === "semantic" && m.importance >= STICKY_IMPORTANCE) sticky.push(m);
+    else if (d && d.content_hash === h && now - d.delivered_at < ECON_TTL_MS) familiar.push(m);
+    else fresh.push(m);
+  }
+
+  // канонический ПОЛНЫЙ блок (тот же алгоритм, что memBlock) — база сравнения
+  const fullLines: string[] = [];
+  let fullTotal = 0;
+  for (const m of sel) {
+    const line = `- [${m.kind}] ${m.key}: ${m.content.slice(0, 240)}`;
+    if (fullTotal + line.length > budget) continue;
+    fullLines.push(line); fullTotal += line.length;
+  }
+
+  // КОМПАКТНЫЙ блок: sticky+fresh целиком, familiar — одной строкой ключей
+  const compactLines: string[] = [];
+  let compactTotal = 0;
+  const used: MemRow[] = [];
+  for (const m of [...sticky, ...fresh]) {
+    const line = `- [${m.kind}] ${m.key}: ${m.content.slice(0, 240)}`;
+    if (compactTotal + line.length > budget) continue;
+    compactLines.push(line); compactTotal += line.length; used.push(m);
+  }
+  const header = compactLines.length
+    ? `TEAM MEMORY (economy: ${fresh.length} новых/изменённых, ${familiar.length} знакомых элиминировано — детали по ключам: memory_search):`
+    : "";
+  if (familiar.length) {
+    const elided = `- … уже знакомо (${familiar.length}): ${familiar.map((f) => f.key).join(", ")}`;
+    if (compactTotal + elided.length <= budget + 80) compactLines.push(elided);
+  }
+  const compactBlock = compactLines.length ? `${header}\n${compactLines.join("\n")}` : "";
+
+  // метрика — по СТРОКАМ памяти: заголовок есть у ОБОИХ схем (протокольный оверхед),
+  // считать его «отрицательной экономией» базлайна — нечестно. Строки: полная выборка vs
+  // sticky+fresh+элиминированная строка ключей → базлайн = 0 ровно, элиминация > 0.
+  const bytesFull = fullLines.join("\n").length;
+  const bytesCompact = compactLines.join("\n").length;
+  const savedPct = bytesFull > 0 && bytesCompact < bytesFull
+    ? Math.min(0.95, Math.round((1 - bytesCompact / bytesFull) * 1000) / 1000)
+    : 0;
+
+  // регистрация доставки (включая повторный touch familiar — продлевает окно честно)
+  for (const m of sel) {
+    db.query(
+      `INSERT INTO memory_delivery (consumer, mem_id, content_hash, delivered_at) VALUES (?,?,?,?)
+       ON CONFLICT(consumer, mem_id) DO UPDATE SET content_hash=excluded.content_hash, delivered_at=excluded.delivered_at`,
+    ).run(consumer, m.id, memContentHash(m.content), now);
+  }
+  memTouch(used.map((u) => u.id));
+
+  const metrics: MemEconMetrics = {
+    consumer, full_n: sel.length, compact_n: used.length,
+    sticky_n: sticky.length, fresh_n: fresh.length, familiar_n: familiar.length,
+    bytes_full: bytesFull, bytes_compact: bytesCompact, saved_pct: savedPct,
+  };
+  db.query(
+    `INSERT INTO memory_economy (consumer, full_n, compact_n, sticky_n, fresh_n, familiar_n, bytes_full, bytes_compact, saved_pct, at)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+  ).run(consumer, metrics.full_n, metrics.compact_n, metrics.sticky_n, metrics.fresh_n, metrics.familiar_n, bytesFull, bytesCompact, savedPct, now);
+  db.query(
+    `DELETE FROM memory_economy WHERE id NOT IN (SELECT id FROM memory_economy ORDER BY id DESC LIMIT ${ECON_JOURNAL_CAP})`,
+  ).run();
+  emit("MEMORY_ECONOMY", {
+    consumer, saved_pct: savedPct, bytes_full: bytesFull, bytes_compact: bytesCompact,
+    fresh: metrics.fresh_n, familiar: metrics.familiar_n,
+  });
+  return { block: compactBlock, used, metrics };
+}
+
+/** Агрегат экономики памяти: журнал + суммы по consumer'ам. */
+export function memoryEconStatus(): {
+  ok: true; deliveries: number; avg_saved_pct: number; bytes_saved_total: number;
+  by_consumer: Array<{ consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number }>;
+  journal: Array<MemEconMetrics & { id: number; at: number }>;
+} {
+  const total = db.query(`SELECT COUNT(*) n, COALESCE(AVG(saved_pct),0) avg_saved, COALESCE(SUM(bytes_full - bytes_compact),0) bytes_saved FROM memory_economy`)
+    .get() as { n: number; avg_saved: number; bytes_saved: number };
+  const byConsumer = db.query(
+    `SELECT consumer, COUNT(*) deliveries, AVG(saved_pct) avg_saved_pct, SUM(bytes_full - bytes_compact) bytes_saved, MAX(at) last_at
+     FROM memory_economy GROUP BY consumer ORDER BY last_at DESC LIMIT 8`,
+  ).all() as Array<{ consumer: string; deliveries: number; avg_saved_pct: number; bytes_saved: number; last_at: number }>;
+  const journal = db.query(`SELECT * FROM memory_economy ORDER BY id DESC LIMIT 30`)
+    .all() as Array<MemEconMetrics & { id: number; at: number }>;
+  return {
+    ok: true, deliveries: total.n, avg_saved_pct: Math.round(total.avg_saved * 1000) / 1000,
+    bytes_saved_total: total.bytes_saved, by_consumer: byConsumer, journal,
+  };
+}
+
+/** Очистка следов consumer'а (eval/самоочистка) — возвращает число удалённых строк. */
+export function memEconCleanup(consumer: string): { delivery: number; journal: number } {
+  const c = String(consumer).slice(0, 64);
+  const d = db.query(`DELETE FROM memory_delivery WHERE consumer=?`).run(c);
+  const j = db.query(`DELETE FROM memory_economy WHERE consumer=?`).run(c);
+  return { delivery: Number(d.changes), journal: Number(j.changes) };
 }
 
 export const MEMORY_TS = nowIso;

@@ -1,0 +1,13 @@
+{
+ "schema": "me2.pr-close-manifest.v1",
+ "repo": "PatrickFrome/Compute",
+ "mode": "dry-run",
+ "cutoff": "2026-09-09T23:25:13.720923+00:00",
+ "generated_at": "2026-09-23T23:25:20.755502+00:00",
+ "open_pr_total": 316,
+ "stale_total": 0,
+ "batch": 0,
+ "closed": {},
+ "errors": 0,
+ "stale_preview": []
+}
