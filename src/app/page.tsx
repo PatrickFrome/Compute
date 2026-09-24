@@ -80,7 +80,7 @@ type FleetData = { ok: boolean; nodes: { id: string; kind: string; state: string
 type SuData = { ok: boolean; check: { ok: boolean; verdict: string; local_head: string | null; remote_head: string | null; behind: number | null; ahead: number | null; dirty_files: number; version: string; error?: string }; journal: { id: number; op: string; from_sha: string | null; to_sha: string | null; result: string; detail: string | null; at: number }[] };
 type RsiP = { id: string; title: string; status: string; source: string; artifact: string | null; evidence: string; created_at: number };
 type RsiData = { ok: boolean; proposals: RsiP[]; stats: { total: number; proposed: number; adopted: number; rejected: number; rolled_back: number }; artifacts: number };
-type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id: string; name: string; old_ref: string; verdict: string; evidence: string }[]; gaps: { id: string; title: string; status: string; closure: string }[] };
+type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id: string; name: string; old_ref: string; verdict: string; evidence: string; cursor_ref?: string; parity?: string }[]; gaps: { id: string; title: string; status: string; closure: string }[] };
 type SenseTargetT = { ref: string; role: string; name: string };
 type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
 type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
@@ -2751,12 +2751,15 @@ export default function MissionControl() {
                                 <span className="text-[9px] uppercase tracking-wider text-zinc-600">матрица механик · порт M1–M18</span>
                                 {mech && <span className={`font-mono text-[9px] ${mech.mechanics.every((m) => m.verdict === "WORKS") ? "text-emerald-400" : "text-amber-400"}`}>{mech.verdict}</span>}
                               </div>
-                              <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Реестр механик ME1–ME16">
+                              <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Реестр механик ME1–ME30">
                                 {(mech?.mechanics ?? []).map((m) => (
-                                  <div key={m.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]" title={`${m.name} — ${m.evidence}`}>
+                                  <div key={m.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]" title={`${m.name} — ${m.evidence}${m.cursor_ref ? ` · Cursor: ${m.cursor_ref}` : ""}`}>
                                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.verdict === "WORKS" ? "bg-emerald-400" : m.verdict === "CAVEAT" ? "bg-amber-400" : "bg-zinc-600"}`} aria-hidden />
                                     <span className="w-8 shrink-0 font-semibold text-zinc-400">{m.id}</span>
                                     <span className="min-w-0 flex-1 truncate text-zinc-500">{m.name}</span>
+                                    {m.parity && (
+                                      <span className={`hidden shrink-0 rounded px-1 py-px text-[8px] font-semibold uppercase tracking-wide sm:inline ${m.parity === "PARITY" ? "bg-emerald-500/15 text-emerald-400" : m.parity === "PARTIAL" ? "bg-amber-500/15 text-amber-400" : m.parity === "MISSING" ? "bg-rose-500/15 text-rose-400" : "bg-zinc-500/15 text-zinc-500"}`} title={`Cursor: ${m.cursor_ref ?? "—"} · матрица R21/R22`}>{m.parity}</span>
+                                    )}
                                     <span className="hidden shrink-0 text-zinc-700 md:inline" title="старая механика">← {m.old_ref}</span>
                                   </div>
                                 ))}

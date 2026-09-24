@@ -57,20 +57,24 @@ function repoRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 }
 
-/** ME18: Electron-клиент shell (R21) — вердикт из живого состояния файлов + CI */
+/** ME30: desktop-клиент (Electron, R46-R64) — вердикт из живого состояния файлов + CI */
 export function clientShellStatus() {
   const root = repoRoot();
   const rels = [
-    "electron/main.cjs",
-    "electron/preload.cjs",
-    "electron/package.json",
+    "desktop/src/main.ts",
+    "desktop/src/daemon-supervisor.ts",
+    "desktop/src/gateway.ts",
+    "desktop/src/tab-registry.ts",
+    "desktop/src/updater.ts",
+    "desktop/src/preload.ts",
   ];
   const files = rels.map((rel) => join(root, rel));
   const present = files.filter((f) => existsSync(f)).length;
-  const ci = existsSync(join(root, ".github", "workflows", "electron-build.yml"));
+  const builder = existsSync(join(root, "desktop", "electron-builder.yml"));
+  const ci = existsSync(join(root, ".github", "workflows", "desktop-build.yml"));
   const tauri = existsSync(join(root, "src-tauri", "tauri.conf.json"));
-  const electron = present === files.length && ci;
-  return { present, total: files.length, ci, tauri, electron };
+  const desktop = present === files.length && builder && ci;
+  return { present, total: files.length, builder, ci, tauri, desktop };
 }
 
 export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
@@ -347,15 +351,24 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     if (p) { r.cursor_ref = p.cursor_ref; r.parity = p.parity; }
   }
 
-  // ME18: клиент Electron (R21) — по живому состоянию файлов
+  // ME41: desktop-клиент (R21 скелет → R46-R64 desktop/ — канон после smart-merge R65)
   const cs = clientShellStatus();
   rows.push({
-    id: "ME18", name: "Electron client shell (sidecar+secure window)", old_ref: "легаси-браузер MetaEngine (Electron)",
-    verdict: cs.electron && cs.tauri ? "WORKS" : "CAVEAT",
-    evidence: `electron: ${cs.present}/${cs.total} файлов, CI workflow: ${cs.ci ? "да" : "нет"}; tauri: ${cs.tauri ? "есть (альтернатива)" : "нет"}; GUI-run в песочнице невозможен — сборка=CI`,
+    id: "ME41", name: "Desktop client: Electron (supervisor+gateway+tabs+updater)", old_ref: "легаси-браузер MetaEngine (Electron)",
+    verdict: cs.desktop ? "WORKS" : "CAVEAT",
+    evidence: `desktop/src: ${cs.present}/${cs.total} модулей, electron-builder: ${cs.builder ? "да" : "нет"}, CI: ${cs.ci ? "да" : "нет"}; tauri: ${cs.tauri ? "есть (альтернатива)" : "нет"}; GUI-run в песочнице невозможен — сборка=CI`,
     cursor_ref: "VS Code fork shell (полный продукт)",
-    parity: cs.electron ? "PARTIAL" : "MISSING",
+    parity: cs.desktop ? "PARTIAL" : "MISSING",
   });
+
+  // ME18–ME40 (линия R21-R64): parity-метки по §34 — UNKNOWN до свипа docs.cursor.com (R66)
+  const unknownNoCursor = new Set(["ME18","ME19","ME20","ME21","ME22","ME23","ME24","ME25","ME26","ME27","ME28","ME29","ME30","ME31","ME32","ME33","ME34","ME35","ME36","ME37","ME38","ME39","ME40"]);
+  for (const r of rows) {
+    if (unknownNoCursor.has(r.id) && !r.parity) {
+      r.parity = "UNKNOWN";
+      r.cursor_ref = "— (нет публичного подтверждения; свип docs.cursor.com → R66)";
+    }
+  }
 
   const works = rows.filter((r) => r.verdict === "WORKS").length;
   return {
