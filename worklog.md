@@ -1097,3 +1097,23 @@ Stage Summary:
 - Честные ограничения раунда: квоты z-ai (web_search/vision 429) → VLM-ревью и свежие свайпы официальных доков Cursor перенесены в R22; git-push заблокирован потерей токена.
 - Бэклог R22 (P1 Core Cursor Parity): ① свайпы docs.cursor.com → конвертировать UNKNOWN→{PARITY/PARTIAL/MISSING}; ② composer/chat-агент поверх шины ME1 в Electron-клиенте; ③ ME9 tree-sitter+embeddings (@codebase parity); ④ VLM-верификация r21/r21-mobile; ⑤ electron-updater (P8) + восстановление секретов оператором.
 - Скриншоты: download/r21-mechanics-parity.png, download/r21-mobile-390.png; ресёрч: research/2026/R21-ELECTRON-CLIENT-RESEARCH.md, R21-CURSOR-PARITY-MATRIX.md.
+---
+Task ID: R65-SMART-MERGE-R56-64-PLUS-R21-20260924
+Agent: Z.ai Code (main)
+Task: «Продолжи разработку по roadmap устранения gap, помни что мы разрабатываем клиент на базе электрон, делай тесты и ресёрчи» + оператор восстановил секреты (GitHub admin-токен, Supabase service JWT, JWT secret) → разблокированы push/CI/self-update/SQL-зеркало.
+
+Work Log:
+- R65-0 (секреты): /home/z/.a2/.github.env (GITHUB_TOKEN_ADMIN), /home/z/.a2/supabase-cloud.env (URL + SERVICE_ROLE_JWT + JWT_SECRET), /home/z/.ghtoken-sandbox восстановлены, perms 600; значения НЕ попадали ни в один git-трекнутый файл (guard git-sync.sh активен).
+- R65-1 (ME7 живой тест): POST /selfupdate op=check → NO_TOKEN→DIVERGED (токен жив) → после push: **UP_TO_DATE (behind=0, ahead=0, dirty=0) — CAVEAT ME7 закрыт, verdict WORKS**.
+- R65-2 (диагностика diverged): remote sandbox/me2-os = 5e1b898 — ПАРАЛЛЕЛЬНАЯ линия R56–R64 (daemon v0.51.0: /exec /file classifier OS-sandbox workbench /ui MCP eval-харнесс RLS-audit RPC-reconcile self-audit; desktop/ = Electron-клиент R46-R64; корпус Cursor R61: 329 стр./360 capabilities/138-строчная parity-матрица/gap analysis/roadmap; их матрица механик ME1–ME40). merge-base=13257cc (R20). Локальная линия: R21 (parity-поля, parity-чипы, electron/ скелет, CI).
+- R65-3 (SMART-MERGE): конфликты eslint.config.mjs (union ignores +desktop/release), index.ts (взят их v0.51.0, VERSION→0.52.0 в store.ts), page.tsx (взят их MC v5 целиком, parity-чипы повторно наложены на блок матрицы, aria-label ME1–ME41), worklog.md (обе истории сохранены; нумерация раундов столкнулась — их R21–R64 и наши R21; наш раунд продолжен как R65). electron/ УДАЛЁН как дубликат — desktop/ канон; electron-build.yml → desktop-build.yml (ретаргет на desktop/: typecheck→tsc→electron-builder smoke, 3 ОС); clientShellStatus() пересчитан под desktop/src (6 модулей+builder+CI); наш ряд переименован ME30→ME41 (коллизия с их ME30 DB-гигиена); ME18–ME40 получили честные parity=UNKNOWN («свайп docs.cursor.com → R66», §34). Merge-коммит d8a1474 + follow-up 0127f0b.
+- R65-4 (тесты): рестарт daemon → v0.52.0, /mechanics **41 строка, 0 дубликатов, 100% parity-покрытие** (PARITY 3 / PARTIAL 6 / UNKNOWN 32), ME41 desktop=WORKS (6/6 модулей), ME7=WORKS (UP_TO_DATE); **POST /eval/run → 65/65 PASS** (их регресс-харнесс на слитом коде); lint 0/0; YAML desktop-build валиден.
+- R65-5 (push+CI): git-sync.sh → sandbox/me2-os 0127f0b; GitHub Actions: **desktop-build = SUCCESS с первого прогона (3 ОС)** — первый CI для desktop/ вообще (их линия его не имела); tauri-build = in_progress (успешно на 5e1b898, на 0127f0b завершение — фоновый добор).
+- R65-6 (QA MC v5): agent-browser :81 — панель МИССИЯ→МЕХАНИКИ: **41 parity-чип в DOM, ME41 ряд, вердикт «29/41 WORKS»**; мобайл 390: hscroll=false; скриншоты download/r65-mc-v5-parity.png, r65-mobile-390.png.
+- R65-7 (ресёрч-реконсилиация): R21-CURSOR-PARITY-MATRIX.md и R21-ELECTRON-CLIENT-RESEARCH.md дополнены RECONCILIATION-разделами: канон parity-учёта = R61-корпус (360 capabilities) + живое поле /mechanics; канон клиента = desktop/; UNKNOWN ME18–ME40 конвертируются в R66 сверкой с R61-матрицей (перенос вердиктов с источниками, не изобретение).
+
+Stage Summary:
+- **Две параллельные линии истории ME2 OS объединены в одну** (высшая директива «electron+me2 = одна система» теперь и структурно, и исторически однозначна): daemon v0.52.0 = их P0-a/b/2 инструменты + наша parity-осведомлённость; desktop/ = канонический Electron-клиент с CI; MC v5 с parity-чипами ME1–ME41.
+- Инварианты: actions 47/47, eval 65/65 PASS, lint 0/0, secrets-guard чист, mobile 390 без hscroll.
+- ME7 SELF-UPDATE: CAVEAT→WORKS (операторские токены восстановлены).
+- Бэклог R66: ① конвертация 32 UNKNOWN в parity-вердикты сверкой с R61-корпусом; ② упаковка bun-рантайма для desktop/supervisor (packaged-профиль); ③ P1-гапы из R61-GAP-ANALYSIS (15 P0) — следующий по DAG; ④ tauri-build зелёность на 0127f0b; ⑤ VLM-ревью r65 скриншотов (квота).

@@ -52,3 +52,17 @@ ME17 browser sense + client tabs ──┤
                                    └→ P2 agent runtime (chat/composer поверх шины ME1)
 P2 → P3 fleet(>1 нода) → P4 computer-use → P5 automation → P6 self-heal → P7 RSI → P8 self-update → P9 beyond
 ```
+
+---
+
+## RECONCILIATION (R65, smart-merge)
+
+Smart-merge с параллельной линией (R56–R64) принёс **канонический корпус R61**:
+`research/2026/R61-CAPABILITY-ENCYCLOPEDIA.md` (360 capabilities, официальный корпус
+Cursor 329 стр.), `R61-PARITY-MATRIX.md` (138 строк, JSON), `R61-GAP-ANALYSIS.md`
+(15 P0), `R61-ROADMAP.md` (P0–P9), `R61-ARCHITECTURE-MODEL.md`.
+
+Статусы: **этот файл (v1, ME1–ME18) — исторический артефакт R21-линии**; канон
+parity-учёта = R61-корпус + живое поле parity в `/mechanics` (ME1–ME41 после слияния).
+UNKNOWN-метки ME18–ME40 конвертируются в R66 сверкой с R61-матрицей (у неё есть
+источники — переносим вердикты, не изобретаем).

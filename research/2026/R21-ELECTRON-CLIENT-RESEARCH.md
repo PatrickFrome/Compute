@@ -81,3 +81,18 @@ GitHub-токен потерян при env-reset (см. worklog R21-0) → push
   **деливерабл Capability/Parity Matrix** (файл + живое поле в /mechanics).
 - Следующий gap (P1 Core Cursor Parity): табы/композер в клиенте (Cursor-подобный
   composer-UX поверх sense-слоя ME17) — либо дерево chat/composer-агента.
+
+---
+
+## RECONCILIATION (R65): desktop/ — канон
+
+Smart-merge обнаружил: параллельная линия уже реализовала этот документ на R46–R64 —
+`desktop/` (metaengine-desktop v0.40.0): daemon-supervisor (вечный, backoff),
+встроенный gateway (замена Caddy, XTransformPort http+ws), tab-registry (панели +
+нативные WEB-вкладки), updater из GitHub, окно Mission Control v5.
+
+Вердикт: **наш R21-скелет electron/ выведен из состава (дубликат), desktop/ = единственная
+Electron-оболочка ME2 OS**. Уникальный вклад R21-линии сохранён: CI desktop-build.yml
+(3 ОС, typecheck→tsc→electron-builder smoke; их линия CI для desktop не имела),
+parity-поля в /mechanics, parity-чипы MC. Backlog: упаковка bun-рантайма для supervisor
+в packaged-сборке.
