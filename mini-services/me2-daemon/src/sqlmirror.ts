@@ -17,6 +17,7 @@
 // Zero-authority: модуль только читает локальный event-log и пишет в облако; на шину,
 // daemon-решения и self-update не влияет. 47-действий инвариант не трогается (вне шины).
 import { Database } from "bun:sqlite";
+import { emit } from "../store";
 import { tokenGet, onTokenChange } from "./tokens";
 
 export const SQLMIRROR_SCHEMA = "me2.sqlmirror.v1";
@@ -47,6 +48,8 @@ export interface SqlMirrorStatus {
   pending: number;
   batches_ok: number;
   batches_err: number;
+  collisions_total: number;
+  last_collision_seq: number | null;
   last_error: string | null;
   last_ok_at: number | null;
   last_probe_at: number | null;
@@ -96,6 +99,8 @@ export class SqlMirror {
   private timer: ReturnType<typeof setInterval> | null = null;
   private errUntil = 0;
   private running = false;
+  private collisions = 0;
+  private lastCollisionSeq: number | null = null;
 
   constructor(private db: Database) {
     this.key = pickCredential();
@@ -229,6 +234,11 @@ export class SqlMirror {
         this.lastError = null;
         this.state = "LIVE";
         this.batchesErr = 0;
+        // R71 (аудит §16/§4): таблица зеркала РАЗДЕЛЯЕТСЯ поколениями песочниц (seq-PK не
+        // поколенио-безопасен) — ignore-duplicates молча роняет нашу строку, если чужое
+        // поколение уже заняло seq. Конвертируем тихую потерю в ВИДЫЙ сигнал: после каждой
+        // пачки проверяем hash последней строки; несовпадение = MIRROR_COLLISION.
+        void this.verifyBatchTail(rows[rows.length - 1]);
       } catch (e) {
         this.batchesErr += 1;
         this.lastError = String(e?.message || e).slice(0, 140);
@@ -237,6 +247,50 @@ export class SqlMirror {
     } finally {
       this.running = false;
     }
+  }
+
+  /** R71: детект межпоколенческих коллизий (hash последней строки ≠ локальному). */
+  private async verifyBatchTail(last: { seq: number; hash: string | null }): Promise<void> {
+    if (!this.key) return;
+    try {
+      const r = await fetch(`${restBase()}/${TABLE}?seq=eq.${last.seq}&select=hash`, {
+        headers: { apikey: this.key, Authorization: `Bearer ${this.key}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return; // проба не мешает каналу — ошибка доставки уже видна в статусе
+      const rows = (await r.json()) as Array<{ hash: string }>;
+      const remote = rows[0]?.hash ?? "";
+      if (remote && remote !== (last.hash ?? "")) {
+        this.collisions += 1;
+        this.lastCollisionSeq = last.seq;
+        console.log(`[sqlmirror] MIRROR_COLLISION seq=${last.seq} — в зеркале чужая строка (другое поколение daemon), наша потеряна молча; оператору: sql/0004 (UNIQUE(boot_id,seq))`);
+        try {
+          emit("MIRROR_COLLISION", { seq: last.seq, expected: (last.hash ?? "").slice(0, 12), got: remote.slice(0, 12) });
+        } catch { /* zero-authority: событие не критично */ }
+      }
+    } catch { /* сеть/таймаут — не мешает каналу */ }
+  }
+
+  /** R71: детект межпоколенческих коллизий (hash последней строки ≠ локальному). */
+  private async verifyBatchTail(last: { seq: number; hash: string | null }): Promise<void> {
+    if (!this.key) return;
+    try {
+      const r = await fetch(`${restBase()}/${TABLE}?seq=eq.${last.seq}&select=hash`, {
+        headers: { apikey: this.key, Authorization: `Bearer ${this.key}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return; // проба не мешает каналу — ошибка доставки уже видна в статусе
+      const rows = (await r.json()) as Array<{ hash: string }>;
+      const remote = rows[0]?.hash ?? "";
+      if (remote && remote !== (last.hash ?? "")) {
+        this.collisions += 1;
+        this.lastCollisionSeq = last.seq;
+        console.log(`[sqlmirror] MIRROR_COLLISION seq=${last.seq} — в зеркале чужая строка (другое поколение daemon), наша потеряна молча; оператору: sql/0004 (UNIQUE(boot_id,seq))`);
+        try {
+          emit("MIRROR_COLLISION", { seq: last.seq, expected: (last.hash ?? "").slice(0, 12), got: remote.slice(0, 12) });
+        } catch { /* zero-authority: событие не критично */ }
+      }
+    } catch { /* сеть/таймаут — не мешает каналу */ }
   }
 
   /**
@@ -295,6 +349,8 @@ export class SqlMirror {
       pending,
       batches_ok: this.batchesOk,
       batches_err: this.batchesErr,
+      collisions_total: this.collisions,
+      last_collision_seq: this.lastCollisionSeq,
       last_error: this.lastError,
       last_ok_at: this.lastOkAt,
       last_probe_at: this.lastProbeAt,

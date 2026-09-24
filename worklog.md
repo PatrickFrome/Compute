@@ -1245,3 +1245,24 @@ Stage Summary:
 - Вердикт по контурам: REST-шина ПРОДАКШН-ВЕРИФИЦИРОВАНА (маршруты+идемпотентность); webhooks-in ПРОДАКШН-ВЕРИФИЦИРОВАН (fail-closed, персистентный дедуп пережил kill -9, внешний путь smee E2E); sqlmirror ИНТЕГРИРОВАН (гейт персистентен, дренаж 448->0); CI-ingress работает (tauri-build @2186305 in_progress, предыдущий a94e518 success); UI ИНТЕГРИРОВАН (WS LIVE, данные живые); LLM-плоскость — честная деградация по внешней квоте 429 (backoff x3 -> fail -> память -> governor breaker OPEN — реакция корректна)
 - Честные ограничения (не скрываю): Electron-клиент и реальный CDP-браузер вне песочницы — browser-плоскость верифицирована только REST-частью (BROWSER_TABS count=0 без клиента); preview-origin капчей-закрыт (smee-релей — боевой обходной контур); soak >30 мин не прогонялся
 - Бэклог R71: watchdog/автоперезапуск на me2-webhook-relay; P0-4 durable execution; P1 core.agent-loop harness; LLM-квота 429 — операторская задача
+
+---
+Task ID: R71
+Agent: Z.ai (main)
+Task: Продолжение сквозного аудита (раунд 2): сценарии A/E/G, конкурентность, RLS, data-consistency зеркала, soak, dead-code
+
+Work Log:
+- CI @699c5ad3 (R70-фиксы): tauri-build completed SUCCESS
+- Сценарий A (AI Coding, попытка 1): TASK_ENQUEUE -> QUEUED 8503 -> LEASED 8505 -> STEP_START 8506 -> FAILED 8507 «governor_open (39s), lane P1» — breaker честно сдержал 429-шторм, полный наблюдаемый цикл с корреляцией task_id
+- Сценарий A (попытка 2 после самовосстановления breaker OPEN->CLOSED): FAILED 429 от провайдера — механизм агента (dispatch/lease/step/fail-classification/memory) верифицирован, блокер = внешняя квота LLM (не дефект системы)
+- Сценарий G (worker failure): ghost-воркер via /workers/heartbeat (idempotent upsert OK) -> 90s без heartbeat -> WORKER_REAP reaped:1 -> OFFLINE; fossil (heartbeat -31мин) -> GC DELETE. Полный жизненный цикл подтверждён без моков
+- Concurrency: 3 раунда x (12 уникальных + 3 рейс-дубликата same-guid + 4 bad-sig) параллельно x10: дубликаты -> 200 без двойных эмиссий (проверено SQL-группировкой), bad-sig -> 401 12/12, hash-chain последних 60 событий LINKED
+- Security: /sqlmirror/ui-token — anon/mint токены выдаются, /ui HTML 0x JWT-паттернов, /hooks секрет не отдаёт (secret:"vault"); RLS-проба на строки: mint-канал 401 (известная R54-деградация, ждём sb_publishable — сильнее fail-closed), service_proxy 200 (боевой read-канал UI)
+- Data-consistency зеркала (§16): НАЙДЕН P1-РИСК — таблица me2_event_mirror разделяется поколениями песочниц (найдены строки daemon v0.51.0 от 05:56, seq до 23335+, при локальном seq 8726); seq-PK не поколенио-безопасен -> ignore-duplicates может молча терять наши строки при перекрытии. Наши ключевые события (8367/8383/8507) и хвост (4000+) в зеркале целы; seq 1-244 отсутствуют по cursor-политике первого бута (by-design). ФИКС БЕЗ DDL: детектор коллизий в sqlmirror.tick — после каждой пачки hash хвостовой строки сверяется с локальным; несовпадение -> консоль + событие MIRROR_COLLISION + счётчики collisions_total/last_collision_seq в /sqlmirror. Оператору: sql/0004 UNIQUE(boot_id,seq)
+- Dead-code (§2): Me2Core (src/core.ts, 28KB, симуляционная плоскость wrk_/tsk_) НИГДЕ не инстанцируется — 0 импортов по daemon+скриптам; вытеснен worker.ts+pool.ts+agentchat.ts. Честно помечен в шапке файла как UNUSED (не удалён — исторический референс lease/dispatch/governor)
+- Soak-срез: RSS 111-117MB @ boot+1мин (два поколения — деградации нет), DB 9.7MB + WAL 3.9MB, breaker самовосстановился OPEN->CLOSED
+
+Stage Summary:
+- daemon v0.56.1 (+коллизия-детектор): eval PASS 66/66, lint 0/0, инвариант 47/47, mirror LIVE (detector armed, collisions 0), CI @699c5ad3 SUCCESS
+- Capability-матрица R71: REST-шина PV; webhooks-in PV (вкл. рейс-дедуп); персистентность PV (kill -9, R70); worker-lifecycle PV (Scenario G полный); agent-loop PV-механизм / PARTIAL-провайдер (429 внешняя); RLS FAIL-CLOSED подтверждён (401 на mint, row-level для authenticated UNKNOWN до sb_publishable); Me2Core UNUSED (помечен); mirror-поколения: риск ЗАМЕЧЕН + детектор ЖИВОЙ
+- Бэклог R72: sql/0004 (UNIQUE(boot_id,seq)) оператору; sb_publishable от оператора для RLS-канала; P0-4 durable execution; P1 core.agent-loop harness; LLM-квота
