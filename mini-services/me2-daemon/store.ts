@@ -20,7 +20,7 @@ const HERE = process.env.ME2_DATA_DIR || join(dirname(fileURLToPath(import.meta.
 mkdirSync(HERE, { recursive: true });
 
 /** Версия daemon'а — единый источник (R49): health, /state.capabilities, eval, UI. */
-export const VERSION = "0.46.0";
+export const VERSION = "0.47.0";
 
 export const DB_FILE = join(HERE, "me2.db");
 export const db = new Database(DB_FILE);
