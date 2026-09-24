@@ -12059,3 +12059,227 @@ error: API request failed with status 429: {"error":"Too many requests, please t
 [agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
 [evidence] sent 7 events to Supabase via storage (pending: 0)
 [evidence] sent 4 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 4)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 7 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[providers] zai:glm-5.3 429/5xx → backoff 1092ms (attempt 1/4)
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[providers] zai:glm-5.3 429/5xx → backoff 1725ms (attempt 2/4)
+[evidence] sent 10 events to Supabase via storage (pending: 2)
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[providers] zai:glm-5.3 429/5xx → backoff 3316ms (attempt 3/4)
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[evidence] sent 6 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 1)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 8)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[evidence] sent 13 events to Supabase via storage (pending: 15)
+[evidence] sent 24 events to Supabase via storage (pending: 1)
+[evidence] sent 5 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 6 events to Supabase via storage (pending: 1)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 8)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 12 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 1)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[evidence] sent 2 events to Supabase via storage (pending: 8)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 9 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 5 events to Supabase via storage (pending: 0)
+[evidence] sent 8 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[providers] zai:glm-5.3 429/5xx → backoff 1151ms (attempt 1/4)
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[providers] zai:glm-5.3 429/5xx → backoff 1857ms (attempt 2/4)
+[evidence] sent 2 events to Supabase via storage (pending: 2)
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[providers] zai:glm-5.3 429/5xx → backoff 3357ms (attempt 3/4)
+Failed to make API request:  98 |                 headers: headers,
+ 99 |                 body: JSON.stringify(requestBody),
+100 |             });
+101 |             if (!response.ok) {
+102 |                 const errorBody = await response.text();
+103 |                 throw new Error(`API request failed with status ${response.status}: ${errorBody}`);
+                                ^
+error: API request failed with status 429: {"error":"Too many requests, please try again later"}
+      at createChatCompletion (/home/z/my-project/mini-services/me2-daemon/node_modules/z-ai-web-dev-sdk/dist/index.js:103:27)
+      at async chatOnce (/home/z/my-project/mini-services/me2-daemon/providers.ts:248:45)
+      at async llmRetry (/home/z/my-project/mini-services/me2-daemon/providers.ts:45:20)
+      at async <anonymous> (/home/z/my-project/mini-services/me2-daemon/providers.ts:205:29)
+      at async llmSlot (/home/z/my-project/mini-services/me2-daemon/providers.ts:27:18)
+      at async chat (/home/z/my-project/mini-services/me2-daemon/providers.ts:191:21)
+      at async agentChatTurn (/home/z/my-project/mini-services/me2-daemon/src/agentchat.ts:716:25)
+
+[evidence] sent 6 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 6 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 7 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 4 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 4 events to Supabase via storage (pending: 1)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[evidence] sent 1 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)
+[agentchat] supervisor tick: kicked=ac_mufobhqma8rnad supervisors=1
+[evidence] sent 3 events to Supabase via storage (pending: 0)

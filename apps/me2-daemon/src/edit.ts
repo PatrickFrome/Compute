@@ -27,6 +27,7 @@ import { db, emit } from "../store";
 import { recordSpan } from "./otel";
 import { execRoots } from "./exec";
 import { SB_ROOT } from "./sandbox";
+import { REPO_ROOT } from "./worktrees";
 
 export const EDIT_SCHEMA = "me2.edit.v1";
 
@@ -311,7 +312,7 @@ export function editProbeOffline(): { ok: boolean; mode: "probe_offline"; negati
   try { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, "probe.txt"), "a\n"); } catch { /* probe без FS — негативы честно не сойдут */ }
   const probeFile = join(dir, "probe.txt");
   const cases: Array<{ reason: string; plan: EditPlan }> = [
-    { reason: "root_denied", plan: planEdit("/home/z/my-project/package.json", "--- package.json\n+++ package.json\n@@ -1 +1 @@\n-a\n+b\n") },
+    { reason: "root_denied", plan: planEdit(join(REPO_ROOT, "package.json"), "--- package.json\n+++ package.json\n@@ -1 +1 @@\n-a\n+b\n") }, // REPO_ROOT вне SB/WT-корней → root_denied
     { reason: "bad_diff_headers", plan: planEdit(probeFile, "+++ /abs/path\n@@ -1 +1 @@\n-a\n+b\n") },
     { reason: "diff_required", plan: planEdit(probeFile, "") },
     { reason: "file_deletion_denied", plan: planEdit(probeFile, "--- probe.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-a\n") },

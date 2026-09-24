@@ -142,7 +142,7 @@ self.__SERVER_FILES_MANIFEST={
     }
   },
   "appDir": "/tmp/r76-merge/apps/me2-ui",
-  "relativeAppDir": "apps/me2-ui",
+  "relativeAppDir": "",
   "files": [
     ".next/routes-manifest.json",
     ".next/server/pages-manifest.json",
