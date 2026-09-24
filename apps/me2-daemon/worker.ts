@@ -11,6 +11,7 @@ import {
   listAgents, listTasks, nextReadyTask, nextReadyTaskAny, setAgentStatus, getTask, updateTask, emit, type AgentRow, type TaskRow,
 } from "./store";
 import { chat } from "./providers";
+import { isQuotaError, parkTaskQuota, PARK_MAX } from "./src/quota";
 import { recordSpan } from "./src/otel";
 import { reviewTask } from "./src/reviewer";
 import { isPoolAgent, poolAcquire, poolRelease, type PoolLeaseRow } from "./src/pool";
@@ -256,10 +257,10 @@ export function buildReflection(task: TaskRow, errMsg: string, ctx?: ReflectCtx)
       what = `Агент израсходовал все ${task.max_steps} шагов, не вызвав finish.`;
       hint = "Раздробите спецификацию на подзадачи; ретрай даёт +2 шага — используйте их на finish, а не на новые изыскания.";
     }
-  } else if (e.includes("fetch failed") || e.includes("timeout") || e.includes("econnrefused") || e.includes("provider") || e.includes("socket")) {
+  } else if (e.includes("fetch failed") || e.includes("timeout") || e.includes("econnrefused") || e.includes("provider") || e.includes("socket") || e.includes("governor") || e.includes("429") || e.includes("rate limit") || e.includes("retry-after")) {
     cause = "provider_unavailable";
-    what = "Провайдер LLM недоступен или ответил таймаутом на шаге агента.";
-    hint = "Это инфраструктурный сбой, не ошибка спецификации: проверьте провайдеров (панель АГЕНТЫ) и повторите.";
+    what = "Провайдер LLM недоступен, перегружен (429/квота/governor) или ответил таймаутом на шаге агента.";
+    hint = "Это инфраструктурный сбой, не ошибка спецификации: v0.57.0 паркует такие задачи (TASK_PARKED) и они доживают до окна квоты; проверьте /llm и повторите при необходимости.";
   } else if (e.includes("path_escape") || e.includes("enoent") || e.includes("no such file")) {
     cause = "workspace_path";
     what = "Инструмент workspace получил неверный или запрещённый путь.";
@@ -414,12 +415,21 @@ async function runAgentTask(agent: AgentRow, task: TaskRow) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (leaseAlive(task.id)) {
-      const refl = buildReflection(task, msg, { toolCalls, parseFails });
-      updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500), reflection: refl });
-      let cause: string | undefined;
-      try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
-      emit("TASK_FAILED", { error: msg.slice(0, 300), cause }, agent.id, task.id);
-      fleetStep(lease, task, agent.id, "fail", { step: 0, preview: msg });
+      // v0.57.0 quota-resilience (L4): квотная ошибка НЕ хоронит задачу — парк с отложенным
+      // возвратом в READY (master-loop не видит до not_before_ms); бюджет PARK_MAX честен:
+      // после исчерпаний — обычный FAILED с рефлексией (не вечный карусель)
+      if (isQuotaError(msg) && task.park_count < PARK_MAX) {
+        const p = parkTaskQuota(task.id, task.park_count, msg, agent.id);
+        fleetStep(lease, task, agent.id, "fail", { step: 0, preview: `parked #${p.park_no}/${PARK_MAX} (+${p.delay_s}s): ${msg}` });
+        recordSpan("worker.quota_park", { "me2.task_id": task.id, "me2.park_no": p.park_no }, Date.now());
+      } else {
+        const refl = buildReflection(task, msg, { toolCalls, parseFails });
+        updateTask(task.id, { status: "FAILED", error: msg.slice(0, 500), reflection: refl });
+        let cause: string | undefined;
+        try { cause = (JSON.parse(refl) as { cause?: string }).cause; } catch { /* не событие */ }
+        emit("TASK_FAILED", { error: msg.slice(0, 300), cause }, agent.id, task.id);
+        fleetStep(lease, task, agent.id, "fail", { step: 0, preview: msg });
+      }
     } else {
       emit("TASK_LEASE_VOID", { reason: "status_left_running_mid_lease", error: msg.slice(0, 200) }, agent.id, task.id);
     }

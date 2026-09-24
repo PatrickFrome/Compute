@@ -18,6 +18,8 @@ import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLMIRROR_TABLE } from "./sqlmirror";
+import { tokenGet } from "./tokens";
+import { anonRegisteredJwt, mintSupabaseJwt, publishableKey } from "./supabase-jwt";
 
 export const RLS_AUDIT_SCHEMA = "me2.rls-audit.v1";
 export const RPC_REGISTRY_TABLE = process.env.ME2_RPC_REGISTRY_TABLE || "me2_rpc_registry_h205f22";
@@ -50,6 +52,17 @@ export type RlsAuditResult =
       anon: { dml_grants: number; policies: number };
       duration_ms: number; cached?: boolean;
     }
+  // R66: поведенческий REST-аудит (PostgREST) — anon fail-closed + service читает.
+  // Честность: если anon-канал = mint и контрольная mint-authenticated проба тоже 401 — канал отвергнут
+  // облаком (ротация ключей), anon-блокировка НЕДОКАЗУЕМА из REST → INCONCLUSIVE (нужен publishable/anon-ключ).
+  | {
+      ok: true; schema: string; mode: "live-rest"; verdict: "PASS" | "FAIL" | "INCONCLUSIVE"; ran_at: string;
+      probes: Array<{ table: string; anon_status: number | null; anon_blocked: boolean | null; service_status: number; service_ok: boolean }>;
+      anon_channel: "publishable" | "anon_registered" | "mint" | "none";
+      control_status?: number | null;
+      service_all_ok: boolean; anon_all_blocked: boolean;
+      duration_ms: number; cached?: boolean; note: string;
+    }
   | { ok: false; schema: string; mode: "live"; reason: string; detail?: string }
   | {
       ok: true; schema: string; mode: "probe_offline"; reason: "audit_live_skipped_in_probe";
@@ -76,11 +89,75 @@ export function rlsAuditProbeOffline(): RlsAuditResult {
   };
 }
 
+/** R66: поведенческий REST-аудит (PostgREST): anon fail-closed + service читает. Никогда не бросает. */
+async function rlsAuditRest(): Promise<RlsAuditResult> {
+  const t0 = Date.now();
+  const base = (tokenGet("SUPABASE_URL") || "").replace(/\/$/, "");
+  const key = tokenGet("SUPABASE_SERVICE_ROLE_JWT");
+  if (!base || !key) return { ok: false, schema: RLS_AUDIT_SCHEMA, mode: "live", reason: "no_rest_credentials" };
+  // anon-ключ: канонический RLS-гейт — publishable → anon_registered → mint (тот же порядок, что в ui-token).
+  let anonChannel: "publishable" | "anon_registered" | "mint" | "none" = "none";
+  let anonKey: string | null = null;
+  const pub = publishableKey();
+  if (pub) { anonChannel = "publishable"; anonKey = pub; }
+  else {
+    const reg = anonRegisteredJwt();
+    if (reg) { anonChannel = "anon_registered"; anonKey = reg; }
+    else {
+      const minted = mintSupabaseJwt("anon");
+      if (minted) { anonChannel = "mint"; anonKey = minted; }
+    }
+  }
+  try {
+    const hdr = (k: string) => ({ apikey: k, Authorization: `Bearer ${k}` });
+    const probes: Array<{ table: string; anon_status: number | null; anon_blocked: boolean | null; service_status: number; service_ok: boolean }> = [];
+    for (const t of RLS_EXPECTED_FLAGS) {
+      const svc = await fetch(`${base}/rest/v1/${t}?select=*&limit=1`, { headers: hdr(key), signal: AbortSignal.timeout(8000) });
+      let anonStatus: number | null = null;
+      let anonBlocked: boolean | null = null;
+      if (anonKey) {
+        const an = await fetch(`${base}/rest/v1/${t}?select=*&limit=1`, { headers: hdr(anonKey), signal: AbortSignal.timeout(8000) });
+        anonStatus = an.status;
+        // 401/403 = отказ; 400 = PGRST-ошибка формы (тоже не отдаёт строки); 404 = таблица нет (PGRST205) — аноним строки не видит.
+        anonBlocked = an.status === 401 || an.status === 403 || an.status === 400 || an.status === 404;
+      }
+      probes.push({ table: t, anon_status: anonStatus, anon_blocked: anonBlocked, service_status: svc.status, service_ok: svc.ok });
+    }
+    const serviceAllOk = probes.every((p) => p.service_ok);
+    const anonAllBlocked = probes.every((p) => p.anon_blocked === true);
+    // Контрольная проба для mint-канала: mint-authenticated должен читать (200) — иначе канал отвергнут облаком
+    // и anon-блокировка (401) может быть «невалидный ключ», а не RLS-гейт → честный INCONCLUSIVE.
+    let controlStatus: number | null = null;
+    if (anonChannel === "mint") {
+      const ctl = mintSupabaseJwt("authenticated");
+      if (ctl) {
+        const cr = await fetch(`${base}/rest/v1/${RLS_EXPECTED_FLAGS[0]}?select=*&limit=1`, { headers: hdr(ctl), signal: AbortSignal.timeout(8000) });
+        controlStatus = cr.status;
+      }
+    }
+    const mintUntrusted = anonChannel === "mint" && controlStatus !== 200;
+    const verdict: "PASS" | "FAIL" | "INCONCLUSIVE" =
+      !serviceAllOk ? "FAIL" : mintUntrusted ? "INCONCLUSIVE" : anonAllBlocked && anonChannel !== "none" ? "PASS" : "FAIL";
+    const result: RlsAuditResult = {
+      ok: true, schema: RLS_AUDIT_SCHEMA, mode: "live-rest", verdict, ran_at: new Date().toISOString(),
+      probes, anon_channel: anonChannel, control_status: controlStatus, service_all_ok: serviceAllOk, anon_all_blocked: anonAllBlocked,
+      duration_ms: Date.now() - t0,
+      note: mintUntrusted
+        ? "поведенческий REST-аудит: mint-канал отвергнут облаком (контрольная authenticated-проба " + (controlStatus ?? "?") + ") — anon-блокировка недоказуема из REST; нужен sb_publishable_/anon-ключ оператора; service_role читает ✓"
+        : "поведенческий REST-аудит (PostgREST): anon не читает строки (fail-closed), service_role читает; гранты/политики pg_catalog из REST недоступны — матрица sql/0003+0004 сверяется офлайн (probe)",
+    };
+    cache = { at: Date.now(), data: result };
+    return result;
+  } catch (e) {
+    return { ok: false, schema: RLS_AUDIT_SCHEMA, mode: "live", reason: "rest_failed", detail: String(e).slice(0, 140) };
+  }
+}
+
 /** Живой аудит: bash-скрипт (psql-канал) → JSON → честная раздача. Никогда не бросает. */
 export async function runRlsAuditAsync(force = false): Promise<RlsAuditResult> {
   if (!force && cache && Date.now() - cache.at < CACHE_MS) {
     const c = cache.data;
-    return c.ok && "mode" in c && c.mode === "live" ? { ...c, cached: true } : c;
+    return c.ok && "mode" in c && (c.mode === "live" || c.mode === "live-rest") ? { ...c, cached: true } : c;
   }
   if (process.env.ME2_BOOT_MODE === "probe") return rlsAuditProbeOffline();
   if (busy) return busy;
@@ -106,7 +183,7 @@ export async function runRlsAuditAsync(force = false): Promise<RlsAuditResult> {
       try { raw = readFileSync(outFile, "utf8"); } catch { raw = null; }
       try { rmSync(outDir, { recursive: true, force: true }); } catch { /* tmp */ }
       if (code === 2) return resolve({ ok: false, schema: RLS_AUDIT_SCHEMA, mode: "live", reason: "no_db_url" });
-      if (code === 3) return resolve({ ok: false, schema: RLS_AUDIT_SCHEMA, mode: "live", reason: "psql_unavailable" });
+      if (code === 3) { void rlsAuditRest().then(resolve); return; } // R66: psql недоступен → поведенческий REST-аудит
       if (code === 4) return resolve({ ok: false, schema: RLS_AUDIT_SCHEMA, mode: "live", reason: "not_supabase_url" });
       if (code === 6) return resolve({ ok: false, schema: RLS_AUDIT_SCHEMA, mode: "live", reason: "query_failed", detail: stderr.slice(0, 160) });
       if (raw === null) {

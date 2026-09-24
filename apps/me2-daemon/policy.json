@@ -27,5 +27,12 @@
     "crons_per_chat": 8,
     "crons_global": 48,
     "cron_min_minutes": 5
+  },
+  "classifier": {
+    "enabled": true,
+    "llm_enabled": false,
+    "timeout_ms": 3000,
+    "queue_max": 20,
+    "model": "zai"
   }
 }

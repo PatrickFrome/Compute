@@ -18,7 +18,11 @@ import {
   getMeta, setMeta, reapStaleWorkers, lastSeq, onEvent,
   createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
 } from "./store";
-import { listProviders } from "./providers";
+import { listProviders, gatewayTlsStatus } from "./providers";
+import { llmQuotaStatus } from "./src/quota";
+import { ciPollMs, ciStatus, ciTick } from "./src/ci";
+import { hooksStatus, handleGithubWebhook } from "./src/hooks";
+import { sqlmirrorGatePersisted } from "./src/sqlmirror";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
@@ -29,6 +33,10 @@ import { runRlsAuditAsync } from "./src/rls-audit";
 import { runRpcReconcileAsync } from "./src/rpc-reconcile";
 import { startSelfAuditLoop } from "./src/self-audit";
 import { exthostStatus, runExtension, exthostStartEventLoop, setMirrorFeedProvider } from "./src/exthost";
+import { execStatus, runTerminalAsync, runApprovedAsync, execProbeOffline, planExec } from "./src/exec";
+import { reviewStatus, reviewPlan, classifyDry, queueTake, queueResolve, queueDeny, classifierSetOverride, type ReviewInput } from "./src/review";
+import { sandboxStatus, sandboxProbe, runSandboxedAsync, sandboxSetOverride } from "./src/sandbox2";
+import { editStatus, applyEditAsync, rollbackEdit, editProbeOffline } from "./src/edit";
 import { uiTokenBundle, verifySupabaseJwt, gotrueToken, gotrueStatus, gotrueVerifyShape } from "./src/supabase-jwt";
 import { fenceList, fenceClear, verdictStats } from "./src/effect";
 import { codegraphSummary, codegraphImpact } from "./src/codegraph";
@@ -47,7 +55,7 @@ import { suCheckAsync, suApply, suCached, selfupdateStatus } from "./src/selfupd
 import { rsiPropose, rsiAdopt, rsiReject, rsiRollback, rsiList } from "./src/rsi";
 import { mechanicsMatrix } from "./src/mechanics";
 import { senseNow, senseList, senseAct } from "./src/sense";
-import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict } from "./src/bench";
+import { benchObserve, benchBootStart, benchBootDone, benchSnapshot, benchVerdict, benchSuspend, benchResetRings } from "./src/bench";
 import { mcpHandle, mcpStatus } from "./src/mcp";
 import { evalRun, evalStatus } from "./src/eval";
 import { senseDiffs } from "./src/sense";
@@ -161,6 +169,19 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", `http://localhost:${REST_PORT}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
+  // R69.1: капчу публичного origin из живого трафика — Host, с которым платформенный
+  // preview-прокси стучится через Caddy (x-forwarded-host / host). Нужно для боевого
+  // URL GitHub-webhook без ручного ввода оператора. Список кандидатов (кап 20) в meta.
+  try {
+    const hh = String(req.headers.host ?? "");
+    const xfh = String(req.headers["x-forwarded-host"] ?? "");
+    const cand = ((xfh || hh).split(",")[0] ?? "").trim();
+    if (cand && !cand.startsWith("localhost") && !cand.startsWith("127.0.0.1") && !cand.startsWith("[::1]")) {
+      const seen = new Set<string>(JSON.parse(getMeta("host_candidates") || "[]") as string[]);
+      if (!seen.has(cand) && seen.size < 20) { seen.add(cand); setMeta("host_candidates", JSON.stringify([...seen])); }
+      setMeta("public_origin_last", `${cand} @ ${new Date().toISOString()}`);
+    }
+  } catch { /* капча не критична */ }
   const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS", "Access-Control-Allow-Headers": "Content-Type" };
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
 
@@ -183,6 +204,27 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
     // ── R52 (фаза D, H6): статус SQL-контура (read-only, вне шины; 47-инвариант не тронут) ──
     if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
+    // R67: P0-e ingress (pull) — статус поллера GitHub Actions + последние runs ветки.
+    if (path === "/ci" && req.method === "GET") return json(res, 200, ciStatus());
+    // R68: P0-e webhooks-in (push) — HMAC-верифицированный вход внешних событий.
+    // Секрет НЕ логируем и НЕ возвращаем; подпись — над RAW-телом (важно для HMAC).
+    if (path === "/hooks/github" && req.method === "POST") {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      const h = req.headers;
+      const out = handleGithubWebhook(
+        {
+          delivery: typeof h["x-github-delivery"] === "string" ? h["x-github-delivery"] : null,
+          event: typeof h["x-github-event"] === "string" ? h["x-github-event"] : null,
+          signature: typeof h["x-hub-signature-256"] === "string" ? h["x-hub-signature-256"] : null,
+          peer: req.socket?.remoteAddress ?? "-",
+          userAgent: typeof h["user-agent"] === "string" ? h["user-agent"] : null,
+        },
+        Buffer.concat(chunks),
+      );
+      return json(res, out.status, out.body);
+    }
+    if (path === "/hooks" && req.method === "GET") return json(res, 200, hooksStatus());
     // R53 (фаза D-исполнение): короткоживущие JWT для чтения зеркала из UI с гейтом RLS.
     // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
     // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
@@ -257,6 +299,121 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
         return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
       }
     }
+    // ── R62 P0-a «exec/edit tools»: TERMINAL_RUN + FILE_EDIT для агентного harness ──
+    // Канон Cursor terminal/edit-files (корпус R61, трек A); enforcement = allowlist по
+    // сегментам → prlimit → таймаут → env-белый-список; cwd/цель — только управляемые
+    // корни (песочницы/worktrees). Вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/exec" && req.method === "GET") return json(res, 200, execStatus());
+    if (path === "/exec" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; mode?: string; cmd?: string; cwd?: string; timeout_ms?: number; sandbox?: boolean };
+        if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+        // Run Mode «plan» (канон Cursor Plan Mode): план + вердикт тира-3 БЕЗ spawn и БЕЗ очереди
+        if (body?.op === "plan" || body.mode === "plan") {
+          const plan = planExec(body.cmd, body.cwd, body.timeout_ms);
+          if (!plan.ok) return json(res, 200, { ok: false, schema: "me2.exec.v1", reason: plan.reason, detail: plan.detail, mode: "plan" });
+          const input: ReviewInput = { cmd: body.cmd, cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! };
+          return json(res, 200, { ok: true, schema: "me2.exec.v1", mode: "plan", planned: { segments: plan.segments, binaries: plan.binaries }, cwd: plan.cwd, timeout_ms: plan.timeout_ms, review: reviewPlan(input) });
+        }
+        if (body?.op !== "run") return json(res, 400, { ok: false, error: "bad_op", allowed: ["run", "plan"] });
+        // R64 P0-2: sandbox:true → fs-риски гасит конфайнмент (канон D02), не очередь
+        return json(res, 200, await runTerminalAsync(body.cmd, body.cwd, body.timeout_ms, "rest", { sandbox: body.sandbox === true }));
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R64 P0-2 «OS-sandbox»: fs/syscall-конфайнмент (канон Cursor Landlock+seccomp) ──
+    // Слои: ns (userns+mountns: ro-root, rw-rebind корней, tmpfs /tmp, hide секретов)
+    // + seccomp-bpf (deny-лист + default-deny INET); strict fail-closed; Landlock ≥5.13.
+    // Вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/sandbox" && req.method === "GET") return json(res, 200, sandboxStatus());
+    if (path === "/sandbox" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; net?: "deny" | "allow"; auto_sandbox?: boolean; strict?: boolean };
+        if (body?.op === "probe") {
+          return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", op: "probe", ...(await sandboxProbe("rest")) });
+        }
+        if (body?.op === "run") {
+          if (typeof body?.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+          return json(res, 200, await runSandboxedAsync(body.cmd, body.cwd, { net: body.net, timeout: body.timeout_ms, source: "rest" }));
+        }
+        if (body?.op === "config") {
+          const patch: Record<string, unknown> = {};
+          if (typeof body.auto_sandbox === "boolean") patch.auto_sandbox = body.auto_sandbox;
+          if (typeof body.strict === "boolean") patch.strict = body.strict;
+          if (body.net === "deny" || body.net === "allow") patch.net = body.net;
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: "nothing_to_set", fields: ["auto_sandbox", "strict", "net"] });
+          const cfg = sandboxSetOverride(patch as never);
+          try { emit("SANDBOX_CONFIG", { patch, effective: { auto_sandbox: cfg.auto_sandbox, net: cfg.net, strict: cfg.strict } }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.sandbox2.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json sandbox" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["probe", "run", "config"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    // ── R63 P0-b «classifier tier»: Run Modes + пре-исполнение (канон Cursor Auto-review) ──
+    // Тир-3: allowlist (exec) → sandbox-ability (P0-2) → classifier; ask → очередь одобрений оператора.
+    // Классификатор НЕ security boundary (канон D02); вне шины (47-инвариант); манифест non-bypass 34.
+    if (path === "/review" && req.method === "GET") return json(res, 200, reviewStatus());
+    if (path === "/review" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; cmd?: string; cwd?: string; timeout_ms?: number; id?: number; enabled?: boolean; llm?: boolean };
+        if (body?.op === "classify") {
+          if (typeof body.cmd !== "string" || typeof body.cwd !== "string") return json(res, 400, { ok: false, error: "cmd_and_cwd_required" });
+          const plan = planExec(body.cmd, body.cwd, body.timeout_ms);
+          if (!plan.ok) return json(res, 200, { ok: false, schema: "me2.review.v1", stage: "tier1_allowlist", reason: plan.reason, detail: plan.detail });
+          const input: ReviewInput = { cmd: body.cmd, cwd: plan.cwd!, binaries: plan.binaries!, segments: plan.segments! };
+          return json(res, 200, { ok: true, schema: "me2.review.v1", stage: "tier3_classifier", review: await classifyDry(input), planned: { binaries: plan.binaries } });
+        }
+        if (body?.op === "approve") {
+          if (typeof body.id !== "number") return json(res, 400, { ok: false, error: "id_required" });
+          const taken = queueTake(body.id);
+          if (!taken) return json(res, 404, { ok: false, error: "not_found_or_not_pending" });
+          const verdict = await runApprovedAsync(taken.cmd, taken.cwd, taken.timeout_ms, "review-approve");
+          queueResolve(body.id, verdict.ok, verdict.exit, verdict.duration);
+          try { emit("CLASSIFIER_APPROVED", { id: body.id, cmd: taken.cmd.slice(0, 120), ok: verdict.ok, exit: verdict.exit, ms: verdict.duration, source: "review-approve" }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", approved: true, run: verdict });
+        }
+        if (body?.op === "deny") {
+          if (typeof body.id !== "number") return json(res, 400, { ok: false, error: "id_required" });
+          const denied = queueDeny(body.id);
+          if (!denied) return json(res, 404, { ok: false, error: "not_found_or_not_pending" });
+          try { emit("CLASSIFIER_DENIED", { id: body.id, cmd: null, source: "review-queue" }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", denied: true });
+        }
+        if (body?.op === "config") {
+          const patch: Record<string, unknown> = {};
+          if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+          if (typeof body.llm === "boolean") patch.llm_enabled = body.llm;
+          if (typeof body.timeout_ms === "number" && body.timeout_ms >= 500 && body.timeout_ms <= 30000) patch.timeout_ms = body.timeout_ms;
+          if (!Object.keys(patch).length) return json(res, 400, { ok: false, error: "nothing_to_set", fields: ["enabled", "llm", "timeout_ms"] });
+          const cfg = classifierSetOverride(patch as never);
+          try { emit("CLASSIFIER_CONFIG", { patch, effective: cfg }, null, null); } catch { /* chain не критичен */ }
+          return json(res, 200, { ok: true, schema: "me2.review.v1", config: cfg, note: "override до рестарта daemon; персист — policy.json classifier" });
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["classify", "approve", "deny", "config"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
+    if (path === "/file" && req.method === "GET") return json(res, 200, editStatus());
+    if (path === "/file" && req.method === "POST") {
+      try {
+        const body = await readBody(req) as { op?: string; path?: string; diff?: string; edit_id?: number };
+        if (body?.op === "apply") {
+          if (typeof body.path !== "string" || typeof body.diff !== "string") return json(res, 400, { ok: false, error: "path_and_diff_required" });
+          return json(res, 200, await applyEditAsync(body.path, body.diff, "rest"));
+        }
+        if (body?.op === "rollback") {
+          if (typeof body.edit_id !== "number") return json(res, 400, { ok: false, error: "edit_id_required" });
+          return json(res, 200, rollbackEdit(body.edit_id, "rest"));
+        }
+        return json(res, 400, { ok: false, error: "bad_op", allowed: ["apply", "rollback"] });
+      } catch (e) {
+        return json(res, 400, { ok: false, error: String(e).slice(0, 200) });
+      }
+    }
     if (path === "/evidence" && req.method === "POST") {
       const body = await readBody(req) as { op?: string };
       if (body?.op === "probe_ddl") return json(res, 200, { ok: true, ...(await probeDdl(true)) });
@@ -276,6 +433,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       return json(res, 200, evidenceQuery(tid));
     }
     if (path === "/providers" && req.method === "GET") return json(res, 200, { ok: true, providers: await listProviders() });
+    if (path === "/llm" && req.method === "GET") return json(res, 200, { ok: true, ...llmQuotaStatus(), gateway_tls: gatewayTlsStatus(), providers: await listProviders() });
 
     // ── E3 (R34): executor-пул — N живых GLM-контекстов с честными lease (вне шины 47/47) ──
     if (path === "/pool" && req.method === "GET") return json(res, 200, poolStatus());
@@ -809,7 +967,10 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     // ── R26 B1: регресс-датасет + eval-харнесс (ME22) ──
     if (path === "/eval" && req.method === "GET") return json(res, 200, evalStatus(VERSION));
     if (path === "/eval/run" && req.method === "POST") {
-      const report = evalRun(VERSION);
+      benchResetRings(); // R62: свежее окно измерения (кольца с прошлого прогона не влекутся)
+      benchSuspend(true); // сам eval — батч: его очередь не пишется в кольцо
+      let report: ReturnType<typeof evalRun>;
+      try { report = evalRun(VERSION); } finally { benchSuspend(false); }
       return json(res, 200, report);
     }
     // ── R27 C1: Mission Control — objectives + work_graph (fails-closed, zero-authority) ──
@@ -882,7 +1043,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci", "/hooks", "/llm"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -1075,6 +1236,11 @@ setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_0
 // R23: Outcome River (деградации freshness = исходы) + reliability-ordered retirement
 setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
+// R67: P0-e ingress (pull) — поллер GitHub Actions: новые завершённые runs → CI_RUN_* в event-log
+if (!PROBE_MODE) {
+  ciTick(); // первый прогрев сразу после бута (async, event-loop не блокирует)
+  setInterval(() => { try { ciTick(); } catch { /* noop */ } }, ciPollMs());
+}
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
 // R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама
@@ -1156,6 +1322,13 @@ if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase
       console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
     }
   } catch { /* честный отказ: гейт остаётся выключенным */ }
+}
+// R70 (аудит): третий путь восстановления — персистентное решение в meta sqlmirror_gate='1'
+// (записывается конструктором SqlMirror при первом буте с env=1 + ключом). Гасит сценарий
+// «рестарт без start.sh → зеркало молча OFF» даже без SUPABASE_DB_URL в env-файле.
+if (process.env.ME2_SQL_MIRROR === undefined && sqlmirrorGatePersisted(db)) {
+  process.env.ME2_SQL_MIRROR = "1";
+  console.log("e2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
 }
 const sqlMirror = new SqlMirror(db);
 sqlMirror.start();

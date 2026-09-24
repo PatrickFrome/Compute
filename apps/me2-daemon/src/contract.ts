@@ -50,8 +50,8 @@ export function capabilitiesJson(): CapabilityContract {
       events: ["agentchat:step", "snapshot"],
     },
     rest: {
-      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/exthost"],
-      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}"],
+      read: ["/health", "/state", "/agentchat", "/agentchat/:id", "/agentchat/:id/status", "/events", "/tokens", "/evidence", "/eval", "/sqlmirror", "/sqlmirror/ui-token", "/sqlmirror/rls-audit", "/sqlmirror/rpc-reconcile", "/hooks", "/llm", "/exthost", "/exec", "/file", "/review", "/sandbox"],
+      write: ["/tokens {op:set|delete}", "/policy", "/demand", "/cron", "/exthost/run {id}", "/exec {op:run|plan,cmd,cwd,timeout_ms?,sandbox?} (P0-a: белый список бинарей по сегментам + prlimit + cwd в управляемых корнях; plan — без spawn; sandbox:true — R64 P0-2)", "/file {op:apply|rollback, path, diff|edit_id} (P0-a: unified-diff + dry-run + durable-rollback)", "/review {op:approve|deny|classify|config} (P0-b: тир-3 классификатор, очередь одобрений ask)", "/sandbox {op:probe|run|config} (R64 P0-2: OS-конфайнмент ns+seccomp, strict fail-closed)"],
     },
     memory: ["/memory op:write|delete|economy"],
     ui: "/ui",
@@ -66,9 +66,14 @@ export function capabilitiesJson(): CapabilityContract {
         "матрица: docs/version-matrix.md (K8)",
         "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
         "R58: политики как данные — GET /sqlmirror/rls-audit сверяет живой каталог Postgres с ожидаемой матрицей sql/0003+0004 (DML строго; платформенные дефолты Supabase — info)",
+        "R68/R69: webhooks-in (push-фаза P0-e) — POST /hooks/github, HMAC-SHA256 X-Hub-Signature-256 (timing-safe), персистентный дедуп X-GitHub-Delivery (sqlite hook_deliveries, переживает рестарт); события HOOK_PING/GIT_PUSH/GIT_PR_*/CI_HOOK_RUN_* → event-log → облако; боевой контур: хук 685103637 в репо → smee.io → релей me2-webhook-relay (:3044, outbound-SSE) → daemon — первый внешний HOOK_PING seq 5846 verified (R69.1); прямой лег :81 /hooks/github?XTransformPort=3041 тоже работает; секрет в vault (GITHUB_WEBHOOK_SECRET), регистрация — scripts/webhook-register.sh [auto|register|ping]; без секрета — честный 503",
         "R60: workbench-лэйаут /ui — collapse/expand секций с персистом localStorage (канон VS Code workbench, порядок секций не меняется)",
         "R60: exthost — расширения skills/ext/* исполняются в подпроцессе под prlimit, только stdio-JSON, caps-медиация (неизвестная cap — честный отказ), activation manual/bus:*",
-        "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run)",
+        "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run, /exec, /file)",
+        "R62 P0-a exec/edit tools (гэп P0-0 R61): TERMINAL_RUN — allowlist бинарей по сегментам, prlimit as/nofile/core, таймаут, env-белый-список, cwd только в песочницах/worktrees; FILE_EDIT — unified-diff с dry-run-валидацией и durable-rollback из журнала; манифест non-bypass 30→32 (eval v26)",
+        "R63 P0-b classifier tier (гэп P0-1 R61): Run Modes (run|plan) + тир-3 классификатор пре-исполнения по канону Cursor D02 (allowlist → prlimit → classifier); вердикты allow/ask/block; ask → очередь одобрений оператора (POST /review approve|deny); эвристика детерминированная, LLM — opt-in (policy.json classifier, таймаут → ask fail-closed); классификатор честно НЕ security boundary; манифест non-bypass 32→33 (eval v27)",
+        "R64 P0-2 OS-sandbox (гэп P0-2 R61): fs/syscall-конфайнмент канона Cursor — слоистый дизайн: Landlock (ядро ≥5.13; на 5.10 ENOSYS — честный skip) + ns (userns+mountns: ro-root, rw-rebind управляемых корней, tmpfs /tmp, tmpfs-RO поверх /home/z/.a2) + seccomp-bpf (deny-лист mount/unshare/io_uring/ptrace… + default-deny INET, единый билдер launcher/eval); strict fail-closed — слои не применились → команда НЕ исполнена; verdict «sandbox» классификатора теперь реален (sandbox.auto_sandbox, канон D02); манифест non-bypass 33 (eval v28)",
+        "R72/R73: LLM Quota-Resilience (GET /llm) — 4 уровня без обхода квоты: L1 pacing (глобальный min-gap стартов), L2 response-cache (SQLite llm_cache, дедуп детерминированных промптов), L3 failover zai↔gateway (TLS-проба исключает мёртвый канал, LLM_FAILOVER в chain), L4 park-and-resume (квотная/инфра ошибка → READY+not_before_ms, бюджет PARK_MAX=8, 45с→600с; FAILED только после бюджета); R73: зеркало пишет поколенио-безопасные seq' (boot_epoch = epoch_n×10^7, meta sqlmirror_epoch_n) — перекрытие поколений песочниц устранено без DDL; relay-watchdog (me2-webhook-relay/watchdog.sh, автостарт в start.sh)",
       ],
     },
   };
@@ -136,6 +141,8 @@ export function missionUiHtml(): string {
   textarea:focus-visible, select:focus-visible, button:focus-visible { outline:2px solid #10b981; outline-offset:1px; }
   .line { display:flex; gap:8px; }
   select { flex:1; background:#09090b; color:#e4e4e7; border:1px solid #3f3f46; border-radius:8px; padding:7px 9px; font:inherit; }
+  .ops input { flex:1; background:#09090b; color:#e4e4e7; border:1px solid #3f3f46; border-radius:8px; padding:7px 9px; font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .ops input:focus-visible { outline:2px solid #10b981; outline-offset:1px; }
   button { background:#059669; border:1px solid #047857; color:#ecfdf5; border-radius:8px; padding:7px 14px; font:inherit; font-weight:600; cursor:pointer; min-height:32px; }
   button:hover { background:#047857; }
   button:disabled { opacity:.45; cursor:default; }
@@ -186,6 +193,7 @@ export function missionUiHtml(): string {
     <div class="wb-body" id="wb-body-mirror">
     <div class="row sub" id="rls-audit" data-testid="mc-rls-audit" style="margin:6px 6px 0">аудит политик: загрузка…</div>
     <div class="row sub" id="rpc-reconcile" data-testid="mc-rpc-reconcile" style="margin:6px 6px 0">сверка реестра: загрузка…</div>
+    <div class="row sub" id="hooks-in" data-testid="mc-hooks-in" style="margin:6px 6px 0">webhooks-in: загрузка…</div>
     <div class="scroll" id="mirror" data-testid="mc-mirror" style="max-height:32vh" aria-live="polite"></div>
     </div>
   </section>
@@ -195,8 +203,50 @@ export function missionUiHtml(): string {
     <div class="scroll" id="ext" data-testid="mc-ext" style="max-height:26vh" aria-live="polite"></div>
     </div>
   </section>
+  <section aria-label="Exec/Edit инструменты P0-a" style="grid-column:1/-1" id="wb-exec">
+    <h2>Exec/Edit (P0-a · прелимит · белые списки) <span class="n" id="exec-n">—</span><button class="wb-toggle" id="wb-toggle-exec" aria-expanded="true" aria-controls="wb-body-exec" data-testid="mc-exec-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-exec">
+    <div class="row sub" id="exec-caps" data-testid="mc-exec-caps" style="margin:6px 6px 0">exec: загрузка…</div>
+    <div class="scroll" id="exec" data-testid="mc-exec" style="max-height:20vh" aria-live="polite"></div>
+    <div class="ops">
+      <div class="line"><input id="exec-cmd" aria-label="Команда (белый список)" placeholder="команда: git, node, bun, ls, cat, grep… (подстановки $() и env= отклоняются)" value="node --version"></div>
+      <div class="line"><input id="exec-cwd" aria-label="cwd в управляемом корне" placeholder="cwd: каталог внутри песочницы или worktree…"></div>
+      <div class="line">
+        <button id="b-exec" title="TERMINAL_RUN: allowlist по сегментам → классификатор → prlimit → таймаут (санкционированная запись POST /exec)">Выполнить</button>
+        <button id="b-plan" class="ghost" title="Run Mode plan: план + вердикт классификатора БЕЗ исполнения (POST /exec op:plan)">План</button>
+        <button id="b-demo" class="ghost" title="Демо петли Cursor: FILE_EDIT создаёт p0a-demo.js → TERMINAL_RUN node p0a-demo.js → зелёный вывод (POST /file + /exec)">Demo: edit→run→green</button>
+        <span id="exec-out" class="sub" style="align-self:center; white-space:pre-wrap; max-height:64px; overflow-y:auto"></span>
+      </div>
+    </div>
+    </div>
+  </section>
+  <section aria-label="Run Modes и классификатор пре-исполнения P0-b" style="grid-column:1/-1" id="wb-review">
+    <h2>Run Modes (P0-b · классификатор) <span class="n" id="review-n">—</span><button class="wb-toggle" id="wb-toggle-review" aria-expanded="true" aria-controls="wb-body-review" data-testid="mc-review-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-review">
+    <div class="row sub" id="review-caps" data-testid="mc-review-caps" style="margin:6px 6px 0">classifier: загрузка…</div>
+    <div class="row sub" id="review-stats" style="margin:0 6px">статистика 24ч: —</div>
+    <div class="scroll" id="review" data-testid="mc-review" style="max-height:22vh" aria-live="polite"></div>
+    </div>
+  </section>
+  <section aria-label="OS-сандбокс P0-2" style="grid-column:1/-1" id="wb-sandbox">
+    <h2>Sandbox (P0-2 · OS-конфайнмент) <span class="n" id="sbox-n">—</span><button class="wb-toggle" id="wb-toggle-sandbox" aria-expanded="true" aria-controls="wb-body-sandbox" data-testid="mc-sbox-toggle" title="Свернуть/развернуть">▾</button></h2>
+    <div class="wb-body" id="wb-body-sandbox">
+    <div class="row sub" id="sbox-caps" data-testid="mc-sbox-caps" style="margin:6px 6px 0">sandbox: загрузка…</div>
+    <div class="row sub" id="sbox-probe" style="margin:0 6px">probe: не запускался</div>
+    <div class="scroll" id="sbox" data-testid="mc-sbox" style="max-height:20vh" aria-live="polite"></div>
+    <div class="ops">
+      <div class="line"><input id="sbox-cmd" aria-label="Команда в сандбоксе" placeholder="команда (белый список): echo, git, node, ls…"></div>
+      <div class="line"><input id="sbox-cwd" aria-label="cwd в управляемом корне" placeholder="cwd: каталог внутри песочницы или worktree…"></div>
+      <div class="line">
+        <button id="b-sbox-run" title="Запуск в сандбоксе: unshare userns+mountns → ro-root + rw-rebind + hide-секретов → seccomp deny-лист + net=deny (POST /sandbox op:run — tier-1 план обязателен)">В сандбоксе</button>
+        <button id="b-sbox-probe" class="ghost" title="Живая верификация конфайнмента: запись внутрь ok · запись в секреты отказ · сеть EPERM · контроль net=allow (POST /sandbox op:probe)">Probe</button>
+        <span id="sbox-out" class="sub" style="align-self:center; white-space:pre-wrap; max-height:64px; overflow-y:auto"></span>
+      </div>
+    </div>
+    </div>
+  </section>
 </main>
-<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run)</footer>
+<footer>self-contained · 0 сборки · 0 внешних зависимостей · socket.io с daemon'а (:${WS_PORT}, path "/") · данные — REST · записи — только санкционированные (R60 ruling: POST /exthost/run · /exec · /file · /review · /sandbox)</footer>
 <div id="toast" class="toast" role="alert"></div>
 <script>
 (function(){
@@ -344,6 +394,13 @@ export function missionUiHtml(): string {
       var el=$("rls-audit");
       if(!j.ok){ el.textContent="аудит политик: честно недоступен ("+esc(j.reason||"?")+")"; el.style.color="#fcd34d"; return; }
       if(j.mode==="probe_offline"){ el.textContent="аудит политик: офлайн (probe) — матрица ожиданий "+j.expected.dml_rows+" DML / "+j.expected.policies+" политик / anon 0:0"; el.style.color="#a1a1aa"; return; }
+      if(j.mode==="live-rest"){ // R66: поведенческий REST-аудит (PostgREST): anon fail-closed + service читает
+        var vr=(j.verdict==="PASS"); var vi=(j.verdict==="INCONCLUSIVE");
+        var det=(j.probes||[]).map(function(p){ var n=String(p.table).replace("_h205f22","");
+          return n+": anon "+(p.anon_blocked===true?"✗блок("+p.anon_status+")":"⚠"+(p.anon_status||"?"))+" · svc "+(p.service_ok?"✓":"✗"+p.service_status); }).join(" · ");
+        el.innerHTML="аудит политик (live REST, поведенческий): <b>"+(vr?"PASS ✓":vi?"НЕДОКАЗАН":"FAIL ✗")+"</b> · anon-канал "+esc(j.anon_channel||"?")+(j.control_status!=null?" (контроль "+j.control_status+")":"")+" · "+det+(j.cached?" · кэш 60с":"");
+        el.style.color = vr ? "#6ee7b7" : vi ? "#fcd34d" : "#fca5a5"; return;
+      }
       var v=(j.verdict==="PASS");
       var anonOk=(j.anon.dml_grants===0&&j.anon.policies===0);
       el.innerHTML="аудит политик (psql, живой каталог): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · DML-гранты "+(j.grants.mismatch?"РАСХОЖДЕНИЕ с sql/0004":"= sql/0004 ✓")+" · политики "+(j.policies.mismatch?"РАСХОЖДЕНИЕ с sql/0003":"= sql/0003 ✓")+" · RLS-флаги включены · anon fail-closed "+(anonOk?"✓ (DML="+j.anon.dml_grants+", политик="+j.anon.policies+")":"⚠ DML="+j.anon.dml_grants+", политик="+j.anon.policies)+" · платформенных дефолтов (info): "+(j.grants.platform_extra||[]).length+(j.cached?" · кэш 60с":"");
@@ -359,9 +416,24 @@ export function missionUiHtml(): string {
       if(!j.ok){ el.textContent="сверка реестра: честно недоступна ("+esc(j.reason||"?")+")"; el.style.color="#fcd34d"; return; }
       if(j.mode==="probe_offline"){ el.textContent="сверка реестра: офлайн (probe) — ожидание "+j.expected.total+" RPC ("+j.expected.tiers.ACTIVE+"/"+j.expected.tiers.CONTROL_PLANE+"/"+j.expected.tiers.FREEZE+")"; el.style.color="#a1a1aa"; return; }
       var v=(j.verdict==="PASS"); var g=j.registry;
-      el.innerHTML="сверка реестра RPC (psql, живой каталог): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · ожидание "+g.expected_total+" · факт "+g.actual_total+" · ACTIVE "+g.per_tier_actual.ACTIVE+"/"+g.per_tier_expected.ACTIVE+" · CONTROL_PLANE "+g.per_tier_actual.CONTROL_PLANE+"/"+g.per_tier_expected.CONTROL_PLANE+" · FREEZE "+g.per_tier_actual.FREEZE+"/"+g.per_tier_expected.FREEZE+" · нет "+g.missing_count+" · лишних "+g.extra_count+" · тир-дрейф "+g.tier_mismatch_count+" · хеш "+esc(g.hash_actual)+(j.cached?" · кэш 60с":"");
+      var chan=(j.mode==="live-rest")?"live REST":"psql, живой каталог"; // R66: два канала одной сверки
+      var oa=(j.mode==="live-rest"&&j.openapi_total!=null)?" · OpenAPI "+j.openapi_total:"";
+      el.innerHTML="сверка реестра RPC ("+chan+"): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · ожидание "+g.expected_total+" · факт "+g.actual_total+" · ACTIVE "+g.per_tier_actual.ACTIVE+"/"+g.per_tier_expected.ACTIVE+" · CONTROL_PLANE "+g.per_tier_actual.CONTROL_PLANE+"/"+g.per_tier_expected.CONTROL_PLANE+" · FREEZE "+g.per_tier_actual.FREEZE+"/"+g.per_tier_expected.FREEZE+" · нет "+g.missing_count+" · лишних "+g.extra_count+" · тир-дрейф "+g.tier_mismatch_count+oa+(j.cached?" · кэш 60с":"");
       el.style.color = v ? "#6ee7b7" : "#fca5a5";
     }).catch(function(){ var el=$("rpc-reconcile"); if(el){ el.textContent="сверка реестра: сеть недоступна"; el.style.color="#fcd34d"; } });
+  }
+
+  // R68 «webhooks-in (push)»: статус HMAC-канала внешних событий (P0-e вторая фаза).
+  function loadHooks(){
+    fetch(api("/hooks")).then(function(r){ return r.json(); }).then(function(j){
+      var el=$("hooks-in");
+      if(!j.ok){ el.textContent="webhooks-in: недоступен"; el.style.color="#fcd34d"; return; }
+      var vr=String(j.verdict||"?");
+      var live=(vr==="LIVE");
+      var lab=live?"LIVE ✓":(vr==="DEV_SECRET"?"DEV-СЕКРЕТ":(vr==="NO_SECRET"?"СЕКРЕТА НЕТ":"ОЖИДАНИЕ"));
+      el.innerHTML="webhooks-in (push, HMAC): <b>"+lab+"</b> · secret "+esc(j.secret||"?")+" · получено "+j.received_total+" · верифицировано "+j.verified_total+" · отклонено "+j.rejected_total+(j.rejected_last_reason?" ("+esc(j.rejected_last_reason)+")":"")+" · событий "+j.events_emitted_total+" · дедуп "+j.dedupe_size+(j.dedupe_persistent?" (sqlite ✓ переживает рестарт)":"");
+      el.style.color = live ? "#6ee7b7" : (vr==="NO_SECRET" ? "#fca5a5" : "#fcd34d");
+    }).catch(function(){ var el=$("hooks-in"); if(el){ el.textContent="webhooks-in: сеть недоступна"; el.style.color="#fcd34d"; } });
   }
 
   // R60 workbench (канон VS Code workbench): collapse/expand секций + персист
@@ -369,7 +441,7 @@ export function missionUiHtml(): string {
   // лэйаута силами daemon'а — кандидат R61+). Порядок секций не меняется (урок R12/R16):
   // только видимостью, кнопка в заголовке + dblclick по заголовку, aria-expanded/controls.
   var WB_KEY = "me2.ui.workbench.v1";
-  var WB_IDS = ["fleet", "river", "mirror", "ext"];
+  var WB_IDS = ["fleet", "river", "mirror", "ext", "exec", "review", "sandbox"];
   function wbLoad(){ try { return JSON.parse(localStorage.getItem(WB_KEY) || "{}") || {}; } catch(e){ return {}; } }
   function wbSave(s){ try { localStorage.setItem(WB_KEY, JSON.stringify(s)); } catch(e){} }
   function wbSet(id, col, save){
@@ -431,6 +503,190 @@ export function missionUiHtml(): string {
     }).catch(function(){ var el = $("ext-n"); if(el) el.textContent = "ошибка"; });
   }
 
+  // R62 P0-a exec/edit: терминал + правки файлов для агентного harness (канон Cursor
+  // terminal/edit-files, корпус R61). Кнопки — санкционированные записи POST /exec и
+  // POST /file (белый список в eval mission.ui_contract v26). Демо = петля Cursor:
+  // edit (создание файла диффом) → run (node) → зелёный вывод.
+  function loadExec(){
+    fetch(api("/exec")).then(function(r){ return r.json(); }).then(function(j){
+      var caps = $("exec-caps"); var box = $("exec"); if(!caps||!box) return;
+      if(!j.ok){ caps.textContent = "exec: честно недоступен (" + esc(j.reason||"?") + ")"; $("exec-n").textContent = "—"; return; }
+      caps.innerHTML = 'allowlist ' + esc(String(j.allowlist.length)) + ' бин. · ' + (j.caps.prlimit ? 'prlimit ✓ (as=4GiB nofile=256 core=0)' : 'prlimit ✗') + ' · timeout ≤ ' + esc(String(j.caps.timeout_max_ms/1000)) + 'с · подстановки $() ' + esc(j.caps.substitution) + ' · cwd: ' + esc(j.roots.join(" | ")) + ' · прогонов ' + esc(String(j.counters.runs)) + ' / отказов ' + esc(String(j.counters.denied));
+      box.textContent = "";
+      (j.recent||[]).forEach(function(r){
+        var d = document.createElement("div"); d.className = "ev " + (r.ok ? "step" : "degraded");
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = (r.ok ? ("exit " + r.exit) : (r.reason || "fail")) + " · " + esc(r.source) + " · " + esc(String(r.ms||0)) + "мс";
+        var pl = document.createElement("div"); pl.className = "pl";
+        pl.textContent = "$ " + r.cmd;
+        d.appendChild(ty); d.appendChild(pl); box.appendChild(d);
+      });
+      if(!(j.recent||[]).length) box.innerHTML = '<div class="row sub">прогонов ещё не было — команда исполняется под prlimit с таймаутом, каждый сегмент против белого списка</div>';
+      $("exec-n").textContent = j.counters.runs + "/" + j.counters.denied;
+    }).catch(function(){ var el=$("exec-n"); if(el) el.textContent = "ошибка"; });
+  }
+  function execRun(cmd, cwd, into){
+    var out = into || $("exec-out");
+    out.textContent = "…";
+    return fetch(api("/exec"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "run", cmd: cmd, cwd: cwd }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        var NL = String.fromCharCode(10);
+        if(v.ok){ out.textContent = "exit " + v.exit + " · " + v.duration + "мс" + NL + (v.stdout_tail || "").slice(0, 400); return v; }
+        out.textContent = "отказ: " + (v.reason || "?") + (v.detail ? NL + String(v.detail).slice(0, 240) : "");
+        throw new Error(v.reason || "exec_failed");
+      });
+  }
+  $("b-exec").addEventListener("click", function(){
+    var cmd = $("exec-cmd").value.trim(), cwd = $("exec-cwd").value.trim();
+    if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
+    var b = this; b.disabled = true;
+    execRun(cmd, cwd).then(function(){ toast("exec ok", "ok"); loadExec(); loadReview(); })
+      .catch(function(e){ toast("exec отказ: " + e.message, "err"); loadExec(); loadReview(); })
+      .then(function(){ b.disabled = false; });
+  });
+  // R63 P0-b: Run Mode «plan» — план + вердикт классификатора без исполнения (канон Cursor Plan Mode)
+  $("b-plan").addEventListener("click", function(){
+    var cmd = $("exec-cmd").value.trim(), cwd = $("exec-cwd").value.trim();
+    if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
+    var b = this, out = $("exec-out"); b.disabled = true; out.textContent = "…";
+    fetch(api("/exec"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "plan", cmd: cmd, cwd: cwd }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        if(!v.ok){ out.textContent = "план отказ: " + (v.reason || "?") + (v.detail ? String.fromCharCode(10) + String(v.detail).slice(0, 240) : ""); return; }
+        var rv = v.review || {};
+        out.textContent = "план ok · сегментов " + (v.planned ? v.planned.segments.length : "?") + " · классификатор: " + (rv.verdict || "?") + (rv.rule ? " (" + rv.rule + ")" : "") + " · " + (rv.reason || "") + String.fromCharCode(10) + "bin: " + ((v.planned ? v.planned.binaries : []) || []).join(" ");
+      })
+      .catch(function(){ out.textContent = "план: сеть недоступна"; })
+      .then(function(){ b.disabled = false; });
+  });
+  $("b-demo").addEventListener("click", function(){
+    var cwd = $("exec-cwd").value.trim();
+    if(!cwd){ toast("нужен cwd (управляемый корень) — demo создаст там p0a-demo.js", "err"); return; }
+    var b = this; b.disabled = true;
+    var fname = "p0a-demo-" + Date.now().toString(36) + ".js";
+    var diff = ['--- /dev/null', '+++ ' + fname, '@@ -0,0 +1,2 @@', '+console.log("me2-p0a: edit-run-green");', '+console.log("agent loop live");'].join(String.fromCharCode(10));
+    var out = $("exec-out");
+    fetch(api("/file"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "apply", path: cwd + "/" + fname, diff: diff }) })
+      .then(function(r){ return r.json(); })
+      .then(function(e){
+        if(!e.ok) throw new Error("edit: " + (e.reason || "?") + (e.detail ? " · " + String(e.detail).slice(0, 100) : ""));
+        return execRun("node " + fname, cwd).then(function(v){
+          toast("edit→run→green ✓ · edit_id=" + e.rollback_at + " · exit=" + v.exit + (e.hunks ? "" : "") + " · откат правок существующих файлов — из журнала", "ok");
+          loadExec();
+        });
+      })
+      .catch(function(e){ out.textContent = String(e.message || e).slice(0, 300); toast("demo отказ: " + e.message, "err"); loadExec(); })
+      .then(function(){ b.disabled = false; });
+  });
+
+  // R63 P0-b classifier tier: очередь одобрений (ask) + статистика вердиктов. Кнопки ✓/✗ —
+  // санкционированная запись POST /review {op:approve|deny} (канон Cursor Approvals UI:
+  // Allow once / Deny; классификатор НЕ security boundary — решение оператора финальное).
+  function loadReview(){
+    fetch(api("/review")).then(function(r){ return r.json(); }).then(function(j){
+      var caps = $("review-caps"), st = $("review-stats"), box = $("review"); if(!caps || !box) return;
+      if(!j.ok){ caps.textContent = "classifier: честно недоступен"; $("review-n").textContent = "—"; return; }
+      var c = j.config || {};
+      caps.innerHTML = 'тир-3 ' + (c.enabled ? '<b style="color:#6ee7b7">вкл</b>' : 'выкл') + ' · LLM ' + (c.llm_enabled ? '<b>вкл (' + esc(c.model || "?") + ', ≤' + esc(String(c.timeout_ms || 3000)) + 'мс)</b>' : 'выкл (эвристика)') + ' · очередь ≤ ' + esc(String(c.queue_max || 20)) + ' · не security boundary';
+      var s = j.stats_24h || {};
+      st.textContent = 'статистика 24ч: block=' + (s.CLASSIFIER_BLOCK || 0) + ' · ask=' + (s.CLASSIFIER_ASK || 0) + ' · одобрено=' + (s.CLASSIFIER_APPROVED || 0) + ' · отклонено=' + (s.CLASSIFIER_DENIED || 0);
+      box.textContent = "";
+      var q = j.queue || {};
+      (q.pending || []).forEach(function(p){
+        var d = document.createElement("div"); d.className = "ev degraded";
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = "#" + p.id + " · ask · " + esc(p.engine) + " · ждёт оператора";
+        var pl = document.createElement("div"); pl.className = "pl"; pl.textContent = "$ " + p.cmd + " · cwd " + p.cwd;
+        var rs = document.createElement("div"); rs.className = "sub"; rs.textContent = "причина: " + p.reason;
+        var ops = document.createElement("div"); ops.style.marginTop = "4px";
+        var ba = document.createElement("button"); ba.className = "ghost"; ba.textContent = "✓ одобрить"; ba.title = "Исполнить команду (POST /review op:approve — tier-1 остаётся)";
+        var bd = document.createElement("button"); bd.className = "ghost"; bd.textContent = "✗ отклонить"; bd.title = "Отклонить команду из очереди (POST /review op:deny)";
+        ba.addEventListener("click", function(){ reviewDecide("approve", p.id); });
+        bd.addEventListener("click", function(){ reviewDecide("deny", p.id); });
+        ops.appendChild(ba); ops.appendChild(bd);
+        d.appendChild(ty); d.appendChild(pl); d.appendChild(rs); d.appendChild(ops);
+        box.appendChild(d);
+      });
+      (q.recent || []).slice(0, 6).forEach(function(r){
+        if(r.status === "pending") return;
+        var d = document.createElement("div"); d.className = "ev " + (r.status === "executed" ? "step" : "degraded");
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = "#" + r.id + " · " + r.status + (r.run_ok ? " · exit " + r.run_exit : "");
+        var pl = document.createElement("div"); pl.className = "pl"; pl.textContent = "$ " + r.cmd;
+        d.appendChild(ty); d.appendChild(pl); box.appendChild(d);
+      });
+      if(!(q.pending || []).length && !(q.recent || []).some(function(r){ return r.status !== "pending"; })) box.innerHTML = '<div class="row sub">очередь пуста — ask попадает сюда на одобрение (канон Approvals UI Cursor)</div>';
+      $("review-n").textContent = (q.pending || []).length + " ждёт";
+    }).catch(function(){ var el = $("review-n"); if(el) el.textContent = "ошибка"; });
+  }
+  function reviewDecide(dec, id){
+    fetch(api("/review"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: dec, id: id }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        if(v.ok && dec === "approve"){ var ex = v.run || {}; toast(ex.ok ? "одобрено · exit " + ex.exit + " · " + ex.duration + "мс" : "одобрено, прогон не удался: " + (ex.reason || "?"), ex.ok ? "ok" : "err"); }
+        else if(v.ok){ toast("отклонено (#" + id + ")", "ok"); }
+        else { toast("отказ: " + (v.error || "?"), "err"); }
+        loadReview(); loadExec();
+      })
+      .catch(function(){ toast("сеть недоступна", "err"); });
+  }
+
+  // R64 P0-2 OS-sandbox: слои конфайнмента (ns+seccomp; Landlock ≥5.13 — честный skip
+  // на 5.10) + probe (живой негатив/позитив, эскале-детектор) + запуск в конфайнменте.
+  // Кнопки — санкционированные записи POST /sandbox {op:probe|run} (белый список eval).
+  function loadSandbox(){
+    fetch(api("/sandbox")).then(function(r){ return r.json(); }).then(function(j){
+      var caps = $("sbox-caps"), box = $("sbox"); if(!caps || !box) return;
+      if(!j.ok){ caps.textContent = "sandbox: недоступен"; $("sbox-n").textContent = "—"; return; }
+      var c = j.caps || {}, cf = j.config || {}, ct = j.counters || {};
+      caps.innerHTML = 'landlock ABI ' + esc(String(c.landlock_abi)) + ' · userns ' + esc(String(c.userns_max)) + ' · seccomp ' + esc(String(c.seccomp_mode)) + ' · слои <b style="color:#6ee7b7">' + esc((c.layers_available||[]).join("+")) + '</b> · net ' + esc(cf.net||"?") + ' · auto ' + (cf.auto_sandbox ? "вкл" : "выкл") + ' · strict ' + (cf.strict ? "fail-closed" : "soft") + ' · прогонов ' + esc(String(ct.runs||0)) + ' / отказов ' + esc(String(ct.failed||0)) + ' / эскале ' + esc(String(ct.escapes||0));
+      box.textContent = "";
+      (j.recent||[]).forEach(function(r){
+        var d = document.createElement("div"); d.className = "ev " + (r.ok ? "step" : "degraded");
+        var ty = document.createElement("div"); ty.className = "ty";
+        ty.textContent = (r.ok ? ("exit " + r.exit) : (r.reason || "fail")) + " · sandbox · " + esc(String(r.ms||0)) + "мс";
+        var pl = document.createElement("div"); pl.className = "pl"; pl.textContent = "$ " + r.cmd;
+        d.appendChild(ty); d.appendChild(pl); box.appendChild(d);
+      });
+      if(!(j.recent||[]).length) box.innerHTML = '<div class="row sub">sandbox-прогонов ещё не было — Probe верифицирует конфайнмент живыми негативами (секреты/сеть)</div>';
+      $("sbox-n").textContent = c.verdict === "sandboxable" ? "sandboxable" : "unsandboxed";
+    }).catch(function(){ var el = $("sbox-n"); if(el) el.textContent = "ошибка"; });
+  }
+  $("b-sbox-run").addEventListener("click", function(){
+    var cmd = $("sbox-cmd").value.trim(), cwd = $("sbox-cwd").value.trim();
+    if(!cmd || !cwd){ toast("нужны команда и cwd (управляемый корень)", "err"); return; }
+    var b = this, out = $("sbox-out"); b.disabled = true; out.textContent = "…";
+    fetch(api("/sandbox"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "run", cmd: cmd, cwd: cwd }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        var NL = String.fromCharCode(10);
+        if(v.ok){
+          var layers = Object.keys(v.sandbox && v.sandbox.layers || {}).filter(function(k){ return v.sandbox.layers[k] === true || v.sandbox.layers[k] === "installed"; });
+          out.textContent = "exit " + v.exit + " · " + v.duration + "мс · net " + (v.sandbox && v.sandbox.net) + NL + "слои: " + layers.join(", ");
+          toast("sandbox run ok", "ok"); return;
+        }
+        var failed = v.sandbox && v.sandbox.strict_ok === false;
+        out.textContent = (failed ? "sandbox_failed (strict): " : "отказ: ") + (v.reason || ("exit " + v.exit)) + NL + (v.stderr_tail || "").slice(0, 200);
+        toast(failed ? "sandbox_failed — команда НЕ исполнена" : "прогон в сандбоксе: exit " + v.exit, failed ? "err" : "ok");
+      })
+      .catch(function(){ out.textContent = "сеть недоступна"; })
+      .then(function(){ b.disabled = false; loadSandbox(); });
+  });
+  $("b-sbox-probe").addEventListener("click", function(){
+    var b = this, out = $("sbox-probe"); b.disabled = true; out.textContent = "probe: …";
+    fetch(api("/sandbox"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "probe" }) })
+      .then(function(r){ return r.json(); })
+      .then(function(v){
+        var c = v.checks || {};
+        out.textContent = "probe " + (v.ok ? "✓ 4/4" : "✗") + (v.escape ? " · ЭСКАПИРОВАНО!" : "") + " · внутрь " + (c.write_inside && c.write_inside.ok ? "✓" : "✗") + " · секреты " + (c.write_outside_denied && c.write_outside_denied.ok ? "скрыты ✓" : "✗") + " · сеть " + (c.net_denied && c.net_denied.ok ? "EPERM ✓" : "✗") + " · контроль " + (c.net_allow_control && c.net_allow_control.ok ? "✓" : "✗") + " · " + esc(String(v.ms||0)) + "мс";
+        toast(v.ok ? "probe: конфайнмент подтверждён (4/4)" : "probe: НАРУШЕНИЕ — смотри лог", v.ok ? "ok" : "err");
+        loadSandbox();
+      })
+      .catch(function(){ out.textContent = "probe: сеть недоступна"; })
+      .then(function(){ b.disabled = false; });
+  });
+
   function connectSocket(){
     var s=document.createElement("script");
     s.src="http://"+location.hostname+":${WS_PORT}/socket.io.js";
@@ -472,8 +728,8 @@ export function missionUiHtml(): string {
   }
   window.addEventListener("hashchange", openFromHash);
 
-  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadExt(); connectSocket(); openFromHash();
-  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadExt, 60000);
+  loadHead(); loadFleet(); loadRiver(); loadMirror(); loadAudit(); loadReconcile(); loadHooks(); loadExt(); loadExec(); loadReview(); loadSandbox(); connectSocket(); openFromHash();
+  setInterval(loadFleet, 4000); setInterval(loadHead, 15000); setInterval(loadRiver, 20000); setInterval(loadMirror, 30000); setInterval(loadAudit, 120000); setInterval(loadReconcile, 120000); setInterval(loadHooks, 120000); setInterval(loadExt, 60000); setInterval(loadExec, 30000); setInterval(loadReview, 30000); setInterval(loadSandbox, 30000);
   setInterval(function(){ var u=$("ch-upd"); u.textContent="обновлено "+new Date().toLocaleTimeString(); }, 1000);
 })();
 </script>
