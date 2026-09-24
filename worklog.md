@@ -1337,3 +1337,18 @@ Stage Summary:
 - Daemon v0.57.1: eval PASS 70/70 (v31), lint 0/0, инвариант 47/47, mirror LIVE collisions=0, дедуп/chain пережили kill -9, CI SUCCESS.
 - Аудит-вердикт: REST-шина, webhooks-in, персистентность, worker-lifecycle, quota-resilience (pacing/cache/failover/park) — ПРОДАКШН-ВЕРИФИЦИРОВАНЫ в этом раунде независимо.
 - Честные ограничения: vercel-gateway TLS вниз на уровне сети песочницы (внешне, не чинится изнутри — проба исключает его из цепочки); Electron/CDP-плоскость вне песочницы; soak ≥30 мин — итог отдельно.
+
+---
+Task ID: R73-SOAK-FINAL
+Agent: Z.ai (main)
+Task: Soak-итог (долг R70–R72: soak ≥30 мин никогда не прогонялся) + финальный коммит раунда
+
+Work Log:
+- Ограничение платформы выявлено и обойдено: фоновые процессы, заспавненные из tool-сессий, reap'ятся платформой после завершения вызова (soak.sh и soak2.sh умерли после первого сэмпла; комментарий в me2-watchdog.ts подтверждает: «The platform reaps tool-spawned processes»). Метод-обход: soak СЕГМЕНТАМИ внутри одного Bash-вызова (до 10 мин каждый): 3 сегмента × 9 сэмплов × 55с.
+- ИТОГ (28 сэмплов, окно 20:10:29–20:44:53 UTC = 34 мин): RSS min=108 max=136 last=118 MB — роста нет, деградации нет; mirror state LIVE всё окно; pending max 8 (штатный пакетный дренаж → 0); collisions_total 0 (boot-epoch фикс стабилен); last_seq 11525→12047 монотонно (бизнес-события шли: агентные чаты, пула-циклы).
+- Commit 1838741e (R73) push в sandbox/me2-os: mirror boot-epoch, gateway TLS-проба, relay watchdog, LLM-QUOTA карточка, verifyBatchTail dedup, eval v31 (70/70), worklog.
+
+Stage Summary:
+- Soak ≥30 мин ВЫПОЛНЕН впервые: утечек/деградации нет, зеркало стабильно, коллизий 0.
+- R73 закрыт полностью: все долги R70–R72 устранены, полный аудит пройден заново независимо (инвентарь 67 GET, eval 70/70, selftest, идемпотентность, concurrency, chaos kill -9, security, CI SUCCESS, UI/мобайл).
+- Оператору (без изменений): vercel-gateway TLS — внешний сетевой вопрос; sql/0004 — опциональный канонический DDL (клиентский фикс уже решает проблему); sb_publishable для RLS-канала.
