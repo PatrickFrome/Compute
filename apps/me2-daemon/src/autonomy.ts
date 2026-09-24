@@ -48,6 +48,9 @@ const BUDGET_BREACH = Number(process.env.ME2_RISK_BREACH ?? 80);
 const BUDGET_WEIGHTS: Record<string, number> = {
   TASK_FAILED: 1, POOL_LEASE_REAPED: 2, AGENT_CHAT_TURN_FAILED: 1,
   AGENT_CHAT_DEGRADED: 3, TASK_REWARD_HACK: 5, EVAL_FAIL: 2, COMMAND_DENIED: 2,
+  EXEC_DENIED: 2, EDIT_ROLLBACK: 3, // R62 P0-a: отказы терминала и авто/ручные откаты правок в blast-radius
+  CLASSIFIER_BLOCK: 2, CLASSIFIER_DENIED: 1, // R63 P0-b: блоки тира-3 в blast-radius; операторские дени очереди — шум меньше
+  SANDBOX_FAILED: 2, SANDBOX_ESCAPE: 3, // R64 P0-2: strict-отказы честнее в blast-radius; эскале конфайнмента — максимальный сигнал
 };
 
 // ── P2+P3: liveness / deadlock / livelock ─────────────────────────
@@ -213,6 +216,11 @@ export const ENFORCED_WRITE_FAMILIES: Record<string, string> = {
   "/db/hygiene": "DB-гигиена: WAL checkpoint/PRAGMA, без деструктива домена",
   "/mcp": "MCP-шлюз: JSON-RPC поверх тех же REST-семейств (отдельного пути нет)",
   "/exthost/run": "R60 exthost-плоскость: изолированный прогон расширения (spawn prlimit as/nofile/core + env-белый-список + caps-медиация), журнал exthost_runs + EXT_RUN в chain; расширение не пишет в домен",
+  "/exec": "R62 P0-a exec-плоскость (TERMINAL_RUN): белые списки бинарей ПО СЕГМЕНТАМ + prlimit (as/nofile/core) + таймаут + env-белый-список + cwd только в управляемых корнях; журнал exec_runs + TERMINAL_RUN/EXEC_DENIED в chain; вне шины (47-инвариант)",
+  "/file": "R62 P0-a edit-плоскость (FILE_EDIT): unified-diff с dry-run-валидацией + durable-бэкап в журнале file_edits + rollback; цель только в управляемых корнях, single-file, без .git/удалений; EDIT_APPLIED/EDIT_DENIED/EDIT_ROLLBACK в chain",
+  "/review": "R63 P0-b classifier-плоскость (тир-3 auto-review): approve|deny очереди classifier_ask + classify (dry, без spawn) + config (enabled/llm); классификатор НЕ security boundary; события CLASSIFIER_BLOCK/ASK/APPROVED/DENIED/CONFIG в chain; approve исполняет runApprovedAsync (tier-1 не скипается)",
+  "/sandbox": "R64 P0-2 OS-sandbox-плоскость: probe (живой негатив/позитив конфайнмента + SANDBOX_ESCAPE при эскале) + run (tier-1 planExec обязателен → ns+seccomp, strict fail-closed: слои не применились → команда НЕ исполнена) + config (auto_sandbox/net/strict); Landlock ≥5.13; события SANDBOX_APPLIED/FAILED/PROBE/ESCAPE/CONFIG в chain",
+  "/hooks/github": "R68 P0-e webhooks-in (push): enforcement = HMAC-SHA256 над RAW-телом (X-Hub-Signature-256, timing-safe) ДО любой обработки + дедуп X-GitHub-Delivery; без подписи/с ключом неверным → 401, событие НЕ создаётся; zero-authority: только наблюдения HOOK_PING/GIT_PUSH/CI_HOOK_RUN_*/HOOK_EVENT в event-log (никогда не команды шины); секрет в vault (GITHUB_WEBHOOK_SECRET), без секрета 503",
 };
 export function nonBypassAudit(): {
   verdict: "NO_BYPASS" | "UNKNOWN_ROUTE"; post_routes: string[]; classified: number;

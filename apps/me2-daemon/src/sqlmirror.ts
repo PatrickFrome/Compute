@@ -17,6 +17,7 @@
 // Zero-authority: модуль только читает локальный event-log и пишет в облако; на шину,
 // daemon-решения и self-update не влияет. 47-действий инвариант не трогается (вне шины).
 import { Database } from "bun:sqlite";
+import { emit } from "../store";
 import { tokenGet, onTokenChange } from "./tokens";
 
 export const SQLMIRROR_SCHEMA = "me2.sqlmirror.v1";
@@ -47,9 +48,61 @@ export interface SqlMirrorStatus {
   pending: number;
   batches_ok: number;
   batches_err: number;
+  collisions_total: number;
+  last_collision_seq: number | null;
   last_error: string | null;
   last_ok_at: number | null;
   last_probe_at: number | null;
+  boot_epoch: number;
+  epoch_n: number;
+}
+
+// ── R70: персистентное операторское решение «зеркало включено» ──
+// Проблема (найдена аудитом R70): решение жило ТОЛЬКО в env процесса (start.sh экспортирует
+// ME2_SQL_MIRROR=1), а авто-восстановление бута вне start.sh завязано на SUPABASE_DB_URL в
+// env-файле — которого оператор не добавлял. Рестарт без start.sh (kill -9 + ручной запуск,
+// респавн супервизором) молча гасил зеркало в OFF при живом курсоре. Фикс: бут с включённым
+// зеркалом (+ ключ в vault) персистит решение в meta sqlmirror_gate='1'; любой последующий
+// бут восстанавливает его оттуда. Явный ME2_SQL_MIRROR=0 удаляет решение (осознанный off).
+const GATE_KEY = "sqlmirror_gate";
+
+/** Читано ли персистентное операторское решение (meta sqlmirror_gate='1'). */
+export function sqlmirrorGatePersisted(db: Database): boolean {
+  try {
+    const r = db.query("SELECT value FROM meta WHERE key=?").get(GATE_KEY) as { value: string } | undefined;
+    return r?.value === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistGate(db: Database, on: boolean): void {
+  try {
+    if (on) {
+      db.query("INSERT INTO meta (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(GATE_KEY, "1");
+    } else {
+      db.query("DELETE FROM meta WHERE key=?").run(GATE_KEY);
+    }
+  } catch {
+    /* meta недоступна — решение живёт только в env (честная деградация) */
+  }
+}
+
+// ── R73: поколенио-безопасные seq'и зеркала БЕЗ DDL ──
+// Проблема (R71 §16, детектор подтвердил ×12): таблица зеркала РАЗДЕЛЯЕТСЯ поколениями
+// песочниц; PK seq — глобальный, чужие строки занимают наши seq → ignore-duplicates молча
+// роняет наши события. sql/0004 (UNIQUE(boot_id,seq)) ждёт оператора, но фикс возможен
+// ЧИСТО клиентски: зеркалируем seq' = boot_epoch + local_seq, где boot_epoch = epoch_n × 10^7,
+// а epoch_n — персистентный счётчик бутов (meta sqlmirror_epoch_n). Каждая инкарнация daemon'а
+// пишет в СВОЁ 10^7-окно → перекрытие поколений физически невозможно (локальные seq ≪ 10^7).
+// Маппинг обратим: local_seq = seq' − boot_epoch, boot_epoch = ⌊seq'/10^7⌋ × 10^7.
+// Деградация: meta недоступна → epoch_n=0 → seq'=local_seq (legacy-режим, честно).
+export const EPOCH_STRIDE = 10_000_000;
+const EPOCH_KEY = "sqlmirror_epoch_n";
+
+/** Зеркальный seq: окно бута + локальный seq. */
+export function mirrorSeq(epochN: number, localSeq: number): number {
+  return Math.max(0, epochN) * EPOCH_STRIDE + localSeq;
 }
 
 export class SqlMirror {
@@ -65,9 +118,18 @@ export class SqlMirror {
   private timer: ReturnType<typeof setInterval> | null = null;
   private errUntil = 0;
   private running = false;
+  private collisions = 0;
+  private lastCollisionSeq: number | null = null;
+  // R73: поколенио-безопасные seq'и зеркала (см. EPOCH_STRIDE ниже)
+  private epochN = 0;
+  private bootEpoch = 0;
 
   constructor(private db: Database) {
     this.key = pickCredential();
+    // R70: решение оператора персистится. env=1 + ключ → meta gate='1'; явный env=0 →
+    // решение удаляется; env не задан и решения нет → OFF (как до первого включения).
+    if (process.env.ME2_SQL_MIRROR === "0") persistGate(this.db, false);
+    else if (this.configured) persistGate(this.db, true);
     onTokenChange((name) => {
       // R54: канал записи — sb_secret (новый формат) с фолбэком на legacy service_role JWT
       // (операторский, HMAC-верифицирован против SUPABASE_JWT_SECRET; облако принимает точную
@@ -75,12 +137,28 @@ export class SqlMirror {
       if (name === "SUPABASE_SERVICE_ROLE_JWT" || name === "SUPABASE_SERVICE_ROLE_JWT_LEGACY") {
         this.key = pickCredential();
         this.recomputeGate();
+        if (this.configured) persistGate(this.db, true);
       }
     });
   }
 
   get configured(): boolean {
     return process.env.ME2_SQL_MIRROR === "1" && this.key.length > 0;
+  }
+
+  /** R73: выделение окна поколений этому буту (однократно, персистентно, до первой пачки). */
+  private ensureEpoch(): void {
+    if (this.bootEpoch > 0 || !this.configured) return;
+    try {
+      const cur = this.db.query("SELECT value FROM meta WHERE key=?").get(EPOCH_KEY) as { value: string } | undefined;
+      this.epochN = (Number(cur?.value) || 0) + 1;
+      this.bootEpoch = this.epochN * EPOCH_STRIDE;
+      this.db.query("INSERT INTO meta (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(EPOCH_KEY, String(this.epochN));
+      console.log(`[sqlmirror] boot_epoch=${this.bootEpoch} (epoch_n=${this.epochN}) — зеркальные seq' = boot_epoch + local_seq (поколенио-безопасно, R73)`);
+    } catch {
+      this.epochN = 0;
+      this.bootEpoch = 0; // meta недоступна — legacy-режим seq'=local_seq (честная деградация)
+    }
   }
 
   private recomputeGate(): void {
@@ -155,8 +233,9 @@ export class SqlMirror {
       }>;
       if (rows.length === 0) return;
       const version = (this.db.query("SELECT value FROM meta WHERE key='version'").get() as { value: string } | undefined)?.value ?? "";
+      this.ensureEpoch(); // R73: окно поколений выделяется ДО первой отправки пачки
       const body = rows.map((e) => ({
-        seq: e.seq,
+        seq: mirrorSeq(this.epochN, e.seq),
         ts: e.ts,
         type: e.type,
         actor: e.agent_id ?? "daemon",
@@ -193,6 +272,11 @@ export class SqlMirror {
         this.lastError = null;
         this.state = "LIVE";
         this.batchesErr = 0;
+        // R71 (аудит §16/§4): таблица зеркала РАЗДЕЛЯЕТСЯ поколениями песочниц (seq-PK не
+        // поколенио-безопасен) — ignore-duplicates молча роняет нашу строку, если чужое
+        // поколение уже заняло seq. Конвертируем тихую потерю в ВИДЫЙ сигнал: после каждой
+        // пачки проверяем hash последней строки; несовпадение = MIRROR_COLLISION.
+        void this.verifyBatchTail(rows[rows.length - 1]);
       } catch (e) {
         this.batchesErr += 1;
         this.lastError = String(e?.message || e).slice(0, 140);
@@ -201,6 +285,29 @@ export class SqlMirror {
     } finally {
       this.running = false;
     }
+  }
+
+  /** R71: детект межпоколенческих коллизий (hash последней строки ≠ локальному). */
+  private async verifyBatchTail(last: { seq: number; hash: string | null }): Promise<void> {
+    if (!this.key) return;
+    try {
+      const remoteSeq = mirrorSeq(this.epochN, last.seq);
+      const r = await fetch(`${restBase()}/${TABLE}?seq=eq.${remoteSeq}&select=hash`, {
+        headers: { apikey: this.key, Authorization: `Bearer ${this.key}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return; // проба не мешает каналу — ошибка доставки уже видна в статусе
+      const rows = (await r.json()) as Array<{ hash: string }>;
+      const remote = rows[0]?.hash ?? "";
+      if (remote && remote !== (last.hash ?? "")) {
+        this.collisions += 1;
+        this.lastCollisionSeq = last.seq;
+        console.log(`[sqlmirror] MIRROR_COLLISION local_seq=${last.seq} mirror_seq=${remoteSeq} — в зеркале чужая строка, наша потеряна молча; оператору: sql/0004 (UNIQUE(boot_id,seq))`);
+        try {
+          emit("MIRROR_COLLISION", { seq: last.seq, mirror_seq: remoteSeq, expected: (last.hash ?? "").slice(0, 12), got: remote.slice(0, 12) });
+        } catch { /* zero-authority: событие не критично */ }
+      }
+    } catch { /* сеть/таймаут — не мешает каналу */ }
   }
 
   /**
@@ -236,6 +343,10 @@ export class SqlMirror {
 
   start(): void {
     this.recomputeGate();
+    // R73: ensureEpoch НЕ здесь — платформенный watchdog (me2-watchdog.ts, stdio:ignore)
+    // спавнит дубль-инкарнации, которые умирают по EADDRINUSE/guard ПОСЛЕ start(), но
+    // успевали зря сжигать окна (эмпирика R73: +2 окна за рестарт). Инкремент — в tick()
+    // перед первой ПАЧКОЙ: до него доживают только реально живые процессы (listen прошёл).
     if (this.timer) return;
     this.timer = setInterval(() => { void this.tick(); }, INTERVAL_MS);
     this.timer.unref?.();
@@ -259,9 +370,13 @@ export class SqlMirror {
       pending,
       batches_ok: this.batchesOk,
       batches_err: this.batchesErr,
+      collisions_total: this.collisions,
+      last_collision_seq: this.lastCollisionSeq,
       last_error: this.lastError,
       last_ok_at: this.lastOkAt,
       last_probe_at: this.lastProbeAt,
+      boot_epoch: this.bootEpoch,
+      epoch_n: this.epochN,
     };
   }
 }

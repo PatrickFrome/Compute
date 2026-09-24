@@ -1,4 +1,9 @@
 // ME2 CORE — deterministic single-writer engine (M1).
+// ⚠️ R71-аудит: Me2Core НИГДЕ не инстанцируется (0 импортов по всему daemon + скриптам) —
+// это спящая симуляционная compute-плоскость эпохи M1 (wrk_/tsk_, детерминированные исходы),
+// вытесненная реальными контурами worker.ts (drainCommands/watchdog) + pool.ts + agentchat.ts.
+// НЕ УДАЛЯТЬ без решения оператора: исторический референс lease/dispatch/governor-паттернов.
+// Статус в capability-матрице: UNUSED (не BROKEN — код самодостаточен, но вне боевого контура).
 // Lessons encoded from the legacy system audit:
 //  - ONE owner of state (no multi-writer jsonb merges)  → SQLite WAL + in-memory fold
 //  - Local command bus (µs, not 4s DB polls)            → lane scheduler + budget

@@ -20,7 +20,7 @@ const HERE = process.env.ME2_DATA_DIR || join(dirname(fileURLToPath(import.meta.
 mkdirSync(HERE, { recursive: true });
 
 /** Версия daemon'а — единый источник (R49): health, /state.capabilities, eval, UI. */
-export const VERSION = "0.48.0";
+export const VERSION = "0.57.1";
 
 export const DB_FILE = join(HERE, "me2.db");
 export const db = new Database(DB_FILE);
@@ -114,6 +114,10 @@ if (!taskCols.includes("reflection")) db.exec(`ALTER TABLE tasks ADD COLUMN refl
 if (!taskCols.includes("objective_id")) db.exec(`ALTER TABLE tasks ADD COLUMN objective_id TEXT`);
 // R29 C3: reviewer-agent — LLM-ревью результата против спека (антифальшь, директива оператора)
 if (!taskCols.includes("review")) db.exec(`ALTER TABLE tasks ADD COLUMN review TEXT`);
+// v0.57.0 quota-resilience: парк квотных задач — not_before_ms скрывает от master-loop'а
+// до срока (задача доживает до окна квоты), park_count — честный бюджет переносов
+if (!taskCols.includes("not_before_ms")) db.exec(`ALTER TABLE tasks ADD COLUMN not_before_ms INTEGER NOT NULL DEFAULT 0`);
+if (!taskCols.includes("park_count")) db.exec(`ALTER TABLE tasks ADD COLUMN park_count INTEGER NOT NULL DEFAULT 0`);
 
 export type AgentRow = {
   id: string; role: string; status: string; model: string; paused: number; created_at: string; updated_at: string;
@@ -121,7 +125,8 @@ export type AgentRow = {
 export type TaskRow = {
   id: string; title: string; spec: string; role: string | null; parent_id: string | null; status: string;
   agent_id: string | null; max_steps: number; steps: number; result: string | null;
-  error: string | null; reflection: string | null; objective_id: string | null; review: string | null; created_at: string; updated_at: string;
+  error: string | null; reflection: string | null; objective_id: string | null; review: string | null;
+  not_before_ms: number; park_count: number; created_at: string; updated_at: string;
 };
 export type EventRow = {
   seq: number; ts: string; type: string; agent_id: string | null; task_id: string | null; data: string;
@@ -277,9 +282,9 @@ export function deleteAgent(id: string) {
 }
 
 // ── tasks ─────────────────────────────────────────────────────────
-export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "reflection" | "created_at" | "updated_at" | "parent_id" | "objective_id"> & { parent_id?: string | null; objective_id?: string | null; reflection?: string | null };
+export type NewTask = Omit<TaskRow, "status" | "agent_id" | "steps" | "result" | "error" | "reflection" | "created_at" | "updated_at" | "parent_id" | "objective_id" | "not_before_ms" | "park_count"> & { parent_id?: string | null; objective_id?: string | null; reflection?: string | null };
 export function createTask(t: NewTask): TaskRow {
-  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, objective_id: t.objective_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, reflection: t.reflection ?? null, created_at: nowIso(), updated_at: nowIso() };
+  const row: TaskRow = { ...t, parent_id: t.parent_id ?? null, objective_id: t.objective_id ?? null, status: "READY", agent_id: null, steps: 0, result: null, error: null, reflection: t.reflection ?? null, not_before_ms: 0, park_count: 0, created_at: nowIso(), updated_at: nowIso() };
   db.query(`INSERT INTO tasks (id,title,spec,role,parent_id,status,agent_id,max_steps,steps,result,error,reflection,objective_id,created_at,updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(row.id, row.title, row.spec, row.role, row.parent_id, row.status, row.agent_id, row.max_steps, row.steps, row.result, row.error, row.reflection, row.objective_id, row.created_at, row.updated_at);
@@ -297,13 +302,13 @@ export function getTask(id: string): TaskRow | null {
 }
 export function nextReadyTask(agentRole: string): TaskRow | null {
   return (db.query(
-    `SELECT * FROM tasks WHERE status='READY' AND (role IS NULL OR role='' OR role=?) ORDER BY created_at LIMIT 1`,
-  ).get(agentRole) as TaskRow | null) ?? null;
+    `SELECT * FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? AND (role IS NULL OR role='' OR role=?) ORDER BY created_at LIMIT 1`,
+  ).get(Date.now(), agentRole) as TaskRow | null) ?? null;
 }
 /** E3 (R34): pool-исполнители универсальны — берут ЛЮБУЮ READY-задачу (дежурная смена,
  *  не ролевая матрица); чинит вечное READY узких ролей без агента-носителя. */
 export function nextReadyTaskAny(): TaskRow | null {
-  return (db.query(`SELECT * FROM tasks WHERE status='READY' ORDER BY created_at LIMIT 1`).get() as TaskRow | null) ?? null;
+  return (db.query(`SELECT * FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? ORDER BY created_at LIMIT 1`).get(Date.now()) as TaskRow | null) ?? null;
 }
 export function updateTask(id: string, patch: Partial<TaskRow>) {
   const cols = Object.keys(patch);

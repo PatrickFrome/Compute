@@ -29,6 +29,7 @@ import { evalVerdict } from "./eval";
 import { governorStatus } from "./governor";
 import { demandStatus } from "./demand";
 import { tokensStatus } from "./tokens";
+import { hooksStatus } from "./hooks";
 import { policyStatus } from "./policy";
 import { objectivesVerdict } from "./objectives";
 import { handoffsVerdict } from "./handoffs";
@@ -39,11 +40,42 @@ import { poolStatus } from "./pool";
 import { agentChatStatus, fleetDigest } from "./agentchat";
 import { autonomyStatus } from "./autonomy";
 import type { SuCheck } from "./selfupdate";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface MechanicRow {
   id: string; name: string; old_ref: string;
   verdict: "WORKS" | "CAVEAT" | "DECOR";
   evidence: string;
+  /** Cursor-аналог (R21 parity-матрица + корпус R61; §34: UNKNOWN если нет публичных доков) */
+  cursor_ref?: string;
+  parity?: "PARITY" | "PARTIAL" | "MISSING" | "SUPERIOR" | "UNKNOWN";
+}
+
+/** Корень репо из src/ демона: src → me2-daemon → mini-services → repo */
+function repoRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+/** ME30: desktop-клиент (Electron, R46-R64) — вердикт из живого состояния файлов + CI */
+export function clientShellStatus() {
+  const root = repoRoot();
+  const rels = [
+    "desktop/src/main.ts",
+    "desktop/src/daemon-supervisor.ts",
+    "desktop/src/gateway.ts",
+    "desktop/src/tab-registry.ts",
+    "desktop/src/updater.ts",
+    "desktop/src/preload.ts",
+  ];
+  const files = rels.map((rel) => join(root, rel));
+  const present = files.filter((f) => existsSync(f)).length;
+  const builder = existsSync(join(root, "desktop", "electron-builder.yml"));
+  const ci = existsSync(join(root, ".github", "workflows", "desktop-build.yml"));
+  const tauri = existsSync(join(root, "src-tauri", "tauri.conf.json"));
+  const desktop = present === files.length && builder && ci;
+  return { present, total: files.length, builder, ci, tauri, desktop };
 }
 
 export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
@@ -147,6 +179,7 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME17", name: "Semantic browser perception (CAPTURE→act→verify)", old_ref: "browser-tools.ts semantic_targets[]",
       verdict: senseStatus().tabs > 0 ? "WORKS" : "CAVEAT",
       evidence: `sense: tabs=${senseStatus().tabs}, targets=${senseStatus().total_targets}, last_age=${senseStatus().last_age_s ?? "—"}s; act+auto-verify по ref/имени`,
+      cursor_ref: "Browser/computer-use (анонсирован)", parity: "PARTIAL",
     },
     {
       id: "ME18", name: "CDP network/console sensors (Chrome DevTools MCP parity)", old_ref: "—",
@@ -294,6 +327,87 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       } catch (e) { return `ME40 evidence failed: ${String(e).slice(0, 80)}`; } })(),
     },
   ];
+
+  // Паритет-метки ME1–ME16 (R21-матрица; UNKNOWN = нет публичных доков Cursor, §34)
+  // R66: конвертация UNKNOWN → вердикты ПЕРЕНОСОМ из корпуса R61 (r61-parity-matrix.json, 329 стр. official corpus),
+  // источники = id capability — не изобретение (§34). SUPERIOR — только там, где корпус R61 сам дал SUPERIOR
+  // (infra.*: нет аналога в 329 стр. docs.cursor.com + blog/security/changelog).
+  const parityMap: Record<string, { cursor_ref: string; parity: NonNullable<MechanicRow["parity"]> }> = {
+    ME1: { cursor_ref: "Tool-call loop агента (Composer/Agent)", parity: "PARITY" },
+    ME2: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME3: { cursor_ref: "Agent mode (автономные прогоны)", parity: "PARITY" },
+    ME4: { cursor_ref: "Memories / Rules", parity: "PARTIAL" },
+    ME5: { cursor_ref: "Composer/Chat LLM", parity: "PARITY" },
+    ME6: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME7: { cursor_ref: "Auto-update (Electron/Squirrel)", parity: "PARTIAL" },
+    ME8: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME9: { cursor_ref: "Codebase indexing (@codebase, embeddings)", parity: "PARTIAL" },
+    ME10: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME11: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME12: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME13: { cursor_ref: "Browser agent (анонсирован)", parity: "PARTIAL" },
+    ME14: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME15: { cursor_ref: "— (bugbot ≠ runtime RH)", parity: "UNKNOWN" },
+    ME16: { cursor_ref: "—", parity: "UNKNOWN" },
+    // ── R66: перенос вердиктов из корпуса R61 (ME18–ME40) ──
+    ME18: { cursor_ref: "R61 core.browser-tool (console/network)", parity: "PARITY" },
+    ME19: { cursor_ref: "— (нет аналога в корпусе R61; §34)", parity: "UNKNOWN" },
+    ME20: { cursor_ref: "R61 core.harness-evals + evals.internal (внутренние бенчи)", parity: "PARITY" },
+    ME21: { cursor_ref: "R61 ext.mcp-server (Cursor как MCP-провайдер)", parity: "PARITY" },
+    ME22: { cursor_ref: "R61 core.harness-evals (CursorBench/A-B/keep-rate)", parity: "PARITY" },
+    ME23: { cursor_ref: "R61 plan.task-tracking (todos/plan items)", parity: "PARITY" },
+    ME24: { cursor_ref: "R61 fleet.handoff-docs + fleet.swarm (handoff-doc protocol)", parity: "PARTIAL" },
+    ME25: { cursor_ref: "R61 mdl.catalog + core.model-switch", parity: "PARTIAL" },
+    ME26: { cursor_ref: "R61 core.agent-review (dedicated review pass)", parity: "PARTIAL" },
+    ME27: { cursor_ref: "R61 sec.permissions-json + core.run-modes", parity: "PARTIAL" },
+    ME28: { cursor_ref: "— (нет аналога в корпусе R61; ctx.* — про codebase-контекст)", parity: "UNKNOWN" },
+    ME29: { cursor_ref: "— (нет аналога в корпусе R61)", parity: "UNKNOWN" },
+    ME30: { cursor_ref: "— (нет аналога в корпусе R61; инфраструктурная гигиена)", parity: "UNKNOWN" },
+    ME31: { cursor_ref: "R61 art.logs (логи как артефакты; у ME2 — hash-chain outbox→cloud)", parity: "PARITY" },
+    ME32: { cursor_ref: "R61 infra.audit-loop + art.trace (вне корпуса)", parity: "SUPERIOR" },
+    ME33: { cursor_ref: "R61 api.pool-queue (list/SSE/claim/release, scale-to-zero)", parity: "PARTIAL" },
+    ME34: { cursor_ref: "R61 ctx.memory (SUPERIOR: persistent agent memory)", parity: "SUPERIOR" },
+    ME35: { cursor_ref: "R61 fleet.swarm (recursive planner/worker trees)", parity: "PARTIAL" },
+    ME36: { cursor_ref: "R61 fleet.swarm + plan.task-tracking", parity: "PARTIAL" },
+    ME37: { cursor_ref: "R61 infra.nonbypass-bus + infra.audit-loop (вне корпуса)", parity: "SUPERIOR" },
+    ME38: { cursor_ref: "R61 mdl.cost-governor (cost-based routing)", parity: "PARTIAL" },
+    ME39: { cursor_ref: "R61 auto.automations (cron + event triggers)", parity: "PARTIAL" },
+    ME40: { cursor_ref: "R61 cloud.secrets + cloud.secret-redaction", parity: "PARITY" },
+  };
+  for (const r of rows) {
+    const p = parityMap[r.id];
+    if (p) { r.cursor_ref = p.cursor_ref; r.parity = p.parity; }
+  }
+
+  // ME41: desktop-клиент (R21 скелет → R46-R64 desktop/ — канон после smart-merge R65)
+  const cs = clientShellStatus();
+  rows.push({
+    id: "ME41", name: "Desktop client: Electron (supervisor+gateway+tabs+updater)", old_ref: "легаси-браузер MetaEngine (Electron)",
+    verdict: cs.desktop ? "WORKS" : "CAVEAT",
+    evidence: `desktop/src: ${cs.present}/${cs.total} модулей, electron-builder: ${cs.builder ? "да" : "нет"}, CI: ${cs.ci ? "да" : "нет"}; tauri: ${cs.tauri ? "есть (альтернатива)" : "нет"}; GUI-run в песочнице невозможен — сборка=CI`,
+    cursor_ref: "VS Code fork shell (полный продукт)",
+    parity: cs.desktop ? "PARTIAL" : "MISSING",
+  });
+
+  // ME42: webhooks-in (R68 — push-фаза P0-e; вход внешних событий поверх pull-канала R67)
+  const hs = hooksStatus();
+  rows.push({
+    id: "ME42",
+    name: "Webhooks-in: POST /hooks/github — HMAC-SHA256 (X-Hub-Signature-256, timing-safe), персистентный дедуп X-GitHub-Delivery, HOOK_PING/GIT_PUSH/GIT_PR_*/CI_HOOK_RUN_* → event-log → облако",
+    old_ref: "— (внешние события были только pull; push-канала не существовало)",
+    verdict: hs.secret !== "missing" && hs.verified_total > 0 ? "WORKS" : "CAVEAT",
+    evidence: `secret: ${hs.secret}, verdict: ${hs.verdict}, received: ${hs.received_total}, verified: ${hs.verified_total}, rejected: ${hs.rejected_total} (посл. причина: ${hs.rejected_last_reason ?? "—"}), событий: ${hs.events_emitted_total}, дедуп: sqlite-персистентный (${hs.dedupe_size} GUID, переживает рестарт — R69), gateway: ${hs.gateway.via}, события: ${hs.events_supported.join("/")}, внешний канал: smee-релей (mini-services/me2-webhook-relay :3044→smee.io, outbound-SSE) — хук 685103637 зарегистрирован в репо, ПЕРВЫЙ внешний HOOK_PING seq 5846 (zen-цитата GitHub, hook_id совпал, last_response 200) — R69.1`,
+    cursor_ref: "— (нет публичного подтверждения; сверка с корпусом R61 продолжается)",
+    parity: "UNKNOWN",
+  });
+
+  // Остаточные UNKNOWN (строки без parityMap-входа) — §34: честно UNKNOWN, не «у Cursor нет»
+  for (const r of rows) {
+    if (!r.parity) {
+      r.parity = "UNKNOWN";
+      if (!r.cursor_ref) r.cursor_ref = "— (нет публичного подтверждения; сверка с корпусом R61 продолжается)";
+    }
+  }
 
   const works = rows.filter((r) => r.verdict === "WORKS").length;
   return {

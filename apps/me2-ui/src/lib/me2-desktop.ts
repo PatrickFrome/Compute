@@ -35,7 +35,7 @@ export interface Me2DesktopBridge {
   panels: string[];
   tabs: {
     /** UI сменил панель — уведомить нативную оболочку (синхронизация TabRegistry). */
-    setActive(kind: "panel", key: string): void;
+    setActive(kind: "panel" | "page", key: string): void;
     /** Открыть сайт нативной вкладкой-браузером (G10: браузер сам открывает сайт). */
     openSite(url: string, title?: string): Promise<{ ok: boolean; id?: string; error?: string }>;
   };

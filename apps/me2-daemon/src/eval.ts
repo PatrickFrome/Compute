@@ -38,13 +38,15 @@ import { handoffList, handoffStats } from "./handoffs";
 import { glmStatus, canonicalGlm, agentTag } from "./glm";
 import { reviewStats } from "./reviewer";
 import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
+import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck } from "./sandbox2";
+import { sandboxEligible, FS_RULES } from "./review";
 import { senseDiffs } from "./sense";
 import { obsvPersistState } from "./obsv";
 import { hygieneStatus } from "./dbhygiene";
 import { evidenceStatus, verifyChain, recomputeHash } from "../evidence";
 import { recordSpan } from "./otel";
 import { poolStatus, poolScale, poolEvalLeaseCycle, POOL_MAX } from "./pool";
-import { createTask, updateTask, rid } from "../store";
+import { createTask, updateTask, rid, getTask, nextReadyTaskAny } from "../store";
 import {
   agentChatCreate, agentChatDelete, agentChatStatus, chatAppend, buildChatContext, agentChatClose, execChatToolSync,
   supervisorEnsure, interchatDeliver, unreadInterchat, agentChatGet, agentChatList, chatSetObjective, fleetDigest, normalizeChatModel,
@@ -56,16 +58,22 @@ import { SQLMIRROR_TABLE } from "./sqlmirror";
 import { RLS_EXPECTED_DML, RLS_EXPECTED_POLICIES, RLS_EXPECTED_FLAGS, rlsAuditProbeOffline } from "./rls-audit";
 import { RPC_EXPECTED_TOTAL, RPC_EXPECTED_TIERS, rpcReconcileProbeOffline } from "./rpc-reconcile";
 import { capsAllowed, CAPS_WHITELIST, exthostProbeOffline } from "./exthost";
+import { planExec, execProbeOffline, execRoots, ALLOWED_BINARIES, evalTmpPrepare, evalTmpCleanup } from "./exec";
+import { planEdit, editProbeOffline, editEvalTmpDir } from "./edit";
+import { reviewPlan, classifierConfig, classifierSetOverride, type ReviewInput } from "./review";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
 import { policyAllows, policyCheckTool, tierForRole, policyReload, policyStatus, policyCaps } from "./policy";
 import { cronAdd, cronList, cronTick, cronCancel, cronTestReset } from "./cron";
 import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus } from "./tokens";
-import { rmSync, readFileSync } from "node:fs";
+import { quotaCacheKey, quotaCacheGet, quotaCachePut, isQuotaError, parkDelayMs, parkTaskQuota, PARK_MAX } from "./quota";
+import { providerChain, gatewayReady } from "../providers";
+import { mirrorSeq, EPOCH_STRIDE } from "./sqlmirror";
+import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 25;
+export const EVAL_DATASET_VERSION = 31;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -167,6 +175,17 @@ export const EVAL_DATASET: EvalCheck[] = [
     run: () => {
       const b = getMeta("boot"); const v = getMeta("version");
       return { ok: !!b && !!v, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}` };
+    },
+  },
+  {
+    id: "state.sqlmirror_gate", plane: "state", title: "SQL-зеркало: операторское решение персистентно (R70)",
+    critical: true, expect: "env ME2_SQL_MIRROR=1 ⇔ meta sqlmirror_gate='1' (решение переживает рестарт; фикс аудита R70)",
+    run: () => {
+      const envOn = process.env.ME2_SQL_MIRROR === "1";
+      const gate = db.query("SELECT value FROM meta WHERE key='sqlmirror_gate'").get() as { value: string } | undefined;
+      const gateOn = gate?.value === "1";
+      const ok = envOn === gateOn;
+      return { ok, evidence: `env=${envOn ? "1" : "unset/0"}, meta_gate=${gateOn ? "1" : "absent"}${ok ? "" : " — РАССИНХРОН: рестарт вне start.sh изменит состояние зеркала"}` };
     },
   },
   // — агенты/задачи —
@@ -850,6 +869,98 @@ export const EVAL_DATASET: EvalCheck[] = [
     },
   },
   {
+    id: "llm.quota_cache",
+    plane: "llm",
+    title: "Quota-Resilience L2 (v0.57.0): response-cache — дедуп детерминированных промптов экономит квоту",
+    critical: false,
+    expect: "put→get возвращает ответ и растит hits; другой ключ → miss; TTL-просрочка → miss и самоочистка; llm_cache персистентна в SQLite",
+    run: () => {
+      const msgs = [{ role: "user" as const, content: "eval-cache-fixed-prompt" }];
+      const k1 = quotaCacheKey("test:model", msgs, 0);
+      const putOk = quotaCachePut(k1, "test:model", "RESP-A");
+      const g1 = quotaCacheGet(k1);
+      const g2 = quotaCacheGet(k1);
+      const k2 = quotaCacheKey("test:model", [{ role: "user" as const, content: "eval-cache-другой-промпт" }], 0);
+      const missOther = quotaCacheGet(k2);
+      db.query(`UPDATE llm_cache SET created_at=? WHERE hash=?`).run(Date.now() - 86_500_000, k1); // старше TTL 24ч
+      const expired = quotaCacheGet(k1);
+      const ok = putOk && g1 === "RESP-A" && g2 === "RESP-A" && missOther === null && expired === null;
+      return { ok, evidence: `put=${putOk}, hit1/hit2=${g1}/${g2}, другой-ключ→miss=${missOther === null}, TTL-просрочка→miss=${expired === null} (дедуп = квота не тратится)` };
+    },
+  },
+  {
+    id: "llm.failover_chain",
+    plane: "llm",
+    title: "Quota-Resilience L3 (v0.57.0): failover-цепочка провайдеров zai↔gateway — квота ×2 вместо одной точки отказа",
+    critical: true,
+    expect: "providerChain('zai:default') начинается с zai и содержит gateway ⇔ ключ реально доступен (честное соответствие, не выдумка); providerChain('gateway:foo') начинается с gateway и всегда содержит zai-альтернативу",
+    run: () => {
+      const c1 = providerChain("zai:default");
+      const c2 = providerChain("gateway:foo");
+      const primaryOk = c1[0]?.provider === "zai" && c2[0]?.provider === "gateway";
+      const gwInChain = c1.some((p) => p.provider === "gateway");
+      const ready = gatewayReady();
+      const consistent = gwInChain === ready && (ready ? c1.length === 2 : c1.length === 1);
+      const zaiAlt = c2.length === 2 && c2[1]?.provider === "zai";
+      const ok = primaryOk && consistent && zaiAlt;
+      return { ok, evidence: `zai:default → [${c1.map((p) => p.provider).join(",")}] (gateway=${gwInChain}, ключ доступен=${ready}, соответствие=${consistent}); gateway:foo → [${c2.map((p) => p.provider).join(",")}], zai-альтернатива=${zaiAlt}` };
+    },
+  },
+  {
+    id: "worker.quota_park",
+    plane: "worker",
+    title: "Quota-Resilience L4 (v0.57.0): park-and-resume — квотная ошибка паркует задачу вместо смерти (R71 сценарий A: FAILED был терминальным)",
+    critical: true,
+    expect: "isQuotaError ловит governor_open/429/rate-limit и не ловит runtime; park → READY+not_before>now, скрыта от master-loop'а (WHERE-предикат + nextReadyTaskAny); сброс срока → видна; park_count инкрементится (бюджет PARK_MAX); delay растёт с cap; worker.ts содержит ветку парка",
+    run: () => {
+      const cls = isQuotaError("governor_open (39s): LLM-вызов отклонён Governor (lane P1)")
+        && isQuotaError("gateway HTTP 429: too many requests")
+        && isQuotaError("rate limit exceeded (retry-after: 30s)")
+        && !isQuotaError("path_escape_blocked")
+        && !isQuotaError("max_steps_exhausted");
+      const d0 = parkDelayMs(0), d5 = parkDelayMs(5), d50 = parkDelayMs(50);
+      const capS = Math.max(5, Number(process.env.ME2_TASK_PARK_CAP_S ?? 600));
+      const delayOk = d5 > d0 && d50 <= (capS * 1000) + 5_500; // cap + jitter ≤5с
+      const t = createTask({ id: rid("task"), title: "eval quota park", spec: "eval-only park mechanics", role: "EXECUTOR", max_steps: 1 } as Parameters<typeof createTask>[0]);
+      const p1 = parkTaskQuota(t.id, 0, "governor_open (60s)", null);
+      const after = getTask(t.id);
+      const parkedOk = after?.status === "READY" && (after?.not_before_ms ?? 0) > Date.now() && after?.park_count === 1;
+      const hidden = !db.query(`SELECT id FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? AND id=?`).get(Date.now(), t.id);
+      const notPicked = nextReadyTaskAny()?.id !== t.id; // очередь может содержать другие задачи — припаркованная не берётся
+      updateTask(t.id, { not_before_ms: 0 }); // окно квоты «открылось»
+      const visible = !!db.query(`SELECT id FROM tasks WHERE status='READY' AND COALESCE(not_before_ms,0)<=? AND id=?`).get(Date.now(), t.id);
+      parkTaskQuota(t.id, 1, "HTTP 429", null);
+      const pc = getTask(t.id)?.park_count;
+      updateTask(t.id, { status: "ARCHIVED" }); // самоочистка (listTasks ARCHIVED не показывает)
+      let workerSrcOk = false;
+      try {
+        const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../worker.ts"), "utf8");
+        workerSrcOk = src.includes("isQuotaError") && src.includes("parkTaskQuota") && src.includes("PARK_MAX");
+      } catch { /* source не читается — честный FAIL */ }
+      const ok = cls && delayOk && parkedOk && hidden && notPicked && visible && pc === 2 && workerSrcOk;
+      return { ok, evidence: `классификация=${cls}, delay ${Math.round(d0 / 1000)}с→${Math.round(d5 / 1000)}с (cap: ${Math.round(d50 / 1000)}с≤${capS}с)=${delayOk}, park#1 (+${p1.delay_s}с) → READY/not_before=${parkedOk}, скрыта=${hidden}/${notPicked}, окно открылось → видна=${visible}, park_count=${pc}/${PARK_MAX}, worker.ts-ветка=${workerSrcOk}` };
+    },
+  },
+  {
+    id: "state.sqlmirror_epoch",
+    plane: "state",
+    title: "SQL-зеркало: поколенио-безопасные seq' без DDL (R73) — окна бутов по 10^7",
+    critical: true,
+    expect: "meta sqlmirror_epoch_n персистентен (≥1 при включённом зеркале); mirrorSeq(n, local) = n×10^7 + local; окно другого бута даёт другой seq' → перекрытие поколений физически невозможно",
+    run: () => {
+      const m = db.query("SELECT value FROM meta WHERE key='sqlmirror_epoch_n'").get() as { value: string } | undefined;
+      const n = Number(m?.value) || 0;
+      const gate = db.query("SELECT value FROM meta WHERE key='sqlmirror_gate'").get() as { value: string } | undefined;
+      const mirrorOn = gate?.value === "1";
+      const a = mirrorSeq(n, 42);
+      const otherBoot = mirrorSeq(n + 1, 42);
+      const strideOk = otherBoot - a === EPOCH_STRIDE;
+      const persistOk = !mirrorOn || n >= 1; // зеркало включено → окно уже выделено (ensureEpoch на буте)
+      const ok = a === n * EPOCH_STRIDE + 42 && strideOk && persistOk;
+      return { ok, evidence: `mirror_on=${mirrorOn}, epoch_n=${n}, mirrorSeq(42)=${a} (=n×10^7+42), соседний бут → ${otherBoot} (шаг ${EPOCH_STRIDE}), перекрытие исключено=${strideOk}, персистентность=${persistOk}` };
+    },
+  },
+  {
     id: "demand.autopilot",
     plane: "demand",
     title: "G10 автопилот спроса: гистерезис 2 тика, создание живого CODE-чата по сигналу, suppression по капам, cleanup",
@@ -1030,10 +1141,11 @@ export const EVAL_DATASET: EvalCheck[] = [
       const external = srcs.filter((s) => !s.includes(":"+WS_PORT+"/socket.io.js"));
       const noExternalAssets = external.length === 0 && !/href="https?:/.test(html);
       // R60 (указание оператора: «UI не обязан быть read only»): REST-записи разрешены,
-      // но только санкционированные — каждая именована, белый список короче — крепче поводок
+      // но только санкционированные — каждая именована, белый список короче — крепче поводок;
+      // R62 P0-a: + /exec (TERMINAL_RUN) и /file (FILE_EDIT); R63 P0-b: + /review (approve/deny/config)
       const writes = [...html.matchAll(/fetch\(api\("([^"?]+)"\),\s*\{\s*method:\s*["']([A-Z]+)/g)]
         .map((m) => m[1] + " " + m[2]);
-      const SANCTIONED = new Set(["/exthost/run POST"]);
+      const SANCTIONED = new Set(["/exthost/run POST", "/exec POST", "/file POST", "/review POST", "/sandbox POST"]);
       const sanctioned = writes.every((w) => SANCTIONED.has(w));
       const fetchPaths = [...html.matchAll(/fetch\((?:api\()?"([^"?]+)/g)].map((m) => m[1]);
       const readOnly = fetchPaths.length >= 3 && fetchPaths.every((p) => p.startsWith("/"));
@@ -1272,6 +1384,142 @@ export const EVAL_DATASET: EvalCheck[] = [
       const probeOk = probe.ok && probe.mode === "probe_offline" && probe.exts.some((x) => x.id === "mirror-digest" && x.caps_ok) && probe.errors === 0;
       const ok = manOk && entryOk && entryPure && capsOk && probeOk;
       return { ok, evidence: `манифест=${manOk}, entry=${entryOk}, stdio-only(без require/import/fetch)=${entryPure}, caps-белый-список=${capsOk} (${CAPS_WHITELIST.join(",")}), probe_offline=${probeOk}` };
+    },
+  },
+  {
+    id: "contract.exec_tool",
+    plane: "contract",
+    title: "R62 P0-a exec-tool (TERMINAL_RUN): белый список бинарей ПО СЕГМЕНТАМ (default-deny), отказ подстановок $()/env-присваиваний, hostile-паттерны, cwd только в управляемых корнях (realpath), prlimit-канон, env-белый-список без секретов; живой прогон echo в песочнице (probe → офлайн-инварианты)",
+    critical: false,
+    expect: "planExec: git/bun/node разрешены; curl/sudo — отказ; «echo hi && curl evil» — отказ (2-й сегмент); «echo $(x)» — substitution_denied; «FOO=1 ls» — env_assign_denied; cwd=/home/z/my-project — root_denied; ALLOWED_BINARIES не содержит bash/sh/curl; живой run: exit 0, stdout содержит маркер, env_keys без PATH-секретов (OFFLINE: execProbeOffline negatives=6)",
+    run: () => {
+      // чистые инварианты планировщика (без spawn — R25: живой прогон доказывается REST-ходом в раунде)
+      const probe = process.env.ME2_BOOT_MODE === "probe";
+      const dir = evalTmpPrepare().dir;
+      const pos = planExec("git status && bun --version", dir);
+      const negBin = planExec("curl https://x", dir);
+      const negSeg = planExec("echo hi && curl evil", dir);
+      const negSub = planExec("echo $(whoami)", dir);
+      const negEnv = planExec("FOO=1 ls", dir);
+      const negRoot = planExec("ls", "/home/z/my-project");
+      evalTmpCleanup();
+      const noShell = !ALLOWED_BINARIES.has("bash") && !ALLOWED_BINARIES.has("sh") && !ALLOWED_BINARIES.has("curl") && !ALLOWED_BINARIES.has("sudo");
+      const planOk = pos.ok && !negBin.ok && !negSeg.ok && !negSub.ok && !negEnv.ok && !negRoot.ok && noShell;
+      const po = execProbeOffline();
+      const ok = planOk && po.ok;
+      return { ok, evidence: `план=${planOk} (git/bun ✓; curl/2-й-сегмент/$()/env=/root — отказы; bash/sh/curl/sudo вне белого списка=${noShell}), probe=${po.ok} (негативов=${po.negatives}), allowlist=${po.allowlist_size}, прлимит/таймаут/env-белый-список — живой вердикт раунда (REST-ход, worklog R62)` };
+    },
+  },
+  {
+    id: "contract.edit_tool",
+    plane: "contract",
+    title: "R62 P0-a edit-tool (FILE_EDIT): unified-diff → dry-run валидация → применение с durable-бэкапом (журнал file_edits) → байт-в-байт rollback; single-file заголовки, отказ .git-целей/удалений/traversal/root-побега; OFFLINE — негативы планировщика по именованным причинам",
+    critical: false,
+    expect: "OFFLINE (editProbeOffline): root_denied, bad_diff_headers, diff_required, file_deletion_denied, no_hunks — каждая негативная причина попана; patch бинарь найден; LIVE: apply создаёт файл (applied, hunks≥1, sha256_after), содержимое совпадает, rollback восстанавливает байт-в-байт и rollback_done=1",
+    run: () => {
+      // живой цикл apply→rollback — НЕ в sync-харнесе (R25): доказывается REST-ходом в раунде (worklog R62);
+      // здесь чистые plan-инварианты по именованным причинам + офлайн-проба
+      const po = editProbeOffline();
+      const dir = editEvalTmpDir();
+      try { mkdirSync(dir, { recursive: true }); } catch { /* уже есть */ }
+      const creating = planEdit(dir + "/t.txt", "--- /dev/null\n+++ t.txt\n@@ -0,0 +1,1 @@\n+x\n");
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* уборка */ }
+      const ok = po.ok && creating.ok && creating.creating === true && (creating.patch_argv ?? []).includes("-p0");
+      return { ok, evidence: `OFFLINE негативы=${po.negatives.length}✓ (${po.negatives.map((n) => n.reason).join(",")}), patch=${po.patch_binary}, план создания=${creating.ok} (-p0 при --- /dev/null без b/-префикса — живая проба R62), apply/rollback байт-в-байт — REST-ход раунда (worklog R62)` };
+    },
+  },
+  {
+    id: "contract.classifier_tier",
+    plane: "contract",
+    title: "R63 P0-b classifier tier (Run Modes + классификатор пре-исполнения): канон Cursor D02 — порядок allowlist → sandbox-ability → classifier; вердикты allow/ask/block; эвристика детерминированная (LLM — opt-in, таймаут → ask fail-closed); ask → очередь одобрений оператора (POST /review approve|deny); классификатор НЕ security boundary",
+    critical: false,
+    expect: "reviewPlan: «git status» → allow; «echo hi > /home/z/my-project/x» → ask (redirect_outside_roots); «cat /home/z/.a2/x» → ask (path_outside_roots); «git push» → ask; «git push --force» → block; «npm install x» → ask (supply_chain); «git reset --hard» → ask; «bun --version» → allow; серия 20 команд → распределение вердиктов считается; конфиг: enabled=false → engine=off; policy.json classifier парсится",
+    run: () => {
+      const dir = "/home/z/me2-sandboxes";
+      const v = (cmd: string) => reviewPlan({ cmd, cwd: dir, binaries: [], segments: [] } as ReviewInput);
+      const allow1 = v("git status");
+      const redirect = v("echo hi > /home/z/my-project/pwn.txt");
+      const secretRead = v("cat /home/z/.a2/supabase-cloud.env");
+      const push = v("git push origin main");
+      const force = v("git push --force origin main");
+      const install = v("npm install left-pad");
+      const reset = v("git reset --hard HEAD~1");
+      const ver = v("bun --version");
+      const clean = v("git clean -fd");
+      const namesOk = redirect.rule === "redirect_outside_roots" && secretRead.rule === "path_outside_roots"
+        && push.rule === "external_state" && force.rule === "force_push" && install.rule === "supply_chain"
+        && reset.rule === "destructive_local" && clean.rule === "destructive_local";
+      const planOk = allow1.verdict === "allow" && redirect.verdict === "ask" && secretRead.verdict === "ask"
+        && push.verdict === "ask" && force.verdict === "block" && install.verdict === "ask"
+        && reset.verdict === "ask" && clean.verdict === "ask" && ver.verdict === "allow" && namesOk;
+      // серия 20 команд → распределение (evidence §24: «серия прогонов → распределение вердиктов»)
+      const series = ["git status", "bun --version", "ls -la", "node --version", "git diff", "echo ok",
+        "git push", "npm install x", "git reset --hard", "git clean -fd", "git branch -D tmp",
+        "echo hi > /home/z/my-project/x", "git push --force", "npm publish", "chmod 777 f", "cat /home/z/.a2/k",
+        "grep -r x .", "date", "printf y", "wc -l"].map((c) => v(c));
+      const dist = series.reduce<Record<string, number>>((a, r) => { a[r.verdict] = (a[r.verdict] ?? 0) + 1; return a; }, {});
+      const seriesOk = series.length === 20 && (dist.allow ?? 0) + (dist.ask ?? 0) + (dist.block ?? 0) === 20 && (dist.block ?? 0) >= 2 && (dist.ask ?? 0) >= 6;
+      // конфиг-плоскость: enabled=false виден в classifierConfig (гейт classifyGate в live-прогоне
+      // вернёт engine=off — асинхронно, живой REST-ход раунда); policy.json парсится (не бросает)
+      const baseCfg = classifierConfig();
+      const off = classifierSetOverride({ enabled: false });
+      classifierSetOverride({ enabled: baseCfg.enabled });
+      const restored = classifierConfig();
+      const cfgOk = off.enabled === false && restored.enabled === true && baseCfg.enabled === true && baseCfg.timeout_ms >= 500 && baseCfg.queue_max >= 1 && typeof baseCfg.model === "string" && baseCfg.model.length > 0;
+      const ok = planOk && seriesOk && cfgOk;
+      return { ok, evidence: `план=${planOk} (allow×2 ✓; ask: redirect/secret-path/push/install/reset/clean по именованным правилам ✓; block: force-push ✓; config on/off/on ✓), серия 20 → ${JSON.stringify(dist)} (block=${dist.block ?? 0}, ask=${dist.ask ?? 0}), очередь approve/deny + ask-fail-closed LLM — живые REST-ходы раунда (worklog R63)` };
+    },
+  },
+  {
+    id: "contract.sandbox2",
+    plane: "contract",
+    title: "R64 P0-2 OS-sandbox: fs/syscall-конфайнмент (канон Cursor Landlock+seccomp) — слоистый дизайн (ns на ядре 5.10: userns+mountns+seccomp; Landlock ≥5.13), strict fail-closed (обязательные слои не применились → команда НЕ исполнена), seccomp-bpf единый источник для launcher и eval (buildSeccompFilter), default-deny INET при net=deny, конфигурация как данные (policy.json sandbox)",
+    critical: false,
+    expect: "planSandbox: пустой cmd → отказ; curl (tier-1) → отказ; cwd вне корней → отказ; неабсолютный hide → отказ; хороший план → argv содержит bash -c и seccomp net=deny с mount/unshare/io_uring_setup/ptrace; strictCheck: полные слои → ok; make_private=false → fail; verdict=null → fail; sandboxEligible: fs-правило + auto → true; external_state + auto → false; config on/off/on",
+    run: () => {
+      const dir = "/home/z/me2-sandboxes";
+      // plan-инварианты (канон R25: без spawn в sync-харнесе; живые прогоны — REST-ходы раунда)
+      const neg1 = planSandbox("", dir);
+      const neg2 = planSandbox("curl https://example.com", dir);   // tier-1: вне белого списка (non-bypass)
+      const neg3 = planSandbox("ls", "/home/z/my-project");         // cwd вне управляемых корней
+      const neg4 = planSandbox("ls", dir, { hide: ["relative"] }); // hide не абсолютный
+      const negatives = [neg1, neg2, neg3, neg4].filter((p) => !p.ok).length;
+      const good = planSandbox("echo ok > probe.txt", dir);
+      const planOk = good.ok
+        && good.argv!.includes("-c") && good.argv!.includes("/bin/bash")
+        && good.profile!.net === "deny" && good.profile!.landlock === false // ABI-проба R64: ядро 5.10
+        && good.profile!.hide.includes("/home/z/.a2")                       // секреты скрыты по умолчанию
+        && good.profile!.env.ME2_SANDBOX === "1" && !good.profile!.env.PATH.includes("=" )
+        && good.profile!.rlimits.as === 4294967296; // канон R62 (V8 CodeRange)
+      // BPF-программа: один источник для launcher и eval (инвариант целостности)
+      const secOk = good.ok && good.seccomp!.net === "deny"
+        && good.seccomp!.deny_syscalls.includes("mount") && good.seccomp!.deny_syscalls.includes("unshare")
+        && good.seccomp!.deny_syscalls.includes("io_uring_setup") && good.seccomp!.deny_syscalls.includes("ptrace")
+        && good.seccomp!.len > 40; // arch+LD+34 deny+socket-блок+clone-блок+ALLOW
+      // strict-матрица: fail-closed без обязательных слоёв (живые негативы — probe в REST-ходах раунда)
+      const full = { make_private: true, ro_root: true, rw_rebinds: true, secrets_hidden: true, seccomp: "installed", rlimit_as: true, rlimit_nofile: true, rlimit_core: true, net: "deny" };
+      const m1 = strictCheck(full as never, "deny", true).ok === true;
+      const m2 = strictCheck({ ...full, make_private: false } as never, "deny", true).ok === false;
+      const m3 = strictCheck(null, "deny", true).ok === false;
+      const m4 = strictCheck({ ...full, seccomp: "install_failed" } as never, "deny", true).ok === false;
+      const strictMatrix = m1 && m2 && m3 && m4;
+      // канон D02: sandbox-ability резолвит fs-риски ДО classifier (элегибельность)
+      const elig = sandboxEligible("redirect_outside_roots", true, "sandboxable") === true
+        && sandboxEligible("external_state", true, "sandboxable") === false   // git push — НЕ fs-риск
+        && sandboxEligible("path_outside_roots", false, "sandboxable") === false // auto off → ask (R63-поведение)
+        && sandboxEligible("redirect_outside_roots", true, "unsandboxed") === false; // без сандбокса — ask
+      const fsRulesOk = FS_RULES.has("redirect_outside_roots") && FS_RULES.has("path_outside_roots") && FS_RULES.has("var_expansion_path") && FS_RULES.size === 3;
+      // конфиг-плоскость (config as data)
+      const baseCfg = sandboxConfig();
+      const off = sandboxSetOverride({ auto_sandbox: true, net: "allow" });
+      sandboxSetOverride({ auto_sandbox: baseCfg.auto_sandbox, net: baseCfg.net });
+      const restored = sandboxConfig();
+      const cfgOk = off.auto_sandbox === true && off.net === "allow" && restored.net === baseCfg.net && restored.auto_sandbox === baseCfg.auto_sandbox
+        && typeof baseCfg.strict === "boolean" && typeof baseCfg.tmp_size === "string";
+      // офлайн-проба модуля (двойная проверка тем же харнесом)
+      const probeOff = sandboxProbeOffline();
+      const ok = negatives === 4 && planOk && secOk && strictMatrix && elig && fsRulesOk && cfgOk && probeOff.ok;
+      return { ok, evidence: `негативы plan=${negatives}/4 ✓; argv+rlimit-as-4GiB+hide-.a2 ✓; BPF=${secOk ? "mount/unshare/io_uring_setup/ptrace, len=" + good.seccomp!.len : "FAIL"}; strict-матрица ${strictMatrix ? "ok/fail/fail/fail ✓" : "FAIL"}; sandboxEligible (fs×auto×caps) ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}; живые негативы/эскале-детектор — probe в REST-ходах раунда` };
     },
   },
 ];

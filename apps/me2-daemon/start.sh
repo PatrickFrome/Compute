@@ -46,7 +46,13 @@ if [ "$SP" != "3042" ]; then
   agent-browser stream enable --port 3042 >/dev/null 2>&1
 fi
 
-# 5) дождаться health (до 10s)
+# 5) R73: watchdog релея webhooks (релей исчезал молча — инцидент R70); без дублей
+WD="$SELFDIR/../me2-webhook-relay/watchdog.sh"
+if [ -f "$WD" ] && ! pgrep -f "me2-webhook-relay/watchdog.sh" >/dev/null 2>&1; then
+  setsid nohup bash "$WD" >/dev/null 2>&1 &
+fi
+
+# 6) дождаться health (до 10s)
 for i in $(seq 1 20); do
   H=$(curl -sf --max-time 1 http://localhost:3041/health 2>/dev/null)
   if [ -n "$H" ]; then echo "STARTED: $H"; exit 0; fi
