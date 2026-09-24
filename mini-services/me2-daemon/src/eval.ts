@@ -38,7 +38,9 @@ import { handoffList, handoffStats } from "./handoffs";
 import { glmStatus, canonicalGlm, agentTag } from "./glm";
 import { reviewStats } from "./reviewer";
 import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
-import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck } from "./sandbox2";
+import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck, SECRETS_HIDE, probeSandboxCaps } from "./sandbox2";
+import { SB_ROOT } from "./sandbox";
+import { REPO_ROOT } from "./worktrees";
 import { sandboxEligible, FS_RULES } from "./review";
 import { senseDiffs } from "./sense";
 import { obsvPersistState } from "./obsv";
@@ -73,7 +75,7 @@ import { mirrorSeq, EPOCH_STRIDE } from "./sqlmirror";
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 31;
+export const EVAL_DATASET_VERSION = 32;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1391,7 +1393,7 @@ export const EVAL_DATASET: EvalCheck[] = [
     plane: "contract",
     title: "R62 P0-a exec-tool (TERMINAL_RUN): белый список бинарей ПО СЕГМЕНТАМ (default-deny), отказ подстановок $()/env-присваиваний, hostile-паттерны, cwd только в управляемых корнях (realpath), prlimit-канон, env-белый-список без секретов; живой прогон echo в песочнице (probe → офлайн-инварианты)",
     critical: false,
-    expect: "planExec: git/bun/node разрешены; curl/sudo — отказ; «echo hi && curl evil» — отказ (2-й сегмент); «echo $(x)» — substitution_denied; «FOO=1 ls» — env_assign_denied; cwd=/home/z/my-project — root_denied; ALLOWED_BINARIES не содержит bash/sh/curl; живой run: exit 0, stdout содержит маркер, env_keys без PATH-секретов (OFFLINE: execProbeOffline negatives=6)",
+    expect: "planExec: git/bun/node разрешены; curl/sudo — отказ; «echo hi && curl evil» — отказ (2-й сегмент); «echo $(x)» — substitution_denied; «FOO=1 ls» — env_assign_denied; cwd=REPO_ROOT — root_denied; ALLOWED_BINARIES не содержит bash/sh/curl; живой run: exit 0, stdout содержит маркер, env_keys без PATH-секретов (OFFLINE: execProbeOffline negatives=6)",
     run: () => {
       // чистые инварианты планировщика (без spawn — R25: живой прогон доказывается REST-ходом в раунде)
       const probe = process.env.ME2_BOOT_MODE === "probe";
@@ -1401,7 +1403,7 @@ export const EVAL_DATASET: EvalCheck[] = [
       const negSeg = planExec("echo hi && curl evil", dir);
       const negSub = planExec("echo $(whoami)", dir);
       const negEnv = planExec("FOO=1 ls", dir);
-      const negRoot = planExec("ls", "/home/z/my-project");
+      const negRoot = planExec("ls", REPO_ROOT); // вне SB/WT-корней → root_denied
       evalTmpCleanup();
       const noShell = !ALLOWED_BINARIES.has("bash") && !ALLOWED_BINARIES.has("sh") && !ALLOWED_BINARIES.has("curl") && !ALLOWED_BINARIES.has("sudo");
       const planOk = pos.ok && !negBin.ok && !negSeg.ok && !negSub.ok && !negEnv.ok && !negRoot.ok && noShell;
@@ -1433,13 +1435,13 @@ export const EVAL_DATASET: EvalCheck[] = [
     plane: "contract",
     title: "R63 P0-b classifier tier (Run Modes + классификатор пре-исполнения): канон Cursor D02 — порядок allowlist → sandbox-ability → classifier; вердикты allow/ask/block; эвристика детерминированная (LLM — opt-in, таймаут → ask fail-closed); ask → очередь одобрений оператора (POST /review approve|deny); классификатор НЕ security boundary",
     critical: false,
-    expect: "reviewPlan: «git status» → allow; «echo hi > /home/z/my-project/x» → ask (redirect_outside_roots); «cat /home/z/.a2/x» → ask (path_outside_roots); «git push» → ask; «git push --force» → block; «npm install x» → ask (supply_chain); «git reset --hard» → ask; «bun --version» → allow; серия 20 команд → распределение вердиктов считается; конфиг: enabled=false → engine=off; policy.json classifier парсится",
+    expect: "reviewPlan: «git status» → allow; «echo hi > $REPO_ROOT/x» → ask (redirect_outside_roots); «cat $SECRETS_HIDE/x» → ask (path_outside_roots); «git push» → ask; «git push --force» → block; «npm install x» → ask (supply_chain); «git reset --hard» → ask; «bun --version» → allow; серия 20 команд → распределение вердиктов считается; конфиг: enabled=false → engine=off; policy.json classifier парсится",
     run: () => {
-      const dir = "/home/z/me2-sandboxes";
+      const dir = SB_ROOT;
       const v = (cmd: string) => reviewPlan({ cmd, cwd: dir, binaries: [], segments: [] } as ReviewInput);
       const allow1 = v("git status");
-      const redirect = v("echo hi > /home/z/my-project/pwn.txt");
-      const secretRead = v("cat /home/z/.a2/supabase-cloud.env");
+      const redirect = v(`echo hi > ${REPO_ROOT}/pwn.txt`);
+      const secretRead = v(`cat ${SECRETS_HIDE}/supabase-cloud.env`);
       const push = v("git push origin main");
       const force = v("git push --force origin main");
       const install = v("npm install left-pad");
@@ -1455,7 +1457,7 @@ export const EVAL_DATASET: EvalCheck[] = [
       // серия 20 команд → распределение (evidence §24: «серия прогонов → распределение вердиктов»)
       const series = ["git status", "bun --version", "ls -la", "node --version", "git diff", "echo ok",
         "git push", "npm install x", "git reset --hard", "git clean -fd", "git branch -D tmp",
-        "echo hi > /home/z/my-project/x", "git push --force", "npm publish", "chmod 777 f", "cat /home/z/.a2/k",
+        `echo hi > ${REPO_ROOT}/x`, "git push --force", "npm publish", "chmod 777 f", `cat ${SECRETS_HIDE}/k`,
         "grep -r x .", "date", "printf y", "wc -l"].map((c) => v(c));
       const dist = series.reduce<Record<string, number>>((a, r) => { a[r.verdict] = (a[r.verdict] ?? 0) + 1; return a; }, {});
       const seriesOk = series.length === 20 && (dist.allow ?? 0) + (dist.ask ?? 0) + (dist.block ?? 0) === 20 && (dist.block ?? 0) >= 2 && (dist.ask ?? 0) >= 6;
@@ -1477,18 +1479,18 @@ export const EVAL_DATASET: EvalCheck[] = [
     critical: false,
     expect: "planSandbox: пустой cmd → отказ; curl (tier-1) → отказ; cwd вне корней → отказ; неабсолютный hide → отказ; хороший план → argv содержит bash -c и seccomp net=deny с mount/unshare/io_uring_setup/ptrace; strictCheck: полные слои → ok; make_private=false → fail; verdict=null → fail; sandboxEligible: fs-правило + auto → true; external_state + auto → false; config on/off/on",
     run: () => {
-      const dir = "/home/z/me2-sandboxes";
+      const dir = SB_ROOT;
       // plan-инварианты (канон R25: без spawn в sync-харнесе; живые прогоны — REST-ходы раунда)
       const neg1 = planSandbox("", dir);
       const neg2 = planSandbox("curl https://example.com", dir);   // tier-1: вне белого списка (non-bypass)
-      const neg3 = planSandbox("ls", "/home/z/my-project");         // cwd вне управляемых корней
+      const neg3 = planSandbox("ls", REPO_ROOT); // cwd вне управляемых корней (SB/WT)
       const neg4 = planSandbox("ls", dir, { hide: ["relative"] }); // hide не абсолютный
       const negatives = [neg1, neg2, neg3, neg4].filter((p) => !p.ok).length;
       const good = planSandbox("echo ok > probe.txt", dir);
       const planOk = good.ok
         && good.argv!.includes("-c") && good.argv!.includes("/bin/bash")
         && good.profile!.net === "deny" && good.profile!.landlock === false // ABI-проба R64: ядро 5.10
-        && good.profile!.hide.includes("/home/z/.a2")                       // секреты скрыты по умолчанию
+        && good.profile!.hide.includes(SECRETS_HIDE)                         // секреты скрыты по умолчанию
         && good.profile!.env.ME2_SANDBOX === "1" && !good.profile!.env.PATH.includes("=" )
         && good.profile!.rlimits.as === 4294967296; // канон R62 (V8 CodeRange)
       // BPF-программа: один источник для launcher и eval (инвариант целостности)
@@ -1518,8 +1520,16 @@ export const EVAL_DATASET: EvalCheck[] = [
         && typeof baseCfg.strict === "boolean" && typeof baseCfg.tmp_size === "string";
       // офлайн-проба модуля (двойная проверка тем же харнесом)
       const probeOff = sandboxProbeOffline();
+      // env-честность: в unsandboxed-окружении ДОГОВОР(plan) обязан отказать — это и есть инвариант P0-2
+      const capsNow = probeSandboxCaps();
+      if (capsNow.verdict === "unsandboxed") {
+        const refused = !good.ok && good.reason === "sandbox_unavailable";
+        const ok2 = negatives === 4 && refused && strictMatrix && elig && fsRulesOk && cfgOk && probeOff.ok;
+        return { ok: ok2, evidence: `env unsandboxed (fs=${capsNow.fs_confinement}, seccomp_mode=${capsNow.seccomp_mode}, userns_max=${capsNow.userns_max}, landlock_abi=${capsNow.landlock_abi}) → план честно отказал=${refused} (fail-closed P0-2); негативы plan=${negatives}/4; strict-матрица ${strictMatrix ? "✓" : "FAIL"}; sandboxEligible ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}` };
+      }
       const ok = negatives === 4 && planOk && secOk && strictMatrix && elig && fsRulesOk && cfgOk && probeOff.ok;
-      return { ok, evidence: `негативы plan=${negatives}/4 ✓; argv+rlimit-as-4GiB+hide-.a2 ✓; BPF=${secOk ? "mount/unshare/io_uring_setup/ptrace, len=" + good.seccomp!.len : "FAIL"}; strict-матрица ${strictMatrix ? "ok/fail/fail/fail ✓" : "FAIL"}; sandboxEligible (fs×auto×caps) ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}; живые негативы/эскале-детектор — probe в REST-ходах раунда` };
+      const bpf = secOk ? "mount/unshare/io_uring_setup/ptrace, len=" + good.seccomp!.len : good.ok ? `FAIL(net=${good.seccomp!.net}, len=${good.seccomp!.len})` : `FAIL(plan_ok=false, reason=${good.reason})`;
+      return { ok, evidence: `негативы plan=${negatives}/4 ✓; argv+rlimit-as-4GiB+hide-.a2 ✓; BPF=${bpf}; strict-матрица ${strictMatrix ? "ok/fail/fail/fail ✓" : "FAIL"}; sandboxEligible (fs×auto×caps) ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}; caps(fs=${capsNow.fs_confinement}, landlock_abi=${capsNow.landlock_abi}, userns=${capsNow.userns_max}); живые негативы/эскале-детектор — probe в REST-ходах раунда` };
     },
   },
 ];

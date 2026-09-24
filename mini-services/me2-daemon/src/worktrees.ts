@@ -6,8 +6,9 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-export const REPO_ROOT = "/home/z/my-project";
-export const WORKTREE_ROOT = "/home/z/me2-worktrees";
+const CONTOUR = process.env.ME2_CONTOUR_HOME ?? "/home/z";
+export const REPO_ROOT = process.env.ME2_REPO_ROOT ?? join(CONTOUR, "my-project");
+export const WORKTREE_ROOT = join(CONTOUR, "me2-worktrees");
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 const MAX_WORKTREES = 8;

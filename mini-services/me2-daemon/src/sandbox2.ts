@@ -35,7 +35,7 @@ import { createServer } from "node:net";
 import { db, emit, VERSION } from "../store";
 import { recordSpan } from "./otel";
 import { SB_ROOT } from "./sandbox";
-import { WORKTREE_ROOT } from "./worktrees";
+import { REPO_ROOT, WORKTREE_ROOT } from "./worktrees";
 import { planExec } from "./exec";
 import { loadPolicy, type SandboxPolicy } from "./policy";
 import { buildSeccompFilter, type NetMode } from "./seccomp-filter";
@@ -47,8 +47,9 @@ const STDOUT_CAP = 8_000;
 const STDERR_CAP = 4_000;
 const PROBE_TIMEOUT_MS = 15_000;
 
-// секреты хоста — единственный обязательный hide (vault /home/z/.a2)
-const DEFAULT_HIDE = ["/home/z/.a2"];
+// секреты хоста — единственный обязательный hide (vault $CONTOUR/.a2)
+const DEFAULT_HIDE = [join(process.env.ME2_CONTOUR_HOME ?? "/home/z", ".a2")];
+export const SECRETS_HIDE = DEFAULT_HIDE[0];
 
 try { mkdirSync(S2_DIR, { recursive: true }); } catch { /* probe-режим */ }
 
@@ -486,13 +487,16 @@ export function sandboxStatus(): {
 /** Офлайн-проба для eval: plan-инварианты без spawn (канон R25). */
 export function sandboxProbeOffline(): { ok: boolean; mode: "probe_offline"; negatives: number; plan_ok: number; seccomp_integrity: boolean } {
   const negatives = [
-    planSandbox("", "/home/z/me2-sandboxes"),
-    planSandbox("curl https://example.com", "/home/z/me2-sandboxes"),   // tier-1: вне белого списка
-    planSandbox("ls", "/home/z/my-project"),                            // cwd вне корней
-    planSandbox("ls", "/home/z/me2-sandboxes", { hide: ["relative/path"] }), // hide не абсолютный
+    planSandbox("", SB_ROOT),
+    planSandbox("curl https://example.com", SB_ROOT),   // tier-1: вне белого списка
+    planSandbox("ls", REPO_ROOT),                       // cwd вне корней (SB/WT)
+    planSandbox("ls", SB_ROOT, { hide: ["relative/path"] }), // hide не абсолютный
   ].filter((p) => !p.ok).length;
-  const good = planSandbox("echo ok > probe.txt", "/home/z/me2-sandboxes");
-  const planOk = good.ok && good.argv!.includes("/bin/bash") && good.argv!.includes("-c") && good.seccomp!.net === "deny"
+  const good = planSandbox("echo ok > probe.txt", SB_ROOT);
+  const capsHere = probeSandboxCaps();
+  const planOk = capsHere.verdict === "unsandboxed"
+    ? !good.ok && good.reason === "sandbox_unavailable" // честный fail-closed: план отказал (канон P0-2)
+    : good.ok && good.argv!.includes("/bin/bash") && good.argv!.includes("-c") && good.seccomp!.net === "deny"
     && good.seccomp!.deny_syscalls.includes("mount")
     && good.seccomp!.deny_syscalls.includes("unshare")
     && good.seccomp!.deny_syscalls.includes("io_uring_setup")
