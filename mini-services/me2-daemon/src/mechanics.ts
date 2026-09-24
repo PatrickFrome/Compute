@@ -19,11 +19,38 @@ import { roadmapVerdict } from "./roadmap";
 import { brainThoughts } from "./brain";
 import { senseStatus } from "./sense";
 import type { SuCheck } from "./selfupdate";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface MechanicRow {
   id: string; name: string; old_ref: string;
   verdict: "WORKS" | "CAVEAT" | "DECOR";
   evidence: string;
+  /** Cursor-аналог (R21 parity-матрица, §34: UNKNOWN если нет публичных доков) */
+  cursor_ref?: string;
+  parity?: "PARITY" | "PARTIAL" | "MISSING" | "UNKNOWN";
+}
+
+/** Корень репо из src/ демона: src → me2-daemon → mini-services → repo */
+function repoRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+/** ME18: Electron-клиент shell (R21) — вердикт из живого состояния файлов + CI */
+export function clientShellStatus() {
+  const root = repoRoot();
+  const rels = [
+    "electron/main.cjs",
+    "electron/preload.cjs",
+    "electron/package.json",
+  ];
+  const files = rels.map((rel) => join(root, rel));
+  const present = files.filter((f) => existsSync(f)).length;
+  const ci = existsSync(join(root, ".github", "workflows", "electron-build.yml"));
+  const tauri = existsSync(join(root, "src-tauri", "tauri.conf.json"));
+  const electron = present === files.length && ci;
+  return { present, total: files.length, ci, tauri, electron };
 }
 
 export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
@@ -127,8 +154,43 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
       id: "ME17", name: "Semantic browser perception (CAPTURE→act→verify)", old_ref: "browser-tools.ts semantic_targets[]",
       verdict: senseStatus().tabs > 0 ? "WORKS" : "CAVEAT",
       evidence: `sense: tabs=${senseStatus().tabs}, targets=${senseStatus().total_targets}, last_age=${senseStatus().last_age_s ?? "—"}s; act+auto-verify по ref/имени`,
+      cursor_ref: "Browser/computer-use (анонсирован)", parity: "PARTIAL",
     },
   ];
+
+  // Паритет-метки ME1–ME16 (R21-матрица; UNKNOWN = нет публичных доков Cursor, §34)
+  const parityMap: Record<string, { cursor_ref: string; parity: NonNullable<MechanicRow["parity"]> }> = {
+    ME1: { cursor_ref: "Tool-call loop агента (Composer/Agent)", parity: "PARITY" },
+    ME2: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME3: { cursor_ref: "Agent mode (автономные прогоны)", parity: "PARITY" },
+    ME4: { cursor_ref: "Memories / Rules", parity: "PARTIAL" },
+    ME5: { cursor_ref: "Composer/Chat LLM", parity: "PARITY" },
+    ME6: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME7: { cursor_ref: "Auto-update (Electron/Squirrel)", parity: "PARTIAL" },
+    ME8: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME9: { cursor_ref: "Codebase indexing (@codebase, embeddings)", parity: "PARTIAL" },
+    ME10: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME11: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME12: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME13: { cursor_ref: "Browser agent (анонсирован)", parity: "PARTIAL" },
+    ME14: { cursor_ref: "—", parity: "UNKNOWN" },
+    ME15: { cursor_ref: "— (bugbot ≠ runtime RH)", parity: "UNKNOWN" },
+    ME16: { cursor_ref: "—", parity: "UNKNOWN" },
+  };
+  for (const r of rows) {
+    const p = parityMap[r.id];
+    if (p) { r.cursor_ref = p.cursor_ref; r.parity = p.parity; }
+  }
+
+  // ME18: клиент Electron (R21) — по живому состоянию файлов
+  const cs = clientShellStatus();
+  rows.push({
+    id: "ME18", name: "Electron client shell (sidecar+secure window)", old_ref: "легаси-браузер MetaEngine (Electron)",
+    verdict: cs.electron && cs.tauri ? "WORKS" : "CAVEAT",
+    evidence: `electron: ${cs.present}/${cs.total} файлов, CI workflow: ${cs.ci ? "да" : "нет"}; tauri: ${cs.tauri ? "есть (альтернатива)" : "нет"}; GUI-run в песочнице невозможен — сборка=CI`,
+    cursor_ref: "VS Code fork shell (полный продукт)",
+    parity: cs.electron ? "PARTIAL" : "MISSING",
+  });
 
   const works = rows.filter((r) => r.verdict === "WORKS").length;
   return {

@@ -41,7 +41,7 @@ import { senseNow, senseList, senseAct } from "./src/sense";
 
 const WS_PORT = 3040;
 const REST_PORT = 3041;
-const VERSION = "0.20.0";
+const VERSION = "0.21.0";
 const BOOT_TS = nowIso();
 const BOOT_T0 = Date.now();
 setMeta("boot", BOOT_TS);

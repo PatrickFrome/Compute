@@ -1,0 +1,27 @@
+{
+  "name": "me2-electron",
+  "productName": "ME2 OS",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ME2 OS client shell: Electron window + me2-daemon sidecar (primary client per operator directive; Tauri shell retained as CI alternative)",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --dir",
+    "dist:full": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "os.me2.client",
+    "productName": "ME2 OS",
+    "directories": { "output": "release" },
+    "files": ["main.cjs", "preload.cjs", "package.json"],
+    "extraResources": [{ "from": "dist-sidecar", "to": "sidecar", "filter": ["**/*"] }],
+    "mac": { "target": [{ "target": "dmg", "arch": ["arm64"] }], "category": "public.app-category.developer-tools" },
+    "linux": { "target": ["AppImage"], "category": "Development" },
+    "win": { "target": ["portable"] }
+  }
+}
