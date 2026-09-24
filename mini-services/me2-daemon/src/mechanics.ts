@@ -47,9 +47,9 @@ export interface MechanicRow {
   id: string; name: string; old_ref: string;
   verdict: "WORKS" | "CAVEAT" | "DECOR";
   evidence: string;
-  /** Cursor-аналог (R21 parity-матрица, §34: UNKNOWN если нет публичных доков) */
+  /** Cursor-аналог (R21 parity-матрица + корпус R61; §34: UNKNOWN если нет публичных доков) */
   cursor_ref?: string;
-  parity?: "PARITY" | "PARTIAL" | "MISSING" | "UNKNOWN";
+  parity?: "PARITY" | "PARTIAL" | "MISSING" | "SUPERIOR" | "UNKNOWN";
 }
 
 /** Корень репо из src/ демона: src → me2-daemon → mini-services → repo */
@@ -328,6 +328,9 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
   ];
 
   // Паритет-метки ME1–ME16 (R21-матрица; UNKNOWN = нет публичных доков Cursor, §34)
+  // R66: конвертация UNKNOWN → вердикты ПЕРЕНОСОМ из корпуса R61 (r61-parity-matrix.json, 329 стр. official corpus),
+  // источники = id capability — не изобретение (§34). SUPERIOR — только там, где корпус R61 сам дал SUPERIOR
+  // (infra.*: нет аналога в 329 стр. docs.cursor.com + blog/security/changelog).
   const parityMap: Record<string, { cursor_ref: string; parity: NonNullable<MechanicRow["parity"]> }> = {
     ME1: { cursor_ref: "Tool-call loop агента (Composer/Agent)", parity: "PARITY" },
     ME2: { cursor_ref: "—", parity: "UNKNOWN" },
@@ -345,6 +348,30 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     ME14: { cursor_ref: "—", parity: "UNKNOWN" },
     ME15: { cursor_ref: "— (bugbot ≠ runtime RH)", parity: "UNKNOWN" },
     ME16: { cursor_ref: "—", parity: "UNKNOWN" },
+    // ── R66: перенос вердиктов из корпуса R61 (ME18–ME40) ──
+    ME18: { cursor_ref: "R61 core.browser-tool (console/network)", parity: "PARITY" },
+    ME19: { cursor_ref: "— (нет аналога в корпусе R61; §34)", parity: "UNKNOWN" },
+    ME20: { cursor_ref: "R61 core.harness-evals + evals.internal (внутренние бенчи)", parity: "PARITY" },
+    ME21: { cursor_ref: "R61 ext.mcp-server (Cursor как MCP-провайдер)", parity: "PARITY" },
+    ME22: { cursor_ref: "R61 core.harness-evals (CursorBench/A-B/keep-rate)", parity: "PARITY" },
+    ME23: { cursor_ref: "R61 plan.task-tracking (todos/plan items)", parity: "PARITY" },
+    ME24: { cursor_ref: "R61 fleet.handoff-docs + fleet.swarm (handoff-doc protocol)", parity: "PARTIAL" },
+    ME25: { cursor_ref: "R61 mdl.catalog + core.model-switch", parity: "PARTIAL" },
+    ME26: { cursor_ref: "R61 core.agent-review (dedicated review pass)", parity: "PARTIAL" },
+    ME27: { cursor_ref: "R61 sec.permissions-json + core.run-modes", parity: "PARTIAL" },
+    ME28: { cursor_ref: "— (нет аналога в корпусе R61; ctx.* — про codebase-контекст)", parity: "UNKNOWN" },
+    ME29: { cursor_ref: "— (нет аналога в корпусе R61)", parity: "UNKNOWN" },
+    ME30: { cursor_ref: "— (нет аналога в корпусе R61; инфраструктурная гигиена)", parity: "UNKNOWN" },
+    ME31: { cursor_ref: "R61 art.logs (логи как артефакты; у ME2 — hash-chain outbox→cloud)", parity: "PARITY" },
+    ME32: { cursor_ref: "R61 infra.audit-loop + art.trace (вне корпуса)", parity: "SUPERIOR" },
+    ME33: { cursor_ref: "R61 api.pool-queue (list/SSE/claim/release, scale-to-zero)", parity: "PARTIAL" },
+    ME34: { cursor_ref: "R61 ctx.memory (SUPERIOR: persistent agent memory)", parity: "SUPERIOR" },
+    ME35: { cursor_ref: "R61 fleet.swarm (recursive planner/worker trees)", parity: "PARTIAL" },
+    ME36: { cursor_ref: "R61 fleet.swarm + plan.task-tracking", parity: "PARTIAL" },
+    ME37: { cursor_ref: "R61 infra.nonbypass-bus + infra.audit-loop (вне корпуса)", parity: "SUPERIOR" },
+    ME38: { cursor_ref: "R61 mdl.cost-governor (cost-based routing)", parity: "PARTIAL" },
+    ME39: { cursor_ref: "R61 auto.automations (cron + event triggers)", parity: "PARTIAL" },
+    ME40: { cursor_ref: "R61 cloud.secrets + cloud.secret-redaction", parity: "PARITY" },
   };
   for (const r of rows) {
     const p = parityMap[r.id];
@@ -361,12 +388,11 @@ export function mechanicsMatrix(version: string, suCheck?: SuCheck | null) {
     parity: cs.desktop ? "PARTIAL" : "MISSING",
   });
 
-  // ME18–ME40 (линия R21-R64): parity-метки по §34 — UNKNOWN до свипа docs.cursor.com (R66)
-  const unknownNoCursor = new Set(["ME18","ME19","ME20","ME21","ME22","ME23","ME24","ME25","ME26","ME27","ME28","ME29","ME30","ME31","ME32","ME33","ME34","ME35","ME36","ME37","ME38","ME39","ME40"]);
+  // Остаточные UNKNOWN (строки без parityMap-входа) — §34: честно UNKNOWN, не «у Cursor нет»
   for (const r of rows) {
-    if (unknownNoCursor.has(r.id) && !r.parity) {
+    if (!r.parity) {
       r.parity = "UNKNOWN";
-      r.cursor_ref = "— (нет публичного подтверждения; свип docs.cursor.com → R66)";
+      if (!r.cursor_ref) r.cursor_ref = "— (нет публичного подтверждения; сверка с корпусом R61 продолжается)";
     }
   }
 

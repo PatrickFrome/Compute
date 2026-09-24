@@ -391,6 +391,13 @@ export function missionUiHtml(): string {
       var el=$("rls-audit");
       if(!j.ok){ el.textContent="аудит политик: честно недоступен ("+esc(j.reason||"?")+")"; el.style.color="#fcd34d"; return; }
       if(j.mode==="probe_offline"){ el.textContent="аудит политик: офлайн (probe) — матрица ожиданий "+j.expected.dml_rows+" DML / "+j.expected.policies+" политик / anon 0:0"; el.style.color="#a1a1aa"; return; }
+      if(j.mode==="live-rest"){ // R66: поведенческий REST-аудит (PostgREST): anon fail-closed + service читает
+        var vr=(j.verdict==="PASS"); var vi=(j.verdict==="INCONCLUSIVE");
+        var det=(j.probes||[]).map(function(p){ var n=String(p.table).replace("_h205f22","");
+          return n+": anon "+(p.anon_blocked===true?"✗блок("+p.anon_status+")":"⚠"+(p.anon_status||"?"))+" · svc "+(p.service_ok?"✓":"✗"+p.service_status); }).join(" · ");
+        el.innerHTML="аудит политик (live REST, поведенческий): <b>"+(vr?"PASS ✓":vi?"НЕДОКАЗАН":"FAIL ✗")+"</b> · anon-канал "+esc(j.anon_channel||"?")+(j.control_status!=null?" (контроль "+j.control_status+")":"")+" · "+det+(j.cached?" · кэш 60с":"");
+        el.style.color = vr ? "#6ee7b7" : vi ? "#fcd34d" : "#fca5a5"; return;
+      }
       var v=(j.verdict==="PASS");
       var anonOk=(j.anon.dml_grants===0&&j.anon.policies===0);
       el.innerHTML="аудит политик (psql, живой каталог): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · DML-гранты "+(j.grants.mismatch?"РАСХОЖДЕНИЕ с sql/0004":"= sql/0004 ✓")+" · политики "+(j.policies.mismatch?"РАСХОЖДЕНИЕ с sql/0003":"= sql/0003 ✓")+" · RLS-флаги включены · anon fail-closed "+(anonOk?"✓ (DML="+j.anon.dml_grants+", политик="+j.anon.policies+")":"⚠ DML="+j.anon.dml_grants+", политик="+j.anon.policies)+" · платформенных дефолтов (info): "+(j.grants.platform_extra||[]).length+(j.cached?" · кэш 60с":"");
@@ -406,7 +413,9 @@ export function missionUiHtml(): string {
       if(!j.ok){ el.textContent="сверка реестра: честно недоступна ("+esc(j.reason||"?")+")"; el.style.color="#fcd34d"; return; }
       if(j.mode==="probe_offline"){ el.textContent="сверка реестра: офлайн (probe) — ожидание "+j.expected.total+" RPC ("+j.expected.tiers.ACTIVE+"/"+j.expected.tiers.CONTROL_PLANE+"/"+j.expected.tiers.FREEZE+")"; el.style.color="#a1a1aa"; return; }
       var v=(j.verdict==="PASS"); var g=j.registry;
-      el.innerHTML="сверка реестра RPC (psql, живой каталог): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · ожидание "+g.expected_total+" · факт "+g.actual_total+" · ACTIVE "+g.per_tier_actual.ACTIVE+"/"+g.per_tier_expected.ACTIVE+" · CONTROL_PLANE "+g.per_tier_actual.CONTROL_PLANE+"/"+g.per_tier_expected.CONTROL_PLANE+" · FREEZE "+g.per_tier_actual.FREEZE+"/"+g.per_tier_expected.FREEZE+" · нет "+g.missing_count+" · лишних "+g.extra_count+" · тир-дрейф "+g.tier_mismatch_count+" · хеш "+esc(g.hash_actual)+(j.cached?" · кэш 60с":"");
+      var chan=(j.mode==="live-rest")?"live REST":"psql, живой каталог"; // R66: два канала одной сверки
+      var oa=(j.mode==="live-rest"&&j.openapi_total!=null)?" · OpenAPI "+j.openapi_total:"";
+      el.innerHTML="сверка реестра RPC ("+chan+"): <b>"+(v?"PASS ✓":"FAIL ✗")+"</b> · ожидание "+g.expected_total+" · факт "+g.actual_total+" · ACTIVE "+g.per_tier_actual.ACTIVE+"/"+g.per_tier_expected.ACTIVE+" · CONTROL_PLANE "+g.per_tier_actual.CONTROL_PLANE+"/"+g.per_tier_expected.CONTROL_PLANE+" · FREEZE "+g.per_tier_actual.FREEZE+"/"+g.per_tier_expected.FREEZE+" · нет "+g.missing_count+" · лишних "+g.extra_count+" · тир-дрейф "+g.tier_mismatch_count+oa+(j.cached?" · кэш 60с":"");
       el.style.color = v ? "#6ee7b7" : "#fca5a5";
     }).catch(function(){ var el=$("rpc-reconcile"); if(el){ el.textContent="сверка реестра: сеть недоступна"; el.style.color="#fcd34d"; } });
   }

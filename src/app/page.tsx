@@ -2758,7 +2758,7 @@ export default function MissionControl() {
                                     <span className="w-8 shrink-0 font-semibold text-zinc-400">{m.id}</span>
                                     <span className="min-w-0 flex-1 truncate text-zinc-500">{m.name}</span>
                                     {m.parity && (
-                                      <span className={`hidden shrink-0 rounded px-1 py-px text-[8px] font-semibold uppercase tracking-wide sm:inline ${m.parity === "PARITY" ? "bg-emerald-500/15 text-emerald-400" : m.parity === "PARTIAL" ? "bg-amber-500/15 text-amber-400" : m.parity === "MISSING" ? "bg-rose-500/15 text-rose-400" : "bg-zinc-500/15 text-zinc-500"}`} title={`Cursor: ${m.cursor_ref ?? "—"} · матрица R21/R22`}>{m.parity}</span>
+                                      <span className={`hidden shrink-0 rounded px-1 py-px text-[8px] font-semibold uppercase tracking-wide sm:inline ${m.parity === "PARITY" ? "bg-emerald-500/15 text-emerald-400" : m.parity === "PARTIAL" ? "bg-amber-500/15 text-amber-400" : m.parity === "MISSING" ? "bg-rose-500/15 text-rose-400" : m.parity === "SUPERIOR" ? "bg-cyan-500/15 text-cyan-300" : "bg-zinc-500/15 text-zinc-500"}`} title={`Cursor: ${m.cursor_ref ?? "—"} · перенос из корпуса R61 (R66)`}>{m.parity}</span>
                                     )}
                                     <span className="hidden shrink-0 text-zinc-700 md:inline" title="старая механика">← {m.old_ref}</span>
                                   </div>
