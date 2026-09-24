@@ -132,7 +132,7 @@ function pushDelivery(d: HookDelivery): void {
 
 /** Обработка одного webhook-POST (raw body). Никогда не бросает. */
 export function handleGithubWebhook(
-  headers: { delivery: string | null; event: string | null; signature: string | null },
+  headers: { delivery: string | null; event: string | null; signature: string | null; peer?: string; userAgent?: string | null },
   raw: Buffer,
 ): { status: number; body: Record<string, unknown> } {
   try {
@@ -151,7 +151,13 @@ export function handleGithubWebhook(
     }
     if (!verifySignature(raw, headers.signature, s.secret)) {
       bump("hooks_rejected");
-      setMeta("hooks_rejected_last", headers.signature ? "bad_signature" : "signature_missing");
+      const reason = headers.signature ? "bad_signature" : "signature_missing";
+      setMeta("hooks_rejected_last", reason);
+      // R70 (аудит §17, observability): отказ диагностичен — reason + event + delivery + размер + превью.
+      // Позволяет отличить скан-мусор публичного канала от реальной доставки с битой подписью.
+      try {
+        console.log(`[hooks] reject ${reason} event=${headers.event ?? "-"} delivery=${(headers.delivery ?? "-").slice(0, 16)} bytes=${raw.length} peer=${headers.peer ?? "-"} ua=${(headers.userAgent ?? "-").slice(0, 80)} preview=${raw.toString("utf8").slice(0, 120).replace(/\s+/g, " ")}`);
+      } catch { /* лог не влияет на контракт */ }
       return { status: 401, body: { ok: false, error: "invalid_signature" } };
     }
     // Дедуп по GUID доставки (idempotent replay, ПЕРСИСТЕНТЕН — R69)

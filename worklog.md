@@ -1217,3 +1217,31 @@ Stage Summary:
 - Бэклог R70: ① watchdog/watchdog-группа для me2-webhook-relay + автозапуск со стартом песочницы; ② P0-4 durable execution; ③ P1 core.agent-loop harness; ④ переключение webhook на прямой preview-origin по готовности оператора (одна команда); ⑤ VLM снят с работы — не планируется.
 
 Дополнение R69.1 (по delivery-log GitHub, все 5 доставок status 200, redelivery=false): POST /hooks/{id}/tests для repo-webhook шлёт НЕ ping, а ПОСЛЕДНИЙ PUSH — поэтому в 17:29:49 пришёл реальный GIT_PUSH a94e518 (5871), а не ping; комментарий в webhook-register.sh исправлен. Хронология канала: 5846 HOOK_PING (создание хука) → 5871 GIT_PUSH a94e518 (тест-доставка) → 6374 GIT_PUSH 2186305 (наш собственный push вернулся снаружи!) → 6375/6376 HOOK_EVENT workflow_run requested/in_progress (CI-старт) — push-канал полностью самодостаточен.
+
+---
+Task ID: R70
+Agent: Z.ai (main)
+Task: FULL SYSTEM AUDIT / INTEGRATION / TEST / OPTIMIZATION — доказать, что все модули и механизмы METAENGINE реально работают, связаны и интегрированы в единый производственный контур
+
+Work Log:
+- Инвентаризация: 78 REST-маршрутов daemon, все 49 GET-эндпоинтов -> 200 + валидный JSON (ни одного 500)
+- Контрактный eval: PASS 65/65 (v28) -> после добавления регресс-кейса PASS 66/66 (v29, 81-114ms)
+- Стресс webhooks-in: burst 53 доставки (~500 rps, конкурентность 8): 30 уникальных -> 200/verified; 15 bad-sig -> 401 (fail-closed); replay усечённых display-id -> не дедуплицируется (корректно — ключ полный GUID)
+- Идемпотентность шины: 12 параллельных POST /commands с одним idempotency_key -> ровно 1 исполнение, 11 deduped, 16ms (PASS)
+- CHAOS: kill -9 daemon -> рестарт -> персистентный дедуп PASS (GUID пережил kill -9: dedupe:true, persisted:true), hash-chain цел, eval PASS после рестарта
+- Чистый латентный замер: p50 0.4ms / p95 1.1ms (кольца bench были загрязнены sweep-обходом — см. фикс 3)
+- UI (agent-browser через gateway :81 = контекст preview): WS LIVE, зеркало LIVE, задачи 59, вкладки MISSION/TELEMETRY рендерятся, mobile 390px hscroll=false
+
+FIXED (каждый — с регресс-защитой):
+1. P1 sqlmirror gate: решение оператора «зеркало ON» жило только в env процесса (start.sh); любой рестарт вне start.sh молча гасил зеркало в OFF (авто-восстановление R56-4 завязано на SUPABASE_DB_URL, которого в env-файле нет). Фикс: конструктор SqlMirror персистит решение в meta sqlmirror_gate='1' (явный env=0 — удаляет), на буте третий путь восстановления из meta (index.ts); регресс: eval state.sqlmirror_gate (env==meta-gate). Доказано E2E: голый «bun index.ts» рестарт -> WARMUP->LIVE.
+2. P2 relay zombie --hot: старая инкарнация me2-webhook-relay (код ДО фикса «служебные кадры») продолжала жить внутри bun --hot процесса и непрерывно форвардила keep-alive кадры smee (body:{}, без заголовков) -> 401-спам ~4/мин в daemon; health-счётчики новой инкарнации врали (fwd_errors=0). Локализовано новым observability-логом (peer=127.0.0.1, ua=Bun/1.3.14). Фикс: dev-скрипт без --hot (stateful SSE-потребитель), чистый setsid-рестарт; дельта 401 за 100с = 0.
+3. P4 bench честность: кольца латентностей размерные (512) и при низком трафике не дренируются — burst держит p95 ложно высоким часами. Фикс: age-based pruning (STALE_MS=600s) в statsOf/statsOfCold; живое подтверждение: rest p95=1ms (n=104) на свежем окне.
+4. Observability §17: [hooks] reject лог (reason/event/delivery/peer/ua/preview) — именно им пойман виновник 401-спама; отличает скан-мусор публичного канала от битой подписи реальной доставки.
+
+E2E внешний контур: публичный smee-канал (GJgf40QtxZd8oUlA) -> SSE -> relay -> daemon HMAC-verify -> HOOK_PING seq 8367 (маркер R70-SHOT3, relay dlv/fwd 2/2, err 0) — GitHub-эквивалентный путь доказан после фиксов. Служебные кадры smee skip-ятся, секрет через канал не ходит.
+
+Stage Summary:
+- daemon v0.56.1: eval 66/66 (v29), lint 0/0, инвариант 47/47, mirror LIVE pending=0 err=0, evidence pending=0, seq 8370, RSS ~117MB
+- Вердикт по контурам: REST-шина ПРОДАКШН-ВЕРИФИЦИРОВАНА (маршруты+идемпотентность); webhooks-in ПРОДАКШН-ВЕРИФИЦИРОВАН (fail-closed, персистентный дедуп пережил kill -9, внешний путь smee E2E); sqlmirror ИНТЕГРИРОВАН (гейт персистентен, дренаж 448->0); CI-ingress работает (tauri-build @2186305 in_progress, предыдущий a94e518 success); UI ИНТЕГРИРОВАН (WS LIVE, данные живые); LLM-плоскость — честная деградация по внешней квоте 429 (backoff x3 -> fail -> память -> governor breaker OPEN — реакция корректна)
+- Честные ограничения (не скрываю): Electron-клиент и реальный CDP-браузер вне песочницы — browser-плоскость верифицирована только REST-частью (BROWSER_TABS count=0 без клиента); preview-origin капчей-закрыт (smee-релей — боевой обходной контур); soak >30 мин не прогонялся
+- Бэклог R71: watchdog/автоперезапуск на me2-webhook-relay; P0-4 durable execution; P1 core.agent-loop harness; LLM-квота 429 — операторская задача

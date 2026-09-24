@@ -4,6 +4,6 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "dev": "bun --hot index.ts"
+    "dev": "bun index.ts"
   }
 }

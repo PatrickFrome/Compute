@@ -70,7 +70,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 28;
+export const EVAL_DATASET_VERSION = 29;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -172,6 +172,17 @@ export const EVAL_DATASET: EvalCheck[] = [
     run: () => {
       const b = getMeta("boot"); const v = getMeta("version");
       return { ok: !!b && !!v, evidence: `boot=${b ?? "null"}, version=${v ?? "null"}` };
+    },
+  },
+  {
+    id: "state.sqlmirror_gate", plane: "state", title: "SQL-зеркало: операторское решение персистентно (R70)",
+    critical: true, expect: "env ME2_SQL_MIRROR=1 ⇔ meta sqlmirror_gate='1' (решение переживает рестарт; фикс аудита R70)",
+    run: () => {
+      const envOn = process.env.ME2_SQL_MIRROR === "1";
+      const gate = db.query("SELECT value FROM meta WHERE key='sqlmirror_gate'").get() as { value: string } | undefined;
+      const gateOn = gate?.value === "1";
+      const ok = envOn === gateOn;
+      return { ok, evidence: `env=${envOn ? "1" : "unset/0"}, meta_gate=${gateOn ? "1" : "absent"}${ok ? "" : " — РАССИНХРОН: рестарт вне start.sh изменит состояние зеркала"}` };
     },
   },
   // — агенты/задачи —

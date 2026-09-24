@@ -52,6 +52,37 @@ export interface SqlMirrorStatus {
   last_probe_at: number | null;
 }
 
+// ── R70: персистентное операторское решение «зеркало включено» ──
+// Проблема (найдена аудитом R70): решение жило ТОЛЬКО в env процесса (start.sh экспортирует
+// ME2_SQL_MIRROR=1), а авто-восстановление бута вне start.sh завязано на SUPABASE_DB_URL в
+// env-файле — которого оператор не добавлял. Рестарт без start.sh (kill -9 + ручной запуск,
+// респавн супервизором) молча гасил зеркало в OFF при живом курсоре. Фикс: бут с включённым
+// зеркалом (+ ключ в vault) персистит решение в meta sqlmirror_gate='1'; любой последующий
+// бут восстанавливает его оттуда. Явный ME2_SQL_MIRROR=0 удаляет решение (осознанный off).
+const GATE_KEY = "sqlmirror_gate";
+
+/** Читано ли персистентное операторское решение (meta sqlmirror_gate='1'). */
+export function sqlmirrorGatePersisted(db: Database): boolean {
+  try {
+    const r = db.query("SELECT value FROM meta WHERE key=?").get(GATE_KEY) as { value: string } | undefined;
+    return r?.value === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistGate(db: Database, on: boolean): void {
+  try {
+    if (on) {
+      db.query("INSERT INTO meta (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(GATE_KEY, "1");
+    } else {
+      db.query("DELETE FROM meta WHERE key=?").run(GATE_KEY);
+    }
+  } catch {
+    /* meta недоступна — решение живёт только в env (честная деградация) */
+  }
+}
+
 export class SqlMirror {
   private key = "";
   private state: SqlMirrorState = "OFF";
@@ -68,6 +99,10 @@ export class SqlMirror {
 
   constructor(private db: Database) {
     this.key = pickCredential();
+    // R70: решение оператора персистится. env=1 + ключ → meta gate='1'; явный env=0 →
+    // решение удаляется; env не задан и решения нет → OFF (как до первого включения).
+    if (process.env.ME2_SQL_MIRROR === "0") persistGate(this.db, false);
+    else if (this.configured) persistGate(this.db, true);
     onTokenChange((name) => {
       // R54: канал записи — sb_secret (новый формат) с фолбэком на legacy service_role JWT
       // (операторский, HMAC-верифицирован против SUPABASE_JWT_SECRET; облако принимает точную
@@ -75,6 +110,7 @@ export class SqlMirror {
       if (name === "SUPABASE_SERVICE_ROLE_JWT" || name === "SUPABASE_SERVICE_ROLE_JWT_LEGACY") {
         this.key = pickCredential();
         this.recomputeGate();
+        if (this.configured) persistGate(this.db, true);
       }
     });
   }

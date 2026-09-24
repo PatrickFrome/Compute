@@ -21,6 +21,7 @@ import {
 import { listProviders } from "./providers";
 import { ciPollMs, ciStatus, ciTick } from "./src/ci";
 import { hooksStatus, handleGithubWebhook } from "./src/hooks";
+import { sqlmirrorGatePersisted } from "./src/sqlmirror";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
@@ -215,6 +216,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
           delivery: typeof h["x-github-delivery"] === "string" ? h["x-github-delivery"] : null,
           event: typeof h["x-github-event"] === "string" ? h["x-github-event"] : null,
           signature: typeof h["x-hub-signature-256"] === "string" ? h["x-hub-signature-256"] : null,
+          peer: req.socket?.remoteAddress ?? "-",
+          userAgent: typeof h["user-agent"] === "string" ? h["user-agent"] : null,
         },
         Buffer.concat(chunks),
       );
@@ -1317,6 +1320,13 @@ if (process.env.ME2_SQL_MIRROR === undefined && existsSync("/home/z/.a2/supabase
       console.log("e2-daemon] sqlmirror gate восстановлен из решения оператора (SUPABASE_DB_URL в env-файле, бут вне start.sh)");
     }
   } catch { /* честный отказ: гейт остаётся выключенным */ }
+}
+// R70 (аудит): третий путь восстановления — персистентное решение в meta sqlmirror_gate='1'
+// (записывается конструктором SqlMirror при первом буте с env=1 + ключом). Гасит сценарий
+// «рестарт без start.sh → зеркало молча OFF» даже без SUPABASE_DB_URL в env-файле.
+if (process.env.ME2_SQL_MIRROR === undefined && sqlmirrorGatePersisted(db)) {
+  process.env.ME2_SQL_MIRROR = "1";
+  console.log("e2-daemon] sqlmirror gate восстановлен из meta (персистентное операторское решение, бут вне start.sh)");
 }
 const sqlMirror = new SqlMirror(db);
 sqlMirror.start();

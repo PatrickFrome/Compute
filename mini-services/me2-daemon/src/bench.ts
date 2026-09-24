@@ -23,13 +23,19 @@ import { fileURLToPath } from "node:url";
 import { mcpStatus } from "./mcp";
 
 const RING_CAP = 512;
+// R70 (аудит §18, честные базовые линии): кольцо — размерное, но при низком трафике
+// burst-выброс (sweep/нагрузка/eval-батч) держит p95 ложно высоким ЧАСАМИ — образцы
+// не дренируются. Фикс: возрастное отбрасывание (STALE_MS) при наблюдении И при чтении —
+// p95 всегда описывает свежее окно, а не историю всплесков.
+const STALE_MS = 600_000;
 // B3-уточнение (R35): сэмплы boot-окна (первые 10с — JIT/первое соединение/флеш outbox)
 // идут в ОТДЕЛЬНОЕ холодное кольцо: они меряют прогрев, а не стационарный p95 сервиса.
 // Иначе пара холодных сэмплов вечно держит p95 над порогом (ложный FAIL после рестарта).
 const COLD_WINDOW_MS = 10_000;
 const COLD_CAP = 64;
-const rings = new Map<BenchProbe, number[]>();
-const coldRings = new Map<BenchProbe, number[]>();
+// (ts, ms) — пары для возрастной выбраковки
+const rings = new Map<BenchProbe, Array<{ ts: number; ms: number }>>();
+const coldRings = new Map<BenchProbe, Array<{ ts: number; ms: number }>>();
 
 /** Наблюдение латентности (ms). Вызывается из горячего пути — O(1) амортизированно. */
 // R62: замер приостанавливается на время тяжёлых in-process батчей (evalRun) — иначе
@@ -44,17 +50,26 @@ export function benchObserve(probe: BenchProbe, ms: number): void {
   if (benchSuspended) return;
   if (!Number.isFinite(ms) || ms < 0) return;
   const v = Math.round(ms);
-  if (Date.now() - bootT0 < COLD_WINDOW_MS) {
+  const now = Date.now();
+  if (now - bootT0 < COLD_WINDOW_MS) {
     let cr = coldRings.get(probe);
     if (!cr) { cr = []; coldRings.set(probe, cr); }
     if (cr.length >= COLD_CAP) cr.shift();
-    cr.push(v);
+    cr.push({ ts: now, ms: v });
     return;
   }
   let ring = rings.get(probe);
   if (!ring) { ring = []; rings.set(probe, ring); }
   if (ring.length >= RING_CAP) ring.shift();
-  ring.push(v);
+  ring.push({ ts: now, ms: v });
+}
+
+/** R70: выбраковка образцов старше STALE_MS (кольцо = свежее окно, не история всплесков). */
+function prune(ring: Array<{ ts: number; ms: number }>): Array<{ ts: number; ms: number }> {
+  const cutoff = Date.now() - STALE_MS;
+  let i = 0;
+  while (i < ring.length && ring[i].ts < cutoff) i++;
+  return i > 0 ? ring.slice(i) : ring;
 }
 
 function pct(sorted: number[], p: number): number | null {
@@ -68,8 +83,8 @@ export interface BenchStats {
 }
 
 function statsOf(probe: BenchProbe): BenchStats {
-  const ring = rings.get(probe) ?? [];
-  const sorted = [...ring].sort((a, b) => a - b);
+  const ring = prune(rings.get(probe) ?? []);
+  const sorted = ring.map((s) => s.ms).sort((a, b) => a - b);
   return {
     n: sorted.length,
     p50: pct(sorted, 50), p95: pct(sorted, 95), p99: pct(sorted, 99),
@@ -78,8 +93,8 @@ function statsOf(probe: BenchProbe): BenchStats {
 }
 
 function statsOfCold(probe: BenchProbe): BenchStats {
-  const ring = coldRings.get(probe) ?? [];
-  const sorted = [...ring].sort((a, b) => a - b);
+  const ring = prune(coldRings.get(probe) ?? []);
+  const sorted = ring.map((s) => s.ms).sort((a, b) => a - b);
   return {
     n: sorted.length,
     p50: pct(sorted, 50), p95: pct(sorted, 95), p99: pct(sorted, 99),
