@@ -53,6 +53,8 @@ import {
 import { capabilitiesJson, withContract, missionUiHtml, CONTRACT_VERSION } from "./contract";
 import { mintSupabaseJwt, verifySupabaseJwt, uiTokenBundle, jwtSecretPresent, publishableKey, serviceRoleLegacyJwt, anonRegisteredJwt, gotrueStatus, gotrueCreds, gotrueVerifyShape } from "./supabase-jwt";
 import { SQLMIRROR_TABLE } from "./sqlmirror";
+import { RLS_EXPECTED_DML, RLS_EXPECTED_POLICIES, RLS_EXPECTED_FLAGS, rlsAuditProbeOffline } from "./rls-audit";
+import { RPC_EXPECTED_TOTAL, RPC_EXPECTED_TIERS, rpcReconcileProbeOffline } from "./rpc-reconcile";
 import { livenessStatus, budgetStatus, nonBypassAudit, ENFORCED_WRITE_FAMILIES } from "./autonomy";
 import { governorTestReset, governorInject429, governorBreakerState, governorStatus, governorCooldownForTest } from "./governor";
 import { demandTick, demandStatus, demandConfig, demandConfigSet, demandTestReset, type DemandSnapshot } from "./demand";
@@ -62,7 +64,7 @@ import { tokensEnsure, tokenSet, tokenGet, tokenDelete, tokenList, tokensStatus 
 import { rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 22;
+export const EVAL_DATASET_VERSION = 24;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1165,14 +1167,55 @@ export const EVAL_DATASET: EvalCheck[] = [
     },
   },
   {
+    id: "contract.supabase_rls_audit",
+    plane: "contract",
+    title: "R58 «политики как данные»: RLS-самоаудит — ожидаемая матрица (sql/0003+0004) как данные, DML-слой строго, платформенные дефолты info, честный офлайн probe-режим",
+    critical: false,
+    expect: "матрица ожиданий: 4 DML-гранта (anon — ни одного; privs только DML), 2 политики authenticated SELECT, RLS-флаги обеих таблиц; скрипт scripts/rls-audit.sh существует; probe-режим даёт честный офлайн-ответ без сети и секретов",
+    run: () => {
+      let scriptOk = false;
+      try { scriptOk = readFileSync(join(import.meta.dir, "..", "scripts", "rls-audit.sh"), "utf8").includes("RLS_AUDIT_JSON") || readFileSync(join(import.meta.dir, "..", "scripts", "rls-audit.sh"), "utf8").length > 1000; } catch { scriptOk = false; }
+      const DML = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+      const dmlOk = RLS_EXPECTED_DML.length === 4
+        && RLS_EXPECTED_DML.every((r) => r.privs.every((p) => DML.includes(p)) && r.privs.length > 0)
+        && !RLS_EXPECTED_DML.some((r) => r.role === "anon")
+        && RLS_EXPECTED_DML.some((r) => r.table === SQLMIRROR_TABLE && r.role === "service_role" && r.privs.length === 4);
+      const polOk = RLS_EXPECTED_POLICIES.length === 2 && RLS_EXPECTED_POLICIES.every((p) => p.role === "authenticated" && p.cmd === "SELECT");
+      const flagsOk = RLS_EXPECTED_FLAGS.length === 2 && RLS_EXPECTED_FLAGS.includes(SQLMIRROR_TABLE);
+      const probe = rlsAuditProbeOffline();
+      const probeOk = probe.ok && probe.mode === "probe_offline" && probe.script_present && probe.expected.dml_rows === 4 && probe.expected.anon_dml === 0 && probe.expected.anon_policies === 0;
+      const ok = scriptOk && dmlOk && polOk && flagsOk && probeOk;
+      return { ok, evidence: `script=${scriptOk}, dml=${dmlOk} (${RLS_EXPECTED_DML.length} строк, anon исключён, service CRUD полон), политики=${polOk} (${RLS_EXPECTED_POLICIES.length}), флаги=${flagsOk}, probe_offline=${probeOk} (${probe.expected?.dml_rows} DML / ${probe.expected?.policies} политик / anon 0/0)` };
+    },
+  },
+  {
+    id: "contract.supabase_rpc_reconcile",
+    plane: "contract",
+    title: "R59 «реестр как данные»: сверка живого RPC-реестра облака с классификацией R52 (count + поимённый состав + тир-дрейф + sha256-хеш множества), честный офлайн probe-режим",
+    critical: false,
+    expect: "ожидание 243 RPC (ACTIVE 24 / CONTROL_PLANE 37 / FREEZE 182, источник research/2026/r52-rpc-registry.json — версии в репо); скрипт scripts/rpc-reconcile.sh существует; probe-режим даёт честный офлайн-ответ; никаких секретов в ожиданиях и вердиктах",
+    run: () => {
+      let scriptOk = false;
+      try { scriptOk = readFileSync(join(import.meta.dir, "..", "scripts", "rpc-reconcile.sh"), "utf8").length > 1000; } catch { scriptOk = false; }
+      const tiersOk = RPC_EXPECTED_TOTAL === 243
+        && RPC_EXPECTED_TIERS.ACTIVE === 24
+        && RPC_EXPECTED_TIERS.CONTROL_PLANE === 37
+        && RPC_EXPECTED_TIERS.FREEZE === 182;
+      const probe = rpcReconcileProbeOffline();
+      const probeOk = probe.ok && probe.mode === "probe_offline" && probe.script_present && probe.expected.total === 243;
+      const ok = scriptOk && tiersOk && probeOk;
+      return { ok, evidence: `script=${scriptOk}, ожидание=${tiersOk} (${RPC_EXPECTED_TOTAL} = ${RPC_EXPECTED_TIERS.ACTIVE}/${RPC_EXPECTED_TIERS.CONTROL_PLANE}/${RPC_EXPECTED_TIERS.FREEZE}), probe_offline=${probeOk}, источник-ожиданий-в-репо=${probe.expected_source_present}` };
+    },
+  },
+  {
     id: "mission.sqlmirror_ui",
     plane: "mission",
-    title: "R54 фаза D: GET /ui несёт панель «Зеркало SQL» — каналы publishable/anon_registered/service_proxy/mint, anon-проба с честным fail-closed-вердиктом, никакого секрета в HTML",
+    title: "R54 фаза D + R58: GET /ui несёт панель «Зеркало SQL» — каналы publishable/anon_registered/gotrue/service_proxy/mint, anon-проба с честным fail-closed-вердиктом, RLS-самоаудит «политики как данные», никакого секрета в HTML",
     critical: true,
-    expect: "HTML содержит data-testid=mc-mirror, fetch /sqlmirror/ui-token, маркеры RLS-гейта (anon-проба + fail-closed + предупреждение о протечке), в HTML нет вшитых JWT (eyJ…), нет внешних ключей; имя таблицы зеркала совпадает с sql/0001 (если файл доступен по относительному пути)",
+    expect: "HTML содержит data-testid=mc-mirror, fetch /sqlmirror/ui-token, маркеры RLS-гейта (anon-проба + fail-closed + предупреждение о протечке), R58-аудит политик (/sqlmirror/rls-audit), R59-сверку реестра (/sqlmirror/rpc-reconcile), в HTML нет вшитых JWT (eyJ…), нет внешних ключей; имя таблицы зеркала совпадает с sql/0001 (если файл доступен по относительному пути)",
     run: () => {
       const html = missionUiHtml();
-      const markers = ['data-testid="mc-mirror"', "/sqlmirror/ui-token", "anon_token", "fail-closed", "RLS", "ПРОЧИТАЛ"].every((m) => html.includes(m));
+      const markers = ['data-testid="mc-mirror"', "/sqlmirror/ui-token", "anon_token", "fail-closed", "RLS", "ПРОЧИТАЛ", 'data-testid="mc-rls-audit"', "/sqlmirror/rls-audit", "аудит политик", 'data-testid="mc-rpc-reconcile"', "/sqlmirror/rpc-reconcile", "сверка реестра"].every((m) => html.includes(m));
       const noSecretInHtml = !/eyJ[A-Za-z0-9_-]{20,}/.test(html); // вшитых JWT нет — только выдача по требованию
       const noLongLivedKeys = !/service_role/i.test(html); // сервисных ключей в UI нет (R47/T2 не утекает)
       let tableCross = "sql-file-n/a"; let tableOk = true;
