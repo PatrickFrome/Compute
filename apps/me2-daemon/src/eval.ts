@@ -38,7 +38,7 @@ import { handoffList, handoffStats } from "./handoffs";
 import { glmStatus, canonicalGlm, agentTag } from "./glm";
 import { reviewStats } from "./reviewer";
 import { approvalsStatus, gateCheck, APPROVAL_GATES } from "./approvals";
-import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck, SECRETS_HIDE } from "./sandbox2";
+import { planSandbox, sandboxProbeOffline, sandboxConfig, sandboxSetOverride, strictCheck, SECRETS_HIDE, probeSandboxCaps } from "./sandbox2";
 import { SB_ROOT } from "./sandbox";
 import { REPO_ROOT } from "./worktrees";
 import { sandboxEligible, FS_RULES } from "./review";
@@ -75,7 +75,7 @@ import { mirrorSeq, EPOCH_STRIDE } from "./sqlmirror";
 import { rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const EVAL_DATASET_VERSION = 31;
+export const EVAL_DATASET_VERSION = 32;
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS eval_runs (
@@ -1520,8 +1520,16 @@ export const EVAL_DATASET: EvalCheck[] = [
         && typeof baseCfg.strict === "boolean" && typeof baseCfg.tmp_size === "string";
       // офлайн-проба модуля (двойная проверка тем же харнесом)
       const probeOff = sandboxProbeOffline();
+      // env-честность: в unsandboxed-окружении ДОГОВОР(plan) обязан отказать — это и есть инвариант P0-2
+      const capsNow = probeSandboxCaps();
+      if (capsNow.verdict === "unsandboxed") {
+        const refused = !good.ok && good.reason === "sandbox_unavailable";
+        const ok2 = negatives === 4 && refused && strictMatrix && elig && fsRulesOk && cfgOk && probeOff.ok;
+        return { ok: ok2, evidence: `env unsandboxed (fs=${capsNow.fs_confinement}, seccomp_mode=${capsNow.seccomp_mode}, userns_max=${capsNow.userns_max}, landlock_abi=${capsNow.landlock_abi}) → план честно отказал=${refused} (fail-closed P0-2); негативы plan=${negatives}/4; strict-матрица ${strictMatrix ? "✓" : "FAIL"}; sandboxEligible ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}` };
+      }
       const ok = negatives === 4 && planOk && secOk && strictMatrix && elig && fsRulesOk && cfgOk && probeOff.ok;
-      return { ok, evidence: `негативы plan=${negatives}/4 ✓; argv+rlimit-as-4GiB+hide-.a2 ✓; BPF=${secOk ? "mount/unshare/io_uring_setup/ptrace, len=" + good.seccomp!.len : "FAIL"}; strict-матрица ${strictMatrix ? "ok/fail/fail/fail ✓" : "FAIL"}; sandboxEligible (fs×auto×caps) ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}; живые негативы/эскале-детектор — probe в REST-ходах раунда` };
+      const bpf = secOk ? "mount/unshare/io_uring_setup/ptrace, len=" + good.seccomp!.len : good.ok ? `FAIL(net=${good.seccomp!.net}, len=${good.seccomp!.len})` : `FAIL(plan_ok=false, reason=${good.reason})`;
+      return { ok, evidence: `негативы plan=${negatives}/4 ✓; argv+rlimit-as-4GiB+hide-.a2 ✓; BPF=${bpf}; strict-матрица ${strictMatrix ? "ok/fail/fail/fail ✓" : "FAIL"}; sandboxEligible (fs×auto×caps) ${elig && fsRulesOk ? "✓" : "FAIL"}; config on/off/on ✓; offline-probe=${probeOff.ok}; caps(fs=${capsNow.fs_confinement}, landlock_abi=${capsNow.landlock_abi}, userns=${capsNow.userns_max}); живые негативы/эскале-детектор — probe в REST-ходах раунда` };
     },
   },
 ];

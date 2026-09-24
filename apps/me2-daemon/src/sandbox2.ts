@@ -493,7 +493,10 @@ export function sandboxProbeOffline(): { ok: boolean; mode: "probe_offline"; neg
     planSandbox("ls", SB_ROOT, { hide: ["relative/path"] }), // hide не абсолютный
   ].filter((p) => !p.ok).length;
   const good = planSandbox("echo ok > probe.txt", SB_ROOT);
-  const planOk = good.ok && good.argv!.includes("/bin/bash") && good.argv!.includes("-c") && good.seccomp!.net === "deny"
+  const capsHere = probeSandboxCaps();
+  const planOk = capsHere.verdict === "unsandboxed"
+    ? !good.ok && good.reason === "sandbox_unavailable" // честный fail-closed: план отказал (канон P0-2)
+    : good.ok && good.argv!.includes("/bin/bash") && good.argv!.includes("-c") && good.seccomp!.net === "deny"
     && good.seccomp!.deny_syscalls.includes("mount")
     && good.seccomp!.deny_syscalls.includes("unshare")
     && good.seccomp!.deny_syscalls.includes("io_uring_setup")
