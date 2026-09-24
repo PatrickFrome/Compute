@@ -66,7 +66,7 @@ export function capabilitiesJson(): CapabilityContract {
         "матрица: docs/version-matrix.md (K8)",
         "R53: зеркало SQL в Supabase читается из UI с гейтом RLS (jwt authenticated 120с; anon — fail-closed)",
         "R58: политики как данные — GET /sqlmirror/rls-audit сверяет живой каталог Postgres с ожидаемой матрицей sql/0003+0004 (DML строго; платформенные дефолты Supabase — info)",
-        "R68: webhooks-in (push-фаза P0-e) — POST /hooks/github, HMAC-SHA256 X-Hub-Signature-256 (timing-safe), дедуп X-GitHub-Delivery; события HOOK_PING/GIT_PUSH/CI_HOOK_RUN_* → event-log → облако; секрет в vault (GITHUB_WEBHOOK_SECRET), без него — честный 503",
+        "R68/R69: webhooks-in (push-фаза P0-e) — POST /hooks/github, HMAC-SHA256 X-Hub-Signature-256 (timing-safe), персистентный дедуп X-GitHub-Delivery (sqlite hook_deliveries, переживает рестарт); события HOOK_PING/GIT_PUSH/GIT_PR_*/CI_HOOK_RUN_* → event-log → облако; gateway-лег :81 /hooks/github?XTransformPort=3041; секрет в vault (GITHUB_WEBHOOK_SECRET), регистрация в репо — scripts/webhook-register.sh; без секрета — честный 503",
         "R60: workbench-лэйаут /ui — collapse/expand секций с персистом localStorage (канон VS Code workbench, порядок секций не меняется)",
         "R60: exthost — расширения skills/ext/* исполняются в подпроцессе под prlimit, только stdio-JSON, caps-медиация (неизвестная cap — честный отказ), activation manual/bus:*",
         "R60 ruling оператора: «UI не обязан быть read only» — REST-записи из панели разрешены только санкционированные (белый список в eval mission.ui_contract; сейчас: POST /exthost/run, /exec, /file)",
@@ -430,7 +430,7 @@ export function missionUiHtml(): string {
       var vr=String(j.verdict||"?");
       var live=(vr==="LIVE");
       var lab=live?"LIVE ✓":(vr==="DEV_SECRET"?"DEV-СЕКРЕТ":(vr==="NO_SECRET"?"СЕКРЕТА НЕТ":"ОЖИДАНИЕ"));
-      el.innerHTML="webhooks-in (push, HMAC): <b>"+lab+"</b> · secret "+esc(j.secret||"?")+" · получено "+j.received_total+" · верифицировано "+j.verified_total+" · отклонено "+j.rejected_total+(j.rejected_last_reason?" ("+esc(j.rejected_last_reason)+")":"")+" · событий "+j.events_emitted_total+" · дедуп "+j.dedupe_size;
+      el.innerHTML="webhooks-in (push, HMAC): <b>"+lab+"</b> · secret "+esc(j.secret||"?")+" · получено "+j.received_total+" · верифицировано "+j.verified_total+" · отклонено "+j.rejected_total+(j.rejected_last_reason?" ("+esc(j.rejected_last_reason)+")":"")+" · событий "+j.events_emitted_total+" · дедуп "+j.dedupe_size+(j.dedupe_persistent?" (sqlite ✓ переживает рестарт)":"");
       el.style.color = live ? "#6ee7b7" : (vr==="NO_SECRET" ? "#fca5a5" : "#fcd34d");
     }).catch(function(){ var el=$("hooks-in"); if(el){ el.textContent="webhooks-in: сеть недоступна"; el.style.color="#fcd34d"; } });
   }

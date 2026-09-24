@@ -21,11 +21,35 @@
 // Аналоги: GitHub webhook receivers (smee.io), ArgoCD webhooks, K8s Event API (push).
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { emit, getMeta, setMeta } from "../store";
+import { db, emit, getMeta, nowIso, setMeta } from "../store";
 import { tokenGet } from "./tokens";
 
-export const HOOKS_SCHEMA = "me2.hooks.v1";
+export const HOOKS_SCHEMA = "me2.hooks.v2";
 const DEDUPE_CAP = 512;
+
+// R69: дедуп ПЕРСИСТЕНТЕН — таблица hook_deliveries переживает рестарт daemon'а
+// (урок R68: in-memory окно очищалось рестартом; повторы GitHub после рестарта
+// плодили бы дубли). PK-lookup на каждый POST — дёшево; кап 512 строк.
+let hooksSchemaReady = false;
+function ensureSchema(): void {
+  if (hooksSchemaReady) return;
+  db.run("CREATE TABLE IF NOT EXISTS hook_deliveries (guid TEXT PRIMARY KEY, event TEXT, at TEXT NOT NULL)");
+  hooksSchemaReady = true;
+}
+function hasDelivery(guid: string): boolean {
+  ensureSchema();
+  return !!db.query("SELECT 1 FROM hook_deliveries WHERE guid = ?").get(guid);
+}
+function recordDelivery(guid: string, event: string): void {
+  ensureSchema();
+  db.query("INSERT OR IGNORE INTO hook_deliveries (guid, event, at) VALUES (?, ?, ?)").run(guid, event, nowIso());
+  db.run(`DELETE FROM hook_deliveries WHERE guid NOT IN (SELECT guid FROM hook_deliveries ORDER BY rowid DESC LIMIT ${DEDUPE_CAP})`);
+}
+function deliveriesCount(): number {
+  ensureSchema();
+  const r = db.query("SELECT COUNT(*) AS n FROM hook_deliveries").get() as { n?: number } | null;
+  return Number(r?.n ?? 0);
+}
 
 export type HookDelivery = {
   delivery: string;
@@ -45,12 +69,14 @@ export type HooksStatus = {
   events_emitted_total: number;
   rejected_last_reason: string | null;
   dedupe_size: number;
+  dedupe_persistent: boolean;
+  gateway: { path: string; via: string; secret_header: string };
+  events_supported: string[];
   last_delivery_at: string | null;
   deliveries: HookDelivery[];
   verdict: "LIVE" | "DEV_SECRET" | "NO_SECRET" | "WARMUP";
 };
 
-const seenDeliveries = new Set<string>();
 const deliveries: HookDelivery[] = [];
 
 function secretSource(): { secret: string; source: "vault" | "env-dev" } | null {
@@ -115,16 +141,12 @@ export function handleGithubWebhook(
       setMeta("hooks_rejected_last", headers.signature ? "bad_signature" : "signature_missing");
       return { status: 401, body: { ok: false, error: "invalid_signature" } };
     }
-    // Дедуп по GUID доставки (idempotent replay)
+    // Дедуп по GUID доставки (idempotent replay, ПЕРСИСТЕНТЕН — R69)
     const delivery = headers.delivery || `noguid-${Date.now().toString(36)}`;
-    if (seenDeliveries.has(delivery)) {
-      return { status: 200, body: { ok: true, dedupe: true, delivery: delivery.slice(0, 16) } };
+    if (hasDelivery(delivery)) {
+      return { status: 200, body: { ok: true, dedupe: true, delivery: delivery.slice(0, 16), persisted: true } };
     }
-    seenDeliveries.add(delivery);
-    if (seenDeliveries.size > DEDUPE_CAP) {
-      const oldest = seenDeliveries.values().next().value;
-      if (oldest) seenDeliveries.delete(oldest);
-    }
+    recordDelivery(delivery, headers.event ?? "unknown");
     let payload: Record<string, unknown> = {};
     try {
       payload = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
@@ -161,6 +183,22 @@ export function handleGithubWebhook(
         commits: Array.isArray(payload.commits) ? payload.commits.length : 0,
         repo,
       });
+    } else if (event === "pull_request") {
+      // R69: PR-события — вход для fleet-целей (ветка открыта/закрыта/влита)
+      const pr = payload.pull_request as Record<string, unknown> | undefined;
+      const base = {
+        number: pr ? Number(pr.number ?? 0) : null,
+        title: pr && typeof pr.title === "string" ? (pr.title as string).slice(0, 120) : null,
+        action,
+        sender: typeof (payload.sender as Record<string, unknown> | undefined)?.login === "string"
+          ? String((payload.sender as Record<string, unknown>).login)
+          : null,
+        repo,
+      };
+      if (action === "opened") tr("GIT_PR_OPENED", base);
+      else if (action === "closed" && pr?.merged === true) tr("GIT_PR_MERGED", base);
+      else if (action === "closed") tr("GIT_PR_CLOSED", base);
+      else tr("HOOK_EVENT", { event, action, repo });
     } else if (event === "workflow_run" && action === "completed") {
       const wr = payload.workflow_run as Record<string, unknown> | undefined;
       const okRun = wr?.conclusion === "success";
@@ -204,12 +242,15 @@ export function hooksStatus(): HooksStatus {
     rejected_total: metaNum("hooks_rejected"),
     events_emitted_total: metaNum("hooks_events_emitted"),
     rejected_last_reason: getMeta("hooks_rejected_last") || null,
-    dedupe_size: seenDeliveries.size,
+    dedupe_size: deliveriesCount(),
     last_delivery_at: getMeta("hooks_last_delivery_at") || null,
     deliveries: [...deliveries],
+    dedupe_persistent: true,
+    gateway: { path: "/hooks/github", via: ":81 /hooks/github?XTransformPort=3041 (Caddy reverse_proxy — тело и заголовки прозрачны, HMAC сохраняется)", secret_header: "X-Hub-Signature-256" },
+    events_supported: ["ping", "push", "pull_request", "workflow_run"],
     verdict,
   };
 }
 
 export const HOOKS_NOTE =
-  "P0-e webhooks-in (push): POST /hooks/github — HMAC-SHA256 (X-Hub-Signature-256, timing-safe), dedupe X-GitHub-Delivery, HOOK_PING/GIT_PUSH/CI_HOOK_RUN_* → event-log → sqlmirror в облако";
+  "P0-e webhooks-in (push): POST /hooks/github — HMAC-SHA256 (X-Hub-Signature-256, timing-safe), персистентный дедуп X-GitHub-Delivery (SQLite, переживает рестарт — R69), HOOK_PING/GIT_PUSH/GIT_PR_*/CI_HOOK_RUN_* → event-log → sqlmirror в облако; gateway-лег :81?XTransformPort=3041; регистрация в репо — scripts/webhook-register.sh";

@@ -85,7 +85,7 @@ type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id
 type CiData = { ok: boolean; schema: string; repo: string; branch: string; token: "present" | "missing"; verdict: "LIVE" | "NO_TOKEN" | "ERROR" | "WARMUP"; runs: { id: number; name: string; head_sha7: string; status: string; conclusion: string | null; created_at: string | null }[]; polls_total: number; events_emitted_total: number; last_seen_run_id: number; last_error: string | null };
 // R68: P0-e webhooks-in (push) — POST /hooks/github (HMAC-SHA256)
 type HooksDeliveryT = { delivery: string; event: string; action: string | null; emitted: string[]; at: string };
-type HooksData = { ok: boolean; schema: string; secret: "vault" | "env-dev" | "missing"; received_total: number; verified_total: number; rejected_total: number; events_emitted_total: number; rejected_last_reason: string | null; dedupe_size: number; last_delivery_at: string | null; deliveries: HooksDeliveryT[]; verdict: "LIVE" | "DEV_SECRET" | "NO_SECRET" | "WARMUP" };
+type HooksData = { ok: boolean; schema: string; secret: "vault" | "env-dev" | "missing"; received_total: number; verified_total: number; rejected_total: number; events_emitted_total: number; rejected_last_reason: string | null; dedupe_size: number; dedupe_persistent: boolean; gateway: { path: string; via: string; secret_header: string }; events_supported: string[]; last_delivery_at: string | null; deliveries: HooksDeliveryT[]; verdict: "LIVE" | "DEV_SECRET" | "NO_SECRET" | "WARMUP" };
 type SenseTargetT = { ref: string; role: string; name: string };
 type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
 type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
@@ -2835,7 +2835,7 @@ export default function MissionControl() {
                             {/* R68: WEBHOOKS-IN (P0-e push) — POST /hooks/github (HMAC-SHA256) → события → облако */}
                             <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2" data-testid="hooks-in">
                               <div className="mb-1.5 flex items-center justify-between">
-                                <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="P0-e webhooks-in (push): POST /hooks/github — HMAC-SHA256 X-Hub-Signature-256 (timing-safe) над RAW-телом; дедуп X-GitHub-Delivery; события HOOK_PING/GIT_PUSH/CI_HOOK_RUN_* → event-log → sqlmirror в облако. Секрет — vault (GITHUB_WEBHOOK_SECRET)">
+                                <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="P0-e webhooks-in (push): POST /hooks/github — HMAC-SHA256 X-Hub-Signature-256 (timing-safe) над RAW-телом; персистентный дедуп X-GitHub-Delivery (sqlite, R69); события HOOK_PING/GIT_PUSH/GIT_PR_*/CI_HOOK_RUN_* → event-log → sqlmirror в облако. Секрет — vault (GITHUB_WEBHOOK_SECRET); gateway-лег :81 /hooks/github?XTransformPort=3041; регистрация — scripts/webhook-register.sh">
                                   <Webhook className="h-3 w-3 text-amber-400" aria-hidden /> WEBHOOKS-IN
                                 </span>
                                 {hooksData && (
@@ -2848,7 +2848,7 @@ export default function MissionControl() {
                                     <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="источник секрета HMAC (vault — канон; env-dev — только самотест)">secret: {hooksData.secret}</span>
                                     <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="всего событий сгенерировано каналом в event-log (зеркалятся в облако)">событий: {hooksData.events_emitted_total}</span>
                                     <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="отклонено: подпись отсутствует/неверна (fail-closed)">отклон: {hooksData.rejected_total}</span>
-                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="размер окна дедупликации X-GitHub-Delivery (in-memory, честно очищается рестартом)">dedupe: {hooksData.dedupe_size}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="GUID-окно дедупликации X-GitHub-Delivery: SQLite-таблица hook_deliveries — ПЕРСИСТЕНТНА, переживает рестарт daemon'а (R69), кап 512">dedupe: {hooksData.dedupe_size}{hooksData.dedupe_persistent ? " ✓sqlite" : " (in-memory)"}</span>
                                   </div>
                                   <div className="max-h-28 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние доставки webhook">
                                     {hooksData.deliveries.map((d, i) => (
