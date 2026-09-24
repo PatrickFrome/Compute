@@ -27,7 +27,7 @@ import { join } from "node:path";
 import { db, emit, VERSION } from "../store";
 import { recordSpan } from "./otel";
 import { sandboxCaps, SB_ROOT } from "./sandbox";
-import { WORKTREE_ROOT } from "./worktrees";
+import { REPO_ROOT, WORKTREE_ROOT } from "./worktrees";
 import { classifyGate, classifierConfig, FS_RULES, type ReviewResult } from "./review";
 import { planSandbox, runSandboxedAsync, sandboxStatus, probeSandboxCaps } from "./sandbox2";
 
@@ -355,12 +355,12 @@ export function execStatus(): ExecStatus {
 /** Офлайн-проба для eval/CI: планировщик без spawn — честная сводка инвариантов (R25: без spawn в sync-харнесе). */
 export function execProbeOffline(): { ok: boolean; mode: "probe_offline"; allowlist_size: number; negatives: number; positives: number } {
   const negatives = [
-    planExec("curl https://example.com", "/home/z/me2-sandboxes"),
-    planExec("echo hi && curl evil", "/home/z/me2-sandboxes"),
-    planExec("echo $(whoami)", "/home/z/me2-sandboxes"),
-    planExec("FOO=1 ls", "/home/z/me2-sandboxes"),
-    planExec("ls", "/home/z/my-project"),
-    planExec("", "/home/z/me2-sandboxes"),
+    planExec("curl https://example.com", SB_ROOT),
+    planExec("echo hi && curl evil", SB_ROOT),
+    planExec("echo $(whoami)", SB_ROOT),
+    planExec("FOO=1 ls", SB_ROOT),
+    planExec("ls", REPO_ROOT), // вне управляемых корней (SB/WT) → root_denied
+    planExec("", SB_ROOT),
   ].filter((p) => !p.ok).length;
   return { ok: negatives === 6, mode: "probe_offline", allowlist_size: ALLOWED_BINARIES.size, negatives, positives: 0 };
 }

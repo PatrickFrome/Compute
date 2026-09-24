@@ -17,8 +17,10 @@ import { join } from "node:path";
 import { recordSpan } from "./otel";
 import { REPO_ROOT } from "./worktrees";
 
-export const SB_ROOT = "/home/z/me2-sandboxes";
-export const SB_SNAPSHOTS = "/home/z/me2-sandboxes/.snapshots";
+/** Контур хоста настраивается env (CI/probe: временный контур; локально /home/z). */
+export const ME2_CONTOUR = process.env.ME2_CONTOUR_HOME ?? "/home/z";
+export const SB_ROOT = join(ME2_CONTOUR, "me2-sandboxes");
+export const SB_SNAPSHOTS = join(SB_ROOT, ".snapshots");
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 const MAX_SANDBOXES = 6;

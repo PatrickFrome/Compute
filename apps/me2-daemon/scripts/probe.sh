@@ -18,13 +18,18 @@ LOG="$DATA/probe.log"
 export ME2_WS_PORT="$WS" ME2_REST_PORT="$REST" ME2_LEGACY_MIRROR_PORT="$MIRROR" \
        ME2_SCREENCEAST_PORT="$SC" ME2_DATA_DIR="$DATA" ME2_LOCK_FILE="$LOCK"
 export ME2_BOOT_MODE=probe
-# корень репо/чатов probe-инстанса — внутри его временного каталога (CI: /home/z недоступен)
+# временный КОНТУР (exec/edit/sandbox2 корни + vault-hide + REPO_ROOT): eval-проверки
+# контур-честные; контур НЕ под /tmp|/var|/opt (SYS_READABLE-префиксы иначе гасят redirect-негативы)
+CONTOUR="$(mktemp -d "$PWD/../../.me2-gate-contour.XXXXXX")"
+export ME2_CONTOUR_HOME="$CONTOUR"
+export ME2_REPO_ROOT="$CONTOUR/my-project"
 mkdir -p "$DATA/repo"
-export ME2_REPO_ROOT="$DATA/repo"
+mkdir -p "$CONTOUR/my-project" "$CONTOUR/me2-sandboxes" "$CONTOUR/me2-worktrees" "$CONTOUR/.a2"
 
 cleanup() {
   kill "$PROBE_PID" 2>/dev/null || true
   rm -f "$LOCK" 2>/dev/null || true
+  rm -rf "$CONTOUR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
