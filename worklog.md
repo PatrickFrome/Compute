@@ -1459,3 +1459,23 @@ Stage Summary:
 - Инварианты сохранены: XTransformPort-контракты, socket-события, 47-каталог, window-события, data-testid (page-* + legacy panel-*), Electron-мост, hash/localStorage (расширены me2.page.v1/me2.workspace.v1), бюджет шины, секреты не отображаются.
 - Feature→Page Matrix: 0 потерь функциональности; честные улучшения: SANDBOXES PLANE read-only (мёртвый маршрут daemon подтверждён), liveTail в логе честно замораживает watermark, pool scale — абсолютный слот (как daemon).
 - Осталось честно: hover-panels/dockable-resizable плавающие панели не реализованы (Sec-сворачивание + grid вместо этого) — в бэклог; supervisor panel скрыт на <xl (responsive).
+
+---
+Task ID: R75-CC-CHATGPT-MINIMAL
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d57bcd7272d81): «в command center должны быть только чат-агенты слева, в центре — настоящий браузер, открывающий настоящий чат-агент в z.ai, как это было в старом браузере; интерфейс минималистичный, строгий, лаконичный, никаких огромных блоков информации. Проанализируй desktop-версию ChatGPT, возьми за пример».
+
+Work Log:
+- Референс ChatGPT desktop разобран по механикам: узкий список переписок (точка+имя, hover-действия, поиск сверху, «New chat» кнопкой), центр = вся полезная область, ничего лишнего; sidebar скрыт на мобильных; ⌘B-паттерн переключения сайдбара.
+- pages/command.tsx переписан (397→281 строк): УДАЛЕНЫ SupervisorPanel (5 Sec-блоков чипов), AgentChatPanel (h-72 drawer), PageHeader с actions, все Chip/StateBadge-блоки. ОСТАЛОСЬ: AgentSidebar (ChatGPT-стиль: «+ чат», поиск testid agent-sidebar-filter, строки точка-статуса+имя+Shield-роли, hover — ExternalLink «показать вкладку z.ai», deg/blocked-маркеры только по факту, нижняя моно-строка статуса) + тонкая строка CurrentAgent (dot·title·model·исход·ws) + BrowserStage (НАСТОЯЩИЙ браузер: таб-полоса, urlbar, live-скринкаст :3042, CDP-фолбэк :3043).
+- «Открывает настоящего чат-агента в z.ai»: openAgentTab() — клик по агенту → loadBrowserTabs() → match url∋session.id → title⊇title → единственная z.ai-вкладка → BROWSER_SELECT_TAB {tab} CONTROL quiet; нет z.ai-вкладки → честный тост-подсказка («откройте chat.z.ai кнопкой +»). Авто-подсветка первого агента при маунте — локальная (без смены вкладки daemon: вкладку переключает только явный клик).
+- ⌘B/Ctrl+B (вкл. RU «ы») — свернуть/развернуть список; <768px при загрузке список скрыт (deferred setTimeout — react-hooks/set-state-in-effect); кнопка-глаз cc-sidebar-toggle в строке агента.
+- tsc-гигиена попутно: WS_OPTS (me2-bus) и ME2_WS_OPTS (me2-socket) transports→Array<"websocket"|"polling"> (был readonly as const → TS2345); store.tsx /actions тип + ok?; me2-desktop setActive kind: "panel"|"page". src/ ошибки 6→3 (остались 3 pre-existing в browser-tools.ts/fallback-console.ts — legacy Electron-пути, не рендерятся).
+- QA (agent-browser, gateway :81, WS LIVE): desktop 1280 — 3-зонный Command Center живыми данными (12/12 агентов, sup1, deg-маркеры реального флота); клик «API 429 Recovery» → StageBar обновился мгновенно; нет z.ai-вкладки → тост честно подсказал; скрытие/раскрытие сайдбара ✓; Alt+3→browser, Alt+1→command ✓; Ctrl+K палитра ✓; mobile 390 fresh-load — сайдбар скрыт, hscroll=false, браузер на всю ширину; скриншоты /tmp/r75-cc-*.png. Console: единственный dev-шум — Radix useId mismatch в закрытой Command Palette (известный React19-артефакт, не функциональный).
+- lint 0/0; bun run build не запускался (запрещено); daemon v0.57.1 не тронут (seq 13024+, жив).
+
+Stage Summary:
+- Command Center теперь = ChatGPT-модель: список агентов слева / настоящий браузер-центр, ноль информационных блоков; супервизор-контекст переехал на SUPERVISOR (Alt+6) и статус-бар — Global-vs-Local контракт §9 соблюдён.
+- Клик-агент = выбор его z.ai-вкладки в скринкасте (match id→title→единственная z.ai), с честным отказом вместо тихого ничегонеделания.
+- Инварианты: относительные fetch + XTransformPort, testid page-command/agent-sidebar/browser-*, кэш-бюджет шины (CONTROL quiet), секреты не затронуты.
+- Честно не сделано: 3 pre-existing tsc-ошибки в legacy-либах (browser-tools/fallback-console) — вне рендер-пути; Radix useId dev-шум; пер-воркспейс персист раскладок командного центра не нужен после упрощения (сайдбар булев).

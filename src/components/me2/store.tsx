@@ -154,7 +154,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     void me2Fetch<Snapshot>("/state?XTransformPort=3041").then((d) => {
       if (d?.ok) set({ snap: d, events: d.events ?? [] });
     });
-    void me2Fetch<{ actions: ActionMeta[] }>("/actions?XTransformPort=3041").then((d) => {
+    void me2Fetch<{ ok?: boolean; actions: ActionMeta[] }>("/actions?XTransformPort=3041").then((d) => {
       if (d?.ok) set({ catalog: d.actions ?? [] });
     });
     const ev = setInterval(() => {

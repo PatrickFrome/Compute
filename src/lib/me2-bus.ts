@@ -32,7 +32,7 @@ export type BrowserTab = { id: string; title: string; url: string; active: boole
 export type ToastPayload = { title: string; description?: string; variant?: "default" | "destructive" };
 
 // ── константы стиля (перенос из legacy 1:1) ─────────────────────────────────────
-export const WS_OPTS = { path: "/", transports: ["websocket", "polling"] as const, reconnectionDelay: 2000, timeout: 8000 };
+export const WS_OPTS = { path: "/", transports: ["websocket", "polling"] as Array<"websocket" | "polling">, reconnectionDelay: 2000, timeout: 8000 };
 
 export const EVENT_STYLE: Record<string, string> = {
   TASK_QUEUED: "text-emerald-400", TASK_LEASED: "text-amber-400", TASK_DONE: "text-emerald-300",

@@ -10,7 +10,7 @@
  */
 import type { Socket } from "socket.io-client";
 
-export const ME2_WS_OPTS = { path: "/", transports: ["websocket", "polling"], reconnectionDelay: 2000, timeout: 8000 } as const;
+export const ME2_WS_OPTS = { path: "/", transports: ["websocket", "polling"] as Array<"websocket" | "polling">, reconnectionDelay: 2000, timeout: 8000 };
 
 let sockPromise: Promise<Socket> | null = null;
 
