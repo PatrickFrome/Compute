@@ -19,6 +19,7 @@ import {
   createAgent, createTask, nowIso, setTaskReflectionLlm, VERSION,
 } from "./store";
 import { listProviders } from "./providers";
+import { ciPollMs, ciStatus, ciTick } from "./src/ci";
 import { startMasterLoop, watchdogStaleTasks } from "./worker";
 import { drainCommands, runOne, knownActions, actionCatalog, abGroupOf } from "./commands";
 import { initEvidence, evidenceStatus, probeDdl, probeStorage, verifyChain, evidenceQuery } from "./evidence";
@@ -187,6 +188,8 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
     if (path === "/evidence" && req.method === "GET") return json(res, 200, evidenceStatus());
     // ── R52 (фаза D, H6): статус SQL-контура (read-only, вне шины; 47-инвариант не тронут) ──
     if (path === "/sqlmirror" && req.method === "GET") return json(res, 200, { ok: true, ...sqlMirror.status() });
+    // R67: P0-e ingress (pull) — статус поллера GitHub Actions + последние runs ветки.
+    if (path === "/ci" && req.method === "GET") return json(res, 200, ciStatus());
     // R53 (фаза D-исполнение): короткоживущие JWT для чтения зеркала из UI с гейтом RLS.
     // authenticated → SELECT разрешён (sql/0003), anon → честно пусто (fail-closed, политики нет).
     // Секрет не покидает daemon; токен живёт 120с. Read-only, вне шины (47-инвариант не тронут).
@@ -1004,7 +1007,7 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
 
 // B3: каждый REST-запрос — наблюдение в гистограмму. Классы: hot-path (порог p95<50ms)
 // vs admin-эндпоинты (тяжёлые сканы SQLite, без порога — операторские, не горячий путь).
-const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review"];
+const BENCH_ADMIN_PREFIXES = ["/mechanics", "/codegraph", "/memory", "/rsi", "/roadmap", "/selfupdate", "/spans", "/mcp", "/metrics", "/commands", "/state", "/events", "/eval", "/workgraph", "/objectives", "/handoffs", "/glm", "/reviews", "/approvals", "/db/hygiene", "/pool", "/agentchat", "/autonomy", "/governor", "/demand", "/policy", "/cron", "/tokens", "/exthost", "/exec", "/file", "/sandbox", "/review", "/ci"];
 const BENCH_BROWSER_PREFIXES = ["/browser", "/screencast"];
 function benchClassOf(p: string): BenchProbeName {
   if (BENCH_ADMIN_PREFIXES.some((a) => p === a || p.startsWith(`${a}/`))) return "rest_admin";
@@ -1197,6 +1200,11 @@ setInterval(() => { try { fleetSelfTick(VERSION); } catch { /* noop */ } }, 15_0
 // R23: Outcome River (деградации freshness = исходы) + reliability-ordered retirement
 setInterval(() => { try { fleetTick(); } catch { /* noop */ } }, 15_000);
 setInterval(() => { try { fleetGc(); } catch { /* noop */ } }, 3_600_000);
+// R67: P0-e ingress (pull) — поллер GitHub Actions: новые завершённые runs → CI_RUN_* в event-log
+if (!PROBE_MODE) {
+  ciTick(); // первый прогрев сразу после бута (async, event-loop не блокирует)
+  setInterval(() => { try { ciTick(); } catch { /* noop */ } }, ciPollMs());
+}
 // R19: фоновый selfupdate-check (чтобы /mechanics сразу видел вердикт, не блокируя REST)
 if (!PROBE_MODE) setTimeout(() => { void suCheckAsync(VERSION).catch(() => { /* телеметрия не ломает старт */ }); }, 4_000);
 // R26 B1: автопрогон регресс-датасета в каждой инкарнации — история копится сама

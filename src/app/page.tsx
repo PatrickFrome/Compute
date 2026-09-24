@@ -81,6 +81,8 @@ type SuData = { ok: boolean; check: { ok: boolean; verdict: string; local_head: 
 type RsiP = { id: string; title: string; status: string; source: string; artifact: string | null; evidence: string; created_at: number };
 type RsiData = { ok: boolean; proposals: RsiP[]; stats: { total: number; proposed: number; adopted: number; rejected: number; rolled_back: number }; artifacts: number };
 type MechData = { ok: boolean; verdict: string; version: string; mechanics: { id: string; name: string; old_ref: string; verdict: string; evidence: string; cursor_ref?: string; parity?: string }[]; gaps: { id: string; title: string; status: string; closure: string }[] };
+// R67: P0-e ingress (pull) — GitHub Actions poller (ветка sandbox/me2-os)
+type CiData = { ok: boolean; schema: string; repo: string; branch: string; token: "present" | "missing"; verdict: "LIVE" | "NO_TOKEN" | "ERROR" | "WARMUP"; runs: { id: number; name: string; head_sha7: string; status: string; conclusion: string | null; created_at: string | null }[]; polls_total: number; events_emitted_total: number; last_seen_run_id: number; last_error: string | null };
 type SenseTargetT = { ref: string; role: string; name: string };
 type SenseRowT = { tab: string; url: string; title: string; targets_count: number; revision: string; age_s?: number; targets: SenseTargetT[] };
 type SenseData = { ok: boolean; rows: SenseRowT[]; total_targets: number };
@@ -1602,6 +1604,8 @@ export default function MissionControl() {
   const [obsvOpen, setObsvOpen] = useState(false);
   const [bench, setBench] = useState<BenchData | null>(null);
   const [evalData, setEvalData] = useState<EvalData | null>(null);
+  // R67: CI-ingress статус (P0-e, pull-канал GitHub Actions)
+  const [ciData, setCiData] = useState<CiData | null>(null);
   // R31 Track D: последний диф перцепции + DB-гигиена
   const [lastDiff, setLastDiff] = useState<SenseDiffT | null>(null);
   const [hyg, setHyg] = useState<HygData | null>(null);
@@ -1716,6 +1720,10 @@ export default function MissionControl() {
   // R26 B1: eval-харнесс (GET /eval — последний прогон + история регресс-датасета)
   const loadEval = useCallback(async () => {
     try { const r = await fetch("/eval?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setEvalData(r as EvalData); } catch { /* daemon недоступен */ }
+  }, []);
+  // R67: CI-ingress (GET /ci) — статус pull-канала GitHub Actions
+  const loadCi = useCallback(async () => {
+    try { const r = await fetch("/ci?XTransformPort=3041", { cache: "no-store" }).then((x) => x.json()); if (r?.ok) setCiData(r as CiData); } catch { /* daemon недоступен */ }
   }, []);
   // R31 D4: DB-гигиена (GET /db/hygiene — WAL, freelist, индексы, журнал операций)
   const loadHyg = useCallback(async () => {
@@ -1847,6 +1855,12 @@ export default function MissionControl() {
     const iv = setInterval(() => void loadEval(), 60_000);
     return () => clearInterval(iv);
   }, [loadEval]);
+  // R67: CI-ingress — mount + 120с (поллер на daemon'е и так не чаще 5 мин)
+  useEffect(() => {
+    void loadCi();
+    const iv = setInterval(() => void loadCi(), 120_000);
+    return () => clearInterval(iv);
+  }, [loadCi]);
   // R31 D4: DB-гигиена видна в браузерной панели — mount + 60с
   useEffect(() => {
     void loadHyg();
@@ -1912,11 +1926,11 @@ export default function MissionControl() {
 
   useEffect(() => {
     if (mcxOpen) {
-      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
+      void loadMech(); void loadMem(); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens();
       const iv = setInterval(() => void loadFleet(), 15_000);
       return () => clearInterval(iv);
     }
-  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
+  }, [mcxOpen, loadMech, loadMem, loadMemEcon, loadBrain, loadFleet, loadSu, loadRsi, loadSense, loadObsv, loadBench, loadEval, loadCi, loadWg, loadHo, loadGlm, loadRev, loadAppr, loadHyg, loadEvChain, loadPool, loadAutonomy, loadGovernor, loadDemand, loadTokens]);
 
   const retireAgent = useCallback(async (id: string) => {
     await sendCommand("AGENT_RETIRE", { id }, { lane: "CONTROL", successMsg: "агент уволен" });
@@ -2732,7 +2746,7 @@ export default function MissionControl() {
                             )}
                             <button
                               type="button"
-                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
+                              onClick={() => { void loadMech(); void loadMem(memQ, memKind); void loadMemEcon(); void loadBrain(); void loadFleet(); void loadSu(); void loadRsi(); void loadSense(true); void loadObsv(); void loadBench(); void loadEval(); void loadCi(); void loadWg(); void loadHo(); void loadGlm(); void loadRev(); void loadAppr(); void loadHyg(); void loadEvChain(); void loadPool(); void loadAutonomy(); void loadGovernor(); void loadDemand(); void loadTokens(); }}
                               title="Обновить все механики"
                               aria-label="Обновить все механики"
                               className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
@@ -2767,6 +2781,40 @@ export default function MissionControl() {
                                   <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка матрицы…</div>
                                 )}
                               </div>
+                            </div>
+
+                            {/* R67: CI-INGRESS (P0-e pull) — GitHub Actions sandbox/me2-os → события в event-log → облако */}
+                            <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 p-2" data-testid="ci-ingress">
+                              <div className="mb-1.5 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-500" title="P0-e ingress (pull): поллер GitHub Actions каждые 5 мин; новые завершённые прогоны → CI_RUN_* в event-log → sqlmirror зеркалирует в облако. Webhooks-in (push) — следующий шаг">
+                                  <GitBranch className="h-3 w-3 text-teal-400" aria-hidden /> CI-INGRESS
+                                </span>
+                                {ciData && (
+                                  <span className={`rounded px-1.5 py-px font-mono text-[9px] ${ciData.verdict === "LIVE" ? "bg-emerald-500/15 text-emerald-400" : ciData.verdict === "ERROR" ? "bg-rose-500/15 text-rose-400" : ciData.verdict === "NO_TOKEN" ? "bg-amber-500/15 text-amber-400" : "bg-zinc-500/15 text-zinc-500"}`} title={`verdict: ${ciData.verdict} · опросов: ${ciData.polls_total} · событий: ${ciData.events_emitted_total}${ciData.last_error ? " · ошибка: " + ciData.last_error.slice(0, 60) : ""}`}>{ciData.verdict}</span>
+                                )}
+                              </div>
+                              {ciData ? (
+                                <>
+                                  <div className="mb-1 flex flex-wrap gap-1">
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="ветка опроса">{ciData.branch}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="всего завершённых прогонов отражено в event-log">событий: {ciData.events_emitted_total}</span>
+                                    <span className="rounded bg-zinc-900 px-1.5 py-px font-mono text-[9px] text-zinc-400" title="опросов поллера">poll: {ciData.polls_total}</span>
+                                  </div>
+                                  <div className="max-h-28 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700" role="list" aria-label="Последние прогоны CI">
+                                    {ciData.runs.map((r) => (
+                                      <div key={r.id} role="listitem" className="flex items-center gap-1.5 rounded bg-zinc-950/60 px-1.5 py-1 font-mono text-[9px]" title={`${r.name} · run ${r.id} · ${r.status}${r.conclusion ? " · " + r.conclusion : ""}`}>
+                                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r.status === "completed" ? (r.conclusion === "success" ? "bg-emerald-400" : "bg-rose-400") : "bg-amber-400"}`} aria-hidden />
+                                        <span className="w-16 shrink-0 truncate text-zinc-400">{r.name}</span>
+                                        <span className="shrink-0 text-zinc-600">{r.head_sha7}</span>
+                                        <span className={`min-w-0 flex-1 truncate ${r.status === "completed" ? (r.conclusion === "success" ? "text-emerald-500" : "text-rose-400") : "text-amber-400"}`}>{r.status === "completed" ? r.conclusion : r.status}</span>
+                                      </div>
+                                    ))}
+                                    {ciData.runs.length === 0 && <div className="rounded border border-dashed border-zinc-800 px-2 py-1.5 text-center font-mono text-[9px] text-zinc-600">прогонов нет</div>}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="rounded-md border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[10px] text-zinc-600">загрузка CI-статуса…</div>
+                              )}
                             </div>
 
                             {/* R27 C1: MISSION CONTROL — objectives→tasks→agents (ME23, fails-closed, zero-authority) */}

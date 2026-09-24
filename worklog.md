@@ -1136,3 +1136,21 @@ Stage Summary:
 - Инварианты: actions 47/47, eval 65/65 PASS, lint 0/0, mobile 390 без hscroll, secrets-guard чист.
 - Оператору: ① для PASS RLS-аудита — положить sb_publishable_… или legacy anon-JWT в supabase-cloud.env (SUPABASE_PUBLISHABLE_KEY / SUPABASE_ANON_JWT); ② для LIVE-REST evidence вместо storage — применить research/2026/R23-me2-evidence-migration.sql (или дать SUPABASE_DB_URL); ③ VLM-квота исчерпана — r66-скриншоты в R67.
 - Бэклог R67: ① VLM-ревью r66-скриншотов (квота); ② P0-e ingress / P0-4 durable execution по DAG R65; ③ tauri-build зелёность на 0127f0b (был in_progress); ④ desktop/ packaged-профиль bun-рантайма; ⑤ P1-гапы R61-GAP-ANALYSIS (core.agent-loop harness, TERMINAL/RUN-действие, edit-инструмент с diff-валидацией).
+---
+Task ID: R67-CI-INGRESS-P0E-20260924
+Agent: Z.ai Code (main)
+Task: «Продолжи разработку по roadmap устранения gap, перед работой анализируй worklog, github и supabase, помни что мы разрабатываем клиент на базе электрон, делай тесты и ресёрчи, сихнронизируй бд» — R67: P0-e ingress (pull-фаза) + верификация sync-контура + долги R66.
+
+Work Log:
+- R67-0 (аудит): daemon v0.53.0 → 47/47; HEAD debe211 (R66) = remote; /home/z/.a2/ на месте (первый ls без -a скрыл dotfile — ложная тревога env-reset, урок: проверять ls -la); tauri-build на debe211 in_progress — 3 job'а стартовали 16:00 (rust-матрица ~20 мин, НЕ застрял, job-логи проверены); sqlmirror LIVE (временами pending≤8 — штатно, добивается пакетами, 0 ошибок); evidence LIVE-STORAGE pending=0.
+- R67-1 (долг VLM): r66-скриншоты — z-ai vision 429 снова; долг переносится в R68 (квота z-ai общая с LLM-флотом).
+- R67-2 (P0-e ingress, pull-фаза — РЕАЛИЗОВАН, daemon v0.54.0): src/ci.ts — поллер GitHub Actions ветки sandbox/me2-os (ME2_CI_POLL_SEC, default 300с, кэш 45с): новые ЗАВЕРШЁННЫЕ прогоны → события CI_RUN_COMPLETED / CI_RUN_FAILED в event-log (ровно один раз, last_seen_run_id в meta, порядок id asc); честные вердикты LIVE / NO_TOKEN / ERROR / WARMUP; fetch строго async (урок R25-4), никогда не бросает; REST GET /ci (класс rest_admin, 47/47 инвариант сохранён). PROBE_MODE пропускает тик.
+- R67-3 (живой тест контура): первый же тик эмитил 7 событий (последние 8 runs: 7 completed + tauri in_progress); CI_RUN_COMPLETED в event-log seq 1770-1776; **замеркалированы в Supabase: 7 рядов daemon_version=0.54.0, mirrored_at 16:10:22** — внешний контур синхронизации БД замкнут: GitHub → poller → event-log → sqlmirror → облако.
+- R67-4 (UI): МИССИЯ-вкладка — карточка CI-INGRESS (data-testid, teal GitBranch, aria-label): чип-вердикт (LIVE=изумруд/NO_TOKEN=янтарь/ERROR=роза/WARMUP=цинк), чипы ветки/событий/опросов, список 8 последних прогонов (точка conclusion, имя, sha7, статус; max-h-28 прокрутка, кастомный скроллбар); loadCi: mount + 120с + оба refresh-all; aria/role списки.
+- R67-5 (тесты): /ci → LIVE, polls=2, events=7, last_seen_run_id установлен; CI_RUN в облаке 7 рядов ✓; eval 65/65 PASS; lint 0/0; agent-browser: карточка в DOM (rows=8, LIVE), мобайл 390 hscroll=false cardW=340; dev.log чист. Скриншот download/r67-ci-ingress.png.
+
+Stage Summary:
+- P0-e ingress открыт pull-фазой: ME2 теперь получает внешние события (CI судейство коммитов) без оператора; события текут в event-log и зеркалируются в облако — синхронизация БД усилилась живым внешним контуром (проверено запросом к Supabase).
+- Daemon v0.54.0: инвариант 47/47; eval 65/65; CI-INGRESS виден в MC и обновляется.
+- Честные ограничения: webhooks-in (push-модель) — R68 (нужен публичный endpoint + HMAC-ключ); VLM-ревью r66/r67 — долг (429); tauri-build на debe211 — фоновый добор (cron подтвердит).
+- Бэклог R68: ① VLM-ревью r66/r67-скриншотов (квота); ② webhooks-in: публичный /hooks/github с HMAC-верификацией (push-фаза P0-e); ③ P0-4 durable execution (step-функция + intent-log); ④ desktop/ packaged-профиль bun-рантайма; ⑤ P1-гапы R61-GAP-ANALYSIS (core.agent-loop harness, TERMINAL/RUN, edit+diff).
