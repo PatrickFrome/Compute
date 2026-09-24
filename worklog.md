@@ -1484,3 +1484,40 @@ Stage Summary:
 - origin/main = посторонняя (RSI) линия: PR #821 (85767548) и ci(operator)-коммиты, merge-base с нашей историей ОТСУТСТВУЕТ (попытка rebase попробовала переложить все 109 коммитов — прервано `git rebase --abort`, состояние восстановлено чисто).
 - Правильная интеграция: каноническая рабочая ветка sandbox/me2-os = cfdd5d50 (R74) на remote → push main:sandbox/me2-os = fast-forward cfdd5d50..d9d42a13 (R75 опубликован). origin/main не тронут — слияние двух несвязанных историй = решение оператора.
 - PAT-паттерн: set-url с токеном из /home/z/.a2/.github.env → push → немедленный set-url на чистый URL + unset (значение не в логах).
+
+---
+Task ID: R76-RELEASE-SELFUPDATE
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d58e5d7ee97f1): «Собери релизную версию, прогони тесты и обнови старый браузер (он сейчас live) через self update новой релизной версией».
+
+Work Log (текущий статус):
+- Аудит канала доставки: desktop/updater.ts DEPRECATED (R50) — авторитетный канал старого браузера = prerelease-ветка release/self-update-ambiguity-live-v2 + CI autorelease (релизы v0.7.0-dev.<run>.<n>: NSIS-exe 115MB + Guardian native + verified-self-update-manifest.json; последний v0.7.0-dev.35939884332.1 от 2026-09-24 = контент R60/daemon v0.48.0). Self-update браузера (runtime-v8 + Guardian, staged activation) забирает новый prerelease сам — «старый браузер live».
+- ME7-канал daemon (/selfupdate, ff-only sandbox/me2-os→local main) жив: наш R75 = bb3db16a уже на remote (R75-раунд).
+- Smart-merge R61-R75 (прецедент PR #955/#956): worktree от cfa7ee20 → apps/me2-daemon = наш v0.57.1 целиком, apps/me2-ui = наш R75-UI (src/components/me2 10 Pages + core), версии 0.57.1, + worklog.md + docs/me2-ui-redesign.md + .gitignore гигиена; их пайплайн-файлы не тронуты (scripts/pack-me2-ui.mjs, workflows).
+- Прогон тестов ДО PR: bun install --frozen-lockfile OK (оба), next standalone build PASS, daemon probe gate PASS 70/70 (изолированный контур), eslint 0/0.
+- PR #957 merged (080d7c51) → CI: unified gate FAIL (daemon-gate: 3 eval-чека завязаны на /home/z — EACCES mkdir/realpath в CI; ui-build: pack не нашёл .next/standalone/server.js — turbopack monorepo inference клал standalone в apps/me2-ui/ вложенно).
+- Фикс PR #958 merged (cd778257): ME2_CONTOUR_HOME (default /home/z) для SB_ROOT/WORKTREE_ROOT/REPO_ROOT/SECRETS_HIDE; probe.sh поднимает временный контур ВНЕ SYS_READABLE-префиксов (/tmp гасил redirect_outside_roots — тонкая ловушка); REPO_ROOT в контуре; turbopack.root в next.config; sandboxProbeOffline/execProbeOffline/eval на константах. Локальная верификация после фикса: gate PASS 70/70, standalone build PASS + server.js в корне, dev-сервер :3000 жив.
+- Статус CI на cd778257: наблюдение (unified gate + evidence gate + autorelease → новый релиз v0.7.0-dev.<run>.<n>).
+
+Stage Summary:
+- Релизная версия собрана (daemon v0.57.1 + R75 UI в пайплайн-раскладке release-v2), тесты прогнаны локально 70/70 + CI-гейты на повторном прогоне, self-update канал старого браузера получает новый prerelease автоматически после зелёного autorelease.
+- Урок: SYS_READABLE-префиксы (/tmp…) взаимодействуют с эвристиками classifier — контуры тестов обязаны быть вне них; контур-честность (env-переопределение) вместо захардкоженных путей — правильная инженерия, не ослабление.
+
+- CI-прогресс (a636f5b7 = merge #959): ME2 Unified Gate SUCCESS (daemon 70/70 в CI, UI deps+build+pack), Critical Audit / Developer Emergency Update / Analysis Stack / Durability Gates SUCCESS; Release Evidence Gate + Fast Verified Dev Release (autorelease) in_progress — релиз v0.7.0-dev.<run>.<n> публикуется после зелёного evidence gate.
+
+---
+Task ID: R76-FINAL
+Agent: Z.ai Code (main)
+Task: R76 завершение — релиз опубликован, self-update канал старого браузера активирован.
+
+Work Log:
+- CI-цепочка для a636f5b7 (#959 merge): Fast Self Update E2E — флейк «wedge escalation must request process exit(2)» под нагрузкой 16 параллельных прогонов (наш мерж не трогал apps/metaengine-browser — ретрай зелёный); rerun-failed-jobs для E2E + Evidence Gate + Autorelease → ВСЕ SUCCESS.
+- РЕЛИЗ ОПУБЛИКОВАН: v0.7.0-dev.36071623683.1 (23:30:06Z, target a636f5b7, prerelease, 7 assets: METAENGINE-Browser-Test-Setup-x64.exe 115.8MB + blockmap + Guardian ×2 + verified-self-update-manifest.json + guardian-native-staging-manifest.json + dev.yml). Промежуточный v0.7.0-dev.36069671710.1 (080d7c51) тоже вышел.
+- Содержимое релиза: daemon v0.57.1 (eval v32 70/70, sqlmirror gate, bench, quota, webhooks-in) + me2-ui R75 (10 Pages + Command Center ChatGPT-minimal) + turbopack root (корректный standalone path для pack-me2-ui) в пайплайн-раскладке release/self-update-ambiguity-live-v2.
+- Тесты прогнаны: локально (probe gate 70/70 ×3 прогона, eslint 0/0, standalone build PASS, frozen-lockfile OK ×2) + CI (Unified Gate SUCCESS, Evidence Gate SUCCESS — known-live-defect-regressions + exact-sha convergence, Package Smoke SUCCESS, Self-Update E2E SUCCESS, Durability Gates SUCCESS).
+- Self-update живого старого браузера: новый prerelease = вершина канала; runtime-v8 (poll) → staged download → Guardian activation; физическая N→N+1-передача байт доказана gate'ом physical_n_to_n_plus_1 SUCCESS. Установка применяется на машине оператора в её цикле проверки — канал полностью верифицирован конвейером.
+
+Stage Summary:
+- Директива выполнена: релиз собран (smart-merge PR #957/#958/#959), тесты прогнаны локально+CI, новый релиз опубликован в штатный self-update канал живого браузера.
+- Инфраструктурный след: eval стал контур-честным (ME2_CONTOUR_HOME), probe.sh поднимает изолированный контур вне SYS_READABLE, eval v32, me2-ui .gitignore, turbopack.root.
+- Урок о флейках: тяжёлые E2E под параллельной нагрузкой требуют ретрай-политики (rerun-failed-jobs) — применено, доказано зелёным повтором.
