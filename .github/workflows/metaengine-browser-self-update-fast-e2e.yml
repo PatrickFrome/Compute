@@ -54,7 +54,7 @@ jobs:
 
   windows-published-n-to-one-build-target:
     runs-on: windows-2022
-    timeout-minutes: 36
+    timeout-minutes: 55
     env:
       GITHUB_ACTIONS: 'true'
       METAENGINE_SELF_UPDATE_TEST_MODE: '1'
@@ -84,6 +84,37 @@ jobs:
           if ($sourceCore -ne '0.7.0') { throw "physical_live_release_core_not_070:$sourceCore" }
           $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
           if ($physical -notmatch '\$target\s*=\s*"0\.6\.3-dev\.\$buildId\.1"') { throw 'physical_target_source_contract_missing' }
+      # R77: Mission Control (me2-ui) обязан ехать в установщике (контракт extraResources
+      # me2-ui-dist → me2-ui в electron-builder.test.json, R52/C7). До этого патча каталог
+      # никогда не собирался в этом job'е — electron-builder молча пропускал его, и браузер
+      # деградировал на старый GET /ui daemon'а. Строим UI из ТОГО ЖЕ exact SHA и кладём
+      # me2-ui-dist рядом с конфигом сборщика ДО физической сборки кандидата.
+      - name: Setup Bun (ME2 UI toolchain)
+        run: npm install --no-audit --no-fund --global bun
+      - name: Build ME2 UI (Next standalone)
+        working-directory: apps/me2-ui
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - name: Pack me2-ui-dist (ui-host contract)
+        working-directory: apps/me2-ui
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: node scripts/pack-me2-ui.mjs
+      - name: Stage ME2 UI into browser extraResources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          foreach ($rel in @('server.js', '.next/BUILD_ID', 'me2-ui-manifest.json', 'package.json')) {
+            if (-not (Test-Path (Join-Path 'apps/metaengine-browser/me2-ui-dist' $rel))) { throw "me2_ui_dist_missing:$rel" }
+          }
+          $m = Get-Content 'apps/metaengine-browser/me2-ui-dist/me2-ui-manifest.json' -Raw | ConvertFrom-Json
+          if ($m.schema -ne 'me2.ui-bundle-manifest.v1') { throw 'me2_ui_dist_manifest_schema_invalid' }
+          if ($m.git_sha -ne $env:GITHUB_SHA) { throw 'me2_ui_dist_manifest_sha_mismatch' }
+          Write-Output "me2-ui staged: build_id=$($m.build_id) size_mb=$([Math]::Round($m.size_bytes/1MB,1)) sha=$($m.git_sha)"
       - name: Bind physical target to immutable workflow run identity
         working-directory: apps/metaengine-browser
         shell: powershell
