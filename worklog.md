@@ -1556,3 +1556,79 @@ Stage Summary:
 - Релиз с Mission Control в установщике: все физические и контрактные гейты зелёные; публикация = штатный autorelease (ретраи запущены). Преемник: убедиться в зелёности evidence 36078514154 → autorelease 36078514120 → взять новый v0.7.0-dev.<run>.1 из /releases (exe вырастет со 115.8 МБ) → дать ссылку оператору.
 - Капсула R77 опубликована и доступна оператору по прямой ссылке; формат воспроизводит прецедент a2-capsule (2026-09-21) и расширяет его отчётным блоком R74-R77.
 - Секреты: ноль значений в капсуле (только имена файлов/переменных) — капсула лежит в cloud-хосте и не должна быть носителем креденшелов.
+
+---
+Task ID: R78-1a
+Agent: Explore (browser-src audit)
+Task: R78 audit — full mechanisms/modules inventory of apps/metaengine-browser (reconstructed verbatim from session context after env-reset R80)
+
+Work Log:
+- Инвентаризация src/: 376 файлов (356 .mjs + 19 .cjs + me2/), ~110k LOC; домены по префиксам (rsi 91ф/42.9k, browser-brain 24ф/5.3k, supervisor 19ф/6.3k, self-update 15ф/3.6k, browser-guardian 16ф/3.8k, native-supervisor 13ф/4.8k, devos+metaengine-devos 23ф/6.0k, me2 10ф/1.6k).
+- Входная цепочка: final-runtime-entry.mjs (registerHooks-переписывание импортов на *-activated близнецы + second-instance resurrection) → main-entry.mjs (single-instance nonce-ACK, self-update handoff/qualification) → main.mjs (монолит-шелл); после ready — опциональный me2-integration-entry.
+- me2-плоскость: daemon-host REST :3041 / state, socket-client WS :3040, ui-host :3000 (bun → ELECTRON_RUN_AS_NODE), ui-gateway :8137 XTransformPort → 3040/3041/3042/3043, fleet/supervisor-mesh/brain-адаптеры.
+- Зависимости: deps = ровно electron-updater 6.8.9 + socket.io-client 4.8.1 (принцип «no new dependencies»); devDeps: electron 44, @electron/asar, @electron/fuses. Тесты: 604 *.test.mjs, npm test = node --test.
+- Достигнутость: python-анализ ссылок — только 2 файла без ссылок; self-update-runtime.mjs = compat-shim над v8; 4 пары runtime/-activated; 9-стадийный fanout; 4-файловое emergency-update семейство. TOP-8 must-carry зафиксирован.
+
+Stage Summary:
+- ~110k LOC при живой связности (97%+ достижимы) — проблема связочная плотность, не мёртвый код. rsi-* 39% — кандидат на секвестр. Механический хребет rebuild: self-update стек, Guardian (+native SCM), single-instance nonce-ACK/resurrection, native-supervisor, me2-плоскость, browser-policy/TabRegistry, keepalive/epoch-fence, brain-персистентность.
+
+---
+Task ID: R78-DESKTOP-FROM-SCRATCH
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d6ad9f8728939 + 1a0d6c0eba272bf1 «поэтапно»): аудит всех механизмов/модулей METAENGINE → собрать клиент METAENGINE Desktop на Electron с нуля (без legacy-версий, без старых тестов, по функциям/механизмам/модулям системы ME), ресёрч. (Реконструкция из контекста после env-reset R80; код цел на ветке me2/r78-desktop-from-scratch fb0fc3f45.)
+
+Work Log:
+- АУДИТ (R78-1a): 376 файлов ~110k LOC, домены KEEP/REBUILD/DEAD; TOP-8 must-carry зафиксирован.
+- РЕСЁРЧ (research/2026/R78-DESKTOP-RESEARCH.md): electron 44.4.5, electron-builder 26.16.1, socket.io-client 4.8.3, @electron/fuses 2.1.3. КЛЮЧЕВОЙ ФАКТ: createFilter() app-builder-lib ЖЁСТКО отбрасывает корневой node_modules копируемого набора (26.15.7 И 26.16.1) — первопричина R77.
+- STAGE 1: apps/me2-desktop с нуля — 22 исходника: daemon-host (adopt-or-spawn, капы), ui-host (bun → ELECTRON_RUN_AS_NODE), ui-gateway :8137, fleet-tabs (потолок 12), window-shell (WebContentsView, роли MAIN/FLEET/SUPERVISOR), browser-policy (deny-by-default), journal (JSONL), staged-updater (me2.desktop-update-manifest.v1, sha256+size, retention). Suite node --test 38/38 GREEN (3 своих бага найдено и исправлено).
+- STAGE 2: pack:ui 69.6 MiB node_modules=true → dist:dir electron-builder (electron 44.4.5) → resources/me2-ui = 75MB С node_modules/next → verify-installed-bundle OK; verify-builder-copy.cjs физически доказал дефект/фикс на fixture.
+- STAGE 3: smoke под Xvfb — РЕАЛЬНЫЙ boot: daemon adopted + handshake me2-daemon-contract.v1, UI adopted live :3000, gateway :8137, update честный network_error (evidence/smoke-plane-*.json). CI: .github/workflows/me2-desktop-gate.yml.
+- STAGE 4: ветка me2/r78-desktop-from-scratch (fb0fc3f45, 36 файлов +6034, секретов 0) запушена. Legacy-фикс отменён: рельс уже ушёл вперёд (PR #966, cf747798a) — правило node_modules УЖЕ в electron-builder.test.json, НОВЫЙ релиз v0.7.0-dev.36089462649.1 опубликован: Setup exe 122.4 MB (+5.8 MB — deps UI поехали в установщик).
+
+Stage Summary:
+- METAENGINE Desktop v0.8.0-dev.0.1 собран с нуля и доказан тремя физическими пробами. R77-дефект закрыт на BOTH уровнях: legacy-рельс (релиз 122.4MB) и новый клиент (фикс вшит в конструкцию). Backlog R79: Guardian-parity activation, CI-прогон gate, операторское GUI-обкатывание, PR-решение.
+
+---
+Task ID: R79-GAP-CLOSURE-20260925
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d71cb3c687a51 + 1a0d71e5d08c09a5 + 1a0d727c4d8a44e9): продолжить разработку roadmap закрытия gap, обновлять desktop клиент после каждого раунда, проверять интеграцию всех механик/модулей; найти roadmap и сверку с курсором в worklog. (Реконструкция из контекста; код цел на 8cf09ad7.)
+
+Work Log:
+- ДИАГНОЗ CI: gate на fb0fc3f45 = FAILURE, job package-proof exit 127 «electron-builder: not found» — свежий runner без npm ci зависимостей apps/me2-desktop (devDependency). Фикс: шаг «Install desktop deps» (npm ci + ELECTRON_SKIP_BINARY_DOWNLOAD=1) в me2-desktop-gate.yml.
+- ROADMAP МАТЕРИАЛИЗОВАН: apps/me2-desktop/docs/GAP-ROADMAP.md — живая матрица TOP-8 × статус × раунд × остаток + раунд-журнал + очередь R80-R82 + инварианты.
+- GAP #7 ЗАКРЫТ: src/me2/epoch-fence.mjs — boot-эпоха демона из /health; смена → честный re-adopt + breaches; silence → backoff 15с→120с. EpochFence в Me2Plane: startKeepalive/stopKeepalive (main.mjs вызывает ПОСЛЕ bringUp — тесты герметичны), snapshot() несёт fence-состояние.
+- GAP #3 ЗАКРЫТ: src/me2/instance-nonce.mjs — secondary передаёт {nonce,ts} через requestSingleInstanceLock(additionalData); primary верифицирует в second-instance (TTL 10с, hex 16-128, clock-sanity; nonce_expired/malformed/payload_absent); verified → journal ACK; невалидный → окно поднимается, journal хранит причину — без тихих дропов.
+- ПОПУТНЫЙ ФИКС R78-бага: BrowserWindow без импорта в main.mjs (smoke не падал, GUI упал бы) — импорт добавлен.
+- ТЕСТЫ: +28 → suite 66/66 GREEN (1.05с); check-syntax OK 32 файла. Версия: 0.8.0-dev.0.1 → 0.8.1-dev.0.1.
+- PUSH: 8cf09ad7 → me2/r78-desktop-from-scratch (9 файлов, +481/-8). Секрет-чек 0; PAT-паттерн соблюдён.
+- CI: run на 8cf09ad7 = SUCCESS (contract + package-proof — полная dist:dir + verify-installed-bundle в CI впервые).
+
+Stage Summary:
+- Gate ЗЕЛЁНЫЙ впервые полностью; курсор матрицы: 4.5/8 (1,3,5,7 ✅ + 6 🔄). Backlog R80: #1a activation/handoff/qualification → R81 #2 Guardian-parity лайт → R82 #4/#8. Урок: «работает локально» ≠ доказано; CI-сборка обязана включать полную установку зависимостей.
+
+---
+Task ID: R80-BRANCH-AUDIT-ENVRESET-20260925
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d79b35e5a2225): «Сделай полный аудит всех веток R». Обнаружен и устранён env-reset (полный откат песочницы к R21-эпохе).
+
+Work Log:
+- ENV-RESET ЗАФИКСИРОВАН: /home/z/.a2 (секреты) MISSING, worktree /home/z/r77-merge MISSING, /home/z/my-project откатился к R21 (HEAD 73486dd, worklog 129 строк, daemon v0.21.0 вместо v0.57.1, last_seq=27 вместо 18001). Всё R22-R79 локально погибло.
+- ЦЕЛОСТНОСТЬ REMOTE ПОДТВЕРЖДЕНА: git ls-remote/fetch работают БЕЗ токена (read-канал жив; API 403 — приватный репо). Полный fetch '+refs/heads/*' + теги v0.7.0-dev.*.1 → EXIT=0. 615 remote-веток.
+- ПОТЕРИ vs ЦЕЛОЕ: код R79 цел на origin/me2/r78-desktop-from-scratch (8cf09ad7, 2026-09-25 05:58, ровно 9 файлов +481/-8 — сверено со составом коммита); рельса origin/sandbox/me2-os = b39db2e0 «R77 final» (worklog 74 записи, хвост R77-FINAL); релизный рельс origin/release/self-update-ambiguity-live-v2 = cf747798; main = 85767548 (посторонняя RSI-линия, НЕ наша история — R75-урок).
+- ПОГИБЛО ТОЛЬКО локально (реконструировано из контекста сессии): worklog-записи R78-1a, R78-DESKTOP-FROM-SCRATCH, R79-GAP-CLOSURE — восстановлены дословно выше. Секреты НЕ восстановимы локально (значения никогда не покидали .a2) — ждём свежий PAT от оператора.
+- ВОССТАНОВЛЕНИЕ ЛОКАЛЬНОЙ ТОПОЛОГИИ: local/r21-snapshot = 73486dd (страховка); local main reset --hard → origin/sandbox/me2-os (b39db2e0); worktree /home/z/r77-merge создан заново на me2/r78-desktop-from-scratch (8cf09ad7, epoch-fence/instance-nonce на месте). R21 NOT ancestor рельсы — слияние локальной R21-линии не требовалось/не выполнялось.
+
+ПОЛНЫЙ АУДИТ ВЕТОК (615 шт., по семействам):
+- work/*: 518 — RSI-линия (browser-brain ×30+, browser-final-convergence семейства, host-agent, VEF; массовая веткопасть Aug–Sep). Вердикт: не наши, не трогать, кандидат на архивацию по решению оператора.
+- repair/*: 31 — RSI-репейры (command-plane, composer, rollover). Не наши.
+- me2/*: 12 — НАШИ: smart-merge-r40/r41/r49/r50/r51/r52/r57/r59/r60 (прецеденты R61 smart-merge, 09-23/24), smart-merge-r61-75 (11b6f449, 09-24), r77-mission-control-in-installer (49ea843f), r78-desktop-from-scratch (8cf09ad7 — актуальный desktop-рельс).
+- integration/*: 11 — RSI. fix/*: 10 — RSI (glm-*, self-update-ambiguous-recovery). release/*: 8 — смесь: a2-chat-bridge-v0.5.22/23, browser-0.6.6-dev.13/14/15.1, metaengine-browser-final-candidate (легаси-каналы), self-update-ambiguity-live-v1/v2 (наш релизный рельс v2 = cf747798).
+- КЛЮЧЕВЫЕ РЕЛЬСЫ: sandbox/me2-os = b39db2e0 (09-25, R77 final — канон ME2); release/self-update-ambiguity-live-v2 = cf747798 (09-25); main = 85767548 (09-19, ЧУЖАЯ RSI-история — push только main:sandbox/me2-os!); rail-merge = 3d2d0659 (09-21); browser-dev-channel = 83135fdd (08-30).
+- НОВЫЕ (появились 09-25, не из нашего контура): work/r78-maintenance-idle-window-v1 (88e7aced) / v2 (b29c0e52), work/r77-installed-ui-bundle-proof-v1 (c21a7892), update/browser-dev-channel (34d905d6) — требуют операторской сверки (кто создал: CI/автоматика/параллельный агент).
+- tmp/noop/do-not-use/scratch/recovery-*: мусор прошлых экспериментов, удаление — по решению оператора.
+
+Stage Summary:
+- Аудит веток выполнен на живых данных remote (fetch-канал работает без токена — читаем, не пишем); env-reset купирован: локальная топология восстановлена до R79-консистентного состояния, worklog реконструирован до R79 + эта запись.
+- БЛОКЕР: PUSH и GitHub API недоступны (токен потерян вместе с .a2). Оператору: положить свежий GITHUB_TOKEN_ADMIN в /home/z/.a2/.github.env (perms 600) → следующий раунд: bash scripts/git-sync.sh опубликует реконструированный worklog (main→sandbox/me2-os, fast-forward).
+- Daemon: рабочий каталог обновлён до рельса (v0.57.1 код); рестарт через start.sh — сразу после этой записи. Mission Control поднимется R75-сборкой.
+- Backlog R81: #1a activation/handoff/qualification (desktop) после подтверждения токена; сверка новых веток r78-maintenance-* с оператором.
