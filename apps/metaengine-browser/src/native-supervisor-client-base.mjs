@@ -961,10 +961,22 @@ export class NativeSupervisorClient {
   // deadline breach escalates regardless.
   #armCycleHardDeadline() {
     this.#disarmCycleHardDeadline();
+    this.#scheduleCycleHardDeadlineCheck(this.#commandCycleHardDeadlineMs);
+  }
+
+  #scheduleCycleHardDeadlineCheck(delayMs) {
     this.#cycleHardDeadlineTimer = setTimeout(() => {
       this.#cycleHardDeadlineTimer = null;
       if (!this.#running || !this.#cyclePromise) return;
-      if (Date.now() - this.#cycleStartedAtMs < this.#commandCycleHardDeadlineMs) return;
+      const cycleAgeMs = Math.max(0, Date.now() - this.#cycleStartedAtMs);
+      if (cycleAgeMs < this.#commandCycleHardDeadlineMs) {
+        // Timers are not a proof that the wall clock has crossed the deadline:
+        // coarse clocks, suspend/resume and clock correction can make a callback
+        // observe an age just below the threshold. Never drop the only
+        // out-of-band wedge guard in that case; re-arm for the exact remainder.
+        this.#scheduleCycleHardDeadlineCheck(Math.max(1, this.#commandCycleHardDeadlineMs - cycleAgeMs));
+        return;
+      }
       const updateState = String(this.#selfUpdate?.snapshot?.()?.state || '').toUpperCase();
       if (['DOWNLOADING', 'DOWNLOADED', 'READY_RESTART', 'PENDING_RESTART', 'INSTALLING'].includes(updateState)
         && !this.#wedgeEscalation) {
@@ -974,17 +986,17 @@ export class NativeSupervisorClient {
       }
       this.#wedgeEscalation = {
         reason: 'CYCLE_HARD_DEADLINE_EXIT_ESCALATION',
-        cycle_age_ms: Date.now() - this.#cycleStartedAtMs,
+        cycle_age_ms: cycleAgeMs,
         update_state: updateState || null,
         at: new Date().toISOString(),
         authority_effect: false,
       };
-      this.#lastError = `command_cycle_hard_deadline:${Date.now() - this.#cycleStartedAtMs}ms:exit_escalation`;
+      this.#lastError = `command_cycle_hard_deadline:${cycleAgeMs}ms:exit_escalation`;
       // Flush one last heartbeat with the escalation marker, then exit so the
       // Sentinel relaunches a clean process (relaunch path is proven in production).
       void this.#kickHeartbeat().catch(() => {});
       setTimeout(() => { try { this.#wedgeExitImpl(2); } catch { /* best effort */ } }, WEDGE_EXIT_GRACE_MS);
-    }, this.#commandCycleHardDeadlineMs);
+    }, Math.max(1, Number(delayMs) || 1));
     this.#cycleHardDeadlineTimer.unref?.();
   }
 
