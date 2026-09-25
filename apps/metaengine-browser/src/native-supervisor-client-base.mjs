@@ -1082,7 +1082,6 @@ export class NativeSupervisorClient {
     if (this.#supervisorMode === 'OFF' || this.#armed !== true) return this.#maintenancePromise;
     const now = Date.now();
     if (this.#maintenancePromise || now - this.#lastMaintenanceAtMs < this.#maintenanceIntervalMs) return this.#maintenancePromise;
-    this.#lastMaintenanceAtMs = now;
     this.#maintenancePromise = (async () => {
       // Mesh startup is a recoverable local initialization step. A one-shot
       // filesystem/runtime failure must not leave CONTROL healthy while the mesh
@@ -1110,7 +1109,15 @@ export class NativeSupervisorClient {
         this.#continuityStatus = applyQuarantineAuthHealToContinuityStatus(this.#continuityStatus, refreshed);
       }
       await this.#selfUpdate?.cycle().catch((error) => { this.#lastError = `self_update:${clipError(error)}`; });
-    })().finally(() => { this.#maintenancePromise = null; });
+    })().finally(() => {
+      // Cool down from completion, not start. If maintenance itself takes longer
+      // than the interval, stamping at start makes the next empty command cycle
+      // immediately launch another maintenance pass and can starve DevOS idle work
+      // forever behind #waitForBaseMaintenanceIdle(). Completion-relative cooldown
+      // guarantees a maintenance-free idle window without adding a scheduler.
+      this.#lastMaintenanceAtMs = Date.now();
+      this.#maintenancePromise = null;
+    });
     return this.#maintenancePromise;
   }
 

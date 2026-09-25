@@ -196,3 +196,23 @@ test('fast lane keeps bounded admission even under very large command bursts', a
   assert.ok(peak <= 128, `read concurrency escaped bound: ${peak}`);
   assert.ok(peak >= 16, `read concurrency unexpectedly serialized: ${peak}`);
 });
+
+
+test('maintenance cooldown starts after maintenance settles so DevOS receives an idle window', async () => {
+  const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
+  const begin = source.indexOf('#kickMaintenance()');
+  const end = source.indexOf('async #nextCommand()', begin);
+  assert.ok(begin >= 0 && end > begin, 'maintenance source boundary missing');
+  const maintenance = source.slice(begin, end);
+  const promiseAt = maintenance.indexOf('this.#maintenancePromise = (async () => {');
+  const finallyAt = maintenance.indexOf('})().finally(() => {', promiseAt);
+  const completionStampAt = maintenance.indexOf('this.#lastMaintenanceAtMs = Date.now()', finallyAt);
+  assert.ok(promiseAt >= 0 && finallyAt > promiseAt, 'maintenance promise/finally boundary missing');
+  assert.ok(completionStampAt > finallyAt, 'maintenance cooldown must be stamped only after the pass settles');
+  assert.doesNotMatch(
+    maintenance.slice(0, promiseAt),
+    /this\.#lastMaintenanceAtMs\s*=\s*now/,
+    'start-time cooldown can immediately re-admit another long maintenance pass and starve DevOS idle work',
+  );
+  assert.match(source, /const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;/);
+});
