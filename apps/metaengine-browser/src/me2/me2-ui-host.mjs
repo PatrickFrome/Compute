@@ -8,12 +8,16 @@
  *
  * Разрешение каталога UI (кандидаты): ME2_UI_DIR env → resources/me2-ui (упакованный) →
  * cwd/me2-ui → cwd/../me2-ui. Спавн: ME2_UI_BIN (bun) `run start` (production-сборка Next);
- * при ME2_UI_DEV=1 — `run dev` (только для разработки). Отсутствие каталога и живого UI —
- * честный DEGRADED: Mission Control остаётся на самодостаточном GET /ui daemon'а (фолбэк R49).
+ * при ME2_UI_DEV=1 — `run dev` (только для разработки). Если ME2_UI_BIN не задан и bun
+ * недоступен на машине (R77: установщик обязан работать без внешних зависимостей) —
+ * честный фолбэк: Electron-бинарник в роли node (ELECTRON_RUN_AS_NODE=1) запускает
+ * standalone server.js напрямую — Next standalone не требует bun. Отсутствие каталога
+ * и живого UI — честный DEGRADED: Mission Control остаётся на самодостаточном
+ * GET /ui daemon'а (фолбэк R49).
  *
  * Fail-open и zero-authority: недоступность UI не роняет браузер и не трогает self-update.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -72,12 +76,35 @@ function resolveUiDir() {
   return null;
 }
 
+/** Ленивая проба bun (кэшируется): машины оператора не обязаны иметь bun (R77). */
+let bunProbe = null;
+function bunAvailable() {
+  if (bunProbe !== null) return bunProbe;
+  try {
+    const r = spawnSync('bun', ['--version'], { timeout: 5000, windowsHide: true, encoding: 'utf8' });
+    bunProbe = r.status === 0;
+  } catch {
+    bunProbe = false;
+  }
+  return bunProbe;
+}
+
 function spawnUi(dir) {
   const bin = process.env.ME2_UI_BIN || 'bun';
-  const args = process.env.ME2_UI_DEV === '1' ? ['run', 'dev'] : ['run', 'start'];
-  child = spawn(bin, args, {
+  const dev = process.env.ME2_UI_DEV === '1';
+  let cmd = bin;
+  let args = dev ? ['run', 'dev'] : ['run', 'start'];
+  let env = { ...process.env, PORT: String(UI_PORT), ME2_HOSTED_BY_BROWSER: '1' };
+  // R77: без bun и без явного ME2_UI_BIN — Electron-бинарник в роли node запускает
+  // standalone server.js напрямую (production-контракт pack-me2-ui не требует bun).
+  if (!dev && !process.env.ME2_UI_BIN && !bunAvailable()) {
+    cmd = process.execPath;
+    args = ['server.js'];
+    env = { ...env, ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' };
+  }
+  child = spawn(cmd, args, {
     cwd: dir,
-    env: { ...process.env, PORT: String(UI_PORT), ME2_HOSTED_BY_BROWSER: '1' },
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
