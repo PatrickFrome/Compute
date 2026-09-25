@@ -8,6 +8,7 @@ on:
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
       - release/self-update-ambiguity-live-v2
+      - work/r77-installed-ui-bundle-proof-v1
   workflow_dispatch:
 
 permissions:
@@ -51,6 +52,8 @@ jobs:
           grep -q '"beforePack": "./scripts/electron-builder-before-pack.cjs"' electron-builder.test.json
           grep -q 'service_activation_authorized = \$false' scripts/build-guardian-native-staging.ps1
           grep -q 'guardian_native_staging_verified' scripts/verify-installed-guardian-native-staging.ps1
+          node --check scripts/verify-me2-ui-bundle.mjs
+          node --check scripts/verify-builder-copy.cjs
 
   windows-published-n-to-one-build-target:
     runs-on: windows-2022
@@ -84,6 +87,14 @@ jobs:
           if ($sourceCore -ne '0.7.0') { throw "physical_live_release_core_not_070:$sourceCore" }
           $physical = Get-Content ./test/self-update-fast-physical.ps1 -Raw
           if ($physical -notmatch '\$target\s*=\s*"0\.6\.3-dev\.\$buildId\.1"') { throw 'physical_target_source_contract_missing' }
+      - name: Prove electron-builder 26.15.7 copies nested UI dependencies
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --prefix scripts/build-tools --no-audit --no-fund --ignore-scripts app-builder-lib@26.15.7
+          node scripts/verify-builder-copy.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'me2_ui_builder_copy_contract_failed' }
       # R77: Mission Control (me2-ui) обязан ехать в установщике (контракт extraResources
       # me2-ui-dist → me2-ui в electron-builder.test.json, R52/C7). До этого патча каталог
       # никогда не собирался в этом job'е — electron-builder молча пропускал его, и браузер
@@ -115,6 +126,8 @@ jobs:
           if ($m.schema -ne 'me2.ui-bundle-manifest.v1') { throw 'me2_ui_dist_manifest_schema_invalid' }
           if ($m.git_sha -ne $env:GITHUB_SHA) { throw 'me2_ui_dist_manifest_sha_mismatch' }
           Write-Output "me2-ui staged: build_id=$($m.build_id) size_mb=$([Math]::Round($m.size_bytes/1MB,1)) sha=$($m.git_sha)"
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'me2_ui_staged_verification_failed' }
       - name: Bind physical target to immutable workflow run identity
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -172,6 +185,18 @@ jobs:
           [System.IO.File]::WriteAllText((Resolve-Path -LiteralPath $manifestPath), (($manifest | ConvertTo-Json -Depth 20) + "`n"), [System.Text.UTF8Encoding]::new($false))
           $readback = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
           if ([string]$readback.installed_executable_sha256 -ne $digest) { throw 'installed_target_executable_sha256_readback_mismatch' }
+      - name: Prove installed ME2 UI after physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          node scripts/verify-me2-ui-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-ui') `
+            --expected-sha '${{ github.sha }}' `
+            --runtime (Join-Path $installRoot 'METAENGINE Browser Test.exe') `
+            --smoke --evidence './self-update-fast-evidence/installed-me2-ui-proof.json'
+          if ($LASTEXITCODE -ne 0) { throw 'installed_me2_ui_verification_failed' }
       - name: Prove installed Guardian staging after physical update
         working-directory: apps/metaengine-browser
         shell: powershell

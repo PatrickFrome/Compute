@@ -126,6 +126,23 @@ jobs:
           if not re.fullmatch(r'[0-9a-f]{64}',installed_digest): raise SystemExit('installed_executable_sha256_invalid')
           manifest_digest=hashlib.sha256(mp.read_bytes()).hexdigest()
 
+          ui_proofs=list(root.rglob('installed-me2-ui-proof.json'))
+          if len(ui_proofs)!=1: raise SystemExit('me2_ui_proof_cardinality_invalid:'+str(len(ui_proofs)))
+          up=ui_proofs[0]; u=json.loads(up.read_text(encoding='utf-8'))
+          if u.get('schema')!='metaengine.browser.me2.installed-ui-proof.v1': raise SystemExit('me2_ui_proof_schema_invalid')
+          if u.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('me2_ui_proof_git_sha_mismatch')
+          if u.get('runtime_smoke')!='PASS': raise SystemExit('me2_ui_runtime_smoke_missing')
+          manifest_ui_size=int(u.get('manifest_size_bytes') or 0)
+          installed_ui_size=int(u.get('installed_size_bytes') or 0)
+          if manifest_ui_size<=0 or installed_ui_size!=manifest_ui_size: raise SystemExit('me2_ui_installed_size_mismatch')
+          deps=u.get('dependencies') or {}
+          expected_deps={'next/package.json','next/dist/server/lib/start-server','react/package.json','react-dom/package.json'}
+          if set(deps)!=expected_deps or any(not isinstance(v,str) or not v for v in deps.values()): raise SystemExit('me2_ui_dependency_proof_invalid')
+          for key in ('manifest_sha256','html_sha256','static_sha256'):
+              if not re.fullmatch(r'[0-9a-f]{64}',str(u.get(key) or '').lower()): raise SystemExit('me2_ui_digest_invalid:'+key)
+          ui_proof_digest=hashlib.sha256(up.read_bytes()).hexdigest()
+          ui_proof_size=up.stat().st_size
+
           guardian=list(root.rglob('guardian-native-staging-manifest.json'))
           if len(guardian)!=1: raise SystemExit('guardian_manifest_cardinality_invalid:'+str(len(guardian)))
           gp=guardian[0]
@@ -206,7 +223,7 @@ jobs:
           }
           with open('release.env','w',encoding='utf-8') as f:
               for k,v in env.items(): f.write(f'{k}={shlex.quote(v)}\n')
-          print(f"verified version={version} installer_sha256={digest} installed_executable_sha256={installed_digest} manifest_sha256={manifest_digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
+          print(f"verified version={version} installer_sha256={digest} installed_executable_sha256={installed_digest} me2_ui_size={installed_ui_size} me2_ui_proof_sha256={ui_proof_digest} manifest_sha256={manifest_digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
           PY
           cat release.env >> "$GITHUB_ENV"
 

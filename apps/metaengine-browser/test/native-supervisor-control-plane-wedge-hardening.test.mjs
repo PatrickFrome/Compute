@@ -4,7 +4,22 @@ import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function hangingFetch(_url, { signal } = {}) {
+async function waitFor(predicate, { timeoutMs = 15000, intervalMs = 50, label = 'condition' } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(intervalMs);
+  }
+  assert.fail(`wait_timeout:${label}`);
+}
+
+function hangingFetch(url, { signal } = {}) {
+  // Wedge only the command lease path. Startup heartbeat/enrollment must remain
+  // healthy so this test measures the command-cycle hard deadline itself rather
+  // than spending most of its budget inside an unrelated bounded startup fetch.
+  if (!String(url).includes('/v1/commands/wait-batch')) {
+    return Promise.resolve({ status: 202, ok: true, json: async () => ({}) });
+  }
   return new Promise((_resolve, reject) => {
     signal?.addEventListener('abort', () => reject(signal.reason || new Error('aborted')), { once: true });
   });
@@ -127,12 +142,24 @@ test('CP-W1: a cycle wedged past the hard deadline escalates to exit so the Sent
     commandCycleHardDeadlineMs: 1000,
     wedgeExitImpl: (code) => { exitCode = code; },
   }));
-  // start() awaits its tail cycle; a wedged lease keeps that await pending
-  // (in production the bounded fetch wrapper prevents this) — drive it detached.
+  // start() awaits startup work while #schedule() independently launches the
+  // command cycle. Drive start detached, then observe each watchdog phase instead
+  // of relying on one wall-clock sleep: on a saturated CI runner a late timer
+  // phase can otherwise run the test's fixed sleep callback before the newly
+  // scheduled exit-grace timer, producing a false negative.
   void client.start().catch(() => {});
-  // deadline 1000ms (first cycle starts at the 1s interval tick) + exit grace
-  // 2500ms + scheduling slack — the exit stub must have fired before the assert.
-  await sleep(6000);
+  await waitFor(
+    () => client.snapshot().control_plane.cycle_running === true,
+    { label: 'wedged_cycle_started' },
+  );
+  await waitFor(
+    () => client.snapshot().control_plane.wedge_escalation?.reason === 'CYCLE_HARD_DEADLINE_EXIT_ESCALATION',
+    { label: 'hard_deadline_escalation' },
+  );
+  await waitFor(
+    () => exitCode === 2,
+    { timeoutMs: 10000, label: 'wedge_exit_grace' },
+  );
   client.stop();
   assert.equal(exitCode, 2, 'the wedge escalation must request process exit(2)');
   const cp = client.snapshot().control_plane;

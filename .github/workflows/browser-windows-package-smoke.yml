@@ -17,6 +17,8 @@ on:
       - 'apps/metaengine-browser/test/browser-shell-visual-evidence.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
+      - 'apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs'
+      - 'apps/me2-ui/**'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
 concurrency:
@@ -90,6 +92,24 @@ jobs:
           }
           Write-Host ($evidence | ConvertTo-Json -Compress -Depth 8)
 
+      - name: Build and stage exact-head ME2 UI
+        shell: pwsh
+        env:
+          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --no-audit --no-fund --global bun
+          Push-Location apps/me2-ui
+          try {
+            bun install --frozen-lockfile
+            bun run build
+            node scripts/pack-me2-ui.mjs
+          } finally { Pop-Location }
+          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'package_smoke_staged_me2_ui_invalid' }
+
       - name: Build exact-head unsigned NSIS package through native staging hook
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -152,6 +172,16 @@ jobs:
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app)) { throw "packaged_browser_missing:$app" }
+          $uiEvidence = "$env:RUNNER_TEMP\installed-me2-ui-proof.json"
+          node scripts/verify-me2-ui-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-ui') `
+            --expected-sha ([string]$proof.source_head) `
+            --runtime $app --smoke --evidence $uiEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'package_smoke_installed_me2_ui_invalid' }
+          $uiProof = Get-Content $uiEvidence -Raw | ConvertFrom-Json
+          if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) { throw 'package_smoke_me2_ui_proof_invalid' }
+          $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
           $out = "$env:RUNNER_TEMP\package-version-probe.out"
           $err = "$env:RUNNER_TEMP\package-version-probe.err"
           $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err

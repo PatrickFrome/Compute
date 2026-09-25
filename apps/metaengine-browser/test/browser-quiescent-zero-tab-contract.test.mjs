@@ -74,5 +74,12 @@ test('convergence product head contains no temporary patch authority and package
       to: 'me2-ui',
       filter: ['**/*'],
     },
+    {
+      // R77: dependencies require their own FileSet because electron-builder filters
+      // a FileSet's root node_modules directory.
+      from: 'me2-ui-dist/node_modules',
+      to: 'me2-ui/node_modules',
+      filter: ['**/*'],
+    },
   ]);
 });

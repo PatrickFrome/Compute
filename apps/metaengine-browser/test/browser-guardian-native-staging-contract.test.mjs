@@ -50,6 +50,12 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     from: 'me2-ui-dist',
     to: 'me2-ui',
     filter: ['**/*'],
+  }, {
+    // R77: electron-builder 26 filters the root node_modules of a FileSet.
+    // Copy the standalone runtime dependencies from their own FileSet boundary.
+    from: 'me2-ui-dist/node_modules',
+    to: 'me2-ui/node_modules',
+    filter: ['**/*'],
   }]);
   assert.match(hook, /buildDevOSSourceSnapshot/);
   assert.match(hook, /devos-source-snapshot/);
