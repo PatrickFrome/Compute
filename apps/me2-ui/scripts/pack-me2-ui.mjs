@@ -15,9 +15,11 @@
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(new URL('..', import.meta.url).pathname);
+// R77: fileURLToPath — кросс-платформенно (pathname '/D:/…' на Windows не резолвится resolve())
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const STANDALONE = join(ROOT, '.next', 'standalone');
 const DIST = join(ROOT, 'me2-ui-dist');
 const SCHEMA = 'me2.ui-bundle-manifest.v1';
