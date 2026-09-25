@@ -8,6 +8,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 test('maintenance cooldown starts after maintenance settles so DevOS receives an idle window', () => {
   const source = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-base.mjs'), 'utf8');
+  const coreSource = fs.readFileSync(path.join(appRoot, 'src', 'native-supervisor-client-core-base.mjs'), 'utf8');
   const begin = source.indexOf('#kickMaintenance()');
   const end = source.indexOf('async #nextCommand()', begin);
   assert.ok(begin >= 0 && end > begin, 'maintenance source boundary missing');
@@ -22,5 +23,5 @@ test('maintenance cooldown starts after maintenance settles so DevOS receives an
     /this\.#lastMaintenanceAtMs\s*=\s*now/,
     'start-time cooldown can immediately re-admit another long maintenance pass and starve DevOS idle work',
   );
-  assert.match(source, /const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;/);
+  assert.match(coreSource, /const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;/);
 });
