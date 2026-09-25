@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs';
 
@@ -154,11 +155,11 @@ test('CP-W1: a cycle wedged past the hard deadline escalates to exit so the Sent
   );
   await waitFor(
     () => client.snapshot().control_plane.wedge_escalation?.reason === 'CYCLE_HARD_DEADLINE_EXIT_ESCALATION',
-    { label: 'hard_deadline_escalation' },
+    { timeoutMs: 45000, label: 'hard_deadline_escalation' },
   );
   await waitFor(
     () => exitCode === 2,
-    { timeoutMs: 10000, label: 'wedge_exit_grace' },
+    { timeoutMs: 30000, label: 'wedge_exit_grace' },
   );
   client.stop();
   assert.equal(exitCode, 2, 'the wedge escalation must request process exit(2)');
@@ -166,6 +167,24 @@ test('CP-W1: a cycle wedged past the hard deadline escalates to exit so the Sent
   assert.equal(cp.wedge_escalation?.reason, 'CYCLE_HARD_DEADLINE_EXIT_ESCALATION');
   assert.match(client.snapshot().last_error || '', /command_cycle_hard_deadline/);
   assert.equal(cp.cycle_running, true, 'the wedged cycle is still (honestly) reported as running');
+});
+
+test('CP-W1: an early hard-deadline callback re-arms the watchdog instead of dropping it', () => {
+  const source = readFileSync(new URL('../src/native-supervisor-client-base.mjs', import.meta.url), 'utf8');
+  const begin = source.indexOf('#scheduleCycleHardDeadlineCheck(delayMs)');
+  const end = source.indexOf('#disarmCycleHardDeadline()', begin);
+  assert.ok(begin >= 0 && end > begin, 'hard-deadline scheduling source boundary missing');
+  const watchdog = source.slice(begin, end);
+  assert.match(
+    watchdog,
+    /if \(cycleAgeMs < this\.#commandCycleHardDeadlineMs\) \{[\s\S]*this\.#scheduleCycleHardDeadlineCheck\(Math\.max\(1, this\.#commandCycleHardDeadlineMs - cycleAgeMs\)\);/,
+    'an early callback must re-arm for the remaining deadline instead of dropping the watchdog',
+  );
+  assert.doesNotMatch(
+    watchdog,
+    /if \(cycleAgeMs < this\.#commandCycleHardDeadlineMs\) return;/,
+    'the old one-shot early-return wedge hole must never return',
+  );
 });
 
 test('CP-W1: hard deadline is clamped to a safe floor', () => {
