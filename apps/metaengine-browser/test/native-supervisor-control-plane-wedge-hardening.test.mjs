@@ -4,7 +4,13 @@ import { NativeSupervisorClient } from '../src/native-supervisor-client-base.mjs
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function hangingFetch(_url, { signal } = {}) {
+function hangingFetch(url, { signal } = {}) {
+  // Wedge only the command lease path. Startup heartbeat/enrollment must remain
+  // healthy so this test measures the command-cycle hard deadline itself rather
+  // than spending most of its budget inside an unrelated bounded startup fetch.
+  if (!String(url).includes('/v1/commands/wait-batch')) {
+    return Promise.resolve({ status: 202, ok: true, json: async () => ({}) });
+  }
   return new Promise((_resolve, reject) => {
     signal?.addEventListener('abort', () => reject(signal.reason || new Error('aborted')), { once: true });
   });
