@@ -8,6 +8,7 @@ on:
       - work/devos-elastic-fleet-bootstrap-v1
       - work/browser-devos-root-transport-bootstrap-v1
       - release/self-update-ambiguity-live-v2
+      - work/r77-installed-ui-bundle-proof-v1
   workflow_dispatch:
 
 permissions:
