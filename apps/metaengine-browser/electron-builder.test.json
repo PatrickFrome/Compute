@@ -64,6 +64,13 @@
       "filter": [
         "**/*"
       ]
+    },
+    {
+      "from": "me2-ui-dist/node_modules",
+      "to": "me2-ui/node_modules",
+      "filter": [
+        "**/*"
+      ]
     }
   ],
   "publish": [
