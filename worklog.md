@@ -1648,3 +1648,4 @@ Stage Summary:
 - Состояние «всё готово к публикации»: 1 ff-коммит рельсы + 2 архив-ветки, ровно одна команда после восстановления токена. Блокер единственный: /home/z/.a2/.github.env с GITHUB_TOKEN_ADMIN (perms 600).
 - Оператор: положить свежий PAT → следующего касания `bash scripts/push-pending-r80.sh` (или я сделаю это в начале R81 автоматически при обнаружении токена).
 - Backlog R81 (без изменений): #1a activation/handoff/qualification desktop; сверка work/r78-maintenance-idle-window-v1/v2 + work/r77-installed-ui-bundle-proof-v1 + update/browser-dev-channel с оператором.
+- [cron 413338 2026-09-25T16:22+08] PAT ожидается, push-pending готов (ba623a59): scripts/push-pending-r80.sh опубликует main→sandbox/me2-os (ff b39db2e0..) + me2/archive-r21-sandbox-snapshot + me2/archive-v040-main-archive; токен /home/z/.a2/.github.env всё ещё отсутствует — публикация ворклога и архив-веток отложена до оператора.
