@@ -51,6 +51,9 @@ jobs:
           grep -q 'guardian-native' apps/metaengine-browser/electron-builder.test.json
           grep -q 'service_activation_authorized = \$false' apps/metaengine-browser/scripts/build-guardian-native-staging.ps1
           grep -q 'guardian_native_staging_verified' apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1
+          node --check apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs
+          node --check apps/metaengine-browser/scripts/verify-builder-copy.cjs
+          grep -q 'me2-ui-dist/node_modules' apps/metaengine-browser/electron-builder.test.json
           grep -q 'self_update_test_feed_not_allowed' apps/metaengine-browser/src/self-update-runtime.mjs
           grep -q 'persistUpdatedSuccessorReceipt' apps/metaengine-browser/src/main-entry.mjs
           grep -q 'SUCCESSOR_STARTUP_PROBE_ONLY' apps/metaengine-browser/src/self-update-smoke.mjs
@@ -88,6 +91,32 @@ jobs:
       - name: Install physical-test dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund
+      - name: Prove electron-builder 26.15.7 UI dependency copy
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --prefix scripts/build-tools --no-audit --no-fund --ignore-scripts app-builder-lib@26.15.7
+          node scripts/verify-builder-copy.cjs
+
+      - name: Build and stage exact-head ME2 UI
+        shell: pwsh
+        env:
+          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --no-audit --no-fund --global bun
+          Push-Location apps/me2-ui
+          try {
+            bun install --frozen-lockfile
+            bun run build
+            node scripts/pack-me2-ui.mjs
+          } finally { Pop-Location }
+          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'full_e2e_staged_me2_ui_invalid' }
+
       - name: Bind physical harness to live 0.7.0 line and exact run identity
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -116,6 +145,19 @@ jobs:
         env:
           METAENGINE_GITHUB_API_TOKEN: ${{ github.token }}
         run: ./test/self-update-fast-physical-ci.ps1
+      - name: Prove installed ME2 UI after physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          node scripts/verify-me2-ui-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-ui') `
+            --expected-sha '${{ github.event.pull_request.head.sha || github.sha }}' `
+            --runtime (Join-Path $installRoot 'METAENGINE Browser Test.exe') `
+            --smoke --evidence './self-update-fast-evidence/installed-me2-ui-proof.json'
+          if ($LASTEXITCODE -ne 0) { throw 'full_e2e_installed_me2_ui_invalid' }
+
       - name: Prove installed Guardian staging after physical update
         working-directory: apps/metaengine-browser
         shell: powershell

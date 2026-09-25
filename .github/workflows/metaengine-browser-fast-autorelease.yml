@@ -126,6 +126,23 @@ jobs:
           if not re.fullmatch(r'[0-9a-f]{64}',installed_digest): raise SystemExit('installed_executable_sha256_invalid')
           manifest_digest=hashlib.sha256(mp.read_bytes()).hexdigest()
 
+          ui_proofs=list(root.rglob('installed-me2-ui-proof.json'))
+          if len(ui_proofs)!=1: raise SystemExit('me2_ui_proof_cardinality_invalid:'+str(len(ui_proofs)))
+          up=ui_proofs[0]; u=json.loads(up.read_text(encoding='utf-8'))
+          if u.get('schema')!='metaengine.browser.me2.installed-ui-proof.v1': raise SystemExit('me2_ui_proof_schema_invalid')
+          if u.get('git_sha')!=os.environ['EXPECTED_SHA']: raise SystemExit('me2_ui_proof_git_sha_mismatch')
+          if u.get('runtime_smoke')!='PASS': raise SystemExit('me2_ui_runtime_smoke_missing')
+          manifest_ui_size=int(u.get('manifest_size_bytes') or 0)
+          installed_ui_size=int(u.get('installed_size_bytes') or 0)
+          if manifest_ui_size<=0 or installed_ui_size!=manifest_ui_size: raise SystemExit('me2_ui_installed_size_mismatch')
+          deps=u.get('dependencies') or {}
+          expected_deps={'next/package.json','next/dist/server/lib/start-server','react/package.json','react-dom/package.json'}
+          if set(deps)!=expected_deps or any(not isinstance(v,str) or not v for v in deps.values()): raise SystemExit('me2_ui_dependency_proof_invalid')
+          for key in ('manifest_sha256','html_sha256','static_sha256'):
+              if not re.fullmatch(r'[0-9a-f]{64}',str(u.get(key) or '').lower()): raise SystemExit('me2_ui_digest_invalid:'+key)
+          ui_proof_digest=hashlib.sha256(up.read_bytes()).hexdigest()
+          ui_proof_size=up.stat().st_size
+
           guardian=list(root.rglob('guardian-native-staging-manifest.json'))
           if len(guardian)!=1: raise SystemExit('guardian_manifest_cardinality_invalid:'+str(len(guardian)))
           gp=guardian[0]
@@ -200,13 +217,14 @@ jobs:
               'DEV_YML_SHA256':dev_digest,'DEV_YML_SIZE':str(dev_size),
               'MANIFEST_SHA256':manifest_digest,'MANIFEST_SIZE':str(manifest_size),
               'INSTALLED_EXECUTABLE_SHA256':installed_digest,
+              'ME2_UI_PROOF':str(up),'ME2_UI_PROOF_SHA256':ui_proof_digest,'ME2_UI_PROOF_SIZE':str(ui_proof_size),
               'GUARDIAN_MANIFEST':str(gp),'GUARDIAN_MANIFEST_SHA256':gdigest,'GUARDIAN_MANIFEST_SIZE':str(guardian_manifest_size),
               'GUARDIAN_SERVICE_BINARY':str(service_path),'GUARDIAN_SERVICE_SHA256':service_sha,'GUARDIAN_SERVICE_SIZE':str(service_size),
               'GUARDIAN_CONFIGURATOR_BINARY':str(configurator_path),'GUARDIAN_CONFIGURATOR_SHA256':configurator_sha,'GUARDIAN_CONFIGURATOR_SIZE':str(configurator_size),
           }
           with open('release.env','w',encoding='utf-8') as f:
               for k,v in env.items(): f.write(f'{k}={shlex.quote(v)}\n')
-          print(f"verified version={version} installer_sha256={digest} installed_executable_sha256={installed_digest} manifest_sha256={manifest_digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
+          print(f"verified version={version} installer_sha256={digest} installed_executable_sha256={installed_digest} me2_ui_size={installed_ui_size} me2_ui_proof_sha256={ui_proof_digest} manifest_sha256={manifest_digest} guardian_manifest_sha256={gdigest} guardian_release_binaries=2")
           PY
           cat release.env >> "$GITHUB_ENV"
 
@@ -217,7 +235,7 @@ jobs:
           if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/dev/null 2>&1; then
             echo "release_tag_already_exists:${TAG}" >&2; exit 1
           fi
-          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" "$GUARDIAN_MANIFEST" \
+          gh release create "$TAG" "$INSTALLER" "$BLOCKMAP" "$DEV_YML" "$MANIFEST" "$ME2_UI_PROOF" "$GUARDIAN_MANIFEST" \
             "$GUARDIAN_SERVICE_BINARY" "$GUARDIAN_CONFIGURATOR_BINARY" \
             --repo "$GITHUB_REPOSITORY" --target "$EXPECTED_SHA" \
             --title "METAENGINE Browser ${TAG}" \
@@ -244,6 +262,7 @@ jobs:
               (os.path.basename(os.environ['BLOCKMAP']),'BLOCKMAP_SHA256','BLOCKMAP_SIZE'),
               ('dev.yml','DEV_YML_SHA256','DEV_YML_SIZE'),
               ('verified-self-update-manifest.json','MANIFEST_SHA256','MANIFEST_SIZE'),
+              ('installed-me2-ui-proof.json','ME2_UI_PROOF_SHA256','ME2_UI_PROOF_SIZE'),
               ('guardian-native-staging-manifest.json','GUARDIAN_MANIFEST_SHA256','GUARDIAN_MANIFEST_SIZE'),
               ('METAENGINEBrowserGuardian.exe','GUARDIAN_SERVICE_SHA256','GUARDIAN_SERVICE_SIZE'),
               ('METAENGINEBrowserGuardianConfigure.exe','GUARDIAN_CONFIGURATOR_SHA256','GUARDIAN_CONFIGURATOR_SIZE'),
