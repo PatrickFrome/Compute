@@ -1632,3 +1632,19 @@ Stage Summary:
 - БЛОКЕР: PUSH и GitHub API недоступны (токен потерян вместе с .a2). Оператору: положить свежий GITHUB_TOKEN_ADMIN в /home/z/.a2/.github.env (perms 600) → следующий раунд: bash scripts/git-sync.sh опубликует реконструированный worklog (main→sandbox/me2-os, fast-forward).
 - Daemon: рабочий каталог обновлён до рельса (v0.57.1 код); рестарт через start.sh — сразу после этой записи. Mission Control поднимется R75-сборкой.
 - Backlog R81: #1a activation/handoff/qualification (desktop) после подтверждения токена; сверка новых веток r78-maintenance-* с оператором.
+
+---
+Task ID: R80-PUSH-PENDING-20260925
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d7a60538fa12d): «Весь ворклог и все ветки должны быть в github».
+
+Work Log:
+- Полный инвентарь того, чего НЕТ на GitHub: ① коммит 44dd5f64 (реконструированный worklog R78-1a/R78/R79 + R80-аудит) — локальная рельса, ff к origin/sandbox/me2-os; ② R21-снапшот 73486dd — НЕ содержится ни в одной из 615 remote-веток; ③ main-archive c95de21 «ME2 v0.4.0» — тоже 0 remote-веток.
+- Поиск каналов публикации: .a2 не восстановлен; env/proc чисты; .netrc/.git-credentials/.ssh/gh CLI отсутствуют; API 403; push без токена = «could not read Username». Read-канал git (ls-remote/fetch) работает анонимно — репо читаем, писать нельзя.
+- ПОДГОТОВЛЕНА ОДНОКОМАНДНАЯ ПУБЛИКАЦИЯ: scripts/push-pending-r80.sh (chmod +x) — PAT-безопасный паттерн (set-url→push→мгновенный restore, trap EXIT), три реф-пуша: main→sandbox/me2-os (ff), local/r21-snapshot→me2/archive-r21-sandbox-snapshot, main-archive→me2/archive-v040-main-archive; финальная ls-remote верификация. Токен нигде не печатается/не логируется.
+- Всё закоммичено локально на рельсе — nada теряется даже при повторном env-reset? НЕТ: локальные объекты при env-reset гибнут (урок R80). Риск принят и зафиксирован: реконструкция возможна из контекста сессии, но оператору нужно залить токен как можно скорее.
+
+Stage Summary:
+- Состояние «всё готово к публикации»: 1 ff-коммит рельсы + 2 архив-ветки, ровно одна команда после восстановления токена. Блокер единственный: /home/z/.a2/.github.env с GITHUB_TOKEN_ADMIN (perms 600).
+- Оператор: положить свежий PAT → следующего касания `bash scripts/push-pending-r80.sh` (или я сделаю это в начале R81 автоматически при обнаружении токена).
+- Backlog R81 (без изменений): #1a activation/handoff/qualification desktop; сверка work/r78-maintenance-idle-window-v1/v2 + work/r77-installed-ui-bundle-proof-v1 + update/browser-dev-channel с оператором.
