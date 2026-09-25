@@ -1,0 +1,92 @@
+name: ME2 Desktop Gate (R78 zero-based client)
+
+on:
+  push:
+    branches:
+      - me2/r78-desktop-from-scratch
+      - release/self-update-ambiguity-live-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: me2-desktop-gate-${{ github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install (skip electron binary for unit stage)
+        working-directory: apps/me2-desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm install --no-audit --no-fund
+      - name: Syntax + unit suite
+        working-directory: apps/me2-desktop
+        run: |
+          npm run check
+          npm test
+      - name: Physical electron-builder copy proof (R77 regression guard)
+        working-directory: apps/me2-desktop
+        env:
+          ME2_RUN_COPY_PROBE: '1'
+        run: npm test -- --test-name-pattern "builder copy"
+
+  package-proof:
+    needs: contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install UI toolchain (bun) and build Mission Control
+        working-directory: apps/me2-ui
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: |
+          npm install --no-audit --no-fund --global bun
+          bun install --frozen-lockfile
+          bun run build
+      - name: Pack me2-ui-dist into desktop
+        working-directory: apps/me2-desktop
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: npm run pack:ui
+      - name: Unpacked distribution build
+        working-directory: apps/me2-desktop
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: npm run dist:dir
+      - name: Verify installed bundle (R77 blind spots)
+        working-directory: apps/me2-desktop
+        env:
+          ME2_BUILD_SHA: ${{ github.sha }}
+        run: |
+          SHA=$(git rev-parse HEAD)
+          node scripts/verify-installed-bundle.mjs --app dist-desktop/linux-unpacked --sha="$SHA"
+      - name: Upload packaging evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: me2-desktop-package-proof-${{ github.sha }}
+          path: apps/me2-desktop/evidence/
+          if-no-files-found: ignore

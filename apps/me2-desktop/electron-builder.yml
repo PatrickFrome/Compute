@@ -1,0 +1,55 @@
+# METAENGINE Desktop — packaging (R78 zero-based rebuild)
+# Research findings baked in (research/2026/R78-DESKTOP-RESEARCH.md):
+#   electron-builder 26.16.1 (latest stable) STILL hard-drops the root node_modules
+#   of any copied directory set (app-builder-lib/out/util/filter.js createFilter:
+#   `if (relative === "node_modules") return false`). Therefore the Mission Control
+#   dependencies ride as an EXPLICIT second extraResources rule — and
+#   test/builder-copy.test.mjs proves the copy mechanism physically.
+appId: dev.me2.desktop
+productName: METAENGINE Desktop
+asar: true
+electronFuses:
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  enableNodeCliInspectArguments: false
+directories:
+  output: dist-desktop
+files:
+  - src/**/*
+  - package.json
+beforePack: ./scripts/electron-builder-before-pack.cjs
+extraResources:
+  # Mission Control (Next standalone) — code, build, static assets
+  - from: me2-ui-dist
+    to: me2-ui
+    filter:
+      - "**/*"
+  # THE R77 FIX: dependencies as an explicit copy set. createFilter() rejects a
+  # root-level "node_modules" entry inside the FIRST rule (from=me2-ui-dist),
+  # so the standalone's trimmed node_modules would be silently dropped and the
+  # installed server.js would die with MODULE_NOT_FOUND (R77 live defect).
+  - from: me2-ui-dist/node_modules
+    to: me2-ui/node_modules
+    filter:
+      - "**/*"
+publish:
+  provider: github
+  owner: PatrickFrome
+  repo: Compute
+  releaseType: prerelease
+  channel: dev
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: METAENGINE-Desktop-Setup-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: METAENGINE Desktop
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false

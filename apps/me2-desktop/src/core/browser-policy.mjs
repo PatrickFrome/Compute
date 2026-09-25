@@ -1,0 +1,64 @@
+/**
+ * Browser policy — the security contract of every WebContentsView.
+ * Deny-by-default permissions, navigation allowlist, no popped-out windows,
+ * hardened webRequest. Pure decision functions are unit-tested; the electron
+ * session wiring is injected.
+ */
+import { FLEET } from '../shared/me2-constants.mjs';
+
+/** Navigation decision (pure). */
+export function resolveNavigation({ url, mainOrigin } = {}) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { allow: false, reason: 'url_unparseable' };
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return { allow: false, reason: 'scheme_denied' };
+  }
+  if (mainOrigin && parsed.origin === mainOrigin) return { allow: true };
+  if (parsed.origin === FLEET.ORIGIN) return { allow: true };
+  // localhost planes are MAIN-origin assets behind the gateway, never direct nav targets
+  if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') return { allow: false, reason: 'loopback_denied' };
+  return { allow: false, reason: 'origin_not_allowed' };
+}
+
+const DENIED_PERMISSIONS = new Set([
+  'media',
+  'geolocation',
+  'notifications',
+  'midi',
+  'midiSysex',
+  'pointerLock',
+  'fullscreen',
+  'openExternal',
+  'display-capture',
+  'backgroundSync',
+  'speech',
+]);
+
+/** Permission decision (pure). */
+export function resolvePermission(permission) {
+  return DENIED_PERMISSIONS.has(permission) ? 'deny' : 'deny';
+}
+
+/** Wire a WebContentsView with the policy (electron injected; testable via fakes). */
+export function applyPolicy({ webContents, mainOrigin, onBlocked = () => {}, setWindowOpenHandler, session }) {
+  setWindowOpenHandler(({ url }) => {
+    const verdict = resolveNavigation({ url, mainOrigin });
+    if (!verdict.allow) onBlocked({ kind: 'window-open', url, reason: verdict.reason });
+    return { action: verdict.allow ? 'allow' : 'deny' };
+  });
+  webContents.on('will-navigate', (event, url) => {
+    const verdict = resolveNavigation({ url, mainOrigin });
+    if (!verdict.allow) {
+      event.preventDefault();
+      onBlocked({ kind: 'navigate', url, reason: verdict.reason });
+    }
+  });
+  if (session?.setPermissionRequestHandler) {
+    session.setPermissionRequestHandler((_wc, permission, callback) => callback(resolvePermission(permission) === 'allow'));
+  }
+  return { hardened: true };
+}

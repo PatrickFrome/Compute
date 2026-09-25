@@ -1,0 +1,36 @@
+{
+  "name": "@me2/desktop",
+  "productName": "METAENGINE Desktop",
+  "version": "0.8.0-dev.0.1",
+  "private": true,
+  "type": "module",
+  "description": "METAENGINE Desktop — Electron PID-1 shell rebuilt from scratch around the ME2 OS system (daemon fleet + Mission Control + browser plane). R78 zero-based rebuild; no legacy RSI-line code.",
+  "author": "ME2 OS",
+  "main": "src/main.mjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PatrickFrome/Compute.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --me2-smoke",
+    "check": "node scripts/check-syntax.mjs",
+    "test": "node --test",
+    "pack:ui": "node scripts/pack-me2-ui.mjs",
+    "verify:installed": "node scripts/verify-installed-bundle.mjs",
+    "verify:builder-copy": "node scripts/verify-builder-copy.cjs",
+    "dist:dir": "electron-builder --dir --publish never",
+    "dist": "electron-builder --win nsis --x64 --publish never"
+  },
+  "dependencies": {
+    "socket.io-client": "4.8.3"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "@electron/fuses": "2.1.3",
+    "electron-builder": "26.16.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
