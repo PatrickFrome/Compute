@@ -5,13 +5,14 @@
  * Smoke mode (--me2-smoke): bring the plane up headless-ish, print the snapshot,
  * exit 0 — the honest machine-checkable probe for CI/operator.
  */
-import { app } from 'electron';
-import { join, dirname } from 'node:path';
+import { app, BrowserWindow } from 'electron';
+import { join } from 'node:path';
 import { LifecycleJournal } from './core/journal.mjs';
 import { Me2Plane } from './me2/plane.mjs';
 import { createWindowShell } from './core/window-shell.mjs';
 import { StagedUpdater } from './update/staged-updater.mjs';
 import { resolveInstanceAction, UPDATE } from './shared/me2-constants.mjs';
+import { createNonce, verifyResurrectionData, resolveSecondaryHandoff } from './me2/instance-nonce.mjs';
 
 const SMOKE = process.argv.includes('--me2-smoke');
 
@@ -26,9 +27,9 @@ async function boot() {
   journal = new LifecycleJournal({ userDataDir });
   journal.record('boot', { version: app.getVersion(), smoke: SMOKE, electron: process.versions.electron });
 
-  const lockAcquired = app.requestSingleInstanceLock();
+  const lockAcquired = app.requestSingleInstanceLock(createNonce()); // payload → primary's second-instance
   const action = resolveInstanceAction({ lockAcquired, hasResurrectionSignal: false });
-  journal.record('instance_guard', { action });
+  journal.record('instance_guard', { action, handoff: resolveSecondaryHandoff({ lockAcquired, data: null }).action });
   if (action !== 'primary') {
     if (SMOKE) console.log(JSON.stringify({ smoke: 'instance_guard', action }));
     app.exit(0);
@@ -52,6 +53,7 @@ async function boot() {
 
   const status = await plane.bringUp();
   journal.record('plane_up', { status });
+  plane.startKeepalive(); // R79: epoch-fenced keepalive (no-ops in tests — not called there)
 
   if (!SMOKE) {
     shell = createWindowShell({ BrowserWindow, journal, log: (r) => journal.record('shell', r) });
@@ -91,8 +93,9 @@ app.on('before-quit', () => {
   journal?.record('exit', {});
   plane?.shutdown();
 });
-app.on('second-instance', () => {
-  journal?.record('second_instance', { resurrect: true });
+app.on('second-instance', (_event, argv, additionalData) => {
+  const ack = verifyResurrectionData(additionalData, { now: Date.now() });
+  journal?.record('second_instance', { resurrect: true, ackOk: ack.ok, reason: ack.reason, argvCount: Array.isArray(argv) ? argv.length : 0 });
   if (shell?.win) {
     if (shell.win.isMinimized()) shell.win.restore();
     shell.win.focus();

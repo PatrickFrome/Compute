@@ -1,7 +1,7 @@
 {
   "name": "@me2/desktop",
   "productName": "METAENGINE Desktop",
-  "version": "0.8.0-dev.0.1",
+  "version": "0.8.1-dev.0.1",
   "private": true,
   "type": "module",
   "description": "METAENGINE Desktop — Electron PID-1 shell rebuilt from scratch around the ME2 OS system (daemon fleet + Mission Control + browser plane). R78 zero-based rebuild; no legacy RSI-line code.",
