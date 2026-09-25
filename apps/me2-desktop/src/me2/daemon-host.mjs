@@ -28,7 +28,7 @@ export class DaemonHost {
     if (!health.ok) return null;
     const state = await probeJson(`http://127.0.0.1:${DAEMON.REST_PORT}${CONTRACT.HANDSHAKE_PATH}`);
     const handshake = parseHandshake(state.json ?? state.text ?? '');
-    this.status = 'adopted';
+    this.status = handshake.ok ? 'adopted' : 'degraded';
     this.log({ plane: 'daemon-host', event: 'adopted', handshake: handshake.ok, contract: handshake.ok ? CONTRACT.SCHEMA : handshake.reason });
     return { health, handshake };
   }
@@ -70,12 +70,14 @@ export class DaemonHost {
    */
   async bringUp({ backoffMs = DAEMON_HOST.RESTART_BACKOFF_MS } = {}) {
     const adopted = await this.adopt();
-    if (adopted) return { ok: true, mode: 'adopted', ...adopted };
+    if (adopted) return { ok: adopted.handshake.ok, mode: adopted.handshake.ok ? 'adopted' : 'degraded', ...adopted };
     for (let attempt = 0; attempt <= DAEMON_HOST.MAX_RESTARTS; attempt += 1) {
       const spawned = await this.spawnDaemon();
       if (spawned.ok) {
         const state = await probeJson(`http://127.0.0.1:${DAEMON.REST_PORT}${CONTRACT.HANDSHAKE_PATH}`);
-        return { ok: true, mode: 'spawned', handshake: parseHandshake(state.json ?? '') };
+        const handshake = parseHandshake(state.json ?? '');
+        this.status = handshake.ok ? 'spawned' : 'degraded';
+        return { ok: handshake.ok, mode: this.status, handshake };
       }
       this.restarts += 1;
       if (this.restarts > DAEMON_HOST.MAX_RESTARTS) break;

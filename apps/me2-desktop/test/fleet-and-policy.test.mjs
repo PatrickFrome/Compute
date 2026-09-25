@@ -1,53 +1,73 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { agentTabUrl, matchTabForSession, FleetTabs } from '../src/me2/fleet-tabs.mjs';
 import { resolveNavigation, resolvePermission } from '../src/core/browser-policy.mjs';
 import { FLEET } from '../src/shared/me2-constants.mjs';
-
-const session = { id: 'chat_abc123', title: 'API 429 Recovery' };
-
-test('fleet tabs: url built from session id', () => {
-  assert.equal(agentTabUrl(session), `${FLEET.ORIGIN}/c/chat_abc123`);
-  assert.equal(agentTabUrl(null), null);
+const session = { id: 'local-api-id', conversation_url: FLEET.ORIGIN + '/c/real-web-id' };
+function setup({ load, ceiling } = {}) {
+  const views = [], focused = [], removed = [];
+  const fleet = new FleetTabs({ ceiling, activate: id => focused.push(id), remove: id => removed.push(id),
+    viewFactory: () => {
+      const wc = new EventEmitter();
+      wc.id = views.length + 1; wc.url = ''; wc.dead = false;
+      wc.getURL = () => wc.url; wc.isDestroyed = () => wc.dead;
+      wc.loadURL = async url => { wc.emit('did-start-navigation', {}, url, false, true); if (load) await load(wc, url); else wc.url = url; };
+      wc.close = () => { wc.dead = true; wc.emit('destroyed'); };
+      const view = { webContents: wc }; views.push(view); return view;
+    } });
+  return { fleet, views, focused, removed };
+}
+test('API IDs, spoof origins and title matches never establish web identity', () => {
+  assert.equal(agentTabUrl({ id: 'abc' }), null);
+  assert.equal(agentTabUrl(session), session.conversation_url);
+  for (const url of ['https://chat.z.ai.evil/c/real-web-id', 'https://evil/c/real-web-id', 'https://x@chat.z.ai/c/real-web-id'])
+    assert.equal(agentTabUrl({ conversation_url: url }), null);
+  assert.equal(matchTabForSession(session, [{ url: session.conversation_url + '-other', title: session.id }]), null);
+  assert.equal(matchTabForSession(session, [{ url: session.conversation_url }, { url: session.conversation_url }]), null);
 });
-
-test('fleet tabs: match by url suffix, ambiguity falls back honestly', () => {
-  const tabs = [{ url: `${FLEET.ORIGIN}/c/chat_abc123?x=1`, title: 't' }];
-  assert.equal(matchTabForSession(session, tabs), tabs[0]);
-  const ambiguous = [
-    { url: `${FLEET.ORIGIN}/c/chat_abc123`, title: 'a' },
-    { url: `${FLEET.ORIGIN}/c/chat_abc123`, title: 'b' },
-  ];
-  assert.equal(matchTabForSession(session, ambiguous), null);
+test('native navigation completes before binding; reuse focuses exact conversation', async () => {
+  const { fleet, views, focused } = setup();
+  const first = await fleet.openAgent(session);
+  assert.equal(first.ok, true); assert.equal(first.reused, false);
+  assert.equal(first.web_contents_id, 1); assert.equal(first.generation, 1);
+  assert.equal(first.execution_authority, false);
+  const second = await fleet.openAgent({ ...session, id: 'different-api-id' });
+  assert.equal(second.reused, true); assert.equal(views.length, 1); assert.equal(focused.length, 2);
 });
-
-test('fleet tabs: open respects ceiling, reuse focuses', () => {
-  const views = [];
-  const ft = new FleetTabs({ viewFactory: ({ url, role }) => (views.push({ url, role }), { url, role }) });
-  for (let i = 0; i < 12; i += 1) {
-    const r = ft.openAgent({ id: `chat_${i}` });
-    assert.equal(r.ok, true);
-  }
-  const overflow = ft.openAgent({ id: 'chat_overflow' });
-  assert.equal(overflow.ok, false);
-  assert.equal(overflow.reason, 'tab_ceiling_reached');
-  const reuse = ft.openAgent({ id: 'chat_1' });
-  assert.equal(reuse.ok, true);
-  assert.equal(reuse.reused, true);
-  assert.equal(ft.list().length, 12);
+test('concurrent open is singleflight and reserves bounded capacity', async () => {
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const { fleet, views } = setup({ ceiling: 1, load: async (wc, url) => { await gate; wc.url = url; } });
+  const first = fleet.openAgent(session), duplicate = fleet.openAgent(session);
+  assert.equal(first, duplicate);
+  assert.equal((await fleet.createConversation()).reason, 'tab_ceiling_reached');
+  release(); assert.equal((await first).ok, true); assert.equal(views.length, 1);
 });
-
-test('browser policy: navigation allowlist', () => {
-  assert.equal(resolveNavigation({ url: `${FLEET.ORIGIN}/c/x` }).allow, true);
-  assert.equal(resolveNavigation({ url: 'https://evil.example.com' }).allow, false);
-  assert.equal(resolveNavigation({ url: 'http://127.0.0.1:3041/health' }).allow, false);
-  assert.equal(resolveNavigation({ url: 'file:///etc/passwd' }).allow, false);
-  assert.equal(resolveNavigation({ url: 'not a url' }).allow, false);
-  assert.equal(resolveNavigation({ url: 'https://me2.local/', mainOrigin: 'https://me2.local' }).allow, true);
+test('login redirect stays unbound, never reports a proven conversation', async () => {
+  const { fleet } = setup({ load: async wc => { wc.url = FLEET.ORIGIN + '/login'; } });
+  const result = await fleet.openAgent(session);
+  assert.equal(result.ok, false); assert.equal(result.reason, 'conversation_not_proven');
+  assert.equal(result.conversation_url, null); assert.equal(result.state, 'UNBOUND');
 });
-
-test('browser policy: permissions deny-by-default', () => {
-  for (const p of ['media', 'geolocation', 'notifications', 'unknown-permission']) {
-    assert.equal(resolvePermission(p), 'deny');
-  }
+test('root seed has no conversation proof; native navigation later establishes identity', async () => {
+  const { fleet, views } = setup();
+  const root = await fleet.createConversation(); assert.equal(root.state, 'UNBOUND');
+  views[0].webContents.url = session.conversation_url;
+  assert.equal(fleet.list()[0].state, 'CONVERSATION_OBSERVED');
+  views[0].webContents.emit('render-process-gone');
+  assert.equal(fleet.list()[0].state, 'INVALIDATED');
+  assert.equal(fleet.list()[0].conversation_url, null);
+});
+test('failed load releases quota and destroys orphan WebContents', async () => {
+  const { fleet, views } = setup({ load: async () => { throw Error('network'); } });
+  assert.equal((await fleet.openAgent(session)).ok, false);
+  assert.equal(fleet.list().length, 0); assert.equal(views[0].webContents.dead, true);
+});
+test('browser policy separates trusted control from remote conversation', () => {
+  assert.equal(resolveNavigation({ url: session.conversation_url }).allow, true);
+  assert.equal(resolveNavigation({ url: session.conversation_url, mainOrigin: 'http://127.0.0.1:8137', trusted: true }).allow, false);
+  for (const url of ['file:///etc/passwd', 'http://127.0.0.1:3041/health', 'https://evil.test'])
+    assert.equal(resolveNavigation({ url }).allow, false);
+  assert.equal(resolvePermission('unknown'), 'deny');
 });

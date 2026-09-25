@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - me2/r78-desktop-from-scratch
+      - work/desktop-web-conversation-integration-v1
       - release/self-update-ambiguity-live-v2
   workflow_dispatch:
 

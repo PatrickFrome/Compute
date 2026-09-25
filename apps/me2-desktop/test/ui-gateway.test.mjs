@@ -41,12 +41,13 @@ test('gateway: proxies to allowed XTransformPort target', async () => {
   }
 });
 
-test('gateway: rejects missing / disallowed / invalid XTransformPort', async () => {
-  const gw = createUiGateway({ port: 0 });
+test('gateway: routes UI and rejects disallowed / invalid XTransformPort', async () => {
+  const gw = createUiGateway({ port: 0, targetMap: { 3000: upstream.address().port } });
   const { port } = await gw.listen();
   try {
     const noParam = await fetch(`http://127.0.0.1:${port}/health`);
-    assert.equal(noParam.status, 400);
+    assert.equal(noParam.status, 200);
+    assert.equal(await noParam.text(), upstreamBody);
     const disallowed = await fetch(`http://127.0.0.1:${port}/x?XTransformPort=9999`);
     assert.equal(disallowed.status, 403);
     const invalid = await fetch(`http://127.0.0.1:${port}/x?XTransformPort=abc`);

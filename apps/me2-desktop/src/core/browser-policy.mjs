@@ -7,7 +7,7 @@
 import { FLEET } from '../shared/me2-constants.mjs';
 
 /** Navigation decision (pure). */
-export function resolveNavigation({ url, mainOrigin } = {}) {
+export function resolveNavigation({ url, mainOrigin, trusted = false } = {}) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -17,7 +17,9 @@ export function resolveNavigation({ url, mainOrigin } = {}) {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     return { allow: false, reason: 'scheme_denied' };
   }
+  if (parsed.username || parsed.password) return { allow: false, reason: 'credentials_denied' };
   if (mainOrigin && parsed.origin === mainOrigin) return { allow: true };
+  if (trusted) return { allow: false, reason: 'control_origin_only' };
   if (parsed.origin === FLEET.ORIGIN) return { allow: true };
   // localhost planes are MAIN-origin assets behind the gateway, never direct nav targets
   if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') return { allow: false, reason: 'loopback_denied' };
@@ -44,19 +46,22 @@ export function resolvePermission(permission) {
 }
 
 /** Wire a WebContentsView with the policy (electron injected; testable via fakes). */
-export function applyPolicy({ webContents, mainOrigin, onBlocked = () => {}, setWindowOpenHandler, session }) {
+export function applyPolicy({ webContents, mainOrigin, onBlocked = () => {}, setWindowOpenHandler, session, trusted = false }) {
   setWindowOpenHandler(({ url }) => {
-    const verdict = resolveNavigation({ url, mainOrigin });
+    const verdict = resolveNavigation({ url, mainOrigin, trusted });
     if (!verdict.allow) onBlocked({ kind: 'window-open', url, reason: verdict.reason });
-    return { action: verdict.allow ? 'allow' : 'deny' };
+    return { action: 'deny' }; // Every native tab must belong to the registry.
   });
-  webContents.on('will-navigate', (event, url) => {
-    const verdict = resolveNavigation({ url, mainOrigin });
+  const guardNavigation = (event, url) => {
+    const verdict = resolveNavigation({ url, mainOrigin, trusted });
     if (!verdict.allow) {
       event.preventDefault();
       onBlocked({ kind: 'navigate', url, reason: verdict.reason });
     }
-  });
+  };
+  webContents.on('will-navigate', guardNavigation);
+  webContents.on('will-redirect', guardNavigation);
+  if (session?.setPermissionCheckHandler) session.setPermissionCheckHandler(() => false);
   if (session?.setPermissionRequestHandler) {
     session.setPermissionRequestHandler((_wc, permission, callback) => callback(resolvePermission(permission) === 'allow'));
   }

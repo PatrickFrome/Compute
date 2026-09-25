@@ -21,18 +21,21 @@ export function verifyManifest(raw) {
     return { ok: false, reason: 'manifest_not_json' };
   }
   if (!m || m.schema !== MANIFEST_SCHEMA) return { ok: false, reason: 'schema_mismatch', seen: m?.schema ?? null };
-  if (typeof m.version !== 'string' || !/^v?\d+\.\d+\.\d+/.test(m.version)) {
+  if (typeof m.version !== 'string' || !/^v?\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(m.version)) {
     return { ok: false, reason: 'version_invalid', seen: m?.version ?? null };
   }
   if (!Array.isArray(m.files) || m.files.length === 0) return { ok: false, reason: 'files_missing' };
+  const names = new Set();
   for (const f of m.files) {
     if (!f || typeof f.name !== 'string' || typeof f.url !== 'string') return { ok: false, reason: 'file_entry_invalid' };
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(f.name) || names.has(f.name.toLowerCase())) return { ok: false, reason: 'file_name_invalid' };
+    names.add(f.name.toLowerCase());
     if (typeof f.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(f.sha256)) {
       return { ok: false, reason: 'file_sha256_invalid', file: f.name ?? null };
     }
     if (!Number.isFinite(f.size) || f.size <= 0) return { ok: false, reason: 'file_size_invalid', file: f.name ?? null };
   }
-  if (typeof m.min_previous_version === 'string' && !/^v?\d+\.\d+\.\d+/.test(m.min_previous_version)) {
+  if (typeof m.min_previous_version === 'string' && !/^v?\d+\.\d+\.\d+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/.test(m.min_previous_version)) {
     return { ok: false, reason: 'min_previous_version_invalid' };
   }
   return { ok: true, manifest: m };

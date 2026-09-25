@@ -10,16 +10,17 @@ import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { join } from 'node:path';
-import { appendJournal, readJournal, readJson } from '../shared/durable-file.mjs';
+import { appendJournal, readJournal, readJson, writeJsonAtomic } from '../shared/durable-file.mjs';
 import { UPDATE } from '../shared/me2-constants.mjs';
 import { verifyManifest, shouldTakeUpdate, verifyFileEntry } from './verified-manifest.mjs';
 
 export class StagedUpdater {
-  constructor({ userDataDir, currentVersion, runningSourceSha = null, fetchImpl = fetch, log = () => {} }) {
+  constructor({ userDataDir, currentVersion, runningSourceSha = null, manifestUrl = '', fetchImpl = fetch, log = () => {} }) {
     this.userDataDir = userDataDir;
     this.currentVersion = currentVersion;
     this.runningSourceSha = runningSourceSha;
     this.fetchImpl = fetchImpl;
+    this.manifestUrl = manifestUrl;
     this.log = log;
     this.stagedDir = join(userDataDir, UPDATE.STAGED_DIR_NAME);
     this.journalFile = join(userDataDir, UPDATE.JOURNAL_NAME);
@@ -35,7 +36,8 @@ export class StagedUpdater {
     return { records, corrupt };
   }
 
-  async checkOnce({ manifestUrl } = {}) {
+  async checkOnce({ manifestUrl = this.manifestUrl } = {}) {
+    if (!manifestUrl) return { ok: false, reason: 'update_channel_not_configured' };
     this.journal({ stage: 'poll', manifestUrl });
     let res;
     try {
@@ -68,6 +70,8 @@ export class StagedUpdater {
   }
 
   async stageManifest(manifest) {
+    const validated = verifyManifest(manifest);
+    if (!validated.ok) return validated;
     await mkdir(this.stagedDir, { recursive: true });
     const targetDir = join(this.stagedDir, manifest.version);
     await rm(targetDir, { recursive: true, force: true });
@@ -106,10 +110,11 @@ export class StagedUpdater {
       version: manifest.version,
       dir: targetDir,
       files: manifest.files.map((f) => f.name),
-      handed_off: true,
+      handed_off: false, // No installer activation/qualification has occurred.
     };
     this.journal(record);
     this.state = { ...this.state, last_check: new Date().toISOString(), last_staged: manifest.version };
+    writeJsonAtomic(join(this.userDataDir, 'update-state.json'), this.state);
     await this.pruneRetention();
     return { ok: true, staged: true, version: manifest.version, dir: targetDir };
   }

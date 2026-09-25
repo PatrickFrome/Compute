@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const APP = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('builder copy mechanism: electron-builder must NOT drop root node_modules under our explicit rule', { timeout: 300000 }, () => {
+test('builder copy mechanism: electron-builder must NOT drop root node_modules under our explicit rule', { timeout: 300000 }, (t) => {
   // Stage-2 physical probe — opt-in: ME2_RUN_COPY_PROBE=1 (CI packaging jobs set it;
   // default unit runs stay fast and honestly SKIP, never silent-green).
   if (process.env.ME2_RUN_COPY_PROBE !== '1') {
+    t.skip('physical builder copy probe not enabled');
     console.log('[builder-copy] SKIP (opt-in): set ME2_RUN_COPY_PROBE=1 to run the physical electron-builder copy proof');
     assert.equal(existsSync(join(APP, 'scripts', 'verify-builder-copy.cjs')), true);
     return;

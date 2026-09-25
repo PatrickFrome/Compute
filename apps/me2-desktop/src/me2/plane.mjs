@@ -24,6 +24,7 @@ export class Me2Plane {
     this.userDataDir = userDataDir;
     this.fence = new EpochFence(); // R79: daemon boot-epoch keepalive
     this.keepaliveTimer = null;
+    this.keepaliveGeneration = 0;
     this.status = {
       daemon: { ok: false, mode: null, handshake: null },
       ui: { ok: false, mode: null },
@@ -81,29 +82,53 @@ export class Me2Plane {
    * Called by main.mjs AFTER bringUp (not inside bringUp — keeps tests hermetic).
    * On epoch change → re-adopt handshake + journal; on silence → backoff.
    */
-  startKeepalive({ baseMs = KEEPALIVE.BASE_MS, firstDelayMs = null } = {}) {
-    if (this.keepaliveTimer) return;
+  startKeepalive({ baseMs = KEEPALIVE.BASE_MS, firstDelayMs = null,
+    probe = () => probeJson(`http://127.0.0.1:${DAEMON.REST_PORT}${CONTRACT.HEALTH_PATH}`, { timeoutMs: 3000 }),
+    schedule = setTimeout, cancel = clearTimeout } = {}) {
+    if (this.keepaliveRunning) return;
+    this.keepaliveRunning = true;
+    this.cancelProbeTimer = cancel;
+    this.fence.baseMs = baseMs;
+    const generation = ++this.keepaliveGeneration;
+    const current = () => this.keepaliveRunning && generation === this.keepaliveGeneration;
     const tick = async () => {
-      const health = await probeJson(`http://127.0.0.1:${DAEMON.REST_PORT}${CONTRACT.HEALTH_PATH}`, { timeoutMs: 3000 });
-      const verdict = this.fence.observe({ ok: health.ok, boot: health.json?.boot ?? null });
-      this.log({ plane: 'keepalive', ...verdict });
-      if (verdict.epochStale) {
-        const re = await this.daemonHost.adopt();
-        this.status.daemon = re?.handshake?.ok === true
-          ? { ...this.status.daemon, handshake: { contract: CONTRACT.SCHEMA, version: re.handshake.version } }
-          : { ...this.status.daemon, handshake: { reason: re?.handshake?.reason ?? 'readopt_failed' } };
+      this.keepaliveTimer = null;
+      let delay = baseMs;
+      try {
+        const health = await probe();
+        if (!current()) return;
+        const verdict = this.fence.observe({ ok: health.ok, boot: health.json?.boot ?? null });
+        delay = verdict.nextProbeMs;
+        this.log({ plane: 'keepalive', ...verdict });
+        if (!health.ok) {
+          this.status.daemon = { ...this.status.daemon, ok: false, handshake: { reason: 'daemon_unreachable' } };
+        } else if (verdict.first || verdict.epochStale || !this.status.daemon.ok) {
+          const re = await this.daemonHost.adopt();
+          if (!current()) return;
+          const ok = re?.handshake?.ok === true;
+          this.status.daemon = { ...this.status.daemon, ok, handshake: ok
+            ? { contract: CONTRACT.SCHEMA, version: re.handshake.version }
+            : { reason: re?.handshake?.reason ?? 'readopt_failed' } };
+        }
+      } catch (error) {
+        if (!current()) return;
+        delay = this.fence.observe({ ok: false }).nextProbeMs;
+        this.status.daemon = { ...this.status.daemon, ok: false, handshake: { reason: 'keepalive_failed' } };
+        this.log({ plane: 'keepalive', event: 'failed', error: String(error?.message ?? error).slice(0, 160) });
+      } finally {
+        // A late health/adopt response cannot resurrect a stopped generation.
+        if (current()) this.keepaliveTimer = schedule(tick, delay);
       }
-      this.keepaliveTimer = setTimeout(tick, verdict.nextProbeMs);
     };
-    this.keepaliveTimer = setTimeout(tick, firstDelayMs ?? baseMs);
+    this.keepaliveTimer = schedule(tick, firstDelayMs ?? baseMs);
   }
 
   stopKeepalive() {
-    if (this.keepaliveTimer) {
-      clearTimeout(this.keepaliveTimer);
-      this.keepaliveTimer = null;
-      this.log({ plane: 'keepalive', event: 'stopped' });
-    }
+    this.keepaliveRunning = false;
+    this.keepaliveGeneration += 1;
+    if (this.keepaliveTimer != null) this.cancelProbeTimer?.(this.keepaliveTimer);
+    this.keepaliveTimer = null;
+    this.log({ plane: 'keepalive', event: 'stopped' });
   }
 
   async shutdown() {

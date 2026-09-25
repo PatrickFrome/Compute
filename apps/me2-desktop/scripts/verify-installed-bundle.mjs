@@ -11,7 +11,7 @@
  * Exit 0 only if everything holds. This is the test that would have caught R77.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { probeInstalledUi } from './probe-installed-ui.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -67,18 +67,21 @@ const electronBin =
   ].find((p) => existsSync(p));
 if (!electronBin) fail('packaged electron binary не найден — нечем проверить запуск');
 
-const probe = spawnSync(electronBin, [join(uiDir, 'server.js')], {
-  encoding: 'utf8',
-  timeout: 20000,
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', PORT: '0', ME2_VERIFY_PROBE: '1' },
-});
-// server.js starts a listener; in probe mode we accept either a clean exit or a
-// timeout kill — what we REJECT is MODULE_NOT_FOUND / startup crash output.
-const out = `${probe.stdout ?? ''}\n${probe.stderr ?? ''}`;
-if (/Cannot find module|MODULE_NOT_FOUND|Error: Cannot/.test(out)) fail(`запуск через упакованный electron упал: ${out.slice(0, 300)}`);
-
-console.log(`[verify-installed-bundle] OK: sha=${manifest.git_sha} build=${manifest.build_id} node_modules=present next=present electron-run=clean`);
-process.exit(0);
+try {
+  if (readFileSync(join(uiDir, '.next', 'BUILD_ID'), 'utf8').trim() !== manifest.build_id) fail('build_id mismatch');
+  function contentBytes(dir) {
+    return readdirSync(dir).reduce((sum, name) => {
+      const full = join(dir, name);
+      if (full === join(uiDir, 'me2-ui-manifest.json')) return sum;
+      const stat = statSync(full);
+      return sum + (stat.isDirectory() ? contentBytes(full) : stat.size);
+    }, 0);
+  }
+  const size = contentBytes(uiDir);
+  if (size !== manifest.size_bytes) fail(`installed size mismatch: ${size} != ${manifest.size_bytes}`);
+  const proof = await probeInstalledUi({ executable: electronBin, uiDir });
+  console.log(JSON.stringify({ ok: true, git_sha: manifest.git_sha, build_id: manifest.build_id, size_bytes: size, ...proof }));
+} catch (error) { fail(error.message); }
 
 function statIsFile(p) {
   try {
