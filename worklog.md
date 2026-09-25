@@ -1521,3 +1521,38 @@ Stage Summary:
 - Директива выполнена: релиз собран (smart-merge PR #957/#958/#959), тесты прогнаны локально+CI, новый релиз опубликован в штатный self-update канал живого браузера.
 - Инфраструктурный след: eval стал контур-честным (ME2_CONTOUR_HOME), probe.sh поднимает изолированный контур вне SYS_READABLE, eval v32, me2-ui .gitignore, turbopack.root.
 - Урок о флейках: тяжёлые E2E под параллельной нагрузкой требуют ретрай-политики (rerun-failed-jobs) — применено, доказано зелёным повтором.
+
+---
+Task ID: R77-MISSION-CONTROL-IN-INSTALLER
+Agent: Z.ai Code (main)
+Task: Директива оператора (trace 1a0d5d9d251c35c9): «браузер обновился, но выглядит полностью по старому — браузер должен включать все новейшие модули и новый интерфейс».
+
+Work Log (статус: PR #960 merged, CI в прогоне):
+- ДИАГНОЗ (подтверждён кодом): установщик собирается в metaengine-browser-self-update-fast-e2e.yml (windows job → test/self-update-fast-physical-candidate.ps1 → npx electron-builder --config electron-builder.test.json). Конфиг сборщика ОБЪЯВЛЯЕТ extraResources me2-ui-dist → me2-ui (контракт R52/C7, «панели Mission Control едут в установщике»), но НИ ОДИН шаг CI не собирал apps/me2-ui и не создавал apps/metaengine-browser/me2-ui-dist → electron-builder молча пропускал → в релизе v0.7.0-dev.36071623683.1 НЕТ resources/me2-ui → me2-ui-host честно DEGRADED (me2_ui_dir_not_found) → me2-mission-control resolveUiUrl() падает на фолбэк DAEMON_UI_URL = GET /ui daemon'а = самодостаточная легаси-страница R49-R60 → оператор видит «полностью по старому». Контракт-тесты это не ловили: проверяют НАЛИЧИЕ записи extraResources в json, а не существование каталога.
+- ФИКС (PR #960, merge 9f643250d в release/self-update-ambiguity-live-v2): в windows job fast-e2e добавлены шаги ДО физической сборки кандидата: npm i -g bun → bun install --frozen-lockfile (apps/me2-ui) → bun run build (Next standalone, ME2_BUILD_SHA=github.sha) → node scripts/pack-me2-ui.mjs → Copy-Item me2-ui-dist в apps/metaengine-browser/ с жёсткими ассертами контракта (server.js, .next/BUILD_ID, me2-ui-manifest.json, schema, sha==GITHUB_SHA). timeout-minutes 36→55.
+- me2-ui-host.mjs (браузер): честный node-фолбэк — если ME2_UI_BIN не задан и bun недоступен на машине оператора, спавн process.execPath (Electron) с ELECTRON_RUN_AS_NODE=1 + NODE_ENV=production, запускает упакованный standalone server.js напрямую. Явный ME2_UI_BIN и dev-режим сохраняют legacy-поведение. bunAvailable() — ленивая spawnSync-проба с кэшем.
+- Локальные доказательства: свежий next standalone build PASS; pack OK (build_id=aPeOOauUy…, 69.6 MiB, schema me2.ui-bundle-manifest.v1, sha совпадает); node --check на патченном ui-host; боевой smoke фолбэка: PORT=3211 node server.js → HTTP 200 text/html из dist; YAML валиден (шаги в windows job, contract-job не тронут). apps/me2-ui/.gitignore += me2-ui-dist/.
+- Пайплайн-инварианты не тронуты: beforePack/afterAllArtifactBuild (guardian trust root), electron-builder.test.json (уже содержал контракт extraResources), physical harness, exact-SHA publisher. ELECTRON_RUN_AS_NODE-паттерн уже используется кодовой базой (sentinel worker).
+- CI на 9f643250d: ME2 Unified Gate SUCCESS, Self Update Durability Gate SUCCESS; Fast Self Update E2E (с нашим UI-билдом) in_progress; дальше Evidence Gate → Fast Verified Dev Release (autorelease) → новый релиз v0.7.0-dev.<run>.1 С УПАКОВАННЫМ Mission Control (R75 UI) в resources/me2-ui.
+- Ожидаемый эффект у оператора: self-update заберёт новый prerelease; после установки ui-host спавнит Next UI (:3000) → ui-gateway (:8137, XTransformPort→daemon :3040/3041/3042/3043) → Mission Control открывает R75 Command Center (ChatGPT-минимализм, агенты слева, настоящий браузер в центре) вместо легаси GET /ui.
+
+Stage Summary:
+- Причина «старого интерфейса после обновления» устранена на уровне пайплайна (не UI): Mission Control теперь физически едет в установщике из того же exact SHA, с контракт-ассертами против тихого пропуска.
+- Честные границы: daemon по-прежнему НЕ бандлится в установщик (daemon-host усыновляет живой/спавнит bun index.ts — свежая инсталляция без bun-демона на машине останется DEGRADED по daemon-плоскости; отдельная задача); трекинговый .next в apps/me2-ui (1586 файлов из их линии) не трогал — гигиена вне скоупа, чтобы не дестабилизировать их пайплайн.
+
+---
+Task ID: R77-FINAL
+Agent: Z.ai Code (main)
+Task: R77 завершение — CI-цепочка доведена до релиза с упакованным Mission Control; полная капсула R77 собрана и залита в облачный хост по запросу оператора (trace 1a0d62692be0fe4d).
+
+Work Log:
+- CI на e7ded9dae (merge #962): fast-e2e attempt 2 SUCCESS (windows-цепочка с упакованным UI полностью: build+pack+stage+physical electron-builder+published-baseline→N+1+Guardian); full-e2e 36078514181 attempt 2 SUCCESS (attempt 1 — CP-W1 флейк в contract); evidence gate 36078514154 и autorelease 36078514120 — attempt 3 запущены при запечатывании капсулы (до этого честно фейлились на convergence, пока full-e2e не был зелёным).
+- Диагноз-паттерн R77 зафиксирован в капсуле как урок: контракт extraResources без сборки источника = мёртвая запись; контракт-тесты должны проверять существование каталога/артефакта, не только конфиг.
+- КАПСУЛА R77 (запрос оператора «сделай полную капсулу для следующего чата, включая worklog и отчёты, залей в облачный хост»): /home/z/my-project/me2-capsule-r77/ — 00_START_HERE_CAPSULE.md (точка старта, git-топология, инварианты, первые шаги), 01_ENDPOINTS_AND_INVARIANTS.md (порты/контракты/vault-имена БЕЗ значений секретов), 02_RELEASE_AND_SELFUPDATE.md (хроника R76-R77 + грабли CI + механика self-update), 03_OPERATOR_REPORT_R74-R77.md (отчёт по четырём раундам), worklog.md (полный, R17-R77), prev-capsule-2026-09-21/ (предыдущая капсула целиком, включая worklog-recovered-entries и reports), docs/ (me2-ui-redesign и др.), qa/ (22 скриншота r65-r75). Итог: 44 файла, 2.68 MiB zip, sha256 80e35fa09292841c….
+- Заливка в облачный хост: GitHub Releases (канал-безопасно: служебный prerelease capsule-me2-r77 БЕЗ dev.yml/манифестов — self-update браузера его не подхватывает) → ассет me2-capsule-r77-2026-09-25.zip, state=uploaded. URL: https://github.com/PatrickFrome/Compute/releases/download/capsule-me2-r77/me2-capsule-r77-2026-09-25.zip (страница: …/releases/tag/capsule-me2-r77).
+- PAT-гигиена соблюдена во всех set-url/push/PR/merge/release-вызовах (токен нигде не залогирован).
+
+Stage Summary:
+- Релиз с Mission Control в установщике: все физические и контрактные гейты зелёные; публикация = штатный autorelease (ретраи запущены). Преемник: убедиться в зелёности evidence 36078514154 → autorelease 36078514120 → взять новый v0.7.0-dev.<run>.1 из /releases (exe вырастет со 115.8 МБ) → дать ссылку оператору.
+- Капсула R77 опубликована и доступна оператору по прямой ссылке; формат воспроизводит прецедент a2-capsule (2026-09-21) и расширяет его отчётным блоком R74-R77.
+- Секреты: ноль значений в капсуле (только имена файлов/переменных) — капсула лежит в cloud-хосте и не должна быть носителем креденшелов.
