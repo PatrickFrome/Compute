@@ -9878,3 +9878,21 @@ Work Log:
 
 Stage Summary:
 - раунд 10 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+---
+Task ID: R80-DESKTOP-1A-20260927
+Agent: Super-Z (операторская директива trace 1a0dfc4236ba0ca9 «скрипт должен самоулучшаться, проводить аудит и двигать разработку desktop клиента дальше»)
+Task: ME2-раунд: self-evolve тик + аудит + desktop-клиент (me2/r78-desktop-from-scratch): GAP #1a activation/handoff/qualification
+
+Work Log:
+- вход-аудит раунда: daemon 0.21.0 (47/47, ok, last_seq 226), git clean @ 723fe9dc, секреты /home/z/.a2/.github.env на месте (значения не печатались); full-audit 06:02: DONE=17 PARTIAL=1 BLOCKED=3 (Supabase JWT pending operator; R2 secret access key не передан — известные блокеры)
+- desktop-рельс восстановлен локально: worktree /home/z/me2-desktop на origin/me2/r78-desktop-from-scratch (8cf09ad7, R79-состояние, курсор матрицы 4.5/8)
+- GAP #1a реализован: src/update/activator.mjs — resolveBootActivation (чистая матрица verdict'ов: idle/qualifying/version_mismatch/id_mismatch/applied_unconfirmed/rolled_back/orphan_flag/stale; TTL pending 10мин) + ActivationManager (requestFromStaged → durable pending-activation.json; spawnHandoff → detached NSIS /S + unref на before-quit; qualify → boot-alive окно 30с → journal qualified + pending снят; rolled_back-семейство журналируется честно, staged-артефакты сохраняются для ретрая)
+- wiring: main.mjs (activation-вердикт ДО plane; авто-arm при свежем staging; smoke-snapshot несёт activation.verdict; IPC me2:update-apply / me2:activation-status), preload.cjs +applyUpdate/+activationStatus (аддитивно, bridge.v1 не сломан), me2-constants +ACTIVATION (--me2-activation, NSIS /S, .exe-паттерн)
+- тесты: +20 → suite 86/86 GREEN (node --test, Node 24), check-syntax OK 34 файла; версия 0.8.1-dev.0.1 → 0.8.2-dev.0.1; GAP-ROADMAP: 1a → ✅ R80, курсор 5.5/8, очередь R81 = #2 Guardian-parity лайт
+- push: 8d276feb → me2/r78-desktop-from-scratch (новый scripts/push-desktop-r80.sh, PAT-safe: URL восстанавливается, секрет не печатался); CI gate (contract + package-proof) запущен на 8d276feb
+- самоулучшение: self-evolve self-check OK (mirrors 2/2 synced), evolve round=10 client=200 lint=0/0 score=83% next_task=EV-TOASTS; self-update "implemented-DESKTOP-1A" → v1.22
+- rail: worklog + push main→sandbox/me2-os через git-sync.sh (см. Stage Summary R80-PUSH-* паттерн)
+
+Stage Summary:
+- Desktop: GAP #1a закрыт — staged-обновление применяет себя: detached-установщик при выходе, qualification-окно после перезапуска, честный откат; курсор 5.5/8; CI gate на 8d276feb — 3-й зелёный прогон даст оператору основание для PR в release/self-update-ambiguity-live-v2
+- Console: бэклог движка = EV-TOASTS (следующий консольный тик); протокол раунда соблюдён: тик закончился кодом, версия bump, suite зелёный, ветка запушена
