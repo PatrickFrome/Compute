@@ -14,6 +14,7 @@ import {
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
 const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
+const integration = await readFile(new URL('../src/me2/me2-integration-entry.mjs', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -66,4 +67,15 @@ test('ME2 page navigation controls presentation only through the trusted preload
   assert.match(main, /browser_command_authority:\s*false/);
   assert.match(main, /release_authority:\s*false/);
   assert.match(main, /authority_effect:\s*false/);
+});
+
+
+test('concurrent primary-window startup joins the same ME2 readiness barrier', () => {
+  const inflight = integration.indexOf('if (startPromise) return startPromise;');
+  const startedGuard = integration.indexOf('if (started || stoppedFlag) return me2IntegrationStatus();', inflight);
+  assert.ok(inflight >= 0);
+  assert.ok(startedGuard > inflight);
+  assert.match(integration, /startPromise = startMe2IntegrationOnce\(\{ app \}\)/);
+  assert.match(integration, /return await startPromise/);
+  assert.match(integration, /finally \{[\s\S]*startPromise = null/);
 });
