@@ -193,7 +193,7 @@ jobs:
             --smoke --evidence $daemonEvidence
           if ($LASTEXITCODE -ne 0) { throw 'package_smoke_installed_me2_daemon_invalid' }
           $daemonProof = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
-          if ($daemonProof.runtime_smoke -ne 'PASS' -or $daemonProof.external_bun_required -ne $false) { throw 'package_smoke_me2_daemon_proof_invalid' }
+          if ($daemonProof.runtime_smoke -ne 'PASS' `n              -or $daemonProof.external_bun_required -ne $false `n              -or $daemonProof.smoke_child_external_runtime_path_sanitized -ne $true) { throw 'package_smoke_me2_daemon_proof_invalid' }
           $proof | Add-Member -NotePropertyName me2_daemon_installed_verified -NotePropertyValue $true -Force
           $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
           $proof | Add-Member -NotePropertyName me2_daemon_executable_sha256 -NotePropertyValue ([string]$daemonProof.executable_sha256) -Force
