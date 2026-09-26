@@ -46,6 +46,8 @@ const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/page
 const me2TasksPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
 const me2Dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
 const me2ContextDrawer = await readFile(new URL('../../me2-ui/src/components/me2/shell/context-drawer.tsx', import.meta.url), 'utf8');
+const r85VisualHarness = await readFile(new URL('./me2-r85-visual-evidence.mjs', import.meta.url), 'utf8');
+const packageSmokeWorkflow = await readFile(new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -254,6 +256,21 @@ test('installed ME2 primary shell is attested from main-process CDP DOM geometry
 });
 
 
+
+test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy shell fixtures', () => {
+  assert.match(packageSmokeWorkflow, /Capture R85 primary ME2 visual evidence/);
+  assert.match(packageSmokeWorkflow, /test\/me2-r85-visual-evidence\.mjs/);
+  assert.match(packageSmokeWorkflow, /r85-primary-visual\/r85-visual-evidence\.json/);
+  assert.match(packageSmokeWorkflow, /r85-primary-visual\/\*\.png/);
+  assert.match(r85VisualHarness, /metaengine\.browser\.r85-visual-evidence\.v1/);
+  assert.match(r85VisualHarness, /primary_me2_ui_captured:\s*true/);
+  assert.match(r85VisualHarness, /legacy_shell_captured:\s*false/);
+  assert.match(r85VisualHarness, /remote_browser_content_captured:\s*false/);
+  assert.match(r85VisualHarness, /closed_overlays_absent_from_dom:\s*true/);
+  assert.match(r85VisualHarness, /capturePage\(\)/);
+  assert.match(r85VisualHarness, /r85-command-1440x960/);
+  assert.match(r85VisualHarness, /r85-command-drawer-1440x960/);
+});
 
 test('R85 control-room chrome keeps closed overlays out of the semantic tree', () => {
   assert.match(me2Shell, /\{paletteOpen \? <CommandPalette \/> : null\}/);
