@@ -206,8 +206,10 @@ test('R85 persistent chrome is compact and cannot directly fire emergency flush'
   assert.match(me2Pagebar, /className="flex h-9/);
   assert.match(me2Statusbar, /h-\[22px\]/);
   assert.doesNotMatch(me2Statusbar, /budgetFlush|BUDGET_FLUSH|EMERGENCY/);
-  assert.match(me2Palette, /window\.confirm\("Сбросить очередь command bus\?/);
+  assert.doesNotMatch(me2Palette, /window\.confirm\(|window\.prompt\(/);
   assert.match(me2Palette, /BUDGET_FLUSH:\s*confirmBudgetFlush/);
+  assert.match(me2Palette, /data-testid="emergency-flush-confirm"/);
+  assert.match(me2Palette, /setConfirmFlush\(true\)/);
 });
 
 test('R85 Command remains an integrated native-stage workbench with R75 anchors', () => {
@@ -299,6 +301,13 @@ test('R85 Task Sheet schedules scroll after commit, never during render', () => 
   assert.match(me2Dialogs, /requestAnimationFrame\(\(\) => \{/);
   assert.match(me2Dialogs, /\[detail\?\.id, stream\.length\]/);
   assert.doesNotMatch(me2Dialogs, /if \(detail\) setTimeout\(/);
+});
+
+test('R85 registry command arguments stay inside the semantic palette', () => {
+  assert.match(me2Palette, /data-testid="registry-action-args"/);
+  assert.match(me2Palette, /JSON\.parse\(pendingArgs\)/);
+  assert.match(me2Palette, /sendCommand\(pendingAction\.action, payload/);
+  assert.doesNotMatch(me2Palette, /window\.prompt\(/);
 });
 
 test('R85 command palette exposes full authority lanes instead of abbreviated color-only hints', () => {
