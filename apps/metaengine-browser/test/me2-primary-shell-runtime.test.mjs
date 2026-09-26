@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT,
   ME2_PRIMARY_COMMAND_GAP,
   ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH,
   ME2_PRIMARY_PAGEBAR_HEIGHT,
@@ -36,12 +37,12 @@ test('R75 primary shell keeps ME2 chrome and agent rail outside the native Brows
   });
   assert.equal(plan.surface_profile, 'ME2_R75_COMMAND');
   assert.equal(plan.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP);
-  assert.equal(plan.remote_bounds.y, ME2_PRIMARY_TOP_HEIGHT + 8 + 32 + 8);
+  assert.equal(plan.remote_bounds.y, ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT + ME2_PRIMARY_COMMAND_GAP);
   assert.equal(
     plan.remote_bounds.width,
     1440 - (ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP) - ME2_PRIMARY_PAGE_PADDING,
   );
-  assert.equal(plan.reserved_bottom_height, ME2_PRIMARY_PAGEBAR_HEIGHT + ME2_PRIMARY_STATUSBAR_HEIGHT + 8);
+  assert.equal(plan.reserved_bottom_height, ME2_PRIMARY_PAGEBAR_HEIGHT + ME2_PRIMARY_STATUSBAR_HEIGHT + ME2_PRIMARY_PAGE_PADDING);
   assert.equal(plan.remote_bounds.height, 960 - plan.remote_bounds.y - plan.reserved_bottom_height);
   assert.equal(plan.overlay_remote_content, false);
   assert.equal(plan.renderer_dimensions_authoritative, false);
