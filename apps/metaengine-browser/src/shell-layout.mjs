@@ -19,6 +19,8 @@ export const ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT = 32;
 export const ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT = 28;
 export const ME2_PRIMARY_BROWSER_URLBAR_HEIGHT = 36;
 export const ME2_PRIMARY_BROWSER_STATUS_HEIGHT = 24;
+export const ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT = 200;
+export const ME2_PRIMARY_MIN_BROWSER_HEIGHT = 320;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const OPERATIONS_MODES = new Set(['OPEN', 'CLOSED']);
@@ -57,7 +59,14 @@ function sidebarWidth(mode) {
   return 0;
 }
 
-export function planShellLayout({ width, height, state, surface_profile = 'LEGACY_BROWSER_SHELL', me2_command_rail_open = true } = {}) {
+export function planShellLayout({
+  width,
+  height,
+  state,
+  surface_profile = 'LEGACY_BROWSER_SHELL',
+  me2_command_rail_open = true,
+  me2_context_drawer_open = false,
+} = {}) {
   const windowWidth = finiteDimension(width, 'width');
   const windowHeight = finiteDimension(height, 'height');
   const requested = state?.schema === 'metaengine.browser-shell.layout-state.v1'
@@ -109,13 +118,21 @@ export function planShellLayout({ width, height, state, surface_profile = 'LEGAC
         + ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
       windowHeight,
     );
-    bottom = Math.min(
+    const baseBottom = Math.min(
       ME2_PRIMARY_PAGEBAR_HEIGHT
         + ME2_PRIMARY_STATUSBAR_HEIGHT
         + ME2_PRIMARY_PAGE_PADDING
         + ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
       Math.max(0, windowHeight - top),
     );
+    const drawerRequested = me2_context_drawer_open === true;
+    const drawerFits = windowHeight - top - baseBottom - ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT >= ME2_PRIMARY_MIN_BROWSER_HEIGHT;
+    const drawerEffective = drawerRequested && drawerFits;
+    bottom = Math.min(
+      baseBottom + (drawerEffective ? ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT : 0),
+      Math.max(0, windowHeight - top),
+    );
+    if (drawerRequested && !drawerFits) adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
     const preferredLeft = ME2_PRIMARY_PAGE_PADDING
       + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH
       + ME2_PRIMARY_COMMAND_GAP;
@@ -156,6 +173,14 @@ export function planShellLayout({ width, height, state, surface_profile = 'LEGAC
     active_surface_target_satisfied: contentWidth >= activeSurfaceWidthTarget,
     active_surface_priority: true,
     me2_command_rail_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_command_rail_open !== false : null,
+    me2_context_drawer_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_context_drawer_open === true : null,
+    me2_context_drawer_effective_open: surfaceProfile === 'ME2_R75_COMMAND'
+      ? (me2_context_drawer_open === true && !adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE'))
+      : null,
+    me2_context_drawer_height: surfaceProfile === 'ME2_R75_COMMAND' && me2_context_drawer_open === true
+      && !adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE')
+      ? ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT
+      : 0,
     chrome_degrades_before_active_surface: true,
     adaptations: Object.freeze(adaptations),
     adapted: adaptations.length > 0,
