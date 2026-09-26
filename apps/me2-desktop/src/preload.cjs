@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld('me2', {
   },
   daemon: { status, restart: which => ipcRenderer.invoke('me2:restart', which) },
   update: { check: () => ipcRenderer.invoke('me2:update-check'), apply: () => ipcRenderer.invoke('me2:update-apply') },
+  webConversations: {
+    list: () => ipcRenderer.invoke('me2:list-conversations'),
+    open: url => ipcRenderer.invoke('me2:open-site', url),
+    focus: id => ipcRenderer.invoke('me2:focus-conversation', id),
+    create: () => ipcRenderer.invoke('me2:new-conversation'),
+  },
   chats: { create: () => ipcRenderer.invoke('me2:new-conversation') },
   onTabActivated: subscribe('me2:tab-activated'),
   onProcStatus: subscribe('me2:proc-status'),

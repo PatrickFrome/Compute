@@ -104,6 +104,11 @@ function handleTrusted(channel, handler) {
   });
 }
 handleTrusted('me2:status', () => ({ ok: Boolean(plane), ...(plane?.snapshot() ?? {}), web_conversations: fleet?.list() ?? [] }));
+handleTrusted('me2:list-conversations', () => ({ ok: Boolean(fleet), conversations: fleet?.list() ?? [] }));
+handleTrusted('me2:focus-conversation', id => {
+  if (!fleet?.list().some(row => row.tab_id === id && row.state !== 'INVALIDATED')) return { ok: false, reason: 'conversation_unavailable' };
+  return shell.activate(id);
+});
 handleTrusted('me2:open-agent', session => fleet?.openAgent(session) ?? { ok: false, reason: 'fleet_unavailable' });
 handleTrusted('me2:new-conversation', () => fleet?.createConversation() ?? { ok: false, reason: 'fleet_unavailable' });
 handleTrusted('me2:open-site', url => {

@@ -327,7 +327,7 @@ export function SystemPage() {
           </Sec>
 
           {/* ME7: SELF-UPDATE */}
-          <Sec id="sys-selfupdate" title="SELF-UPDATE" icon={GitMerge} tone="amber">
+          <Sec id="sys-selfupdate" defaultOpen title="SELF-UPDATE" icon={GitMerge} tone="amber">
             <div className="space-y-1.5" data-testid="selfupdate-card">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME7: ff-only из sandbox/me2-os; барьеры dirty/diverged; 403 = гейт authority_effect">

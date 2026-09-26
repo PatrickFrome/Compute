@@ -22,28 +22,7 @@ export function Dot({ on, pulse }: { on: boolean; pulse?: boolean }) {
 }
 
 // ── useCountUp: плавный счётчик KPI ─────────────────────────────────────────────
-export function useCountUp(target: number): number {
-  const [val, setVal] = useState(target);
-  const raf = useRef<number | null>(null);
-  const from = useRef(target);
-  useEffect(() => {
-    if (from.current === target) return;
-    const start = performance.now();
-    const a = from.current;
-    const step = (t: number) => {
-      const p = Math.min(1, (t - start) / 320);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const v = Math.round(a + (target - a) * eased);
-      setVal(v);
-      if (p < 1) raf.current = requestAnimationFrame(step);
-      else { from.current = target; }
-    };
-    raf.current = requestAnimationFrame(step);
-    return () => { if (raf.current) cancelAnimationFrame(raf.current); };
-  }, [target]);
-  useEffect(() => { from.current = val; }, [val]);
-  return val;
-}
+export function useCountUp(target: number): number { return target; }
 
 // ── KpiTile: плитка метрики ─────────────────────────────────────────────────────
 export function KpiTile({ label, value, icon: Icon, tone = "zinc", hot }: {
@@ -168,12 +147,12 @@ export function Chip({ label, value, tone = "zinc", title }: {
 }
 
 // ── Sec: сворачиваемая секция-карточка (базовый строительный блок страниц) ──────
-export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true, tone = "zinc", dense }: {
+export function Sec({ id, title, icon: Icon, right, children, defaultOpen = false, tone = "zinc", dense }: {
   id: string; title: string; icon: LucideIcon; right?: ReactNode; children: ReactNode;
   defaultOpen?: boolean; tone?: "zinc" | "emerald" | "amber" | "rose" | "cyan" | "violet" | "teal"; dense?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const lsKey = `me2.sec.${id}`;
+  const lsKey = `me2.sec.quiet-v1.${id}`;
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
@@ -200,10 +179,10 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
           type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`}
           className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-zinc-900/60"
         >
-          <Icon className={`h-3.5 w-3.5 shrink-0 ${tones[tone]}`} aria-hidden />
+
           <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-300">{title}</span>
         </button>
-        {right && <div className="flex shrink-0 items-center gap-1.5 pr-1">{right}</div>}
+        {open && right && <div className="flex shrink-0 items-center gap-1.5 pr-1">{right}</div>}
         <button
           type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`} aria-label={open ? "свернуть секцию" : "развернуть секцию"}
           className="flex shrink-0 items-center px-2 py-2 text-zinc-600 hover:text-zinc-300"

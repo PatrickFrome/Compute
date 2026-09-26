@@ -55,7 +55,7 @@ export class UiHost {
     const plan = this.buildSpawnPlan();
     let bin;
     let args;
-    const env = { ...this.env, NODE_ENV: 'production', PORT: String(UI.PORT) };
+    const env = { ...this.env, NODE_ENV: 'production', PORT: String(UI.PORT), ME2_WATCHDOG: 'off' };
     if (plan.mode === 'bun-dev') {
       bin = this.env.ME2_UI_BIN || 'bun';
       args = plan.args;

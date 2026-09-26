@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   turbopack: { root: __dirname },
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   reactStrictMode: false,
 };

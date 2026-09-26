@@ -27,8 +27,24 @@ export interface Me2UpdateInfo {
   error?: string;
 }
 
+export interface WebConversation {
+  tab_id: string;
+  web_contents_id: number | null;
+  generation: number;
+  conversation_url: string | null;
+  state: "INVALIDATED" | "CONVERSATION_OBSERVED" | "UNBOUND";
+  execution_authority: false;
+}
+export interface DesktopResult { ok: boolean; reason?: string; error?: string }
+
 /** Реестр вкладок браузера ME2 (R41 TabRegistry): панельные + нативные WEB-вкладки. */
 export interface Me2DesktopBridge {
+  webConversations?: {
+    list(): Promise<{ ok: boolean; conversations: WebConversation[] }>;
+    open(url: string): Promise<DesktopResult>;
+    focus(id: string): Promise<DesktopResult>;
+    create(): Promise<DesktopResult>;
+  };
   env: "electron";
   version: string;
   platform: string;

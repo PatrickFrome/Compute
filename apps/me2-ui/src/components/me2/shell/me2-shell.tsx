@@ -4,6 +4,7 @@
 // · PageBar (Resolve-навигация) · StatusBar · GlobalDialogs + Palette + toast-мост.
 
 import { useEffect } from "react";
+import dynamic from "next/dynamic";
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
@@ -11,16 +12,16 @@ import { PageBar } from "@/components/me2/shell/pagebar";
 import { StatusBar } from "@/components/me2/shell/statusbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
-import { CommandPage } from "@/components/me2/pages/command";
-import { AgentsPage } from "@/components/me2/pages/agents";
-import { BrowserPage } from "@/components/me2/pages/browser";
-import { CodePage } from "@/components/me2/pages/code";
-import { TasksPage } from "@/components/me2/pages/tasks";
-import { SupervisorPage } from "@/components/me2/pages/supervisor";
-import { ComputePage } from "@/components/me2/pages/compute";
-import { MemoryPage } from "@/components/me2/pages/memory";
-import { ObservabilityPage } from "@/components/me2/pages/observability";
-import { SystemPage } from "@/components/me2/pages/system";
+const CommandPage = dynamic(() => import("@/components/me2/pages/command").then(m => m.CommandPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const AgentsPage = dynamic(() => import("@/components/me2/pages/agents").then(m => m.AgentsPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const BrowserPage = dynamic(() => import("@/components/me2/pages/browser").then(m => m.BrowserPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const CodePage = dynamic(() => import("@/components/me2/pages/code").then(m => m.CodePage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const TasksPage = dynamic(() => import("@/components/me2/pages/tasks").then(m => m.TasksPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const SupervisorPage = dynamic(() => import("@/components/me2/pages/supervisor").then(m => m.SupervisorPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const ComputePage = dynamic(() => import("@/components/me2/pages/compute").then(m => m.ComputePage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const MemoryPage = dynamic(() => import("@/components/me2/pages/memory").then(m => m.MemoryPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const ObservabilityPage = dynamic(() => import("@/components/me2/pages/observability").then(m => m.ObservabilityPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
+const SystemPage = dynamic(() => import("@/components/me2/pages/system").then(m => m.SystemPage), { loading: () => <p className="p-4 text-sm text-zinc-500">Загрузка…</p> });
 
 function PageOutlet({ page }: { page: PageKey }) {
   switch (page) {

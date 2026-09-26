@@ -188,7 +188,7 @@ export function MemoryPage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-2">
         {/* кол.1: MEMORY */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="memory-list" title="MEMORY" icon={Database} tone="teal"
+          <Sec id="memory-list" defaultOpen title="MEMORY" icon={Database} tone="teal"
             right={<>
               {mem && (
                 <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="SQLite WAL — переживает рестарт (исправление CAVEAT M13/R6)">

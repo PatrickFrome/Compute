@@ -34,6 +34,7 @@ function spawnDaemon(): void {
       stdio: "ignore",
       env: { ...process.env, ME2_WATCHDOG: "off" },
     });
+    child.on("error", error => console.error("[me2-watchdog] spawn failed:", error.message));
     child.unref();
     console.log("[me2-watchdog] spawned me2-daemon pid=", child.pid);
   } catch (e) {
