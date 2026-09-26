@@ -1742,3 +1742,22 @@ Stage Summary:
 - НОВЫЙ P0 (первый приоритет): починить branch audit — расширить фильтр покрытия (me2/repair/fix/tmp/scratch/perf и т.д. — 78 веток вне аудита), восстановить UNRELATED_HISTORY-классификацию в auditor.mjs, сменить/добавить триггерную ветку.
 - convergence-план (R81): от cf747798 новая ветка: +2 desktop commits (me2/r78) +5 commits #967 + Guardian effect contracts (admission/dispatch permit) + Browser execution adapter + root-seed rollover fix; Supervisor P0 ROOT_SEED_CONVERSATION_NOT_PROVEN остаётся открытым гейтом.
 - Публикация: запись в local worklog, уйдёт на GitHub скриптом push-pending (ba623a59) сразу после появления PAT; cron 413338 продолжает мониторинг (тик 73, 10:22 — токена нет).
+
+---
+Task ID: R80-CAPSULE-R77-ANALYSIS
+Agent: Super Z (main agent)
+Task: «проанализируй купсулу» — полный анализ me2-capsule-r77-2026-09-25 (zip не сохранился на диске; анализ по распакованному /tmp/my-project/me2-capsule-r77 + git-тегу capsule-me2-r77).
+
+Work Log:
+- Идентификация: капсула полной передачи контекста R77, запечатана 2026-09-25 ~01:23–01:41 UTC (отправитель web-0e323763, trace 1a0d5d9d→1a0d62692). Состав: 4 MD-дока (00 START / 01 ENDPOINTS+INVARIANTS / 02 RELEASE+SELFUPDATE / 03 OPERATOR REPORT R74–R77), worklog.md (73 записи R16→R77, 1541 строка, 470K), docs/ (5 файлов: legacy mission-control 389K, me2-ui-redesign contract, electron-rebuild-plan, supabase-rpc-registry, version-matrix), qa/ (23 скриншота R21→R74), prev-capsule-2026-09-21/ (+история до R17).
+- Скан секретов: CLEAN — паттерны ghp_/github_pat_/ghs_/sk- отсутствуют; только имена vault-файлов (соблюдён инвариант §4.1). ✅
+- Верификация git-тега capsule-me2-r77 (f689af62, есть на remote): коммит «R76: release published v0.7.0-dev.36071623683.1» на ЛИНИИ sandbox/me2-os (не release). merge-base с release ПУСТ — истории unrelated; 111 коммитов ME2-линии (R69→R76 worklog-коммиты) сохранены только в теге/капсуле, в release попали через smart-merge PR #957–#962. Это подтверждает документированную топологию капсулы (§2) и механику smart-merge.
+- Проверка чек-листа «первых шагов» капсулы (§1.4): РАЗРЕШЁН. ls-remote --tags: v0.7.0-dev.36078514203.1 → e7ded9dae (merge #962 — релиз с упакованным Mission Control, изданный ПОСЛЕ запечатывания ретраями evidence/autorelease) и v0.7.0-dev.36089462649.1 → cf747798 (текущий tip release, merge PR #966, включает #963–#966: bundle gate, maintenance cooldown, rearm). Всего dev-тегов: 71.
+- Полнота worklog-цепочки капсулы: R16→R77 непрерывно, честные пропуски нумерации R38–R42, R45. ✅
+- Сверка с внешним аудитом (R80-BRANCH-GRAPH-EXTERNAL-AUDIT): противоречий нет; бэклог-пункт капсулы #2 (main↔release merge — решение оператора) superseded стратегией convergence (DO NOT MERGE main, строить от cf747798).
+
+Stage Summary:
+- Капсула точна и внутренне непротиворечива: все проверяемые утверждения верифицированы (9/9), секретов нет, чек-лист запечатывания полностью разрешился пост-фактум (релизы 36078514203.1 и 36089462649.1 вышли).
+- Капсула НЕ знает о событиях после 2026-09-25 01:41: R78 (desktop-from-scratch/#967), R79, R80 (потеря PAT, cron 413338, внешний аудит). Требуется аддендум: §1.4 выполнено; инвариант #8 — cron перенумерован 412490→413338; бэклог #2 — заменён convergence-планом.
+- Артефакт остаётся каноническим онбординг-доком; тег capsule-me2-r77 — точка восстановления ME2-линии (111 коммитов вне release).
+- Публикация: запись уйдёт в GitHub со следующим успешным push-pending (PAT по-прежнему отсутствует, тик 73/10:22).
