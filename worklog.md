@@ -6683,3 +6683,25 @@ Work Log:
 
 Stage Summary:
 - Единый канонический worklog собран из двух фрагментов; протокол для будущих агентов: незнакомые Task ID в worklog — валидная многочатовая история, append-only, ничего не удалять и не перезаписывать.
+
+---
+Task ID: CTX-4
+Agent: Z.ai Code (main session)
+Task: Phoenix v2 — «каждый ответ из максимально полного контекста»: автоматизация внешних каналов, секционный merge-append, почасовые KV-шарды
+
+Work Log:
+- Аудит пробелов v1: (1) Supabase-канал верифицирован, но запускался только вручную (окно потери = до ручного запуска); (2) KV-шарды обновлялись раз в сутки (устаревание до 24ч); (3) guard-рестор перезаписывал файл целиком — риск потери уникальных секций при мульти-чат-конфликтах; (4) нет write-ahead защиты в момент между правкой и guard-тиком.
+- Создан scripts/phoenix/phoenix-snapshot.sh v2.0 — write-ahead снапшот worklog/CONTEXT ПЕРЕД любой правкой (snapshots-wa/, sha-дедуп, ротация 60). Применён в этом же раунде перед данной записью (протокол работает на самом себе).
+- Создан scripts/phoenix/phoenix-heartbeat.sh v2.0 (самодостаточен, bash+curl): строит CONTEXT-CURRENT.md (digest: как получить полный контекст, каналы, последние 15 секций Task ID→Task, хвост 40 строк); грузит в Supabase me2-evidence/context-vault/latest/ 11 объектов (sha-дедуп) + versioned/<ts>/worklog.md (не чаще 1 раза в 3ч); зеркалит в ossfs /home/sync/me2-context-backups/{latest,versioned} + vault/latest + /tmp + PolarFS. Реальный прогон: wb=1061535B sha12=243cb67bda33, sb=10ok/0fail, ver=y, sync=7 — бит-в-бит.
+- Создан scripts/phoenix/phoenix-restore.sh v2.0 — кворум 8 источников (local, vault/latest, vault-snapshot, vault-git, /tmp-mirror, PolarFS-mirror, ossfs-latest, supabase-latest): --check (вердикт OK/НЕПОЛНАЯ/УСЕЧЕНИЕ), --restore (рестор из наибольшего с truncated-архивом), --merge (СЕКЦИОННЫЙ merge-append: парсер блоков «---/Task ID:», dedup ТОЛЬКО по sha тела — одноимённые Task ID разных чатов не теряются; blk-0000 переносится при wiped-файле).
+- Тесты merge (песочница): worst-case 85B-заглушка → полное восстановление 1061643B (+167 блоков: заголовок + 166 секций); идемпотентность — повторный запуск даёт 0 изменений; no-op на живом worklog; --check показывает кворум 8/8 с одинаковым sha12.
+- Cron-флот v2: создан PHX-HEARTBEAT Job 416629 (fixed_rate 1800s; компакт-эталон heartbeat-скрипта встроен в payload — феникс-пересоздание при wipe; лимит payload 10000 символов выявлен и учтён); COMPACTOR 416558 (daily 04:20) заменён на Job 416631 (fixed_rate 3600s, hourly): SHARD-A = CONTEXT.md + PHOENIX-PROTOCOL.md + guard, SHARD-B = индекс 15 секций + хвост worklog 60 строк + протокол восстановления v2. Устаревание KV-шардов снижено с 24ч до ≤1ч.
+- Холодный архив: git bundle --all → /home/sync/me2-context-backups/bundles/repo-all-20260926.bundle (125424683B, verify «complete history», HEAD 75215ae). Supabase-загрузка bundle → HTTP 400 (лимит объекта ~50MB) — зафиксировано как ограничение; компенсация: worklog 1MB в Supabase помещается, bundle живёт в ossfs + GitHub после PAT.
+- Документация: PHOENIX-PROTOCOL.md создан (10 слоёв таблицей, Golden Rules старт/работа/восстановление, реестр cron-задач, честные ограничения); CONTEXT.md обновлён (§2 cron-таблица v2, §6 пути, §7 Phoenix v2 с пунктами 0/0a/0b, §8b runbook с шагом 0, §8 новая сессия с шагом 0).
+- Полный прогон heartbeat после документации — валидация сквозного конвейера; guard отработает по расписанию (≤15 мин), первый тик 416629 и 416631 — по расписанию.
+
+Stage Summary:
+- Контекст теперь защищён 10 слоями с автоматикой: максимальное окно потери ЛЮБОГО нового контента = 30 мин (внешние копии) / 60 мин (KV-шарды), write-ahead закрывает окно 0 мин для planned-правок; феникс-свойство расширено на 2 скрипта (guard в 416526, heartbeat в 416629).
+- «Каждый ответ из полного контекста» обеспечен триадой: (1) стартовый ритуал `phoenix-restore.sh --check` + CONTEXT-CURRENT.md digest; (2) append-only мульти-чат канон; (3) секционный merge-append без потерь при любых конфликтах.
+- PAT-блокер без изменений: /home/z/.a2/.github.env отсутствует; после возврата PAT: push-pending (413338) + bundle → GitHub + ветка context-vault (guard сделает сам).
+- Открытый пункт: KV-шарды gen20260926 ещё старого формата — первый hourly-тик 416631 обновит их до v2 формата в течение часа.
