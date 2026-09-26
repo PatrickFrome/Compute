@@ -66,6 +66,7 @@ interface Me2State {
   contextDrawerPreferredOpen: boolean;
   contextDrawerOpen: boolean;
   contextDrawerTab: ContextDrawerTab;
+  contextDrawerFollowSelection: boolean;
   commandRailPreferredOpen: boolean;
   // selection (agent-first)
   chatId: string | null;
@@ -81,6 +82,7 @@ interface Me2State {
   setDialog: (d: DialogKind) => void;
   setContextDrawer: (open: boolean) => void;
   setContextDrawerTab: (tab: ContextDrawerTab) => void;
+  setContextDrawerFollowSelection: (follow: boolean) => void;
   syncContextDrawer: (preferred?: boolean) => void;
   setCommandRailPreference: (open: boolean) => void;
   resetWorkspaceLayout: () => void;
@@ -101,6 +103,7 @@ const WORKSPACE_LAYOUTS_LS = "me2.workspace-layouts.v1";
 type WorkspaceLayoutPreference = {
   drawerOpen: boolean;
   drawerTab: ContextDrawerTab;
+  drawerFollowSelection: boolean;
   commandRailOpen: boolean;
 };
 
@@ -115,7 +118,12 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
         const rail = typeof row.commandRailOpen === "boolean"
           ? row.commandRailOpen
           : localStorage.getItem(`me2.command.agent-rail.v2:${workspace}`) !== "0";
-        return { drawerOpen: row.drawerOpen, drawerTab: tab, commandRailOpen: rail };
+        return {
+          drawerOpen: row.drawerOpen,
+          drawerTab: tab,
+          drawerFollowSelection: typeof row.drawerFollowSelection === "boolean" ? row.drawerFollowSelection : true,
+          commandRailOpen: rail,
+        };
       }
     }
     const legacyTab = localStorage.getItem(CONTEXT_DRAWER_TAB_LS);
@@ -124,10 +132,11 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
     return {
       drawerOpen: localStorage.getItem(CONTEXT_DRAWER_LS) === "1",
       drawerTab: legacyTab === "selection" || legacyTab === "commands" || legacyTab === "runtime" ? legacyTab : "events",
+      drawerFollowSelection: true,
       commandRailOpen: legacyRail !== "0",
     };
   } catch {
-    return { drawerOpen: false, drawerTab: "events", commandRailOpen: true };
+    return { drawerOpen: false, drawerTab: "events", drawerFollowSelection: true, commandRailOpen: true };
   }
 }
 
@@ -177,6 +186,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
   contextDrawerTab: "events",
+  contextDrawerFollowSelection: true,
   commandRailPreferredOpen: true,
   chatId: null,
   busyAction: false,
@@ -231,17 +241,23 @@ export const useMe2 = create<Me2State>((set, get) => ({
     writeWorkspaceLayout(get().workspace, { drawerTab: tab });
   },
 
+  setContextDrawerFollowSelection: (follow) => {
+    set({ contextDrawerFollowSelection: follow });
+    writeWorkspaceLayout(get().workspace, { drawerFollowSelection: follow });
+  },
+
   setCommandRailPreference: (open) => {
     set({ commandRailPreferredOpen: open });
     writeWorkspaceLayout(get().workspace, { commandRailOpen: open });
   },
 
   resetWorkspaceLayout: () => {
-    const defaults: WorkspaceLayoutPreference = { drawerOpen: false, drawerTab: "events", commandRailOpen: true };
+    const defaults: WorkspaceLayoutPreference = { drawerOpen: false, drawerTab: "events", drawerFollowSelection: true, commandRailOpen: true };
     writeWorkspaceLayout(get().workspace, defaults);
     set({
       contextDrawerPreferredOpen: defaults.drawerOpen,
       contextDrawerTab: defaults.drawerTab,
+      contextDrawerFollowSelection: defaults.drawerFollowSelection,
       commandRailPreferredOpen: defaults.commandRailOpen,
     });
     get().syncContextDrawer(defaults.drawerOpen);
@@ -280,6 +296,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         set({
           contextDrawerPreferredOpen: workspaceLayout.drawerOpen,
           contextDrawerTab: workspaceLayout.drawerTab,
+          contextDrawerFollowSelection: workspaceLayout.drawerFollowSelection,
           commandRailPreferredOpen: workspaceLayout.commandRailOpen,
         });
         writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
@@ -436,12 +453,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
       workspace: w,
       contextDrawerPreferredOpen: layoutPreference.drawerOpen,
       contextDrawerTab: layoutPreference.drawerTab,
+      contextDrawerFollowSelection: layoutPreference.drawerFollowSelection,
       commandRailPreferredOpen: layoutPreference.commandRailOpen,
     });
     try { localStorage.setItem(WS_LS, w); } catch { /* приватный режим */ }
     const ws = WORKSPACES.find((x) => x.key === w);
     if (ws) get().setPage(ws.page);
-    get().syncContextDrawer(layoutPreference.drawerOpen);
   },
 
   setPalette: (open) => set({ paletteOpen: open }),
@@ -450,7 +467,15 @@ export const useMe2 = create<Me2State>((set, get) => ({
   openTask: (id) => {
     const st = get();
     const task = st.snap?.tasks.find((t) => t.id === id) ?? (st.snap?.archived ?? []).find((t) => t.id === id) ?? null;
-    set({ detail: task, inspectedTaskId: task?.id ?? id, stream: [] });
+    set((state) => ({
+      detail: task,
+      inspectedTaskId: task?.id ?? id,
+      stream: [],
+      contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
+    }));
+    if (get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
+      writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
+    }
     void me2Fetch<{ events: Event[] }>(`/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`).then((d) => {
       if (d?.events) set({ stream: d.events });
     });
@@ -460,7 +485,15 @@ export const useMe2 = create<Me2State>((set, get) => ({
 
   setChatId: (id) => {
     // единая точка выбора агента: store + window-события (совместимость компонентов)
-    if (id !== get().chatId) set({ chatId: id });
+    if (id !== get().chatId) {
+      set((state) => ({
+        chatId: id,
+        contextDrawerTab: id && state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
+      }));
+      if (id && get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
+        writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
+      }
+    }
     window.dispatchEvent(new CustomEvent("me2:select-chat", { detail: id }));
   },
 }));
