@@ -1,0 +1,43 @@
+{
+  "schema": "metaengine.r83.edge-canary-qualification.v1",
+  "captured_at": "2026-09-26",
+  "project_ref": "xpeibufgzjknrhbhpffp",
+  "candidate": {
+    "slug": "a2-browser-native-supervisor-v14-canary",
+    "function_id": "991d9bf0-e46f-4eca-8f6a-0140e0eac1fe",
+    "deployed_version": 1,
+    "ezbr_sha256": "b88e59e8be31f6f0a4c3d58605bad5753d45acf04e9c5a65fe7c8f28e02c9be3",
+    "source_pin": "ef04d60a63c260cfaf7fe530b0026f03ea2401c4"
+  },
+  "rollback": {
+    "slug": "a2-browser-native-supervisor-v1",
+    "function_id": "2599cb19-2c85-4292-838e-05e9d17e58da",
+    "deployed_version": 13,
+    "ezbr_sha256": "68c269077c9f6114a4abf2fabb4d51a5eb4ada263ba5c04c1adb898c600c6570",
+    "source_pin": "d8b239e7c11c72ab5db821952733dbb6c6500366"
+  },
+  "required_capabilities": [
+    "createDbInspectRoutes",
+    "createEmergencyCommandRoutes",
+    "createPostgresCommandWakeHub",
+    "createRsiResultReceiptReadback",
+    "createCognitiveDeltaRoutes",
+    "h205f22_a2_browser_supervisor_issue_native_v1",
+    "/v1/commands/issue-tool"
+  ],
+  "static_qualification": {
+    "candidate_pin_must_be_ancestor": true,
+    "edge_source_must_match_candidate_pin": true,
+    "focused_contract_tests_required": true
+  },
+  "live_qualification": {
+    "signed_health_required": true,
+    "signed_e2e_required": true,
+    "postgres_notify_readback_required": true,
+    "result_receipt_readback_required": true,
+    "rollback_drill_required": true,
+    "completed": false
+  },
+  "promotion_authorized": false,
+  "authority_effect": false
+}
