@@ -127,7 +127,7 @@ async function refreshBrainBaseline() {
 // microtask is insufficient. Observe DOM mutations and emit CONFIRMED as soon as
 // the exact R75 composition exists; emit incomplete only after one bounded
 // hydration deadline. No interval/polling loop and no renderer authority.
-if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
   const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
   let settled = false;
@@ -171,8 +171,12 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof M
     } catch {}
   };
 
-  observer = new MutationObserver(inspect);
-  try { observer.observe(document.documentElement, { childList: true, subtree: true }); } catch {}
+  const Observer = window.MutationObserver || globalThis.MutationObserver;
+  if (typeof Observer === 'function') {
+    observer = new Observer(inspect);
+    try { observer.observe(document.documentElement, { childList: true, subtree: true }); } catch {}
+  }
+  window.addEventListener('load', inspect, { once: true });
   inspect();
   deadline = setTimeout(() => {
     if (settled) return;
