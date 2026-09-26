@@ -13,7 +13,8 @@ $manifestPath = Join-Path $stageRoot 'me2-daemon-manifest.json'
 
 if (-not (Test-Path $daemonRoot -PathType Container)) { throw 'me2_daemon_source_missing' }
 $bun = Get-Command bun -ErrorAction SilentlyContinue
-if (-not $bun) { throw 'me2_daemon_bun_toolchain_missing' }
+$bunCommand = if ($bun) { $bun.Source } else { 'npx' }
+$bunPrefix = if ($bun) { @() } else { @('--yes', 'bun@1.3.3') }
 
 $sourceHead = (git -C $repoRoot rev-parse HEAD).Trim().ToLowerInvariant()
 if ($sourceHead -notmatch '^[0-9a-f]{40}$') { throw 'me2_daemon_source_head_invalid' }
@@ -36,10 +37,10 @@ New-Item -ItemType Directory -Force -Path $stageRoot | Out-Null
 
 Push-Location $daemonRoot
 try {
-  & $bun.Source install --frozen-lockfile
+  & $bunCommand @bunPrefix install --frozen-lockfile
   if ($LASTEXITCODE -ne 0) { throw "me2_daemon_bun_install_exit_$LASTEXITCODE" }
 
-  & $bun.Source build --compile --target=bun-windows-x64 index.ts --outfile $exePath
+  & $bunCommand @bunPrefix build --compile --target=bun-windows-x64 index.ts --outfile $exePath
   if ($LASTEXITCODE -ne 0) { throw "me2_daemon_compile_exit_$LASTEXITCODE" }
 } finally {
   Pop-Location
