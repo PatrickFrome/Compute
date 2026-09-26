@@ -617,6 +617,70 @@ Decision after research:
 - stale geometry responses must remain fenced as more resizable native-aware panes are added.
 
 
+
+## 6.11 UI slice checkpoint I — exact agent/tab identity
+
+Implementation checkpoint: `4e7ceb0a0755a7259c4ca049e2cc6b53dc5e4163`.  
+Reproducible contract checkpoint: `9c4acf311d60cbde0ec5cc7189ce1f8ae990ed54`.
+
+Audit finding:
+- COMMAND previously resolved an agent to a Browser tab by `session id in URL → similar title → sole z.ai tab`;
+- both fallbacks can select a different live conversation, because a display title is not an identity and “only one currently visible candidate” does not prove ownership.
+
+Implemented:
+- added side-effect-free `r85-ui-contracts.mjs` so the binding rule is executable in Node regression tests;
+- a candidate must be an actual `z.ai`/subdomain URL and contain the exact session id with token boundaries;
+- title similarity is never used for binding;
+- a sole z.ai tab is never treated as proof of ownership;
+- duplicate exact-id candidates fail closed as `ambiguous`;
+- missing exact binding leaves the Browser unchanged and asks the operator to select manually.
+
+Reproducible cases now cover:
+- exact session id → one exact tab;
+- same/similar title without session id → rejected;
+- session id as a prefix of a different id → rejected;
+- session id on a non-z.ai origin → rejected;
+- two exact-id candidates → ambiguous and rejected.
+
+Post-step research:
+- **Electron webContents** treats `webContents.id` as unique application identity and exposes lookup by exact Chrome DevTools `TargetID`; this reinforces the distinction between identity and display metadata such as page title. https://www.electronjs.org/docs/latest/api/web-contents
+- The same Electron API explicitly provides `fromDevToolsTargetId(targetId)`, again using an exact identifier instead of title heuristics when crossing process/control boundaries.
+- This aligns with METAENGINE Browser Brain's existing exact binding model: human-readable title is useful presentation context, but it is not an authority-bearing selector.
+
+Decision after research:
+- keep title only for display/search;
+- never promote title similarity into Browser-control identity;
+- future AgentChat → Browser bindings should carry an explicit tab/target/session identity from the authoritative backend so even URL parsing becomes a compatibility fallback.
+
+## 6.12 UI slice checkpoint J — stale Drawer response fencing
+
+Implementation checkpoint: `35c62434a3933ee6932f2779a423885e2269d56f`.  
+Reproducible contract checkpoint: `9c4acf311d60cbde0ec5cc7189ce1f8ae990ed54`.
+
+Audit finding:
+- `contextDrawerSyncSeq` rejected older resize replies only when another Drawer sync had already started;
+- a Page or Workspace transition could invalidate the meaning of an in-flight request without necessarily creating a newer Drawer request first;
+- therefore a late IPC response could re-apply old effective height/open state to a different UI context.
+
+Implemented:
+- each Drawer request captures causal identity `{seq, workspace, page}`;
+- response/catch paths apply state only when all three still match;
+- every Page transition invalidates outstanding Drawer generations before changing presentation;
+- every Workspace transition invalidates them before loading its layout;
+- the pure `presentationSyncStillCurrent()` contract is directly exercised by Node tests for changed sequence, page and workspace.
+
+Post-step research:
+- **React useEffect documentation** shows the canonical “ignore stale result” pattern specifically because asynchronous responses can arrive in a different order than requests; cleanup/causal invalidation prevents an old result from updating current UI state. https://react.dev/reference/react/useEffect
+- React's **You Might Not Need an Effect** guide describes the same race condition for changing query/page context and requires stale-response rejection. https://react.dev/learn/you-might-not-need-an-effect
+- **AbortController** can cancel supported network operations, but Electron IPC invocation here is not a fetch controlled by an AbortSignal; therefore causal generation/context fencing is the correct boundary even if lower-level cancellation is later added. https://developer.mozilla.org/en-US/docs/Web/API/AbortController
+- Electron owns native `WebContentsView` geometry in the main process, so renderer state must never accept an effective-bounds reply that belongs to a previous presentation context.
+
+Decision after research:
+- sequence-only fences are insufficient where Workspace/Page are part of request meaning;
+- every future async presentation bridge must carry or capture the complete causal identity of the view it is updating;
+- cancellation is useful optimization, but stale-result rejection remains the correctness invariant.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
