@@ -120,6 +120,7 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(uiHost, /event: 'UI_UNOWNED_PORT'/);
   assert.match(uiHost, /state = 'WAITING_FOR_PORT_RELEASE'/);
   assert.match(uiHost, /ME2_UI_ALLOW_EXTERNAL_ADOPT/);
+  assert.match(uiHost, /routing_authorized:\s*childOwned \|\| externalAdoptAuthorized/);
   const finalEntry = await fs.readFile(path.join(appRoot, 'src', 'final-runtime-entry.mjs'), 'utf8');
   assert.match(
     finalEntry,
