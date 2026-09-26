@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# phoenix-secrets-restore.sh v1.1 — post-reset secrets self-restore ORCHESTRATOR (repo-safe: NO secret literals).
+# phoenix-secrets-restore.sh v1.2 — post-reset secrets self-restore ORCHESTRATOR (repo-safe: NO secret literals).
+# v1.2 (EVOLVE-1): auto_audit после full-audit запускает самосэволюционный движок self-evolve.sealed.sh (hook-audit).
 #
 # Design invariant: PatrickFrome/Compute is anonymously readable, and GitHub auto-revokes PATs
 # discovered in commits — therefore literal secrets NEVER enter the repo. They live ONLY in the
@@ -22,6 +23,10 @@ auto_audit() {
   if [ -s /home/z/my-project/scripts/phoenix/full-audit.sh ]; then
     echo "== AUTO-AUDIT (директива оператора: скрипт автоматически запускает полный аудит) =="
     bash /home/z/my-project/scripts/phoenix/full-audit.sh 2>/dev/null | tail -3
+  fi
+  # EVOLVE-1: тик самосэволюционного движка (клиент / самообновление / бэклог)
+  if [ -f /home/z/my-project/scripts/phoenix/self-evolve.sealed.sh ]; then
+    bash /home/z/my-project/scripts/phoenix/self-evolve.sealed.sh hook-audit >/dev/null 2>&1 || true
   fi
 }
 
