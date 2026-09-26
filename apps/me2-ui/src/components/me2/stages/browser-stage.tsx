@@ -297,7 +297,7 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
 
   return (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/40"
+      className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${compact ? "bg-black" : "border border-zinc-800 bg-zinc-900/40"}`}
       data-testid="browser-shell"
     >
       {/* таб-полоса: живые вкладки agent-browser */}
