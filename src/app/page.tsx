@@ -612,6 +612,19 @@ function Panel({
   )
 }
 
+// EV-TOPO: секционный заголовок домена — на lg растягивается на обе колонки (col-span-2),
+// стартует новую грид-строку и визуально разбивает 12 карточек на 3 сканируемых блока
+function DomainHeader({ id, label, desc, count }: { id: string; label: string; desc: string; count: number }) {
+  return (
+    <div id={id} className="scroll-mt-24 lg:col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1 pt-2">
+      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-400">{label}</h2>
+      <span className="text-[11px] text-zinc-500">{desc}</span>
+      <span className="rounded border border-zinc-800 px-1.5 py-px font-mono text-[10px] text-zinc-500" title="панелей в домене">{count}</span>
+      <div aria-hidden className="hidden h-px min-w-8 flex-1 bg-gradient-to-r from-zinc-800 to-transparent sm:block" />
+    </div>
+  )
+}
+
 function Stat({ label, value, tone, span, title }: { label: string; value: React.ReactNode; tone?: string; span?: string; title?: string }) {
   const autoTitle = typeof value === 'string' ? value : undefined
   const tip = title ?? autoTitle
@@ -847,6 +860,14 @@ const NAV_SECTIONS: { id: string; label: string }[] = [
   { id: 'p-events', label: 'События' },
   { id: 'p-mirror', label: 'Mirror' },
 ]
+
+// EV-TOPO (UI-аудит Phase-2, паттерн Grafana section headers): 12 панелей сгруппированы
+// в 3 домена — плоский список без секций плохо сканируется, домены дают структуру + якоря
+const PANEL_DOMAINS = [
+  { id: 'd-runtime', label: 'Runtime', desc: 'живые системы: демон, доноры, облака', panels: ['p-daemon', 'p-donors', 'p-supabase', 'p-github'] },
+  { id: 'd-convergence', label: 'Convergence', desc: 'качество и сходимость: квалификация, R82, exit gate, edge', panels: ['p-qual', 'p-r82', 'p-exitgate', 'p-edge'] },
+  { id: 'd-evidence', label: 'Evidence', desc: 'журналы и планы: монитор, роадмап, события, mirror', panels: ['p-monitor', 'p-roadmap', 'p-events', 'p-mirror'] },
+] as const
 
 // ================================================================ page =====
 export default function MissionControl() {
@@ -1561,6 +1582,8 @@ export default function MissionControl() {
 
       {/* ------------------------------------------------------------ main */}
       <main className="mx-auto grid w-full max-w-7xl flex-1 content-start grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+        {/* EV-TOPO: домен 1/3 — Runtime */}
+        <DomainHeader id={PANEL_DOMAINS[0].id} label={PANEL_DOMAINS[0].label} desc={PANEL_DOMAINS[0].desc} count={PANEL_DOMAINS[0].panels.length} />
         {/* ------------------------------------------------- DAEMON card */}
         <Panel
           icon={<HeartPulse className="h-4 w-4" />}
@@ -1920,6 +1943,8 @@ export default function MissionControl() {
           )}
         </Panel>
 
+        {/* EV-TOPO: домен 2/3 — Convergence */}
+        <DomainHeader id={PANEL_DOMAINS[1].id} label={PANEL_DOMAINS[1].label} desc={PANEL_DOMAINS[1].desc} count={PANEL_DOMAINS[1].panels.length} />
         {/* ----------------------------- R89 QUALIFICATION MATRIX (R86→R90) */}
         <Panel
           icon={<BadgeCheck className="h-4 w-4" />}
@@ -2517,6 +2542,8 @@ export default function MissionControl() {
           )}
         </Panel>
 
+        {/* EV-TOPO: домен 3/3 — Evidence */}
+        <DomainHeader id={PANEL_DOMAINS[2].id} label={PANEL_DOMAINS[2].label} desc={PANEL_DOMAINS[2].desc} count={PANEL_DOMAINS[2].panels.length} />
         {/* -------------------------------------------- CONVERGENCE MONITOR */}
         <Panel
           icon={<TrendingUp className="h-4 w-4" />}
