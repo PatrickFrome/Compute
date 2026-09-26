@@ -27,6 +27,10 @@ const me2Pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell
 const me2Statusbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/statusbar.tsx', import.meta.url), 'utf8');
 const me2Palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
 const me2Command = await readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8');
+const me2BrowserStage = await readFile(new URL('../../me2-ui/src/components/me2/stages/browser-stage.tsx', import.meta.url), 'utf8');
+const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
+const me2AgentChatFeed = await readFile(new URL('../../me2-ui/src/hooks/use-agentchat-sessions.ts', import.meta.url), 'utf8');
+const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -171,6 +175,42 @@ test('R85 Command remains an integrated native-stage workbench with R75 anchors'
   assert.match(me2Topbar, /data-testid="topbar"/);
   assert.match(me2Pagebar, /data-testid="pagebar"/);
   assert.match(me2Statusbar, /data-testid="statusbar"/);
+});
+
+test('R85 semantic workbench avoids nested interactive agent rows', () => {
+  assert.doesNotMatch(me2Command, /role="button"\s+tabIndex=\{0\}[\s\S]{0,1200}<button/);
+  assert.match(me2Command, /type="button"\s+aria-current=\{chatId === s\.id\}/);
+  assert.match(me2Command, /aria-label=\{\`Открыть вкладку z\.ai агента/);
+});
+
+test('R85 Command hides browser transport tuning while full Browser retains it', () => {
+  assert.match(me2BrowserStage, /\{!compact && \(\s*<div role="group" aria-label="Профиль полосы стрима"/);
+  assert.match(me2BrowserStage, /compact \? \(\s*<span className="ml-auto text-zinc-600">/);
+  assert.match(me2BrowserStage, /\[30, 55, 85\]\.map/);
+  assert.match(me2BrowserStage, /\[480, 640, 960\]\.map/);
+});
+
+test('R85 attention and observability use progressive disclosure without effect authority', () => {
+  assert.match(me2Topbar, /data-testid="attention-button"/);
+  assert.match(me2Topbar, /data-testid="attention-center"/);
+  assert.doesNotMatch(me2Topbar, /sendCommand\(|BUDGET_FLUSH|EMERGENCY/);
+  assert.match(me2Observability, /"compact" \| "full"/);
+  assert.match(me2Observability, /me2\.obs\.events\.view\.v1/);
+  assert.match(me2Observability, /prev\.event\.type === event\.type/);
+});
+
+test('R85 agent chat feed is shared and background-aware', () => {
+  assert.match(me2AgentChatFeed, /useSyncExternalStore/);
+  assert.match(me2AgentChatFeed, /document\.visibilityState === "visible"/);
+  assert.match(me2AgentChatFeed, /inFlight/);
+  assert.match(me2Command, /useAgentChatSessions/);
+  assert.doesNotMatch(me2Command, /setInterval\([^\n]*agentchat/);
+});
+
+test('R85 unavailable legacy sandbox plane is fail-close and collapsed by default', () => {
+  assert.match(me2CodePage, /title="SANDBOXES · LEGACY LOCKED"/);
+  assert.match(me2CodePage, /defaultOpen=\{false\}/);
+  assert.match(me2CodePage, /legacy capability unavailable/);
 });
 
 test('ME2 UI routing authority is revoked on stop, degradation, or owned-process loss', () => {
