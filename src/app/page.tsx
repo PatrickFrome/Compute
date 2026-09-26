@@ -12,9 +12,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
-import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts'
 import {
-  Activity, AlertTriangle, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
   Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -276,6 +276,17 @@ interface MirrorStatus {
     matches_state: boolean | null
     tail: { seq: number; type: string | null; local_seq: number | null; ours: boolean; anchor: boolean }[]
   }
+  stats_24h: {
+    checked_at: string
+    rows: number
+    capped: boolean
+    first_seq: number | null
+    last_seq: number | null
+    oldest_ts: string | null
+    newest_ts: string | null
+    by_type: { type: string; count: number }[]
+    window_since: string
+  } | null
   history: Me2Event[]
 }
 
@@ -389,6 +400,139 @@ function Spark({ data, color, label, value }: { data: { t: string; v: number }[]
   )
 }
 
+// --------------------------------------------- draft timeline chart ------
+// R83-WATCH: full-size draft-chars timeline over the durable 24h history
+// (backlog item since R82-STICKY: «график draft chars из durable-истории
+// при >48 сэмплах (downsample)»). The canary state is ENCODED IN COLOR: rose
+// points are OVERSIZED (poisoned draft), emerald points are OK (cleared),
+// failed/UNKNOWN probes leave gaps (connectNulls=false — a failed probe never
+// fakes a draft value). The dashed amber line is the 4000-char canary
+// threshold. The rose→emerald drop is the operator-clear moment — the live
+// visual proof the whole OPERATOR_CLEAR stage waits for.
+function DraftTimeline({ samples, threshold }: { samples: ReadbackDraftSample[]; threshold: number }) {
+  const { data, counts, downsampledFrom } = useMemo(() => {
+    const MAX_POINTS = 140
+    let used = samples
+    let from: number | null = null
+    if (samples.length > MAX_POINTS) {
+      from = samples.length
+      const step = Math.ceil(samples.length / MAX_POINTS)
+      const buckets: ReadbackDraftSample[][] = []
+      for (let i = 0; i < samples.length; i += step) buckets.push(samples.slice(i, i + step))
+      // bucket-max when any OVERSIZED sample is present (worst case stays
+      // visible — the poison level must never be averaged away), otherwise
+      // the LAST sample of the bucket (state transitions preserved)
+      used = buckets.map((b) => {
+        const oversized = b.filter((s) => s.canary === 'OVERSIZED' && s.chars != null)
+        if (oversized.length > 0) return oversized.reduce((m, s) => ((s.chars ?? 0) > (m.chars ?? 0) ? s : m))
+        return b[b.length - 1]
+      })
+    }
+    const data = used.map((s) => ({
+      t: hhmmss(s.ts),
+      full: s,
+      oversize: s.canary === 'OVERSIZED' && s.chars != null ? s.chars : null,
+      ok: s.canary === 'OK' && s.chars != null ? s.chars : null,
+    }))
+    const counts = {
+      oversized: samples.filter((s) => s.canary === 'OVERSIZED').length,
+      ok: samples.filter((s) => s.canary === 'OK').length,
+      unknown: samples.filter((s) => s.chars == null).length,
+      lastChars: samples.length ? samples[samples.length - 1].chars : null,
+    }
+    return { data, counts, downsampledFrom: from }
+  }, [samples])
+
+  const maxChars = Math.max(threshold * 1.25, ...data.map((d) => d.oversize ?? d.ok ?? 0))
+
+  return (
+    <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Timeline драфта · chars</span>
+        <Chip tone={counts.ok > 0 ? 'ok' : counts.oversized > 0 ? 'p0' : 'neutral'}>{counts.oversized} OVERSIZED</Chip>
+        <Chip tone={counts.ok > 0 ? 'ok' : 'neutral'}>{counts.ok} OK</Chip>
+        {counts.unknown > 0 && <Chip tone="neutral">{counts.unknown} без чтения</Chip>}
+        {downsampledFrom != null && <Chip tone="info" title={`downsample: ${downsampledFrom} сэмплов → ${data.length} точек (bucket-max для OVERSIZED — уровень отравления не усредняется)`}>↓{data.length}/{downsampledFrom}</Chip>}
+      </div>
+      <div className="h-44">
+        {data.length >= 2 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+              <RTooltip
+                contentStyle={TOOLTIP_STYLE}
+                labelStyle={{ color: '#a1a1aa' }}
+                cursor={{ stroke: '#3f3f46' }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  const d = payload[0]?.payload as { full: ReadbackDraftSample }
+                  const s = d?.full
+                  if (!s) return null
+                  return (
+                    <div style={TOOLTIP_STYLE}>
+                      <div className="font-mono text-[10px] text-zinc-400">{s.ts}</div>
+                      <div className="font-mono text-[11px]">
+                        <span className={s.canary === 'OVERSIZED' ? 'text-rose-300' : s.canary === 'OK' ? 'text-emerald-300' : 'text-zinc-400'}>{s.canary}</span>
+                        {s.chars != null && <span className="text-zinc-300"> · {s.chars} chars</span>}
+                      </div>
+                      {s.error && <div className="max-w-56 text-[10px] text-rose-300/80" title={s.error}>{s.error}</div>}
+                      <div className="text-[10px] text-zinc-500">{s.source === 'opportunistic' ? 'oppo-проба' : 'периодическая'}</div>
+                    </div>
+                  )
+                }}
+              />
+              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="t" tick={{ fill: '#71717a', fontSize: 9 }} tickLine={false} axisLine={{ stroke: '#3f3f46' }} interval={Math.max(0, Math.ceil(data.length / 6) - 1)} minTickGap={16} />
+              <YAxis tick={{ fill: '#71717a', fontSize: 9 }} tickLine={false} axisLine={false} width={44} domain={[0, Math.ceil(maxChars * 1.08)]} tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} />
+              <ReferenceLine y={threshold} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: `порог ${threshold}`, fill: '#f59e0b', fontSize: 9, position: 'insideTopRight' }} />
+              <Line type="monotone" dataKey="oversize" stroke="#fb7185" strokeWidth={1.5} dot={{ r: 1.5, fill: '#fb7185', strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} name="OVERSIZED" />
+              <Line type="monotone" dataKey="ok" stroke="#34d399" strokeWidth={1.5} dot={{ r: 1.5, fill: '#34d399', strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} name="OK" />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-full items-center justify-center text-[10px] text-zinc-600">нужно ≥2 сэмпла с чтением — сэмплер работает (5 мин / oppo)</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ------------------------------------------------------- audio alerts ----
+// R83-WATCH: subtle WebAudio cues for gate transitions, milestones and mirror
+// divergence (backlog: «звук/тост при смене current_gate»). No audio assets,
+// zero network — a lazily-created AudioContext with two quiet sine notes.
+// Respects the persisted mute toggle and never fires in a hidden tab.
+type BeepKind = 'gate' | 'milestone' | 'alert'
+let audioCtx: AudioContext | null = null
+function beep(kind: BeepKind): void {
+  try {
+    if (typeof document !== 'undefined' && document.hidden) return
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AC) return
+    if (!audioCtx) audioCtx = new AC()
+    if (audioCtx.state === 'suspended') void audioCtx.resume()
+    const t0 = audioCtx.currentTime
+    const notes: [number, number][] = kind === 'gate'
+      ? [[880, 0], [660, 0.09]]                      // soft descending pair — gate moved
+      : kind === 'milestone'
+        ? [[523, 0], [784, 0.1]]                     // rising pair — milestone landed
+        : [[392, 0], [311, 0.12], [392, 0.24]]       // double low — divergence
+    for (const [freq, at] of notes) {
+      const osc = audioCtx.createOscillator()
+      const gain = audioCtx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.0001, t0 + at)
+      gain.gain.exponentialRampToValueAtTime(0.045, t0 + at + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.11)
+      osc.connect(gain).connect(audioCtx.destination)
+      osc.start(t0 + at)
+      osc.stop(t0 + at + 0.13)
+    }
+  } catch {
+    /* audio is a nicety, never a dependency */
+  }
+}
+
 // ================================================================ page =====
 export default function MissionControl() {
   const { toast } = useToast()
@@ -430,9 +574,23 @@ export default function MissionControl() {
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [wsLive, setWsLive] = useState(false)
+  // R83-WATCH: audio-cue toggle (persisted; muted state also persisted) —
+  // gate transitions beep 'gate', milestone events beep 'milestone', mirror
+  // divergence beeps 'alert'. The toggle is a header ghost-button.
+  const [soundOn, setSoundOn] = useState(() => {
+    try { return localStorage.getItem('me2-sound') !== 'off' } catch { return true }
+  })
+  const toggleSound = useCallback(() => {
+    setSoundOn((on) => {
+      const next = !on
+      try { localStorage.setItem('me2-sound', next ? 'on' : 'off') } catch { /* storage best-effort */ }
+      return next
+    })
+  }, [])
   const wsRef = useRef<WebSocket | null>(null)
   const backoffRef = useRef(1000)
   const filterRef = useRef<HTMLInputElement | null>(null)
+  const donorSearchRef = useRef<HTMLInputElement | null>(null)
   const activeStageRef = useRef<HTMLDivElement | null>(null)
   const prevGateRef = useRef<string | null>(null)
 
@@ -537,8 +695,12 @@ export default function MissionControl() {
     return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j); clearInterval(k) }
   }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback, loadEdgeImport, loadMirror])
 
-  // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears
+  // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears.
+  // R83-WATCH: donor-registry navigation — Alt+1..5 switches scheduler lanes,
+  // Alt+D jumps to the donor search (backlog R82-STICKY «keyboard-навигация
+  // lane-фильтров донор-браузера»). Alt-combos are safe while typing.
   useEffect(() => {
+    const LANES = ['ALL', 'READ_ONLY', 'TAB_MUTATION', 'GLOBAL_MUTATION', 'EMERGENCY'] as const
     const onKey = (ev: KeyboardEvent) => {
       const target = ev.target as HTMLElement | null
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
@@ -548,6 +710,16 @@ export default function MissionControl() {
       } else if (ev.key === 'Escape' && target === filterRef.current) {
         setFilter('')
         filterRef.current?.blur()
+      } else if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
+        if (ev.code === 'KeyD') {
+          ev.preventDefault()
+          donorSearchRef.current?.focus()
+          donorSearchRef.current?.select()
+        } else if (/^Digit[1-5]$/.test(ev.code)) {
+          ev.preventDefault()
+          const lane = LANES[Number(ev.code.slice(5)) - 1]
+          if (lane) setDonorLane(lane)
+        }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -587,27 +759,84 @@ export default function MissionControl() {
     const fresh = milestones.filter((m) => m.seq > milestoneSeqRef.current)
     if (fresh.length === 0) return
     milestoneSeqRef.current = top
+    if (soundOn) beep('milestone')
     for (const m of fresh.slice(-3)) {
       toast({
         title: `Milestone · ${MILESTONE_LABELS[m.type]}`,
         description: `#${m.seq} · ${m.type}${m.subject ? ` · ${m.subject}` : ''}`,
       })
     }
-  }, [events, toast])
+  }, [events, toast, soundOn])
+
+  // ---- R83-WATCH: mirror-divergence auto-alert (backlog R83-MIRROR-3
+  // «авто-алерт в тост при mirror_diverged»). The mirror is the evidence
+  // pipeline — if it diverges or fails, the console must SAY SO the moment
+  // the poller sees it, not only via a chip in the card. Transitions are
+  // edge-detected (null → error / true → false = destructive toast + 'alert'
+  // beep; recovery = informative toast), first load is the silent baseline.
+  // False-alarm guard: a sync landing BETWEEN the status call's state-read
+  // and live-read shows live.seq > state — benign lag that converges on the
+  // next poll; only REAL divergence toasts (live.seq < state = truncation /
+  // rollback, or equal seq with hash mismatch = foreign writer).
+  const mirrorErrRef = useRef<boolean | null>(null)
+  const mirrorMatchRef = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (!mirror) return
+    const err = !!mirror.state.last_error
+    const liveSeq = mirror.live.last_row?.seq ?? null
+    const stateSeq = mirror.state.last_mirror_seq
+    const match = mirror.live.matches_state
+    const benignLag = match === false && liveSeq != null && liveSeq > stateSeq
+    const realDivergence = match === false && !benignLag
+    const prevErr = mirrorErrRef.current
+    const prevMatch = mirrorMatchRef.current
+    // baseline: first observation is recorded silently
+    if (prevErr === null) mirrorErrRef.current = err
+    if (prevMatch === null) mirrorMatchRef.current = !realDivergence
+    if (prevErr === null && prevMatch === null) return
+    if (prevErr !== null && prevErr !== err) {
+      mirrorErrRef.current = err
+      if (err) {
+        const le = mirror.state.last_error
+        if (soundOn) beep('alert')
+        toast({
+          title: '⚠ Mirror: ошибка синка',
+          description: `${le?.code ?? '?'}: ${(le?.message ?? '').slice(0, 120)} — fail-closed, записи остановлены`,
+        })
+      } else {
+        toast({ title: 'Mirror восстановлен', description: 'последний синк без ошибок — запись в Supabase продолжается' })
+      }
+    }
+    if (prevMatch !== null && prevMatch !== !realDivergence) {
+      mirrorMatchRef.current = !realDivergence
+      if (realDivergence) {
+        if (soundOn) beep('alert')
+        toast({
+          title: '⚠ Mirror: live tail ≠ state',
+          description: `живой хвост #${liveSeq ?? '?'} против durable state #${stateSeq}${liveSeq != null && liveSeq < stateSeq ? ' — УСЕЧЕНИЕ/откат хвоста' : ' — hash-несовпадение на том же seq (чужая запись)'}; требуется reconcile оператора`,
+        })
+      } else {
+        toast({ title: 'Mirror: live tail ≡ state', description: 'живой хвост Supabase совпал с durable-state демона' })
+      }
+    }
+  }, [mirror, toast, soundOn])
 
   // ---- stage-machine auto-scroll: when the exit-gate current_gate CHANGES,
   // bring the ACTIVE/BLOCKED stage row into view once (never on every poll).
+  // R83-WATCH: the change also plays the 'gate' cue (backlog: «звук при
+  // смене current_gate») — R82 closing will be audible, not just visible.
   useEffect(() => {
     const gate = readback?.current_gate ?? null
     const prev = prevGateRef.current
     prevGateRef.current = gate
     if (!gate || gate === prev) return
     if (prev === null) return // first load: no scroll jump
+    if (soundOn) beep('gate')
     const t = setTimeout(() => {
       activeStageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 400)
     return () => clearTimeout(t)
-  }, [readback?.current_gate])
+  }, [readback?.current_gate, soundOn])
 
   useEffect(() => {
     let closed = false
@@ -718,7 +947,7 @@ export default function MissionControl() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-            <Chip tone="warn">{health?.round ?? 'R82'} · SUPERVISOR LIVENESS</Chip>
+            <Chip tone="warn">{health?.round ?? 'R83'} · WATCH</Chip>
             <Chip tone={daemonUp ? 'ok' : 'p0'}>
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
@@ -726,6 +955,15 @@ export default function MissionControl() {
             <Chip tone={wsLive ? 'info' : 'neutral'}>
               <Radio className="h-3 w-3" /> bus {wsLive ? 'live' : 'rest-only'}
             </Chip>
+            <Button
+              variant="ghost" size="sm"
+              className="h-8 w-8 p-0 text-zinc-400 hover:text-teal-400"
+              onClick={toggleSound}
+              aria-label={soundOn ? 'Выключить звук оповещений' : 'Включить звук оповещений'}
+              title={soundOn ? 'звук оповещений включён: смена exit-gate · milestone-события · расхождение mirror (клик — выкл)' : 'звук оповещений выключен (клик — вкл) — WebAudio, без внешних ассетов'}
+            >
+              {soundOn ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+            </Button>
           </div>
         </div>
       </header>
@@ -821,9 +1059,10 @@ export default function MissionControl() {
                 })}
                 <div className="relative min-w-[140px] flex-1 sm:max-w-[220px]">
                   <Input
+                    ref={donorSearchRef}
                     value={donorQuery}
                     onChange={(e) => setDonorQuery(e.target.value)}
-                    placeholder="поиск действия…"
+                    placeholder="поиск действия… (Alt+D)"
                     aria-label="Поиск по донор-реестру"
                     className="h-8 border-zinc-700 bg-zinc-950/60 pr-7 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/40"
                   />
@@ -832,6 +1071,7 @@ export default function MissionControl() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Сортировка донор-реестра">
+                  <span className="mr-1 hidden text-[10px] text-zinc-600 sm:inline" title="Alt+1 — все · Alt+2 — READ_ONLY · Alt+3 — TAB_MUTATION · Alt+4 — GLOBAL_MUTATION · Alt+5 — EMERGENCY · Alt+D — поиск">Alt+1–5 · D</span>
                   {([['name', 'A→Z'], ['cost-asc', 'cost ↑'], ['cost-desc', 'cost ↓']] as const).map(([mode, label]) => (
                     <button
                       key={mode}
@@ -1249,26 +1489,19 @@ export default function MissionControl() {
                     return oppo > 0 ? <Chip tone="info">oppo-проб {oppo}</Chip> : null
                   })()}
                 </div>
-                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-                  <Spark
-                    label="draft, chars"
-                    color="#fb7185"
-                    value={readback.draft.last?.chars != null ? String(readback.draft.last.chars) : '—'}
-                    data={readback.draft.samples.filter((s) => s.chars != null).map((s) => ({ t: hhmmss(s.ts), v: s.chars as number }))}
-                  />
-                  <div className="col-span-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 lg:col-span-3">
-                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Последние пробы</div>
-                    <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
-                      {readback.draft.samples.slice(-8).reverse().map((s, i) => (
-                        <div key={i} className="flex items-baseline gap-2 font-mono text-[10px]">
-                          <span className="text-zinc-600">{hhmmss(s.ts)}</span>
-                          {s.source === 'opportunistic' && <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[9px] font-bold uppercase text-cyan-300" title="оппортунистическая проба — снята в момент старта новой rollover-попытки, пока attempt-таб жив">oppo</span>}
-                          <span className={s.canary === 'OVERSIZED' ? 'text-rose-400' : s.canary === 'OK' ? 'text-emerald-400' : 'text-zinc-500'}>{s.canary}</span>
-                          <span className="ml-auto truncate text-zinc-400" title={`${s.ts} · ${s.canary}${s.chars != null ? ` · ${s.chars} chars` : ''}${s.error ? ` · ${s.error}` : ''} · ${s.source === 'opportunistic' ? 'оппортунистическая проба' : 'периодическая проба'}`}>{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
-                        </div>
-                      ))}
-                      {readback.draft.samples.length === 0 && <div className="py-2 text-center text-[10px] text-zinc-600">сэмплер разогревается (первый сэмпл ~1 мин)…</div>}
-                    </div>
+                <DraftTimeline samples={readback.draft.samples} threshold={readback.draft.threshold} />
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Последние пробы</div>
+                  <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                    {readback.draft.samples.slice(-8).reverse().map((s, i) => (
+                      <div key={i} className="flex items-baseline gap-2 font-mono text-[10px]">
+                        <span className="text-zinc-600">{hhmmss(s.ts)}</span>
+                        {s.source === 'opportunistic' && <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[9px] font-bold uppercase text-cyan-300" title="оппортунистическая проба — снята в момент старта новой rollover-попытки, пока attempt-таб жив">oppo</span>}
+                        <span className={s.canary === 'OVERSIZED' ? 'text-rose-400' : s.canary === 'OK' ? 'text-emerald-400' : 'text-zinc-500'}>{s.canary}</span>
+                        <span className="ml-auto truncate text-zinc-400" title={`${s.ts} · ${s.canary}${s.chars != null ? ` · ${s.chars} chars` : ''}${s.error ? ` · ${s.error}` : ''} · ${s.source === 'opportunistic' ? 'оппортунистическая проба' : 'периодическая проба'}`}>{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
+                      </div>
+                    ))}
+                    {readback.draft.samples.length === 0 && <div className="py-2 text-center text-[10px] text-zinc-600">сэмплер разогревается (первый сэмпл ~1 мин)…</div>}
                   </div>
                 </div>
               </div>
@@ -1731,6 +1964,28 @@ export default function MissionControl() {
                   </div>
                 </div>
               )}
+              {mirror.stats_24h && (
+                <div>
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500" title={`агрегат читается прямо из PostgREST (select seq,type,ts, без payload) за окно с ${hhmmss(mirror.stats_24h.window_since)} — взгляд на durability со стороны БД, а не со слов демона`}>24 ч в Supabase · глазами БД</span>
+                    {mirror.stats_24h.capped && <Chip tone="warn" title={`строк в окне больше лимита выборки — показанный счёт ${mirror.stats_24h.rows}+`}>capped</Chip>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <Stat label="строк за 24 ч" value={String(mirror.stats_24h.rows)} tone="text-cyan-300" title="строки me2_event_mirror_h205f22, записанные за последние 24 ч (по mirrored_at, читается из БД)" />
+                    <Stat label="seq-диапазон" value={mirror.stats_24h.first_seq != null ? `#${mirror.stats_24h.first_seq}…#${mirror.stats_24h.last_seq}` : '—'} title="минимальный…максимальный seq в 24ч-окне" />
+                    <Stat label="старейшая" value={mirror.stats_24h.oldest_ts ? hhmmss(mirror.stats_24h.oldest_ts) : '—'} title={mirror.stats_24h.oldest_ts ?? '—'} />
+                    <Stat label="свежайшая" value={mirror.stats_24h.newest_ts ? hhmmss(mirror.stats_24h.newest_ts) : '—'} title={mirror.stats_24h.newest_ts ?? '—'} />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {mirror.stats_24h.by_type.map((t) => (
+                      <Chip key={t.type} tone={t.type === 'MIRROR_SYNC' ? 'ok' : t.type.startsWith('R82') ? 'info' : 'neutral'} title={`${t.type}: ${t.count} строк за 24 ч`}>
+                        {t.type} · {t.count}
+                      </Chip>
+                    ))}
+                    {mirror.stats_24h.by_type.length === 0 && <span className="text-[10px] text-zinc-600">за 24 ч ничего не записано (окно пусто)</span>}
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   onClick={syncMirrorNow} disabled={busy === 'mirror-sync' || mirror.pending === 0}
@@ -1883,7 +2138,7 @@ export default function MissionControl() {
             PR#{conv.pr?.number ?? 968} CI {conv.rollup_state}
           </span>
           )}
-          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R82'} · {readback ? `exit gate: ${readback.current_gate}` : 'release readiness: BLOCKED (см. gap matrix)'}</span>
+          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R83'} · {readback ? `exit gate: ${readback.current_gate}` : 'release readiness: BLOCKED (см. gap matrix)'}</span>
         </div>
       </footer>
     </div>

@@ -227,6 +227,44 @@ async function liveTail(limit = 5, fresh = false): Promise<LiveRow[]> {
   return rows;
 }
 
+// ------------------------------------------------------ 24h DB aggregate ---
+
+// R83-WATCH: read-only aggregate over the live mirror table for the last 24
+// hours — fetched straight from PostgREST (select seq/type/ts only, never the
+// payload) and aggregated client-side, so the stats never depend on the
+// daemon's own bookkeeping. TTL-cached like the tail.
+const STATS_TTL_CACHE_MS = 120_000;
+const STATS_LIMIT = 2000; // rows fetched per aggregate (type distribution cap)
+let statsCache: { at: number; data: MirrorStats24h } | null = null;
+
+export async function mirrorStats24h(fresh = false): Promise<MirrorStats24h | null> {
+  if (!fresh && statsCache && Date.now() - statsCache.at < STATS_TTL_CACHE_MS) return statsCache.data;
+  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const path =
+    `/rest/v1/${MIRROR_TABLE}?select=seq,type,ts&mirrored_at=gte.${encodeURIComponent(since)}` +
+    `&order=seq.desc&limit=${STATS_LIMIT}`;
+  const rows = (await supa(path)) as { seq?: number; type?: string | null; ts?: string | null }[];
+  const seqs = rows.map((r) => (typeof r.seq === "number" ? r.seq : NaN)).filter(Number.isFinite);
+  const byType = new Map<string, number>();
+  for (const r of rows) {
+    const t = r.type == null || r.type === "" ? "(no type)" : String(r.type);
+    byType.set(t, (byType.get(t) ?? 0) + 1);
+  }
+  const data: MirrorStats24h = {
+    checked_at: new Date().toISOString(),
+    rows: rows.length,
+    capped: rows.length >= STATS_LIMIT,
+    first_seq: seqs.length ? Math.min(...seqs) : null,
+    last_seq: seqs.length ? Math.max(...seqs) : null,
+    oldest_ts: rows.length ? (rows[rows.length - 1].ts ?? null) : null, // desc order → oldest last
+    newest_ts: rows.length ? (rows[0].ts ?? null) : null,
+    by_type: [...byType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([type, count]) => ({ type, count })),
+    window_since: since,
+  };
+  statsCache = { at: Date.now(), data };
+  return data;
+}
+
 // Parse the payload string scalar into the mirror binding (marker, local_seq,
 // local_hash, event). Foreign/legacy rows (v0.57.1) return null binding.
 function parseBinding(row: LiveRow): { local_seq: number; local_hash: string } | null {
@@ -467,7 +505,24 @@ export interface MirrorStatus {
     matches_state: boolean | null; // null = live check pending
     tail: { seq: number; type: string | null; local_seq: number | null; ours: boolean; anchor: boolean }[];
   };
+  // R83-WATCH: DB-side 24h aggregate read straight from PostgREST — the
+  // console shows durability from the DATABASE's point of view, not the
+  // daemon's word about its own writes (independent-verifier principle).
+  // null when the aggregate could not be read (best-effort, like `live`).
+  stats_24h: MirrorStats24h | null;
   history: Me2Event[]; // last MIRROR_SYNC events from the local chain
+}
+
+export interface MirrorStats24h {
+  checked_at: string;
+  rows: number; // rows mirrored in the last 24h (capped by STATS_LIMIT)
+  capped: boolean; // rows == limit → the true count is higher
+  first_seq: number | null; // oldest seq in the window
+  last_seq: number | null; // newest seq in the window
+  oldest_ts: string | null; // ts of the oldest row
+  newest_ts: string | null; // ts of the newest row
+  by_type: { type: string; count: number }[]; // top types, desc
+  window_since: string; // the 24h cutoff that was queried
 }
 
 let autoTimer: ReturnType<typeof setInterval> | null = null;
@@ -521,6 +576,13 @@ export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
   } catch {
     /* live check is best-effort in the status route; sync failures surface via last_error */
   }
+  // R83-WATCH: DB-side 24h aggregate (best-effort — null surfaces in the UI)
+  let stats: MirrorStats24h | null = null;
+  try {
+    stats = await mirrorStats24h(fresh);
+  } catch {
+    /* stats are evidence, not a gate */
+  }
   return {
     ok: true,
     schema: "metaengine.mirror.status.v1",
@@ -545,6 +607,7 @@ export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
       next_in_ms: nextTickAt ? Math.max(0, nextTickAt - Date.now()) : null,
     },
     live,
+    stats_24h: stats,
     history: eventsOfType("MIRROR_SYNC").slice(-8).reverse(),
   };
 }

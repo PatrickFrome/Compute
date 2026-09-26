@@ -157,6 +157,15 @@ export const CONVERGENCE_EVIDENCE = {
     fail_closed: "расхождение живого tail со state (foreign rows / hash mismatch / truncation) → sync отказывается писать, требует ручного reconcile оператора",
     cadence: "boot через 15s + таймер 120s + operator POST /mirror/sync; single-flight; state cursor обновляется после каждого подтверждённого батча",
   },
+  r83_watch: {
+    built: "2026-09-26T10:15:00Z",
+    module: "daemon src/mirror.ts stats_24h + консоль (0.67.0-r83watch)",
+    mirror_stats_24h: "GET /mirror → stats_24h: DB-side агрегат прямо из PostgREST (select seq,type,ts — БЕЗ payload) за 24ч-окно по mirrored_at: rows / seq-диапазон / старейшая-свежайшая / top-8 типов; TTL 120s; live-проверка на старте: 421 строка #90013993…#90014413 (BUS_CLIENT_CONNECTED 176, DAEMON_BOOT 124, SANDBOX_EXEC 87)",
+    console_draft_timeline: "полноценный timeline драфта из durable 24h-истории: canary-состояние кодируется цветом (rose=OVERSIZED / emerald=OK), провалы проб = разрывы (connectNulls=false — провал никогда не фейкает значение), порог 4000 — пунктир, downsample >140 точек с bucket-max (уровень отравления не усредняется); rose→emerald переход = живое доказательство очистки драфта оператором",
+    mirror_auto_alert: "консоль: авто-тост + звук при переходе mirror state (null→error = destructive; true→false matches_state = destructive «live tail ≠ state»; восстановление = informative) — расхождение pipeline'а evidence больше не прячется в чипе карточки",
+    audio_cues: "WebAudio-сигналы (без ассетов): 'gate' при смене current_gate exit-gate, 'milestone' на milestone-события hash-chain, 'alert' на mirror-расхождение; mute-тоггл в хедере (persist localStorage), скрытая вкладка не звучит",
+    donor_keyboard: "Alt+1–5 — lane-фильтры донор-браузера (все/RO/TAB/GM/EMG), Alt+D — фокус поиска; дополняет '/' журнала событий",
+  },
 } as const;
 
 export const RECOVERY_STATUS = {
