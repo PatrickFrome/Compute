@@ -150,3 +150,14 @@ test('R84 identity projection never fabricates BrowserCell or CDP target when Br
   assert.equal(identity.execution_authority, false);
   assert.equal(identity.authority_effect, false);
 });
+
+test('R84 desktop gateway semantic port closes upgraded sockets under Browser lifecycle ownership', async () => {
+  const gateway = await fs.readFile(new URL('../src/me2/me2-ui-gateway.mjs', import.meta.url), 'utf8');
+  assert.match(gateway, /const sockets = new Set\(\)/);
+  assert.match(gateway, /server\.on\('connection', trackSocket\)/);
+  assert.match(gateway, /trackSocket\(tcpConnect/);
+  assert.match(gateway, /for \(const socket of \[\.\.\.sockets\]\)/);
+  assert.match(gateway, /socket\.destroy\(\)/);
+  assert.match(gateway, /upgraded_socket_shutdown_bounded:\s*true/);
+  assert.match(gateway, /authority_effect:\s*false/);
+});
