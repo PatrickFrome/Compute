@@ -300,7 +300,7 @@ jobs:
               Start-Sleep -Milliseconds 250
             }
 
-                        $normalText = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
+            $normalText = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
             if ($normalText -notmatch '"state":"ME2_R75_UI_CONTRACT_CONFIRMED"') {
               Get-Content $normalOut -ErrorAction SilentlyContinue
               Get-Content $normalErr -ErrorAction SilentlyContinue
@@ -310,7 +310,7 @@ jobs:
               throw 'installed_me2_r75_dom_contract_incomplete'
             }
 
-if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
+            if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
