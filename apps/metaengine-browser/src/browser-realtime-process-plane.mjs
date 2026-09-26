@@ -631,6 +631,14 @@ export class BrowserRealtimeProcessPlane {
     });
   }
 
+  runtimeBinding(tabId, options = {}) {
+    // R84 desktop convergence: expose the Brain's canonical O(1) runtime
+    // binding as a read-only capability. This does not create a second
+    // identity registry or grant execution/lease authority.
+    if (typeof this.#brain?.binding !== 'function') return null;
+    return this.#brain.binding(tabId, options);
+  }
+
   brainSnapshot() {
     return Object.freeze({
       ...this.#brain.snapshot(),
