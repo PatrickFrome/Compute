@@ -177,6 +177,8 @@ try {
   $me2UiReady = $false
   $me2GatewayLive = $false
   $me2MissionTabCreated = $false
+  $me2PrimaryShellReady = $false
+  $me2R75UiConfirmed = $false
   $me2Fatal = $null
   $me2Deadline = [DateTime]::UtcNow.AddSeconds(45)
   while ([DateTime]::UtcNow -lt $me2Deadline) {
@@ -194,6 +196,9 @@ try {
         if ($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_SPAWN','UI_ADOPTED') -contains $event) { $me2UiStarted = $true }
         if ($schema -eq 'metaengine.browser.me2.ui-gateway.v1' -and $event -eq 'GATEWAY_LIVE') { $me2GatewayLive = $true }
         if ($schema -eq 'metaengine.browser.me2.mission-control.v1' -and $event -eq 'SUPERVISOR_TAB_CREATED') { $me2MissionTabCreated = $true }
+        if ($schema -eq 'metaengine.browser-local-shell.v2' -and [string]$row.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' -and [string]$row.shell_mode -eq 'ME2_PRIMARY' -and $row.legacy_shell_is_normal_path -eq $false) { $me2PrimaryShellReady = $true }
+        if ($schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' -and [string]$row.state -eq 'ME2_R75_UI_CONTRACT_CONFIRMED') { $me2R75UiConfirmed = $true }
+        if ($schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' -and [string]$row.state -eq 'ME2_R75_UI_CONTRACT_INCOMPLETE') { $me2Fatal = "$schema/ME2_R75_UI_CONTRACT_INCOMPLETE" }
         if (($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_DIR_NOT_FOUND','SPAWN_ERROR','RESTARTS_EXHAUSTED') -contains $event) `
             -or ($schema -eq 'metaengine.browser.me2.daemon-host.v1' -and @('DAEMON_LAUNCH_NOT_FOUND','DAEMON_INITIAL_READINESS_FAILED','SPAWN_ERROR','RESTARTS_EXHAUSTED') -contains $event) `
             -or ($schema -eq 'metaengine.browser.me2.integration.v1' -and @('ME2_CONTRACT_MISMATCH','ME2_CONTRACT_UNREACHABLE','DAEMON_HOST_START_FAILED','UI_HOST_START_FAILED') -contains $event)) {
@@ -208,11 +213,11 @@ try {
         if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) { $me2UiReady = $true }
       } catch {}
     }
-    if ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated) { break }
+    if ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated -and $me2PrimaryShellReady -and $me2R75UiConfirmed) { break }
     Start-Sleep -Milliseconds 200
   }
-  if (-not ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated)) {
-    throw "soak_me2_runtime_not_settled:daemon=$me2DaemonReady,contract=$me2ContractOk,ui=$me2UiReady,gateway=$me2GatewayLive,mission=$me2MissionTabCreated"
+  if (-not ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated -and $me2PrimaryShellReady -and $me2R75UiConfirmed)) {
+    throw "soak_me2_runtime_not_settled:daemon=$me2DaemonReady,contract=$me2ContractOk,ui=$me2UiReady,gateway=$me2GatewayLive,mission=$me2MissionTabCreated,primary_shell=$me2PrimaryShellReady,r75_dom=$me2R75UiConfirmed"
   }
 
   $stableHandleSamples = 0
@@ -383,6 +388,9 @@ try {
   $proof | Add-Member -NotePropertyName me2_ui_ready -NotePropertyValue ([bool]$me2UiReady) -Force
   $proof | Add-Member -NotePropertyName me2_gateway_live -NotePropertyValue ([bool]$me2GatewayLive) -Force
   $proof | Add-Member -NotePropertyName me2_mission_supervisor_tab_created -NotePropertyValue ([bool]$me2MissionTabCreated) -Force
+  $proof | Add-Member -NotePropertyName me2_primary_shell_ready -NotePropertyValue ([bool]$me2PrimaryShellReady) -Force
+  $proof | Add-Member -NotePropertyName me2_r75_dom_contract_verified -NotePropertyValue ([bool]$me2R75UiConfirmed) -Force
+  $proof | Add-Member -NotePropertyName resource_baseline_after_r75_mount -NotePropertyValue $true -Force
   $proof | Add-Member -NotePropertyName resource_baseline_handle_plateau_samples -NotePropertyValue $stableHandleSamples -Force
   $proof | Add-Member -NotePropertyName startup_control_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
   $proof | Add-Member -NotePropertyName startup_control_armed -NotePropertyValue ([bool]$controlState.armed) -Force

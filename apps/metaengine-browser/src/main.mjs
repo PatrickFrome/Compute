@@ -177,6 +177,13 @@ tabNetworkActivity.setCompletionSink((entry) => agentObservationPlane.recordNetw
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let devosSurfaceGridPlan = null;
+// R84 primary Desktop convergence: the packaged R74/R75 ME2 UI is the normal
+// user-facing shell. The legacy metaengine://shell remains a local recovery
+// surface only when the packaged ME2 plane cannot prove itself healthy.
+let primaryShellMode = 'LEGACY_RECOVERY';
+let primaryShellPage = 'command';
+let primaryShellUrl = null;
+const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
 let devosSourceSnapshot = null;
 let devosSessionLayoutsLoaded = false;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -567,6 +574,163 @@ function fallbackSelectedSurface() {
   }];
 }
 
+function nativeBrowserSurfaceAllowed() {
+  return primaryShellMode !== 'ME2_PRIMARY' || primaryShellPage === 'command';
+}
+
+async function preparePrimaryShellTarget() {
+  if (process.env.ME2_INTEGRATION === '0') {
+    primaryShellMode = 'LEGACY_RECOVERY';
+    primaryShellUrl = null;
+    return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_INTEGRATION_DISABLED' };
+  }
+  try {
+    const me2 = await import('./me2/me2-integration-entry.mjs');
+    const status = await me2.startMe2Integration({ app });
+    const gateway = status?.ui_gateway || null;
+    const host = status?.ui_host || null;
+    const ready = gateway?.state === 'LIVE'
+      && gateway?.ui_route_authorized === true
+      && typeof gateway?.url === 'string'
+      && gateway.url.startsWith('http://127.0.0.1:')
+      && host?.routing_authorized === true;
+    if (ready) {
+      primaryShellMode = 'ME2_PRIMARY';
+      primaryShellPage = 'command';
+      primaryShellUrl = `${gateway.url}/#command`;
+      return { mode: primaryShellMode, url: primaryShellUrl, reason: 'PACKAGED_ME2_UI_PROVEN' };
+    }
+    recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL', new Error(
+      `me2_primary_shell_not_ready:gateway=${gateway?.state || 'UNKNOWN'}:host=${host?.state || 'UNKNOWN'}`,
+    ));
+  } catch (error) {
+    recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL', error);
+  }
+  primaryShellMode = 'LEGACY_RECOVERY';
+  primaryShellUrl = null;
+  return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
+}
+
+const ME2_R75_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']);
+
+function cdpBoxVisible(model) {
+  const points = Array.isArray(model?.content) && model.content.length >= 8
+    ? model.content
+    : (Array.isArray(model?.border) ? model.border : []);
+  if (points.length < 8) return false;
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    xs.push(Number(points[i]));
+    ys.push(Number(points[i + 1]));
+  }
+  if (xs.some((value) => !Number.isFinite(value)) || ys.some((value) => !Number.isFinite(value))) return false;
+  return Math.max(...xs) - Math.min(...xs) >= 2 && Math.max(...ys) - Math.min(...ys) >= 2;
+}
+
+async function probeMe2R75InstalledDomOnce(webContents) {
+  const present = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+  const visible = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+  const dbg = webContents?.debugger;
+  let attachedHere = false;
+  let error = null;
+  try {
+    if (!dbg || typeof dbg.sendCommand !== 'function' || typeof dbg.attach !== 'function') {
+      throw new Error('me2_r75_cdp_debugger_unavailable');
+    }
+    if (!dbg.isAttached()) {
+      dbg.attach('1.3');
+      attachedHere = true;
+    }
+    await dbg.sendCommand('DOM.enable');
+    const documentResult = await dbg.sendCommand('DOM.getDocument', { depth: 2, pierce: true });
+    const rootNodeId = Number(documentResult?.root?.nodeId || 0);
+    if (!Number.isSafeInteger(rootNodeId) || rootNodeId <= 0) throw new Error('me2_r75_dom_root_missing');
+    for (const id of ME2_R75_DOM_IDS) {
+      const found = await dbg.sendCommand('DOM.querySelector', {
+        nodeId: rootNodeId,
+        selector: `[data-testid="${id}"]`,
+      });
+      const nodeId = Number(found?.nodeId || 0);
+      present[id] = Number.isSafeInteger(nodeId) && nodeId > 0;
+      if (!present[id]) continue;
+      try {
+        const box = await dbg.sendCommand('DOM.getBoxModel', { nodeId });
+        visible[id] = cdpBoxVisible(box?.model);
+      } catch {
+        visible[id] = false;
+      }
+    }
+  } catch (probeError) {
+    error = String(probeError?.message || probeError).slice(0, 240);
+  } finally {
+    try { if (attachedHere && dbg?.isAttached()) dbg.detach(); } catch {}
+  }
+  const complete = error == null
+    && ME2_R75_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
+  return Object.freeze({
+    complete,
+    present: Object.freeze({ ...present }),
+    visible: Object.freeze({ ...visible }),
+    error,
+  });
+}
+
+async function probeMe2R75InstalledDom(webContents, {
+  timeoutMs = 12000,
+  intervalMs = 150,
+} = {}) {
+  // Read-only convergence fence: loadURL() can settle before Next/React has
+  // committed the final layout/CSS box models on a cold installed machine.
+  // Re-observe the same strict DOM+BoxModel contract for one bounded window.
+  // This is not an effect retry and grants no renderer/browser/scheduler authority.
+  const startedAt = Date.now();
+  const deadline = startedAt + Math.max(0, Number(timeoutMs) || 0);
+  const pauseMs = Math.max(25, Math.min(1000, Number(intervalMs) || 150));
+  let attempts = 0;
+  let last = null;
+
+  do {
+    attempts += 1;
+    last = await probeMe2R75InstalledDomOnce(webContents);
+    if (last.complete === true) break;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, pauseMs));
+  } while (true);
+
+  const complete = last?.complete === true;
+  const row = Object.freeze({
+    schema: 'metaengine.browser.me2-r75-installed-ui.v1',
+    state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
+    page: primaryShellPage,
+    required: ME2_R75_DOM_IDS,
+    present: last?.present || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    visible: last?.visible || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    evidence_source: 'MAIN_PROCESS_CDP_DOM_BOX_MODEL_BOUNDED_CONVERGENCE',
+    probe_attempts: attempts,
+    probe_elapsed_ms: Math.max(0, Date.now() - startedAt),
+    probe_timeout_ms: Math.max(0, Number(timeoutMs) || 0),
+    error: last?.error || null,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    legacy_shell_is_normal_path: false,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+  console[complete ? 'log' : 'error'](JSON.stringify(row));
+  return Object.freeze({
+    complete,
+    present: Object.freeze({ ...(last?.present || {}) }),
+    visible: Object.freeze({ ...(last?.visible || {}) }),
+    attempts,
+    elapsed_ms: row.probe_elapsed_ms,
+    error: last?.error || null,
+  });
+}
+
 function computeDevOSSurfaceGrid() {
   if (!shellLayoutPlan) return null;
   const shell = currentDevOSPresentationShellView();
@@ -581,10 +745,17 @@ function computeDevOSSurfaceGrid() {
 function layout() {
   if (!windowRef || windowRef.isDestroyed()) return;
   const { width, height } = windowRef.getContentBounds();
-  shellLayoutPlan = planShellLayout({ width, height, state: shellLayoutState });
+  shellLayoutPlan = planShellLayout({
+    width,
+    height,
+    state: shellLayoutState,
+    surface_profile: primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'command'
+      ? 'ME2_R75_COMMAND'
+      : 'LEGACY_BROWSER_SHELL',
+  });
   shellView?.setBounds(shellLayoutPlan.shell_bounds);
   if (shellView) { try { windowRef.contentView.addChildView(shellView); } catch {} }
-  devosSurfaceGridPlan = computeDevOSSurfaceGrid();
+  devosSurfaceGridPlan = nativeBrowserSurfaceAllowed() ? computeDevOSSurfaceGrid() : null;
   const browserPaneByTab = new Map((devosSurfaceGridPlan?.browser_panes || []).map((pane) => [String(pane.tab_id || ''), pane]));
   for (const [tabId, view] of views) {
     const pane = browserPaneByTab.get(String(tabId));
@@ -606,6 +777,12 @@ function attachSelected({ force_single_selected = false } = {}) {
     shellView?.setBounds(shellLayoutPlan.shell_bounds);
   }
   if (force_single_selected) {
+    if (!nativeBrowserSurfaceAllowed()) {
+      for (const [, view] of views) {
+        try { windowRef.contentView.removeChildView(view); } catch {}
+      }
+      return;
+    }
     const selected = registry.selected();
     for (const [tabId, view] of views) {
       if (tabId === selected?.tab_id && !view.webContents.isDestroyed()) {
@@ -1716,20 +1893,41 @@ async function createWindow() {
   });
   layout();
 
-  // The only user-visible startup boundary is the local packaged shell. Remote
-  // navigation, persisted Fleet state, supervisor identity, DevOS and local
-  // bridge availability are degradable subsystems and must never destroy the UI.
-  await shellView.webContents.loadURL('metaengine://shell/');
+  // R84/R75 Desktop convergence: packaged ME2 is the normal shell. The old
+  // metaengine://shell is retained only as a deterministic local recovery path.
+  // Remote agent/browser views remain native WebContentsViews and are composed
+  // above the ME2 command-center stage; ME2 renderer pixels never gain browser
+  // execution authority.
+  const shellTarget = await preparePrimaryShellTarget();
+  try {
+    await shellView.webContents.loadURL(shellTarget.url);
+    if (shellTarget.mode === 'ME2_PRIMARY') {
+      const r75 = await probeMe2R75InstalledDom(shellView.webContents);
+      if (r75.complete !== true) {
+        throw new Error(`me2_r75_primary_shell_contract_incomplete:${r75.error || 'dom_or_geometry_missing'}`);
+      }
+    }
+  } catch (error) {
+    if (shellTarget.mode !== 'ME2_PRIMARY') throw error;
+    recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL_LOAD', error);
+    primaryShellMode = 'LEGACY_RECOVERY';
+    primaryShellPage = 'command';
+    primaryShellUrl = null;
+    await shellView.webContents.loadURL('metaengine://shell/');
+  }
   layout();
   windowRef.show();
   windowRef.focus();
   console.log(JSON.stringify({
-    schema: 'metaengine.browser-local-shell.v1',
-    state: 'LOCAL_SHELL_VISIBLE',
+    schema: 'metaengine.browser-local-shell.v2',
+    state: primaryShellMode === 'ME2_PRIMARY' ? 'ME2_PRIMARY_SHELL_VISIBLE' : 'LEGACY_RECOVERY_SHELL_VISIBLE',
+    shell_mode: primaryShellMode,
+    shell_url_class: primaryShellMode === 'ME2_PRIMARY' ? 'PACKAGED_ME2_LOOPBACK' : 'METAENGINE_RECOVERY_PROTOCOL',
     version: app.getVersion(),
     pid: process.pid,
     remote_network_required: false,
     fleet_state_required: false,
+    legacy_shell_is_normal_path: false,
     authority_effect: false,
   }));
 
@@ -1741,6 +1939,23 @@ async function createWindow() {
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
+ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
+  assertShellSender(event);
+  const page = String(rawPage || '').trim().toLowerCase();
+  if (!ME2_PRIMARY_PAGES.has(page)) throw new Error('primary_shell_page_invalid');
+  primaryShellPage = page;
+  layout();
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-page.v1',
+    page,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;

@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { resolveMe2DaemonLaunch, waitForMe2DaemonReady } from '../src/me2/me2-daemon-host.mjs';
-import { decideMe2UiInitialAction, me2UiExternalAdoptionAllowed, resolveMe2UiLaunch } from '../src/me2/me2-ui-host.mjs';
+import { decideMe2UiInitialAction, me2UiExternalAdoptionAllowed, projectMe2UiRoutingAuthority, resolveMe2UiLaunch, startMe2UiHost, stopMe2UiHost, me2UiHostStatus } from '../src/me2/me2-ui-host.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
@@ -94,6 +94,55 @@ test('source checkout remains an explicit Bun fallback only', () => {
   assert.deepEqual(launch.args, ['index.ts']);
 });
 
+test('UI routing requires live ownership and readiness; shutdown revokes external adoption too', () => {
+  const child = { pid: 42, exitCode: null, signalCode: null };
+  const owned = { mode: 'spawned', state: 'HEALTHY', child };
+  const adopted = { mode: 'adopted', state: 'ADOPTED', allowExternalAdopt: true };
+  for (const [label, input, expected] of [
+    ['healthy owned UI', owned, true],
+    ['healthy explicitly adopted UI', adopted, true],
+    ['owned process still starting', { ...owned, state: 'STARTING' }, false],
+    ['owned process stopping', { ...owned, state: 'STOPPING' }, false],
+    ['owned process degraded', { ...owned, state: 'DEGRADED' }, false],
+    ['owned health readback after stop', { ...owned, stopped: true }, false],
+    ['spawn failed before PID', { ...owned, child: {} }, false],
+    ['stale health after child exited', { ...owned, child: { ...child, exitCode: 0 } }, false],
+    ['stale health after child signalled', { ...owned, child: { ...child, signalCode: 'SIGTERM' } }, false],
+    ['missing child handle', { ...owned, child: null }, false],
+    ['healthy unowned port', { state: 'HEALTHY' }, false],
+    ['adoption without opt-in', { ...adopted, allowExternalAdopt: false }, false],
+    ['adopted process stopped', { ...adopted, state: 'STOPPED' }, false],
+    ['adopted health readback after stop', { ...adopted, stopped: true }, false],
+    ['adopted process degraded', { ...adopted, state: 'DEGRADED' }, false],
+  ]) {
+    const result = projectMe2UiRoutingAuthority(input);
+    assert.equal(result.routing_authorized, expected, label);
+    assert.equal(result.initial_readiness_confirmed, expected, label);
+  }
+});
+
+test('stopping an adopted UI revokes routing without signalling the external process', async () => {
+  const savedFetch = globalThis.fetch;
+  const savedOptIn = process.env.ME2_UI_ALLOW_EXTERNAL_ADOPT;
+  process.env.ME2_UI_ALLOW_EXTERNAL_ADOPT = '1';
+  globalThis.fetch = async () => new Response('<html></html>', { headers: { 'content-type': 'text/html' } });
+  try {
+    const started = await startMe2UiHost();
+    assert.equal(started.state, 'ADOPTED');
+    assert.equal(started.routing_authorized, true);
+    const stopped = stopMe2UiHost({ killChild: true });
+    assert.equal(stopped.state, 'STOPPED');
+    assert.equal(stopped.child_pid, null);
+    assert.equal(stopped.routing_authorized, false);
+    assert.equal(me2UiHostStatus().initial_readiness_confirmed, false);
+  } finally {
+    stopMe2UiHost();
+    globalThis.fetch = savedFetch;
+    if (savedOptIn === undefined) delete process.env.ME2_UI_ALLOW_EXTERNAL_ADOPT;
+    else process.env.ME2_UI_ALLOW_EXTERNAL_ADOPT = savedOptIn;
+  }
+});
+
 test('R85 package contract aligns daemon version and preserves one scheduler owner', async () => {
   const daemonPackage = JSON.parse(await fs.readFile(path.join(repoRoot, 'apps', 'me2-daemon', 'package.json'), 'utf8'));
   const store = await fs.readFile(path.join(repoRoot, 'apps', 'me2-daemon', 'store.ts'), 'utf8');
@@ -125,7 +174,7 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(uiHost, /event: 'UI_UNOWNED_PORT'/);
   assert.match(uiHost, /state = 'WAITING_FOR_PORT_RELEASE'/);
   assert.match(uiHost, /ME2_UI_ALLOW_EXTERNAL_ADOPT/);
-  assert.match(uiHost, /routing_authorized:\s*childOwned \|\| externalAdoptAuthorized/);
+  assert.match(uiHost, /\.\.\.projectMe2UiRoutingAuthority\(\{ mode, state, child, stopped,/);
   assert.match(uiHost, /export async function stopMe2UiHostAndWait/);
   assert.match(uiHost, /event: 'UI_FORCE_KILL'/);
   assert.match(uiHost, /event: 'UI_STOP_CONFIRMED'/);

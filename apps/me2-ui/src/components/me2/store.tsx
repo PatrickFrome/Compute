@@ -111,7 +111,18 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const h = window.location.hash.replace("#", "");
         const stored = localStorage.getItem(PAGE_LS);
         const raw = (PAGES.some((p) => p.key === h) && h) || stored;
-        if (raw && PAGES.some((p) => p.key === raw)) set({ page: raw as PageKey, recentPages: [raw as PageKey] });
+        if (raw && PAGES.some((p) => p.key === raw)) {
+          set({ page: raw as PageKey, recentPages: [raw as PageKey] });
+          try {
+            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown } }).metaengineShell;
+            void shell?.setPrimaryPage?.(raw);
+          } catch { /* Browser preload bridge absent in web-only mode */ }
+        } else {
+          try {
+            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown } }).metaengineShell;
+            void shell?.setPrimaryPage?.("command");
+          } catch { /* Browser preload bridge absent in web-only mode */ }
+        }
         const ws = localStorage.getItem(WS_LS) as WorkspaceKey | null;
         if (ws) set({ workspace: ws });
       } catch { /* приватный режим */ }
@@ -233,6 +244,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
       localStorage.setItem(PAGE_LS, p);
       history.replaceState(null, "", `#${p}`);
     } catch { /* приватный режим */ }
+    try {
+      const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown } }).metaengineShell;
+      void shell?.setPrimaryPage?.(p);
+    } catch { /* Browser preload bridge absent in web-only mode */ }
     // Electron TabRegistry
     void (async () => {
       try {

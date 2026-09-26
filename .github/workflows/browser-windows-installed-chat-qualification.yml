@@ -212,12 +212,13 @@ jobs:
             $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
             $null = $normal.Handle
             $deadline = [DateTime]::UtcNow.AddSeconds(55)
-            $localShellIndex = -1
+            $primaryShellIndex = -1
             $preconnectIndex = -1
             $userSessionIndex = -1
             $nativeSupervisorIndex = -1
             $initialTabIndex = -1
             $remoteLoadIndex = -1
+            $r75UiConfirmed = $false
             $cleanControl = $false
             $controlState = $null
             $readySince = $null
@@ -230,20 +231,27 @@ jobs:
               }
               if (Test-Path $normalOut -PathType Leaf) {
                 $normalLines = @(Get-Content $normalOut -ErrorAction SilentlyContinue)
-                $localShellIndex = -1
+                $primaryShellIndex = -1
                 $preconnectIndex = -1
                 $userSessionIndex = -1
                 $nativeSupervisorIndex = -1
                 $initialTabIndex = -1
                 $remoteLoadIndex = -1
+                $r75UiConfirmed = $false
                 for ($i = 0; $i -lt $normalLines.Count; $i++) {
                   $line = [string]$normalLines[$i]
                   if (-not $line.Trim().StartsWith('{')) { continue }
                   try { $runtimeEvent = $line | ConvertFrom-Json } catch { continue }
-                  if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v1' `
-                      -and $runtimeEvent.state -eq 'LOCAL_SHELL_VISIBLE' `
+                  if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v2' `
+                      -and $runtimeEvent.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' `
+                      -and $runtimeEvent.shell_mode -eq 'ME2_PRIMARY' `
+                      -and $runtimeEvent.legacy_shell_is_normal_path -eq $false `
                       -and $runtimeEvent.authority_effect -eq $false) {
-                    $localShellIndex = $i
+                    $primaryShellIndex = $i
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v2' `
+                      -and $runtimeEvent.state -eq 'LEGACY_RECOVERY_SHELL_VISIBLE') {
+                    throw 'installed_legacy_recovery_shell_visible_on_healthy_me2'
                   }
                   if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' `
                       -and $runtimeEvent.state -eq 'ARMED' `
@@ -271,6 +279,17 @@ jobs:
                   if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' -and $runtimeEvent.subsystem -eq 'INITIAL_REMOTE_LOAD') {
                     $remoteLoadIndex = $i
                   }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' `
+                      -and $runtimeEvent.state -eq 'ME2_R75_UI_CONTRACT_CONFIRMED' `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $r75UiConfirmed = $true
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' `
+                      -and $runtimeEvent.state -eq 'ME2_R75_UI_CONTRACT_INCOMPLETE') {
+                    Get-Content $normalOut -ErrorAction SilentlyContinue
+                    Get-Content $normalErr -ErrorAction SilentlyContinue
+                    throw 'installed_me2_r75_dom_contract_incomplete'
+                  }
                 }
               }
               $cleanControl = $false
@@ -285,7 +304,7 @@ jobs:
                   $cleanControl = $true
                 }
               }
-              if ($localShellIndex -ge 0 -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
+              if ($primaryShellIndex -ge 0 -and $r75UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
                 if (-not $readySince) { $readySince = [DateTime]::UtcNow }
                 if (([DateTime]::UtcNow - $readySince).TotalSeconds -ge 2) { break }
               } else {
@@ -294,18 +313,28 @@ jobs:
               Start-Sleep -Milliseconds 250
             }
 
-            if ($localShellIndex -lt 0) { throw 'installed_local_shell_not_visible' }
+            if (-not $r75UiConfirmed) {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'installed_me2_r75_dom_contract_not_confirmed'
+            }
+
+            if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
             if (-not $cleanControl) { throw 'installed_clean_genesis_control_not_verified' }
             if ($initialTabIndex -ge 0) { throw 'installed_clean_genesis_created_initial_tab' }
             if ($remoteLoadIndex -ge 0) { throw 'installed_clean_genesis_started_initial_remote_load' }
-            if (-not ($localShellIndex -lt $preconnectIndex -and $preconnectIndex -lt $userSessionIndex)) {
-              throw 'installed_chatgpt_preconnect_order_invalid'
+            if (-not ($primaryShellIndex -lt $preconnectIndex -and $preconnectIndex -lt $userSessionIndex)) {
+              throw 'installed_me2_primary_shell_preconnect_order_invalid'
             }
 
             $proof.preconnect_armed = $true
+            $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_r75_dom_contract_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName legacy_recovery_shell_visible_on_normal_startup -NotePropertyValue $false -Force
+            $proof | Add-Member -NotePropertyName normal_shell_mode -NotePropertyValue 'ME2_PRIMARY' -Force
             $proof.clean_genesis_control_verified = $true
             $proof.automatic_initial_tab_suppressed = $true
             $proof.automatic_initial_remote_load_suppressed = $true
