@@ -506,6 +506,33 @@ Decision after research:
 - named custom layouts can come later, after fixed workspace defaults and geometry clamps are proven.
 
 
+
+## 6.7 UI slice checkpoint E — selection-driven read-only inspector
+
+Checkpoint source head before this note: `678e2ae624e313f87423df173c7608902402f2d3`.
+
+Implemented:
+- Context Drawer now has a first-class `Selection` tab;
+- the inspector follows two exact UI selections already owned by the application: selected agent session and last inspected task;
+- task inspection retains `inspectedTaskId` after the modal/detail surface closes, so secondary context survives without keeping a blocking overlay mounted;
+- agent context reuses the shared `useAgentChatSessions()` feed instead of creating a second polling/fetch path;
+- the inspector shows bounded identity/state information (session id, agent id, role, model, objective/outcome summary; task id, status, spec, role and step progress);
+- no effect controls were added to the inspector and it contains no direct `me2Fetch`, `sendCommand` or agent mutation API.
+
+Post-step research:
+- **Figma Dev Mode Inspect** is explicitly selection-driven: selecting a layer populates name/type, component metadata, properties, change history and implementation information in the Inspect panel. The useful METAENGINE rule is “selection determines context; the inspector explains it.” https://help.figma.com/hc/en-us/articles/15023124644247-Guide-to-Dev-Mode
+- **GitHub Copilot app agent sessions** keeps multiple isolated sessions in parallel, each with its own workspace/branch, while the selected session exposes its mode, model, reasoning and work context. METAENGINE should likewise make exact session identity/state visible in the secondary inspector instead of forcing the operator to infer it from logs. https://docs.github.com/en/copilot/how-tos/github-copilot-app/agent-sessions
+- **Cursor Worktrees / Agent Review** separates each agent task in an isolated worktree and makes result review a distinct inspection step. This reinforces keeping “inspect/review context” separate from actuation controls. https://prod.cursor.com/docs/configuration/worktrees and https://prod.cursor.com/docs/agent/agent-review
+- **Linear issue selection** distinguishes highlight/selection from the actions that can then be invoked through keyboard, command menu or contextual menu. METAENGINE should preserve the same separation: selection itself is non-effect state. https://linear.app/docs/select-issues
+- **Figma Inspect with view-only access** still exposes useful properties even when editing is unavailable. This supports a read-only inspector contract that remains valuable without inheriting authority. https://help.figma.com/hc/en-us/articles/22012921621015-Guide-to-inspecting
+
+Decision after research:
+- keep Selection inspector non-mutating;
+- when selection changes, update inspector context without manufacturing task/agent authority;
+- future inspector expansion should prefer exact identity/evidence/provenance fields already available in bounded projections;
+- effects remain on their owning Page, task sheet, or Command Palette, not in the inspector.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
