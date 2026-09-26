@@ -52,8 +52,12 @@ jobs:
           grep -q 'service_activation_authorized = \$false' apps/metaengine-browser/scripts/build-guardian-native-staging.ps1
           grep -q 'guardian_native_staging_verified' apps/metaengine-browser/scripts/verify-installed-guardian-native-staging.ps1
           node --check apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs
+          node --check apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs
           node --check apps/metaengine-browser/scripts/verify-builder-copy.cjs
           grep -q 'me2-ui-dist/node_modules' apps/metaengine-browser/electron-builder.test.json
+          grep -q 'me2-daemon-dist' apps/metaengine-browser/electron-builder.test.json
+          grep -q 'build-me2-daemon-staging.ps1' apps/metaengine-browser/scripts/electron-builder-before-pack.cjs
+          node -e "const p=require('./apps/me2-daemon/package.json'); const fs=require('fs'); const s=fs.readFileSync('./apps/me2-daemon/store.ts','utf8'); const m=s.match(/export\\s+const\\s+VERSION\\s*=\\s*['\\\"]([^'\\\"]+)/); if(!m||p.version!==m[1]) process.exit(1)"
           grep -q 'self_update_test_feed_not_allowed' apps/metaengine-browser/src/self-update-runtime.mjs
           grep -q 'persistUpdatedSuccessorReceipt' apps/metaengine-browser/src/main-entry.mjs
           grep -q 'SUCCESSOR_STARTUP_PROBE_ONLY' apps/metaengine-browser/src/self-update-smoke.mjs
@@ -157,6 +161,18 @@ jobs:
             --runtime (Join-Path $installRoot 'METAENGINE Browser Test.exe') `
             --smoke --evidence './self-update-fast-evidence/installed-me2-ui-proof.json'
           if ($LASTEXITCODE -ne 0) { throw 'full_e2e_installed_me2_ui_invalid' }
+
+      - name: Prove installed ME2 daemon after physical update
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          node scripts/verify-me2-daemon-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-daemon') `
+            --expected-sha '${{ github.event.pull_request.head.sha || github.sha }}' `
+            --smoke --evidence './self-update-fast-evidence/installed-me2-daemon-proof.json'
+          if ($LASTEXITCODE -ne 0) { throw 'full_e2e_installed_me2_daemon_invalid' }
 
       - name: Prove installed Guardian staging after physical update
         working-directory: apps/metaengine-browser
