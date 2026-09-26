@@ -221,28 +221,6 @@ contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
   // Browser WebContentsView is composed into the ME2 page; it grants no task,
   // scheduler, browser-command, update, or release authority.
   setPrimaryPage: (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? '')),
-  // R84/R75: renderer-origin structural attestation. The page can report only
-  // six fixed booleans; origin classification and authority bits are supplied
-  // here in trusted preload, so renderer text cannot mint execution authority.
-  reportUiContract: (input) => {
-    const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
-    const source = input && typeof input === 'object' ? input : {};
-    const present = Object.fromEntries(required.map((id) => [id, source[id] === true]));
-    ipcRenderer.send('metaengine:shell:ui-contract-readback', {
-      schema: 'metaengine.browser.me2-ui-contract-readback.v1',
-      location_class: location.origin.startsWith('http://127.0.0.1:') ? 'PACKAGED_ME2_LOOPBACK' : 'OTHER',
-      hash: String(location.hash || ''),
-      required,
-      present,
-      complete: required.every((id) => present[id] === true),
-      scheduler_authority: false,
-      browser_command_authority: false,
-      update_authority: false,
-      release_authority: false,
-      authority_effect: false,
-    });
-    return Object.freeze({ reported: true, complete: required.every((id) => present[id] === true), authority_effect: false });
-  },
   presentationFocus: Object.freeze({
     snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
     selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
