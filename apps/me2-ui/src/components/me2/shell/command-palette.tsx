@@ -233,7 +233,7 @@ export function CommandPalette() {
             <CommandGroup heading={`Реестр действий шины · ${catalog.length}/47`}>
               {catalog.map((m) => (
                 <CommandItem key={m.action} value={`${m.action} ${m.desc} ${m.group}`} onSelect={() => runRegistryAction(m)}>
-                  <Badge variant="outline" className={`mr-2 h-4 shrink-0 border px-1 font-mono text-[8px] ${laneChip(m.lane)}`}>{m.lane.slice(0, 4)}</Badge>
+                  <Badge variant="outline" title={`Authority lane: ${m.lane}`} aria-label={`Authority lane ${m.lane}`} className={`mr-2 h-5 shrink-0 border px-1.5 font-mono text-[8px] ${laneChip(m.lane)}`}>{m.lane.replace("_", " ")}</Badge>
                   <span className="font-mono text-xs">{m.action}</span>
                   <span className="ml-2 truncate text-[10px] text-zinc-500">{m.desc}</span>
                   <span className="ml-auto shrink-0 font-mono text-[9px] text-zinc-600">c{m.cost}</span>
