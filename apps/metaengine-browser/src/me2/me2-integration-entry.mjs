@@ -60,7 +60,7 @@ export async function me2ContractHandshake() {
     const uiOk = j?.capabilities?.ui === '/ui';
     contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && meshOk && uiOk;
     if (contractState.ok) {
-      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null });
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.capabilities?.version ?? j?.meta?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null });
     } else {
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, mesh_heartbeat: meshOk, ui: uiOk, verdict: 'DEGRADED — операции честно падают до починки контракта' }, { error: true });
     }
