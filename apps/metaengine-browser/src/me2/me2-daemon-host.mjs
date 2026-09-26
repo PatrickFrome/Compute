@@ -21,6 +21,7 @@ const MAX_RESTARTS = Number(process.env.ME2_DAEMON_MAX_RESTARTS || 8);
 const HEALTH_INTERVAL_MS = Number(process.env.ME2_DAEMON_HEALTH_INTERVAL_MS || 15000);
 const BACKOFF_BASE_MS = 2000;
 const BACKOFF_MAX_MS = 5 * 60 * 1000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let child = null;
 let state = 'IDLE';
@@ -29,6 +30,8 @@ let lastError = null;
 let lastHealthOkAt = null;
 let healthTimer = null;
 let stopped = false;
+let daemonDataDir = null;
+let lastLaunchMode = null;
 
 function emitRow(row, { error = false } = {}) {
   const text = JSON.stringify(row);
@@ -44,6 +47,7 @@ function row(statePatch) {
     restarts,
     last_error: lastError,
     last_health_ok_at: lastHealthOkAt,
+    launch_mode: lastLaunchMode,
     rest_base: REST_BASE,
     ...statePatch,
   };
@@ -56,6 +60,7 @@ export function me2DaemonStatus() {
     restarts,
     last_error: lastError,
     last_health_ok_at: lastHealthOkAt,
+    launch_mode: lastLaunchMode,
     child_pid: child?.pid ?? null,
     stopped,
   };
@@ -73,26 +78,46 @@ export async function me2HealthProbe(timeout_ms = 4000) {
   }
 }
 
-function resolveDaemonDir() {
+export function resolveMe2DaemonLaunch({
+  resourcesPath = process.resourcesPath || '',
+  cwd = process.cwd(),
+  env = process.env,
+  exists = existsSync,
+} = {}) {
   const candidates = [
-    process.env.ME2_DAEMON_DIR,
-    join(process.resourcesPath || '', 'me2-daemon'),
-    join(process.cwd(), 'me2-daemon'),
-    join(process.cwd(), '..', 'me2-daemon'),
+    env.ME2_DAEMON_DIR,
+    join(resourcesPath, 'me2-daemon'),
+    join(cwd, 'me2-daemon'),
+    join(cwd, '..', 'me2-daemon'),
   ].filter(Boolean);
   for (const dir of candidates) {
     try {
-      if (dir && existsSync(join(dir, 'index.ts'))) return dir;
+      const packaged = join(dir, 'me2-daemon.exe');
+      if (exists(packaged)) {
+        return Object.freeze({ dir, bin: packaged, args: [], mode: 'PACKAGED_STANDALONE' });
+      }
+      if (exists(join(dir, 'index.ts'))) {
+        return Object.freeze({ dir, bin: env.ME2_DAEMON_BIN || 'bun', args: ['index.ts'], mode: 'SOURCE_BUN' });
+      }
     } catch { /* следующий кандидат */ }
   }
   return null;
 }
 
-function spawnDaemon(dir) {
-  const bin = process.env.ME2_DAEMON_BIN || 'bun';
-  child = spawn(bin, ['index.ts'], {
-    cwd: dir,
-    env: { ...process.env, ME2_HOSTED_BY_BROWSER: '1' },
+function spawnDaemon(launch) {
+  lastLaunchMode = launch.mode;
+  const childEnv = {
+    ...process.env,
+    ME2_HOSTED_BY_BROWSER: '1',
+    // R85: the Browser remains the sole scheduler/authority owner. The packaged
+    // legacy daemon boots as a bounded service plane until R86 explicitly
+    // converges task authority; operators can opt into another mode explicitly.
+    ME2_BOOT_MODE: process.env.ME2_DAEMON_BOOT_MODE || 'probe',
+  };
+  if (!childEnv.ME2_DATA_DIR && daemonDataDir) childEnv.ME2_DATA_DIR = daemonDataDir;
+  child = spawn(launch.bin, launch.args, {
+    cwd: launch.dir,
+    env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
   });
@@ -135,36 +160,62 @@ function scheduleRestart() {
   restarts += 1;
   setTimeout(() => {
     if (stopped) return;
-    const dir = resolveDaemonDir();
-    if (!dir) {
+    const launch = resolveMe2DaemonLaunch();
+    if (!launch) {
       state = 'DEGRADED';
-      lastError = 'me2_daemon_dir_not_found';
-      emitRow(row({ event: 'DAEMON_DIR_NOT_FOUND' }), { error: true });
+      lastError = 'me2_daemon_launch_not_found';
+      emitRow(row({ event: 'DAEMON_LAUNCH_NOT_FOUND' }), { error: true });
       return;
     }
     state = 'STARTING';
-    spawnDaemon(dir);
+    spawnDaemon(launch);
   }, delay);
 }
 
+export async function waitForMe2DaemonReady({ attempts = 60, intervalMs = 250, probe = me2HealthProbe } = {}) {
+  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 60));
+  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 250));
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (child?.exitCode != null) return { ok: false, reason: `child_exit_${child.exitCode}`, attempt: attempt + 1 };
+    last = await probe(Math.min(1500, Math.max(250, delayMs * 4)));
+    if (last?.ok === true) return { ok: true, reason: 'READY', attempt: attempt + 1, last_seq: last.last_seq ?? null };
+    if (attempt + 1 < maxAttempts) await sleep(delayMs);
+  }
+  return { ok: false, reason: String(last?.reason || 'readiness_timeout'), attempt: maxAttempts };
+}
+
 /** Старт хоста: если daemon уже жив (внешняя инкарнация) — усыновляем, не спавним. */
-export async function startMe2DaemonHost() {
+export async function startMe2DaemonHost({ dataDir = null } = {}) {
   stopped = false;
+  daemonDataDir = dataDir ? String(dataDir) : null;
   const pre = await me2HealthProbe(2500);
   if (pre.ok) {
     state = 'ADOPTED';
+    lastLaunchMode = 'ADOPTED_EXTERNAL';
     lastHealthOkAt = new Date().toISOString();
     emitRow(row({ event: 'DAEMON_ADOPTED', last_seq: pre.last_seq }));
   } else {
-    const dir = resolveDaemonDir();
-    if (!dir) {
+    const launch = resolveMe2DaemonLaunch();
+    if (!launch) {
       state = 'DEGRADED';
-      lastError = 'me2_daemon_dir_not_found';
-      emitRow(row({ event: 'DAEMON_DIR_NOT_FOUND' }), { error: true });
+      lastError = 'me2_daemon_launch_not_found';
+      emitRow(row({ event: 'DAEMON_LAUNCH_NOT_FOUND' }), { error: true });
     } else {
       state = 'STARTING';
-      spawnDaemon(dir);
-      emitRow(row({ event: 'DAEMON_SPAWN', dir }));
+      spawnDaemon(launch);
+      emitRow(row({ event: 'DAEMON_SPAWN', mode: launch.mode }));
+      const ready = await waitForMe2DaemonReady();
+      if (ready.ok) {
+        state = 'HEALTHY';
+        lastError = null;
+        lastHealthOkAt = new Date().toISOString();
+        emitRow(row({ event: 'DAEMON_HEALTHY', last_seq: ready.last_seq, readiness_attempt: ready.attempt }));
+      } else {
+        state = 'DEGRADED';
+        lastError = `initial_readiness_${ready.reason}`;
+        emitRow(row({ event: 'DAEMON_INITIAL_READINESS_FAILED', reason: ready.reason, attempt: ready.attempt }), { error: true });
+      }
     }
   }
   healthTimer = setInterval(async () => {

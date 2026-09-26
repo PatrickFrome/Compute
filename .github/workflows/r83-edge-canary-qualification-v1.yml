@@ -1,0 +1,114 @@
+name: R83 Edge Canary Qualification V1
+
+on:
+  push:
+    branches:
+      - 'work/r81-browser-release-convergence-v1'
+    paths:
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
+      - 'apps/metaengine-browser/test/postgres-command-wake.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-realtime-command-wake-migration.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-result-delivery-integration.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-result-delivery-runtime-wiring.test.mjs'
+      - 'apps/metaengine-browser/test/emergency-routes.test.mjs'
+      - 'apps/metaengine-browser/test/cognitive-delta-edge-route.test.mjs'
+      - 'coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json'
+      - '.github/workflows/r83-edge-canary-qualification-v1.yml'
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/**'
+      - 'apps/metaengine-browser/test/postgres-command-wake.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-realtime-command-wake-migration.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-result-delivery-integration.test.mjs'
+      - 'apps/metaengine-browser/test/rsi-result-delivery-runtime-wiring.test.mjs'
+      - 'apps/metaengine-browser/test/emergency-routes.test.mjs'
+      - 'apps/metaengine-browser/test/cognitive-delta-edge-route.test.mjs'
+      - 'coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json'
+      - '.github/workflows/r83-edge-canary-qualification-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-canary-equivalence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Prove exact candidate head
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Prove source equivalence to deployed v14 canary pin
+        run: |
+          set -euo pipefail
+          MANIFEST=coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json
+          PIN="$(node -p "require('./' + process.argv[1]).candidate.source_pin" "$MANIFEST")"
+          test -n "$PIN"
+          git cat-file -e "$PIN^{commit}"
+          git merge-base --is-ancestor "$PIN" HEAD
+          git diff --exit-code "$PIN" HEAD --             apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1             supabase/migrations
+
+      - name: Validate qualification manifest is fail-closed
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const m = JSON.parse(fs.readFileSync('coordination/convergence/R83_EDGE_CANARY_QUALIFICATION_V1.json', 'utf8'));
+          if (m.schema !== 'metaengine.r83.edge-canary-qualification.v1') throw new Error('schema');
+          if (!/^[0-9a-f]{40}$/.test(m.candidate.source_pin)) throw new Error('candidate_pin');
+          if (!/^[0-9a-f]{64}$/.test(m.candidate.ezbr_sha256)) throw new Error('candidate_digest');
+          if (!/^[0-9a-f]{40}$/.test(m.rollback.source_pin)) throw new Error('rollback_pin');
+          if (!/^[0-9a-f]{64}$/.test(m.rollback.ezbr_sha256)) throw new Error('rollback_digest');
+          if (m.live_qualification.completed !== false) throw new Error('live_qualification_must_remain_open');
+          if (m.promotion_authorized !== false || m.authority_effect !== false) throw new Error('promotion_must_remain_fail_closed');
+          const required = new Set([
+            'createDbInspectRoutes',
+            'createEmergencyCommandRoutes',
+            'createPostgresCommandWakeHub',
+            'createRsiResultReceiptReadback',
+            'createCognitiveDeltaRoutes',
+            'h205f22_a2_browser_supervisor_issue_native_v1',
+            '/v1/commands/issue-tool',
+          ]);
+          for (const item of m.required_capabilities || []) required.delete(item);
+          if (required.size) throw new Error('required_capability_manifest_gap:' + [...required].join(','));
+          NODE
+
+      - name: Prove required candidate capabilities exist in exact source
+        run: |
+          set -euo pipefail
+          SRC=apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/index.ts
+          grep -q 'createDbInspectRoutes' "$SRC"
+          grep -q 'createEmergencyCommandRoutes' "$SRC"
+          grep -q 'createPostgresCommandWakeHub' "$SRC"
+          grep -q 'createRsiResultReceiptReadback' "$SRC"
+          grep -q 'createCognitiveDeltaRoutes' "$SRC"
+          grep -q 'h205f22_a2_browser_supervisor_issue_native_v1' "$SRC"
+          grep -q '/v1/commands/issue-tool' "$SRC"
+
+      - name: Run focused Edge convergence contracts
+        working-directory: apps/metaengine-browser
+        run: |
+          set -euo pipefail
+          node --test             test/postgres-command-wake.test.mjs             test/native-supervisor-realtime-command-wake-migration.test.mjs             test/rsi-result-delivery-integration.test.mjs             test/rsi-result-delivery-runtime-wiring.test.mjs             test/emergency-routes.test.mjs             test/cognitive-delta-edge-route.test.mjs
+
+      - name: Prove static qualification has no authority effect
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"

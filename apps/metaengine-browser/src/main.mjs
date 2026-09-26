@@ -24,11 +24,12 @@ import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
 // ME2 smart merge (R41): узкая capability вкладок для ME2-плоскости (fail-open, zero-authority).
 // Плоскость не переписывает createTab — она вызывает его штатно, политика навигации браузера авторитетна.
 import { me2FleetTabsSetHost } from './me2/me2-fleet-tabs-host.mjs';
 import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
-import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
+import { ExactBrowserTabViewMap, resolveExactWebContentsTabBinding } from './browser-webcontents-tab-index.mjs';
 import {
   assertExactNativeSupervisorMutationTargetCurrent,
   resolveExactNativeSupervisorMutationTarget,
@@ -68,12 +69,6 @@ nativeTheme.themeSource = 'dark';
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
-// R41: регистрация хоста вкладок для ME2 Mission Control (браузер сам открывает чат-агентов
-// прямо в сайте). Guarded: ME2_INTEGRATION=0 → ровно прежнее поведение. createTab — hoisted
-// function declaration, ссылка валидна до её текстового определения.
-if (process.env.ME2_INTEGRATION !== '0') {
-  try { me2FleetTabsSetHost({ registry, createTab: (input, opts) => createTab(input, opts) }); } catch { /* ME2-плоскость опциональна */ }
-}
 const views = new ExactBrowserTabViewMap();
 const bridge = new ComputeBridgeClient();
 let windowRef = null;
@@ -87,6 +82,87 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+
+function canonicalTabRuntimeIdentity(tabId) {
+  const id = String(tabId || '');
+  const tab = registry.get(id);
+  const view = views.get(id);
+  const exact = resolveExactWebContentsTabBinding(id);
+  if (!tab || !view || view.webContents.isDestroyed() || !exact) return null;
+
+  // R84: consume the already-live Browser Brain runtime binding through the
+  // NativeSupervisorClient. This is an O(1) read from BrowserRuntimeBindingIndex;
+  // do not scan snapshots and do not manufacture BrowserCell/CDP identity from
+  // URL, title, selected tab, WebContents id, or canonical tab id.
+  let runtime = null;
+  try { runtime = nativeSupervisor?.runtimeBinding?.(id) || null; } catch { runtime = null; }
+  if (runtime
+    && (runtime.schema !== 'metaengine.browser.runtime-binding.v1'
+      || runtime.valid !== true
+      || String(runtime.tab_id || '') !== id
+      || Number(runtime.web_contents_id || 0) !== Number(exact.web_contents_id))) {
+    runtime = null;
+  }
+
+  const cellId = runtime?.cell_id == null ? null : String(runtime.cell_id);
+  const cellGeneration = Number(runtime?.cell_generation || 0) || null;
+  const observedTargetId = runtime?.target_id == null ? null : String(runtime.target_id);
+  const webContentsFallbackTarget = `webcontents:${exact.web_contents_id}`;
+  const runtimeTargetId = observedTargetId && observedTargetId !== webContentsFallbackTarget ? observedTargetId : null;
+  const rendererProcessKey = runtime?.renderer_process_key == null ? null : String(runtime.renderer_process_key);
+  const runtimeIdentityComplete = Boolean(
+    runtime
+    && cellId
+    && cellGeneration
+    && runtimeTargetId
+    && rendererProcessKey
+    && runtime.renderer_process_identity_complete === true
+  );
+
+  return Object.freeze({
+    schema: 'metaengine.browser.canonical-tab-runtime-identity.v1',
+    tab_id: id,
+    browsercell_identity: cellId,
+    browsercell_identity_source: cellId ? 'BROWSER_RUNTIME_BINDING_INDEX' : null,
+    web_contents_id: Number(exact.web_contents_id),
+    webcontents_binding_generation: Number(exact.binding_generation),
+    runtime_binding_generation: Number(runtime?.binding_generation || 0) || null,
+    cell_id: cellId,
+    cell_generation: cellGeneration,
+    renderer_process_key: rendererProcessKey,
+    target_id: runtimeTargetId,
+    document_generation: Number(runtime?.document_generation || 0),
+    semantic_revision: Number(runtime?.semantic_revision || 0),
+    runtime_binding_live: runtime?.valid === true,
+    runtime_identity_complete: runtimeIdentityComplete,
+    runtime_binding_source: runtime ? 'BROWSER_RUNTIME_BINDING_INDEX_O1' : null,
+    identity_lookup_complexity: 'O(1)',
+    exact_identity: true,
+    selected_tab_fallback: false,
+    url_identity_fallback: false,
+    title_identity_fallback: false,
+    webcontents_target_fallback: false,
+    execution_authority: false,
+    command_leasing: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+// R84 Desktop convergence: Mission Control and native conversations use the
+// existing TabRegistry + ExactBrowserTabViewMap. No parallel tab/target registry.
+if (process.env.ME2_INTEGRATION !== '0') {
+  try {
+    me2FleetTabsSetHost({
+      registry,
+      createTab: (input, opts) => createTab(input, opts),
+      closeTab: (tabId) => closeTab(tabId),
+      selectTab: (tabId) => selectBrowserTabForPresentation(tabId),
+      resolveIdentity: (tabId) => canonicalTabRuntimeIdentity(tabId),
+    });
+  } catch { /* optional ME2 plane never becomes Browser authority */ }
+}
+
 let fallbackConsole = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -350,13 +426,20 @@ function applyPresentationFocusIntent(request) {
 }
 
 async function shellSnapshot() {
-  const tabs = registry.snapshot();
+  const rawTabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
   const ownerSafetyGatesSnapshot = ownerSafetyGates?.snapshot() || null;
   const developmentPlaneSnapshot = normalizeDevelopmentPlaneProjection(
     developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null,
   );
   const supervisor = nativeSupervisor?.snapshot() || null;
+  const tabs = Object.freeze({
+    ...rawTabs,
+    tabs: Object.freeze((rawTabs?.tabs || []).map((tab) => Object.freeze({
+      ...tab,
+      runtime_identity: canonicalTabRuntimeIdentity(tab.tab_id),
+    }))),
+  });
   const compute = await currentComputeHealth();
   const presentationFocus = devosPresentationFocus.snapshot();
   const sessionLayouts = devosSessionLayouts.snapshot();
@@ -569,6 +652,22 @@ function wireRemoteView(tab, view) {
   view.webContents.on('did-navigate-in-page', sync);
   view.webContents.on('page-title-updated', sync);
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
+  // R82 live repair: ExactBrowserTabViewMap removes the physical view binding
+  // on Electron's destroyed event. Retire the matching logical TabRegistry row
+  // on that exact physical proof as well; otherwise supervisor state can keep a
+  // ghost tab forever and ambiguity reconciliation repeatedly targets a view
+  // that no longer exists. Explicit closeTab() is safe because registry.close
+  // is idempotent and the helper becomes a no-op when close won the race.
+  view.webContents.once('destroyed', () => {
+    void reconcileDestroyedTabView({
+      tabId: tab.tab_id,
+      registry,
+      fleet,
+      invalidatePerception,
+      attachSelected,
+      publishSnapshot,
+    });
+  });
 }
 
 async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
@@ -1297,6 +1396,19 @@ async function initNativeSupervisor() {
       hostResilience: globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || false,
       getState: nativeSupervisorState,
       executeCommand: executeNativeSupervisorCommand,
+      // R84: one canonical logical BrowserCell allocation lives inside the
+      // existing TabRegistry. The realtime Brain consumes this metadata on the
+      // same process/semantic event path; no URL/title inference or second map.
+      resolveBrowserCell: (tabId) => {
+        const tab = registry.get(String(tabId));
+        if (!tab?.browser_cell_id || !Number.isSafeInteger(Number(tab.browser_cell_generation))) return null;
+        return Object.freeze({
+          cell_id: String(tab.browser_cell_id),
+          cell_generation: Number(tab.browser_cell_generation),
+          provider: tab.kind === 'GLM_CHAT' ? 'ZAI' : (tab.kind === 'CHATGPT' ? 'CHATGPT' : null),
+          role: tab.role || null,
+        });
+      },
       observeLocalTarget,
       workerObservationBudget: 4,
       controlStatePath: supervisorControlStatePath(),

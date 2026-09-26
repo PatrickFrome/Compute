@@ -15,7 +15,9 @@ function functionSlice(source, name, nextName) {
 test('trusted main process owns one full shell projection plus two bounded presentation projections', async () => {
   const main = await read('../src/main.mjs');
   assert.match(main, /import \{ normalizeDevelopmentPlaneProjection, projectWorkspaceWorkbench \} from '\.\/workspace-workbench-projection\.mjs'/);
-  assert.match(main, /const tabs = registry\.snapshot\(\)/);
+  assert.match(main, /const rawTabs = registry\.snapshot\(\)/);
+  assert.match(main, /const tabs = Object\.freeze\(\{[\s\S]*\.\.\.rawTabs,[\s\S]*runtime_identity: canonicalTabRuntimeIdentity\(tab\.tab_id\)/,
+    'R84 may enrich the canonical TabRegistry snapshot with read-only runtime identity but must not replace the registry');
   assert.match(main, /const fleetSnapshot = fleet\?\.snapshot\(\) \|\| null/);
   assert.match(main, /const ownerSafetyGatesSnapshot = ownerSafetyGates\?\.snapshot\(\) \|\| null/);
   assert.match(main, /const developmentPlaneSnapshot = normalizeDevelopmentPlaneProjection\([\s\S]*developmentPlane\?\.statusSnapshot\?\.\(\) \|\| developmentPlane\?\.snapshot\(\) \|\| null,[\s\S]*\)/);

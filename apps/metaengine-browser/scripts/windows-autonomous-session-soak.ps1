@@ -165,6 +165,75 @@ try {
     if ($unexpectedInitialRemoteRows -gt 0) { throw 'soak_zero_topology_startup_started_initial_remote_load' }
   }
 
+  # R85: the full installed runtime is asynchronous beyond PRIMARY_WINDOW_STABLE.
+  # Mission Control creates its supervisor WebContents only after daemon contract
+  # qualification and gateway startup. Taking the handle baseline before that
+  # topology exists misclassifies expected startup handles as an activation leak.
+  # Wait for exact ME2 lifecycle evidence and a live UI probe, then demand a short
+  # handle plateau before measuring the 72 second-instance activations.
+  $me2DaemonReady = $false
+  $me2ContractOk = $false
+  $me2UiStarted = $false
+  $me2UiReady = $false
+  $me2GatewayLive = $false
+  $me2MissionTabCreated = $false
+  $me2Fatal = $null
+  $me2Deadline = [DateTime]::UtcNow.AddSeconds(45)
+  while ([DateTime]::UtcNow -lt $me2Deadline) {
+    $normal.Refresh()
+    if ($normal.HasExited) { throw "soak_normal_ui_exited_before_me2_settle:$($normal.ExitCode)" }
+    if (Test-Path $normalOut -PathType Leaf) {
+      foreach ($line in @(Get-Content $normalOut -ErrorAction SilentlyContinue)) {
+        if (-not [string]$line -or -not ([string]$line).Trim().StartsWith('{')) { continue }
+        try { $row = $line | ConvertFrom-Json } catch { continue }
+        $schema = [string]$row.schema
+        $eventProperty = $row.PSObject.Properties['event']
+        $event = if ($eventProperty) { [string]$eventProperty.Value } else { '' }
+        if ($schema -eq 'metaengine.browser.me2.daemon-host.v1' -and @('DAEMON_HEALTHY','DAEMON_ADOPTED') -contains $event) { $me2DaemonReady = $true }
+        if ($schema -eq 'metaengine.browser.me2.integration.v1' -and $event -eq 'ME2_CONTRACT_OK') { $me2ContractOk = $true }
+        if ($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_SPAWN','UI_ADOPTED') -contains $event) { $me2UiStarted = $true }
+        if ($schema -eq 'metaengine.browser.me2.ui-gateway.v1' -and $event -eq 'GATEWAY_LIVE') { $me2GatewayLive = $true }
+        if ($schema -eq 'metaengine.browser.me2.mission-control.v1' -and $event -eq 'SUPERVISOR_TAB_CREATED') { $me2MissionTabCreated = $true }
+        if (($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_DIR_NOT_FOUND','SPAWN_ERROR','RESTARTS_EXHAUSTED') -contains $event) `
+            -or ($schema -eq 'metaengine.browser.me2.daemon-host.v1' -and @('DAEMON_LAUNCH_NOT_FOUND','DAEMON_INITIAL_READINESS_FAILED','SPAWN_ERROR','RESTARTS_EXHAUSTED') -contains $event) `
+            -or ($schema -eq 'metaengine.browser.me2.integration.v1' -and @('ME2_CONTRACT_MISMATCH','ME2_CONTRACT_UNREACHABLE','DAEMON_HOST_START_FAILED','UI_HOST_START_FAILED') -contains $event)) {
+          $me2Fatal = "$schema/$event"
+        }
+      }
+    }
+    if ($me2Fatal) { throw "soak_me2_runtime_degraded:$me2Fatal" }
+    if ($me2UiStarted -and -not $me2UiReady) {
+      try {
+        $response = Invoke-WebRequest -Uri 'http://127.0.0.1:3000/' -Method Get -TimeoutSec 2
+        if ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 500) { $me2UiReady = $true }
+      } catch {}
+    }
+    if ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated) { break }
+    Start-Sleep -Milliseconds 200
+  }
+  if (-not ($me2DaemonReady -and $me2ContractOk -and $me2UiReady -and $me2GatewayLive -and $me2MissionTabCreated)) {
+    throw "soak_me2_runtime_not_settled:daemon=$me2DaemonReady,contract=$me2ContractOk,ui=$me2UiReady,gateway=$me2GatewayLive,mission=$me2MissionTabCreated"
+  }
+
+  $stableHandleSamples = 0
+  $lastHandleSample = $null
+  $plateauDeadline = [DateTime]::UtcNow.AddSeconds(12)
+  while ([DateTime]::UtcNow -lt $plateauDeadline) {
+    $normal.Refresh()
+    if ($normal.HasExited) { throw "soak_normal_ui_exited_before_resource_plateau:$($normal.ExitCode)" }
+    $sample = Get-Process -Id $normal.Id
+    $count = [int64]$sample.HandleCount
+    if ($null -ne $lastHandleSample -and [Math]::Abs($count - [int64]$lastHandleSample) -le 2) {
+      $stableHandleSamples += 1
+    } else {
+      $stableHandleSamples = 0
+    }
+    $lastHandleSample = $count
+    if ($stableHandleSamples -ge 4) { break }
+    Start-Sleep -Milliseconds 500
+  }
+  if ($stableHandleSamples -lt 4) { throw 'soak_me2_resource_baseline_not_stable' }
+
   $normal.Refresh()
   $primaryPid = [int64]$normal.Id
   $procBefore = Get-Process -Id $normal.Id
@@ -308,6 +377,13 @@ try {
   $proof | Add-Member -NotePropertyName startup_stable_sequence -NotePropertyValue ([int64]$stable.sequence) -Force
   $proof | Add-Member -NotePropertyName startup_resource_baseline_settled -NotePropertyValue $true -Force
   $proof | Add-Member -NotePropertyName startup_resource_baseline_subsystems -NotePropertyValue @($requiredStartupSubsystems) -Force
+  $proof | Add-Member -NotePropertyName me2_runtime_baseline_settled -NotePropertyValue $true -Force
+  $proof | Add-Member -NotePropertyName me2_daemon_ready -NotePropertyValue ([bool]$me2DaemonReady) -Force
+  $proof | Add-Member -NotePropertyName me2_contract_ok -NotePropertyValue ([bool]$me2ContractOk) -Force
+  $proof | Add-Member -NotePropertyName me2_ui_ready -NotePropertyValue ([bool]$me2UiReady) -Force
+  $proof | Add-Member -NotePropertyName me2_gateway_live -NotePropertyValue ([bool]$me2GatewayLive) -Force
+  $proof | Add-Member -NotePropertyName me2_mission_supervisor_tab_created -NotePropertyValue ([bool]$me2MissionTabCreated) -Force
+  $proof | Add-Member -NotePropertyName resource_baseline_handle_plateau_samples -NotePropertyValue $stableHandleSamples -Force
   $proof | Add-Member -NotePropertyName startup_control_mode -NotePropertyValue ([string]$controlState.supervisor_mode) -Force
   $proof | Add-Member -NotePropertyName startup_control_armed -NotePropertyValue ([bool]$controlState.armed) -Force
   $proof | Add-Member -NotePropertyName startup_control_always_on_verified -NotePropertyValue $true -Force

@@ -12,13 +12,14 @@
  * Запуск: final-runtime-entry.mjs → startMe2Integration({ app }) после main-entry.
  * R41: main.mjs аддитивно регистрирует capability вкладок через me2-fleet-tabs-host.
  */
+import { join } from 'node:path';
 import { startMe2DaemonHost, stopMe2DaemonHost, me2DaemonStatus } from './me2-daemon-host.mjs';
 import { startMe2FleetBridge, stopMe2FleetBridge, me2FleetBridgeStatus } from './me2-fleet-bridge.mjs';
 import { startMe2MissionControl, stopMe2MissionControl, me2MissionControlStatus } from './me2-mission-control.mjs';
 import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
 import { startMe2SupervisorMeshBridge, stopMe2SupervisorMeshBridge, me2SupervisorMeshBridgeStatus } from './me2-supervisor-mesh-bridge.mjs';
 import { me2FleetTabsHostStatus } from './me2-fleet-tabs-host.mjs';
-import { startMe2UiHost, stopMe2UiHost, me2UiHostStatus } from './me2-ui-host.mjs';
+import { startMe2UiHost, stopMe2UiHost, stopMe2UiHostAndWait, me2UiHostStatus } from './me2-ui-host.mjs';
 import { startMe2UiGateway, stopMe2UiGateway, me2UiGatewayStatus } from './me2-ui-gateway.mjs';
 import { me2SocketStatus } from './me2-socket-client.mjs';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
@@ -59,7 +60,7 @@ export async function me2ContractHandshake() {
     const uiOk = j?.capabilities?.ui === '/ui';
     contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && meshOk && uiOk;
     if (contractState.ok) {
-      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null });
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.capabilities?.version ?? j?.meta?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null });
     } else {
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, mesh_heartbeat: meshOk, ui: uiOk, verdict: 'DEGRADED — операции честно падают до починки контракта' }, { error: true });
     }
@@ -93,8 +94,12 @@ export async function startMe2Integration({ app } = {}) {
   if (started || stoppedFlag) return me2IntegrationStatus();
   started = true;
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_START', version: ME2_INTEGRATION_VERSION });
+  let userData = null;
   try {
-    await startMe2DaemonHost();
+    userData = app && typeof app.getPath === 'function' ? app.getPath('userData') : null;
+  } catch { /* до ready пути могут быть недоступны — адаптеры честно DEGRADED */ }
+  try {
+    await startMe2DaemonHost({ dataDir: userData ? join(userData, 'me2-daemon') : null });
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_HOST_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
@@ -128,10 +133,6 @@ export async function startMe2Integration({ app } = {}) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'MISSION_CONTROL_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
   // R42a: память brain ⇄ mem-economy (чтение checkpoint'а мозга, sidecar блока памяти ME2)
-  let userData = null;
-  try {
-    userData = app && typeof app.getPath === 'function' ? app.getPath('userData') : null;
-  } catch { /* до ready пути могут быть недоступны — адаптеры честно DEGRADED */ }
   try {
     startMe2BrainAdapter({ userData });
   } catch (e) {
@@ -143,17 +144,64 @@ export async function startMe2Integration({ app } = {}) {
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'MESH_BRIDGE_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
-  if (app && typeof app.once === 'function') {
-    app.once('will-quit', () => {
-      // деликатное завершение: хост НЕ убивает daemon по умолчанию (daemon переживает
-      // перезапуск браузера — его данные в SQLite, наследие постоянных сессий)
+  if (app && typeof app.once === 'function' && typeof app.on === 'function') {
+    let quitDrainStarted = false;
+    let quitDrainComplete = false;
+
+    const stopNonUiPlanes = () => {
       stopMe2SupervisorMeshBridge();
       stopMe2BrainAdapter();
       stopMe2MissionControl();
       stopMe2FleetBridge();
       stopMe2UiGateway();
-      stopMe2UiHost({ killChild: false }); // UI переживает закрытие окна — как daemon (наследие R46)
-      stopMe2DaemonHost({ killChild: false });
+      stopMe2DaemonHost({ killChild: true });
+    };
+
+    app.on('before-quit', (event) => {
+      if (quitDrainComplete) return;
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      if (quitDrainStarted) return;
+      quitDrainStarted = true;
+      stopNonUiPlanes();
+
+      void stopMe2UiHostAndWait({ graceMs: 2500, forceMs: 2500 })
+        .then((uiStatus) => {
+          if (uiStatus?.shutdown?.confirmed !== true) {
+            quitDrainStarted = false;
+            emitRow({
+              schema: ME2_INTEGRATION_SCHEMA,
+              event: 'ME2_UI_SHUTDOWN_UNCONFIRMED',
+              pid: uiStatus?.shutdown?.pid ?? null,
+              verdict: 'QUIT_FENCED',
+            }, { error: true });
+            return;
+          }
+          quitDrainComplete = true;
+          emitRow({
+            schema: ME2_INTEGRATION_SCHEMA,
+            event: 'ME2_QUIT_DRAIN_CONFIRMED',
+            ui_pid: uiStatus?.shutdown?.pid ?? null,
+            ui_force_kill: uiStatus?.shutdown?.forced === true,
+          });
+          app.quit();
+        })
+        .catch((error) => {
+          quitDrainStarted = false;
+          emitRow({
+            schema: ME2_INTEGRATION_SCHEMA,
+            event: 'ME2_QUIT_DRAIN_FAILED',
+            error: String(error?.message || error).slice(0, 200),
+            verdict: 'QUIT_FENCED',
+          }, { error: true });
+        });
+    });
+
+    app.once('will-quit', () => {
+      // R85 single-runtime ownership: will-quit is now only an idempotent final
+      // cleanup edge. before-quit already proved the Browser-owned UI exited,
+      // so the next incarnation cannot race a stale Next server on :3000.
+      stopNonUiPlanes();
+      stopMe2UiHost({ killChild: true });
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_STOP' });
     });
   }

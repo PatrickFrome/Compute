@@ -18,7 +18,10 @@ on:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs'
+      - 'apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1'
+      - 'apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs'
       - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
 concurrency:
@@ -182,6 +185,21 @@ jobs:
           if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) { throw 'package_smoke_me2_ui_proof_invalid' }
           $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
           $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
+
+          $daemonEvidence = "$env:RUNNER_TEMP\installed-me2-daemon-proof.json"
+          node scripts/verify-me2-daemon-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-daemon') `
+            --expected-sha ([string]$proof.source_head) `
+            --smoke --evidence $daemonEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'package_smoke_installed_me2_daemon_invalid' }
+          $daemonProof = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
+          if ($daemonProof.runtime_smoke -ne 'PASS' `
+              -or $daemonProof.external_bun_required -ne $false `
+              -or $daemonProof.smoke_child_external_runtime_path_sanitized -ne $true) { throw 'package_smoke_me2_daemon_proof_invalid' }
+          $proof | Add-Member -NotePropertyName me2_daemon_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_executable_sha256 -NotePropertyValue ([string]$daemonProof.executable_sha256) -Force
+
           $out = "$env:RUNNER_TEMP\package-version-probe.out"
           $err = "$env:RUNNER_TEMP\package-version-probe.err"
           $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
@@ -443,10 +461,19 @@ jobs:
             $progressAgeSeconds = ([DateTime]::UtcNow - ([DateTime]::Parse([string]$progressAfter.progress_at)).ToUniversalTime()).TotalSeconds
             if ($progressAgeSeconds -lt 0 -or $progressAgeSeconds -gt 30) { throw "normal_ui_parent_progress_stale:$progressAgeSeconds" }
 
+            $me2Output = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
+            if ($me2Output -notmatch '"event":"DAEMON_HEALTHY"') { throw 'normal_ui_me2_daemon_health_readback_missing' }
+            if ($me2Output -notmatch '"event":"ME2_CONTRACT_OK"') { throw 'normal_ui_me2_contract_readback_missing' }
+            if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
+              throw 'normal_ui_me2_integration_degraded'
+            }
+
             Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-v1.json" -Force
             Copy-Item $sentinelPath "$env:RUNNER_TEMP\browser-sentinel-v1.json" -Force
             Copy-Item $progressPath "$env:RUNNER_TEMP\browser-parent-progress-v1.json" -Force
             Copy-Item $workerHeartbeatPath "$env:RUNNER_TEMP\browser-sentinel-worker-heartbeat-v1.json" -Force
+            $proof | Add-Member -NotePropertyName me2_browser_integration_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'probe' -Force
             $proof.normal_ui_boot_verified = $true
             $proof.runtime_import_observability_verified = $true
             $proof.second_instance_activation_verified = $true
@@ -478,7 +505,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json apps/me2-daemon)"
 
       - name: Upload exact-head Windows candidate and startup evidence
         if: always()
@@ -488,6 +515,7 @@ jobs:
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/installed-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json
             ${{ runner.temp }}/browser-sentinel-v1.json
             ${{ runner.temp }}/browser-parent-progress-v1.json

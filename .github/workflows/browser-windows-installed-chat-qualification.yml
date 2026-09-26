@@ -80,6 +80,24 @@ jobs:
             throw 'detached_capture_view_physical_proof_invalid'
           }
 
+      - name: Build and stage exact-head ME2 UI
+        shell: pwsh
+        env:
+          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --no-audit --no-fund --global bun
+          Push-Location apps/me2-ui
+          try {
+            bun install --frozen-lockfile
+            bun run build
+            node scripts/pack-me2-ui.mjs
+          } finally { Pop-Location }
+          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_staged_me2_ui_invalid' }
+
       - name: Build exact-head unsigned NSIS installer
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -132,6 +150,35 @@ jobs:
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app -PathType Leaf)) { throw "qualified_installed_browser_missing:$app" }
+
+          $uiEvidence = "$env:RUNNER_TEMP\installed-chat-me2-ui-proof.json"
+          node scripts/verify-me2-ui-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-ui') `
+            --expected-sha ([string]$proof.source_head) `
+            --runtime $app --smoke --evidence $uiEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_me2_ui_bundle_invalid' }
+          $uiProof = Get-Content $uiEvidence -Raw | ConvertFrom-Json
+          if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) {
+            throw 'installed_chat_me2_ui_runtime_invalid'
+          }
+
+          $daemonEvidence = "$env:RUNNER_TEMP\installed-chat-me2-daemon-proof.json"
+          node scripts/verify-me2-daemon-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-daemon') `
+            --expected-sha ([string]$proof.source_head) `
+            --smoke --evidence $daemonEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_me2_daemon_bundle_invalid' }
+          $daemonProof = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
+          if ($daemonProof.runtime_smoke -ne 'PASS' `
+              -or $daemonProof.external_bun_required -ne $false `
+              -or $daemonProof.smoke_child_external_runtime_path_sanitized -ne $true) {
+            throw 'installed_chat_me2_daemon_runtime_invalid'
+          }
+          $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
+          $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
 
           $profileOut = "$env:RUNNER_TEMP\installed-chat-profile.out"
           $profileErr = "$env:RUNNER_TEMP\installed-chat-profile.err"
@@ -295,6 +342,8 @@ jobs:
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/installed-chat-proof.json
+            ${{ runner.temp }}/installed-chat-me2-ui-proof.json
+            ${{ runner.temp }}/installed-chat-me2-daemon-proof.json
             ${{ runner.temp }}/installed-chat-normal.out
             ${{ runner.temp }}/installed-chat-normal.err
             ${{ runner.temp }}/detached-capture-view-physical.jsonl

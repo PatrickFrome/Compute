@@ -14,6 +14,7 @@ on:
       - 'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
+      - 'apps/me2-ui/**'
       - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
   workflow_dispatch:
 
@@ -191,6 +192,23 @@ jobs:
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund --no-package-lock
+      - name: Build and stage exact-head ME2 UI
+        shell: pwsh
+        env:
+          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --no-audit --no-fund --global bun
+          Push-Location apps/me2-ui
+          try {
+            bun install --frozen-lockfile
+            bun run build
+            node scripts/pack-me2-ui.mjs
+          } finally { Pop-Location }
+          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'soak_staged_me2_ui_invalid' }
       - name: Parse packaged session soak harness before expensive build
         working-directory: apps/metaengine-browser
         shell: pwsh
@@ -259,6 +277,46 @@ jobs:
           $guardian = $guardianLine | ConvertFrom-Json
           if ($guardian.staging_only -ne $true -or $guardian.service_activation_authorized -ne $false) { throw 'soak_guardian_staging_not_inert' }
 
+      - name: Verify installed ME2 runtime bundle
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json"
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
+          $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
+
+          $uiEvidence = "$env:RUNNER_TEMP\soak-me2-ui-proof.json"
+          node scripts/verify-me2-ui-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-ui') `
+            --expected-sha ([string]$proof.source_head) `
+            --runtime $app --smoke --evidence $uiEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'soak_me2_ui_bundle_invalid' }
+          $uiProof = Get-Content $uiEvidence -Raw | ConvertFrom-Json
+          if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) {
+            throw 'soak_me2_ui_runtime_invalid'
+          }
+
+          $daemonEvidence = "$env:RUNNER_TEMP\soak-me2-daemon-proof.json"
+          node scripts/verify-me2-daemon-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-daemon') `
+            --expected-sha ([string]$proof.source_head) `
+            --smoke --evidence $daemonEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'soak_me2_daemon_bundle_invalid' }
+          $daemonProof = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
+          if ($daemonProof.runtime_smoke -ne 'PASS' `
+              -or $daemonProof.external_bun_required -ne $false `
+              -or $daemonProof.smoke_child_external_runtime_path_sanitized -ne $true) {
+            throw 'soak_me2_daemon_runtime_invalid'
+          }
+
+          $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
+          $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
+
       - name: Open normal UI and prove 64 sequential plus 8 concurrent exact activations
         working-directory: apps/metaengine-browser
         shell: pwsh
@@ -293,6 +351,8 @@ jobs:
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-autonomous-soak-proof.json
+            ${{ runner.temp }}/soak-me2-ui-proof.json
+            ${{ runner.temp }}/soak-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-soak.json
             ${{ runner.temp }}/soak-profile.out
             ${{ runner.temp }}/soak-profile.err
