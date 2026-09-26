@@ -10,10 +10,13 @@ const APP_ROOT = path.resolve(HERE, '..');
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 const BINDING_PATH = path.join(REPO_ROOT, 'coordination', 'convergence', 'R83_EDGE_V14_CANARY_SOURCE_BINDING_V1.json');
 
-function gitBlobSha1(bytes) {
+function gitTextBlobSha1(bytes) {
+  // actions/checkout on Windows may materialize CRLF even though the Git blob is
+  // canonical LF. The R83 binding is to Git object bytes, not checkout EOLs.
+  const canonical = Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
   return crypto.createHash('sha1')
-    .update(Buffer.from(`blob ${bytes.length}\0`))
-    .update(bytes)
+    .update(Buffer.from(`blob ${canonical.length}\0`))
+    .update(canonical)
     .digest('hex');
 }
 
@@ -45,7 +48,7 @@ test('R83 current helper closure remains byte-identical to the deployed v14 impo
     seen.add(row.path);
     assert.match(row.git_blob_sha1, /^[a-f0-9]{40}$/);
     const bytes = await fs.readFile(path.join(REPO_ROOT, row.path));
-    assert.equal(gitBlobSha1(bytes), row.git_blob_sha1, `R83 source drift: ${row.path}`);
+    assert.equal(gitTextBlobSha1(bytes), row.git_blob_sha1, `R83 source drift: ${row.path}`);
   }
 });
 
