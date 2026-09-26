@@ -69,6 +69,21 @@ const DEFAULT_COMMAND_CDP_DEADLINE_MS = 30000;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
+function axPropertyValue(node, key) {
+  const row = (Array.isArray(node?.properties) ? node.properties : [])
+    .find((property) => String(property?.name || '') === String(key));
+  return row?.value?.value ?? null;
+}
+function normalizedSemanticRole(node) {
+  const role = axValue(node, 'role').toLowerCase();
+  if (TEXT_INPUT_ROLES.has(role)) return role;
+  // R82 live liveness hardening: modern controlled editors can expose an
+  // editable AX node without the historical textbox role. Treat only an
+  // explicit Chromium editable capability as a text-input semantic role.
+  // This does not guess from names, DOM text, focus or geometry.
+  const editable = String(axPropertyValue(node, 'editable') ?? '').trim().toLowerCase();
+  return ['true', 'plaintext', 'richtext'].includes(editable) ? 'textbox' : role;
+}
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 export function nativeBrowserTargetIdentity(webContents) {
@@ -112,7 +127,7 @@ function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
   const frameIds = semanticNodeFrameIds(nodes);
   for (const node of nodes) {
     if (node?.ignored === true) continue;
-    const role = axValue(node, 'role').toLowerCase();
+    const role = normalizedSemanticRole(node);
     const name = axValue(node, 'name');
     const backendNodeId = Number(node?.backendDOMNodeId || 0);
     // GLM agent platform (2026-09-19): the chat.z.ai composer is a textarea
