@@ -91,10 +91,9 @@ function canonicalTabRuntimeIdentity(tabId, supervisorSnapshot = null) {
   if (!tab || !view || view.webContents.isDestroyed() || !exact) return null;
 
   const supervisor = supervisorSnapshot || nativeSupervisor?.snapshot?.() || null;
-  const runtimeRows = supervisor?.realtime_process_plane?.browser_brain?.observation?.runtime_binding_index?.bindings || [];
-  const runtime = runtimeRows.find((row) => row?.valid === true
-    && String(row?.tab_id || '') === id
-    && Number(row?.web_contents_id || 0) === Number(exact.web_contents_id)) || null;
+  // O(1) read through the already-running Brain binding index. Mission Control
+  // never scans or owns a parallel identity table.
+  const runtime = nativeSupervisor?.runtimeBinding?.(id) || null;
   const semanticRows = supervisor?.realtime_process_plane?.semantic_plane?.targets || [];
   const semantic = semanticRows.find((row) => String(row?.tab_id || '') === id) || null;
 
