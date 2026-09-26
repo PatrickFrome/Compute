@@ -589,6 +589,34 @@ Decision after research:
 - the safe preset path is proven first; a drag handle may be layered on top only by sending the same bounded presentation request to main process.
 
 
+
+## 6.10 UI slice checkpoint H — accessible native-aware splitter
+
+Checkpoint source head before this note: `7a77a0a77f0800a8e1ebbc6075288872807fb24b`.
+
+Implemented:
+- the Context Drawer now has a real drag splitter layered on top of the already-proven native-clamped height path;
+- pointer movement is animation-frame throttled;
+- transient drag updates are not persisted; only the final pointer-up size becomes the workspace preference;
+- overlapping main-process geometry requests are fenced by a monotonic `contextDrawerSyncSeq`, so an older IPC result cannot overwrite the latest requested/effective geometry;
+- the splitter is keyboard-operable: `ArrowUp/ArrowDown` adjust by 20px and `Home/End` move to safe min/max;
+- it uses the interactive WAI-ARIA separator contract with `aria-valuemin/max/now`, orientation, label and `aria-controls`;
+- native Browser minimum remains stronger than splitter preference.
+
+Post-step research:
+- **WAI-ARIA Window Splitter pattern** specifies a focusable `separator` with `aria-valuenow/min/max`, an accessible label and `aria-controls`, plus arrow-key movement and optional Home/End. The R85 splitter implements those semantics instead of shipping a mouse-only decorative border. https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/
+- **MDN separator role** makes the same distinction between a static divider and a focusable moveable separator, requiring a numeric current value for a resizable boundary. https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/separator_role
+- **IntelliJ IDEA 2026.2** supports both pointer dragging and keyboard resizing for tool windows, including vertical Up/Down resizing. This validates treating keyboard resize as a normal productivity feature rather than accessibility-only fallback. https://www.jetbrains.com/help/idea/manipulating-the-tool-windows.html
+- **Blender Areas** uses direct border dragging and optional snapping to convenient sizes. METAENGINE's presets provide the snap-like path, while the splitter provides continuous sizing. https://docs.blender.org/manual/en/latest/interface/window_system/areas.html
+- **Electron View/WebContentsView** keeps physical native bounds in main process, so every interactive drag frame still has to pass through the bounded presentation bridge rather than visually moving only the React separator. https://www.electronjs.org/docs/latest/api/view
+
+Decision after research:
+- retain both presets and drag: presets are fast deterministic states; drag is fine adjustment;
+- keyboard resizing is part of the contract, not a later accessibility patch;
+- never write each drag frame to durable workspace preferences;
+- stale geometry responses must remain fenced as more resizable native-aware panes are added.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
