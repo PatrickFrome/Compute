@@ -1,8 +1,8 @@
 {
   "schema": "metaengine.browser.dev-update-hint.v1",
-  "version": "0.7.0-dev.36089462649.1",
-  "tag": "v0.7.0-dev.36089462649.1",
-  "git_sha": "cf747798a285f113ac3ae1563da4be8bd4e56705",
-  "updated_at": "2026-09-25T03:28:43.283541Z",
+  "version": "0.7.0-dev.36228915117.1",
+  "tag": "v0.7.0-dev.36228915117.1",
+  "git_sha": "e7fccd08da180f324490da85c151fcbe656053a3",
+  "updated_at": "2026-09-26T08:23:35.288122Z",
   "authority_effect": false
 }
