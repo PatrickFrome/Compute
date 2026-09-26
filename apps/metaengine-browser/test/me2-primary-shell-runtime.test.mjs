@@ -245,6 +245,14 @@ test('R85 unavailable legacy sandbox plane is fail-close and collapsed by defaul
   assert.match(me2CodePage, /legacy capability unavailable/);
 });
 
+test('R85 page history uses a real cursor for Alt back and forward', () => {
+  assert.match(store, /pageHistoryIndex:\s*number/);
+  assert.match(store, /nextIndex = st\.pageHistoryIndex \+ delta/);
+  assert.match(store, /set\(\{ page: target, pageHistoryIndex: nextIndex \}\)/);
+  assert.match(store, /const prefix = st\.recentPages\.slice\(0, st\.pageHistoryIndex \+ 1\)/);
+  assert.doesNotMatch(store, /rp\.length - 2/);
+});
+
 test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
   assert.match(preload, /const setPrimaryOverlay = \(active\) => ipcRenderer\.invoke\('metaengine:shell:primary-overlay'/);
   const primaryBranch = preload.slice(
