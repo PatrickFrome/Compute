@@ -400,6 +400,31 @@ https://grafana.com/docs/learning-paths/interactive-dashboards/
 The remaining architectural gap is **Workspace = real layout**, not merely `{page, label, hint}`. The safe implementation should introduce persisted pane/view preferences first, then resizable native-aware panes only after geometry is represented in main-process layout contracts. The other priority is a contextual Drawer/Inspector shared by task detail, logs and Browser diagnostics. Both must preserve the established rule: renderer presentation may alter layout, but it does not gain Browser command, scheduler, update or release authority.
 
 
+
+## 6.3 UI slice checkpoint A — persisted operator views
+
+Checkpoint source head before this note: `e5764b96ada0c66f182b1458bf3c11661341dcde`.
+
+Implemented:
+- OBSERVABILITY Event Log now has persisted operator view presets: `attention | all | tasks | fleet | commands`;
+- `attention` is semantic, not color-based: it filters FAILED / ERROR / AMBIGUOUS / BLOCKED / DEGRADED / REJECTED / OFFLINE tokens across event type+data;
+- manually changing lane/search turns the surface into an explicit `custom` view instead of silently pretending a preset is still active;
+- selection persists under `me2.obs.events.preset.v1`;
+- no new effect authority, scheduler, Browser command or update bridge was added.
+
+Post-step research:
+- **Linear Custom Views** saves durable filtered views and lets operators favorite/reopen them; Display Options separately persist layout/group/order preferences. METAENGINE should preserve this separation: query scope and display density are related but not the same setting. https://linear.app/docs/custom-views and https://linear.app/docs/display-options
+- **Temporal Saved Views** saves custom queries specifically to eliminate repeated filter construction; this reinforces keeping operator views lightweight and query-centric rather than cloning dashboards. https://temporal.io/changelog/product-area/ui
+- **Datadog Log Explorer Saved Views** stores query, live time range, visualization and displayed facets. The useful METAENGINE lesson is that a troubleshooting context is a bundle, not only a text filter. Future custom views should be able to persist lane/query/density and eventually time horizon. https://docs.datadoghq.com/logs/explorer/saved_views/
+- **Elastic Discover sessions** preserve queries, filters, columns and view configuration, and can optionally store time/refresh interval. This is a stronger model for future shareable METAENGINE operator views than saving only a filter string. https://www.elastic.co/docs/explore-analyze/discover/save-open-search
+- **Grafana 13 section-level variables** reduce dashboard sprawl by scoping filters independently to a row/tab. For METAENGINE, page-local view variables should not become global filters that unexpectedly mutate TASKS/COMPUTE/OBSERVABILITY together. https://grafana.com/whats-new/2026-04-08-stop-juggling-dashboards-with-section-level-variables-for-rows-and-tabs/
+
+Decision after research:
+- keep current preset storage page-local;
+- do not introduce one global `filters` store;
+- next Saved Views iteration should persist a structured bundle `{query,lane,density,time_horizon,columns}` with explicit scope, rather than multiplying dashboard pages.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
