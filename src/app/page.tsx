@@ -1581,9 +1581,17 @@ export default function MissionControl() {
       )}
 
       {/* ------------------------------------------------------------ main */}
-      <main className="mx-auto grid w-full max-w-7xl flex-1 content-start grid-cols-1 gap-4 p-4 lg:grid-cols-2">
-        {/* EV-TOPO: домен 1/3 — Runtime */}
-        <DomainHeader id={PANEL_DOMAINS[0].id} label={PANEL_DOMAINS[0].label} desc={PANEL_DOMAINS[0].desc} count={PANEL_DOMAINS[0].panels.length} />
+      <main className="mx-auto w-full max-w-7xl flex-1 space-y-5 p-4">
+        {/* ══════════════════════════════ DOMAIN 01 · sec-runtime (EV-TOPO: доменная топология UI-аудита Phase-2) */}
+        <section id="sec-runtime" aria-labelledby="sec-runtime-h" className="col-span-full scroll-mt-24">
+          <div className="sticky top-16 z-[5] -mx-1 flex items-center gap-2.5 rounded-lg border border-zinc-800/80 bg-zinc-950/90 px-3 py-2 shadow-lg shadow-black/30 backdrop-blur-md md:top-[96px]">
+            <span className="font-mono text-[10px] font-bold tracking-[0.2em] text-teal-400">01</span>
+            <h2 id="sec-runtime-h" className="min-w-0 shrink-0 text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-100">Runtime</h2>
+            <span className="hidden shrink-0 text-[10px] text-zinc-500 sm:inline">исполнение · 5 панелей</span>
+            <span className="ml-1 h-px min-w-6 flex-1 bg-gradient-to-r from-zinc-700/80 to-transparent" />
+            <span className="hidden shrink-0 font-mono text-[9px] text-zinc-600 lg:inline">демон · доноры · edge · песочница · монитор</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* ------------------------------------------------- DAEMON card */}
         <Panel
           icon={<HeartPulse className="h-4 w-4" />}
@@ -1808,143 +1816,324 @@ export default function MissionControl() {
           )}
         </Panel>
 
-        {/* ------------------------------------------ CONTROL PLANE card */}
+        {/* -------------------------------------------- R83 EDGE CONVERGENCE */}
         <Panel
-          icon={<Database className="h-4 w-4" />}
-          id="p-supabase"
-          title="Control Plane · Supabase live"
-          chip={supErr ? <Chip tone="warn" title="known-issue: readback недоступен (JWT/cred pending) — не авария, локальный контур жив">known</Chip> : supLive ? <Chip tone={supervisor!.p0_flags.length ? 'p0' : 'ok'}>{supervisor!.p0_flags.length ? `${supervisor!.p0_flags.length} P0` : 'CLEAN'}</Chip> : <Chip tone="neutral">…</Chip>}
-          actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={supLoading} onClick={() => loadSupervisor(true)} aria-label="Свежий снапшот">
-              <RefreshCw className={`h-4 w-4 ${supLoading ? 'animate-spin' : ''}`} />
-            </Button>
-          }
-        >
-          {supErr && !supervisor ? (
-            <ErrBox label="control plane" error={supErr} hint="readback-поверхность недоступна до восстановления credential-плоскостей — локальные панели живут" />
-          ) : supervisor ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Stat label="browser" value={supervisor.extension_version} tone="text-teal-400" span="col-span-2" />
-                <Stat label="runtime" value={supervisor.operator_runtime} span="col-span-2" />
-                <Stat label="client" value={supervisor.client_id.slice(0, 13) + '…'} />
-                <Stat label="heartbeat" value={`${hbAgeLive ?? hbAge ?? '—'}s ago`} tone={(hbAgeLive ?? 99) < 30 ? 'text-emerald-400' : 'text-rose-400'} />
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <Chip tone={supervisor.compute_state === 'HEALTHY' ? 'ok' : 'p0'}>compute {supervisor.compute_state}</Chip>
-                <Chip tone={supervisor.sentinel.worker_health === 'HEALTHY' ? 'ok' : 'p0'}>sentinel {supervisor.sentinel.lifecycle}/{supervisor.sentinel.worker_health}</Chip>
-                <Chip tone={supervisor.dev_plane.state === 'READY' ? 'ok' : 'warn'}>dev-plane {supervisor.dev_plane.state}</Chip>
-                <Chip tone="neutral">{supervisor.operator_mode} · armed={String(supervisor.armed)}</Chip>
-              </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Supervisor keepalive</span>
-                  <Chip tone={ka!.state === 'ACTIVE' ? 'ok' : 'p0'}>{ka!.state}</Chip>
-                  <Chip tone="neutral">cycle_seq {ka!.cycle_seq}</Chip>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  <Stat label="last useful cycle" value={staleLive != null ? `${humanS(staleLive)} назад` : '—'} tone={(staleLive ?? 0) > 3600 ? 'text-rose-400' : 'text-emerald-400'} />
-                  <Stat label="ambiguous_hist" value={ka!.ambiguous_history_count} tone="text-amber-400" />
-                  <Stat label="queued_wakes" value={ka!.queued_wake_count} />
-                  <Stat label="rollover_reason" value={ka!.rollover_reason ?? '—'} tone="text-rose-400" span="col-span-2 sm:col-span-3" />
-                </div>
-              </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Cognitive transport</span>
-                  <Chip tone={supervisor.cognitive.state === 'CONVERGED' ? 'ok' : 'warn'}>{supervisor.cognitive.state}</Chip>
-                  <Chip tone="neutral">resync #{supervisor.cognitive.resync_count}</Chip>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <Stat label="stream" value={(supervisor.cognitive.stream_id ?? '—').slice(0, 13) + '…'} />
-                  <Stat label="sent_events" value={supervisor.cognitive.sent_events} />
-                  <Stat label="ack_through_seq" value={supervisor.cognitive.acknowledged_through_sequence} />
-                  <Stat label="last_success" value={supervisor.cognitive.last_success_at ? hhmmss(supervisor.cognitive.last_success_at) : '—'} />
-                </div>
-              </div>
-              {supervisor.p0_flags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {supervisor.p0_flags.map((f) => <Chip key={f} tone="p0"><ShieldAlert className="h-3 w-3" />{f}</Chip>)}
-                </div>
-              )}
-              <p className="text-[11px] text-zinc-500">
-                Source authority (live read model): <span className="font-mono text-zinc-400">{supervisor.dev_plane.head.slice(0, 12)}</span> @ {supervisor.dev_plane.ref.replace('refs/heads/', '')}
-              </p>
-            </div>
-          ) : (
-            <PanelLoading />
-          )}
-        </Panel>
-
-        {/* ------------------------------------------ R81 CONVERGENCE (GitHub) */}
-        <Panel
-          icon={<GitPullRequest className="h-4 w-4" />}
-          id="p-github"
-          title="R81 Convergence · GitHub live"
+          icon={<Cloud className="h-4 w-4" />}
+          id="p-edge"
+          title="R83 · Edge convergence · Cloudflare live"
           chip={
-            convErr ? <Chip tone="warn" title="known-issue: readback недоступен (cred pending)">known</Chip>
-              : conv ? (
-                <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : conv.rollup_state === 'PENDING' ? 'warn' : 'neutral'}>
-                  CI {conv.rollup_state}
+            edgeErr ? <Chip tone="warn" title="known-issue: readback недоступен (CF-token pending)">known</Chip>
+              : edge ? (
+                <Chip tone={edge.workers.some((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000) ? 'p0' : 'ok'}>
+                  {edge.workers.filter((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000).length}/2 NO SOURCE
                 </Chip>
               ) : <Chip tone="neutral">…</Chip>
           }
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={convLoading} onClick={() => loadConvergence(true)} aria-label="Свежий GitHub-статус">
-              <RefreshCw className={`h-4 w-4 ${convLoading ? 'animate-spin' : ''}`} />
-            </Button>
+            <div className="flex items-center">
+              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true, true)} aria-label="Снять live-снапшот воркеров" title="Свежая квалификация + снапшот живых скриптов в evidence">
+                <Camera className={`h-4 w-4 ${edgeLoading ? 'animate-pulse' : ''}`} />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true)} aria-label="Свежий Edge-статус">
+                <RefreshCw className={`h-4 w-4 ${edgeLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
           }
         >
-          {convErr && !conv ? (
-            <ErrBox label="GitHub" error={convErr} hint="convergence-readback требует GITHUB_TOKEN на daemon-стороне — см. planes в banner" />
-          ) : conv ? (
+          {edgeErr && !edge ? (
+            <ErrBox label="Edge" error={edgeErr} hint="edge-convergence readback ожидает CF-токен на daemon-стороне" />
+          ) : edge ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                <Stat label="PR #968" value={conv.pr ? `${conv.pr.state}${conv.pr.draft ? ' · draft' : ''}` : '—'} tone="text-teal-400" span="col-span-2" />
-                <Stat label="mergeable" value={conv.pr ? (conv.pr.mergeable == null ? '—' : conv.pr.mergeable ? 'yes' : 'no') : '—'} tone={conv.pr?.mergeable ? 'text-emerald-400' : 'text-amber-400'} span="col-span-2" />
-                <Stat label="head" value={conv.head?.short ?? '—'} tone="text-cyan-300" />
-                <Stat label="committed" value={conv.head?.committed_at ? hhmmss(conv.head.committed_at) : '—'} />
-                <Stat label="checks" value={`${conv.checks.success}/${conv.checks.total}`} tone={conv.rollup_state === 'GREEN' ? 'text-emerald-400' : 'text-amber-400'} span="col-span-2" />
-              </div>
-              {conv.head && (
-                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 font-mono text-[11px] leading-snug text-zinc-400">
-                  <span className="text-teal-400">{conv.head.short}</span> {conv.head.message}
-                </div>
-              )}
               <div className="flex flex-wrap gap-1.5">
-                <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : 'warn'}>CI {conv.rollup_state}</Chip>
-                <Chip tone="ok">success {conv.checks.success}</Chip>
-                {conv.checks.pending > 0 && <Chip tone="warn">pending {conv.checks.pending} · in_progress {conv.checks.in_progress}</Chip>}
-                {conv.checks.failed > 0 && <Chip tone="p0">failed {conv.checks.failed}</Chip>}
-                {conv.checks.cancelled > 0 && <Chip tone="neutral">cancelled {conv.checks.cancelled}</Chip>}
-                <Chip tone="neutral">total {conv.checks.total}</Chip>
-                {conv.api.rate_remaining != null && <Chip tone="neutral">rate {conv.api.rate_remaining}</Chip>}
+                <Chip tone="info">{edge.subdomain ?? '—'}.workers.dev</Chip>
+                <Chip tone="neutral">{edge.workers.length} workers</Chip>
+                {edge.workers.map((w) => (
+                  <Chip key={w.id} tone={w.source.verdict === 'NO_SOURCE_IN_REPO' ? (w.live_bytes && w.live_bytes > 1000 ? 'p0' : 'neutral') : w.source.verdict === 'DRIFT' ? 'warn' : 'ok'}>
+                    {w.id.replace('metaengine-', '').replace('metaengine-fabric-worker-h205f21r4', 'fabric')} · {w.source.verdict === 'NO_SOURCE_IN_REPO' ? 'NO SRC' : w.source.verdict}
+                  </Chip>
+                ))}
+              </div>
+              <div className={`space-y-2 ${scrollCls} pr-1`}>
+                {edge.workers.map((w) => (
+                  <div key={w.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="min-w-0 break-all font-mono text-xs text-teal-300">{w.id}</span>
+                      <span className="ml-auto flex items-center gap-1.5">
+                        {w.durable_object && <Chip tone="warn">DO {w.durable_object}</Chip>}
+                        {w.queue && <Chip tone="neutral">queue {w.queue}</Chip>}
+                        {w.workflow && <Chip tone="neutral">workflow</Chip>}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-snug text-zinc-500">{w.role}</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <Stat label="versions" value={w.versions_total != null ? `${w.versions_total} (latest v${w.latest_version?.number ?? '—'})` : '—'} />
+                      <Stat label="live digest" value={w.live_sha256 ?? '—'} tone="text-cyan-300" />
+                      <Stat label="live size" value={w.live_bytes != null ? `${(w.live_bytes / 1024).toFixed(1)} KiB` : '—'} />
+                      <Stat label="source in repo" value={w.source.verdict} tone={w.source.verdict === 'NO_SOURCE_IN_REPO' ? 'text-rose-400' : w.source.verdict === 'DRIFT' ? 'text-amber-400' : 'text-emerald-400'} />
+                    </div>
+                    <p className="mt-2 text-[11px] leading-snug text-zinc-500">
+                      <span className="text-zinc-400">binding:</span> {w.source.note}
+                      {w.secret_bindings.length > 0 && (
+                        <>
+                          <br />
+                          <span className="text-zinc-400">secrets (имена, значения не возвращаются API):</span> {w.secret_bindings.join(', ')}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                ))}
               </div>
               <div className={`space-y-1 ${scrollCls} pr-1`}>
-                {conv.checks.items.map((c, i) => {
-                  const tone: 'ok' | 'warn' | 'p0' | 'neutral' = c.status !== 'completed'
-                    ? 'warn'
-                    : c.conclusion === 'success' ? 'ok' : (c.conclusion === 'failure' || c.conclusion === 'timed_out' || c.conclusion === 'action_required') ? 'p0' : 'neutral'
-                  return (
-                    <div key={`${c.name}-${i}`} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 hover:border-zinc-700">
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={c.name}>{c.name}</span>
-                      <Chip tone={tone}>{c.status === 'completed' ? (c.conclusion ?? '—') : c.status}</Chip>
-                    </div>
-                  )
-                })}
-                {conv.checks.items.length === 0 && <EmptyState icon={<GitBranch className="h-5 w-5" />} title="check-runs пусты" hint="CI ещё не стартовал на выбранном ref — нажмите Refresh после пуша, либо выберите другой workflow-head" />}
+                <div className="px-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Находки квалификации</div>
+                {edge.findings.map((f) => (
+                  <div key={f} className="rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 text-[11px] leading-snug text-zinc-400 hover:border-zinc-700">
+                    {f}
+                  </div>
+                ))}
+                <div className="px-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Блокеры промоушна</div>
+                {edge.promotion_blockers.map((b) => (
+                  <div key={b} className="rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-rose-200/90">
+                    {b}
+                  </div>
+                ))}
               </div>
+              {/* import plan (R83-import) */}
+              {edgePlan && (
+                <div className={`space-y-2 ${scrollCls} pr-1`}>
+                  <div className="flex flex-wrap items-center gap-2 px-0.5">
+                    <Layers className="h-3.5 w-3.5 text-cyan-300" />
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">Импорт-план source-дерева (R83-import)</span>
+                    {edgePlan.workers.filter((w) => w.import_verdict === 'IMPORT_READY').length > 0 && (
+                      <Chip tone="ok">{edgePlan.workers.filter((w) => w.import_verdict === 'IMPORT_READY').length} IMPORT_READY</Chip>
+                    )}
+                    {edgePlan.workers.filter((w) => w.import_verdict === 'NEEDS_UNBUNDLING').length > 0 && (
+                      <Chip tone="warn">{edgePlan.workers.filter((w) => w.import_verdict === 'NEEDS_UNBUNDLING').length} NEEDS_UNBUNDLING</Chip>
+                    )}
+                  </div>
+                  {edgePlan.workers.map((w) => (
+                    <div key={w.worker} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="min-w-0 break-all font-mono text-[11px] text-teal-300">{w.worker}</span>
+                        <Chip tone={w.import_verdict === 'IMPORT_READY' ? 'ok' : w.import_verdict === 'NEEDS_UNBUNDLING' ? 'warn' : 'p0'} className="ml-auto shrink-0">{w.import_verdict}</Chip>
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <Stat label="снапшот" value={w.snapshot_sha256_12 ?? '—'} tone="text-cyan-300" />
+                        <Stat label="характер" value={w.source_character} tone={w.source_character === 'ORIGINAL_MODULES' ? 'text-emerald-400' : 'text-amber-400'} />
+                        <Stat label="модулей" value={String(w.modules.length)} />
+                        <Stat label="в репо" value={w.proposed_repo_prefix} tone="text-zinc-400" />
+                      </div>
+                      {w.modules.length > 0 && (
+                        <div className="mt-2 space-y-0.5">
+                          {w.modules.map((m) => (
+                            <div key={m.module_path} className="flex items-baseline gap-2 rounded border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 font-mono text-[10px] hover:border-zinc-700">
+                              <span className="min-w-0 flex-1 truncate text-zinc-300" title={m.module_path}>{m.module_path}</span>
+                              <span className="shrink-0 text-zinc-600">{m.lines}L · {(m.bytes / 1024).toFixed(1)}KiB</span>
+                              <span className="shrink-0 text-cyan-300/70">{m.sha256_12}</span>
+                              {m.bundle_sections.length > 0 && <span className="shrink-0 text-amber-300/80" title={m.bundle_sections.join('\n')}>{m.bundle_sections.length} src-секций</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {w.wrangler_stub && (
+                        <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
+                          <span className="text-zinc-400">wrangler stub (bindings):</span> {w.wrangler_stub.bindings.join(', ')}
+                        </p>
+                      )}
+                      {w.notes.map((n) => (
+                        <p key={n} className="mt-1 text-[10px] leading-snug text-zinc-500">— {n}</p>
+                      ))}
+                    </div>
+                  ))}
+                  {edgePlan.summary.map((s) => (
+                    <div key={s} className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-cyan-200/80">{s}</div>
+                  ))}
+                </div>
+              )}
+              {/* import PR live status (R83-import deliverable) */}
+              {edgeImport && (
+                <div className="space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <GitPullRequest className="h-3.5 w-3.5 text-emerald-300" />
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-emerald-300">Импорт-PR · source-of-truth в репо</span>
+                    {edgeImport.pr && (
+                      <Chip tone={edgeImport.pr.merged ? 'ok' : edgeImport.pr.state === 'open' ? (edgeImport.ci.terminal && !edgeImport.ci.green ? 'p0' : 'warn') : 'neutral'}>
+                        PR #{edgeImport.pr.number} {edgeImport.pr.merged ? 'MERGED' : edgeImport.pr.state.toUpperCase()}
+                      </Chip>
+                    )}
+                    {edgeImport.pr && (
+                      <Chip tone={edgeImport.ci.terminal ? (edgeImport.ci.green ? 'ok' : 'p0') : 'warn'}>
+                        CI {edgeImport.ci.success}/{edgeImport.ci.total}{!edgeImport.ci.terminal && ' ↻'}
+                      </Chip>
+                    )}
+                    {edgeImport.digest_contract.repo_tree_verified && <Chip tone="ok">digest == LIVE</Chip>}
+                    <Button variant="ghost" size="sm" className="ml-auto h-7 w-7 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeImportLoading} onClick={() => loadEdgeImport(true)} aria-label="Свежий статус импорт-PR" title="Свежий статус PR #982 (edge.import-status)">
+                      <RefreshCw className={`h-3.5 w-3.5 ${edgeImportLoading ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
+                  {edgeImport.pr && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <Stat label="ветка" value={edgeImport.pr.head_branch} tone="text-cyan-300" span="col-span-2" />
+                        <Stat label="head" value={edgeImport.pr.head_sha.slice(0, 10)} tone="text-cyan-300" />
+                        <Stat label="mergeable" value={edgeImport.pr.mergeable == null ? '—' : edgeImport.pr.mergeable ? 'yes' : String(edgeImport.pr.mergeable_state)} tone={edgeImport.pr.mergeable ? 'text-emerald-400' : 'text-amber-400'} />
+                        <Stat label="файлы" value={`${edgeImport.pr.files} (+${edgeImport.pr.additions}/−${edgeImport.pr.deletions})`} tone="text-emerald-400" span="col-span-2" />
+                        <Stat label="base" value={edgeImport.pr.base_branch} tone="text-zinc-400" span="col-span-2" />
+                      </div>
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px]">
+                        <span className="text-zinc-500">digest contract:</span>
+                        <span className="text-cyan-300/80">fabric {edgeImport.digest_contract.fabric_live_sha256}</span>
+                        <span className="text-cyan-300/80">aop1 {edgeImport.digest_contract.aop1_live_sha256}</span>
+                      </div>
+                      {edgeImport.ci.checks.length > 0 && (
+                        <div className="space-y-0.5">
+                          {edgeImport.ci.checks.map((c, i) => (
+                            <div key={`${c.name}-${i}`} className="flex items-baseline gap-2 rounded border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 font-mono text-[10px]">
+                              <span className="min-w-0 flex-1 truncate text-zinc-300" title={c.name}>{c.name}</span>
+                              <span className={`shrink-0 ${c.conclusion === 'success' ? 'text-emerald-400' : c.conclusion ? 'text-rose-400' : 'text-amber-400'}`}>{c.conclusion ?? c.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <a href={edgeImport.pr.url} target="_blank" rel="noreferrer" className="inline-flex items-baseline gap-1 text-[11px] text-teal-300 underline decoration-teal-500/40 hover:text-teal-200">
+                        открыть PR #{edgeImport.pr.number} на GitHub
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </>
+                  )}
+                  {edgeImport.pr_error && (
+                    <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 font-mono text-[10px] text-amber-200/80">import-status: {edgeImport.pr_error}</div>
+                  )}
+                  {edgeImport.summary.map((s) => (
+                    <div key={s} className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-emerald-200/80">{s}</div>
+                  ))}
+                </div>
+              )}
               <p className="text-[11px] leading-relaxed text-zinc-500">
-                Read-only GitHub-клиент демона (PAT только серверно в /home/z/.a2). Rollup честный: cancelled ≠ green — терминальный повтор обязателен.
+                Read-only CF-клиент демона (токен только серверно в /home/z/.a2/cloudflare.env). Кнопка-камера снимает живые скрипты в evidence (data/edge/ + hash-chained EDGE_SNAPSHOT события). Импорт source РЕАЛИЗОВАН — PR #982 несёт verbatim-дерево с digest-контрактом; промоушн (deploy-from-repo) только после ревью оператора + re-verify + ротации CF-токена.
               </p>
             </div>
           ) : (
-            <PanelLoading label="загрузка GitHub-статуса" />
+            <PanelLoading label="квалификация Cloudflare Edge" />
           )}
         </Panel>
 
-        {/* EV-TOPO: домен 2/3 — Convergence */}
-        <DomainHeader id={PANEL_DOMAINS[1].id} label={PANEL_DOMAINS[1].label} desc={PANEL_DOMAINS[1].desc} count={PANEL_DOMAINS[1].panels.length} />
+        {/* EV-TOPO: домен 3/3 — Evidence */}
+        <DomainHeader id={PANEL_DOMAINS[2].id} label={PANEL_DOMAINS[2].label} desc={PANEL_DOMAINS[2].desc} count={PANEL_DOMAINS[2].panels.length} />
+
+        {/* ------------------------------------------- WORKTREES/SANDBOX */}
+        <Panel icon={<GitBranch className="h-4 w-4" />} title="Worktrees · Песочница" chip={<Chip tone="neutral">{worktrees.length} wt</Chip>}>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <Input
+                value={wtName} onChange={(e) => setWtName(e.target.value)} placeholder="wt-<имя> (напр. wt-r82-supervisor)"
+                className="h-11 border-zinc-700 bg-zinc-950 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/50"
+                aria-label="Имя нового worktree"
+              />
+              <Button
+                onClick={createWt} disabled={busy === 'wt-create' || !wtName}
+                className="h-11 shrink-0 border-teal-500/40 bg-teal-600/90 text-xs font-semibold text-white hover:bg-teal-500"
+              >
+                {busy === 'wt-create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitBranch className="h-4 w-4" />}
+                <span className="ml-1.5 hidden sm:inline">создать</span>
+              </Button>
+            </div>
+            <div className={`space-y-1 ${scrollCls} pr-1`}>
+              {worktrees.map((w) => {
+                const name = w.path.split('/').pop() ?? w.path
+                const isMain = w.path === '/home/z/my-project'
+                return (
+                  <div key={w.path} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-2">
+                    <Boxes className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{name}</span>
+                    <span className="hidden shrink-0 font-mono text-[10px] text-zinc-600 sm:inline">{w.branch?.replace('refs/heads/', '') ?? 'detached'}</span>
+                    {!isMain && (
+                      <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit shrink-0 p-0 text-zinc-500 hover:text-rose-400" onClick={() => removeWt(name)} aria-label={`Удалить ${name}`} disabled={busy === `wt-rm:${name}`}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <div className="border-t border-zinc-800 pt-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Sandbox (prlimit-isolated, whitelist)</span>
+                <Terminal className="h-3.5 w-3.5 text-zinc-500" />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {[['bun', '--version'], ['git', 'status', '--short'], ['git', 'log', '--oneline', '-5']].map((cmd) => (
+                  <Button
+                    key={cmd.join(' ')} onClick={() => doExec(cmd)} disabled={busy !== null}
+                    variant="outline" className="h-11 border-zinc-700 bg-zinc-950 font-mono text-[11px] text-zinc-300 hover:border-teal-500/40 hover:text-teal-300"
+                  >
+                    {busy === `exec:${cmd.join(' ')}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                    <span className="ml-1.5">{cmd.join(' ')}</span>
+                  </Button>
+                ))}
+              </div>
+              {execResult && (
+                <pre className={`mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border p-2.5 font-mono text-[11px] ${execResult.ok ? 'border-zinc-800 bg-zinc-950/80 text-zinc-300' : 'border-rose-500/30 bg-rose-500/5 text-rose-300'}`}>
+                  {`$ ${execResult.cmd.join(' ')}  (${execResult.elapsed_ms}ms, exit ${execResult.exit_code})\n${execResult.stdout || execResult.stderr || '(no output)'}`}
+                </pre>
+              )}
+            </div>
+          </div>
+        </Panel>
+
+        {/* -------------------------------------------- CONVERGENCE MONITOR */}
+        <Panel
+          icon={<TrendingUp className="h-4 w-4" />}
+          id="p-monitor"
+          title="Монитор конвергенции · R82"
+          chip={
+            monitor ? (
+              <Chip tone={mLast && mLast.keepalive_state === 'ACTIVE' ? 'ok' : 'p0'}>
+                {mLast ? mLast.keepalive_state : '…'}
+              </Chip>
+            ) : (
+              <Chip tone="neutral">…</Chip>
+            )
+          }
+          defaultOpen
+        >
+          {monitor ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+                <Spark label="heartbeat, s" color="#34d399" value={mLast ? `${mLast.hb_age_s}s` : '—'} data={mkSeries((s) => s.hb_age_s)} />
+                <Spark label="cycle_seq" color="#fbbf24" value={mLast ? String(mLast.cycle_seq) : '—'} data={mkSeries((s) => s.cycle_seq)} />
+                <Spark label="resync_count" color="#22d3ee" value={mLast ? String(mLast.resync_count) : '—'} data={mkSeries((s) => s.resync_count)} />
+                <Spark label="stale cycle, h" color="#fb7185" value={mLast && mLast.stale_completed_s != null ? `${(mLast.stale_completed_s / 3600).toFixed(1)}h` : '—'} data={mkSeries((s) => (s.stale_completed_s != null ? +(s.stale_completed_s / 3600).toFixed(2) : null))} />
+                <Spark label="ambiguous hist" color="#f97316" value={mLast ? String(mLast.ambiguous_history_count) : '—'} data={mkSeries((s) => s.ambiguous_history_count)} />
+                <Spark label="p0 flags" color="#e879f9" value={mLast ? String(mLast.p0_count) : '—'} data={mkSeries((s) => s.p0_count)} />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Chip tone="neutral">интервал {Math.round(monitor.status.interval_ms / 1000)}с</Chip>
+                <Chip tone="neutral">сэмплов {monitor.status.sample_count}/{monitor.status.capacity}</Chip>
+                <Chip tone={monitor.status.last_error ? 'p0' : 'ok'}>{monitor.status.last_error ? 'sampler error' : 'sampler ok'}</Chip>
+                {mLast && <Chip tone="neutral">cognitive {mLast.cognitive_state}</Chip>}
+                {mLast && <Chip tone="neutral">compute {mLast.compute_state}</Chip>}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Критерий успеха R82: <span className="text-amber-300">cycle_seq</span> начинает расти монотонно, а <span className="text-rose-300">stale cycle</span> сбрасывается в секунды. Графики накапливаются в ring-buffer демона (1 час, silent-сэмплинг без записи в evidence log). История драфта — durable (data/draft-history.jsonl, 24 ч, переживает рестарты демона).
+              </p>
+            </div>
+          ) : (
+            <PanelLoading label="загрузка монитора" />
+          )}
+        </Panel>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════ DOMAIN 02 · sec-conv (EV-TOPO: доменная топология UI-аудита Phase-2) */}
+        <section id="sec-conv" aria-labelledby="sec-conv-h" className="col-span-full scroll-mt-24">
+          <div className="sticky top-16 z-[5] -mx-1 flex items-center gap-2.5 rounded-lg border border-zinc-800/80 bg-zinc-950/90 px-3 py-2 shadow-lg shadow-black/30 backdrop-blur-md md:top-[96px]">
+            <span className="font-mono text-[10px] font-bold tracking-[0.2em] text-teal-400">02</span>
+            <h2 id="sec-conv-h" className="min-w-0 shrink-0 text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-100">Convergence</h2>
+            <span className="hidden shrink-0 text-[10px] text-zinc-500 sm:inline">сходимость · 6 панелей</span>
+            <span className="ml-1 h-px min-w-6 flex-1 bg-gradient-to-r from-zinc-700/80 to-transparent" />
+            <span className="hidden shrink-0 font-mono text-[9px] text-zinc-600 lg:inline">квалификация · r82 · exit gate · разрывы · роадмап · события</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* ----------------------------- R89 QUALIFICATION MATRIX (R86→R90) */}
         <Panel
           icon={<BadgeCheck className="h-4 w-4" />}
@@ -2341,251 +2530,6 @@ export default function MissionControl() {
           )}
         </Panel>
 
-        {/* -------------------------------------------- R83 EDGE CONVERGENCE */}
-        <Panel
-          icon={<Cloud className="h-4 w-4" />}
-          id="p-edge"
-          title="R83 · Edge convergence · Cloudflare live"
-          chip={
-            edgeErr ? <Chip tone="warn" title="known-issue: readback недоступен (CF-token pending)">known</Chip>
-              : edge ? (
-                <Chip tone={edge.workers.some((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000) ? 'p0' : 'ok'}>
-                  {edge.workers.filter((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000).length}/2 NO SOURCE
-                </Chip>
-              ) : <Chip tone="neutral">…</Chip>
-          }
-          actions={
-            <div className="flex items-center">
-              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true, true)} aria-label="Снять live-снапшот воркеров" title="Свежая квалификация + снапшот живых скриптов в evidence">
-                <Camera className={`h-4 w-4 ${edgeLoading ? 'animate-pulse' : ''}`} />
-              </Button>
-              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true)} aria-label="Свежий Edge-статус">
-                <RefreshCw className={`h-4 w-4 ${edgeLoading ? 'animate-spin' : ''}`} />
-              </Button>
-            </div>
-          }
-        >
-          {edgeErr && !edge ? (
-            <ErrBox label="Edge" error={edgeErr} hint="edge-convergence readback ожидает CF-токен на daemon-стороне" />
-          ) : edge ? (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-1.5">
-                <Chip tone="info">{edge.subdomain ?? '—'}.workers.dev</Chip>
-                <Chip tone="neutral">{edge.workers.length} workers</Chip>
-                {edge.workers.map((w) => (
-                  <Chip key={w.id} tone={w.source.verdict === 'NO_SOURCE_IN_REPO' ? (w.live_bytes && w.live_bytes > 1000 ? 'p0' : 'neutral') : w.source.verdict === 'DRIFT' ? 'warn' : 'ok'}>
-                    {w.id.replace('metaengine-', '').replace('metaengine-fabric-worker-h205f21r4', 'fabric')} · {w.source.verdict === 'NO_SOURCE_IN_REPO' ? 'NO SRC' : w.source.verdict}
-                  </Chip>
-                ))}
-              </div>
-              <div className={`space-y-2 ${scrollCls} pr-1`}>
-                {edge.workers.map((w) => (
-                  <div key={w.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <span className="min-w-0 break-all font-mono text-xs text-teal-300">{w.id}</span>
-                      <span className="ml-auto flex items-center gap-1.5">
-                        {w.durable_object && <Chip tone="warn">DO {w.durable_object}</Chip>}
-                        {w.queue && <Chip tone="neutral">queue {w.queue}</Chip>}
-                        {w.workflow && <Chip tone="neutral">workflow</Chip>}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] leading-snug text-zinc-500">{w.role}</p>
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <Stat label="versions" value={w.versions_total != null ? `${w.versions_total} (latest v${w.latest_version?.number ?? '—'})` : '—'} />
-                      <Stat label="live digest" value={w.live_sha256 ?? '—'} tone="text-cyan-300" />
-                      <Stat label="live size" value={w.live_bytes != null ? `${(w.live_bytes / 1024).toFixed(1)} KiB` : '—'} />
-                      <Stat label="source in repo" value={w.source.verdict} tone={w.source.verdict === 'NO_SOURCE_IN_REPO' ? 'text-rose-400' : w.source.verdict === 'DRIFT' ? 'text-amber-400' : 'text-emerald-400'} />
-                    </div>
-                    <p className="mt-2 text-[11px] leading-snug text-zinc-500">
-                      <span className="text-zinc-400">binding:</span> {w.source.note}
-                      {w.secret_bindings.length > 0 && (
-                        <>
-                          <br />
-                          <span className="text-zinc-400">secrets (имена, значения не возвращаются API):</span> {w.secret_bindings.join(', ')}
-                        </>
-                      )}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <div className={`space-y-1 ${scrollCls} pr-1`}>
-                <div className="px-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Находки квалификации</div>
-                {edge.findings.map((f) => (
-                  <div key={f} className="rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 text-[11px] leading-snug text-zinc-400 hover:border-zinc-700">
-                    {f}
-                  </div>
-                ))}
-                <div className="px-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Блокеры промоушна</div>
-                {edge.promotion_blockers.map((b) => (
-                  <div key={b} className="rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-rose-200/90">
-                    {b}
-                  </div>
-                ))}
-              </div>
-              {/* import plan (R83-import) */}
-              {edgePlan && (
-                <div className={`space-y-2 ${scrollCls} pr-1`}>
-                  <div className="flex flex-wrap items-center gap-2 px-0.5">
-                    <Layers className="h-3.5 w-3.5 text-cyan-300" />
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">Импорт-план source-дерева (R83-import)</span>
-                    {edgePlan.workers.filter((w) => w.import_verdict === 'IMPORT_READY').length > 0 && (
-                      <Chip tone="ok">{edgePlan.workers.filter((w) => w.import_verdict === 'IMPORT_READY').length} IMPORT_READY</Chip>
-                    )}
-                    {edgePlan.workers.filter((w) => w.import_verdict === 'NEEDS_UNBUNDLING').length > 0 && (
-                      <Chip tone="warn">{edgePlan.workers.filter((w) => w.import_verdict === 'NEEDS_UNBUNDLING').length} NEEDS_UNBUNDLING</Chip>
-                    )}
-                  </div>
-                  {edgePlan.workers.map((w) => (
-                    <div key={w.worker} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <span className="min-w-0 break-all font-mono text-[11px] text-teal-300">{w.worker}</span>
-                        <Chip tone={w.import_verdict === 'IMPORT_READY' ? 'ok' : w.import_verdict === 'NEEDS_UNBUNDLING' ? 'warn' : 'p0'} className="ml-auto shrink-0">{w.import_verdict}</Chip>
-                      </div>
-                      <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        <Stat label="снапшот" value={w.snapshot_sha256_12 ?? '—'} tone="text-cyan-300" />
-                        <Stat label="характер" value={w.source_character} tone={w.source_character === 'ORIGINAL_MODULES' ? 'text-emerald-400' : 'text-amber-400'} />
-                        <Stat label="модулей" value={String(w.modules.length)} />
-                        <Stat label="в репо" value={w.proposed_repo_prefix} tone="text-zinc-400" />
-                      </div>
-                      {w.modules.length > 0 && (
-                        <div className="mt-2 space-y-0.5">
-                          {w.modules.map((m) => (
-                            <div key={m.module_path} className="flex items-baseline gap-2 rounded border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 font-mono text-[10px] hover:border-zinc-700">
-                              <span className="min-w-0 flex-1 truncate text-zinc-300" title={m.module_path}>{m.module_path}</span>
-                              <span className="shrink-0 text-zinc-600">{m.lines}L · {(m.bytes / 1024).toFixed(1)}KiB</span>
-                              <span className="shrink-0 text-cyan-300/70">{m.sha256_12}</span>
-                              {m.bundle_sections.length > 0 && <span className="shrink-0 text-amber-300/80" title={m.bundle_sections.join('\n')}>{m.bundle_sections.length} src-секций</span>}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {w.wrangler_stub && (
-                        <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
-                          <span className="text-zinc-400">wrangler stub (bindings):</span> {w.wrangler_stub.bindings.join(', ')}
-                        </p>
-                      )}
-                      {w.notes.map((n) => (
-                        <p key={n} className="mt-1 text-[10px] leading-snug text-zinc-500">— {n}</p>
-                      ))}
-                    </div>
-                  ))}
-                  {edgePlan.summary.map((s) => (
-                    <div key={s} className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-cyan-200/80">{s}</div>
-                  ))}
-                </div>
-              )}
-              {/* import PR live status (R83-import deliverable) */}
-              {edgeImport && (
-                <div className="space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <GitPullRequest className="h-3.5 w-3.5 text-emerald-300" />
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-emerald-300">Импорт-PR · source-of-truth в репо</span>
-                    {edgeImport.pr && (
-                      <Chip tone={edgeImport.pr.merged ? 'ok' : edgeImport.pr.state === 'open' ? (edgeImport.ci.terminal && !edgeImport.ci.green ? 'p0' : 'warn') : 'neutral'}>
-                        PR #{edgeImport.pr.number} {edgeImport.pr.merged ? 'MERGED' : edgeImport.pr.state.toUpperCase()}
-                      </Chip>
-                    )}
-                    {edgeImport.pr && (
-                      <Chip tone={edgeImport.ci.terminal ? (edgeImport.ci.green ? 'ok' : 'p0') : 'warn'}>
-                        CI {edgeImport.ci.success}/{edgeImport.ci.total}{!edgeImport.ci.terminal && ' ↻'}
-                      </Chip>
-                    )}
-                    {edgeImport.digest_contract.repo_tree_verified && <Chip tone="ok">digest == LIVE</Chip>}
-                    <Button variant="ghost" size="sm" className="ml-auto h-7 w-7 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeImportLoading} onClick={() => loadEdgeImport(true)} aria-label="Свежий статус импорт-PR" title="Свежий статус PR #982 (edge.import-status)">
-                      <RefreshCw className={`h-3.5 w-3.5 ${edgeImportLoading ? 'animate-spin' : ''}`} />
-                    </Button>
-                  </div>
-                  {edgeImport.pr && (
-                    <>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        <Stat label="ветка" value={edgeImport.pr.head_branch} tone="text-cyan-300" span="col-span-2" />
-                        <Stat label="head" value={edgeImport.pr.head_sha.slice(0, 10)} tone="text-cyan-300" />
-                        <Stat label="mergeable" value={edgeImport.pr.mergeable == null ? '—' : edgeImport.pr.mergeable ? 'yes' : String(edgeImport.pr.mergeable_state)} tone={edgeImport.pr.mergeable ? 'text-emerald-400' : 'text-amber-400'} />
-                        <Stat label="файлы" value={`${edgeImport.pr.files} (+${edgeImport.pr.additions}/−${edgeImport.pr.deletions})`} tone="text-emerald-400" span="col-span-2" />
-                        <Stat label="base" value={edgeImport.pr.base_branch} tone="text-zinc-400" span="col-span-2" />
-                      </div>
-                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px]">
-                        <span className="text-zinc-500">digest contract:</span>
-                        <span className="text-cyan-300/80">fabric {edgeImport.digest_contract.fabric_live_sha256}</span>
-                        <span className="text-cyan-300/80">aop1 {edgeImport.digest_contract.aop1_live_sha256}</span>
-                      </div>
-                      {edgeImport.ci.checks.length > 0 && (
-                        <div className="space-y-0.5">
-                          {edgeImport.ci.checks.map((c, i) => (
-                            <div key={`${c.name}-${i}`} className="flex items-baseline gap-2 rounded border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 font-mono text-[10px]">
-                              <span className="min-w-0 flex-1 truncate text-zinc-300" title={c.name}>{c.name}</span>
-                              <span className={`shrink-0 ${c.conclusion === 'success' ? 'text-emerald-400' : c.conclusion ? 'text-rose-400' : 'text-amber-400'}`}>{c.conclusion ?? c.status}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <a href={edgeImport.pr.url} target="_blank" rel="noreferrer" className="inline-flex items-baseline gap-1 text-[11px] text-teal-300 underline decoration-teal-500/40 hover:text-teal-200">
-                        открыть PR #{edgeImport.pr.number} на GitHub
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </>
-                  )}
-                  {edgeImport.pr_error && (
-                    <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 font-mono text-[10px] text-amber-200/80">import-status: {edgeImport.pr_error}</div>
-                  )}
-                  {edgeImport.summary.map((s) => (
-                    <div key={s} className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-emerald-200/80">{s}</div>
-                  ))}
-                </div>
-              )}
-              <p className="text-[11px] leading-relaxed text-zinc-500">
-                Read-only CF-клиент демона (токен только серверно в /home/z/.a2/cloudflare.env). Кнопка-камера снимает живые скрипты в evidence (data/edge/ + hash-chained EDGE_SNAPSHOT события). Импорт source РЕАЛИЗОВАН — PR #982 несёт verbatim-дерево с digest-контрактом; промоушн (deploy-from-repo) только после ревью оператора + re-verify + ротации CF-токена.
-              </p>
-            </div>
-          ) : (
-            <PanelLoading label="квалификация Cloudflare Edge" />
-          )}
-        </Panel>
-
-        {/* EV-TOPO: домен 3/3 — Evidence */}
-        <DomainHeader id={PANEL_DOMAINS[2].id} label={PANEL_DOMAINS[2].label} desc={PANEL_DOMAINS[2].desc} count={PANEL_DOMAINS[2].panels.length} />
-        {/* -------------------------------------------- CONVERGENCE MONITOR */}
-        <Panel
-          icon={<TrendingUp className="h-4 w-4" />}
-          id="p-monitor"
-          title="Монитор конвергенции · R82"
-          chip={
-            monitor ? (
-              <Chip tone={mLast && mLast.keepalive_state === 'ACTIVE' ? 'ok' : 'p0'}>
-                {mLast ? mLast.keepalive_state : '…'}
-              </Chip>
-            ) : (
-              <Chip tone="neutral">…</Chip>
-            )
-          }
-          defaultOpen
-        >
-          {monitor ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-                <Spark label="heartbeat, s" color="#34d399" value={mLast ? `${mLast.hb_age_s}s` : '—'} data={mkSeries((s) => s.hb_age_s)} />
-                <Spark label="cycle_seq" color="#fbbf24" value={mLast ? String(mLast.cycle_seq) : '—'} data={mkSeries((s) => s.cycle_seq)} />
-                <Spark label="resync_count" color="#22d3ee" value={mLast ? String(mLast.resync_count) : '—'} data={mkSeries((s) => s.resync_count)} />
-                <Spark label="stale cycle, h" color="#fb7185" value={mLast && mLast.stale_completed_s != null ? `${(mLast.stale_completed_s / 3600).toFixed(1)}h` : '—'} data={mkSeries((s) => (s.stale_completed_s != null ? +(s.stale_completed_s / 3600).toFixed(2) : null))} />
-                <Spark label="ambiguous hist" color="#f97316" value={mLast ? String(mLast.ambiguous_history_count) : '—'} data={mkSeries((s) => s.ambiguous_history_count)} />
-                <Spark label="p0 flags" color="#e879f9" value={mLast ? String(mLast.p0_count) : '—'} data={mkSeries((s) => s.p0_count)} />
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Chip tone="neutral">интервал {Math.round(monitor.status.interval_ms / 1000)}с</Chip>
-                <Chip tone="neutral">сэмплов {monitor.status.sample_count}/{monitor.status.capacity}</Chip>
-                <Chip tone={monitor.status.last_error ? 'p0' : 'ok'}>{monitor.status.last_error ? 'sampler error' : 'sampler ok'}</Chip>
-                {mLast && <Chip tone="neutral">cognitive {mLast.cognitive_state}</Chip>}
-                {mLast && <Chip tone="neutral">compute {mLast.compute_state}</Chip>}
-              </div>
-              <p className="text-[11px] leading-relaxed text-zinc-500">
-                Критерий успеха R82: <span className="text-amber-300">cycle_seq</span> начинает расти монотонно, а <span className="text-rose-300">stale cycle</span> сбрасывается в секунды. Графики накапливаются в ring-buffer демона (1 час, silent-сэмплинг без записи в evidence log). История драфта — durable (data/draft-history.jsonl, 24 ч, переживает рестарты демона).
-              </p>
-            </div>
-          ) : (
-            <PanelLoading label="загрузка монитора" />
-          )}
-        </Panel>
-
         {/* ------------------------------------------------- GAP MATRIX */}
         <Panel icon={<ShieldAlert className="h-4 w-4" />} title="P0/P1 разрывы · release gap matrix" chip={<Chip tone="p0">BLOCKED</Chip>}>
           <div className={`space-y-1.5 ${scrollCls} pr-1`}>
@@ -2720,6 +2664,156 @@ export default function MissionControl() {
             </div>
           </div>
         </Panel>
+          </div>
+        </section>
+
+        {/* ══════════════════════════════ DOMAIN 03 · sec-evidence (EV-TOPO: доменная топология UI-аудита Phase-2) */}
+        <section id="sec-evidence" aria-labelledby="sec-evidence-h" className="col-span-full scroll-mt-24">
+          <div className="sticky top-16 z-[5] -mx-1 flex items-center gap-2.5 rounded-lg border border-zinc-800/80 bg-zinc-950/90 px-3 py-2 shadow-lg shadow-black/30 backdrop-blur-md md:top-[96px]">
+            <span className="font-mono text-[10px] font-bold tracking-[0.2em] text-teal-400">03</span>
+            <h2 id="sec-evidence-h" className="min-w-0 shrink-0 text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-100">Evidence</h2>
+            <span className="hidden shrink-0 text-[10px] text-zinc-500 sm:inline">артефакты · 4 панели</span>
+            <span className="ml-1 h-px min-w-6 flex-1 bg-gradient-to-r from-zinc-700/80 to-transparent" />
+            <span className="hidden shrink-0 font-mono text-[9px] text-zinc-600 lg:inline">supabase · github · mirror · восстановление</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* ------------------------------------------ CONTROL PLANE card */}
+        <Panel
+          icon={<Database className="h-4 w-4" />}
+          id="p-supabase"
+          title="Control Plane · Supabase live"
+          chip={supErr ? <Chip tone="warn" title="known-issue: readback недоступен (JWT/cred pending) — не авария, локальный контур жив">known</Chip> : supLive ? <Chip tone={supervisor!.p0_flags.length ? 'p0' : 'ok'}>{supervisor!.p0_flags.length ? `${supervisor!.p0_flags.length} P0` : 'CLEAN'}</Chip> : <Chip tone="neutral">…</Chip>}
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={supLoading} onClick={() => loadSupervisor(true)} aria-label="Свежий снапшот">
+              <RefreshCw className={`h-4 w-4 ${supLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          }
+        >
+          {supErr && !supervisor ? (
+            <ErrBox label="control plane" error={supErr} hint="readback-поверхность недоступна до восстановления credential-плоскостей — локальные панели живут" />
+          ) : supervisor ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="browser" value={supervisor.extension_version} tone="text-teal-400" span="col-span-2" />
+                <Stat label="runtime" value={supervisor.operator_runtime} span="col-span-2" />
+                <Stat label="client" value={supervisor.client_id.slice(0, 13) + '…'} />
+                <Stat label="heartbeat" value={`${hbAgeLive ?? hbAge ?? '—'}s ago`} tone={(hbAgeLive ?? 99) < 30 ? 'text-emerald-400' : 'text-rose-400'} />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Chip tone={supervisor.compute_state === 'HEALTHY' ? 'ok' : 'p0'}>compute {supervisor.compute_state}</Chip>
+                <Chip tone={supervisor.sentinel.worker_health === 'HEALTHY' ? 'ok' : 'p0'}>sentinel {supervisor.sentinel.lifecycle}/{supervisor.sentinel.worker_health}</Chip>
+                <Chip tone={supervisor.dev_plane.state === 'READY' ? 'ok' : 'warn'}>dev-plane {supervisor.dev_plane.state}</Chip>
+                <Chip tone="neutral">{supervisor.operator_mode} · armed={String(supervisor.armed)}</Chip>
+              </div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Supervisor keepalive</span>
+                  <Chip tone={ka!.state === 'ACTIVE' ? 'ok' : 'p0'}>{ka!.state}</Chip>
+                  <Chip tone="neutral">cycle_seq {ka!.cycle_seq}</Chip>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <Stat label="last useful cycle" value={staleLive != null ? `${humanS(staleLive)} назад` : '—'} tone={(staleLive ?? 0) > 3600 ? 'text-rose-400' : 'text-emerald-400'} />
+                  <Stat label="ambiguous_hist" value={ka!.ambiguous_history_count} tone="text-amber-400" />
+                  <Stat label="queued_wakes" value={ka!.queued_wake_count} />
+                  <Stat label="rollover_reason" value={ka!.rollover_reason ?? '—'} tone="text-rose-400" span="col-span-2 sm:col-span-3" />
+                </div>
+              </div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Cognitive transport</span>
+                  <Chip tone={supervisor.cognitive.state === 'CONVERGED' ? 'ok' : 'warn'}>{supervisor.cognitive.state}</Chip>
+                  <Chip tone="neutral">resync #{supervisor.cognitive.resync_count}</Chip>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Stat label="stream" value={(supervisor.cognitive.stream_id ?? '—').slice(0, 13) + '…'} />
+                  <Stat label="sent_events" value={supervisor.cognitive.sent_events} />
+                  <Stat label="ack_through_seq" value={supervisor.cognitive.acknowledged_through_sequence} />
+                  <Stat label="last_success" value={supervisor.cognitive.last_success_at ? hhmmss(supervisor.cognitive.last_success_at) : '—'} />
+                </div>
+              </div>
+              {supervisor.p0_flags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {supervisor.p0_flags.map((f) => <Chip key={f} tone="p0"><ShieldAlert className="h-3 w-3" />{f}</Chip>)}
+                </div>
+              )}
+              <p className="text-[11px] text-zinc-500">
+                Source authority (live read model): <span className="font-mono text-zinc-400">{supervisor.dev_plane.head.slice(0, 12)}</span> @ {supervisor.dev_plane.ref.replace('refs/heads/', '')}
+              </p>
+            </div>
+          ) : (
+            <PanelLoading />
+          )}
+        </Panel>
+
+        {/* ------------------------------------------ R81 CONVERGENCE (GitHub) */}
+        <Panel
+          icon={<GitPullRequest className="h-4 w-4" />}
+          id="p-github"
+          title="R81 Convergence · GitHub live"
+          chip={
+            convErr ? <Chip tone="warn" title="known-issue: readback недоступен (cred pending)">known</Chip>
+              : conv ? (
+                <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : conv.rollup_state === 'PENDING' ? 'warn' : 'neutral'}>
+                  CI {conv.rollup_state}
+                </Chip>
+              ) : <Chip tone="neutral">…</Chip>
+          }
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={convLoading} onClick={() => loadConvergence(true)} aria-label="Свежий GitHub-статус">
+              <RefreshCw className={`h-4 w-4 ${convLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          }
+        >
+          {convErr && !conv ? (
+            <ErrBox label="GitHub" error={convErr} hint="convergence-readback требует GITHUB_TOKEN на daemon-стороне — см. planes в banner" />
+          ) : conv ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="PR #968" value={conv.pr ? `${conv.pr.state}${conv.pr.draft ? ' · draft' : ''}` : '—'} tone="text-teal-400" span="col-span-2" />
+                <Stat label="mergeable" value={conv.pr ? (conv.pr.mergeable == null ? '—' : conv.pr.mergeable ? 'yes' : 'no') : '—'} tone={conv.pr?.mergeable ? 'text-emerald-400' : 'text-amber-400'} span="col-span-2" />
+                <Stat label="head" value={conv.head?.short ?? '—'} tone="text-cyan-300" />
+                <Stat label="committed" value={conv.head?.committed_at ? hhmmss(conv.head.committed_at) : '—'} />
+                <Stat label="checks" value={`${conv.checks.success}/${conv.checks.total}`} tone={conv.rollup_state === 'GREEN' ? 'text-emerald-400' : 'text-amber-400'} span="col-span-2" />
+              </div>
+              {conv.head && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 font-mono text-[11px] leading-snug text-zinc-400">
+                  <span className="text-teal-400">{conv.head.short}</span> {conv.head.message}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : 'warn'}>CI {conv.rollup_state}</Chip>
+                <Chip tone="ok">success {conv.checks.success}</Chip>
+                {conv.checks.pending > 0 && <Chip tone="warn">pending {conv.checks.pending} · in_progress {conv.checks.in_progress}</Chip>}
+                {conv.checks.failed > 0 && <Chip tone="p0">failed {conv.checks.failed}</Chip>}
+                {conv.checks.cancelled > 0 && <Chip tone="neutral">cancelled {conv.checks.cancelled}</Chip>}
+                <Chip tone="neutral">total {conv.checks.total}</Chip>
+                {conv.api.rate_remaining != null && <Chip tone="neutral">rate {conv.api.rate_remaining}</Chip>}
+              </div>
+              <div className={`space-y-1 ${scrollCls} pr-1`}>
+                {conv.checks.items.map((c, i) => {
+                  const tone: 'ok' | 'warn' | 'p0' | 'neutral' = c.status !== 'completed'
+                    ? 'warn'
+                    : c.conclusion === 'success' ? 'ok' : (c.conclusion === 'failure' || c.conclusion === 'timed_out' || c.conclusion === 'action_required') ? 'p0' : 'neutral'
+                  return (
+                    <div key={`${c.name}-${i}`} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 hover:border-zinc-700">
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={c.name}>{c.name}</span>
+                      <Chip tone={tone}>{c.status === 'completed' ? (c.conclusion ?? '—') : c.status}</Chip>
+                    </div>
+                  )
+                })}
+                {conv.checks.items.length === 0 && <EmptyState icon={<GitBranch className="h-5 w-5" />} title="check-runs пусты" hint="CI ещё не стартовал на выбранном ref — нажмите Refresh после пуша, либо выберите другой workflow-head" />}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Read-only GitHub-клиент демона (PAT только серверно в /home/z/.a2). Rollup честный: cancelled ≠ green — терминальный повтор обязателен.
+              </p>
+            </div>
+          ) : (
+            <PanelLoading label="загрузка GitHub-статуса" />
+          )}
+        </Panel>
+
+        {/* EV-TOPO: домен 2/3 — Convergence */}
+        <DomainHeader id={PANEL_DOMAINS[1].id} label={PANEL_DOMAINS[1].label} desc={PANEL_DOMAINS[1].desc} count={PANEL_DOMAINS[1].panels.length} />
 
         {/* ----------------------------------------------- EVIDENCE MIRROR */}
         <Panel
@@ -2993,66 +3087,6 @@ export default function MissionControl() {
           )}
         </Panel>
 
-        {/* ------------------------------------------- WORKTREES/SANDBOX */}
-        <Panel icon={<GitBranch className="h-4 w-4" />} title="Worktrees · Песочница" chip={<Chip tone="neutral">{worktrees.length} wt</Chip>}>
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <Input
-                value={wtName} onChange={(e) => setWtName(e.target.value)} placeholder="wt-<имя> (напр. wt-r82-supervisor)"
-                className="h-11 border-zinc-700 bg-zinc-950 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/50"
-                aria-label="Имя нового worktree"
-              />
-              <Button
-                onClick={createWt} disabled={busy === 'wt-create' || !wtName}
-                className="h-11 shrink-0 border-teal-500/40 bg-teal-600/90 text-xs font-semibold text-white hover:bg-teal-500"
-              >
-                {busy === 'wt-create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitBranch className="h-4 w-4" />}
-                <span className="ml-1.5 hidden sm:inline">создать</span>
-              </Button>
-            </div>
-            <div className={`space-y-1 ${scrollCls} pr-1`}>
-              {worktrees.map((w) => {
-                const name = w.path.split('/').pop() ?? w.path
-                const isMain = w.path === '/home/z/my-project'
-                return (
-                  <div key={w.path} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-2">
-                    <Boxes className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{name}</span>
-                    <span className="hidden shrink-0 font-mono text-[10px] text-zinc-600 sm:inline">{w.branch?.replace('refs/heads/', '') ?? 'detached'}</span>
-                    {!isMain && (
-                      <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit shrink-0 p-0 text-zinc-500 hover:text-rose-400" onClick={() => removeWt(name)} aria-label={`Удалить ${name}`} disabled={busy === `wt-rm:${name}`}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-            <div className="border-t border-zinc-800 pt-3">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Sandbox (prlimit-isolated, whitelist)</span>
-                <Terminal className="h-3.5 w-3.5 text-zinc-500" />
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {[['bun', '--version'], ['git', 'status', '--short'], ['git', 'log', '--oneline', '-5']].map((cmd) => (
-                  <Button
-                    key={cmd.join(' ')} onClick={() => doExec(cmd)} disabled={busy !== null}
-                    variant="outline" className="h-11 border-zinc-700 bg-zinc-950 font-mono text-[11px] text-zinc-300 hover:border-teal-500/40 hover:text-teal-300"
-                  >
-                    {busy === `exec:${cmd.join(' ')}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                    <span className="ml-1.5">{cmd.join(' ')}</span>
-                  </Button>
-                ))}
-              </div>
-              {execResult && (
-                <pre className={`mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border p-2.5 font-mono text-[11px] ${execResult.ok ? 'border-zinc-800 bg-zinc-950/80 text-zinc-300' : 'border-rose-500/30 bg-rose-500/5 text-rose-300'}`}>
-                  {`$ ${execResult.cmd.join(' ')}  (${execResult.elapsed_ms}ms, exit ${execResult.exit_code})\n${execResult.stdout || execResult.stderr || '(no output)'}`}
-                </pre>
-              )}
-            </div>
-          </div>
-        </Panel>
-
         {/* -------------------------------------------------- RECOVERY */}
         <Panel icon={<AlertTriangle className="h-4 w-4" />} title="Восстановление после env-reset" chip={<Chip tone={recovery?.env_reset_detected ? 'p0' : 'ok'}>{recovery?.reset_count ? `ENV-RESET #${recovery.reset_count} · LIVE` : 'R81-PHASE0'}</Chip>} defaultOpen>
           {recovery ? (
@@ -3106,6 +3140,8 @@ export default function MissionControl() {
             <PanelLoading />
           )}
         </Panel>
+          </div>
+        </section>
       </main>
 
       {/* ---------------------------------------------------------- footer */}
