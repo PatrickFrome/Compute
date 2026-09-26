@@ -46,6 +46,7 @@ export function Me2Shell() {
   const paletteOpen = useMe2((s) => s.paletteOpen);
   const dialog = useMe2((s) => s.dialog);
   const detail = useMe2((s) => s.detail);
+  const chromeOverlaySources = useMe2((s) => s.chromeOverlaySources);
   const { toast } = useToast();
 
   useEffect(() => { init(); }, [init]);
@@ -60,6 +61,18 @@ export function Me2Shell() {
   }, [toast]);
 
   const overlaysOpen = Boolean(dialog || detail);
+  const nativeOverlayOpen = Boolean(paletteOpen || overlaysOpen || chromeOverlaySources.length > 0);
+
+  useEffect(() => {
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryOverlay?: (active: boolean) => unknown;
+      };
+    }).metaengineShell;
+    if (!shell?.setPrimaryOverlay) return;
+    void shell.setPrimaryOverlay(nativeOverlayOpen);
+    return () => { void shell.setPrimaryOverlay?.(false); };
+  }, [nativeOverlayOpen]);
 
   return (
     <div
