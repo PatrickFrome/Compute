@@ -1,79 +1,107 @@
 "use client";
-// ── TOPBAR: глобальная командная строка + статус системы (Global UI) ───────────
+// ── TOPBAR R85: quiet global command surface ──────────────────────────────────
+// Identity + current context + one global command surface. Runtime telemetry is
+// compressed into attention-oriented health, leaving the workspace as the focus.
 
-import { useMe2, useKpis, useActivity } from "@/components/me2/store";
-import { KpiTile, Sparkline, Dot } from "@/components/me2/ui/primitives";
-import { Search, Command, Boxes, PlayCircle, CheckCircle2, XCircle, Clock } from "lucide-react";
-import { useEffect, useState } from "react";
+import { PAGES, WORKSPACES, useMe2, useKpis } from "@/components/me2/store";
+import { Search, Command, Boxes, Play, AlertTriangle, Radio, Layers3 } from "lucide-react";
+import { Dot } from "@/components/me2/ui/primitives";
 
 export function TopBar() {
   const snap = useMe2((s) => s.snap);
   const connected = useMe2((s) => s.connected);
-  const catalog = useMe2((s) => s.catalog);
+  const mirror = useMe2((s) => s.mirror);
+  const page = useMe2((s) => s.page);
+  const workspace = useMe2((s) => s.workspace);
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const kpi = useKpis();
-  const activity = useActivity();
-  const [clock, setClock] = useState("");
 
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date().toLocaleTimeString("ru-RU", { hour12: false })), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const pageMeta = PAGES.find((p) => p.key === page);
+  const workspaceMeta = WORKSPACES.find((w) => w.key === workspace);
+  const mirrorAttention = Boolean(mirror && (mirror.mode !== "LIVE" || mirror.pending > 0));
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-zinc-800 bg-zinc-950/95 px-3" data-testid="topbar">
-      {/* бренд */}
+    <header
+      className="flex h-[42px] shrink-0 items-center gap-2 border-b border-zinc-800/90 bg-[#0b0b0d] px-2"
+      data-testid="topbar"
+    >
       <button
-        type="button" onClick={() => setPage("command")} data-testid="brand"
-        className="flex shrink-0 items-center gap-2 focus-visible:outline-none"
+        type="button"
+        onClick={() => setPage("command")}
+        data-testid="brand"
+        className="flex h-8 shrink-0 items-center gap-2 rounded-sm px-1.5 text-left hover:bg-zinc-900 focus-visible:outline-none"
         title="METAENGINE · Command Center"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded bg-emerald-600/20 ring-1 ring-emerald-600/40">
-          <Boxes className="h-3.5 w-3.5 text-emerald-400" aria-hidden />
+        <span className="flex h-5 w-5 items-center justify-center border border-emerald-700/50 bg-emerald-950/40">
+          <Boxes className="h-3 w-3 text-emerald-400" aria-hidden />
         </span>
-        <span className="text-[13px] font-black tracking-[0.25em] text-zinc-100">ME2</span>
-        <span className="hidden font-mono text-[9px] text-zinc-600 md:inline">{snap?.meta.version ?? "…"}</span>
+        <span className="text-[12px] font-black tracking-[0.22em] text-zinc-100">ME2</span>
+        <span className="hidden font-mono text-[9px] text-zinc-600 lg:inline">{snap?.meta.version ?? "…"}</span>
       </button>
 
-      {/* глобальная командная строка (клик → палитра) */}
+      <div className="hidden min-w-0 items-center gap-1.5 border-l border-zinc-800 pl-2 md:flex" aria-label="Текущий контекст">
+        <span className="truncate text-[10px] font-semibold tracking-[0.12em] text-zinc-300">{pageMeta?.label ?? page.toUpperCase()}</span>
+        <span className="text-zinc-700">/</span>
+        <span className="max-w-28 truncate text-[9px] text-zinc-500">{workspaceMeta?.label ?? workspace}</span>
+      </div>
+
       <button
         type="button"
         onClick={() => setPalette(true)}
         data-testid="global-cmdbar"
         aria-label="Глобальный поиск и команды (Ctrl+K)"
-        className="group flex h-8 min-w-0 flex-1 max-w-xl items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/70 px-3 text-left transition hover:border-emerald-800/60 hover:bg-zinc-900"
+        className="group mx-auto flex h-8 min-w-0 flex-1 max-w-[680px] items-center gap-2 border border-zinc-800 bg-zinc-900/55 px-2.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
       >
         <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-emerald-400" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-xs text-zinc-500">
-          поиск · переход к странице/агенту/задаче · команды системы…
+        <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">
+          перейти · найти агента/задачу · выполнить команду
         </span>
-        <kbd className="hidden shrink-0 items-center gap-0.5 rounded border border-zinc-700 bg-zinc-900 px-1 font-mono text-[9px] text-zinc-400 sm:flex">
+        <kbd className="hidden shrink-0 items-center gap-0.5 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 font-mono text-[9px] text-zinc-400 sm:flex">
           <Command className="h-2.5 w-2.5" aria-hidden />K
         </kbd>
       </button>
 
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        {/* KPI: только ключевые — остальное в Pages */}
-        <div className="hidden items-center gap-1.5 lg:flex">
-          <KpiTile label="ready" value={kpi.ready} icon={Clock} tone="amber" hot={kpi.ready > 0} />
-          <KpiTile label="run" value={kpi.running} icon={PlayCircle} tone="emerald" hot={kpi.running > 0} />
-          <KpiTile label="done" value={kpi.done} icon={CheckCircle2} tone="zinc" />
-          <KpiTile label="fail" value={kpi.fail} icon={XCircle} tone="rose" hot={kpi.fail > 0} />
-        </div>
-        <Sparkline data={activity} />
-        {/* WS индикатор */}
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[9px]">
+        <span
+          className={`hidden h-7 items-center gap-1.5 border px-2 lg:flex ${
+            kpi.fail > 0
+              ? "border-rose-900/70 bg-rose-950/20 text-rose-300"
+              : "border-zinc-800 bg-zinc-950 text-zinc-400"
+          }`}
+          title={`${kpi.ready} ready · ${kpi.running} running · ${kpi.fail} failed`}
+        >
+          {kpi.fail > 0 ? <AlertTriangle className="h-3 w-3" aria-hidden /> : <Play className="h-3 w-3 text-emerald-500" aria-hidden />}
+          <span>{kpi.running} run</span>
+          <span className="text-zinc-700">·</span>
+          <span>{kpi.ready} ready</span>
+          {kpi.fail > 0 ? <><span className="text-zinc-700">·</span><span>{kpi.fail} fail</span></> : null}
+        </span>
+
+        {mirrorAttention ? (
+          <button
+            type="button"
+            onClick={() => setPage("observability")}
+            className="hidden h-7 items-center gap-1 border border-amber-900/70 bg-amber-950/20 px-2 text-amber-300 xl:flex"
+            title={`Mirror ${mirror?.mode ?? "unknown"} · outbox ${mirror?.pending ?? 0}`}
+          >
+            <Layers3 className="h-3 w-3" aria-hidden />
+            mirror {mirror?.mode ?? "…"}
+          </button>
+        ) : null}
+
         <span
           data-testid="ws-badge"
-          className={`flex items-center gap-1.5 rounded border px-1.5 py-1 font-mono text-[9px] font-bold tracking-widest ${
-            connected ? "border-emerald-800/60 bg-emerald-950/40 text-emerald-300" : "border-rose-800/60 bg-rose-950/40 text-rose-300"
+          className={`flex h-7 items-center gap-1.5 border px-2 font-bold tracking-[0.12em] ${
+            connected
+              ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-300"
+              : "border-rose-900/60 bg-rose-950/20 text-rose-300"
           }`}
-          title={connected ? "socket.io :3040 — шина жива (snapshot 2s + event)" : "шина офлайн — REST-fallback :3041"}
+          title={connected ? "socket.io :3040 — live transport" : "socket offline — REST fallback"}
         >
-          <Dot on={connected} pulse />
-          {connected ? "WS LIVE" : "WS OFF"}
+          {connected ? <Radio className="h-3 w-3" aria-hidden /> : <Dot on={false} />}
+          {connected ? "LIVE" : "OFF"}
         </span>
-        <span className="hidden font-mono text-[10px] tabular-nums text-zinc-500 xl:inline" data-testid="clock">{clock}</span>
       </div>
     </header>
   );
