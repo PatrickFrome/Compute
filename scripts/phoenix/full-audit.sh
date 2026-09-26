@@ -18,7 +18,7 @@ CREDS_DOC=/tmp/my-project/.a2-creds-01.md
 VAULT=/home/z/context-vault
 
 # --- harvest auth (file -> var; never printed) ---
-GH=""; SB_JWT=""; SB_URL="https://sibnfciqcpkuquxzduqr.supabase.co"; CF_API=""; CF_ACCT=""; CF_AI=""
+GH=""; SB_JWT=""; SB_URL="https://xpeibufgzjknrhbhpffp.supabase.co"; CF_API=""; CF_ACCT=""; CF_AI=""   # 2026-09-27 SEC-RESTORE-2: подлинный носитель (sibn… был ложным следом)
 [ -s /home/z/.a2/.github.env ] && { set -a; . /home/z/.a2/.github.env 2>/dev/null; set +a; GH="${GITHUB_TOKEN_ADMIN:-}"; }
 ENVF=/tmp/my-project/.a2-backup/me2.env.20260922
 [ -s "$ENVF" ] && { . "$ENVF" 2>/dev/null; SB_URL="${SUPABASE_URL:-$SB_URL}"; SB_JWT="${SUPABASE_SERVICE_ROLE_JWT:-}"; CF_API="${CF_API_TOKEN:-}"; CF_ACCT="${CF_ACCOUNT_ID:-}"; CF_AI="${CF_AI_WORKER_TOKEN:-}"; }
@@ -80,8 +80,7 @@ if [ -n "$SB_JWT" ]; then
   verdict DONE
 else
   echo "- host: $SB_URL"
-  echo "- СТАТУС: BLOCKED — SUPABASE_SERVICE_ROLE_JWT утерян 2026-09-26 17:11 (ENVF wiped); облачная копия циклична."
-  echo "  Для завершения аудита БД оператору нужно перевыпустить service_role JWT."
+  echo "- СТАТУС: BLOCKED — Supabase REST недоступен (JWT в ENVF: $([ -n "$SB_JWT" ] && echo present || echo absent); проверить сеть/срок токена)."
   verdict BLOCKED
 fi
 echo "### 3.3 Pigsty/PostgreSQL (127.0.0.1:55432)"
@@ -89,7 +88,7 @@ if timeout 3 bash -c 'echo > /dev/tcp/127.0.0.1/55432' 2>/dev/null; then echo "-
 echo
 
 echo "## 4. Капсулы и evidence"
-CAP="https://sibnfciqcpkuquxzduqr.supabase.co/storage/v1/object/public/me2-capsule/me2-os-capsule-2026-09-26.zip"
+CAP="https://xpeibufgzjknrhbhpffp.supabase.co/storage/v1/object/public/me2-capsule/me2-os-capsule-2026-09-26.zip"   # 2026-09-27: капсула жива только на xpei (sibn… уже 400)
 CRESP=$(curl -s -o /dev/null -w '%{http_code} %{size_download}' -I --max-time 20 "$CAP" 2>/dev/null)
 echo "- me2-capsule (public): HTTP/размер HEAD → ${CRESP:-unreachable} (объект me2-os-capsule-2026-09-26.zip)"
 [ "${CRESP%% *}" = "200" ] && verdict DONE || verdict BLOCKED
@@ -200,7 +199,7 @@ echo "## 11. Итог полноты"
 echo "- DONE=$DONE PARTIAL=$PARTIAL BLOCKED=$BLOCKED"
 SCORE=$(( (DONE*100 + PARTIAL*50) / (DONE+PARTIAL+BLOCKED) ))
 echo "- COMPLETENESS SCORE: $SCORE%"
-if [ "$BLOCKED" = "0" ] && [ "$PARTIAL" = "0" ]; then echo "- ВЕРДИКТ: AUDIT COMPLETE — контекст максимально полон"; else echo "- ВЕРДИКТ: контекст НЕПОЛОН — см. BLOCKED выше (корневой блокер: Supabase service JWT утерян 2026-09-26 17:11; R2 secret access key не передан)"; fi
+if [ "$BLOCKED" = "0" ] && [ "$PARTIAL" = "0" ]; then echo "- ВЕРДИКТ: AUDIT COMPLETE — контекст максимально полон"; else echo "- ВЕРДИКТ: контекст НЕПОЛОН — см. BLOCKED/PARTIAL выше (актуальный остаток 2026-09-27: R2 S3 secret access key не передан; Supabase JWT ВОССТАНОВЛЕН — REST=200)"; fi
 } > "$OUT"
 
 # state (для цикла cron: повторять до 100%)

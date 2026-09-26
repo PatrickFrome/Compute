@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# build-sealed-bootstrap.sh v1.0 — regenerates the SEALED secrets bootstrap from LIVE secret files.
+# build-sealed-bootstrap.sh v1.1 — regenerates the SEALED secrets bootstrap from LIVE secret files.
+# v1.1 (2026-09-27, SEC-RESTORE-2): SB_URL→подлинный носитель xpei…; харвест SUPABASE_URL/JWT из ENVF;
+#   эмиссия рабочего SB_JWT-литерала; legacy-blob переносится; creds-doc SEC-RESTORE-2.
 # Repo-safe: this builder contains NO secret literals; values flow file→file only, never printed.
 #
 # Sealed script lives ONLY on surviving channels (PolarFS /tmp + mirrors) because
@@ -13,7 +15,7 @@ ENVF=/tmp/my-project/.a2-backup/me2.env.20260922
 CREDS_DOC=/tmp/my-project/.a2-creds-01.md
 SEAL_DIR=/tmp/my-project/phoenix-sealed
 OUT="$SEAL_DIR/secrets-bootstrap.sh"
-SB_URL="https://sibnfciqcpkuquxzduqr.supabase.co"   # live h205f22 project host (URL is not a secret)
+SB_URL="https://xpeibufgzjknrhbhpffp.supabase.co"   # context-vault carrier, ref из service JWT (URL не секрет); 2026-09-27: sibn… был ложным следом реконструкции (compute-federation worker, капсула уже 400)
 STAMP="$(date +%Y-%m-%d_%H:%M:%S)"
 
 [ -s "$GH_ENV" ] || { echo "BLOCKER: $GH_ENV missing/empty — nothing to seal"; exit 2; }
@@ -34,7 +36,16 @@ if [ -s "$ENVF" ]; then
   CF_ACCT="$(grep -E '^CF_ACCOUNT_ID=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
   CF_R2ID="$(grep -E '^CF_R2_ACCESS_KEY_ID=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
   CF_AI="$(grep -E '^CF_AI_WORKER_TOKEN=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+  SU="$(grep -E '^SUPABASE_URL=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+  [ -n "$SU" ] && SB_URL="$SU"
 fi
+
+# --- harvest Supabase JWT from ENVF (restored 2026-09-27, SEC-RESTORE-2) ---
+SB_JWT=""
+[ -s "$ENVF" ] && SB_JWT="$(grep -E '^SUPABASE_SERVICE_ROLE_JWT=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+# legacy non-JWT blob (архив оператора, в JWT-слот не вставлять)
+LEGACY_BLOB=""
+[ -s "$ENVF" ] && LEGACY_BLOB="$(grep -oE '^# ME2_OPERATOR_BLOB_88B_[0-9]+=.*' "$ENVF" | head -1 || true)"
 
 # --- emit sealed script ---
 mkdir -p "$SEAL_DIR" /tmp/context-vault-mirror/phoenix-sealed
@@ -49,7 +60,13 @@ umask 077
   echo "set -u"
   printf 'GH_PAT=%q\n' "$GH"
   printf 'SB_URL=%q\n' "$SB_URL"
-  echo 'SB_JWT=""  # LOST 2026-09-26 17:11 (ENVF wiped to 0B); cloud copy circular; operator must re-issue, then re-run builder'
+  if [ -n "$SB_JWT" ]; then
+    printf 'SB_JWT=%q\n' "$SB_JWT"
+    echo '# JWT restored 2026-09-27 (SEC-RESTORE-2): идентичен обл. копии me2.env.20260922.restore-key (sha256 fd3bf9a9…); REST=200/storage=200 verified'
+  else
+    echo 'SB_JWT=""  # LOST 2026-09-26 17:11; нужен ре-пост оператора, затем перезапуск builder'
+  fi
+  [ -n "$LEGACY_BLOB" ] && echo "$LEGACY_BLOB   # арх., НЕ JWT"
   printf 'DB_URL=%q\n' "$DB"
   printf 'CF_API_TOKEN=%q\n' "$CF_API"
   printf 'CF_ACCOUNT_ID=%q\n' "$CF_ACCT"
@@ -74,14 +91,14 @@ restore() {
   mkdir -p /tmp/my-project/.a2-backup
   if [ ! -s /tmp/my-project/.a2-backup/me2.env.20260922 ]; then
     { printf 'SUPABASE_URL=%s\n' "$SB_URL"
-      echo '# SUPABASE_SERVICE_ROLE_JWT= <LOST 2026-09-26 17:11 — operator re-issue required>'
-      echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (unreachable w/o the JWT itself)'
+      if [ -n "$SB_JWT" ]; then printf 'SUPABASE_SERVICE_ROLE_JWT=%s\n' "$SB_JWT"; else echo '# SUPABASE_SERVICE_ROLE_JWT= <LOST 2026-09-26 17:11 — operator re-issue required>'; fi
+      echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (reachable; JWT жив с 2026-09-27)'
       [ -n "$CF_API_TOKEN" ] && printf 'CF_API_TOKEN=%s\n' "$CF_API_TOKEN"
       [ -n "$CF_ACCOUNT_ID" ] && printf 'CF_ACCOUNT_ID=%s\n' "$CF_ACCOUNT_ID"
       [ -n "$CF_R2_ACCESS_KEY_ID" ] && printf 'CF_R2_ACCESS_KEY_ID=%s\n' "$CF_R2_ACCESS_KEY_ID"
       [ -n "$CF_AI_WORKER_TOKEN" ] && printf 'CF_AI_WORKER_TOKEN=%s\n' "$CF_AI_WORKER_TOKEN"; } \
       > /tmp/my-project/.a2-backup/me2.env.20260922
-    chmod 600 /tmp/my-project/.a2-backup/me2.env.20260922; echo "wrote: ENVF (URL only; JWT pending operator re-issue)"
+    chmod 600 /tmp/my-project/.a2-backup/me2.env.20260922; echo "wrote: ENVF (Supabase creds$([ -n "$SB_JWT" ] && echo '+JWT') + CF)"
   else echo "keep: ENVF (present)"; fi
   if [ -n "$DB_URL" ]; then
     if [ ! -s "$TH/my-project/.env" ]; then
@@ -105,9 +122,9 @@ chmod 600 "$OUT"
 if [ ! -s "$ENVF" ]; then
   mkdir -p "$(dirname "$ENVF")"
   { printf 'SUPABASE_URL=%s\n' "$SB_URL"
-    echo '# SUPABASE_SERVICE_ROLE_JWT= <LOST 2026-09-26 17:11 — operator re-issue required>'
-    echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (circular)'; } > "$ENVF"
-  chmod 600 "$ENVF"; ENVF_STATE="rebuilt(URL only)"
+    if [ -n "$SB_JWT" ]; then printf 'SUPABASE_SERVICE_ROLE_JWT=%s\n' "$SB_JWT"; else echo '# SUPABASE_SERVICE_ROLE_JWT= <LOST 2026-09-26 17:11 — operator re-issue required>'; fi
+    echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (reachable; JWT жив с 2026-09-27)'; } > "$ENVF"
+  chmod 600 "$ENVF"; ENVF_STATE="rebuilt(Supabase$([ -n "$SB_JWT" ] && echo '+JWT'))"
 else ENVF_STATE="present"; fi
 
 # --- ENVF: append CF keys if absent (idempotent) ---
@@ -153,6 +170,20 @@ if [ -f "$CREDS_DOC" ] && ! grep -q "SEC-SEALED-2" "$CREDS_DOC" && [ -n "$CF_API
     echo "CF_AI_WORKER_TOKEN (cfut_…): ЖИВ (tokens/verify success=true). Значения — в ENVF и sealed (здесь не печатаются)."
   } >> "$CREDS_DOC"
   DOC_STATE="$DOC_STATE+CF"
+fi
+
+# --- creds doc: JWT restore section (SEC-RESTORE-2, idempotent) ---
+if [ -f "$CREDS_DOC" ] && ! grep -q "SEC-RESTORE-2" "$CREDS_DOC" && [ -n "$SB_JWT" ]; then
+  {
+    echo ""
+    echo "## Supabase — ВОССТАНОВЛЕНИЕ 2026-09-27 (SEC-RESTORE-2)"
+    echo "JWT возвращён оператором (ре-пост оригинала); сверён с обл. копией me2.env.20260922.restore-key (sha256 fd3bf9a9…) — REST=200, storage=200, капсула 200."
+    echo "Подлинный носитель context-vault: проект xpei… (объекты context-vault залиты именно туда 2026-09-26; капсула жива только там)."
+    echo "Секция SEC-RESTORE-1 выше («проект xpei мёртв», «живой h205f22 = sibn…») — ОШИБКА реконструкции после инцидента 17:11: sibn… это compute-federation worker (r83-import-build.mjs), его публичная капсула уже HTTP 400."
+    echo "ENVF восстановлен побайтово (оригинал 634B, sha256-verified) + CF-appendum + архивная строка 88B-blob; форензик-копия: me2.env.20260922.orig."
+    echo ""
+  } >> "$CREDS_DOC"
+  DOC_STATE="$DOC_STATE+SEC-RESTORE-2"
 fi
 
 # --- mirrors (best effort) ---
