@@ -577,3 +577,27 @@ Backlog следующего раунда (приоритеты):
 3. ОПЕРАТОР: PR #968 (R81 convergence, draft/clean @ 7740270, CI 20/20) → после merge карточка Qualification покажет r90.tested-binding → covered; seal-манифест на артефакте 10908498280.
 4. R86-seam (у оператора): durable-миграции принятия результатов — когда появится CI-гейт, строка r86.accepted-result-durability станет CI_GATED автоматически.
 5. Консоль (мелочи): авто-тост при r89_exit_gate.pass true→false; график draft-size истории в R82-карточке; per-round фильтр «только пробелы» в Qualification.
+
+---
+Task ID: CAPSULE-20260926
+Agent: Z.ai Code (main agent)
+Task: Полная капсула с отчётом по работе и worklog → загрузка на облачный хост → ссылка на скачивание оператору
+
+Work Log:
+- Собрана капсула `me2-os-capsule-2026-09-26.zip` (12 823 055 bytes, 135 файлов, root-папка me2-os-capsule-2026-09-26/): REPORT.md (итоговый отчёт: резюме, контекст, хроника 16 раундов R81→R88-ADOPT, live-состояние, артефакты/цифры, 10 принципов, backlog/риски) · полный worklog.md (580 строк) · 59 скриншотов (56 QA всех раундов + 3 свежих capsule-console-{desktop,full,mobile}.png, снятых в момент упаковки через gateway :81) · evidence/ (events.jsonl текущего поколения + pre-envreset-repair бэкап, mirror-state.json с generations[], draft-history.jsonl, live-снимки 8 REST-endpoints: health/planes/convergence/qualify/mirror/readback/roadmap/r82-report, R82-диагностические захваты) · source/ (console/page.tsx 2940 строк, 22 модуля демона ~8400 строк, package.json+start.sh+scripts, r82/r83-скрипты, конфиги next/Caddyfile/prisma).
+- Live-состояние на момент капсулы (16:20Z, все поля из живых endpoints): daemon 0.72.0-r88adopt, 31 действие, цепь #105, зеркало #90014600 (pending 0, lag 0), контракт 598 строк/0 нарушений/1 поколение (505 строк), planes 4/4, R82 gate OPERATOR_CLEAR (5/7, драфт 34 955 chars), R89 exit gate PASS (20/20, артефакт 160 110 838 bytes sha-bound), PR #981 MERGED / #982 green / #968 draft-clean; консоль: 15 карточек, 0 JS-ошибок.
+- Секрет-скан перед упаковкой (JWT eyJ…, cfat_/cfut_, service-role, token-паттерны): 0 находок (единственное rg-совпадение — сам детектор-regex в git-sync.sh, false positive); .env-файлов в капсуле нет; контрольные суммы sha256 ключевых файлов вшиты в README капсулы.
+- Облачная загрузка: публичные file-хостинги (0x0.st/catbox/temp.sh/tmpfiles/file.io) из песочницы не работают (egress-таймауты/«Invalid uploader») → использован собственный облачный хост проекта — Supabase Storage (плоскость supabase-cloud.env): создан public-bucket `me2-capsule` (рядом с существующими computefabric-parallel-glm и me2-evidence), zip загружен (object id 355b325a-…, eTag b0fabeb0…), публичная ссылка верифицирована round-trip'ом: HTTP 200, content-type application/zip, content-length байт-в-байт, SHA-256 скачанного == загруженного (607435d0…), unzip -t OK (135 файлов), отдаётся через CF-CDN с accept-ranges (докачиваемо).
+- ССЫЛКА ОПЕРАТОРУ: https://xpeibufgzjknrhbhpffp.supabase.co/storage/v1/object/public/me2-capsule/me2-os-capsule-2026-09-26.zip
+- Git-гигиена: /capsule/ и *.zip добавлены в .gitignore (каноническая копия — облако; в git-sync не едет, репо не раздувается); локальный staging + zip сохранены в /home/z/my-project/capsule/ для переживания env-reset'ов вместе с песочницей.
+- lint не выполнялся (кода проекта не менялось — только .gitignore); dev-сервер жив (GET / 200), демон один (0.72.0-r88adopt).
+
+Stage Summary:
+- Статус: операторский запрос «полная капсула с отчётом и worklog + облачная ссылка» исполнен полностью: отчёт по всему дню (16 раундов) + полный worklog + 59 скриншотов + live-evidence + исходники — одним zip, размещённым в собственном облаке проекта (Supabase Storage, CDN), ссылка проверена на целостность скачиванием.
+- Ключевое решение: публичные хостинги из песочницы мертвы → «облачный хост» = собственная Supabase-плоскость проекта (уже живая для зеркала); новый public-bucket me2-capsule изолирован от приватных me2-evidence/computefabric — публичность даёт прямую ссылку без signed-URL.
+- Живое состояние на конец раунда: без изменений относительно R88-ADOPT (капсула — снимок): planes 4/4, R82 gate OPERATOR_CLEAR (ждёт очистки драфта 34 955 chars), PR #982/#968 под ревью оператора, exact-head 7740270 стабилен.
+
+Backlog следующего раунда (приоритеты):
+1. ОПЕРАТОР (без изменений): очистка account-draft (Ctrl+A+Delete) → R82 закроется сам; ревью+merge PR #982; PR #968 → R89/R90 seal-фаза (манифест на артефакте 10908498280).
+2. Бакет me2-capsule теперь постоянная точка раздачи капсул — при следующих капсулах загружать туда же (версионировать имена файлов датой, x-upsert при пересборке).
+3. Консоль (мелочи, без изменений): авто-тост при падении r89_exit_gate; per-round фильтр в Qualification; edge-карточка retry-политика для медленных CF-вызовов.
