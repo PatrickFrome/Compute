@@ -7,6 +7,8 @@ on:
       - 'work/r81-browser-release-convergence-v1'
     paths:
       - 'coordination/devos/branch-lineage-auditor.mjs'
+      - 'coordination/convergence/r81-source-hygiene-audit.mjs'
+      - 'tests/r81_source_hygiene_audit.test.mjs'
       - 'tests/branch_lineage_auditor.test.mjs'
       - 'tests/branch_lineage_auditor_base_only.test.mjs'
       - 'apps/metaengine-browser/test/branch-lineage-auditor.test.mjs'
@@ -14,6 +16,8 @@ on:
   pull_request:
     paths:
       - 'coordination/devos/branch-lineage-auditor.mjs'
+      - 'coordination/convergence/r81-source-hygiene-audit.mjs'
+      - 'tests/r81_source_hygiene_audit.test.mjs'
       - 'tests/branch_lineage_auditor.test.mjs'
       - 'tests/branch_lineage_auditor_base_only.test.mjs'
       - 'apps/metaengine-browser/test/branch-lineage-auditor.test.mjs'
@@ -52,10 +56,17 @@ jobs:
         run: |
           set -euo pipefail
           node --check coordination/devos/branch-lineage-auditor.mjs
+          node --check coordination/convergence/r81-source-hygiene-audit.mjs
           node --test \
+            tests/r81_source_hygiene_audit.test.mjs \
             tests/branch_lineage_auditor.test.mjs \
             tests/branch_lineage_auditor_base_only.test.mjs \
             apps/metaengine-browser/test/branch-lineage-auditor.test.mjs
+
+      - name: Audit tracked source and capsules for raw credential literals
+        run: |
+          set -euo pipefail
+          node coordination/convergence/r81-source-hygiene-audit.mjs .
 
       - name: Fetch all public remote heads read-only
         run: |
