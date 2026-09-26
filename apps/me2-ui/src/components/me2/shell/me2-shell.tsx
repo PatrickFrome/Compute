@@ -1,7 +1,9 @@
 "use client";
-// ── ME2 SHELL: композиция глобального каркаса (R74 Page-архитектура) ───────────
-// TopBar (global) · PageOutlet (условный монтаж страниц — перф-паттерн legacy)
-// · PageBar (Resolve-навигация) · StatusBar · GlobalDialogs + Palette + toast-мост.
+// ── ME2 SHELL: professional control-room shell (R85) ─────────────────────────
+// One stable global command bar, one task-focused page surface, Resolve-style
+// page dock and a thin read-only status line. Closed overlays are not mounted:
+// this keeps the native Browser semantic projection free from hidden palette
+// controls and reduces false automation targets.
 
 import { useEffect } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
@@ -41,12 +43,13 @@ function PageOutlet({ page }: { page: PageKey }) {
 export function Me2Shell() {
   const page = useMe2((s) => s.page);
   const init = useMe2((s) => s.init);
+  const paletteOpen = useMe2((s) => s.paletteOpen);
+  const dialog = useMe2((s) => s.dialog);
+  const detail = useMe2((s) => s.detail);
   const { toast } = useToast();
 
-  // инициализация стора (WS, REST-fallback, hotkeys, desktop-мост) — один раз
   useEffect(() => { init(); }, [init]);
 
-  // toast-мост: модули без хуков диспатчат me2:toast → Sonner
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent<{ title: string; description?: string; variant?: "default" | "destructive" }>).detail;
@@ -56,17 +59,25 @@ export function Me2Shell() {
     return () => window.removeEventListener("me2:toast", h);
   }, [toast]);
 
+  const overlaysOpen = Boolean(dialog || detail);
+
   return (
-    <div className="mc-dark flex h-screen min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-200" data-testid="me2-shell">
+    <div
+      className="mc-dark flex h-screen min-h-0 flex-col overflow-hidden bg-[#09090b] text-zinc-200 selection:bg-emerald-400/20"
+      data-testid="me2-shell"
+    >
       <TopBar />
-      {/* PageOutlet: только активная страница в DOM (перф), состояние данных в store */}
-      <main className="min-h-0 flex-1 overflow-hidden p-2" data-testid="page-outlet" data-page={page}>
+      <main
+        className="min-h-0 flex-1 overflow-hidden p-1.5"
+        data-testid="page-outlet"
+        data-page={page}
+      >
         <PageOutlet page={page} />
       </main>
       <PageBar />
       <StatusBar />
-      <CommandPalette />
-      <GlobalDialogs />
+      {paletteOpen ? <CommandPalette /> : null}
+      {overlaysOpen ? <GlobalDialogs /> : null}
     </div>
   );
 }
