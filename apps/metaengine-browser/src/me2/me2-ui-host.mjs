@@ -51,6 +51,15 @@ function row(statePatch) {
 }
 
 /** Здоровье UI: GET / отвечает HTML → жив (панели v5). */
+export function me2UiExternalAdoptionAllowed({ env = process.env } = {}) {
+  return env.ME2_UI_ALLOW_EXTERNAL_ADOPT === '1';
+}
+
+export function decideMe2UiInitialAction({ healthOk = false, allowExternalAdopt = false } = {}) {
+  if (!healthOk) return 'SPAWN';
+  return allowExternalAdopt ? 'ADOPT' : 'WAIT_FOR_PORT_RELEASE';
+}
+
 export async function me2UiHealthProbe(timeout_ms = 4000) {
   try {
     const r = await fetch(UI_HEALTH_URL, { signal: AbortSignal.timeout(timeout_ms) });
@@ -189,11 +198,20 @@ function scheduleRestart() {
 export async function startMe2UiHost() {
   stopped = false;
   const pre = await me2UiHealthProbe(2500);
-  if (pre.ok) {
+  const initialAction = decideMe2UiInitialAction({
+    healthOk: pre.ok,
+    allowExternalAdopt: me2UiExternalAdoptionAllowed(),
+  });
+  if (initialAction === 'ADOPT') {
     mode = 'adopted';
     state = 'ADOPTED';
     lastHealthOkAt = new Date().toISOString();
-    emitRow(row({ event: 'UI_ADOPTED', port: UI_PORT }));
+    emitRow(row({ event: 'UI_ADOPTED', port: UI_PORT, external_adopt_authorized: true }));
+  } else if (initialAction === 'WAIT_FOR_PORT_RELEASE') {
+    mode = null;
+    state = 'WAITING_FOR_PORT_RELEASE';
+    lastError = 'me2_ui_port_occupied_by_unowned_process';
+    emitRow(row({ event: 'UI_UNOWNED_PORT', port: UI_PORT, external_adopt_authorized: false }), { error: true });
   } else {
     const launch = resolveMe2UiLaunch();
     if (!launch) {
@@ -212,10 +230,18 @@ export async function startMe2UiHost() {
     if (stopped) return;
     const h = await me2UiHealthProbe();
     if (h.ok) {
+      if (state === 'WAITING_FOR_PORT_RELEASE' && !child) {
+        lastError = 'me2_ui_port_still_owned_elsewhere';
+        return;
+      }
       if (state !== 'ADOPTED' && state !== 'HEALTHY') emitRow(row({ event: 'UI_HEALTHY' }));
       state = child ? 'HEALTHY' : 'ADOPTED';
       lastHealthOkAt = new Date().toISOString();
       restarts = 0;
+    } else if (!child && state === 'WAITING_FOR_PORT_RELEASE') {
+      lastError = `port_released_${h.reason}`;
+      state = 'RESTARTING';
+      scheduleRestart();
     } else if (!child && state !== 'DEGRADED' && state !== 'RESTARTING') {
       lastError = `health_${h.reason}`;
       scheduleRestart();
