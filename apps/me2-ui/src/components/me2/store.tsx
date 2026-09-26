@@ -85,7 +85,7 @@ interface Me2State {
   setContextDrawer: (open: boolean) => void;
   setContextDrawerTab: (tab: ContextDrawerTab) => void;
   setContextDrawerFollowSelection: (follow: boolean) => void;
-  setContextDrawerHeight: (height: number) => void;
+  setContextDrawerHeight: (height: number, persist?: boolean) => void;
   syncContextDrawer: (preferred?: boolean, height?: number) => void;
   setCommandRailPreference: (open: boolean) => void;
   resetWorkspaceLayout: () => void;
@@ -97,6 +97,7 @@ interface Me2State {
 }
 
 let initGuard = false;
+let contextDrawerSyncSeq = 0;
 const PAGE_LS = "me2.page.v1";
 const WS_LS = "me2.workspace.v1";
 const CONTEXT_DRAWER_LS = "me2.context-drawer.open.v1"; // legacy migration
@@ -227,6 +228,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   syncContextDrawer: (preferred, height) => {
+    const syncSeq = ++contextDrawerSyncSeq;
     const want = typeof preferred === "boolean" ? preferred : get().contextDrawerPreferredOpen;
     const wantedHeight = clampContextDrawerHeight(
       typeof height === "number" ? height : get().contextDrawerPreferredHeight,
@@ -258,6 +260,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       return;
     }
     void shell.setPrimaryContextDrawer(want, wantedHeight).then((result) => {
+      if (syncSeq !== contextDrawerSyncSeq) return;
       const effectiveOpen = typeof result?.effective_open === "boolean" ? result.effective_open : want;
       const effectiveHeight = effectiveOpen
         ? clampContextDrawerHeight(Number(result?.drawer_height ?? wantedHeight))
@@ -269,6 +272,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerHeight: effectiveHeight,
       });
     }).catch(() => {
+      if (syncSeq !== contextDrawerSyncSeq) return;
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: false,
@@ -294,10 +298,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
     writeWorkspaceLayout(get().workspace, { drawerFollowSelection: follow });
   },
 
-  setContextDrawerHeight: (height) => {
+  setContextDrawerHeight: (height, persist = true) => {
     const wantedHeight = clampContextDrawerHeight(height);
     set({ contextDrawerPreferredHeight: wantedHeight });
-    writeWorkspaceLayout(get().workspace, { drawerHeight: wantedHeight });
+    if (persist) writeWorkspaceLayout(get().workspace, { drawerHeight: wantedHeight });
     get().syncContextDrawer(get().contextDrawerPreferredOpen, wantedHeight);
   },
 
