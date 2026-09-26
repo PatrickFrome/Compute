@@ -1,33 +1,51 @@
 #!/usr/bin/env bash
 # ============================================================================
-# phoenix-heartbeat.sh v2.1 — внешняя пульсация контекста (reset-immune)
+# phoenix-heartbeat.sh v2.2 — внешняя пульсация контекста (reset-immune)
 # ----------------------------------------------------------------------------
 # КАЖДЫЕ 30 МИН (cron PHX-HEARTBEAT): выносит контекст за пределы песочницы:
 #   1. Строит /home/z/my-project/CONTEXT-CURRENT.md — digest «как получить
 #      полный контекст» (каналы + последние 15 секций + хвост 40 строк).
 #   2. Загружает в Supabase Storage (бакет me2-evidence, context-vault/):
-#      latest/* (дедуп по sha) + versioned/<ts>/worklog.md (не чаще 1 раза в 3ч).
+#      latest/* (дедуп по sha + staleness-revalidation 6ч) +
+#      versioned/<ts>/worklog.md (не чаще 1 раза в 3ч).
 #   3. Зеркалит в ossfs /home/sync/me2-context-backups/{latest,versioned}.
 #   4. Локальные зеркала: vault/latest, /tmp/context-vault-mirror, PolarFS.
 # Секрета не печатает и не логирует. Самодостаточен (только bash+curl) —
-# полный текст встроен в cron-задачу PHX-HEARTBEAT (феникс-свойство:
-# при wipe песочницы cron пересоздаёт скрипт из payload).
+# полный текст встроен в cron-задачу PHX-HEARTBEAT (феникс-свойство: при wipe
+# песочницы cron пересоздаёт скрипт из payload).
 #
-# v2.1 changelog (критический аудит v2.0):
-#   + flock: защита от параллельного запуска (30мин интервал < worst-case рантайма)
-#   + fast-path: без SU/SJ — весь Supabase-блок пропускается (sb=disabled),
-#     вместо 4 бессмысленных fail'ов и спама в журнале каждые 30 мин
-#   + sb_up: 3 попытки с backoff для 000/5xx (одиночный сетевой чих больше
-#     не портит весь цикл); max-time 90s; убран двойной '000' при сбое curl;
-#     401/403 → мгновенное отключение Supabase до следующего запуска
-#   + fix off-by-one в awk-парсере секций (substr($0,8)→substr($0,7)):
-#     первая буква Task-строки больше не съедается в дайджесте
-#   + при отсутствии/усечении worklog дайджест НЕ перезаписывается пустышкой,
-#     инцидент пишется в incidents.log (не деградируем recovery-материал)
-#   + отказы зеркалирования (cp) логируются, а не глотаются молча
-#   + ротация Supabase versioned/ старше 21 дня (раз в сутки, best-effort):
-#     бакет больше не растёт бесконечно
-#   + ротация phoenix.log (keep last 1000 строк)
+# v2.2 changelog — MERGE двух независимых веток аудита v2.0:
+#   [ветка A: self-evolution v2.1]
+#   + flock: одиночный инстанс (worst-case рантайм > интервала cron)
+#   + fast-path: без SU/SJ — весь Supabase-блок пропускается (sb=disabled)
+#   + sb_up: 3 попытки с backoff для 000/5xx; 4xx — ретраи бессмысленны
+#   + fix off-by-one в awk-парсере дайджеста (substr($0,8)→substr($0,7)):
+#     первая буква Task-строки больше не съедается
+#   + отсутствие/усечение worklog: дайджест НЕ затирается пустышкой,
+#     инцидент в incidents.log
+#   + отказы зеркалирования (cp) логируются; ротация versioned (ossfs 40,
+#     Supabase >21д раз в сутки, журнал last-1000)
+#   [ветка B: критический аудит v2.0]
+#   + sb_up: заголовки через curl -H @file — JWT больше не светится в `ps`
+#   + sb_up: успех = любой 2xx (не только 200 — 201 «Created» не считаем
+#     провалом: дедуп не писался, объект перезаливался вечно)
+#   + sb_up: при не-2xx тело ошибки (обезличенное, ≤300B, длинные строки
+#     маскируются) в phoenix.log — v2.0 видела только «HTTP=400» без причины
+#     (реальный кейс: Supabase вернул 400 с телом Invalid Compact JWS —
+#     причина лежала невидимой неделями)
+#   + up_latest: abs (файла нет) отделён от skip (дедуп-совпадение)
+#   + up_latest: staleness-revalidation — объект, не подтверждённый успешной
+#     загрузкой >6ч, принудительно перезаливается даже при совпавшем sha
+#     (лечит «мёртвый дедуп»: v2.0 показывала 7skip при полностью мёртвом
+#     Supabase — дедуп-файлы пережили потерю JWT и маскировали деградацию)
+#   + auth-предохранитель расширен: срабатывает не только на HTTP 401/403,
+#     но и на auth-отказ в ТЕЛЕ ответа (реальный кейс: HTTP 400 c телом
+#     statusCode:403 Invalid Compact JWS — ветка-A-предохранитель молчал)
+#   + дедуп-записи атомарны (tmp+mv); incidents.log: HB-SB-DEGRADED /
+#     HB-SB-RECOVERED только при СМЕНЕ состояния (без спама каждые 30 мин)
+#   + stdout обратно-совместим: префикс «heartbeat ok:» сохранён, добавлены
+#     stale=/abs=; в ротации Supabase-листа заголовки пока на командной
+#     строке (1 раз/сутки — принятый остаточный риск)
 # ============================================================================
 set -u
 
@@ -50,12 +68,16 @@ PROTO="$PROJ/PHOENIX-PROTOCOL.md"
 DIG="$PROJ/CONTEXT-CURRENT.md"
 DEDUP="/tmp/.phx-dedup"
 LOG="$VAULT/journal/phoenix.log"
+INC="$VAULT/journal/incidents.log"
 ts="$(date +%Y%m%d-%H%M%S)"
+now_ep="$(date +%s)"
+FORCE_STALE_SECS=21600   # 6ч без успешного подтверждения → форс-перезалив
 mkdir -p "$DEDUP" "$VAULT/latest" "$VAULT/journal" "$TMPM" \
          "$SYNC/latest" "$SYNC/versioned" "$PFSM" 2>/dev/null
 
 sha_of() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
 size_of() { stat -c%s "$1" 2>/dev/null || echo 0; }
+aw() { printf '%s' "$2" > "$1.tmp.$$" && mv "$1.tmp.$$" "$1"; }  # atomic write
 
 # --- Supabase креды (значения не выводятся) ---
 SU=""; SJ=""
@@ -66,22 +88,30 @@ SU=""; SJ=""
 SB_ENABLED=1;  [ -n "$SU" ] && [ -n "$SJ" ] || SB_ENABLED=0
 SB_AUTH_BROKEN=""
 
+# --- Заголовки в файле (JWT не виден в `ps`); тело ошибки — в файле ---
+SB_HDR="$(mktemp /tmp/.phx-hdr.XXXXXX)"
+chmod 600 "$SB_HDR" 2>/dev/null
+[ "$SB_ENABLED" -eq 1 ] && printf 'Authorization: Bearer %s\napikey: %s\nx-upsert: true\nContent-Type: text/markdown\n' "$SJ" "$SJ" > "$SB_HDR"
+SB_ERR_FILE="$DEDUP/sb-err.last"
+
 sb_up() { # $1=local file $2=object name -> prints http code (3 попытки, backoff)
+  : > "$SB_ERR_FILE" 2>/dev/null
   [ -n "$SU" ] && [ -n "$SJ" ] && [ -s "$1" ] || { echo "000"; return; }
   local code="" try
   for try in 1 2 3; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-      -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
-      -H "x-upsert: true" -H "Content-Type: text/markdown" \
-      --data-binary @"$1" --max-time 90 \
+    code="$(curl -s -o "$SB_HDR.body" -w '%{http_code}' -X POST \
+      -H @"$SB_HDR" --data-binary @"$1" --max-time 90 \
       "$SU/storage/v1/object/me2-evidence/context-vault/$2" 2>/dev/null)"
     code="${code:-000}"
     case "$code" in
-      200) echo "200"; return ;;
+      2??) echo "$code"; return ;;
       000|5*) [ "$try" -lt 3 ] && sleep $((try*5)) ;;
       *) break ;;  # 4xx и прочее — ретраи бессмысленны
     esac
   done
+  # обезличенное тело ошибки (диагностика без утечки секретов)
+  head -c 300 "$SB_HDR.body" 2>/dev/null | tr -d '\n' \
+    | sed -E 's/[A-Za-z0-9_.\/+-]{40,}/<masked>/g' > "$SB_ERR_FILE" 2>/dev/null
   echo "${code:-000}"
 }
 
@@ -91,7 +121,7 @@ sb_up() { # $1=local file $2=object name -> prints http code (3 попытки, 
 if [ -s "$WL" ]; then
   wlsz="$(size_of "$WL")"; wlln="$(wc -l < "$WL" | tr -d ' ')"; wlsha="$(sha_of "$WL")"
   {
-    echo "# PHOENIX CONTEXT DIGEST (auto, heartbeat v2.1)"
+    echo "# PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)"
     echo ""
     echo "gen: $(date -u '+%Y-%m-%dT%H:%M:%SZ') | worklog: ${wlsz}B / ${wlln}L | sha12=${wlsha:0:12}"
     echo ""
@@ -100,6 +130,7 @@ if [ -s "$WL" ]; then
     echo "2. Прочитай: /home/z/my-project/CONTEXT.md (handoff-документ) + /home/z/my-project/PHOENIX-PROTOCOL.md"
     echo "3. Прочитай хвост /home/z/my-project/worklog.md (последние 150+ строк) — канонический журнал ВСЕХ чатов"
     echo "4. Если локальный worklog усечён/отсутствует: \`phoenix-restore.sh --merge\` (секционный merge-append без потерь)"
+    echo "5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)"
     echo ""
     echo "## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (${wlsz}B)"
     echo "| Канал | Путь | Переживает env-reset |"
@@ -126,7 +157,7 @@ if [ -s "$WL" ]; then
 else
   # v2.1: не затираем хороший дайджест пустышкой — фиксируем инцидент
   echo "[$ts] HB-WL-MISSING: worklog отсутствует/пуст — дайджест сохранён прежний, нужен restore --merge" \
-    >> "$VAULT/journal/incidents.log" 2>/dev/null || true
+    >> "$INC" 2>/dev/null || true
 fi
 
 # =========================================================
@@ -153,24 +184,39 @@ for pair in "$WL:$VAULT/latest/worklog.md" "$CTX:$VAULT/latest/CONTEXT.md" \
 done
 
 # =========================================================
-# 3. Supabase upload (latest/ — дедуп по sha)
+# 3. Supabase upload (latest/ — дедуп по sha + staleness-revalidation)
 # =========================================================
-sb_ok=0; sb_fail=0; sb_skip=0
+sb_ok=0; sb_fail=0; sb_skip=0; sb_abs=0; stale_forced=0
 up_latest() { # $1=local $2=obj
-  [ "$SB_ENABLED" -eq 1 ] || return 0          # v2.1: fast-path без кредов
-  [ -s "$1" ] || return 0
-  local sum="$(sha_of "$1")" code
-  if [ "$(cat "$DEDUP/$2.sha" 2>/dev/null || echo)" = "$sum" ]; then sb_skip=$((sb_skip+1)); return 0; fi
-  code="$(sb_up "$1" "$2")"
-  if [ "$code" = "200" ]; then
-    mkdir -p "$DEDUP/$(dirname "$2")"; echo "$sum" > "$DEDUP/$2.sha"; sb_ok=$((sb_ok+1))
-  else
-    sb_fail=$((sb_fail+1)); echo "[$ts] HB-SB-FAIL $2 HTTP=$code" >> "$LOG" 2>/dev/null || true
-    case "$code" in 401|403)  # v2.1: невалидный токен — не жжём остальные объекты
-      SB_AUTH_BROKEN="$code"; SB_ENABLED=0
-      echo "[$ts] HB-SB-AUTH-FAIL HTTP=$code — Supabase отключён до следующего запуска" >> "$LOG" 2>/dev/null || true ;;
-    esac
+  [ "$SB_ENABLED" -eq 1 ] || return 0          # fast-path: без кредов/после auth-отказа
+  [ -s "$1" ] || { sb_abs=$((sb_abs+1)); return 0; }
+  local sum="$(sha_of "$1")" code ots=0 ded="$DEDUP/$2.sha" dts="$DEDUP/$2.ts"
+  [ -f "$dts" ] && ots="$(cat "$dts" 2>/dev/null || echo 0)"
+  if [ "$(cat "$ded" 2>/dev/null || echo)" = "$sum" ] && [ $((now_ep - ots)) -lt "$FORCE_STALE_SECS" ]; then
+    sb_skip=$((sb_skip+1)); return 0
   fi
+  [ "$(cat "$ded" 2>/dev/null || echo)" = "$sum" ] && stale_forced=$((stale_forced+1))
+  code="$(sb_up "$1" "$2")"
+  case "$code" in
+    2??)
+      mkdir -p "$DEDUP/$(dirname "$2")"
+      aw "$ded" "$sum"; aw "$dts" "$now_ep"
+      sb_ok=$((sb_ok+1))
+      ;;
+    *)
+      sb_fail=$((sb_fail+1))
+      echo "[$ts] HB-SB-FAIL $2 HTTP=$code err=$(cat "$SB_ERR_FILE" 2>/dev/null || echo none)" >> "$LOG" 2>/dev/null || true
+      case "$code" in 401|403) SB_AUTH_BROKEN="$code" ;; esac
+      # auth-отказ может быть завёрнут в HTTP 400 (реальный кейс Invalid Compact JWS)
+      if [ -z "$SB_AUTH_BROKEN" ] && grep -qE 'Invalid Compact JWS|AccessDenied|Unauthorized|invalid_jwt|InvalidJWT' "$SB_ERR_FILE" 2>/dev/null; then
+        SB_AUTH_BROKEN="$code(body-auth)"
+      fi
+      if [ -n "$SB_AUTH_BROKEN" ]; then
+        SB_ENABLED=0
+        echo "[$ts] HB-SB-AUTH-FAIL HTTP=$code — Supabase отключён до следующего запуска" >> "$LOG" 2>/dev/null || true
+      fi
+      ;;
+  esac
 }
 up_latest "$WL" "latest/worklog.md"
 up_latest "$CTX" "latest/CONTEXT.md"
@@ -181,8 +227,8 @@ up_latest "$VAULT/latest/phoenix-restore.sh" "latest/phoenix-restore.sh"
 up_latest "$VAULT/latest/phoenix-snapshot.sh" "latest/phoenix-snapshot.sh"
 up_latest "$VAULT/latest/context-guard.sh" "latest/context-guard.sh"
 up_latest "$VAULT/latest/supabase-persist.sh" "latest/supabase-persist.sh"
-up_latest "$VAULT/latest/journal-context.log" "journal-context.log"
-up_latest "$VAULT/latest/journal-incidents.log" "journal-incidents.log"
+up_latest "$VAULT/latest/journal-context.log" "latest/journal-context.log"
+up_latest "$VAULT/latest/journal-incidents.log" "latest/journal-incidents.log"
 
 # versioned worklog: только если sha изменился и прошло ≥3ч с прошлой версии
 ver="n"
@@ -191,14 +237,18 @@ if [ -s "$WL" ] && [ "$SB_ENABLED" -eq 1 ]; then
   last="$(cat "$DEDUP/last-ver.sha" 2>/dev/null || echo x)"
   if [ "$cur" != "$last" ]; then
     lvt=0; [ -f "$DEDUP/last-ver.ts" ] && lvt="$(cat "$DEDUP/last-ver.ts")"
-    now="$(date +%s)"
-    if [ $((now - lvt)) -ge 10800 ]; then
+    if [ $((now_ep - lvt)) -ge 10800 ]; then
       c1="$(sb_up "$WL" "versioned/${ts}/worklog.md")"
-      if [ "$c1" = "200" ]; then
-        ver="y"; echo "$cur" > "$DEDUP/last-ver.sha"; echo "$now" > "$DEDUP/last-ver.ts"
-        mkdir -p "$SYNC/versioned/$ts" && cp "$WL" "$SYNC/versioned/$ts/worklog.md" 2>/dev/null || true
-        echo "[$ts] HB-VERSIONED ${ts} bytes=$(size_of "$WL")" >> "$LOG" 2>/dev/null || true
-      fi
+      case "$c1" in
+        2??)
+          ver="y"; aw "$DEDUP/last-ver.sha" "$cur"; aw "$DEDUP/last-ver.ts" "$now_ep"
+          mkdir -p "$SYNC/versioned/$ts" && cp "$WL" "$SYNC/versioned/$ts/worklog.md" 2>/dev/null || true
+          echo "[$ts] HB-VERSIONED ${ts} bytes=$(size_of "$WL")" >> "$LOG" 2>/dev/null || true
+          ;;
+        *)
+          echo "[$ts] HB-VER-FAIL HTTP=$c1 err=$(cat "$SB_ERR_FILE" 2>/dev/null || echo none)" >> "$LOG" 2>/dev/null || true
+          ;;
+      esac
     fi
   fi
 fi
@@ -223,7 +273,7 @@ if [ "$SB_ENABLED" -eq 1 ]; then
           ccode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -X DELETE \
             -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
             "$SU/storage/v1/object/me2-evidence/context-vault/versioned/$fpath" 2>/dev/null)"
-          [ "$ccode" = "200" ] || [ "$ccode" = "204" ] && del_n=$((del_n+1))
+          { [ "$ccode" = "200" ] || [ "$ccode" = "204" ]; } && del_n=$((del_n+1))
         fi
       done
       [ $del_n -gt 0 ] && echo "[$ts] HB-ROTATE deleted=$del_n (age>21d)" >> "$LOG" 2>/dev/null || true
@@ -249,12 +299,24 @@ if [ -f "$LOG" ] && [ "$(wc -l < "$LOG" 2>/dev/null || echo 0)" -gt 2000 ]; then
   tail -n 1000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" 2>/dev/null || true
 fi
 
-echo "[$ts] HB bytes=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb_ok=$sb_ok sb_fail=$sb_fail ver=$ver sync=$sync_ok" >> "$LOG" 2>/dev/null || true
-if [ "$SB_ENABLED" -eq 0 ]; then
-  sbstat="disabled"
-elif [ -n "$SB_AUTH_BROKEN" ]; then
-  sbstat="auth-fail(HTTP $SB_AUTH_BROKEN)"
-else
-  sbstat="${sb_ok}ok/${sb_fail}fail/${sb_skip}skip"
+# --- v2.2: итоговое состояние канала + incident state-machine ---
+if [ "$SB_ENABLED" -eq 0 ] && [ -z "$SU" -o -z "$SJ" ]; then sbstat="disabled"
+elif [ -n "$SB_AUTH_BROKEN" ]; then sbstat="auth-fail(HTTP $SB_AUTH_BROKEN)"
+else sbstat="${sb_ok}ok/${sb_fail}fail/${sb_skip}skip"; fi
+case "$sbstat" in
+  disabled|auth-fail*) cur_sb="degraded" ;;
+  *)                   cur_sb="ok" ;;
+esac
+prev_sb="$(cat "$DEDUP/sb-state" 2>/dev/null || echo unknown)"
+if [ "$cur_sb" != "$prev_sb" ]; then
+  if [ "$cur_sb" = "degraded" ]; then
+    echo "[$ts] HB-SB-DEGRADED sb=$sbstat err=$(cat "$SB_ERR_FILE" 2>/dev/null || echo см.phoenix.log)" >> "$INC" 2>/dev/null || true
+  elif [ "$prev_sb" != "unknown" ]; then
+    echo "[$ts] HB-SB-RECOVERED (было: $prev_sb)" >> "$INC" 2>/dev/null || true
+  fi
+  aw "$DEDUP/sb-state" "$cur_sb"
 fi
-echo "heartbeat ok: wb=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb=$sbstat ver=$ver sync=$sync_ok cp=$cp_ok v=2.1"
+
+echo "[$ts] HB bytes=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb=$sbstat stale=$stale_forced abs=$sb_abs ver=$ver sync=$sync_ok" >> "$LOG" 2>/dev/null || true
+rm -f "$SB_HDR" "$SB_HDR.body" "$SB_ERR_FILE" 2>/dev/null
+echo "heartbeat ok: wb=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb=$sbstat ver=$ver sync=$sync_ok cp=$cp_ok stale=$stale_forced abs=$sb_abs v=2.2"

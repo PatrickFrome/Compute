@@ -903,6 +903,11 @@ export default function MissionControl() {
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [wsLive, setWsLive] = useState(false)
+  // EV-WS-RESILIENCE: connection quality surfacing — retries/next-retry countdown,
+  // last WS close code, and navigator.onLine so the badge can distinguish
+  // «bus is down» from «browser offline» (reconnect gated until 'online').
+  const [netOnline, setNetOnline] = useState(true)
+  const [wsInfo, setWsInfo] = useState<{ retries: number; nextIn: number | null; lastCode: number | null }>({ retries: 0, nextIn: null, lastCode: null })
   // R83-WATCH: audio-cue toggle (persisted; muted state also persisted) —
   // gate transitions beep 'gate', milestone events beep 'milestone', mirror
   // divergence beeps 'alert'. The toggle is a header ghost-button.
@@ -1332,14 +1337,28 @@ export default function MissionControl() {
   }, [readback?.current_gate, soundOn])
 
   useEffect(() => {
+    // EV-WS-RESILIENCE: reconnect loop hardening — jittered exponential backoff
+    // (±30%, thundering-herd guard), visible retry countdown, close-code capture,
+    // online/offline awareness ('online' event short-circuits the backoff wait).
     let closed = false
     let pingT: ReturnType<typeof setInterval> | undefined
+    let retryT: ReturnType<typeof setTimeout> | undefined
+    let tickT: ReturnType<typeof setInterval> | undefined
+    const clearTimers = () => {
+      if (pingT) clearInterval(pingT); if (retryT) clearTimeout(retryT); if (tickT) clearInterval(tickT)
+      pingT = retryT = tickT = undefined
+    }
     const connect = () => {
       if (closed) return
+      if (typeof navigator !== 'undefined' && !navigator.onLine) { schedule() ; return }
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       const ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3040`)
       wsRef.current = ws
-      ws.onopen = () => { setWsLive(true); backoffRef.current = 1000; pingT = setInterval(() => ws.send(JSON.stringify({ kind: 'ping' })), 25000) }
+      ws.onopen = () => {
+        setWsLive(true); backoffRef.current = 1000
+        setWsInfo((s) => ({ retries: 0, nextIn: null, lastCode: s.lastCode }))
+        pingT = setInterval(() => ws.send(JSON.stringify({ kind: 'ping' })), 25000)
+      }
       ws.onmessage = (m) => {
         try {
           const f = JSON.parse(String(m.data)) as { kind: string; event?: Me2Event }
@@ -1348,15 +1367,34 @@ export default function MissionControl() {
           }
         } catch { /* ignore malformed frame */ }
       }
-      ws.onclose = () => {
+      ws.onclose = (e) => {
         setWsLive(false)
         if (pingT) clearInterval(pingT)
-        if (!closed) { setTimeout(connect, backoffRef.current); backoffRef.current = Math.min(backoffRef.current * 2, 15000) }
+        setWsInfo((s) => ({ ...s, lastCode: e?.code ?? null }))
+        if (!closed) { backoffRef.current = Math.min(backoffRef.current * 2, 15000); schedule() }
       }
       ws.onerror = () => ws.close()
     }
+    const schedule = () => {
+      const base = Math.min(backoffRef.current, 15000)
+      const delay = Math.round(base * (0.7 + Math.random() * 0.6)) // 1s→15s + jitter
+      setWsInfo((s) => ({ ...s, retries: s.retries + 1, nextIn: Math.ceil(delay / 1000) }))
+      const endAt = Date.now() + delay
+      tickT = setInterval(() => setWsInfo((s) => ({ ...s, nextIn: Math.max(0, Math.ceil((endAt - Date.now()) / 1000)) })), 1000)
+      retryT = setTimeout(() => { if (tickT) clearInterval(tickT); tickT = undefined; connect() }, delay)
+    }
+    const onOnline = () => {
+      setNetOnline(true)
+      if (!closed && wsRef.current?.readyState !== WebSocket.OPEN && wsRef.current?.readyState !== WebSocket.CONNECTING) {
+        clearTimers(); setWsInfo((s) => ({ ...s, nextIn: null })); connect()
+      }
+    }
+    const onOffline = () => setNetOnline(false)
+    setNetOnline(typeof navigator === 'undefined' ? true : navigator.onLine)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
     connect()
-    return () => { closed = true; if (pingT) clearInterval(pingT); wsRef.current?.close() }
+    return () => { closed = true; clearTimers(); window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); wsRef.current?.close() }
   }, [])
 
   // ---- actions
@@ -1464,8 +1502,15 @@ export default function MissionControl() {
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
             </Chip>
-            <Chip tone={wsLive ? 'info' : 'neutral'}>
-              <Radio className="h-3 w-3" /> bus {wsLive ? 'live' : 'rest-only'}
+            <Chip
+              tone={wsLive ? 'info' : !netOnline ? 'p0' : 'warn'}
+              title={wsLive
+                ? 'WS :3040 подключён — события идут live-потоком'
+                : !netOnline
+                  ? 'браузер offline — ws-коннект приостановлен, авто-reconnect по событию online'
+                  : `WS потерян${wsInfo.lastCode != null ? ` (close ${wsInfo.lastCode})` : ''}; reconnect #${wsInfo.retries}${wsInfo.nextIn != null ? ` через ${wsInfo.nextIn}s` : ''}`}
+            >
+              <Radio className="h-3 w-3" /> bus {wsLive ? 'live' : !netOnline ? 'offline' : `retry #${wsInfo.retries}·${wsInfo.nextIn ?? '…'}s`}
             </Chip>
             <Button
               variant="ghost" size="sm"
