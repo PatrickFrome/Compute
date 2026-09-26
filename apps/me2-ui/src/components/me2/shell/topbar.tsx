@@ -4,7 +4,7 @@
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
 import { PAGES, WORKSPACES, useMe2 } from "@/components/me2/store";
-import { Search, Command, Boxes, Radio, BellRing, X } from "lucide-react";
+import { Search, Command, Boxes, Radio, BellRing, PanelBottom, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useEffect, useState } from "react";
 
@@ -16,6 +16,9 @@ export function TopBar() {
   const workspace = useMe2((s) => s.workspace);
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
+  const contextDrawerPreferredOpen = useMe2((s) => s.contextDrawerPreferredOpen);
+  const contextDrawerOpen = useMe2((s) => s.contextDrawerOpen);
+  const setContextDrawer = useMe2((s) => s.setContextDrawer);
   const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
   const [attentionOpen, setAttentionOpen] = useState(false);
 
@@ -100,6 +103,24 @@ export function TopBar() {
       </button>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[9px]">
+        <button
+          type="button"
+          onClick={() => setContextDrawer(!contextDrawerPreferredOpen)}
+          aria-pressed={contextDrawerOpen}
+          aria-label={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Context Drawer скрыт из-за высоты окна" : contextDrawerOpen ? "Закрыть Context Drawer" : "Открыть Context Drawer"}
+          data-testid="context-drawer-toggle"
+          className={`flex h-7 min-w-7 items-center justify-center border px-2 transition-colors ${
+            contextDrawerOpen
+              ? "border-cyan-900/70 bg-cyan-950/20 text-cyan-300"
+              : contextDrawerPreferredOpen && page === "command"
+                ? "border-amber-900/70 bg-amber-950/20 text-amber-300"
+                : "border-zinc-800 bg-zinc-950 text-zinc-600 hover:text-zinc-300"
+          }`}
+          title={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Drawer сохранён, но Browser minimum height имеет приоритет. Увеличьте окно." : "Context Drawer · Ctrl/Cmd+J"}
+        >
+          <PanelBottom className="h-3 w-3" aria-hidden />
+        </button>
+
         <div className="relative">
           <button
             type="button"
