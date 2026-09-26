@@ -444,6 +444,24 @@ test('R85 Context Drawer follows selection only when explicitly enabled and alre
   assert.match(me2ContextDrawer, /Drawer никогда не открывается автоматически/);
 });
 
+test('R85 Context Drawer splitter is keyboard-accessible and native-sync fenced', () => {
+  assert.match(me2ContextDrawer, /data-testid="context-drawer-resizer"/);
+  assert.match(me2ContextDrawer, /role="separator"/);
+  assert.match(me2ContextDrawer, /aria-orientation="horizontal"/);
+  assert.match(me2ContextDrawer, /aria-valuemin=\{160\}/);
+  assert.match(me2ContextDrawer, /aria-valuemax=\{360\}/);
+  assert.match(me2ContextDrawer, /event\.key === "ArrowUp"/);
+  assert.match(me2ContextDrawer, /event\.key === "ArrowDown"/);
+  assert.match(me2ContextDrawer, /event\.key === "Home"/);
+  assert.match(me2ContextDrawer, /event\.key === "End"/);
+  assert.match(me2ContextDrawer, /setHeight\(nextHeight, false\)/);
+  assert.match(me2ContextDrawer, /setHeight\(nextHeight, true\)/);
+  assert.match(store, /let contextDrawerSyncSeq = 0/);
+  assert.match(store, /const syncSeq = \+\+contextDrawerSyncSeq/);
+  assert.match(store, /if \(syncSeq !== contextDrawerSyncSeq\) return/);
+  assert.match(store, /setContextDrawerHeight: \(height: number, persist\?: boolean\)/);
+});
+
 test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
   assert.match(preload, /const setPrimaryContextDrawer = \(open, height\) => ipcRenderer\.invoke\(/);
   assert.match(preload, /'metaengine:shell:primary-context-drawer'/);
