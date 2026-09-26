@@ -365,7 +365,7 @@ function parseCli(argv) {
     cwd: process.cwd(),
     baseRef: 'HEAD',
     namespace: 'refs/remotes/origin/',
-    include: /^(work|integration|release)\//,
+    include: /.+/,
     maxBranches: 1000,
     maxFilesPerBranch: 200,
     format: 'json',
