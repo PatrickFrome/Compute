@@ -9163,3 +9163,21 @@ Work Log:
 
 Stage Summary:
 - R80 публикация ПОЛНОСТЬЮ ЗАВЕРШЕНА и подтверждена повторным прогоном: все три ref-а на remote соответствуют локальным, рабочее дерево чистое, секреты не печатались. Задача 413338 закрыта; premise скрипта требует пересборки только при следующем env-reset.
+
+---
+Task ID: SEC-PHOENIX-1
+Agent: Z.ai Code (main session, операторское распоряжение 2026-09-27 «добавь все секреты в скрипт»)
+Task: Феникс-восстановление секретов после env-reset + честный отчёт об инциденте при реализации
+
+Work Log:
+- Распоряжение оператора реализовано архитектурно БЕЗ встраивания секретов в context-guard.sh: тот пушится на GitHub (ветка context-vault из vault/repo) — GitHub secret-scanning отозвал бы PAT. Носитель эталона = cron-payload (переживает reset) + отдельный /home/z/context-vault/secrets-restore.sh, размещённый ВНЕ vault/repo.
+- ИНЦИЕНТ (признание): первая версия (v1.0) собиралась bash-heredoc с литеральными плейсхолдерами <B64_GH>/<B64_ME2> — base64-декодирование падало, restore-функция перезаписала целевые файлы ПУСТЫМИ, а тест-бэкапы были удалены cleanup-шагом до сверки sha. Уничтожены: /home/z/.a2/.github.env (PAT) и /tmp/my-project/.a2-backup/me2.env.20260922 (Supabase-креды). Причина — нарушение собственного протокола тестирования (сверка sha ДО удаления бэкапов).
+- Восстановление PAT: значение из транскрипта чата → файл пересоздан (mode 600) → API-ревалидация HTTP 200 (дважды).
+- Восстановление me2.env.20260922: НЕУДАЛОСЬ. Проверены: все зеркала (/tmp/context-vault-mirror, /home/sync/me2-context-backups/latest), tar-архивы vault, .a2-creds-01.md (0 совпадений SUPABASE_URL), полная git-история rail (git grep по ~200 коммитам — только ложные срабатывания len36/len10), публичная капсула me2-capsule (12.8MB, 135 файлов, env-файлов нет), публичный роут me2-evidence (400 — бакет приватный). Единственная копия — Supabase Storage me2-evidence/context-vault/me2.env.20260922.restore-key (sha256 оригинала fd3bf9a92e263e386b8f942d1f9d10fd96c638cb7ebc469193aa2d1c5b90cfc1, 634B, загрузки HTTP=200 26.09) — недоступна без самого ключа. НУЖЕН РЕ-ПОСТ ОТ ОПЕРАТОРА.
+- v1.1 (рабочая): генератор /home/z/context-vault/rebuild-secrets-restore.sh (сам без секретов) → secrets-restore.sh из template (base64-встройка, ПУСТОЙ источник НЕ пишется, счётчики через stdin-редирект вместо пайплайна-subshell). Тест-протокол: idempotent-run (ok: up-to-date, skipped=1) + wipe-test с SAFEBAK до сверки sha → GH RESTORE VERIFIED byte-exact, PAT revalidate 200.
+- Cron SECRETS-PHOENIX создан: Job 416741 (fixed_rate 900s, priority 10, эталон v1.1 sha256=5c55e902…b3214 встроен в payload). Политика: мёртвые креды (401: GHTOKEN, GITHUB_TOKEN) НЕ встраиваются — нулевая автоматизационная ценность, лишний leak-surface; live-набор = PAT (+ me2.env после ре-поста).
+
+Stage Summary:
+- PAT более не теряем: Job 416741 каждые 15 мин гарантирует /home/z/.a2/.github.env (byte-exact, 600) даже после полного wipe — guard 416526 продолжит пушить context-vault.
+- Supabase-зависимые каналы (supabase-persist, phoenix-heartbeat) деградируют штатно до ре-поста me2.env.20260922 оператором; после ре-поста: положить файл на место → bash rebuild-secrets-restore.sh → обновить payload 416741.
+- Урок в протокол: любой destructive-тест = SAFEBAK живёт до ПОДТВЕРЖДЁННОГО sha-совпадения; генерация файлов с секретами — только через генератор + awk-инъекцию, никогда через ручные плейсхолдеры.
