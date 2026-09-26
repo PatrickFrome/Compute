@@ -27,6 +27,15 @@ GH=""
 DB=""
 [ -s "$PROJ_ENV" ] && DB="$(grep -E '^DATABASE_URL=' "$PROJ_ENV" | head -1 | cut -d= -f2- || true)"
 
+# --- harvest CF secrets from ENVF (operator-supplied 2026-09-27, SEC-SEALED-2) ---
+CF_API=""; CF_ACCT=""; CF_R2ID=""; CF_AI=""
+if [ -s "$ENVF" ]; then
+  CF_API="$(grep -E '^CF_API_TOKEN=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+  CF_ACCT="$(grep -E '^CF_ACCOUNT_ID=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+  CF_R2ID="$(grep -E '^CF_R2_ACCESS_KEY_ID=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+  CF_AI="$(grep -E '^CF_AI_WORKER_TOKEN=' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r' || true)"
+fi
+
 # --- emit sealed script ---
 mkdir -p "$SEAL_DIR" /tmp/context-vault-mirror/phoenix-sealed
 umask 077
@@ -42,10 +51,16 @@ umask 077
   printf 'SB_URL=%q\n' "$SB_URL"
   echo 'SB_JWT=""  # LOST 2026-09-26 17:11 (ENVF wiped to 0B); cloud copy circular; operator must re-issue, then re-run builder'
   printf 'DB_URL=%q\n' "$DB"
+  printf 'CF_API_TOKEN=%q\n' "$CF_API"
+  printf 'CF_ACCOUNT_ID=%q\n' "$CF_ACCT"
+  printf 'CF_R2_ACCESS_KEY_ID=%q\n' "$CF_R2ID"
+  printf 'CF_AI_WORKER_TOKEN=%q\n' "$CF_AI"
   echo 'GH_REPO_URL=https://github.com/PatrickFrome/Compute.git'
   echo 'TH="${SECRETS_TARGET_HOME:-/home/z}"'
   cat << 'BODY'
 gh_api() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: token $1" https://api.github.com/user; }
+cf_validate() { curl -s -H "Authorization: Bearer $1" https://api.cloudflare.com/client/v4/user/tokens/verify | grep -o '"success":[a-z]*' | head -1; }
+cf_acct() { curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CF_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID"; }
 restore() {
   A2="$TH/.a2"; mkdir -p "$A2"
   T="$(mktemp)"; printf 'GITHUB_TOKEN_ADMIN=%s\n' "$GH_PAT" > "$T"; chmod 600 "$T"
@@ -60,7 +75,11 @@ restore() {
   if [ ! -s /tmp/my-project/.a2-backup/me2.env.20260922 ]; then
     { printf 'SUPABASE_URL=%s\n' "$SB_URL"
       echo '# SUPABASE_SERVICE_ROLE_JWT= <LOST 2026-09-26 17:11 — operator re-issue required>'
-      echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (unreachable w/o the JWT itself)'; } \
+      echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (unreachable w/o the JWT itself)'
+      [ -n "$CF_API_TOKEN" ] && printf 'CF_API_TOKEN=%s\n' "$CF_API_TOKEN"
+      [ -n "$CF_ACCOUNT_ID" ] && printf 'CF_ACCOUNT_ID=%s\n' "$CF_ACCOUNT_ID"
+      [ -n "$CF_R2_ACCESS_KEY_ID" ] && printf 'CF_R2_ACCESS_KEY_ID=%s\n' "$CF_R2_ACCESS_KEY_ID"
+      [ -n "$CF_AI_WORKER_TOKEN" ] && printf 'CF_AI_WORKER_TOKEN=%s\n' "$CF_AI_WORKER_TOKEN"; } \
       > /tmp/my-project/.a2-backup/me2.env.20260922
     chmod 600 /tmp/my-project/.a2-backup/me2.env.20260922; echo "wrote: ENVF (URL only; JWT pending operator re-issue)"
   else echo "keep: ENVF (present)"; fi
@@ -72,7 +91,9 @@ restore() {
   else echo "skip: project .env (no DB_URL sealed)"; fi
 }
 case "${1:-restore}" in
-  validate) echo "github_api=$(gh_api "$GH_PAT")" ;;
+  validate) echo "github_api=$(gh_api "$GH_PAT")"
+    [ -n "$CF_API_TOKEN" ] && echo "cf_api_verify=$(cf_validate "$CF_API_TOKEN") cf_account=$(cf_acct)"
+    [ -n "$CF_AI_WORKER_TOKEN" ] && echo "cf_ai_verify=$(cf_validate "$CF_AI_WORKER_TOKEN")" ;;
   restore)  restore; echo "github_api=$(gh_api "$GH_PAT")" ;;
   *) echo "usage: $0 [restore|validate]" ;;
 esac
@@ -88,6 +109,15 @@ if [ ! -s "$ENVF" ]; then
     echo '# cloud copy: Supabase me2-evidence/context-vault/me2.env.20260922.restore-key (circular)'; } > "$ENVF"
   chmod 600 "$ENVF"; ENVF_STATE="rebuilt(URL only)"
 else ENVF_STATE="present"; fi
+
+# --- ENVF: append CF keys if absent (idempotent) ---
+if [ -f "$ENVF" ] && ! grep -q '^CF_API_TOKEN=' "$ENVF" && [ -n "$CF_API" ]; then
+  { printf 'CF_API_TOKEN=%s\n' "$CF_API"
+    [ -n "$CF_ACCT" ] && printf 'CF_ACCOUNT_ID=%s\n' "$CF_ACCT"
+    [ -n "$CF_R2ID" ] && printf 'CF_R2_ACCESS_KEY_ID=%s\n' "$CF_R2ID"
+    [ -n "$CF_AI" ] && printf 'CF_AI_WORKER_TOKEN=%s\n' "$CF_AI"; } >> "$ENVF"
+  chmod 600 "$ENVF"; ENVF_STATE="$ENVF_STATE + CF-appended"
+fi
 
 # --- creds doc: append dated sections (idempotent) ---
 if [ -f "$CREDS_DOC" ] && ! grep -q "SEC-RESTORE-1" "$CREDS_DOC"; then
@@ -111,6 +141,19 @@ if [ -f "$CREDS_DOC" ] && ! grep -q "SEC-RESTORE-1" "$CREDS_DOC"; then
   } >> "$CREDS_DOC"
   DOC_STATE="appended"
 else DOC_STATE="skipped(already or missing)"; fi
+
+# --- creds doc: CF section (SEC-SEALED-2, idempotent) ---
+if [ -f "$CREDS_DOC" ] && ! grep -q "SEC-SEALED-2" "$CREDS_DOC" && [ -n "$CF_API" ]; then
+  {
+    echo ""
+    echo "## CLOUDFLARE — 2026-09-27 (SEC-SEALED-2, операторские токены)"
+    echo "CF_API_TOKEN (cfat_…): скоуп-токен — /accounts/{id}=200, tokens/verify=false."
+    echo "CF_ACCOUNT_ID: d9186d31bdcd71d8eeb193dc9619567e (валиден, 200)."
+    echo "CF_R2_ACCESS_KEY_ID: b2c0561dfa7a4b31d347fbe97a0c3cc5 (secret-пара НЕ передана — для S3-доступа к R2 запросить у оператора)."
+    echo "CF_AI_WORKER_TOKEN (cfut_…): ЖИВ (tokens/verify success=true). Значения — в ENVF и sealed (здесь не печатаются)."
+  } >> "$CREDS_DOC"
+  DOC_STATE="$DOC_STATE+CF"
+fi
 
 # --- mirrors (best effort) ---
 MIRRORS=""
