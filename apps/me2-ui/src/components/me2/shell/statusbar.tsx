@@ -4,11 +4,10 @@
 // emergency mutations. Raw telemetry belongs to its dedicated page.
 
 import { useMe2 } from "@/components/me2/store";
-import { Gauge, Bot, ListChecks, Database, Timer, Server, AlertTriangle } from "lucide-react";
+import { Gauge, Bot, ListChecks, Timer, Server } from "lucide-react";
 
 export function StatusBar() {
   const snap = useMe2((s) => s.snap);
-  const mirror = useMe2((s) => s.mirror);
   const setDialog = useMe2((s) => s.setDialog);
   const setPage = useMe2((s) => s.setPage);
   const stats = snap?.stats ?? {};
@@ -16,7 +15,6 @@ export function StatusBar() {
   const budgetLimit = snap?.budget.limit ?? 24;
   const budgetPct = Math.min(100, Math.round((budgetUsed / Math.max(1, budgetLimit)) * 100));
   const deferred = (snap?.commands ?? []).filter((c) => c.status === "PENDING" && c.run_after).length;
-  const mirrorAttention = Boolean(mirror && (mirror.mode !== "LIVE" || mirror.pending > 0));
 
   return (
     <footer
@@ -44,15 +42,6 @@ export function StatusBar() {
       >
         <Gauge className="h-2.5 w-2.5" aria-hidden />
         budget {budgetUsed}/{budgetLimit}
-      </button>
-      <button
-        type="button"
-        className={`flex shrink-0 items-center gap-1 hover:text-zinc-300 ${mirrorAttention ? "text-amber-400" : ""}`}
-        onClick={() => setPage("observability")}
-        title={`Mirror ${mirror?.mode ?? "unknown"} · outbox ${mirror?.pending ?? 0}`}
-      >
-        {mirrorAttention ? <AlertTriangle className="h-2.5 w-2.5" aria-hidden /> : <Database className="h-2.5 w-2.5" aria-hidden />}
-        mirror {mirror?.mode ?? "…"}{mirror && mirror.pending > 0 ? ` · ${mirror.pending} queued` : ""}
       </button>
       {deferred > 0 ? (
         <button type="button" className="flex shrink-0 items-center gap-1 text-lime-400" onClick={() => setPage("observability")} title="Deferred commands">
