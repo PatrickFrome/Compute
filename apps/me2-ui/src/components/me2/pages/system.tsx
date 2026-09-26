@@ -191,7 +191,7 @@ export function SystemPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-system" data-panel-system>
-      <PageHeader title="SYSTEM" sub="vault · policy · self-update · матрица · контракт" />
+      <PageHeader title="SYSTEM" sub="vault · policy · daemon source sync · матрица · контракт" />
       <div className="grid min-h-0 flex-1 gap-2 overflow-y-auto lg:grid-cols-2 mc-scroll items-start">
 
         {/* ── КОЛОНКА 1 ── */}
@@ -326,11 +326,11 @@ export function SystemPage() {
             </div>
           </Sec>
 
-          {/* ME7: SELF-UPDATE */}
-          <Sec id="sys-selfupdate" title="SELF-UPDATE" icon={GitMerge} tone="amber">
+          {/* ME7 legacy daemon source synchronizer — not the Browser package updater */}
+          <Sec id="sys-selfupdate" title="DAEMON SOURCE SYNC" icon={GitMerge} tone="amber">
             <div className="space-y-1.5" data-testid="selfupdate-card">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="ME7: ff-only из sandbox/me2-os; барьеры dirty/diverged; 403 = гейт authority_effect">
+                <span className="flex shrink-0 items-center gap-1 text-[9px] font-semibold uppercase tracking-widest text-zinc-500" title="Development-only ff sync из sandbox/me2-os. Это НЕ Browser/Sentinel package self-update.">
                   <GitMerge className="h-3 w-3" aria-hidden /> git
                 </span>
                 <StateBadge state={suState(su?.check.verdict ?? "")} size="xs" />
@@ -348,7 +348,7 @@ export function SystemPage() {
                   title="git ls-remote + fetch + rev-list"
                   className="rounded border border-zinc-700 px-2 py-1 font-mono text-[9px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40">check</button>
                 <button type="button" onClick={() => void suOp("apply")} disabled={suBusy}
-                  title="барьеры: dirty-tree/diverged → отказ; ff-only; 403 = гейт authority_effect"
+                  title="daemon source sync: dirty/diverged fail-close; не обновляет установленный METAENGINE Browser"
                   className="rounded border border-amber-800/60 px-2 py-1 font-mono text-[9px] text-amber-300/90 transition hover:bg-zinc-800 disabled:opacity-40">apply ff</button>
                 <span className="ml-auto self-center font-mono text-[9px] text-zinc-600" title="журнал обновлений (transactional journal v8)">
                   {su ? `journal: ${su.journal.length}` : ""}{su?.check.error ? ` · ⚠ ${su.check.error.slice(0, 40)}` : ""}
