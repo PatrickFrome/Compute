@@ -18,6 +18,7 @@ import { r82Diagnosis } from "./r82";
 import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus, startReadbackWatch } from "./readback";
 import { r82Report } from "./report";
+import { qualificationMatrix } from "./qualify";
 import { mirrorStatus, mirrorHealth, mirrorVerify, startAutoMirror, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
@@ -167,6 +168,14 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     // material for R89; fills in as the exit gate converges.
     path: "/r82/report",
     handler: (_r, url) => r82Report(url.searchParams.get("fresh") === "1"),
+  },
+  {
+    method: "GET",
+    // R89-QUAL: live release-qualification matrix — R86→R90 requirements
+    // joined with the exact-head workflow runs + the confirmed Windows
+    // candidate artifact. Honest NOT_GATED rows keep coverage gaps visible.
+    path: "/qualify",
+    handler: (_r, url) => qualificationMatrix(url.searchParams.get("fresh") === "1"),
   },
   {
     method: "GET",

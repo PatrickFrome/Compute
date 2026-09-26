@@ -60,7 +60,7 @@ export const ROADMAP: RoadmapItem[] = [
     goal: "Installer бандлит me2-daemon + runtime; один lifecycle owner; version unification (0.57.1 vs 0.43.0 устранён).",
     exit_gate: "clean Windows без Bun/Node/dev tools запускает весь runtime.",
     status: "IN_PROGRESS",
-    evidence: "R85-волна (18 коммитов, 06:41–06:51Z): standalone daemon payload/staging, unify package/runtime versions @ 7ca55f7e, BOM-free manifest, platform-safe data path, parse-safe PowerShell staging, packaged daemon survives self-update; CI re-qualifying @ 2c28aa85.",
+    evidence: "R85-волна 1 (18 коммитов, 06:41–06:51Z): standalone daemon payload/staging, unify package/runtime versions @ 7ca55f7e, BOM-free manifest, platform-safe data path, parse-safe PowerShell staging, packaged daemon survives self-update. R85-волна 2 — UI-ownership/drain серия (90fc4e2…7740270, 8 коммитов 14:03–14:38Z): gateway не маршрутизирует на unowned UI (UI_UNOWNED_PORT / WAITING_FOR_PORT_RELEASE), will-quit фенсится на подтверждённый drain сохранённого child-процесса, контрактные тесты на оба инварианта. EXACT-HEAD 7740270 CI: 20/20 workflow-ранов SUCCESS (Package Smoke 8m51s, Installed Chat 5m49s, Self Update E2E, Soak с installed-ui-72-activation-race 6m10s, Shell); Windows-кандидат 160,110,838 bytes (artifact 10908498280) замещает 80b569f-кандидат. Осталось: merge PR #968.",
   },
   {
     round: "R86",
@@ -81,14 +81,16 @@ export const ROADMAP: RoadmapItem[] = [
     title: "RESILIENCE / UPDATE",
     goal: "Crash/restart/outage tolerance: Browser, Compute, Supervisor, daemon, Supabase, Sentinel; N→N+1 self-update + rollback.",
     exit_gate: "после каждой fault-class useful closed loop восстанавливается без blind retry.",
-    status: "PENDING",
+    status: "IN_PROGRESS",
+    evidence: "CI-покрытие @ 7740270 (см. /qualify): Self Update E2E доказывает installed UI + daemon + Guardian staging ПОСЛЕ физического обновления + resident installer upgrade с реальным Sentinel; Host Resilience / Live Control Recovery / Watchdog Coalescing / Workspace Reincarnation зелёные. Sandbox-плоскость live-проверена env-reset #2 (0.70.0): честная деградация credential-плоскостей (fail-closed machine-coded, локальные поверхности живы, цепь продолжает писаться)."
   },
   {
     round: "R89",
     title: "RELEASE QUALIFICATION",
     goal: "Испытывать именно установленный продукт: exact-SHA CI, packaged-runtime E2E, clean install, upgrade, chaos, long soak.",
     exit_gate: "все mandatory gates terminal PASS на одном неизменном SHA.",
-    status: "PENDING",
+    status: "IN_PROGRESS",
+    evidence: "Матрица квалификации LIVE (0.71.0, GET /qualify): exact-head 7740270 — 20/20 workflow-ранов терминально SUCCESS, 40/40 check-runs GREEN, Windows-кандидат подтверждён (имя содержит полный SHA, 160,110,838 bytes, не expired); r89_exit_gate.pass = true на этом SHA. Честные NOT_GATED строки: durable acceptance-storage (R86 seam, миграции у оператора), restart-retains-memory (R87, ждёт Supabase-plane), post-seal immutability (R90, по определению до freeze)."
   },
   {
     round: "R90",
@@ -192,9 +194,17 @@ export const CONVERGENCE_EVIDENCE = {
     incident: "env-reset #2 (2026-09-26T13:42Z, live): /home/z/.a2/ уничтожен вторично (первый — R81-PHASE0); уцелели source-tree (git), daemon, консоль, donor-реестр, песочница, worktrees; потеряны ВСЕ credential-плоскости + root data/ (edge-снапшоты — источник жив в PR #982) + локальная hash-chain (500+ событий — выжила в Supabase mirror #90013993..#90014496+, потому и строилась)",
     planes_module: "credential-plane liveness как first-class: planesStatus() проверяет СУЩЕСТВОВАНИЕ файлов + имена ключей (значения никогда не читаются/не логируются/не возвращаются); envResetState(): ≥2 missing = suspected env-reset (файлы предоставляются вместе — потеря одного = действие оператора, потеря двух+ = reset)",
     surfaces: "/health несёт planes+env_reset (дешево, без сети); GET /planes — детали per-plane; RECOVERY_STATUS стал динамическим recoveryStatus() — rebuilt-список вычисляется из живого состояния (planes + git + chain), а не закеширован из R81-PHASE0",
-    fail_closed_verified: "все credential-зависимые поверхности деградируют machine-coded ошибками (github_no_token / controlplane_secrets_missing / edge_secrets_missing / mirror_secrets_missing) — QA agent-browser в degraded-режиме: 14 карточек, 0 JS-ошибок, ERR-состояния честные",
+    fail_closed_verified: "все credential-зависимые поверхности деградируют machine-coded ошибками (github_no_token / controlplane_secrets_missing / edge_secrets_missing / mirror_secrets_missing) — QA agent-browser в degraded-режиме: 0 JS-ошибок, ERR-состояния честные",
     console_degraded_ux: "глобальный EnvResetBanner (planes ✗/✓ чипы + выжившие локальные поверхности + инструкция восстановления); mirror-verify классификация: credentials-блокировка ≠ нарушение контракта (amber «не выполнена · секреты» вместо rose «нарушен»); mirror-alert классифицирует secrets_missing как env-degraded, не как divergence; footer chip env-reset; recovery-карточка динамическая",
     chain_continuity: "новая цепь начинается RECOVERY_GENESIS с тем же mirror-якорем #90013992 — контракт me2-mirror-v1 переживает N-е поколение daemon без разрыва ledger-пространства",
+  },
+  r89_qual: {
+    built: "2026-09-26T15:15:00Z",
+    module: "daemon src/qualify.ts + GET /qualify + action qual.matrix + консоль (0.71.0-r89qual)",
+    trigger: "операторский вопрос к R86–R90: «что тесты реально покрывают?» — ответ живёт в матрице, а не в тексте чата: exact-head двигается, матрица следует за ним",
+    live_inputs: "convergenceStatus (exact head + PR + 40 check-runs) + workflow-раны head_sha (терминальность по гейтам) + артефакты Package Smoke run (windows-кандидат, sha-bound имя); TTL 60s + single-flight",
+    honest_rows: "NOT_GATED не рендерится зелёным никогда: durable acceptance-storage (R86 seam — миграции у оператора), restart-retains-memory (R87 — ждёт Supabase-plane), post-seal-immutability (R90 — по определению до freeze); r88.env-degradation помечен как live-test, не CI-гейт",
+    r89_exit_gate_live: "pass = все workflow-раны head терминально SUCCESS ∧ rollup GREEN ∧ артефакт sha-bound не expired; при первом живом прогоне: 20/20 SUCCESS @ 7740270, кандидат 160,110,838 bytes, pass=true",
   },
 } as const;
 
@@ -205,7 +215,7 @@ export const CONVERGENCE_EVIDENCE = {
 export function recoveryStatus(planes: { id: string; label: string; status: string }[], envReset: { suspected: boolean }) {
   const restored = [
     { item: "me2-daemon REST :3041 + WS :3040 (bun, zero-deps)", state: "ALIVE" },
-    { item: "Mission Control console :3000 (14 карточек, degraded-honest)", state: "ALIVE" },
+    { item: "Mission Control console :3000 (15 карточек, degraded-honest)", state: "ALIVE" },
     { item: "hash-chained event log: RECOVERY_GENESIS → mirror anchor #90013992 (тот же ledger-контракт)", state: "REBUILT" },
     { item: "donor action manifest: 57 действий (4 lanes) из sandbox/me2-os @ 56ba1b87", state: "RECOVERED" },
     { item: "source-tree: git history пережила reset (worklog + все раунды R81→R83 в коммитах)", state: "ALIVE" },

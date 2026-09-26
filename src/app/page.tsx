@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts'
 import {
-  Activity, AlertTriangle, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, BadgeCheck, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
   Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -124,6 +124,27 @@ interface DonorAction {
   lane: 'READ_ONLY' | 'TAB_MUTATION' | 'GLOBAL_MUTATION' | 'EMERGENCY'
   cost: number
   desc: string
+}
+// R89-QUAL: live release-qualification matrix — what the exact-head CI gates
+// ACTUALLY prove for R86→R90 (honest NOT_GATED rows keep gaps visible)
+interface QualifyRun { id: number; name: string; status: string; conclusion: string | null; html_url: string }
+interface QualifyWorkflowRef { match: string; run?: QualifyRun }
+interface QualifyRequirement {
+  id: string; title: string; detail: string
+  covered_by: QualifyWorkflowRef[]
+  coverage: 'COVERED' | 'PARTIAL' | 'FAILED' | 'NOT_GATED'
+  note?: string
+}
+interface QualifyRound { round: string; title: string; exit_gate: string; requirements: QualifyRequirement[] }
+interface QualifyMatrix {
+  fetched_at: string; repository: string; branch: string
+  head: { sha: string; short: string; message: string; committed_at: string } | null
+  pr: { number: number; state: string; draft: boolean; mergeable: boolean | null; mergeable_state: string } | null
+  workflows: { total: number; terminal_success: number; failed: number; non_terminal: number; items: QualifyRun[] }
+  artifact: { id: number; name: string; size_in_bytes: number; expired: boolean; created_at: string; source_run: string; archive_download_url: string } | null
+  rounds: QualifyRound[]
+  r89_exit_gate: { all_terminal_success: boolean; rollup_green: boolean; artifact_confirmed: boolean; pass: boolean; note: string }
+  api: { rate_remaining: number | null }
 }
 interface DonorRegistry {
   provenance: { source_ref: string; source_sha: string; donor_daemon_version: string; source_path?: string; legacy_surface?: string }
@@ -681,6 +702,10 @@ export default function MissionControl() {
   const [conv, setConv] = useState<Convergence | null>(null)
   const [convErr, setConvErr] = useState<string | null>(null)
   const [convLoading, setConvLoading] = useState(false)
+  // R89-QUAL: live qualification matrix (exact-head workflows + artifact)
+  const [qual, setQual] = useState<QualifyMatrix | null>(null)
+  const [qualErr, setQualErr] = useState<string | null>(null)
+  const [qualLoading, setQualLoading] = useState(false)
   const [r82, setR82] = useState<R82Diag | null>(null)
   const [r82Err, setR82Err] = useState<string | null>(null)
   const [r82Loading, setR82Loading] = useState(false)
@@ -773,6 +798,14 @@ export default function MissionControl() {
     finally { setConvLoading(false) }
   }, [])
 
+  // R89-QUAL: qualification matrix loader (TTL 60s on the daemon side)
+  const loadQual = useCallback(async (fresh = false) => {
+    setQualLoading(true)
+    try { setQual(await jfetch<QualifyMatrix>(`/qualify${fresh ? '?fresh=1' : ''}`)); setQualErr(null) }
+    catch (e) { setQualErr((e as Error).message) }
+    finally { setQualLoading(false) }
+  }, [])
+
   const loadR82 = useCallback(async (fresh = false) => {
     setR82Loading(true)
     try { setR82(await jfetch<R82Diag>(`/r82${fresh ? '?fresh=1' : ''}`)); setR82Err(null) }
@@ -859,7 +892,7 @@ export default function MissionControl() {
   }
 
   useEffect(() => {
-    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback()
+    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback(); loadQual()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
@@ -873,6 +906,7 @@ export default function MissionControl() {
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
     const e = setInterval(() => { jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {}) }, 15000)
     const f = setInterval(() => { loadConvergence(false) }, 30000)
+    const q1 = setInterval(() => { loadQual(false) }, 120000)
     const g = setInterval(() => { loadR82(false) }, 60000)
     const h = setInterval(() => { loadEdge(false) }, 120000)
     const j = setInterval(() => { loadEdgeImport(false) }, 120000)
@@ -883,8 +917,8 @@ export default function MissionControl() {
     const m = setInterval(() => { jfetch<R82Report>('/r82/report').then(setR82Report).catch(() => {}) }, 120000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j); clearInterval(k); clearInterval(m) }
-  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback, loadEdgeImport, loadMirror])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(q1); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j); clearInterval(k); clearInterval(m) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadQual, loadR82, loadEdge, loadReadback, loadEdgeImport, loadMirror])
 
   // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears.
   // R83-WATCH: donor-registry navigation — Alt+1..5 switches scheduler lanes,
@@ -1645,6 +1679,123 @@ export default function MissionControl() {
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка GitHub-статуса…</div>
+          )}
+        </Panel>
+
+        {/* ----------------------------- R89 QUALIFICATION MATRIX (R86→R90) */}
+        <Panel
+          icon={<BadgeCheck className="h-4 w-4" />}
+          title="R86–R90 · Qualification · что CI реально доказывает"
+          chip={
+            qualErr ? <Chip tone="p0">ERR</Chip>
+              : qual ? (
+                <Chip tone={qual.r89_exit_gate.pass ? 'ok' : 'warn'} title="R89 exit gate: все mandatory gates terminal PASS на одном неизменном SHA + подтверждённый Windows-кандидат">
+                  {qual.r89_exit_gate.pass ? 'TERMINAL PASS' : 'QUALIFYING'}
+                </Chip>
+              ) : <Chip tone="neutral">…</Chip>
+          }
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={qualLoading} onClick={() => loadQual(true)} aria-label="Свежая матрица квалификации">
+              <RefreshCw className={`h-4 w-4 ${qualLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          }
+        >
+          {qualErr && !qual ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">Qualify: {qualErr}</div>
+          ) : qual ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="exact-head" value={qual.head?.short ?? '—'} tone="text-cyan-300" span="col-span-2" title="SHA ветки конвергенции, на котором вычислена матрица — head не сдвинулся" />
+                <Stat
+                  label="workflows terminal"
+                  value={`${qual.workflows.terminal_success}/${qual.workflows.total}`}
+                  tone={qual.workflows.failed === 0 && qual.workflows.non_terminal === 0 && qual.workflows.total > 0 ? 'text-emerald-400' : 'text-amber-400'}
+                  span="col-span-2"
+                  title="терминальные SUCCESS workflow-ранов этого head (failed / non-terminal считаются честно)"
+                />
+                <Stat
+                  label="Windows-кандидат"
+                  value={qual.artifact ? `${(qual.artifact.size_in_bytes / 1024 / 1024).toFixed(1)} MB` : '—'}
+                  tone={qual.artifact && !qual.artifact.expired ? 'text-emerald-400' : 'text-amber-400'}
+                  span="col-span-2"
+                  title={qual.artifact ? `${qual.artifact.name} · ${qual.artifact.size_in_bytes.toLocaleString('en-US')} bytes · из ${qual.artifact.source_run} · создан ${qual.artifact.created_at}` : 'артефакт Package Smoke не найден на этом head'}
+                />
+                <Stat
+                  label="artifact binding"
+                  value={qual.artifact ? (qual.artifact.expired ? 'expired' : 'sha-bound') : 'missing'}
+                  tone={qual.r89_exit_gate.artifact_confirmed ? 'text-emerald-400' : 'text-amber-400'}
+                  span="col-span-2"
+                  title="имя артефакта содержит полный SHA head — тестированный бинарь идентифицируем (R90 seam)"
+                />
+              </div>
+              <div
+                className={`rounded-lg border p-2.5 text-[11px] leading-relaxed ${qual.r89_exit_gate.pass ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-200/90' : 'border-amber-500/30 bg-amber-500/[0.06] text-amber-200/90'}`}
+                title="живой вывод R89 exit gate из daemon /qualify — обновляется при каждом опросе"
+              >
+                {qual.r89_exit_gate.note}
+              </div>
+              <div className={`space-y-2 ${scrollCls} pr-1`}>
+                {qual.rounds.map((r) => (
+                  <div key={r.round} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span className="font-mono text-[11px] font-bold text-teal-400">{r.round}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-zinc-200" title={r.exit_gate}>{r.title}</span>
+                      <Chip tone="neutral" title={`exit gate: ${r.exit_gate}`}>exit gate</Chip>
+                    </div>
+                    <div className="space-y-1.5">
+                      {r.requirements.map((req) => (
+                        <div key={req.id} className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2.5 py-1.5 transition-colors hover:border-zinc-700/70">
+                          <div className="flex items-center gap-2">
+                            <Chip
+                              tone={req.coverage === 'COVERED' ? 'ok' : req.coverage === 'FAILED' ? 'p0' : req.coverage === 'PARTIAL' ? 'warn' : 'neutral'}
+                              title={req.coverage === 'COVERED' ? 'все покрывающие workflow-раны этого head терминально SUCCESS' : req.coverage === 'NOT_GATED' ? 'CI-гейт отсутствует — честный пробел покрытия' : req.coverage === 'PARTIAL' ? 'не все покрывающие раны терминально зелёные' : 'покрывающий ран упал'}
+                            >
+                              {req.coverage === 'COVERED' ? 'covered' : req.coverage === 'NOT_GATED' ? 'not gated' : req.coverage.toLowerCase()}
+                            </Chip>
+                            <span className="min-w-0 flex-1 text-[11px] leading-snug text-zinc-200" title={req.detail}>{req.title}</span>
+                          </div>
+                          {req.covered_by.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {req.covered_by.map((c) => {
+                                if (!c.run) {
+                                  return (
+                                    <span key={c.match} className="rounded border border-zinc-700 bg-zinc-800/50 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500" title={`workflow «${c.match}» не найден среди ранов этого head — матрица ждёт его появления`}>
+                                      {c.match} · no-run
+                                    </span>
+                                  )
+                                }
+                                const ok = c.run.status === 'completed' && c.run.conclusion === 'success'
+                                const bad = c.run.status === 'completed' && (c.run.conclusion === 'failure' || c.run.conclusion === 'timed_out' || c.run.conclusion === 'action_required')
+                                return (
+                                  <a
+                                    key={c.match}
+                                    href={c.run.html_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] transition-colors ${ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20' : bad ? 'border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20' : 'border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'}`}
+                                    title={`${c.run.name} — ${c.run.status}/${c.run.conclusion ?? '—'} (run ${c.run.id})`}
+                                  >
+                                    {c.run.name.length > 34 ? `${c.run.name.slice(0, 33)}…` : c.run.name}
+                                    <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                                  </a>
+                                )
+                              })}
+                            </div>
+                          )}
+                          {req.note && <p className="mt-1 text-[10px] leading-relaxed text-amber-200/70">{req.note}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Матрица выводится LIVE (daemon <span className="font-mono text-zinc-400">/qualify</span>): workflow-раны exact-head + артефакт Package Smoke + статическая карта требований.
+                NOT_GATED — честные пробелы: durable acceptance-storage (R86, миграции у оператора), restart-retains-memory (R87, ждёт Supabase-plane), post-seal immutability (R90, по определению до freeze). Пробел закрывается новым гейтом, а не ренеймом.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка матрицы квалификации…</div>
           )}
         </Panel>
 

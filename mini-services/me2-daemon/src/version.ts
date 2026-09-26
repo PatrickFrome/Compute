@@ -3,8 +3,8 @@
 // a git ancestor (merge -s ours) and its 57-action manifest is recovered
 // verbatim (see donor-registry.ts). This build remains a fresh implementation:
 // honest local registry only, no donor surface claimed as implemented.
-export const VERSION = "0.70.0-r88resilience";
-export const ROUND = "R88-RESILIENCE";
+export const VERSION = "0.71.0-r89qual";
+export const ROUND = "R89-QUAL";
 export const BOOT_SPAN_MS = 30_000;
 export const STARTED_AT = new Date().toISOString();
 export const REST_PORT = 3041;
