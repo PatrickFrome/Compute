@@ -681,6 +681,43 @@ Decision after research:
 - cancellation is useful optimization, but stale-result rejection remains the correctness invariant.
 
 
+
+## 6.13 UI slice checkpoint K — physical R85 visual qualification
+
+Implementation harness checkpoint: `9edf7fb08e8c9a18b43218f80685f84ed98122e7`.  
+Package Smoke integration checkpoint: `3a8d821a4c1e52a054c76f62da7ac021749c22db`.  
+Source contract checkpoint: `43e8e43e8c95deeb800ec57c3c1e69c4dffff9ff`.
+
+Audit finding:
+- the existing Package Smoke screenshots came from `metaengine://shell/`, the legacy shell fixture with synthetic test data;
+- those PNGs proved legacy-shell layout behavior, not the R85 Next/ME2 interface that users actually see on a healthy primary startup;
+- therefore previous green Package Smoke could prove `ME2_PRIMARY_SHELL_VISIBLE` textually while still lacking direct rendered-pixel evidence for the new R85 chrome.
+
+Implemented:
+- added a dedicated Electron visual harness that starts the exact staged ME2 UI host + loopback gateway and loads the same primary ME2 origin used by the Browser;
+- the primary preload remains capability-fenced to presentation-only page/overlay/rail/drawer IPC;
+- captures the default COMMAND surface and COMMAND with Context Drawer open at 1440×960;
+- verifies physical TopBar 42px, PageBar 36px, StatusBar 22px and Agent Rail 252px;
+- proves closed palette/dialog overlays are absent from the DOM;
+- proves Drawer interaction/height and the R85 global controls are actually rendered;
+- deliberately excludes remote Browser content, so visual evidence cannot leak a live page;
+- writes SHA-256 and byte size for each PNG plus a source-head-bound JSON proof;
+- Package Smoke now uploads the R85 evidence separately from the old legacy-shell evidence.
+
+Post-step research:
+- **Electron webContents.capturePage()** is the native API for capturing the actual rendered page pixels; using it in the Electron harness is a closer proof of the shipped desktop surface than source or DOM snapshots alone. https://www.electronjs.org/docs/latest/api/web-contents
+- **Playwright visual comparisons** emphasize that visual proof should capture a rendered UI in a controlled environment and that host OS/browser/settings can change pixels; this is why the new R85 evidence records platform/Electron version and initially proves geometry/state rather than pretending cross-run PNG hashes are a universal golden. https://playwright.dev/docs/test-snapshots
+- Playwright also waits for stable consecutive screenshots before comparison and disables animation by default for deterministic image assertions; METAENGINE should adopt the same stabilization principle before adding pixel-diff admission.
+- **Storybook visual testing** distinguishes rendered-pixel tests from markup snapshots: pixels catch layout/color/size regressions that DOM/source assertions cannot. This directly addresses the false confidence from legacy-only PNGs. https://storybook.js.org/docs/8/writing-tests/visual-testing
+- **Playwright component testing** recommends isolating explicit UI states and screenshotting those states independently; the R85 harness follows this with closed-Drawer and open-Drawer captures rather than one overloaded screenshot. https://playwright.dev/docs/test-components
+
+Decision after research:
+- keep old legacy-shell screenshots only as legacy/recovery evidence;
+- R85 release qualification must carry distinct primary-ME2 visual evidence;
+- do not treat raw PNG hash equality across unrelated runners as a golden comparison;
+- next visual step should add reviewed baselines or bounded geometry/semantic comparisons for multiple desktop widths after the first physical R85 captures are inspected.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
