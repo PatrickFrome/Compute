@@ -1368,7 +1368,7 @@ export default function MissionControl() {
             </Chip>
             <Button
               variant="ghost" size="sm"
-              className="h-8 w-8 p-0 text-zinc-400 hover:text-teal-400"
+              className="h-8 w-8 touch-hit p-0 text-zinc-400 hover:text-teal-400"
               onClick={toggleSound}
               aria-label={soundOn ? 'Выключить звук оповещений' : 'Включить звук оповещений'}
               title={soundOn ? 'звук оповещений включён: смена exit-gate · milestone-события · расхождение mirror (клик — выкл)' : 'звук оповещений выключен (клик — вкл) — WebAudio, без внешних ассетов'}
@@ -1377,7 +1377,7 @@ export default function MissionControl() {
             </Button>
             <Button
               variant="ghost" size="sm"
-              className="h-8 w-8 p-0 font-mono text-[10px] font-bold text-zinc-400 hover:text-teal-400"
+              className="h-8 w-8 touch-hit p-0 font-mono text-[10px] font-bold text-zinc-400 hover:text-teal-400"
               onClick={() => { cycleLevel(); if (soundOn) beep('milestone') }}
               aria-label={`Громкость оповещений: ${SOUND_LEVELS[levelIdx].label} (клик — следующая)`}
               title={`громкость: ${SOUND_LEVELS[levelIdx].label} (клик — переключает тихо→средне→громко; звучит пробный сигнал)`}
@@ -1445,7 +1445,7 @@ export default function MissionControl() {
           title="Демон · ME2 daemon"
           chip={<Chip tone={daemonUp ? 'ok' : 'p0'}>{daemonUp ? 'UP' : 'DOWN'}</Chip>}
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={loadHealth} aria-label="Обновить health">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" onClick={loadHealth} aria-label="Обновить health">
               <RefreshCw className="h-4 w-4" />
             </Button>
           }
@@ -1519,7 +1519,7 @@ export default function MissionControl() {
                     <button
                       key={lane}
                       onClick={() => setDonorLane(lane)}
-                      className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${active ? laneTone : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
+                      className={`rounded-full border px-2.5 py-1 min-h-9 touch-hit text-[10px] font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${active ? laneTone : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
                       title={lane === 'ALL' ? 'все лены' : `lane priority: ${donorReg.lane_priority?.[lane] ?? '—'}`}
                     >
                       {lane === 'ALL' ? 'все' : lane === 'READ_ONLY' ? 'RO' : lane === 'TAB_MUTATION' ? 'TAB' : lane === 'GLOBAL_MUTATION' ? 'GM' : 'EMG'} · {n}
@@ -1536,7 +1536,7 @@ export default function MissionControl() {
                     className="h-8 border-zinc-700 bg-zinc-950/60 pr-7 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/40"
                   />
                   {donorQuery && (
-                    <button onClick={() => setDonorQuery('')} aria-label="Сбросить поиск" className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">×</button>
+                    <button onClick={() => setDonorQuery('')} aria-label="Сбросить поиск" className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center text-zinc-500 hover:text-zinc-300">×</button>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Сортировка донор-реестра">
@@ -1545,7 +1545,7 @@ export default function MissionControl() {
                     <button
                       key={mode}
                       onClick={() => setDonorSort(mode)}
-                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${donorSort === mode ? 'border-teal-500/40 bg-teal-500/10 text-teal-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'}`}
+                      className={`rounded-full border px-2 py-1 min-h-9 touch-hit text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${donorSort === mode ? 'border-teal-500/40 bg-teal-500/10 text-teal-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'}`}
                       title={mode === 'name' ? 'сортировка по имени' : mode === 'cost-asc' ? 'сортировка по scheduler cost (дешёвые сначала)' : 'сортировка по scheduler cost (дорогие сначала)'}
                     >
                       {label}
@@ -1632,7 +1632,7 @@ export default function MissionControl() {
                             {!expanded && sorted.length > LANE_LIMIT && (
                               <button
                                 onClick={() => setDonorLaneOpen((prev) => ({ ...prev, [lane]: true }))}
-                                className="mt-1.5 w-full rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 px-3 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:border-teal-600/50 hover:bg-teal-500/10 hover:text-teal-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+                                className="mt-1.5 w-full touch-hit rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 px-3 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:border-teal-600/50 hover:bg-teal-500/10 hover:text-teal-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
                                 title={`развернуть lane ${meta.label}: ещё ${sorted.length - LANE_LIMIT} действий (сейчас скрыты)`}
                               >
                                 показать ещё {sorted.length - LANE_LIMIT} из {sorted.length} · {meta.label}
@@ -1667,7 +1667,7 @@ export default function MissionControl() {
           title="Control Plane · Supabase live"
           chip={supErr ? <Chip tone="p0">ERR</Chip> : supLive ? <Chip tone={supervisor!.p0_flags.length ? 'p0' : 'ok'}>{supervisor!.p0_flags.length ? `${supervisor!.p0_flags.length} P0` : 'CLEAN'}</Chip> : <Chip tone="neutral">…</Chip>}
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={supLoading} onClick={() => loadSupervisor(true)} aria-label="Свежий снапшот">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={supLoading} onClick={() => loadSupervisor(true)} aria-label="Свежий снапшот">
               <RefreshCw className={`h-4 w-4 ${supLoading ? 'animate-spin' : ''}`} />
             </Button>
           }
@@ -1741,7 +1741,7 @@ export default function MissionControl() {
               ) : <Chip tone="neutral">…</Chip>
           }
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={convLoading} onClick={() => loadConvergence(true)} aria-label="Свежий GitHub-статус">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={convLoading} onClick={() => loadConvergence(true)} aria-label="Свежий GitHub-статус">
               <RefreshCw className={`h-4 w-4 ${convLoading ? 'animate-spin' : ''}`} />
             </Button>
           }
@@ -1807,7 +1807,7 @@ export default function MissionControl() {
               ) : <Chip tone="neutral">…</Chip>
           }
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={qualLoading} onClick={() => loadQual(true)} aria-label="Свежая матрица квалификации">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={qualLoading} onClick={() => loadQual(true)} aria-label="Свежая матрица квалификации">
               <RefreshCw className={`h-4 w-4 ${qualLoading ? 'animate-spin' : ''}`} />
             </Button>
           }
@@ -1924,7 +1924,7 @@ export default function MissionControl() {
               ) : <Chip tone="neutral">…</Chip>
           }
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={r82Loading} onClick={() => loadR82(true)} aria-label="Свежая R82-диагностика">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={r82Loading} onClick={() => loadR82(true)} aria-label="Свежая R82-диагностика">
               <RefreshCw className={`h-4 w-4 ${r82Loading ? 'animate-spin' : ''}`} />
             </Button>
           }
@@ -2002,7 +2002,7 @@ export default function MissionControl() {
               ) : <Chip tone="neutral">…</Chip>
           }
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={readbackLoading} onClick={() => loadReadback(true)} aria-label="Свежий readback">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={readbackLoading} onClick={() => loadReadback(true)} aria-label="Свежий readback">
               <RefreshCw className={`h-4 w-4 ${readbackLoading ? 'animate-spin' : ''}`} />
             </Button>
           }
@@ -2201,10 +2201,10 @@ export default function MissionControl() {
           }
           actions={
             <div className="flex items-center">
-              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true, true)} aria-label="Снять live-снапшот воркеров" title="Свежая квалификация + снапшот живых скриптов в evidence">
+              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true, true)} aria-label="Снять live-снапшот воркеров" title="Свежая квалификация + снапшот живых скриптов в evidence">
                 <Camera className={`h-4 w-4 ${edgeLoading ? 'animate-pulse' : ''}`} />
               </Button>
-              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true)} aria-label="Свежий Edge-статус">
+              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true)} aria-label="Свежий Edge-статус">
                 <RefreshCw className={`h-4 w-4 ${edgeLoading ? 'animate-spin' : ''}`} />
               </Button>
             </div>
@@ -2336,7 +2336,7 @@ export default function MissionControl() {
                       </Chip>
                     )}
                     {edgeImport.digest_contract.repo_tree_verified && <Chip tone="ok">digest == LIVE</Chip>}
-                    <Button variant="ghost" size="sm" className="ml-auto h-7 w-7 p-0 text-zinc-400 hover:text-teal-400" disabled={edgeImportLoading} onClick={() => loadEdgeImport(true)} aria-label="Свежий статус импорт-PR" title="Свежий статус PR #982 (edge.import-status)">
+                    <Button variant="ghost" size="sm" className="ml-auto h-7 w-7 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={edgeImportLoading} onClick={() => loadEdgeImport(true)} aria-label="Свежий статус импорт-PR" title="Свежий статус PR #982 (edge.import-status)">
                       <RefreshCw className={`h-3.5 w-3.5 ${edgeImportLoading ? 'animate-spin' : ''}`} />
                     </Button>
                   </div>
@@ -2502,7 +2502,7 @@ export default function MissionControl() {
           title={`Журнал событий · hash-chain${events.length ? ` · #${events[0].seq}` : ''}`}
           chip={<Chip tone={wsLive ? 'ok' : 'neutral'}>{wsLive ? 'ws live' : 'poll 5s'}</Chip>}
           actions={
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={exportEvents} disabled={busy === 'export'} aria-label="Экспорт журнала в .jsonl">
+            <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" onClick={exportEvents} disabled={busy === 'export'} aria-label="Экспорт журнала в .jsonl">
               {busy === 'export' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </Button>
           }
@@ -2519,14 +2519,14 @@ export default function MissionControl() {
                     onClick={() => toggleEvClass(c.id)}
                     aria-pressed={active}
                     title={`${c.title} · событий в буфере: ${n}`}
-                    className={`rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${active ? 'border-teal-500/40 bg-teal-500/10 text-teal-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
+                    className={`rounded-full border px-2.5 py-1 min-h-9 touch-hit font-mono text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${active ? 'border-teal-500/40 bg-teal-500/10 text-teal-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
                   >
                     {c.label} · {n}
                   </button>
                 )
               })}
               {evClasses.length > 0 && (
-                <button onClick={() => setEvClasses([])} className="rounded-full border border-zinc-700 px-2.5 py-1 font-mono text-[10px] text-zinc-500 transition-colors hover:border-zinc-600 hover:text-zinc-300" title="снять все class-фильтры">
+                <button onClick={() => setEvClasses([])} className="rounded-full border border-zinc-700 px-2.5 py-1 min-h-9 touch-hit font-mono text-[10px] text-zinc-500 transition-colors hover:border-zinc-600 hover:text-zinc-300" title="снять все class-фильтры">
                   × классы
                 </button>
               )}
@@ -2577,7 +2577,7 @@ export default function MissionControl() {
           }
           actions={
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={() => loadMirror(true)} disabled={mirrorLoading} aria-label="Свежий статус mirror">
+              <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" onClick={() => loadMirror(true)} disabled={mirrorLoading} aria-label="Свежий статус mirror">
                 {mirrorLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               </Button>
             </div>
@@ -2860,7 +2860,7 @@ export default function MissionControl() {
                     <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{name}</span>
                     <span className="hidden shrink-0 font-mono text-[10px] text-zinc-600 sm:inline">{w.branch?.replace('refs/heads/', '') ?? 'detached'}</span>
                     {!isMain && (
-                      <Button variant="ghost" size="sm" className="h-9 w-9 shrink-0 p-0 text-zinc-500 hover:text-rose-400" onClick={() => removeWt(name)} aria-label={`Удалить ${name}`} disabled={busy === `wt-rm:${name}`}>
+                      <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit shrink-0 p-0 text-zinc-500 hover:text-rose-400" onClick={() => removeWt(name)} aria-label={`Удалить ${name}`} disabled={busy === `wt-rm:${name}`}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     )}

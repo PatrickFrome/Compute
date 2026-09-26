@@ -120,3 +120,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  /* EV-RESPONSIVE: touch-цели >=44px — расширяем зону клика ::after'ом
+     без изменения видимого размера (WCAG 2.5.5, mobile-first аудит).
+     h-7 -> 44px, h-8 -> 48px, h-9 -> 52px; border-radius наследуется. */
+  .touch-hit {
+    position: relative;
+  }
+  .touch-hit::after {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: inherit;
+  }
+}
