@@ -480,6 +480,32 @@ Decision after research:
 - every size that touches native Browser pixels must be accepted/clamped by main process first.
 
 
+
+## 6.6 UI slice checkpoint D — typed layout record + Reset Layout
+
+Checkpoint source head before this note: `3d9346bbc04d407bc61f6025b25018e85bb1c111`.
+
+Implemented:
+- `me2.workspace-layouts.v1` now owns both Context Drawer preferences and Command Agent Rail preference;
+- Command page no longer creates a parallel layout-storage plane; it consumes the typed workspace layout record;
+- legacy rail keys are migration inputs only;
+- Workspace menu now exposes an explicit `Reset layout` action;
+- reset restores safe defaults `drawerOpen=false, drawerTab=events, commandRailOpen=true` and reconciles native geometry.
+
+Post-step research:
+- **VS Code Custom Layout** exposes Restore Defaults / Reset View Locations in the same UI where users customize panes. That supports making reset a first-class operation before adding more freedom. https://code.visualstudio.com/docs/configure/custom-layout
+- **IntelliJ IDEA 2026.2 Layouts** keeps a protected factory Default layout and lets the user restore it with `Shift+F12`; custom layouts are separate named states. METAENGINE's reset follows the same safety principle: user layout is mutable, safe default is not. https://www.jetbrains.com/help/idea/tool-window-layouts.html
+- **JetBrains Arrange Tool Windows** explicitly saves locations *and sizes* in a layout and has a restore-default path. This confirms that future width/height persistence belongs in the same typed workspace layout record. https://www.jetbrains.com/help/idea/manipulating-the-tool-windows.html
+- **Blender Workspaces** ships task-specific defaults while allowing custom workspaces. The key lesson is that reset should restore a known task layout, not simply erase random keys. https://docs.blender.org/manual/en/latest/interface/window_system/workspaces.html
+- **Cursor 3.1** persists tiled agent layout across sessions; this increases the importance of a deterministic reset/recovery path once METAENGINE adds multi-agent tiling. https://cursor.com/changelog/3-1
+
+Decision after research:
+- keep one typed layout record per workspace;
+- next layout schema extension will be versioned fields, not ad-hoc keys;
+- any future drag-resize interaction must expose Reset Layout and preserve a main-process-safe default;
+- named custom layouts can come later, after fixed workspace defaults and geometry clamps are proven.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
