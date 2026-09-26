@@ -16,6 +16,7 @@
  */
 import { createServer, request as httpRequest } from 'node:http';
 import { connect as tcpConnect } from 'node:net';
+import { me2UiHostStatus } from './me2-ui-host.mjs';
 
 export const ME2_UI_GATEWAY_SCHEMA = 'metaengine.browser.me2.ui-gateway.v1';
 
@@ -41,6 +42,11 @@ function emitRow(row, { error = false } = {}) {
   else console.log(text);
 }
 
+function uiRouteAuthorized(port) {
+  if (port !== UI_PORT) return true;
+  return me2UiHostStatus()?.routing_authorized === true;
+}
+
 function targetPort(reqUrl) {
   const q = reqUrl.indexOf('XTransformPort=');
   if (q < 0) return UI_PORT;
@@ -60,6 +66,12 @@ function stripTransform(rawUrl) {
 
 function proxyHttp(req, res) {
   const port = targetPort(req.url ?? '/');
+  if (!uiRouteAuthorized(port)) {
+    stats.http_fail += 1;
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'gateway: ui_upstream_unowned' }));
+    return;
+  }
   const path = stripTransform(req.url ?? '/');
   const headers = { ...req.headers, host: `127.0.0.1:${port}`, connection: 'close' };
   const upstream = httpRequest({ host: '127.0.0.1', port, path, method: req.method, headers }, (ur) => {
@@ -82,6 +94,11 @@ function proxyHttp(req, res) {
 /** WS-upgrade: переписываем первую строку (path без XTransformPort) и Host, дальше — сырой pipe. */
 function proxyUpgrade(req, socket, head) {
   const port = targetPort(req.url ?? '/');
+  if (!uiRouteAuthorized(port)) {
+    stats.http_fail += 1;
+    try { socket.destroy(); } catch { /* already closed */ }
+    return;
+  }
   const path = stripTransform(req.url ?? '/');
   stats.ws_upgrades += 1;
   const upstream = trackSocket(tcpConnect({ host: '127.0.0.1', port }, () => {
@@ -160,6 +177,7 @@ export function me2UiGatewayStatus() {
     state,
     port: GATEWAY_PORT,
     ui_port: UI_PORT,
+    ui_route_authorized: me2UiHostStatus()?.routing_authorized === true,
     url: state === 'LIVE' ? `http://127.0.0.1:${GATEWAY_PORT}` : null,
     last_error: lastError,
     stats: { ...stats },
