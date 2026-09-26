@@ -34,6 +34,7 @@ const me2BrowserStage = await readFile(new URL('../../me2-ui/src/components/me2/
 const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url), 'utf8');
 const me2AgentChatFeed = await readFile(new URL('../../me2-ui/src/hooks/use-agentchat-sessions.ts', import.meta.url), 'utf8');
 const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
+const me2TasksPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -249,6 +250,21 @@ test('R85 unavailable legacy sandbox plane is fail-close and collapsed by defaul
   assert.match(me2CodePage, /title="SANDBOXES · LEGACY LOCKED"/);
   assert.match(me2CodePage, /defaultOpen=\{false\}/);
   assert.match(me2CodePage, /legacy capability unavailable/);
+});
+
+test('R85 Tasks is task-focused and does not duplicate Browser or Mirror control planes', () => {
+  assert.match(me2TasksPage, /data-testid="page-tasks"/);
+  assert.match(me2TasksPage, /title={`ВЕТКИ · ЗАДАЧИ/);
+  assert.doesNotMatch(me2TasksPage, /loadBrowserTabs|type BrowserTab|me2:cast-toggle|me2:cast-ctl/);
+  assert.doesNotMatch(me2TasksPage, /<MirrorPanel|mirror-panel/);
+  assert.doesNotMatch(me2TasksPage, /MonitorPlay|MousePointerClick|AppWindow/);
+});
+
+test('R85 persistent chrome avoids duplicate task and mirror telemetry', () => {
+  assert.doesNotMatch(me2Topbar, /useKpis|kpi\.ready|kpi\.running|kpi\.fail/);
+  assert.doesNotMatch(me2Statusbar, /useMe2\(\(s\) => s\.mirror\)|mirrorAttention|Mirror \$\{/);
+  assert.match(me2Topbar, /data-testid="attention-button"/);
+  assert.match(me2Statusbar, /connected \? "runtime live" : snap \? "runtime cached" : "runtime offline"/);
 });
 
 test('R85 page history uses a real cursor for Alt back and forward', () => {
