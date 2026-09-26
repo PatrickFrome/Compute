@@ -92,3 +92,8 @@
 3. Если PAT-OK → выполни протокол Job 413338 (push-pending-r80.sh; если скрипта нет — сообщи оператору, восстанови по описанию в worklog).
 4. Если vault пуст → запусти cron-задачу Context Guard руками или дай guard отработать по расписанию (скрипт пересоздаст всё, кроме старых снапшотов).
 5. Продолжай по roadmap R81+ из раздела 5; первая задача — AUTHORITY FREEZE (после возврата PAT).
+
+## §9 Secrets self-restore (SEC-RESTORE-1, 2026-09-27)
+- После env-reset: `git clone https://github.com/PatrickFrome/Compute.git` работает БЕЗ токена (repo читается анонимно) → запустить `scripts/phoenix/phoenix-secrets-restore.sh` — найдёт SEALED bootstrap на выживших каналах (PolarFS /tmp/my-project/phoenix-sealed + зеркала) и восстановит `/home/z/.a2/.github.env` (авто-перезапись мёртвого токена), ENVF (URL), project .env.
+- Литералы секретов НИКОГДА не попадают в репо (GitHub отзывает PAT в коммитах). Sealed (chmod 600): /tmp/my-project/phoenix-sealed/secrets-bootstrap.sh + зеркала /tmp/context-vault-mirror/phoenix-sealed/, /home/sync/me2-context-backups/phoenix-sealed/. После ротации секретов — `bash scripts/phoenix/tools/build-sealed-bootstrap.sh`.
+- Статус секретов: GITHUB_TOKEN_ADMIN — ЖИВ (200). SUPABASE_SERVICE_ROLE_JWT (h205f22, sibnfciqcpkuquxzduqr.supabase.co) — УТЕРЯН 2026-09-26 17:11 (ENVF→0B), обл. копия циклична → канал Supabase-бэкапов (heartbeat/supabase-persist) НЕ РАБОТАЕТ до перевыпуска оператором. DATABASE_URL (SQLite) — жив, запечатан.

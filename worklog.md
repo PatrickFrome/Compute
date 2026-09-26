@@ -9181,3 +9181,34 @@ Stage Summary:
 - PAT более не теряем: Job 416741 каждые 15 мин гарантирует /home/z/.a2/.github.env (byte-exact, 600) даже после полного wipe — guard 416526 продолжит пушить context-vault.
 - Supabase-зависимые каналы (supabase-persist, phoenix-heartbeat) деградируют штатно до ре-поста me2.env.20260922 оператором; после ре-поста: положить файл на место → bash rebuild-secrets-restore.sh → обновить payload 416741.
 - Урок в протокол: любой destructive-тест = SAFEBAK живёт до ПОДТВЕРЖДЁННОГО sha-совпадения; генерация файлов с секретами — только через генератор + awk-инъекцию, никогда через ручные плейсхолдеры.
+
+---
+Task ID: SEC-RESTORE-1
+Agent: Z.ai Code (main session, распоряжение оператора: «добавь все секреты в скрипт, чтобы при ресете он восстановил всё сам»)
+Task: Самовосстановление секретов после env-reset — sealed-bootstrap на выживающих каналах + repo-safe оркестратор
+
+Work Log:
+- Ограничение дизайна: репо PatrickFrome/Compute читается анонимно (ls-remote без auth работает) → литеральные секреты в git НЕВОЗМОЖНЫ (GitHub auto-revoke PAT в коммитах — защита самоуничтожится). Решение: секреты живут ТОЛЬКО в SEALED-скрипте на PolarFS/зеркалах; в репо — оркестратор без литералов.
+- Инвентаризация: GITHUB_TOKEN_ADMIN жив (200, записан в .github.env 0600); DATABASE_URL (SQLite file:) — из project .env; живой хост Supabase h205f22 = sibnfciqcpkuquxzduqr.supabase.co (носитель — scripts/r83-import-build.mjs:175); SUPABASE_SERVICE_ROLE_JWT — НЕВОССТАНОВИМ локально: единственный носитель /tmp/my-project/.a2-backup/me2.env.20260922 обнулён до 0B в 17:11 Sep 26 (ИНЦИДЕНТ), обл. копия me2-evidence/.../me2.env.20260922.restore-key циклична (нужен сам JWT). СТАРЫЕ ложные следы eyJ в git-sync.sh:12 и worklog:6503 — это паттерны secrets-guard, не ключи.
+- ИНЦИДЕНТ-2 (следствие): канал Supabase-бэкапов (phoenix-heartbeat 416629, supabase-persist) НЕ РАБОТАЕТ с 17:11 Sep 26 — оба читают ключ из обнулённого ENVF. Всё это время внешняя копия context-vault в Supabase НЕ обновлялась; git/ossfs/PolarFS-каналы работали.
+- Создан builder: scripts/phoenix/tools/build-sealed-bootstrap.sh (без литералов; значения file→file через %q; идемпотентный creds-doc append; зеркалирование). Создан оркестратор: scripts/phoenix/phoenix-secrets-restore.sh (repo-safe: present→validate→OK; иначе поиск sealed по 3 каналам → restore → validate → next-steps; подсказка: за rail — никогда force, только fetch+union через scripts/wl-merge.mjs).
+- Sealed сгенерирован: /tmp/my-project/phoenix-sealed/secrets-bootstrap.sh (2613B, sha12=0d04bff91210, chmod 600), зеркала: /tmp/context-vault-mirror/phoenix-sealed/ + /home/sync/me2-context-backups/phoenix-sealed/ (оба OK). Содержит: GH_PAT (живой), SB_URL (живой хост), SB_JWT="" с комментарием-инцидентом, DB_URL, GH_REPO_URL; restore() пишет .github.env (перезаписывает только если отсутствует/невалиден — temp+validate+swap), ENVF (URL+инцидент-комментарий) при 0B, project .env при отсутствии; validate → api-код.
+- Тесты: T1 оркестратор present-path → «OK — nothing to restore» (api=200); T2 sealed validate → 200; T3 restore в SECRETS_TARGET_HOME=/tmp/sec-test → .github.env + project .env созданы (600), api=200 из восстановленного файла (баг «нет mkdir my-project» найден и исправлен; тест повторён чисто), тестовые артефакты удалены.
+- ENVF исправлен: rebuilt (SUPABASE_URL + инцидент-комментарий, 600). Creds-doc .a2-creds-01.md: appended секции «GITHUB ADMIN TOKEN — ОБНОВЛЕНИЕ 2026-09-27» (новое живое значение, старое помечено мёртвым), «Supabase — УТОЧНЕНИЕ» (хост, потеря JWT, статус канала), «SEALED BOOTSTRAP» (пути + правило перегенерации после ротации). CONTEXT.md: §9 Secrets self-restore для пост-резетных агентов.
+- Секрет-гигиена: значения нигде не напечатаны (все операции file→file); repo-скрипты проверены паттерном secrets-guard (ghp_/github_pat_/eyJ) → 0 попаданий; sealed НЕ в git (проверяемая структура: builder читает файлы, а не хардкодит).
+
+Stage Summary:
+- Пост-резетный контур закрыт: анонимный clone (работает без auth) → phoenix-secrets-restore.sh → sealed с PolarFS → .github.env восстановлен и валидирован → push-pending/guard/wl-merge-протокол. Окно ручного вмешательства сведено к нулю для GitHub-плоскости.
+- ЕДИНСТВЕННЫЙ пробел: SUPABASE_SERVICE_ROLE_JWT h205f22 — требуется перевыпуск оператором (Supabase dashboard → service_role key) с последующим `bash scripts/phoenix/tools/build-sealed-bootstrap.sh`; до тех пор Supabase-канал бэкапов остаётся ВЫКЛЮЧЕН (git/ossfs/PolarFS/context-vault-ветка покрывают контекст).
+- Правило на будущее: любая ротация секрета → немедленный прогон builder (sealed на 3 каналах обновляется одной командой).
+
+---
+Task ID: R80-PUSH-D
+Agent: Z.ai Code (main session, Job 413338, тик 01:07+08)
+Task: Контрольный идемпотентный прогон push-pending (после закрытия в R80-PUSH-C)
+
+Work Log:
+- Прогон scripts/push-pending-r80.sh: все три push — «Everything up-to-date»; ls-remote: sandbox/me2-os=0e0d5727 (≡ локальный main), архив-ветки 73486dd/c95de21 на месте. «DONE: all local state published.»
+
+Stage Summary:
+- Публикация стабильна, задача 413338 остаётся закрытой; повторные тики = no-op до следующего env-reset или новых локальных коммитов.
