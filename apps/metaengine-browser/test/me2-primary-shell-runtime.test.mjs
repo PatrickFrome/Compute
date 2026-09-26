@@ -81,6 +81,18 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
 });
 
 
+test('R75 CDP proof converges only inside a bounded read-only window', () => {
+  assert.match(main, /probeMe2R75InstalledDomOnce/);
+  assert.match(main, /timeoutMs = 12000/);
+  assert.match(main, /intervalMs = 150/);
+  assert.match(main, /MAIN_PROCESS_CDP_DOM_BOX_MODEL_BOUNDED_CONVERGENCE/);
+  assert.match(main, /probe_attempts:/);
+  assert.match(main, /probe_elapsed_ms:/);
+  assert.match(main, /automatic_effect_retry_allowed:\s*false/);
+  assert.match(main, /Date\.now\(\) >= deadline/);
+  assert.doesNotMatch(main, /setInterval\([^\n]*probeMe2R75InstalledDom/);
+});
+
 test('installed ME2 primary shell is attested from main-process CDP DOM geometry', () => {
   assert.match(main, /probeMe2R75InstalledDom/);
   assert.match(main, /DOM\.getDocument/);
