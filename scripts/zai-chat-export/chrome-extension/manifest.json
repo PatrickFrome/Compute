@@ -1,9 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Z.ai Chat Export",
-  "version": "1.0.0",
-  "description": "Экспорт всего текста чата Z.ai в Markdown / JSON / TXT. Кнопка на странице, popup с выбором формата, хоткей. Авто-прокрутка истории, дедупликация, код-блоки.",
-  "permissions": ["downloads"],
+  "version": "1.0.1",
+  "description": "Экспорт всего текста чата Z.ai в Markdown / JSON / TXT. Кнопка на странице, popup с выбором формата, хоткей Ctrl+Shift+Y. Авто-прокрутка истории, дедупликация, хронологический порядок, код-блоки.",
+  "minimum_chrome_version": "110",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": ["scripting"],
   "host_permissions": [
     "https://chat.z.ai/*",
     "https://*.z.ai/*",
@@ -21,7 +27,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Z.ai Chat Export",
+    "default_title": "Z.ai Chat Export — экспорт чата",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -34,12 +40,7 @@
         "default": "Ctrl+Shift+Y",
         "mac": "Command+Shift+Y"
       },
-      "description": "Экспортировать чат в Markdown"
+      "description": "Экспортировать текущий чат Z.ai в Markdown"
     }
-  },
-  "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
   }
 }

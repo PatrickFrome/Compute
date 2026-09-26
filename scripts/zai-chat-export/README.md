@@ -10,8 +10,22 @@
 |---|---|---|
 | `zai-chat-export-console.js` | Скрипт для вставки в консоль DevTools | Разовый экспорт, самый быстрый способ |
 | `zai-chat-export.user.js` | Tampermonkey-плагин (userscript) с кнопкой «Export chat» | Регулярные экспорты, всегда под рукой |
-| `chrome-extension/` | **Chrome-расширение (MV3)**: кнопка + popup + хоткей Ctrl+Shift+Y, скачивание через Downloads API | Самый удобный способ для Chrome (см. `chrome-extension/README.md`); zip-пакет: `download/zai-chat-export-chrome-extension.zip` |
+| `chrome-extension/` | **Chrome-расширение (MV3)**: кнопка + popup + хоткей Ctrl+Shift+Y, хронология «от начала до конца», скачивание через `<a download>` | Самый удобный способ для Chrome (см. `chrome-extension/README.md`); zip-пакет (в корне репо): `download/zai-chat-export-chrome-extension.zip` |
 | `test/mock.html` | Мок чата с lazy-load для тестов | Проверка скрипта без реального чата |
+
+## Способ 0 — Chrome-расширение (рекомендуется)
+
+1. Скачайте/распакуйте `download/zai-chat-export-chrome-extension.zip`
+   (путь от корня репозитория `/home/z/my-project`) в постоянную папку
+   (или используйте каталог `chrome-extension/` как есть).
+2. Откройте `chrome://extensions` → включите **Developer mode** (справа вверху).
+3. **Load unpacked** → выберите папку с `manifest.json`.
+4. Откройте чат `chat.z.ai`:
+   - кнопка **«Export chat»** внизу справа (клик = .md, Shift+клик = .json, Alt+клик = .txt);
+   - иконка расширения → popup: формат, тумблер авто-прокрутки, «Скопировать текст»;
+   - хоткей **Ctrl+Shift+Y** (Cmd+Shift+Y на Mac) — мгновенный экспорт в Markdown.
+
+Подробности — в `chrome-extension/README.md`.
 
 ## Способ 1 — консоль (без установки чего-либо)
 
@@ -52,7 +66,10 @@ __zaiExportChat({ FORMAT: 'json', DOWNLOAD: false })  // другой форма
    с накоплением в Map по стабильному id — **дружит с виртуализацией DOM**:
    даже если сообщения удаляются из DOM при прокрутке, они уже сохранены.
 4. Сохранение код-блоков (`pre` + язык из `language-*`) и временных меток (`time[datetime]`).
-5. Сериализация и скачивание через Blob; позиция скролла восстанавливается.
+5. **Хронологический порядок** («от начала до конца»): после загрузки всей истории —
+   пересборка в DOM-порядке + сортировка по timestamp (если парсится >=80% меток);
+   иначе lazy-load дописывал старые блоки после новых.
+6. Сериализация и скачивание через Blob; позиция скролла восстанавливается.
 
 ## Формат Markdown
 
@@ -90,6 +107,8 @@ __zaiExportChat({ FORMAT: 'json', DOWNLOAD: false })  // другой форма
 - Mock-чат: 10 сообщений в DOM + 10 подгружаются lazy-load при прокрутке вверх,
   дубликаты id, код-блок `language-js`, `time[datetime]`.
 - Результаты: собрано ровно 20/20 уникальных; роли 10 User / 10 Assistant / 0 Unknown;
-  порядок хронологический (новое сверху); код-блок сохранён; дедуп по
-  `data-message-id` подтверждён; MD/JSON/TXT все три формата корректны;
-  userscript: кнопка монтируется, клик экспортирует, файл генерируется.
+  порядок строго хронологический (`dom+time`, первое = начало чата); код-блок
+  сохранён; дедуп по `data-message-id` подтверждён; MD/JSON/TXT все три формата
+  корректны; userscript: кнопка монтируется, клик экспортирует; Chrome-расширение
+  v1.0.1 (объединённая версия): `via: anchor`, `order: dom+time`, порядок
+  хронологический, manifest/JS валидны.

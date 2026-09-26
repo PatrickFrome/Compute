@@ -1874,6 +1874,26 @@ Stage Summary:
 - [cron 413338 2026-09-26T12:52+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
 
 ---
+Task ID: R80-ZAI-CHROME-EXTENSION
+Agent: Super Z (main agent)
+Task: «сделай плагин для chrome» (продолжение R80-ZAI-CHAT-EXPORT-TOOL; ссылка пользователя на чат https://chat.z.ai/c/579ed13b-…).
+
+Work Log:
+- Попытка прямого экспорта чата агентом: agent-browser открыл URL → редирект на chat.z.ai + Sign in → чат за авторизацией пользователя, из песочницы недоступен. Вывод записан пользователю: экспорт выполняется в его браузере через созданные инструменты.
+- СОЗДАНО Chrome-расширение (MV3) scripts/zai-chat-export/chrome-extension/: manifest.json (host z.ai, content script, хоткей export-md Ctrl+Shift+Y), content.js (движок экспорта + кнопка «Export chat» + приём команд ZAI_EXPORT/ZAI_EXPORT_PING), background.js (hotkey + авто-инжекция content.js через chrome.scripting), popup.html/popup.js (выбор формата MD/JSON/TXT, тумблер autoScroll, «Скопировать текст» в буфер, детект вкладки Z.ai).
+- ИНЦИДЕНТ ПАРАЛЛЕЛЬНОЙ ЗАПИСИ: между моими правками каталог chrome-extension/ был перезаписан другим процессом (mtime 04:54–04:56, без записи в worklog) — его версия использовала chrome.downloads через SW. Найдены дефекты: (1) background.js — синтаксическая ошибка `new Blob(sg.payload]` (SW не загрузился бы вовсе); (2) URL.createObjectURL недоступен в MV3 service worker; (3) нет хронологического порядка. Merge: взят их UX (popup c кнопками формата + autoScroll-тумблер, build-icons.py) и структура content.js (buildPayload/anchorDownload/exportChat(format,autoScroll)), добавлено моё: reorderChronologically (DOM-порядок + сортировка по timestamp при >=80% парсимых меток, meta.order), ZAI_EXPORT_PING handshake, авто-инжекция через scripting, popup с копированием. manifest: permissions → ["scripting"] (downloads убран — скачивание через <a download> в content script, т.к. blob URL в SW MV3 не создать).
+- ВАЖНО найдено и исправлено при тестировании: lazy-load ломает порядок сообщений (старые блоки дописывались ПОСЛЕ новых) — добавлен reorderChronologically во ВСЕ три версии движка (console/user/extension): слой 1 — пересборка в DOM-порядке если ничего не исчезло (не виртуализовано), слой 2 — стабильная сортировка по времени.
+- Тест (agent-browser + mock.html, объединённая v1.0.1): 20/20 сообщений, роли 10/10/0, order=dom+time, строго хронологический (первое=«[cron tick 10]…» — начало, последнее=конец), via=anchor, кнопка монтируется, синтаксис всех JS и manifest валидны.
+- Артефакты: download/zai-chat-export-chrome-extension.zip (11 файлов, 36.6K); обновлены README.md (Способ 0 — установка расширения) и chrome-extension/README.md (права, anchor-скачивание, хронология, приватность); иконки 16/48/128 (build-icons.py параллельной версии, валидные PNG).
+- Standalone-версии (console/user.js) не пострадали от параллельной записи — reorderChronologically в обеих подтверждён (rg).
+
+Stage Summary:
+- Chrome-расширение v1.0.1 готово и протестировано: scripts/zai-chat-export/chrome-extension/ (Load unpacked) или download/zai-chat-export-chrome-extension.zip. Три способа экспорта: кнопка на странице, popup (формат + копирование в буфер), хоткей Ctrl+Shift+Y.
+- Ключевое улучшение против первой итерации: строгий хронологический порядок «от начала до конца» (dom+time) во всех трёх движках — критично для требования пользователя экспортировать чат целиком.
+- Риск: параллельный процесс писал в тот же каталог без worklog-записи — если появится его запись, старшая по времени версия = моя объединённая (04:58–04:59); рекомендация: конфликтные правки только через worklog-координацию.
+- Экспорт реального чата — на стороне пользователя (auth-стена); порядок действий в ответе пользователю.
+
+---
 Task ID: R80-ZAI-CHAT-EXPORT-CHROME-EXT
 Agent: Super Z (main agent)
 Task: «сделай плагин для chrome» (экспорт чата Z.ai; продолжение R80-ZAI-CHAT-EXPORT-TOOL).
@@ -1889,3 +1909,18 @@ Stage Summary:
 - Chrome-плагин готов: scripts/zai-chat-export/chrome-extension/ + zip в download/. Установка: chrome://extensions → Developer mode → Load unpacked.
 - Три способа экспорта теперь: консоль (разово), Tampermonkey (кнопка), Chrome-расширение (кнопка+popup+хоткей+Downloads API).
 - Реальный прогон на z.ai — на стороне пользователя (сессия у оператора); при расхождении селекторов правится один блок CONFIG в content.js (см. README-расширения, Troubleshooting).
+
+---
+Task ID: R80-ZAI-CHROME-EXT-RECONCILE
+Agent: Super Z (main agent)
+Task: сверка двух параллельных реализаций Chrome-расширения (R80-ZAI-CHROME-EXTENSION vs R80-ZAI-CHAT-EXPORT-CHROME-EXT) и консолидация артефактов.
+
+Work Log:
+- Зафиксировано: обе записи описывают одну задачу; на диске осталась объединённая версия v1.0.1 (mtime 04:58–04:59): content.js с reorderChronologically + ZAI_EXPORT_PING, background.js с авто-инжекцией (syntax error `sg.payload]` исправлен), popup с «Скопировать текст», permissions ["scripting"].
+- Zip в корне репо download/zai-chat-export-chrome-extension.zip ПЕРЕЗАПИСАН объединённой сборкой (11 файлов, 36610 байт; предыдущий zip 04:57 содержал битый background.js без хронологии). Дубликат scripts/zai-chat-export/download/ удалён.
+- README-ссылки синхронизированы: main README + chrome-extension/README указывают на download/ от корня репо.
+- Оба Task ID признаются валидными как история; канонический артефакт — v1.0.1 (объединённая).
+
+Stage Summary:
+- Единый канонический пакет: /home/z/my-project/download/zai-chat-export-chrome-extension.zip = scripts/zai-chat-export/chrome-extension/ (v1.0.1, объединённая, протестированная).
+- Урок для линии: параллельные агенты писали в один каталог без взаимной координации — перед правками читать worklog-хвост и mtime; запись конфликта здесь закрывает расхождение.

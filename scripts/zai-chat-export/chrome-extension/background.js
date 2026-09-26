@@ -1,33 +1,39 @@
-/* Z.ai Chat Export — service worker (MV3)
- * Обязанности: скачивание файлов через chrome.downloads, хоткей export-md. */
+/* Z.ai Chat Export — service worker (Chrome MV3).
+ * Обязанности: хоткей export-md (Ctrl+Shift+Y) -> экспорт активной вкладки.
+ * Скачивание выполняется в content script через <a download> (гарантированно
+ * работает; blob URL нельзя создавать в service worker MV3).
+ * Если content script ещё не в странице (вкладка открыта до установки
+ * расширения) — инжектируем content.js через chrome.scripting и повторяем. */
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg && msg.type === 'zai-download') {
-    const blob = new Blob([msg.payload], { type: (msg.mime || 'text/plain') + ';charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    chrome.downloads.download({ url, filename: msg.filename, saveAs: false }, (id) => {
-      const err = chrome.runtime.lastError;
-      setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* noop */ } }, 30000);
-      if (err) {
-        // Не смогли через downloads API — пусть content script качает сам через <a>.
-        sendResponse({ ok: false, error: err.message });
-      } else {
-        sendResponse({ ok: true, id });
-      }
-    });
-    return true; // асинхронный ответ
+async function ensureContentScript(tabId) {
+  try {
+    const pong = await chrome.tabs.sendMessage(tabId, { type: 'ZAI_EXPORT_PING' });
+    if (pong && pong.ok) return true;
+  } catch { /* нет ресивера — попробуем инжектировать */ }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+    await new Promise((r) => setTimeout(r, 300));
+    const pong2 = await chrome.tabs.sendMessage(tabId, { type: 'ZAI_EXPORT_PING' });
+    return !!(pong2 && pong2.ok);
+  } catch (e) {
+    console.warn('[zai-export] inject failed:', e && e.message ? e.message : e);
+    return false;
   }
-  return undefined;
-});
+}
 
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'export-md') return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.id) return;
+  if (!tab || !tab.id || !/^https:\/\/([a-z0-9-]+\.)*z\.ai\//i.test(tab.url || '')) {
+    console.warn('[zai-export] активная вкладка — не чат Z.ai');
+    return;
+  }
+  const ready = await ensureContentScript(tab.id);
+  if (!ready) return;
   try {
-    await chrome.tabs.sendMessage(tab.id, { type: 'ZAI_EXPORT', format: 'md', autoScroll: true });
-  } catch {
-    // Контент-скрипт ещё не загружен (страница открыта до установки) — подсказка в консоли SW.
-    console.warn('[zai-export] content script недоступен на активной вкладке; обновите страницу z.ai');
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'ZAI_EXPORT', format: 'md', autoScroll: true });
+    console.log('[zai-export]', res && res.ok ? res.filename + ' (' + res.messageCount + ' сообщений, порядок: ' + (res.meta && res.meta.order) + ')' : res);
+  } catch (e) {
+    console.warn('[zai-export] export failed:', e && e.message ? e.message : e);
   }
 });
