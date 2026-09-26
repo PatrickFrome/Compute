@@ -20,6 +20,12 @@ const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.u
 const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
 const integration = await readFile(new URL('../src/me2/me2-integration-entry.mjs', import.meta.url), 'utf8');
 const uiHost = await readFile(new URL('../src/me2/me2-ui-host.mjs', import.meta.url), 'utf8');
+const me2Shell = await readFile(new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url), 'utf8');
+const me2Topbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url), 'utf8');
+const me2Pagebar = await readFile(new URL('../../me2-ui/src/components/me2/shell/pagebar.tsx', import.meta.url), 'utf8');
+const me2Statusbar = await readFile(new URL('../../me2-ui/src/components/me2/shell/statusbar.tsx', import.meta.url), 'utf8');
+const me2Palette = await readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
+const me2Command = await readFile(new URL('../../me2-ui/src/components/me2/pages/command.tsx', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -139,6 +145,32 @@ test('installed ME2 primary shell is attested from main-process CDP DOM geometry
   assert.match(main, /release_authority:\s*false/);
 });
 
+
+
+test('R85 control-room chrome keeps closed overlays out of the semantic tree', () => {
+  assert.match(me2Shell, /\{paletteOpen \? <CommandPalette \/> : null\}/);
+  assert.match(me2Shell, /\{overlaysOpen \? <GlobalDialogs \/> : null\}/);
+  assert.doesNotMatch(me2Shell, /<CommandPalette \/>\s*<GlobalDialogs \/>/);
+});
+
+test('R85 persistent chrome is compact and cannot directly fire emergency flush', () => {
+  assert.match(me2Topbar, /h-\[42px\]/);
+  assert.match(me2Pagebar, /className="flex h-9/);
+  assert.match(me2Statusbar, /h-\[22px\]/);
+  assert.doesNotMatch(me2Statusbar, /budgetFlush|BUDGET_FLUSH|EMERGENCY/);
+  assert.match(me2Palette, /window\.confirm\("Сбросить очередь command bus\?/);
+  assert.match(me2Palette, /BUDGET_FLUSH:\s*confirmBudgetFlush/);
+});
+
+test('R85 Command remains an integrated native-stage workbench with R75 anchors', () => {
+  assert.match(me2Command, /data-testid="page-command"/);
+  assert.match(me2Command, /data-testid="agent-sidebar"/);
+  assert.match(me2Command, /w-\[252px\]/);
+  assert.match(me2Command, /<BrowserStage compact defaultCastOn \/>/);
+  assert.match(me2Topbar, /data-testid="topbar"/);
+  assert.match(me2Pagebar, /data-testid="pagebar"/);
+  assert.match(me2Statusbar, /data-testid="statusbar"/);
+});
 
 test('ME2 UI routing authority is revoked on stop, degradation, or owned-process loss', () => {
   const liveChild = { pid: 4242, exitCode: null, signalCode: null };
