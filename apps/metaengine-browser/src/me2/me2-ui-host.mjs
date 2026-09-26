@@ -261,6 +261,11 @@ export function stopMe2UiHost({ killChild = false } = {}) {
 }
 
 export function me2UiHostStatus() {
+  const childOwned = mode === 'spawned'
+    && child != null
+    && state !== 'STOPPED'
+    && state !== 'DEGRADED';
+  const externalAdoptAuthorized = mode === 'adopted' && me2UiExternalAdoptionAllowed();
   return {
     schema: ME2_UI_HOST_SCHEMA,
     state,
@@ -270,6 +275,9 @@ export function me2UiHostStatus() {
     last_health_ok_at: lastHealthOkAt,
     launch_mode: lastLaunchMode,
     child_pid: child?.pid ?? null,
+    child_owned: childOwned,
+    external_adopt_authorized: externalAdoptAuthorized,
+    routing_authorized: childOwned || externalAdoptAuthorized,
     stopped,
     health_url: UI_HEALTH_URL,
   };
