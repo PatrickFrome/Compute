@@ -115,12 +115,22 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   const integration = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-integration-entry.mjs'), 'utf8');
   assert.match(integration, /startMe2DaemonHost\(\{ dataDir:/);
   assert.match(integration, /stopMe2UiHost\(\{ killChild: true \}\)/);
+  assert.match(integration, /stopMe2UiHostAndWait\(\{ graceMs: 2500, forceMs: 2500 \}\)/);
+  assert.match(integration, /app\.on\('before-quit'/);
+  assert.match(integration, /event: 'ME2_QUIT_DRAIN_CONFIRMED'/);
+  assert.match(integration, /event: 'ME2_UI_SHUTDOWN_UNCONFIRMED'/);
+  assert.match(integration, /verdict: 'QUIT_FENCED'/);
   assert.match(integration, /stopMe2DaemonHost\(\{ killChild: true \}\)/);
   const uiHost = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-ui-host.mjs'), 'utf8');
   assert.match(uiHost, /event: 'UI_UNOWNED_PORT'/);
   assert.match(uiHost, /state = 'WAITING_FOR_PORT_RELEASE'/);
   assert.match(uiHost, /ME2_UI_ALLOW_EXTERNAL_ADOPT/);
   assert.match(uiHost, /routing_authorized:\s*childOwned \|\| externalAdoptAuthorized/);
+  assert.match(uiHost, /export async function stopMe2UiHostAndWait/);
+  assert.match(uiHost, /event: 'UI_FORCE_KILL'/);
+  assert.match(uiHost, /event: 'UI_STOP_CONFIRMED'/);
+  assert.match(uiHost, /event: 'UI_STOP_UNCONFIRMED'/);
+  assert.match(uiHost, /shutdown:\s*Object\.freeze\(\{ confirmed/);
   const finalEntry = await fs.readFile(path.join(appRoot, 'src', 'final-runtime-entry.mjs'), 'utf8');
   assert.match(
     finalEntry,
