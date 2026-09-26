@@ -561,6 +561,34 @@ Decision after research:
 - automatic context changes remain presentation-only and must never initiate an effect.
 
 
+
+## 6.9 UI slice checkpoint G — native-clamped drawer sizing
+
+Checkpoint source head before this note: `e6b73b146587e35503b39904eedde9231889b998`.
+
+Implemented:
+- Context Drawer size is now a typed workspace preference rather than a fixed CSS constant;
+- safe presets are `160 / 200 / 300px`, while main-process accepts a bounded requested height and remains the geometry authority;
+- layout clamps requested size to `160..360px`;
+- the native Browser keeps a protected `320px` minimum height;
+- if the requested drawer size would violate that minimum, main process shrinks the drawer first; if even the minimum drawer does not fit, it closes the drawer;
+- renderer receives the effective height and can show that the preferred size was constrained without overwriting the saved preference;
+- the same height travels through the presentation-only preload bridge and does not add Browser/scheduler/update/release authority.
+
+Post-step research:
+- **VS Code Custom Layout** lets the Panel be repositioned/aligned and quickly maximized/restored, treating secondary-region size as operator layout state rather than page content. https://code.visualstudio.com/docs/configure/custom-layout
+- **IntelliJ IDEA 2026.2** supports dragging tool-window borders, keyboard resizing, maximizing, and optionally remembering custom size per tool window. This strongly supports preserving a preferred size separately from the currently feasible size. https://www.jetbrains.com/help/idea/manipulating-the-tool-windows.html
+- **IntelliJ Layouts** saves moved/resized tool-window arrangements as switchable layouts while preserving a factory Default. METAENGINE's workspace-scoped preferred size plus Reset Layout is the bounded equivalent before named layouts are introduced. https://www.jetbrains.com/help/idea/tool-window-layouts.html
+- **Blender Areas** are resized by dragging shared borders; the layout keeps rectangular editors as first-class regions, and focus/maximize modes temporarily prioritize one editor without destroying the stored arrangement. https://docs.blender.org/manual/en/latest/interface/window_system/areas.html
+- **Electron WebContentsView/View** confirms the technical constraint behind METAENGINE's design: a WebContentsView is a main-process View with explicit `setBounds()`. Renderer CSS therefore cannot be the authority for pixels occupied by the native Browser. https://www.electronjs.org/docs/latest/api/web-contents-view and https://www.electronjs.org/docs/latest/api/view
+
+Decision after research:
+- preserve both `preferredHeight` and main-process `effectiveHeight`;
+- never persist a temporary clamp as the user's preference;
+- keep Browser minimum height stronger than drawer preference;
+- the safe preset path is proven first; a drag handle may be layered on top only by sending the same bounded presentation request to main process.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
