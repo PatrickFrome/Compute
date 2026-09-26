@@ -39,15 +39,21 @@ export function TopBar() {
   const pageMeta = PAGES.find((p) => p.key === page);
   const workspaceMeta = WORKSPACES.find((w) => w.key === workspace);
   const mirrorAttention = Boolean(mirror && (mirror.mode !== "LIVE" || mirror.pending > 0));
-  const failedCommands = (snap?.commands ?? []).filter((command) => command.status === "FAILED").length;
+  const nowMs = Date.now();
+  const failedTasks = (snap?.tasks ?? []).filter((task) => task.status === "FAILED").length;
+  const failedCommands = (snap?.commands ?? []).filter((command) => {
+    if (command.status !== "FAILED") return false;
+    const at = new Date(command.created_at).getTime();
+    return Number.isFinite(at) && nowMs - at <= 15 * 60_000;
+  }).length;
   const offlineWorkers = (snap?.workers ?? []).filter((worker) => worker.state === "OFFLINE").length;
   const budgetUsed = snap?.budget.used ?? 0;
   const budgetLimit = snap?.budget.limit ?? 24;
   const budgetPct = Math.round((budgetUsed / Math.max(1, budgetLimit)) * 100);
   const attentionItems = [
     !connected ? { id: "transport", label: "Transport offline", detail: "Socket :3040 unavailable; REST fallback may be active.", page: "observability" as const, tone: "rose" } : null,
-    kpi.fail > 0 ? { id: "tasks", label: String(kpi.fail) + " failed task" + (kpi.fail === 1 ? "" : "s"), detail: "Review failure evidence and retry policy before any new effect.", page: "tasks" as const, tone: "rose" } : null,
-    failedCommands > 0 ? { id: "commands", label: String(failedCommands) + " failed command" + (failedCommands === 1 ? "" : "s"), detail: "Inspect command receipts; do not blind-retry ambiguous effects.", page: "observability" as const, tone: "rose" } : null,
+    failedTasks > 0 ? { id: "tasks", label: String(failedTasks) + " failed task" + (failedTasks === 1 ? "" : "s"), detail: "Current work queue contains failed tasks; inspect exact evidence before retry.", page: "tasks" as const, tone: "rose" } : null,
+    failedCommands > 0 ? { id: "commands", label: String(failedCommands) + " recent failed command" + (failedCommands === 1 ? "" : "s"), detail: "Failures from the last 15 minutes; inspect receipts and never blind-retry ambiguous effects.", page: "observability" as const, tone: "rose" } : null,
     mirrorAttention ? { id: "mirror", label: "Mirror " + (mirror?.mode ?? "unknown"), detail: "Outbox " + String(mirror?.pending ?? 0) + (mirror?.last_error ? " · " + mirror.last_error.slice(0, 90) : ""), page: "observability" as const, tone: "amber" } : null,
     offlineWorkers > 0 ? { id: "workers", label: String(offlineWorkers) + " offline worker" + (offlineWorkers === 1 ? "" : "s"), detail: "Worker registry reports offline capacity.", page: "compute" as const, tone: "amber" } : null,
     budgetPct >= 75 ? { id: "budget", label: "Command budget " + String(budgetPct) + "%", detail: String(budgetUsed) + "/" + String(budgetLimit) + " cost units used in the current window.", page: "system" as const, tone: "amber" } : null,
