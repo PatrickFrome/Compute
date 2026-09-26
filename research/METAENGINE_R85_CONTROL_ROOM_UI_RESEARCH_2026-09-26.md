@@ -305,6 +305,96 @@ R85 now makes compact BrowserStage chrome deterministic and reserves it in main-
 
 This turns COMMAND into a true hybrid workbench: ME2 owns controls and context, while the native Browser owns only the page viewport. The same constants are tested against `planShellLayout()`, so CSS/main-process geometry drift fails CI instead of silently hiding controls.
 
+
+
+## 6.2 Third critical audit delta — 2026-09-26 21:44 UTC
+
+This pass re-established source-of-truth from the current R85 branch **and** independently re-read the still-installed R84 Browser state. The installed bytes remain `0.7.0-dev.3.1`; therefore source fixes below are not claimed as physical R85 proof yet.
+
+### Live runtime evidence
+
+- Native Browser heartbeat remained current; runtime is `native-electron-supervisor-v1`, CONTROL, armed.
+- Compute remained HEALTHY and available.
+- Fleet remained 4 ACTIVE / 0 LOST / 0 BOUND_UNVERIFIED.
+- Host resilience remained ACTIVE with a healthy Sentinel worker.
+- Browser self-update remained fail-closed in `AMBIGUOUS_INSTALL` with `automatic_retry_allowed=false` and `restart_gate_safe=false`; the audit did not retry it.
+- Supervisor keepalive remained `ROLLOVER_AMBIGUOUS` with `ROLLOVER_ERROR:supervisor_composer_not_unique`; installed R84 does not contain the R85 semantic/composer corrections yet, so no blind rollover retry was issued.
+
+### Source audit findings that survived the second R85 pass
+
+**1. TASKS had cross-domain control-plane leakage.**  
+Although the architecture says Browser controls belong to COMMAND/BROWSER and Mirror belongs to OBSERVABILITY, TASKS still mounted its own browser-tab poll, live/steering toggles and MirrorPanel. This duplicated state, created another 15s browser polling loop and made the task page responsible for unrelated infrastructure.
+
+R85 now removes that entire Browser/Mirror strip from TASKS. TASKS owns branch graph, queue and retry metrics only. The selected task branch view is persisted in `me2.tasks.branch-view.v1`, following the same preference model used by professional tools instead of reconstructing the view every time the page is remounted.
+
+**2. Persistent chrome still repeated the same facts in three places.**  
+Task counts appeared in TopBar and StatusBar; mirror degradation appeared in Attention Center and StatusBar. The result was a smaller R74 dashboard rather than true low-entropy chrome.
+
+R85 now keeps TopBar for identity/context/search/Attention/transport, while StatusBar holds compact operational navigation. Mirror failure is owned by Attention + OBSERVABILITY, not repeated globally.
+
+**3. Cached state was presented as live runtime.**  
+StatusBar used the presence of `snap` to render `runtime live`. A disconnected socket can leave a valid cached snapshot, so this label was semantically wrong. It now renders `runtime live | runtime cached | runtime offline` from transport state plus snapshot presence.
+
+**4. A native shell intent bypassed the ME2 overlay/composition model.**  
+The `open-site-prompt` event used `window.prompt`. That prompt was outside the ME2 design system, outside normal semantic composition, and did not participate in the renderer/native-WebContents overlay state.
+
+R85 replaces it with a real global `OpenSiteDialog`. Only http/https is accepted. The dialog uses the same presentation overlay path that temporarily yields the native Browser surface, and it calls the existing Desktop tab API without adding scheduler/update/release authority.
+
+**5. Task Sheet had a render-time timer side effect.**  
+The component called `setTimeout(...scrollIntoView...)` directly during render whenever a task detail existed. Re-renders could therefore accumulate unnecessary timers. It now uses a post-commit `useEffect + requestAnimationFrame`, keyed by task identity and stream length, with cancellation.
+
+**6. Command authority existed but was visually abbreviated.**  
+Registry actions displayed the lane as the first four characters. This made the strongest control boundary less explicit exactly where agents/operators select actions. R85 now renders the full authority lane text (`READ ONLY / CONTROL / MUTATION / EMERGENCY`) with text + border semantics and accessible label, rather than relying on color or abbreviation.
+
+### 2026 reference synthesis
+
+**DaVinci Resolve 21** continues to organize the application as dedicated task Pages with one-click switching. This supports the strict domain rule now enforced in TASKS: a Page should own its task workflow, not accumulate Browser/Observability controls merely because those data are available.  
+https://www.blackmagicdesign.com/products/davinciresolve/
+
+**VS Code** keeps a dominant editor/work surface with sidebars, Panel, Status Bar and configurable visibility, while Command Palette remains a universal access point. This supports a low-entropy global shell plus optional secondary context rather than permanent telemetry everywhere.  
+https://code.visualstudio.com/docs/editing/getting-started/userinterface
+
+**JetBrains 2026.2 New UI** explicitly targets reduced visual complexity and progressive disclosure; Compact Mode reduces toolbar/header heights, spacing, padding, icons and buttons. R85's 42/36/22 chrome and flat panes follow that direction without hiding operational state.  
+https://www.jetbrains.com/help/idea/new-ui.html
+
+**Chrome DevTools** uses a Drawer so a secondary tool (for example Quick Source) can remain available while the operator works in another primary panel, and its Command Menu provides fast navigation/actions. The next R85 composition slice should use a contextual Drawer/Inspector for secondary logs/details instead of adding permanent columns.  
+https://developer.chrome.com/docs/devtools/quick-source  
+https://developer.chrome.com/docs/devtools/command-menu
+
+**Cursor** exposes agents in a sidepane and separates Agent/Ask/Plan/Debug and execution/approval behavior. The relevant METAENGINE lesson is not the branding of modes but explicit capability visibility: an operator should see what an agent/action is permitted to do.  
+https://cursor.com/docs/agent/overview  
+https://prod.cursor.com/docs/agent/security/run-modes
+
+**GitHub Copilot app (current)** runs several isolated agent sessions in parallel, each with its own branch/worktree or cloud sandbox, and makes Interactive/Plan/Autopilot plus model/reasoning settings explicit per session. METAENGINE's AGENTS/SUPERVISOR UI should converge toward the same direct session-state/authority visibility rather than forcing inspection through logs.  
+https://docs.github.com/en/copilot/concepts/agents/github-copilot-app  
+https://docs.github.com/en/copilot/how-tos/github-copilot-app/agent-sessions
+
+**Windsurf Arena** runs multiple Cascade sessions independently, with a separate worktree for each model, then allows convergence on a chosen approach. Cascade Hooks also make pre-action blocking controls explicit for reads, writes, commands and MCP. This validates two METAENGINE directions: visible isolated parallel lanes and first-class pre-effect guardrails.  
+https://docs.windsurf.com/windsurf/cascade/arena  
+https://docs.windsurf.com/windsurf/cascade/hooks
+
+**Linear** persists display options (layout/group/order/properties) as personal or workspace defaults and separates Priority notifications from ordinary updates. R85 now starts applying that model to TASKS view persistence and Attention Center.  
+https://linear.app/docs/display-options  
+https://linear.app/docs/inbox
+
+**Temporal** uses Compact, Timeline and Full History to expose high-value grouped state first while retaining full low-level history for debugging; current Cloud UI also has Saved Views. R85 already applies compact grouping to Event Log; the next step is saved operator views, not additional cloned monitoring panels.  
+https://temporal.io/blog/the-dark-magic-of-workflow-exploration  
+https://temporal.io/changelog/product-area/ui
+
+**Ray Dashboard** separates operational questions into Metrics/Cluster/Jobs/Logs/Serve rather than building one universal telemetry page. This reinforces the current TASKS/COMPUTE/OBSERVABILITY boundary.  
+https://docs.ray.io/en/latest/ray-observability/getting-started.html
+
+**Blender 5.2** models a Workspace as a task-specific arrangement of Areas/Editors and allows workspace duplication/reordering/persistence. METAENGINE should keep Page = functional domain and evolve Workspace = saved arrangement/preferences.  
+https://docs.blender.org/manual/en/latest/interface/window_system/workspaces.html
+
+**Grafana** recommends dynamic dashboards driven by variables to reduce dashboard sprawl. The analogous METAENGINE move is Saved Views/variables inside OBSERVABILITY and COMPUTE, not more global KPI copies.  
+https://grafana.com/docs/learning-paths/interactive-dashboards/
+
+### Next high-value UI slice
+
+The remaining architectural gap is **Workspace = real layout**, not merely `{page, label, hint}`. The safe implementation should introduce persisted pane/view preferences first, then resizable native-aware panes only after geometry is represented in main-process layout contracts. The other priority is a contextual Drawer/Inspector shared by task detail, logs and Browser diagnostics. Both must preserve the established rule: renderer presentation may alter layout, but it does not gain Browser command, scheduler, update or release authority.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
