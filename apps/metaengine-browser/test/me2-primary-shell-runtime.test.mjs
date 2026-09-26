@@ -79,3 +79,20 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
   assert.match(integration, /return await startPromise/);
   assert.match(integration, /finally \{[\s\S]*startPromise = null/);
 });
+
+
+test('installed ME2 renderer attests the concrete R75 DOM composition through trusted preload only', () => {
+  for (const id of ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']) {
+    assert.match(preload, new RegExp(id));
+    assert.match(main, new RegExp(id));
+  }
+  assert.match(preload, /metaengine:shell:ui-contract-readback/);
+  assert.match(preload, /metaengine\.browser\.me2-ui-contract-readback\.v1/);
+  assert.match(main, /ME2_R75_UI_CONTRACT_CONFIRMED/);
+  assert.match(main, /ME2_R75_UI_CONTRACT_INCOMPLETE/);
+  assert.match(main, /legacy_shell_is_normal_path:\s*false/);
+  assert.match(main, /scheduler_authority:\s*false/);
+  assert.match(main, /browser_command_authority:\s*false/);
+  assert.match(main, /update_authority:\s*false/);
+  assert.match(main, /release_authority:\s*false/);
+});
