@@ -17,24 +17,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, MessageSquarePlus, PanelLeft, Search, Shield } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useMe2 } from "@/components/me2/store";
-import { me2Fetch, toastBus, sendCommand, loadBrowserTabs, type BrowserTab } from "@/lib/me2-bus";
+import { toastBus, sendCommand, loadBrowserTabs, type BrowserTab } from "@/lib/me2-bus";
 import { agentChatOp } from "@/lib/me2-socket";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
-
-// ── типы (зеркало daemon: agentchat.ts) ─────────────────────────────────────────
-type ChatSession = {
-  id: string; agent_id: string; title: string; status: "ACTIVE" | "CLOSED";
-  state: "IDLE" | "THINKING"; summary: string; compactions: number;
-  turns_ok: number; turns_fail: number; fail_streak: number;
-  last_error: string | null; model: string; objective: string;
-  created_at: string; updated_at: string;
-  outcome_status: string | null; outcome_proof: string | null; outcome_at: string | null;
-  role: string;
-};
-type ChatStatus = { total: number; active: number; thinking: number; supervisors: number; turns_ok: number; turns_fail: number; compactions: number; degraded: number; in_flight: number };
+import { useAgentChatSessions, type AgentChatSession } from "@/hooks/use-agentchat-sessions";
 
 // ── выбор вкладки chat.z.ai под сессию (url∋id → title → единственная z.ai) ─────
-async function openAgentTab(s: ChatSession): Promise<void> {
+async function openAgentTab(s: AgentChatSession): Promise<void> {
   const tabs: BrowserTab[] = await loadBrowserTabs();
   if (tabs.length === 0) {
     toastBus({ title: "браузер daemon пуст", description: `вкладка для «${s.title}» не найдена — «+» в адресной строке откроет z.ai` });
@@ -59,29 +48,18 @@ async function openAgentTab(s: ChatSession): Promise<void> {
 function AgentSidebar() {
   const setChatId = useMe2((s) => s.setChatId);
   const chatId = useMe2((s) => s.chatId);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [status, setStatus] = useState<ChatStatus | null>(null);
+  const { sessions, status, refresh } = useAgentChatSessions();
   const [creating, setCreating] = useState(false);
   const [q, setQ] = useState("");
   const initialPick = useRef(false);
 
   useEffect(() => {
-    let dead = false;
-    const load = async () => {
-      const d = await me2Fetch<{ sessions: ChatSession[]; status: ChatStatus }>("/agentchat?XTransformPort=3041");
-      if (!dead && d) {
-        setSessions(d.sessions ?? []);
-        setStatus(d.status ?? null);
-        // первый заход: подсветить первого активного агента локально (без смены
-        // выбранной вкладки daemon — вкладку переключает только явный клик)
-        const first = (d.sessions ?? []).find((s) => s.status === "ACTIVE");
-        if (!initialPick.current && first) { initialPick.current = true; setChatId(first.id); }
-      }
-    };
-    void load();
-    const iv = window.setInterval(() => { void load(); }, 5000);
-    return () => { dead = true; window.clearInterval(iv); };
-  }, [setChatId]);
+    const first = sessions.find((s) => s.status === "ACTIVE");
+    if (!initialPick.current && first) {
+      initialPick.current = true;
+      setChatId(first.id);
+    }
+  }, [sessions, setChatId]);
 
   const createChat = useCallback(async () => {
     if (creating) return;
@@ -92,11 +70,12 @@ function AgentSidebar() {
       if (r.ok && r.session) {
         setChatId(String(r.session.id));
         toastBus({ title: "чат-агент создан ✓", description: `сессия ${String(r.session.id).slice(0, 16)}` });
+        void refresh();
       } else {
         toastBus({ title: "чат не создан ✗", description: String(r.error ?? "daemon недоступен"), variant: "destructive" });
       }
     } finally { setCreating(false); }
-  }, [creating, setChatId]);
+  }, [creating, refresh, setChatId]);
 
   const active = useMemo(() => sessions.filter((s) => s.status === "ACTIVE"), [sessions]);
   const filtered = useMemo(() => {
@@ -247,20 +226,8 @@ export function CommandPage() {
 
 // текущий агент: точка + имя + модель + честный исход — одна строка
 function CurrentAgent({ chatId }: { chatId: string | null }) {
-  const [sess, setSess] = useState<ChatSession | null>(null);
-  useEffect(() => {
-    if (!chatId) return;
-    let dead = false;
-    const load = async () => {
-      const d = await me2Fetch<{ sessions: ChatSession[] }>("/agentchat?XTransformPort=3041");
-      if (!dead && d) {
-        setSess((d.sessions ?? []).find((x) => x.id === chatId) ?? null);
-      }
-    };
-    void load();
-    const iv = window.setInterval(() => { void load(); }, 5000);
-    return () => { dead = true; window.clearInterval(iv); };
-  }, [chatId]);
+  const { sessions } = useAgentChatSessions();
+  const sess = chatId ? sessions.find((x) => x.id === chatId) ?? null : null;
 
   if (!chatId || !sess) {
     return <span className="truncate text-[12px] text-zinc-600" data-testid="cc-current-agent">агент не выбран</span>;
