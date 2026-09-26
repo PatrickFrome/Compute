@@ -71,6 +71,17 @@ const LANE_CHIP = (lane: string) =>
 
 const etaOf = (c: Command, nowMs: number) => `${Math.max(1, Math.ceil(((c.run_after ?? 0) - nowMs) / 1000))}s`;
 
+type EventViewPresetKey = "attention" | "all" | "tasks" | "fleet" | "commands" | "custom";
+const EVENT_VIEW_PRESET_LS = "me2.obs.events.preset.v1";
+const EVENT_VIEW_PRESETS: Array<{ key: Exclude<EventViewPresetKey, "custom">; label: string; lane: string; attentionOnly?: boolean }> = [
+  { key: "attention", label: "attention", lane: "ALL", attentionOnly: true },
+  { key: "all", label: "all", lane: "ALL" },
+  { key: "tasks", label: "tasks", lane: "TASK" },
+  { key: "fleet", label: "fleet", lane: "AGENT" },
+  { key: "commands", label: "commands", lane: "COMMAND" },
+];
+const EVENT_ATTENTION_TOKENS = ["FAILED", "ERROR", "AMBIGUOUS", "BLOCKED", "DEGRADED", "REJECTED", "OFFLINE"];
+
 // вердикты bench/eval → единый словарь состояний (§9)
 const benchState = (v: string): SysState => (v === "PASS" ? "LIVE" : v === "FAIL" ? "Failed" : "WARMUP");
 const evalState = (v: string): SysState => (v === "PASS" ? "Completed" : v === "FAIL" ? "Failed" : "Degraded");
@@ -99,6 +110,7 @@ function EventLogPanel() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState("");
   const [laneFilter, setLaneFilter] = useState("ALL");
+  const [viewPreset, setViewPreset] = useState<EventViewPresetKey>("attention");
   const logRef = useRef<HTMLDivElement | null>(null);
   const [frozenSeq, setFrozenSeq] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
@@ -108,6 +120,31 @@ function EventLogPanel() {
       const saved = localStorage.getItem("me2.obs.events.view.v1");
       if (saved === "compact" || saved === "full") setViewMode(saved);
     } catch { /* private mode */ }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
+      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) {
+        setViewPreset(saved);
+        const preset = EVENT_VIEW_PRESETS.find((item) => item.key === saved);
+        if (preset) setLaneFilter(preset.lane);
+      }
+    } catch { /* private mode */ }
+  }, []);
+
+  const applyViewPreset = useCallback((key: Exclude<EventViewPresetKey, "custom">) => {
+    const preset = EVENT_VIEW_PRESETS.find((item) => item.key === key);
+    if (!preset) return;
+    setViewPreset(key);
+    setLaneFilter(preset.lane);
+    setFilter("");
+    try { localStorage.setItem(EVENT_VIEW_PRESET_LS, key); } catch { /* private mode */ }
+  }, []);
+
+  const markCustomView = useCallback(() => {
+    setViewPreset("custom");
+    try { localStorage.setItem(EVENT_VIEW_PRESET_LS, "custom"); } catch { /* private mode */ }
   }, []);
 
   const changeViewMode = useCallback((mode: "compact" | "full") => {
@@ -135,12 +172,18 @@ function EventLogPanel() {
     let list = display;
     const lane = EVENT_FILTERS.find((f) => f.key === laneFilter);
     if (lane?.prefix) list = list.filter((e) => e.type.startsWith(lane.prefix));
+    if (viewPreset === "attention") {
+      list = list.filter((event) => {
+        const haystack = `${event.type} ${event.data ?? ""}`.toUpperCase();
+        return EVENT_ATTENTION_TOKENS.some((token) => haystack.includes(token));
+      });
+    }
     if (filter.trim()) {
       const f = filter.toLowerCase();
       list = list.filter((e) => e.type.toLowerCase().includes(f) || (e.data ?? "").toLowerCase().includes(f));
     }
     return list;
-  }, [display, laneFilter, filter]);
+  }, [display, laneFilter, filter, viewPreset]);
 
   const grouped = useMemo(() => {
     if (viewMode === "full") return filtered.map((event) => ({ event, count: 1 }));
@@ -168,8 +211,26 @@ function EventLogPanel() {
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 pb-2">
+          <div className="flex items-center gap-1" role="group" aria-label="Operator event views" data-testid="event-view-presets">
+            {EVENT_VIEW_PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                onClick={() => applyViewPreset(preset.key)}
+                aria-pressed={viewPreset === preset.key}
+                className={`border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide ${
+                  viewPreset === preset.key
+                    ? "border-cyan-900/80 bg-cyan-950/30 text-cyan-300"
+                    : "border-transparent text-zinc-600 hover:border-zinc-800 hover:text-zinc-300"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+            {viewPreset === "custom" ? <span className="px-1 font-mono text-[8px] uppercase text-zinc-600">custom</span> : null}
+          </div>
           <Input
-            value={filter} onChange={(e) => setFilter(e.target.value)}
+            value={filter} onChange={(e) => { setFilter(e.target.value); markCustomView(); }}
             placeholder="фильтр: тип или данные…"
             className="h-7 min-w-28 flex-1 border-zinc-800 bg-zinc-900 font-mono text-[11px]"
           />
@@ -177,7 +238,7 @@ function EventLogPanel() {
             {EVENT_FILTERS.map((f) => (
               <button
                 key={f.key}
-                onClick={() => setLaneFilter(f.key)}
+                onClick={() => { setLaneFilter(f.key); markCustomView(); }}
                 className={`rounded px-1.5 py-0.5 text-[10px] transition ${laneFilter === f.key ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"}`}
               >
                 {f.label}
