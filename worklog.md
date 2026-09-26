@@ -9937,3 +9937,29 @@ Work Log:
 Stage Summary:
 - БД теперь git-трекается и уезжает на GitHub при каждом cron-sync (git add -A) — непрерывный бэкап
 - схема БД остаётся контролируемой prisma/schema.prisma; крупные/секретные .db по-прежнему вне трека по умолчанию
+---
+Task ID: R80
+Agent: Super-Z (cron Job 413338, 2026-09-27 06:52)
+Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
+
+Work Log:
+- .github.env валиден (GITHUB_TOKEN_ADMIN присутствует) → scripts/push-pending-r80.sh исполнен
+- main → sandbox/me2-os: b751deff..591b11a4, ff-push ok
+- архивы: me2/archive-r21-sandbox-snapshot (73486ddf) up-to-date, me2/archive-v040-main-archive (c95de219) up-to-date
+- ls-remote верификация: sandbox/me2-os = 591b11a4 ≡ local HEAD; дерево чистое
+- секреты не печатались и не логировались
+
+Stage Summary:
+- вся локальная state опубликована (DONE: all local state published); следующий цикл стартует с 591b11a4
+---
+Task ID: EV-HEARTBEAT-V2.1
+Agent: Super-Z (операторская директива «критический анализ скрипта + улучшение»)
+Task: аудит и апгрейд scripts/phoenix/phoenix-heartbeat.sh (v2.0 → v2.1)
+
+Work Log:
+- аудит v2.0: off-by-one в awk (substr($0,8)→7 — съедалась 1-я буква Task в дайджесте); 4 бессмысленных SB-fail каждые 30 мин при проблемных кредах; нет retry и flock (worst-case рантайм > 30мин интервала → параллельные инстансы); двойной '000' при сбое curl; refusal-коды не различались; Supabase versioned/ рос бесконечно; отказы cp глотались молча; phoenix.log без ротации; пустой worklog затирал дайджест
+- v2.1: все 9 пунктов закрыты; контракт stdout 'heartbeat ok: ...' сохранён; bash -n ok; прогон: heartbeat ok v=2.1, cp=11 sync=8, vault/latest ≡ local sha
+- известный блокер сохраняется: sb=6fail (JWT невалиден — JWT pending operator), versioned-ротация активируется при появлении валидного JWT
+
+Stage Summary:
+- heartbeat v2.1 в scripts/phoenix/ + vault/latest; cron-payload задачи 416629 всё ещё несёт v2.0 (обновить payload при следующей правке cron)

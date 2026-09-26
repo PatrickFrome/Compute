@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# phoenix-heartbeat.sh v2.0 — внешняя пульсация контекста (reset-immune)
+# phoenix-heartbeat.sh v2.1 — внешняя пульсация контекста (reset-immune)
 # ----------------------------------------------------------------------------
 # КАЖДЫЕ 30 МИН (cron PHX-HEARTBEAT): выносит контекст за пределы песочницы:
 #   1. Строит /home/z/my-project/CONTEXT-CURRENT.md — digest «как получить
@@ -12,8 +12,32 @@
 # Секрета не печатает и не логирует. Самодостаточен (только bash+curl) —
 # полный текст встроен в cron-задачу PHX-HEARTBEAT (феникс-свойство:
 # при wipe песочницы cron пересоздаёт скрипт из payload).
+#
+# v2.1 changelog (критический аудит v2.0):
+#   + flock: защита от параллельного запуска (30мин интервал < worst-case рантайма)
+#   + fast-path: без SU/SJ — весь Supabase-блок пропускается (sb=disabled),
+#     вместо 4 бессмысленных fail'ов и спама в журнале каждые 30 мин
+#   + sb_up: 3 попытки с backoff для 000/5xx (одиночный сетевой чих больше
+#     не портит весь цикл); max-time 90s; убран двойной '000' при сбое curl;
+#     401/403 → мгновенное отключение Supabase до следующего запуска
+#   + fix off-by-one в awk-парсере секций (substr($0,8)→substr($0,7)):
+#     первая буква Task-строки больше не съедается в дайджесте
+#   + при отсутствии/усечении worklog дайджест НЕ перезаписывается пустышкой,
+#     инцидент пишется в incidents.log (не деградируем recovery-материал)
+#   + отказы зеркалирования (cp) логируются, а не глотаются молча
+#   + ротация Supabase versioned/ старше 21 дня (раз в сутки, best-effort):
+#     бакет больше не растёт бесконечно
+#   + ротация phoenix.log (keep last 1000 строк)
 # ============================================================================
 set -u
+
+# --- одиночный инстанс (worst-case рантайм > интервала cron) ---
+LOCK="/tmp/.phx-heartbeat.lock"
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOCK" || true
+  flock -n 9 || { echo "heartbeat FAIL: параллельный инстанс ещё работает"; exit 0; }
+fi
+
 PROJ="/home/z/my-project"
 VAULT="/home/z/context-vault"
 ENVF="/tmp/my-project/.a2-backup/me2.env.20260922"
@@ -39,13 +63,26 @@ SU=""; SJ=""
   SU="$(grep -oE '^SUPABASE_URL=.*' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r\n \"')"
   SJ="$(grep -oE '^SUPABASE_SERVICE_ROLE_JWT=.*' "$ENVF" | head -1 | cut -d= -f2- | tr -d '\r\n \"')"
 }
-sb_up() { # $1=local file $2=object name -> prints http code
+SB_ENABLED=1;  [ -n "$SU" ] && [ -n "$SJ" ] || SB_ENABLED=0
+SB_AUTH_BROKEN=""
+
+sb_up() { # $1=local file $2=object name -> prints http code (3 попытки, backoff)
   [ -n "$SU" ] && [ -n "$SJ" ] && [ -s "$1" ] || { echo "000"; return; }
-  curl -s -o /dev/null -w '%{http_code}' -X POST \
-    -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
-    -H "x-upsert: true" -H "Content-Type: text/markdown" \
-    --data-binary @"$1" --max-time 180 \
-    "$SU/storage/v1/object/me2-evidence/context-vault/$2" 2>/dev/null || echo "000"
+  local code="" try
+  for try in 1 2 3; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+      -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
+      -H "x-upsert: true" -H "Content-Type: text/markdown" \
+      --data-binary @"$1" --max-time 90 \
+      "$SU/storage/v1/object/me2-evidence/context-vault/$2" 2>/dev/null)"
+    code="${code:-000}"
+    case "$code" in
+      200) echo "200"; return ;;
+      000|5*) [ "$try" -lt 3 ] && sleep $((try*5)) ;;
+      *) break ;;  # 4xx и прочее — ретраи бессмысленны
+    esac
+  done
+  echo "${code:-000}"
 }
 
 # =========================================================
@@ -54,7 +91,7 @@ sb_up() { # $1=local file $2=object name -> prints http code
 if [ -s "$WL" ]; then
   wlsz="$(size_of "$WL")"; wlln="$(wc -l < "$WL" | tr -d ' ')"; wlsha="$(sha_of "$WL")"
   {
-    echo "# PHOENIX CONTEXT DIGEST (auto, heartbeat v2.0)"
+    echo "# PHOENIX CONTEXT DIGEST (auto, heartbeat v2.1)"
     echo ""
     echo "gen: $(date -u '+%Y-%m-%dT%H:%M:%SZ') | worklog: ${wlsz}B / ${wlln}L | sha12=${wlsha:0:12}"
     echo ""
@@ -79,13 +116,17 @@ if [ -s "$WL" ]; then
     echo "- CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B"
     echo ""
     echo "## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)"
-    awk '/^Task ID: /{tid=substr($0,10)} /^Task: /{if(tid!=""){print "- " tid " → " substr($0,8); tid=""}}' "$WL" | tail -15
+    awk '/^Task ID: /{tid=substr($0,10)} /^Task: /{if(tid!=""){print "- " tid " → " substr($0,7); tid=""}}' "$WL" | tail -15
     echo ""
     echo "## ХВОСТ worklog (последние 40 строк, вербатим)"
     echo '```'
     tail -40 "$WL"
     echo '```'
   } > "$DIG.tmp" && mv "$DIG.tmp" "$DIG"
+else
+  # v2.1: не затираем хороший дайджест пустышкой — фиксируем инцидент
+  echo "[$ts] HB-WL-MISSING: worklog отсутствует/пуст — дайджест сохранён прежний, нужен restore --merge" \
+    >> "$VAULT/journal/incidents.log" 2>/dev/null || true
 fi
 
 # =========================================================
@@ -103,9 +144,12 @@ for pair in "$WL:$VAULT/latest/worklog.md" "$CTX:$VAULT/latest/CONTEXT.md" \
             "$VAULT/journal/incidents.log:$VAULT/latest/journal-incidents.log"; do
   src="${pair%%:*}"; dst="${pair#*:}"
   [ "$src" = "$dst" ] && continue
-  [ -s "$src" ] && cp "$src" "$dst" 2>/dev/null && cp_ok=$((cp_ok+1)) || true
-  [ -s "$src" ] && { cp "$src" "$TMPM/$(basename "$dst")" 2>/dev/null || true; \
-                     cp "$src" "$PFSM/$(basename "$dst")" 2>/dev/null || true; }
+  if [ -s "$src" ]; then
+    if cp "$src" "$dst" 2>/dev/null; then cp_ok=$((cp_ok+1))
+    else echo "[$ts] HB-MIRROR-FAIL dst=$dst" >> "$LOG" 2>/dev/null || true; fi
+    cp "$src" "$TMPM/$(basename "$dst")" 2>/dev/null || true
+    cp "$src" "$PFSM/$(basename "$dst")" 2>/dev/null || true
+  fi
 done
 
 # =========================================================
@@ -113,12 +157,20 @@ done
 # =========================================================
 sb_ok=0; sb_fail=0; sb_skip=0
 up_latest() { # $1=local $2=obj
+  [ "$SB_ENABLED" -eq 1 ] || return 0          # v2.1: fast-path без кредов
   [ -s "$1" ] || return 0
   local sum="$(sha_of "$1")" code
   if [ "$(cat "$DEDUP/$2.sha" 2>/dev/null || echo)" = "$sum" ]; then sb_skip=$((sb_skip+1)); return 0; fi
   code="$(sb_up "$1" "$2")"
-  if [ "$code" = "200" ]; then mkdir -p "$DEDUP/$(dirname "$2")"; echo "$sum" > "$DEDUP/$2.sha"; sb_ok=$((sb_ok+1))
-  else sb_fail=$((sb_fail+1)); echo "[$ts] HB-SB-FAIL $2 HTTP=$code" >> "$LOG"; fi
+  if [ "$code" = "200" ]; then
+    mkdir -p "$DEDUP/$(dirname "$2")"; echo "$sum" > "$DEDUP/$2.sha"; sb_ok=$((sb_ok+1))
+  else
+    sb_fail=$((sb_fail+1)); echo "[$ts] HB-SB-FAIL $2 HTTP=$code" >> "$LOG" 2>/dev/null || true
+    case "$code" in 401|403)  # v2.1: невалидный токен — не жжём остальные объекты
+      SB_AUTH_BROKEN="$code"; SB_ENABLED=0
+      echo "[$ts] HB-SB-AUTH-FAIL HTTP=$code — Supabase отключён до следующего запуска" >> "$LOG" 2>/dev/null || true ;;
+    esac
+  fi
 }
 up_latest "$WL" "latest/worklog.md"
 up_latest "$CTX" "latest/CONTEXT.md"
@@ -134,7 +186,7 @@ up_latest "$VAULT/latest/journal-incidents.log" "journal-incidents.log"
 
 # versioned worklog: только если sha изменился и прошло ≥3ч с прошлой версии
 ver="n"
-if [ -s "$WL" ] && [ -n "$SU" ] && [ -n "$SJ" ]; then
+if [ -s "$WL" ] && [ "$SB_ENABLED" -eq 1 ]; then
   cur="$(sha_of "$WL")"
   last="$(cat "$DEDUP/last-ver.sha" 2>/dev/null || echo x)"
   if [ "$cur" != "$last" ]; then
@@ -145,13 +197,39 @@ if [ -s "$WL" ] && [ -n "$SU" ] && [ -n "$SJ" ]; then
       if [ "$c1" = "200" ]; then
         ver="y"; echo "$cur" > "$DEDUP/last-ver.sha"; echo "$now" > "$DEDUP/last-ver.ts"
         mkdir -p "$SYNC/versioned/$ts" && cp "$WL" "$SYNC/versioned/$ts/worklog.md" 2>/dev/null || true
-        echo "[$ts] HB-VERSIONED ${ts} bytes=$(size_of "$WL")" >> "$LOG"
+        echo "[$ts] HB-VERSIONED ${ts} bytes=$(size_of "$WL")" >> "$LOG" 2>/dev/null || true
       fi
     fi
   fi
 fi
 # ротация versioned в ossfs: последние 40
 ls -1t "$SYNC/versioned" 2>/dev/null | tail -n +41 | while read -r d; do rm -rf "$SYNC/versioned/$d"; done
+
+# v2.1: ротация Supabase versioned/ старше 21 дня (раз в сутки, best-effort)
+if [ "$SB_ENABLED" -eq 1 ]; then
+  today="$(date +%Y%m%d)"
+  [ "$today" = "$(cat "$DEDUP/last-rotate.day" 2>/dev/null || echo)" ] || {
+    echo "$today" > "$DEDUP/last-rotate.day" 2>/dev/null || true
+    resp="$(curl -s --max-time 60 -X POST "$SU/storage/v1/object/list/me2-evidence" \
+      -H "Authorization: Bearer $SJ" -H "apikey: $SJ" -H "Content-Type: application/json" \
+      -d '{"prefix":"context-vault/versioned/","limit":100,"offset":0}' 2>/dev/null)" || resp=""
+    cutoff="$(date -d '21 days ago' +%Y%m%d 2>/dev/null || echo "")"
+    if [ -n "$resp" ] && [ -n "$cutoff" ]; then
+      del_n=0
+      for fpath in $(printf '%s' "$resp" | grep -oE '"name"\s*:\s*"context-vault/versioned/[^"]+"' | sed -E 's/.*"context-vault\/versioned\///; s/"$//' | sort -u); do
+        ddir="${fpath%%/*}"; dday="${ddir%%-*}"
+        case "$dday" in ''|*[!0-9]*) continue ;; esac
+        if [ "$dday" -lt "$cutoff" ] 2>/dev/null; then
+          ccode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 -X DELETE \
+            -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
+            "$SU/storage/v1/object/me2-evidence/context-vault/versioned/$fpath" 2>/dev/null)"
+          [ "$ccode" = "200" ] || [ "$ccode" = "204" ] && del_n=$((del_n+1))
+        fi
+      done
+      [ $del_n -gt 0 ] && echo "[$ts] HB-ROTATE deleted=$del_n (age>21d)" >> "$LOG" 2>/dev/null || true
+    fi
+  }
+fi
 
 # =========================================================
 # 4. ossfs mirror (latest/)
@@ -166,5 +244,17 @@ if [ -d "$SYNC/latest" ]; then
   done
 fi
 
-echo "[$ts] HB bytes=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb_ok=$sb_ok sb_fail=$sb_fail ver=$ver sync=$sync_ok" >> "$LOG"
-echo "heartbeat ok: wb=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb=${sb_ok}ok/${sb_fail}fail/${sb_skip}skip ver=$ver sync=$sync_ok cp=$cp_ok"
+# v2.1: ротация собственного журнала (keep last 1000 строк)
+if [ -f "$LOG" ] && [ "$(wc -l < "$LOG" 2>/dev/null || echo 0)" -gt 2000 ]; then
+  tail -n 1000 "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" 2>/dev/null || true
+fi
+
+echo "[$ts] HB bytes=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb_ok=$sb_ok sb_fail=$sb_fail ver=$ver sync=$sync_ok" >> "$LOG" 2>/dev/null || true
+if [ "$SB_ENABLED" -eq 0 ]; then
+  sbstat="disabled"
+elif [ -n "$SB_AUTH_BROKEN" ]; then
+  sbstat="auth-fail(HTTP $SB_AUTH_BROKEN)"
+else
+  sbstat="${sb_ok}ok/${sb_fail}fail/${sb_skip}skip"
+fi
+echo "heartbeat ok: wb=$(size_of "$WL") sha12=$(sha_of "$WL" | cut -c1-12) sb=$sbstat ver=$ver sync=$sync_ok cp=$cp_ok v=2.1"

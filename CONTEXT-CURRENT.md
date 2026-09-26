@@ -1,6 +1,6 @@
-# PHOENIX CONTEXT DIGEST (auto, heartbeat v2.0)
+# PHOENIX CONTEXT DIGEST (auto, heartbeat v2.1)
 
-gen: 2026-09-26T22:48:46Z | worklog: 1835391B / 9939L | sha12=61087698abd7
+gen: 2026-09-26T22:59:43Z | worklog: 1836224B / 9953L | sha12=3f89bcee6a8c
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -8,7 +8,7 @@ gen: 2026-09-26T22:48:46Z | worklog: 1835391B / 9939L | sha12=61087698abd7
 3. Прочитай хвост /home/z/my-project/worklog.md (последние 150+ строк) — канонический журнал ВСЕХ чатов
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1835391B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1836224B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -23,38 +23,24 @@ gen: 2026-09-26T22:48:46Z | worklog: 1835391B / 9939L | sha12=61087698abd7
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- EVOLVE-ROUND-8 (implemented-EV-FOOTER, engine v1.14→v1.15) → elf-evolve round 8 — EV-FOOTER (footer-навигация для мобильных + back-to-top + uptime в vitals)
-- R80-PUSH-J → �роверка блокера публикации; при наличии GITHUB_TOKEN_ADMIN — push-pending-r80 (main→sandbox/me2-os + 2 архив-ветки), верификация ls-remote, запись результата
-- R80-PUSH-K → �овторный PAT-watcher прогон: push-pending-r80 (main→sandbox/me2-os + 2 архив-ветки), верификация ls-remote
-- R80-PUSH-L → AT-watcher прогон: push-pending-r80
-- EVOLVE-ROUND-9 (implemented-EV-TOPO, engine v1.15→v1.16) → V-TOPO — доменная группировка 12 панелей в 3 домена Runtime/Convergence/Evidence (Phase-2 из UI-аудита); устранить разрыв «движок планирует, агент не реализует»
-- EVOLVE-ROUND-8 (implemented-EV-TOPO, engine v1.15→v1.17) → V-TOPO — доменная топология: 15 панелей → 3 домена Runtime/Convergence/Evidence со sticky-заголовками (Phase-2 UI-аудита)
-- R80-PUSH-M → AT-watcher прогон: push-pending-r80
-- R80-PUSH-N → AT-watcher прогон: push-pending-r80 (main→sandbox/me2-os ff + 2 архив-ветки), верификация ls-remote
-- EVOLVE-ROUND-9 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
-- EV-RESPONSIVE (implemented, round 9, engine v1.19→v1.20) → V-RESPONSIVE — mobile-first аудит Mission Control: брейкпоинты sm/md/lg, touch-цели >=44px
-- EVOLVE-ROUND-10 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-TOASTS] toast-фидбек на все мутирующие действия клиента (use-toast)
-- R80-DESKTOP-1A-20260927 → E2-раунд: self-evolve тик + аудит + desktop-клиент (me2/r78-desktop-from-scratch): GAP #1a activation/handoff/qualification
-- R80-PUSH-Q → ush-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (GITHUB_TOKEN_ADMIN на месте)
-- R80-PUSH-20260927-0627 → ush main→sandbox/me2-os + 2 архивных ветки, ls-remote верификация
-- DB-GITHUB-20260927 → �одключить БД (db/custom.db) к GitHub-треку sandbox/me2-os
+- R80-PUSH-J → Проверка блокера публикации; при наличии GITHUB_TOKEN_ADMIN — push-pending-r80 (main→sandbox/me2-os + 2 архив-ветки), верификация ls-remote, запись результата
+- R80-PUSH-K → Повторный PAT-watcher прогон: push-pending-r80 (main→sandbox/me2-os + 2 архив-ветки), верификация ls-remote
+- R80-PUSH-L → PAT-watcher прогон: push-pending-r80
+- EVOLVE-ROUND-9 (implemented-EV-TOPO, engine v1.15→v1.16) → EV-TOPO — доменная группировка 12 панелей в 3 домена Runtime/Convergence/Evidence (Phase-2 из UI-аудита); устранить разрыв «движок планирует, агент не реализует»
+- EVOLVE-ROUND-8 (implemented-EV-TOPO, engine v1.15→v1.17) → EV-TOPO — доменная топология: 15 панелей → 3 домена Runtime/Convergence/Evidence со sticky-заголовками (Phase-2 UI-аудита)
+- R80-PUSH-M → PAT-watcher прогон: push-pending-r80
+- R80-PUSH-N → PAT-watcher прогон: push-pending-r80 (main→sandbox/me2-os ff + 2 архив-ветки), верификация ls-remote
+- EVOLVE-ROUND-9 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
+- EV-RESPONSIVE (implemented, round 9, engine v1.19→v1.20) → EV-RESPONSIVE — mobile-first аудит Mission Control: брейкпоинты sm/md/lg, touch-цели >=44px
+- EVOLVE-ROUND-10 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-TOASTS] toast-фидбек на все мутирующие действия клиента (use-toast)
+- R80-DESKTOP-1A-20260927 → ME2-раунд: self-evolve тик + аудит + desktop-клиент (me2/r78-desktop-from-scratch): GAP #1a activation/handoff/qualification
+- R80-PUSH-Q → push-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (GITHUB_TOKEN_ADMIN на месте)
+- R80-PUSH-20260927-0627 → push main→sandbox/me2-os + 2 архивных ветки, ls-remote верификация
+- DB-GITHUB-20260927 → подключить БД (db/custom.db) к GitHub-треку sandbox/me2-os
+- R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
----
-Task ID: R80-PUSH-Q
-Agent: Super-Z (cron Job 413338 2026-09-27 06:37)
-Task: push-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (GITHUB_TOKEN_ADMIN на месте)
-
-Work Log:
-- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались и не логировались
-- push-pending-r80.sh: main→sandbox/me2-os ff 9b94a781..f132387d (DESKTOP-1A worklog + cron-коммиты); me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
-- ls-remote verify: sandbox/me2-os=f132387d ≡ local main HEAD (rail current); DONE: all local state published
-
-Stage Summary:
-- rail sandbox/me2-os = f132387d = local main — публикация завершена; известные блокеры вне скоупа публикации: Supabase JWT pending operator (sb=0ok/4fail), R2 S3 BLOCKED
----
-Task ID: R80-PUSH-20260927-0627
 Agent: Super-Z (PAT-watcher R80, Job 413338 — запись восстановлена задним числом)
 Task: push main→sandbox/me2-os + 2 архивных ветки, ls-remote верификация
 
@@ -81,4 +67,18 @@ Work Log:
 Stage Summary:
 - БД теперь git-трекается и уезжает на GitHub при каждом cron-sync (git add -A) — непрерывный бэкап
 - схема БД остаётся контролируемой prisma/schema.prisma; крупные/секретные .db по-прежнему вне трека по умолчанию
+---
+Task ID: R80
+Agent: Super-Z (cron Job 413338, 2026-09-27 06:52)
+Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
+
+Work Log:
+- .github.env валиден (GITHUB_TOKEN_ADMIN присутствует) → scripts/push-pending-r80.sh исполнен
+- main → sandbox/me2-os: b751deff..591b11a4, ff-push ok
+- архивы: me2/archive-r21-sandbox-snapshot (73486ddf) up-to-date, me2/archive-v040-main-archive (c95de219) up-to-date
+- ls-remote верификация: sandbox/me2-os = 591b11a4 ≡ local HEAD; дерево чистое
+- секреты не печатались и не логировались
+
+Stage Summary:
+- вся локальная state опубликована (DONE: all local state published); следующий цикл стартует с 591b11a4
 ```
