@@ -29,6 +29,7 @@ const MAX_RESTARTS = Number(process.env.ME2_UI_MAX_RESTARTS || 6);
 const HEALTH_INTERVAL_MS = Number(process.env.ME2_UI_HEALTH_INTERVAL_MS || 20000);
 const BACKOFF_BASE_MS = 2000;
 const BACKOFF_MAX_MS = 3 * 60 * 1000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let child = null;
 let state = 'IDLE';
@@ -194,6 +195,19 @@ function scheduleRestart() {
   }, delay);
 }
 
+export async function waitForMe2UiReady({ attempts = 60, intervalMs = 250, probe = me2UiHealthProbe } = {}) {
+  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 60));
+  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 250));
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (child?.exitCode != null) return { ok: false, reason: `child_exit_${child.exitCode}`, attempt: attempt + 1 };
+    last = await probe(Math.min(1500, Math.max(250, delayMs * 4)));
+    if (last?.ok === true) return { ok: true, reason: 'READY', attempt: attempt + 1 };
+    if (attempt + 1 < maxAttempts) await sleep(delayMs);
+  }
+  return { ok: false, reason: String(last?.reason || 'readiness_timeout'), attempt: maxAttempts };
+}
+
 /** Старт хоста UI: живой UI усыновляем (порт уже отвечает), отсутствующий — спавним. */
 export async function startMe2UiHost() {
   stopped = false;
@@ -224,6 +238,18 @@ export async function startMe2UiHost() {
       state = 'STARTING';
       spawnUi(launch);
       emitRow(row({ event: 'UI_SPAWN', dir: launch.dir, source: launch.source, launch_mode: launch.launch_mode }));
+      const ready = await waitForMe2UiReady();
+      if (ready.ok) {
+        state = 'HEALTHY';
+        lastError = null;
+        lastHealthOkAt = new Date().toISOString();
+        restarts = 0;
+        emitRow(row({ event: 'UI_HEALTHY', readiness_attempt: ready.attempt }));
+      } else {
+        state = 'DEGRADED';
+        lastError = `initial_readiness_${ready.reason}`;
+        emitRow(row({ event: 'UI_INITIAL_READINESS_FAILED', reason: ready.reason, attempt: ready.attempt }), { error: true });
+      }
     }
   }
   healthTimer = setInterval(async () => {
@@ -349,7 +375,8 @@ export function me2UiHostStatus() {
     child_pid: child?.pid ?? null,
     child_owned: childOwned,
     external_adopt_authorized: externalAdoptAuthorized,
-    routing_authorized: childOwned || externalAdoptAuthorized,
+    routing_authorized: (childOwned && state === 'HEALTHY') || externalAdoptAuthorized,
+    initial_readiness_confirmed: state === 'HEALTHY' || externalAdoptAuthorized,
     stopped,
     health_url: UI_HEALTH_URL,
   };
