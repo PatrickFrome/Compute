@@ -464,6 +464,21 @@ jobs:
             $me2Output = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
             if ($me2Output -notmatch '"event":"DAEMON_HEALTHY"') { throw 'normal_ui_me2_daemon_health_readback_missing' }
             if ($me2Output -notmatch '"event":"ME2_CONTRACT_OK"') { throw 'normal_ui_me2_contract_readback_missing' }
+            # R84 primary-shell regression gate: the previous installer was a
+            # false green because ME2 was packaged/healthy while the visible
+            # Browser still loaded metaengine://shell. A healthy packaged ME2
+            # candidate must now prove the actual normal user-visible startup.
+            if ($me2Output -notmatch '"state":"ME2_PRIMARY_SHELL_VISIBLE"') {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'normal_ui_me2_primary_shell_not_visible'
+            }
+            if ($me2Output -match '"state":"LEGACY_RECOVERY_SHELL_VISIBLE"') {
+              throw 'normal_ui_legacy_shell_used_despite_packaged_me2'
+            }
+            if ($me2Output -notmatch '"legacy_shell_is_normal_path":false') {
+              throw 'normal_ui_primary_shell_contract_missing'
+            }
             if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
               throw 'normal_ui_me2_integration_degraded'
             }
@@ -473,7 +488,9 @@ jobs:
             Copy-Item $progressPath "$env:RUNNER_TEMP\browser-parent-progress-v1.json" -Force
             Copy-Item $workerHeartbeatPath "$env:RUNNER_TEMP\browser-sentinel-worker-heartbeat-v1.json" -Force
             $proof | Add-Member -NotePropertyName me2_browser_integration_verified -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'probe' -Force
+            $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'primary_me2_shell' -Force
+            $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName legacy_shell_used_on_normal_startup -NotePropertyValue $false -Force
             $proof.normal_ui_boot_verified = $true
             $proof.runtime_import_observability_verified = $true
             $proof.second_instance_activation_verified = $true
