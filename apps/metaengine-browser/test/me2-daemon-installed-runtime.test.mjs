@@ -44,6 +44,13 @@ test('source checkout remains an explicit Bun fallback only', () => {
   assert.deepEqual(launch.args, ['index.ts']);
 });
 
+test('R85 daemon staging script is parse-safe around PowerShell colon interpolation', async () => {
+  const staging = await fs.readFile(path.join(appRoot, 'scripts', 'build-me2-daemon-staging.ps1'), 'utf8');
+  assert.doesNotMatch(staging, /\\$[A-Za-z_][A-Za-z0-9_]*:/, 'PowerShell variables before colon must use ${name} delimiting');
+  assert.match(staging, /me2_daemon_source_head_mismatch:\\$\\{sourceHead\\}:\\$\\{ExpectedSourceHead\\}/);
+  assert.match(staging, /me2_daemon_version_drift:\\$\\{packageVersion\\}:\\$\\{runtimeVersion\\}/);
+});
+
 test('R85 package contract aligns daemon version and preserves one scheduler owner', async () => {
   const daemonPackage = JSON.parse(await fs.readFile(path.join(repoRoot, 'apps', 'me2-daemon', 'package.json'), 'utf8'));
   const store = await fs.readFile(path.join(repoRoot, 'apps', 'me2-daemon', 'store.ts'), 'utf8');
