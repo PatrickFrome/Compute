@@ -35,6 +35,7 @@ const me2Observability = await readFile(new URL('../../me2-ui/src/components/me2
 const me2AgentChatFeed = await readFile(new URL('../../me2-ui/src/hooks/use-agentchat-sessions.ts', import.meta.url), 'utf8');
 const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
 const me2TasksPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
+const me2Dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -267,6 +268,14 @@ test('R85 persistent chrome avoids duplicate task and mirror telemetry', () => {
   assert.doesNotMatch(me2Statusbar, /useMe2\(\(s\) => s\.mirror\)|mirrorAttention|Mirror \$\{/);
   assert.match(me2Topbar, /data-testid="attention-button"/);
   assert.match(me2Statusbar, /connected \? "runtime live" : snap \? "runtime cached" : "runtime offline"/);
+});
+
+test('R85 native open-site intent uses the ME2 overlay plane instead of window.prompt', () => {
+  assert.match(store, /type === "open-site-prompt"[\s\S]{0,240}dialog: "openSite"/);
+  assert.doesNotMatch(store, /window\.prompt\("URL сайта для нативной вкладки/);
+  assert.match(me2Dialogs, /data-testid="open-site-dialog"/);
+  assert.match(me2Dialogs, /desktop\.tabs\.openSite\(value\)/);
+  assert.match(me2Dialogs, /\^https\?:\\\/\\\//i/);
 });
 
 test('R85 page history uses a real cursor for Alt back and forward', () => {
