@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
+  ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT,
+  ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
   ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT,
   ME2_PRIMARY_COMMAND_GAP,
   ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH,
@@ -41,12 +44,26 @@ test('R75 primary shell keeps ME2 chrome and agent rail outside the native Brows
   });
   assert.equal(plan.surface_profile, 'ME2_R75_COMMAND');
   assert.equal(plan.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP);
-  assert.equal(plan.remote_bounds.y, ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT + ME2_PRIMARY_COMMAND_GAP);
+  assert.equal(
+    plan.remote_bounds.y,
+    ME2_PRIMARY_TOP_HEIGHT
+      + ME2_PRIMARY_PAGE_PADDING
+      + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT
+      + ME2_PRIMARY_COMMAND_GAP
+      + ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT
+      + ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
+  );
   assert.equal(
     plan.remote_bounds.width,
     1440 - (ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP) - ME2_PRIMARY_PAGE_PADDING,
   );
-  assert.equal(plan.reserved_bottom_height, ME2_PRIMARY_PAGEBAR_HEIGHT + ME2_PRIMARY_STATUSBAR_HEIGHT + ME2_PRIMARY_PAGE_PADDING);
+  assert.equal(
+    plan.reserved_bottom_height,
+    ME2_PRIMARY_PAGEBAR_HEIGHT
+      + ME2_PRIMARY_STATUSBAR_HEIGHT
+      + ME2_PRIMARY_PAGE_PADDING
+      + ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
+  );
   assert.equal(plan.remote_bounds.height, 960 - plan.remote_bounds.y - plan.reserved_bottom_height);
   assert.equal(plan.overlay_remote_content, false);
   assert.equal(plan.renderer_dimensions_authoritative, false);
@@ -188,6 +205,21 @@ test('R85 Command hides browser transport tuning while full Browser retains it',
   assert.match(me2BrowserStage, /compact \? \(\s*<span className="ml-auto text-zinc-600">/);
   assert.match(me2BrowserStage, /\[30, 55, 85\]\.map/);
   assert.match(me2BrowserStage, /\[480, 640, 960\]\.map/);
+});
+
+test('R85 native Browser overlays only the viewport and preserves compact Browser chrome', () => {
+  assert.match(me2BrowserStage, /compact \? "h-7 pt-1" : "pt-1\.5"/);
+  assert.match(me2BrowserStage, /compact \? "h-9 py-0" : "py-1\.5"/);
+  assert.match(me2BrowserStage, /compact \? "h-6 py-0" : "py-1"/);
+  const plan = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+  });
+  assert.ok(plan.remote_bounds.y > ME2_PRIMARY_TOP_HEIGHT + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT);
+  assert.ok(plan.reserved_bottom_height > ME2_PRIMARY_PAGEBAR_HEIGHT + ME2_PRIMARY_STATUSBAR_HEIGHT);
+  assert.equal(plan.authority_effect, false);
 });
 
 test('R85 attention and observability use progressive disclosure without effect authority', () => {
