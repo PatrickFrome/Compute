@@ -1924,3 +1924,18 @@ Work Log:
 Stage Summary:
 - Единый канонический пакет: /home/z/my-project/download/zai-chat-export-chrome-extension.zip = scripts/zai-chat-export/chrome-extension/ (v1.0.1, объединённая, протестированная).
 - Урок для линии: параллельные агенты писали в один каталог без взаимной координации — перед правками читать worklog-хвост и mtime; запись конфликта здесь закрывает расхождение.
+
+---
+Task ID: R80-ZAI-EXPORT-DOWNLINK
+Agent: Super Z (main agent)
+Task: «дай ссылку на скачивание расширения» — публикация артефактов через Preview (порт 3000).
+
+Work Log:
+- Прямой внешний URL из песочницы невозможен; использован канал Preview Panel (Next.js :3000, единственный внешний порт через Caddy).
+- Артефакты размещены в public/zai-chat-export/: zai-chat-export-chrome-extension.zip (v1.0.1, 16862b), zai-chat-export-console.js, zai-chat-export.user.js, chrome-extension-install-ru.md.
+- src/app/page.tsx: Me2Shell сохранён, добавлен фиксированный aside-панель (bottom-14 left-4, z-9999, aria-label) с 4 download-ссылками: основная зелёная «Chrome-расширение (.zip)» + консольный + userscript + инструкция; подсказка про Open in New Tab.
+- Верификация: curl — все 4 URL отдают 200 (zip = 16862b, байт-в-байт); agent-browser — 4 ссылки на месте, клик по основной → /tmp/dl-test.zip 16862b, валидный zip на 11 файлов (README.md, popup.html, background.js, ...); скриншот подтверждает рендер панели в Me2 UI без перекрытия (полировка bottom-14 после первого прогона); dev.log — GET / 200, ошибки 404 только от собственных агент-панелей Me2 (XTransformPort 3041/3043, WS OFF — штатно).
+
+Stage Summary:
+- Ссылка для оператора: открыть Preview Panel → зелёная кнопка «Chrome-расширение (.zip)» в левом нижнем углу; либо Open in New Tab + путь /zai-chat-export/zai-chat-export-chrome-extension.zip.
+- Публикация в GitHub — после возврата PAT (page.tsx + public/* в локальном main).
