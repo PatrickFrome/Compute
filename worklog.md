@@ -295,3 +295,33 @@ Backlog следующего раунда (приоритеты):
 3. R83-merge: PR #982 (CI 3/3 green, mergeable clean) — ревью оператора; после merge можно готовить controlled promotion (deploy-from-repo) с ротацией CF-токена.
 4. Mirror: операторская anchor-запись (кнопка в консоли) → auto-mirror daemon-событий в me2_event_mirror (milestone-события готовы).
 5. Мелочи: длинная история draft size (ring 4h → persist в data/); звук/тост при смене current_gate; PR #968 CI-rollup в футере.
+
+---
+Task ID: R82-STICKY-20260926
+Agent: Z.ai Code (main agent)
+Task: QA-раунд + hardening R82 exit-gate: фикс gate-flicker (sticky canary), durable draft history, донор-манифест-браузер (backlog R81-PHASE1), футер PR#968, мелкие UI-фиксы
+
+Work Log:
+- Вход-аудит: daemon 0.64.0-r82harden green, git clean @ 0a74d07, dev.log чист. Live-статус входа: gate OPERATOR_CLEAR (RELEASE_CI/MANIFEST/SELF_UPDATE/CANARY = DONE), драфт ~29.2k OVERSIZED, cycle_seq 2109 (роста нет — оператор ещё не чистил), PR #982 open/mergeable/CI 3/3 green ждёт ревью, R84-волна оператора живая (head ушёл на 79de162bf5 «ci(r84): qualify canonical BrowserCell flow end to end» прямо во время раунда, 09:08Z).
+- QA входа (agent-browser, gateway :81): 12 карточек, 0 JS-ошибок, overflowX=false @1920; на 390px найдено 2 усечённых элемента «29240 chars» без title (строки проб драфта: title ставился только при error) — исправлено: title теперь всегда (ts · canary · chars · error · источник пробы).
+- ГЛАВНЫЙ БАГ РАУНДА (найден live, исправлен): **gate-flicker** — закэшированный readback показывал current_gate=CANARY при живом OPERATOR_CLEAR. Причина: стадия CANARY пересчитывалась из ТЕКУЩЕГО rollover_reason, который осциллирует (ROOT_DRAFT_OVERSIZED ↔ ROLLOVER_ERROR:rollover_tab_never_committed ↔ моментные дыры между attempt'ами). Фикс (принцип draftCleared-sticky из R82-HARDEN, расширен): canary — исторический факт; proof-chain = live reason ∨ monitor-history scan ∨ in-process sticky set ∨ durable journal milestone R82_CANARY_CONFIRMED (log-gated, рестарт-безопасный). Live-верификация: milestone #373 записан однократно; рестарт демона → 0 дублей, gate остаётся OPERATOR_CLEAR; обе осциллирующие причины видны в observed_reasons.
+- РЕАЛИЗОВАНО durable draft history (backlog R82-HARDEN «ring 4h → persist»): каждый сэмпл appended в data/draft-history.jsonl (288 сэмплов / 24 ч), warm reload при boot (fail-open, malformed lines skip, rolling trim). Live-верификация: 5 сэмплов пережили 2 рестарта демона.
+- РЕАЛИЗОВАН донор-манифест-браузер (backlog c R81-PHASE1, «57 действий с фильтром по lane»): новая карточка «Донор-реестр · 57 действий» — статы (57/9(6f+3p)/48/16), lane-фильтр чипами (все·57 RO·25 TAB·12 GM·17 EMG·3, приоритеты в title), поиск (по имени/описанию/локальному аналогу) с кнопкой сброса, группы по lane со sticky-заголовками, per-action карточки (имя mono, cost-точки ●, desc, аналог ✓full/◐partial/pending с title-пояснениями), max-h-96 custom-scrollbar, бюджет 24/60s + priorities в футере карточки, provenance-чипы. Интерактив верифицирован: TAB→12 строк, поиск «mirror»→MIRROR_FLUSH+MIRROR_STATUS (2), сброс→57.
+- Консоль-дополнения: футер — живой PR#968 CI-rollup чип (тон по GREEN/RED/PENDING, полный CI-стейт в title); монитор — +2 спарка (ambiguous hist #f97316, p0 flags #e879f9 → 6 спарков, grid lg:cols-3); карточка EXIT GATE — блок «Canary-доказательства (sticky)» с чипами observed_reasons + source/confirmed_at; milestone-toast семейство + R82_CANARY_CONFIRMED.
+- Баг-фикс: Stat-компонент не принимал title (передавался, молча игнорировался — тултипы «rollover-попытки»/«текущая попытка» не работали) — добавлен title prop (title ?? autoTitle от string value).
+- Daemon VERSION 0.65.0-r82sticky, ROUND R82-STICKY.
+- QA финальный: lint 0/0; dev.log чист (GET / 200); daemon.log чист (boot 0.65.0); все 13 маршрутов демона 200; agent-browser чистая сессия — 0 JS-ошибок (in-page hooks, 12s pollers), 13 карточек, overflowX=false @1920 и @390, 0 усечений без title (баг «29240 chars» закрыт), футер «PR#968 CI PENDING · R82-STICKY · exit gate: OPERATOR_CLEAR»; скриншоты download/r82sticky-{desktop,mobile}.png.
+- Git: commit 100ea8b → push sandbox/me2-os через git-sync.sh (секрет-скан guard чист).
+
+Stage Summary:
+- Статус: R82 exit-gate переведён из «честный, но мигающий» в ПОЛНОСТЬЮ СХОДЯЩИЙСЯ watch: все исторические факты (self-update, canary, draft-clear) sticky + durable, gate больше не мигает при осцилляции причин. Драфт-история durable 24 ч. Донор-реестр получил полноценный браузер (последний большой UI-backlog R81-эпохи).
+- Живое состояние на конец раунда: gate OPERATOR_CLEAR (BLOCKED на операторе: Ctrl+A+Delete в new-chat композере chat.z.ai — единственное оставшееся действие R82), cycle_seq 2109, драфт ~29.2k OVERSIZED, canary-доказательства: ROOT_DRAFT_OVERSIZED + ROLLOVER_ERROR:rollover_tab_never_committed (оба sticky).
+- Операторская R84-волна: PR #968 draft, CI 38/40 (1 failed, 1 pending), head 07460389f6 «test(r84): reject API session id web bindings» — волна продолжается. PR #982 (R83 импорт) по-прежнему open/mergeable/green — ждёт ревью оператора.
+- UX-урок №: (R82-STICKY-1) любые stage-машины над ОСЦИЛЛИРУЮЩИМИ live-полями обязаны различать «текущее значение» и «исторический факт» — иначе gate мигает между опросами; (R82-STICKY-2) props, передаваемые кастомным компонентам без соотв. полей, молча теряются — React не предупреждает (в отличие от unknown DOM attrs) — ревизия call-sites обязательна при добавлении пропов.
+
+Backlog следующего раунда (приоритеты):
+1. Оператор (единственное блокирующее R82 действие): очистка account-draft на chat.z.ai → gate сойдётся сам (R82_DRAFT_CLEARED живой пробой/инференсом → R82_CYCLE_RESUMED → R82_CLOSED; карточка + тосты обновятся автоматически).
+2. R83-merge: PR #982 (open, mergeable, CI green) — ревью оператора → merge закрывает импорт-фазу; затем controlled promotion с ротацией CF-токена.
+3. Следить за R84-волной (PR #968: 1 failed check на 07460389f6 — если операторский агент не отреагирует, предложить помощь через /convergence данные).
+4. Mirror: операторская anchor-запись (кнопка готова) → auto-mirror daemon-событий в me2_event_mirror.
+5. Мелочи: донор-браузер — сортировка по cost/имени; график draft chars из durable-истории при >48 сэмплах (downsample); keyboard-навигация lane-фильтров донор-браузера.
