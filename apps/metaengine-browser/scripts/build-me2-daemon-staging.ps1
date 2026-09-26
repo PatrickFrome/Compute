@@ -65,5 +65,6 @@ $manifest = [ordered]@{
   browser_actuation_authority = $false
   authority_effect = $false
 }
-$manifest | ConvertTo-Json -Depth 5 | Set-Content $manifestPath -Encoding utf8
+$manifestJson = $manifest | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText($manifestPath, $manifestJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 Write-Host ($manifest | ConvertTo-Json -Compress)
