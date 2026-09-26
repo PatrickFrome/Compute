@@ -270,6 +270,13 @@ test('R85 persistent chrome avoids duplicate task and mirror telemetry', () => {
   assert.match(me2Statusbar, /connected \? "runtime live" : snap \? "runtime cached" : "runtime offline"/);
 });
 
+test('R85 Task Sheet schedules scroll after commit, never during render', () => {
+  assert.match(me2Dialogs, /useRef<HTMLDivElement \| null>\(null\)/);
+  assert.match(me2Dialogs, /requestAnimationFrame\(\(\) => \{/);
+  assert.match(me2Dialogs, /\[detail\?\.id, stream\.length\]/);
+  assert.doesNotMatch(me2Dialogs, /if \(detail\) setTimeout\(/);
+});
+
 test('R85 native open-site intent uses the ME2 overlay plane instead of window.prompt', () => {
   assert.match(store, /type === "open-site-prompt"[\s\S]{0,240}dialog: "openSite"/);
   assert.doesNotMatch(store, /window\.prompt\("URL сайта для нативной вкладки/);
