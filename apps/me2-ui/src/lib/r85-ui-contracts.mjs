@@ -32,7 +32,7 @@ export function zAiUrlContainsExactSession(rawUrl, rawSessionId) {
   let decoded = url.href.toLowerCase();
   try { decoded = decodeURIComponent(decoded); } catch { /* malformed encoding */ }
   const escaped = escapeRegExp(sessionId);
-  const identity = new RegExp(\`(?:^|[^a-z0-9_-])\${escaped}(?:$|[^a-z0-9_-])\`, "i");
+  const identity = new RegExp("(?:^|[^a-z0-9_-])" + escaped + "(?:$|[^a-z0-9_-])", "i");
   return identity.test(decoded);
 }
 
