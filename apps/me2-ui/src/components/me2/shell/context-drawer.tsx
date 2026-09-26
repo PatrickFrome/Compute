@@ -103,6 +103,9 @@ export function ContextDrawer() {
   const setTab = useMe2((s) => s.setContextDrawerTab);
   const followSelection = useMe2((s) => s.contextDrawerFollowSelection);
   const setFollowSelection = useMe2((s) => s.setContextDrawerFollowSelection);
+  const preferredHeight = useMe2((s) => s.contextDrawerPreferredHeight);
+  const height = useMe2((s) => s.contextDrawerHeight);
+  const setHeight = useMe2((s) => s.setContextDrawerHeight);
   const events = useMe2((s) => s.events);
   const snap = useMe2((s) => s.snap);
   const mirror = useMe2((s) => s.mirror);
@@ -112,8 +115,10 @@ export function ContextDrawer() {
 
   return (
     <section
-      className="flex h-[200px] shrink-0 flex-col border-t border-zinc-800 bg-[#09090b]"
+      className="flex shrink-0 flex-col border-t border-zinc-800 bg-[#09090b]"
+      style={{ height: `${height}px` }}
       data-testid="context-drawer"
+      data-drawer-height={height}
       aria-label="Context Drawer"
     >
       <div className="flex h-8 shrink-0 items-center border-b border-zinc-800/80 px-2">
@@ -135,6 +140,33 @@ export function ContextDrawer() {
               {label}
             </button>
           ))}
+        </div>
+        <div className="ml-auto flex items-center gap-0.5 border-r border-zinc-800 pr-2" role="group" aria-label="Context Drawer size">
+          {([
+            [160, "S"],
+            [200, "M"],
+            [300, "L"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setHeight(value)}
+              aria-pressed={preferredHeight === value}
+              className={`h-5 min-w-5 px-1 font-mono text-[8px] ${
+                preferredHeight === value
+                  ? "bg-zinc-800 text-zinc-200"
+                  : "text-zinc-600 hover:bg-zinc-900 hover:text-zinc-300"
+              }`}
+              title={`Drawer ${value}px`}
+            >
+              {label}
+            </button>
+          ))}
+          {height !== preferredHeight ? (
+            <span className="ml-1 font-mono text-[8px] text-amber-400" title="Размер ограничен native Browser minimum">
+              {height}px
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
