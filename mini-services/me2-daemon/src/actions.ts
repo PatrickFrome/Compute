@@ -16,6 +16,7 @@ import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
 import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus } from "./readback";
+import { mirrorStatus, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -51,6 +52,8 @@ export const ACTIONS: ActionDef[] = [
   { name: "edge.import-plan", family: "controlplane", description: "R83 source-tree import plan: live snapshots decomposed into a reviewable repo layout (IMPORT_READY / NEEDS_UNBUNDLING per worker)" },
   { name: "edge.import-status", family: "controlplane", description: "R83 import PR #982 live status: state, CI rollup on branch head, digest contract" },
   { name: "r82.readback", family: "controlplane", description: "R82 exit-gate watch: release CI terminal, self-update landing, draft canary history, cycle growth — deterministic stage machine" },
+  { name: "mirror.status", family: "controlplane", description: "R83 evidence auto-mirror status: chain cursor, live tail match, pending lag, sync history" },
+  { name: "mirror.sync", family: "controlplane", description: "Operator-triggered evidence sync: batch-replicate pending local events into me2_event_mirror (fail-closed on divergence)" },
 ];
 
 export async function dispatch(action: string, args: Record<string, unknown>): Promise<unknown> {
@@ -124,6 +127,10 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return edgeImportStatus(args.fresh === true);
     case "r82.readback":
       return readbackStatus(args.fresh === true);
+    case "mirror.status":
+      return mirrorStatus(args.fresh === true);
+    case "mirror.sync":
+      return syncMirror("operator");
     default:
       throw new OpError("action_not_implemented", `${action} registered but not implemented`, 500);
   }

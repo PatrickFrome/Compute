@@ -81,3 +81,4 @@ export function probe(): ExecResult & { proof: string } {
   const r = execWhitelisted(["bun", "--version"], { silent: true });
   return { ...r, proof: `prlimit-isolated bun exec ok in ${r.elapsed_ms}ms` };
 }
+// hot-reload guard test 09:53:44

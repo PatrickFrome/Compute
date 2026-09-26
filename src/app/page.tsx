@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
-  Activity, AlertTriangle, Boxes, Camera, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
   Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -248,6 +248,37 @@ interface EdgeImportStatus {
   summary: string[]
 }
 
+// R83-MIRROR: evidence auto-mirror (local chain → Supabase me2_event_mirror)
+interface MirrorState {
+  schema: string
+  anchor: { seq: number; hash: string }
+  last_mirror_seq: number
+  last_mirror_hash: string
+  mirrored_local_seq: number
+  last_sync_at: string | null
+  last_error: { code: string; message: string; at: string } | null
+  total_rows_synced: number
+  sync_count: number
+}
+interface MirrorStatus {
+  ok: boolean
+  daemon_version: string
+  round: string
+  fetched_at: string
+  contract: { marker: string; table: string; hash_formula: string; payload_shape: string; continuity: string; fail_closed: string }
+  state: MirrorState
+  local_last_seq: number
+  pending: number
+  auto_sync: { interval_ms: number; boot_delay_ms: number; running: boolean; next_in_ms: number | null }
+  live: {
+    checked_at: string | null
+    last_row: { seq: number; hash: string; daemon_version: string; ours: boolean } | null
+    matches_state: boolean | null
+    tail: { seq: number; type: string | null; local_seq: number | null; ours: boolean; anchor: boolean }[]
+  }
+  history: Me2Event[]
+}
+
 // ---------------------------------------------------------- gap matrix ----
 const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
   { pri: 'P0', title: 'Supervisor useful cycle', status: 'EXIT-GATE WATCH live: PR #981 слит (e7fccd08), release-CI терминален → manifest → self-update → ручная очистка драфта оператором → рост cycle_seq; смотрите карточку R82 EXIT GATE', live: 'keepalive' },
@@ -389,9 +420,12 @@ export default function MissionControl() {
   const [readback, setReadback] = useState<Readback | null>(null)
   const [readbackErr, setReadbackErr] = useState<string | null>(null)
   const [readbackLoading, setReadbackLoading] = useState(false)
+  const [mirror, setMirror] = useState<MirrorStatus | null>(null)
+  const [mirrorLoading, setMirrorLoading] = useState(false)
   const [donorReg, setDonorReg] = useState<DonorRegistry | null>(null)
   const [donorLane, setDonorLane] = useState<'ALL' | DonorAction['lane']>('ALL')
   const [donorQuery, setDonorQuery] = useState('')
+  const [donorSort, setDonorSort] = useState<'name' | 'cost-asc' | 'cost-desc'>('name')
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -461,6 +495,24 @@ export default function MissionControl() {
     finally { setEdgeImportLoading(false) }
   }, [])
 
+  const loadMirror = useCallback(async (fresh = false) => {
+    setMirrorLoading(true)
+    try { setMirror(await jfetch<MirrorStatus>(`/mirror${fresh ? '?fresh=1' : ''}`)) }
+    catch { /* non-critical card */ }
+    finally { setMirrorLoading(false) }
+  }, [])
+
+  const syncMirrorNow = async () => {
+    if (!window.confirm('Синхронизировать зеркальную цепочку с Supabase (batch-запись pending-событий)?')) return
+    setBusy('mirror-sync')
+    try {
+      const r = await jfetch<{ synced: number; mirror_to_seq: number; duration_ms: number }>('/mirror/sync', { method: 'POST' })
+      toast({ title: `Mirror sync: ${r.synced} событий`, description: `mirror #${r.mirror_to_seq} · ${r.duration_ms}ms` })
+      loadMirror(true)
+    } catch (e) { toast({ title: 'Mirror sync отклонён', description: (e as Error).message, variant: 'destructive' }) }
+    finally { setBusy(null) }
+  }
+
   useEffect(() => {
     loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
@@ -469,6 +521,7 @@ export default function MissionControl() {
     jfetch<DonorRegistry>('/donor-registry').then(setDonorReg).catch(() => {})
     jfetch<EdgeImportPlan>('/edge/import-plan').then(setEdgePlan).catch(() => {})
     loadEdgeImport()
+    loadMirror()
     const a = setInterval(loadHealth, 5000)
     const b = setInterval(() => loadSupervisor(false), 10000)
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
@@ -478,10 +531,11 @@ export default function MissionControl() {
     const h = setInterval(() => { loadEdge(false) }, 120000)
     const j = setInterval(() => { loadEdgeImport(false) }, 120000)
     const i = setInterval(() => { loadReadback(false) }, 60000)
+    const k = setInterval(() => { loadMirror(false) }, 60000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j) }
-  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback, loadEdgeImport])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j); clearInterval(k) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback, loadEdgeImport, loadMirror])
 
   // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears
   useEffect(() => {
@@ -520,6 +574,7 @@ export default function MissionControl() {
     R82_CYCLE_RESUMED: 'cycle_seq пошёл — R82 закрыт',
     EDGE_SNAPSHOT: 'Edge-снапшот снят в evidence',
     MIRROR_ANCHOR: 'Operator anchor записан',
+    MIRROR_SYNC: 'Evidence зеркалирован в Supabase',
   }
   useEffect(() => {
     const milestones = events.filter((e) => MILESTONE_LABELS[e.type] != null)
@@ -611,16 +666,6 @@ export default function MissionControl() {
       toast({ title: 'Worktree удалён', description: name })
       loadWorktrees()
     } catch (e) { toast({ title: 'Ошибка удаления', description: (e as Error).message, variant: 'destructive' }) }
-    finally { setBusy(null) }
-  }
-
-  const writeAnchor = async () => {
-    if (!window.confirm('Записать recovery-anchor в Supabase evidence mirror (seq 90013993)?')) return
-    setBusy('anchor')
-    try {
-      const r = await jfetch<{ written: boolean }>('/control-plane/mirror-anchor', { method: 'POST' })
-      toast({ title: r.written ? 'Anchor записан в mirror' : 'Mirror ответ без подтверждения', description: 'me2_event_mirror_h205f22 · seq 90013993' })
-    } catch (e) { toast({ title: 'Mirror write отклонён', description: (e as Error).message, variant: 'destructive' }) }
     finally { setBusy(null) }
   }
 
@@ -774,7 +819,7 @@ export default function MissionControl() {
                     </button>
                   )
                 })}
-                <div className="relative ml-auto min-w-[140px] flex-1 sm:max-w-[220px]">
+                <div className="relative min-w-[140px] flex-1 sm:max-w-[220px]">
                   <Input
                     value={donorQuery}
                     onChange={(e) => setDonorQuery(e.target.value)}
@@ -785,6 +830,18 @@ export default function MissionControl() {
                   {donorQuery && (
                     <button onClick={() => setDonorQuery('')} aria-label="Сбросить поиск" className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">×</button>
                   )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Сортировка донор-реестра">
+                  {([['name', 'A→Z'], ['cost-asc', 'cost ↑'], ['cost-desc', 'cost ↓']] as const).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      onClick={() => setDonorSort(mode)}
+                      className={`rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${donorSort === mode ? 'border-teal-500/40 bg-teal-500/10 text-teal-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-500 hover:border-zinc-600 hover:text-zinc-300'}`}
+                      title={mode === 'name' ? 'сортировка по имени' : mode === 'cost-asc' ? 'сортировка по scheduler cost (дешёвые сначала)' : 'сортировка по scheduler cost (дорогие сначала)'}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </div>
               {(() => {
@@ -809,12 +866,18 @@ export default function MissionControl() {
                     <div className="flex items-center gap-2 text-[10px] text-zinc-500">
                       <span>показано <span className="font-mono text-zinc-300">{shown}</span> из <span className="font-mono">{donorReg.total}</span></span>
                       {donorQuery && <span>· фильтр: <span className="font-mono text-cyan-300">{donorQuery}</span></span>}
+                      <span className="font-mono text-zinc-600">sort: {donorSort}</span>
                       <span className="ml-auto font-mono text-zinc-600">cost: ●=1 · budget {donorReg.budget?.limit ?? 24}/{Math.round((donorReg.budget?.windowMs ?? 60000) / 1000)}s</span>
                     </div>
                     <div className={`max-h-96 space-y-2.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-zinc-800/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-600`}>
                       {lanesShown.map((lane) => {
                         const acts = donorReg.actions.filter((a) => a.lane === lane && matches(a))
                         if (acts.length === 0) return null
+                        const sorted = [...acts].sort((a, b) =>
+                          donorSort === 'name' ? a.action.localeCompare(b.action)
+                          : donorSort === 'cost-asc' ? a.cost - b.cost || a.action.localeCompare(b.action)
+                          : b.cost - a.cost || a.action.localeCompare(b.action)
+                        )
                         const meta = laneMeta[lane]
                         return (
                           <div key={lane}>
@@ -824,7 +887,7 @@ export default function MissionControl() {
                               <span className="ml-auto font-mono text-[9px] text-zinc-600">priority {meta.pri}</span>
                             </div>
                             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                              {acts.map((a) => {
+                              {sorted.map((a) => {
                                 const cp = cpMap.get(a.action)
                                 return (
                                   <div key={a.action} className="group rounded-lg border border-zinc-800 bg-zinc-950/40 p-2 transition-colors hover:border-zinc-700 hover:bg-zinc-900/60">
@@ -1575,6 +1638,117 @@ export default function MissionControl() {
           </div>
         </Panel>
 
+        {/* ----------------------------------------------- EVIDENCE MIRROR */}
+        <Panel
+          icon={<Database className="h-4 w-4" />}
+          title="Mirror · Supabase evidence"
+          chip={
+            mirror ? (
+              <Chip tone={mirror.state.last_error ? 'p0' : mirror.pending > 20 ? 'warn' : 'ok'}>
+                {mirror.state.last_error ? 'error' : mirror.pending === 0 ? 'in sync' : `lag ${mirror.pending}`}
+              </Chip>
+            ) : (
+              <Chip tone="neutral">…</Chip>
+            )
+          }
+          actions={
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={() => loadMirror(true)} disabled={mirrorLoading} aria-label="Свежий статус mirror">
+                {mirrorLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </div>
+          }
+        >
+          {mirror ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="mirror tail" value={`#${mirror.state.last_mirror_seq}`} tone="text-cyan-300" title={`последняя зеркальная строка · head ${mirror.state.last_mirror_hash.slice(0, 16)}…`} />
+                <Stat label="локальная цепь" value={`#${mirror.local_last_seq}`} tone="text-teal-400" title="last_seq локального hash-chain журнала" />
+                <Stat label="отзеркалировано" value={`${mirror.state.mirrored_local_seq}`} title={`total_rows_synced ${mirror.state.total_rows_synced} за ${mirror.state.sync_count} синк-батчей`} />
+                <Stat
+                  label="lag (pending)"
+                  value={mirror.pending === 0 ? '0' : `${mirror.pending}`}
+                  tone={mirror.pending === 0 ? 'text-emerald-400' : mirror.pending > 20 ? 'text-amber-400' : 'text-zinc-300'}
+                  title="события, ещё не записанные в Supabase (таймер подхватит в пределах 2 мин)"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                <Chip tone="neutral">anchor #{mirror.state.anchor.seq} · v0.57.1 tail</Chip>
+                <Chip tone={mirror.live.matches_state === true ? 'ok' : mirror.live.matches_state === false ? 'p0' : 'neutral'} title="живой хвост Supabase совпадает с durable-state демона">
+                  live tail {mirror.live.matches_state === true ? '≡ state' : mirror.live.matches_state === false ? '≠ state' : '…'}
+                </Chip>
+                <Chip tone={mirror.auto_sync.running ? 'ok' : 'warn'} title={`boot ${mirror.auto_sync.boot_delay_ms / 1000}с задержка · далее каждые ${mirror.auto_sync.interval_ms / 1000}с`}>
+                  auto-sync {mirror.auto_sync.running ? 'on' : 'off'}
+                </Chip>
+                {mirror.state.last_sync_at && (
+                  <span title={mirror.state.last_sync_at}>последний синк {humanS(Math.round((now - Date.parse(mirror.state.last_sync_at)) / 1000))} назад</span>
+                )}
+              </div>
+              {mirror.state.last_error && (
+                <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300" title={`${mirror.state.last_error.code}: ${mirror.state.last_error.message}`}>
+                  <span className="font-mono">{mirror.state.last_error.code}</span>: {mirror.state.last_error.message}
+                  <div className="mt-1 text-[10px] text-rose-400/70">fail-closed: sync отказался писать — ручной reconcile оператора</div>
+                </div>
+              )}
+              <div>
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Живой хвост me2_event_mirror_h205f22</span>
+                  <span className="text-[10px] text-zinc-600">(последние {mirror.live.tail.length})</span>
+                </div>
+                <div className="space-y-1">
+                  {mirror.live.tail.map((t) => (
+                    <div key={t.seq} className="flex items-baseline gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 font-mono text-[11px]">
+                      <span className="w-20 shrink-0 text-right text-cyan-300/80">#{t.seq}</span>
+                      <span className={`min-w-0 flex-1 truncate font-semibold ${t.anchor ? 'text-amber-400/90' : 'text-zinc-300'}`} title={t.anchor ? 'recovery anchor — хвост ledger старого daemon v0.57.1' : `локальное событие #${t.local_seq ?? '?'}`}>
+                        {t.anchor ? `⚓ ${t.type}` : t.type ?? '—'}
+                      </span>
+                      {t.anchor ? (
+                        <span className="shrink-0 text-[10px] text-amber-500/70">v0.57.1</span>
+                      ) : (
+                        <span className={`shrink-0 text-[10px] ${t.ours ? 'text-emerald-500/80' : 'text-rose-400/80'}`}>{t.ours ? `→ #${t.local_seq}` : 'foreign'}</span>
+                      )}
+                    </div>
+                  ))}
+                  {mirror.live.tail.length === 0 && <div className="py-4 text-center text-xs text-zinc-600">живой хвост недоступен (Supabase?)</div>}
+                </div>
+              </div>
+              {mirror.history.length > 0 && (
+                <div>
+                  <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">История синков (MIRROR_SYNC из локальной цепи)</div>
+                  <div className={`space-y-1 ${scrollCls} pr-1`}>
+                    {mirror.history.map((h) => {
+                      const p = h.payload as { synced?: number; from_local_seq?: number; to_local_seq?: number; mirror_to_seq?: number; reason?: string } | null
+                      return (
+                        <div key={h.seq} className="flex items-baseline gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 font-mono text-[11px]">
+                          <span className="w-16 shrink-0 text-right text-cyan-300/70">#{p?.mirror_to_seq ?? '—'}</span>
+                          <span className="min-w-0 flex-1 truncate text-zinc-400" title={JSON.stringify(h.payload)}>
+                            {p?.synced ?? '?'} событий · local #{p?.from_local_seq ?? '?'}..#{p?.to_local_seq ?? '?'} · {p?.reason ?? '—'}
+                          </span>
+                          <span className="shrink-0 text-zinc-600">{hhmmss(h.ts)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={syncMirrorNow} disabled={busy === 'mirror-sync' || mirror.pending === 0}
+                  variant="outline" className="h-11 border-cyan-500/40 bg-cyan-500/10 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20"
+                >
+                  {busy === 'mirror-sync' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+                  <span className="ml-1.5">синхронизировать сейчас{mirror.pending > 0 ? ` (${mirror.pending})` : ''}</span>
+                </Button>
+                <span className="text-[10px] leading-snug text-zinc-600">
+                  авто: boot+15с → каждые 2 мин · контракт <span className="font-mono text-zinc-500">{mirror.contract.marker}</span>: payload {'{mirror, local_seq, local_hash, event}'}, hash = sha256(seq·ts·type·actor·subject·payload·prev_hash·daemon_version), fail-closed на расхождении
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+          )}
+        </Panel>
+
         {/* ------------------------------------------- WORKTREES/SANDBOX */}
         <Panel icon={<GitBranch className="h-4 w-4" />} title="Worktrees · Песочница" chip={<Chip tone="neutral">{worktrees.length} wt</Chip>}>
           <div className="space-y-3">
@@ -1672,15 +1846,11 @@ export default function MissionControl() {
                   ))}
                 </ul>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  onClick={writeAnchor} disabled={busy === 'anchor'}
-                  variant="outline" className="h-11 border-amber-500/40 bg-amber-500/10 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
-                >
-                  {busy === 'anchor' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
-                  <span className="ml-1.5">записать mirror-anchor (#90013993)</span>
-                </Button>
-                <span className="text-[10px] leading-snug text-zinc-600">одна якорная запись в me2_event_mirror — продолжение ledger старого daemon v0.57.1</span>
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-3">
+                <Check className="h-4 w-4 shrink-0 text-cyan-400" />
+                <span className="text-[11px] leading-snug text-zinc-300">
+                  Ручная anchor-запись (#90013993) больше не нужна — слот занят авто-зеркалом: первая строка контракта me2-mirror-v0.66 привязывает RECOVERY_GENESIS к хвосту v0.57.1. Дальнейшая репликация — карточка «Mirror · Supabase evidence».
+                </span>
               </div>
             </div>
           ) : (
@@ -1703,6 +1873,11 @@ export default function MissionControl() {
           <span>bus {wsLive ? 'ws' : 'poll'}</span>
           <span>·</span>
           <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
+          {mirror && (
+            <span className={`font-mono ${mirror.pending === 0 && !mirror.state.last_error ? 'text-cyan-400/80' : mirror.pending > 20 || mirror.state.last_error ? 'text-amber-400/80' : 'text-zinc-500'}`} title={`evidence mirror me2_event_mirror_h205f22 · зеркальный хвост #${mirror.state.last_mirror_seq} · отзеркалировано ${mirror.state.mirrored_local_seq}/${mirror.local_last_seq}${mirror.state.last_error ? ` · ${mirror.state.last_error.code}` : ''}`}>
+            · mirror #{mirror.state.last_mirror_seq}{mirror.pending > 0 ? ` (+${mirror.pending})` : ' ✓'}
+          </span>
+          )}
           {conv && (
             <span className={`font-mono ${conv.rollup_state === 'GREEN' ? 'text-emerald-400' : conv.rollup_state === 'RED' ? 'text-rose-400' : conv.rollup_state === 'PENDING' ? 'text-amber-400/80' : 'text-zinc-500'}`} title={`PR #${conv.pr?.number ?? 968} (${conv.pr?.state ?? '?'}${conv.pr?.draft ? ', draft' : ''}) — R84/R85 волна оператора · CI: ${conv.checks.success}/${conv.checks.total} success, ${conv.checks.failed} failed, ${conv.checks.pending} pending`}>
             PR#{conv.pr?.number ?? 968} CI {conv.rollup_state}

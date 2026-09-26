@@ -4,8 +4,9 @@
 // New local chain starts at seq 1 with a GENESIS event referencing the anchor —
 // we do NOT fake continuation of the old seq space (no false-green).
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, openSync, readSync, fstatSync, closeSync } from "node:fs";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { VERSION } from "./version";
 
 export interface Me2Event {
@@ -133,6 +134,54 @@ export function loadEventLog(): void {
 const TYPE_RE = /^[A-Z][A-Z0-9_]{2,47}$/;
 const ACTOR_RE = /^[a-z0-9_][a-z0-9_.:-]{0,63}$/;
 
+// HOT-RELOAD SAFETY (R83-MIRROR lesson): bun --hot re-evaluates edited
+// modules while orphaned timers from PREVIOUS generations may still fire —
+// two module generations then hold separate in-memory `events` arrays and
+// race-append duplicate seqs to the file (observed 2026-09-26: duplicate seq
+// 399/401 lines). Guard: before EVERY append, re-read the file tail; if the
+// file is ahead of our memory (a foreign/older generation appended), reload
+// the whole file (fail-closed) so this append chains onto the true tail.
+function syncFromDisk(): void {
+  if (!existsSync(DATA_FILE)) return;
+  let fd: number | null = null;
+  try {
+    fd = openSync(DATA_FILE, "r");
+    const size = fstatSync(fd).size;
+    if (size === 0) return;
+    const readLen = Math.min(size, 65_536);
+    const buf = Buffer.alloc(readLen);
+    readSync(fd, buf, 0, readLen, size - readLen);
+    const txt = buf.toString("utf8");
+    const lastLine = txt.slice(txt.indexOf("\n") + 1).trimEnd().split("\n").pop() ?? "";
+    if (!lastLine) return;
+    const obj = JSON.parse(lastLine) as Me2Event;
+    const mine = events[events.length - 1];
+    if (!mine || obj.seq > mine.seq) {
+      // foreign appends ahead: adopt them via a full fail-closed reload
+      const keep = events;
+      events = [];
+      loaded = false;
+      try {
+        loadEventLog();
+      } catch (e) {
+        events = keep; // restore our view; the corruption surfaces on next
+        // append attempt or restart — never silently continue past it
+        loaded = true;
+        throw new ChainError(
+          "eventlog_foreign_corruption",
+          `file tail #${obj.seq} ahead of memory #${mine?.seq ?? 0} and reload failed: ${String((e as Error)?.message ?? e).slice(0, 160)}`
+        );
+      }
+    }
+  } catch (e) {
+    if (e instanceof ChainError) throw e;
+    // read/parse problems on the tail: ignore (append will chain from memory;
+    // a torn last line is caught by the next full load)
+  } finally {
+    if (fd != null) try { closeSync(fd) } catch { /* already closed */ }
+  }
+}
+
 export function appendEvent(
   type: string,
   actor: string,
@@ -153,6 +202,7 @@ export function appendEvent(
   if (s.length > 262144) {
     throw new ChainError("event_payload_too_large", "payload > 256 KiB");
   }
+  syncFromDisk(); // hot-reload safety: chain onto the TRUE file tail
   const prev = events[events.length - 1];
   const base: Omit<Me2Event, "hash"> = {
     seq: prev.seq + 1,
@@ -190,6 +240,14 @@ export function tail(limit: number): Me2Event[] {
 export function eventsOfType(type: string): Me2Event[] {
   if (!loaded) loadEventLog();
   return events.filter((e) => e.type === type);
+}
+
+// R83-MIRROR: pending set for the evidence auto-mirror — all events strictly
+// after afterSeq. The local chain is the source; the mirror is the durable
+// remote replica (see src/mirror.ts for the contract).
+export function eventsSince(afterSeq: number): Me2Event[] {
+  if (!loaded) loadEventLog();
+  return events.filter((e) => e.seq > afterSeq);
 }
 
 export function verifyChain(): { valid: boolean; count: number; head_hash: string } {

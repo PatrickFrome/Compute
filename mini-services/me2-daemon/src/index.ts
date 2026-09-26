@@ -17,6 +17,7 @@ import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
 import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus, startReadbackWatch } from "./readback";
+import { mirrorStatus, mirrorHealth, startAutoMirror, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -44,6 +45,7 @@ const routes: { method: string; path: string; handler: Handler }[] = [
       head_hash: headHash(),
       ws_port: WS_PORT,
       mirror_anchor: MIRROR_ANCHOR,
+      mirror: mirrorHealth(),
       monitor: monitorStatus(),
     }),
   },
@@ -135,6 +137,16 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     method: "GET",
     path: "/readback",
     handler: (_r, url) => readbackStatus(url.searchParams.get("fresh") === "1"),
+  },
+  {
+    method: "GET",
+    path: "/mirror",
+    handler: (_r, url) => mirrorStatus(url.searchParams.get("fresh") === "1"),
+  },
+  {
+    method: "POST",
+    path: "/mirror/sync",
+    handler: () => syncMirror("operator"),
   },
   {
     method: "GET",
@@ -268,5 +280,8 @@ startMonitor();
 // R82-EXIT readback watch: READ-ONLY draft sampler (5 min) + one-shot
 // milestones; starts after boot (never blocks listen)
 startReadbackWatch();
+// R83-MIRROR evidence auto-mirror: first sync after 15s warm-up, then every
+// 120s — durable-state cursor + live-tail reconcile make every tick safe
+startAutoMirror();
 
 console.log(`[me2-daemon] ${VERSION} (${ROUND}) REST :${restServer.port} · WS bus :${wsServer.port} · anchor seq ${MIRROR_ANCHOR.seq}`);
