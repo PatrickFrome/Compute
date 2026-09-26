@@ -429,6 +429,9 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
   // (after a successful rollover there are no more attempts to probe).
   const draftCleared =
     draftSamples.some((s) => s.canary === "OK") || milestoneInLog("R82_DRAFT_CLEARED");
+  // R83-VERIFY: journal timestamp of the clear fact (live probe or inference)
+  // — the DraftTimeline renders the milestone marker at exactly this moment.
+  const draftClearedAt = draftCleared ? (eventsOfType("R82_DRAFT_CLEARED")[0]?.ts ?? null) : null;
 
   // attempt churn from the monitor window (live retry-loop heartbeat)
   const attemptIds = new Set(history.map((s) => s.attempt_id).filter((id): id is string => !!id));
@@ -618,6 +621,7 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       last: lastDraft,
       max_chars: maxChars > 0 ? maxChars : null,
       cleared: draftCleared,
+      cleared_at: draftClearedAt,
       threshold: ROOT_DRAFT_MAX_CHARS,
     },
     cycle: {

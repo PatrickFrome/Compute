@@ -17,7 +17,7 @@ import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
 import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus, startReadbackWatch } from "./readback";
-import { mirrorStatus, mirrorHealth, startAutoMirror, syncMirror } from "./mirror";
+import { mirrorStatus, mirrorHealth, mirrorVerify, startAutoMirror, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -147,6 +147,14 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     method: "POST",
     path: "/mirror/sync",
     handler: () => syncMirror("operator"),
+  },
+  {
+    method: "POST",
+    path: "/mirror/verify",
+    // R83-VERIFY: independent in-process contract check (paged read of ALL
+    // rows + 4 checks) — POST because it is a bounded network-heavy operator
+    // action, not a status read; the run lands in the hash-chain as evidence.
+    handler: () => mirrorVerify(),
   },
   {
     method: "GET",

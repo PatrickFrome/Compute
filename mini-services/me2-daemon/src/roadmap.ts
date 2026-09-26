@@ -166,6 +166,17 @@ export const CONVERGENCE_EVIDENCE = {
     audio_cues: "WebAudio-сигналы (без ассетов): 'gate' при смене current_gate exit-gate, 'milestone' на milestone-события hash-chain, 'alert' на mirror-расхождение; mute-тоггл в хедере (persist localStorage), скрытая вкладка не звучит",
     donor_keyboard: "Alt+1–5 — lane-фильтры донор-браузера (все/RO/TAB/GM/EMG), Alt+D — фокус поиска; дополняет '/' журнала событий",
   },
+  r83_verify: {
+    built: "2026-09-26T10:30:00Z",
+    module: "daemon src/mirror.ts mirrorVerify + консоль (0.68.0-r83verify)",
+    in_process_verifier: "POST /mirror/verify — порт verify-mirror.mjs ВНУТРИ демона: читает ВСЕ строки paged ascending от якоря и проверяет 4 проверки (seq-непрерывность от #90013992+1 / prev_hash-цепь до anchor.hash / пересчёт row-hash по документированной формуле / кросс-биндинги payload.local_seq+local_hash ↔ локальная цепь: hash+type/actor/subject+payload+ts); single-flight, cap 20k строк; ПРОГОН ПИШЕТСЯ в hash-chain как MIRROR_VERIFY (ok/rows/duration/violations) — оператору не нужен shell",
+    live_first_run: "448 строк, 0 нарушений, все 4 проверки OK, 728ms, хвост #90014440 — контракт держит (совпадает с внешним verify-mirror.mjs)",
+    last_verify_surface: "GET /mirror → last_verify (из journal) + readback draft.cleared_at (journal milestone ts) — консоль рендерит «последняя проверка» и marker на timeline",
+    console_verify_panel: "кнопка «проверить контракт» (emerald) в Mirror-карточке + результат-панель: 4 чек-строки с ✓/✗ (seq-непрерывность / prev_hash-цепь / hash-пересчёт / кросс-биндинги с подсказками формулы), rows/head/duration chips, samples нарушений; «последняя проверка» из journal когда панель свёрнута",
+    draft_milestone_marker: "DraftTimeline: вертикальная emerald ReferenceLine «драфт очищен» на первом сэмпле ≥ journal-cleared_at (категориальная ось — точный category-hit; edge-cases: до всех сэмплов → левый край, после всех → правый)",
+    sound_levels: "3 уровня громкости (тихо 0.018 / средне 0.045 / громко 0.09) — кнопка ◦/◦◦/◦◦◦ в хедере рядом с bell, persist localStorage 'me2-sound-level', пробный сигнал milestone при переключении",
+    event_class_chips: "журнал событий: class-фильтры milestone/evidence/lifecycle/ops (multi-select, живые счётчики, комбинируются с текстовым фильтром через AND, кнопка × классы для сброса)",
+  },
 } as const;
 
 export const RECOVERY_STATUS = {

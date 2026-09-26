@@ -479,6 +479,167 @@ async function runSync(reason: string): Promise<MirrorSyncResult> {
   }
 }
 
+// ------------------------------------------------------------ verify ----
+
+// R83-VERIFY: the independent contract verifier, IN-PROCESS and callable from
+// the console (one click — no shell needed). Port of scripts/verify-mirror.mjs
+// (the promotion-gate-grade verifier), same four checks:
+//   1. seq contiguity from anchor.seq + 1
+//   2. prev_hash chaining: first row → anchor.hash, each row → previous
+//   3. row-hash recomputation from the documented formula
+//   4. cross-binding: payload.local_seq/local_hash vs the local chain
+//      (hash + type/actor/subject + payload content + ts)
+// Reads ALL rows paged ascending; never trusts the daemon's own state —
+// the local log is loaded raw for binding comparison (its internal chain is
+// verified separately by /eventlog/verify).
+export interface MirrorVerifyResult {
+  ok: boolean;
+  schema: "metaengine.mirror.verify.v1";
+  started_at: string;
+  duration_ms: number;
+  rows_checked: number;
+  head_seq: number | null; // last contiguous row seq
+  violations: number;
+  first_broken_seq: number | null;
+  checks: { seq_continuity: boolean; prev_hash_chain: boolean; row_hashes: boolean; bindings: boolean };
+  samples: string[]; // first N violation descriptions (bounded)
+}
+
+const VERIFY_PAGE = 1000;
+const VERIFY_MAX_ROWS = 20000; // safety cap (24h churn is ~450 rows; 20k = weeks)
+
+let verifyInFlight: Promise<MirrorVerifyResult> | null = null;
+
+export function mirrorVerify(): Promise<MirrorVerifyResult> {
+  if (verifyInFlight) return verifyInFlight;
+  verifyInFlight = (async (): Promise<MirrorVerifyResult> => {
+    const startedAt = new Date().toISOString();
+    const t0 = Date.now();
+    const violations: string[] = []
+    let firstBroken: number | null = null;
+    const flags = { seq: true, prev: true, hash: true, bind: true };
+    const note = (seq: number | null, msg: string): void => {
+      if (firstBroken == null && seq != null) firstBroken = seq;
+      if (violations.length < 12) violations.push(`${seq != null ? `#${seq}: ` : ""}${msg}`);
+    };
+    try {
+      // local chain as raw seq→event map (loaded via eventsSince(0) — loads file)
+      const localMap = new Map<number, Me2Event>();
+      for (const e of eventsSince(0)) localMap.set(e.seq, e);
+
+      // fetch ALL our rows, paged ascending from the anchor
+      const rows: {
+        seq: number; ts: string; type: string; actor: string; subject: string | null;
+        payload: string; prev_hash: string; hash: string; daemon_version: string;
+      }[] = [];
+      let from = MIRROR_ANCHOR.seq;
+      for (;;) {
+        const page = (await supa(
+          `/rest/v1/${MIRROR_TABLE}?select=seq,ts,type,actor,subject,payload,prev_hash,hash,daemon_version&seq=gt.${from}&order=seq.asc&limit=${VERIFY_PAGE}`
+        )) as typeof rows;
+        if (!Array.isArray(page) || page.length === 0) break;
+        rows.push(...page);
+        from = page[page.length - 1].seq;
+        if (page.length < VERIFY_PAGE || rows.length >= VERIFY_MAX_ROWS) break;
+      }
+
+      let prevHash = MIRROR_ANCHOR.hash;
+      let prevSeq = MIRROR_ANCHOR.seq;
+      for (const r of rows) {
+        if (r.seq !== prevSeq + 1) { flags.seq = false; note(r.seq, `seq-gap: expected ${prevSeq + 1}`); }
+        if (r.prev_hash !== prevHash) { flags.prev = false; note(r.seq, "prev_hash mismatch"); }
+        const recomputed = rowHash({ ...r, ts: canonTs(r.ts) });
+        if (recomputed !== r.hash) {
+          flags.hash = false;
+          note(r.seq, `row-hash mismatch (stored ${String(r.hash).slice(0, 12)}… ≠ recomputed ${recomputed.slice(0, 12)}…)`);
+        }
+        // cross-binding via the payload string scalar
+        let binding: { mirror?: string; local_seq?: number; local_hash?: string; event?: unknown } | null = null;
+        if (typeof r.payload === "string") {
+          try {
+            const obj = JSON.parse(r.payload) as typeof binding;
+            if (obj && obj.mirror === MIRROR_MARKER) binding = obj;
+          } catch { /* not ours */ }
+        }
+        if (!binding) {
+          flags.bind = false;
+          note(r.seq, "no me2-mirror-v1 marker in payload");
+        } else {
+          const le = localMap.get(binding.local_seq ?? -1);
+          if (!le) {
+            flags.bind = false;
+            note(r.seq, `local event #${binding.local_seq} missing`);
+          } else {
+            if (le.hash !== binding.local_hash) { flags.bind = false; note(r.seq, "local_hash mismatch"); }
+            if (le.type !== r.type || le.actor !== r.actor || (le.subject ?? null) !== (r.subject ?? null)) {
+              flags.bind = false;
+              note(r.seq, `type/actor/subject mismatch (${le.type}/${r.type})`);
+            }
+            if (JSON.stringify(le.payload ?? null) !== JSON.stringify(binding.event ?? null)) {
+              flags.bind = false;
+              note(r.seq, "payload content mismatch");
+            }
+            if (canonTs(r.ts) !== canonTs(le.ts)) { flags.bind = false; note(r.seq, "ts mismatch"); }
+          }
+        }
+        prevHash = r.hash;
+        prevSeq = r.seq;
+      }
+      const ok = flags.seq && flags.prev && flags.hash && flags.bind;
+      const out: MirrorVerifyResult = {
+        ok,
+        schema: "metaengine.mirror.verify.v1",
+        started_at: startedAt,
+        duration_ms: Date.now() - t0,
+        rows_checked: rows.length,
+        head_seq: rows.length ? rows[rows.length - 1].seq : null,
+        violations: violations.length,
+        first_broken_seq: firstBroken,
+        checks: {
+          seq_continuity: flags.seq,
+          prev_hash_chain: flags.prev,
+          row_hashes: flags.hash,
+          bindings: flags.bind,
+        },
+        samples: violations,
+      };
+      // evidence: the verification run itself is an auditable fact (operator
+      // action or manual click; NOT auto-run — bounded network use on purpose)
+      appendEvent("MIRROR_VERIFY", "operator", out.head_seq ? String(out.head_seq) : null, {
+        ok,
+        rows_checked: out.rows_checked,
+        duration_ms: out.duration_ms,
+        violations: out.violations,
+        first_broken_seq: out.first_broken_seq,
+        daemon_version: VERSION,
+      });
+      return out;
+    } catch (e) {
+      const out: MirrorVerifyResult = {
+        ok: false,
+        schema: "metaengine.mirror.verify.v1",
+        started_at: startedAt,
+        duration_ms: Date.now() - t0,
+        rows_checked: 0,
+        head_seq: null,
+        violations: 1,
+        first_broken_seq: null,
+        checks: { seq_continuity: false, prev_hash_chain: false, row_hashes: false, bindings: false },
+        samples: [`verify failed: ${String((e as Error)?.message ?? e).slice(0, 160)}`],
+      };
+      appendEvent("MIRROR_VERIFY", "operator", null, {
+        ok: false,
+        error: out.samples[0],
+        daemon_version: VERSION,
+      });
+      return out;
+    } finally {
+      verifyInFlight = null;
+    }
+  })();
+  return verifyInFlight;
+}
+
 // -------------------------------------------------------------- surface ----
 
 export interface MirrorStatus {
@@ -510,6 +671,10 @@ export interface MirrorStatus {
   // daemon's word about its own writes (independent-verifier principle).
   // null when the aggregate could not be read (best-effort, like `live`).
   stats_24h: MirrorStats24h | null;
+  // R83-VERIFY: the last verification run recorded in the journal (null if
+  // the contract has never been verified in this chain) — surfaces as the
+  // "last checked" line next to the verify button.
+  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number } | null;
   history: Me2Event[]; // last MIRROR_SYNC events from the local chain
 }
 
@@ -608,6 +773,13 @@ export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
     },
     live,
     stats_24h: stats,
+    last_verify: (() => {
+      const evs = eventsOfType("MIRROR_VERIFY");
+      const ev = evs[evs.length - 1];
+      if (!ev) return null;
+      const p = (ev.payload ?? {}) as { ok?: boolean; rows_checked?: number; duration_ms?: number; violations?: number };
+      return { at: ev.ts, ok: !!p.ok, rows: p.rows_checked ?? 0, duration_ms: p.duration_ms ?? 0, violations: p.violations ?? 0 };
+    })(),
     history: eventsOfType("MIRROR_SYNC").slice(-8).reverse(),
   };
 }

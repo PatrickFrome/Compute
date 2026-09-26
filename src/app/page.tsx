@@ -193,7 +193,7 @@ interface Readback {
   release_ci_error: string | null
   runtime: { extension_version: string; dev_plane_head: string; self_update_landed: boolean; version_transitions: { ts: string; from: string; to: string }[] }
   canary: { rollover_reason: string | null; new_code_active: boolean }
-  draft: { samples: ReadbackDraftSample[]; last: ReadbackDraftSample | null; max_chars: number | null; cleared: boolean; threshold: number }
+  draft: { samples: ReadbackDraftSample[]; last: ReadbackDraftSample | null; max_chars: number | null; cleared: boolean; cleared_at: string | null; threshold: number }
   // R82-HARDEN: rollover attempt churn in the monitor window — the live
   // retry-loop heartbeat (each attempt = fresh tab + draft hydrate + canary abort)
   attempts: {
@@ -287,7 +287,22 @@ interface MirrorStatus {
     by_type: { type: string; count: number }[]
     window_since: string
   } | null
+  // R83-VERIFY: journal-recorded last contract-verification run
+  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number } | null
   history: Me2Event[]
+}
+
+// R83-VERIFY: in-process independent contract check (POST /mirror/verify)
+interface MirrorVerifyResult {
+  ok: boolean
+  started_at: string
+  duration_ms: number
+  rows_checked: number
+  head_seq: number | null
+  violations: number
+  first_broken_seq: number | null
+  checks: { seq_continuity: boolean; prev_hash_chain: boolean; row_hashes: boolean; bindings: boolean }
+  samples: string[]
 }
 
 // ---------------------------------------------------------- gap matrix ----
@@ -409,8 +424,8 @@ function Spark({ data, color, label, value }: { data: { t: string; v: number }[]
 // fakes a draft value). The dashed amber line is the 4000-char canary
 // threshold. The rose→emerald drop is the operator-clear moment — the live
 // visual proof the whole OPERATOR_CLEAR stage waits for.
-function DraftTimeline({ samples, threshold }: { samples: ReadbackDraftSample[]; threshold: number }) {
-  const { data, counts, downsampledFrom } = useMemo(() => {
+function DraftTimeline({ samples, threshold, clearedAt }: { samples: ReadbackDraftSample[]; threshold: number; clearedAt: string | null }) {
+  const { data, counts, downsampledFrom, markerT } = useMemo(() => {
     const MAX_POINTS = 140
     let used = samples
     let from: number | null = null
@@ -440,8 +455,17 @@ function DraftTimeline({ samples, threshold }: { samples: ReadbackDraftSample[];
       unknown: samples.filter((s) => s.chars == null).length,
       lastChars: samples.length ? samples[samples.length - 1].chars : null,
     }
-    return { data, counts, downsampledFrom: from }
-  }, [samples])
+    // R83-VERIFY: milestone marker — the x category of the FIRST sample at/after
+    // the journal clear-moment (categorical axis needs an exact category hit;
+    // a marker before all samples pins to the left edge, after all — right edge)
+    let markerT: string | null = null
+    if (clearedAt) {
+      const clearedMs = Date.parse(clearedAt)
+      const at = used.find((s) => Date.parse(s.ts) >= clearedMs) ?? used[used.length - 1]
+      markerT = at ? hhmmss(at.ts) : null
+    }
+    return { data, counts, downsampledFrom: from, markerT }
+  }, [samples, clearedAt])
 
   const maxChars = Math.max(threshold * 1.25, ...data.map((d) => d.oversize ?? d.ok ?? 0))
 
@@ -484,6 +508,15 @@ function DraftTimeline({ samples, threshold }: { samples: ReadbackDraftSample[];
               <XAxis dataKey="t" tick={{ fill: '#71717a', fontSize: 9 }} tickLine={false} axisLine={{ stroke: '#3f3f46' }} interval={Math.max(0, Math.ceil(data.length / 6) - 1)} minTickGap={16} />
               <YAxis tick={{ fill: '#71717a', fontSize: 9 }} tickLine={false} axisLine={false} width={44} domain={[0, Math.ceil(maxChars * 1.08)]} tickFormatter={(v: number) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(v))} />
               <ReferenceLine y={threshold} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: `порог ${threshold}`, fill: '#f59e0b', fontSize: 9, position: 'insideTopRight' }} />
+              {markerT && (
+                <ReferenceLine
+                  x={markerT}
+                  stroke="#34d399"
+                  strokeWidth={1.5}
+                  strokeDasharray="2 3"
+                  label={{ value: 'драфт очищен', fill: '#34d399', fontSize: 9, position: 'insideTopLeft' }}
+                />
+              )}
               <Line type="monotone" dataKey="oversize" stroke="#fb7185" strokeWidth={1.5} dot={{ r: 1.5, fill: '#fb7185', strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} name="OVERSIZED" />
               <Line type="monotone" dataKey="ok" stroke="#34d399" strokeWidth={1.5} dot={{ r: 1.5, fill: '#34d399', strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} name="OK" />
             </LineChart>
@@ -499,9 +532,20 @@ function DraftTimeline({ samples, threshold }: { samples: ReadbackDraftSample[];
 // ------------------------------------------------------- audio alerts ----
 // R83-WATCH: subtle WebAudio cues for gate transitions, milestones and mirror
 // divergence (backlog: «звук/тост при смене current_gate»). No audio assets,
-// zero network — a lazily-created AudioContext with two quiet sine notes.
+// zero network — a lazily-created AudioContext with quiet sine notes.
 // Respects the persisted mute toggle and never fires in a hidden tab.
+// R83-VERIFY: three persisted volume levels (тихо/средне/громко) — the gain
+// scales linearly; the level cycles from the header button next to the bell.
 type BeepKind = 'gate' | 'milestone' | 'alert'
+type SoundLevel = 'quiet' | 'medium' | 'loud'
+const SOUND_LEVELS: { id: SoundLevel; label: string; gain: number }[] = [
+  { id: 'quiet', label: 'тихо', gain: 0.018 },
+  { id: 'medium', label: 'средне', gain: 0.045 },
+  { id: 'loud', label: 'громко', gain: 0.09 },
+]
+function soundLevel(): SoundLevel {
+  try { return (localStorage.getItem('me2-sound-level') as SoundLevel) ?? 'medium' } catch { return 'medium' }
+}
 let audioCtx: AudioContext | null = null
 function beep(kind: BeepKind): void {
   try {
@@ -510,6 +554,7 @@ function beep(kind: BeepKind): void {
     if (!AC) return
     if (!audioCtx) audioCtx = new AC()
     if (audioCtx.state === 'suspended') void audioCtx.resume()
+    const peak = SOUND_LEVELS.find((l) => l.id === soundLevel())?.gain ?? 0.045
     const t0 = audioCtx.currentTime
     const notes: [number, number][] = kind === 'gate'
       ? [[880, 0], [660, 0.09]]                      // soft descending pair — gate moved
@@ -522,7 +567,7 @@ function beep(kind: BeepKind): void {
       osc.type = 'sine'
       osc.frequency.value = freq
       gain.gain.setValueAtTime(0.0001, t0 + at)
-      gain.gain.exponentialRampToValueAtTime(0.045, t0 + at + 0.012)
+      gain.gain.exponentialRampToValueAtTime(peak, t0 + at + 0.012)
       gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.11)
       osc.connect(gain).connect(audioCtx.destination)
       osc.start(t0 + at)
@@ -587,6 +632,20 @@ export default function MissionControl() {
       return next
     })
   }, [])
+  // R83-VERIFY: volume level cycles quiet → medium → loud (persisted)
+  const [levelIdx, setLevelIdx] = useState(() => {
+    try { return Math.max(0, SOUND_LEVELS.findIndex((l) => l.id === soundLevel())) } catch { return 1 }
+  })
+  const cycleLevel = useCallback(() => {
+    setLevelIdx((i) => {
+      const next = (i + 1) % SOUND_LEVELS.length
+      try { localStorage.setItem('me2-sound-level', SOUND_LEVELS[next].id) } catch { /* storage best-effort */ }
+      return next
+    })
+  }, [])
+  // R83-VERIFY: in-process contract verification (POST /mirror/verify) —
+  // result state here; the handler is defined after loadMirror (deps order)
+  const [mirrorVerifyRes, setMirrorVerifyRes] = useState<MirrorVerifyResult | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const backoffRef = useRef(1000)
   const filterRef = useRef<HTMLInputElement | null>(null)
@@ -659,6 +718,26 @@ export default function MissionControl() {
     catch { /* non-critical card */ }
     finally { setMirrorLoading(false) }
   }, [])
+
+  // R83-VERIFY: run the in-process independent contract check; the result
+  // renders in the Mirror card and the run lands in the hash-chain (MIRROR_VERIFY)
+  const runMirrorVerify = useCallback(async () => {
+    setBusy('mirror-verify')
+    try {
+      const r = await jfetch<MirrorVerifyResult>('/mirror/verify', { method: 'POST' })
+      setMirrorVerifyRes(r)
+      toast({
+        title: r.ok ? `✓ Контракт зеркала держит: ${r.rows_checked} строк` : `✗ Нарушений: ${r.violations}`,
+        description: r.ok
+          ? `seq-непрерывность + prev_hash-цепь + hash-пересчёт + кросс-биндинги — всё OK · ${r.duration_ms}ms · хвост #${r.head_seq}`
+          : `${r.samples.slice(0, 2).join(' · ') || 'первое нарушение см. в карточке'}`,
+        variant: r.ok ? undefined : 'destructive',
+      })
+      loadMirror(true)
+    } catch (e) {
+      toast({ title: 'Верификация не удалась', description: (e as Error).message, variant: 'destructive' })
+    } finally { setBusy(null) }
+  }, [toast, loadMirror])
 
   const syncMirrorNow = async () => {
     if (!window.confirm('Синхронизировать зеркальную цепочку с Supabase (batch-запись pending-событий)?')) return
@@ -747,6 +826,7 @@ export default function MissionControl() {
     EDGE_SNAPSHOT: 'Edge-снапшот снят в evidence',
     MIRROR_ANCHOR: 'Operator anchor записан',
     MIRROR_SYNC: 'Evidence зеркалирован в Supabase',
+    MIRROR_VERIFY: 'Контракт зеркала проверен',
   }
   useEffect(() => {
     const milestones = events.filter((e) => MILESTONE_LABELS[e.type] != null)
@@ -924,9 +1004,28 @@ export default function MissionControl() {
   const hbAgeLive = supervisor ? Math.round((now - Date.parse(supervisor.last_seen_at)) / 1000) : null
   const ka = supervisor?.keepalive
   const staleLive = ka?.last_completed_cycle_at ? Math.round((now - Date.parse(ka.last_completed_cycle_at)) / 1000) : null
+  // R83-VERIFY: event-class quick filters (multi-select chips above the text
+  // filter) — classes combine with the text query (AND). Counts are live.
+  const EV_CLASSES: { id: string; label: string; title: string; match: (t: string) => boolean }[] = [
+    { id: 'milestone', label: 'milestone', title: 'milestone-события exit-gate: R82_* и якорь зеркала', match: (t) => t.startsWith('R82_') || t === 'MIRROR_ANCHOR' },
+    { id: 'evidence', label: 'evidence', title: 'доказательные операции: MIRROR_SYNC · MIRROR_VERIFY · EDGE_SNAPSHOT', match: (t) => t === 'MIRROR_SYNC' || t === 'MIRROR_VERIFY' || t === 'EDGE_SNAPSHOT' },
+    { id: 'lifecycle', label: 'lifecycle', title: 'жизненный цикл демона: DAEMON_BOOT · BUS_CLIENT_*', match: (t) => t === 'DAEMON_BOOT' || t.startsWith('BUS_CLIENT_') },
+    { id: 'ops', label: 'ops', title: 'операторские операции: SANDBOX_EXEC · ACTION_INVOKED · WORKTREE_* · RECOVERY_*', match: (t) => t === 'SANDBOX_EXEC' || t === 'ACTION_INVOKED' || t.startsWith('WORKTREE_') || t.startsWith('RECOVERY_') },
+  ]
+  const [evClasses, setEvClasses] = useState<string[]>([])
+  const toggleEvClass = useCallback((id: string) => {
+    setEvClasses((cs) => (cs.includes(id) ? cs.filter((c) => c !== id) : [...cs, id]))
+  }, [])
   const filtered = useMemo(
-    () => events.filter((e) => !filter || e.type.toLowerCase().includes(filter.toLowerCase())),
-    [events, filter]
+    () => events.filter((e) => {
+      if (filter && !e.type.toLowerCase().includes(filter.toLowerCase())) return false
+      if (evClasses.length > 0) {
+        const cls = EV_CLASSES.find((c) => c.match(e.type))
+        if (!cls || !evClasses.includes(cls.id)) return false
+      }
+      return true
+    }),
+    [events, filter, evClasses]
   )
   const mSamples = monitor?.samples ?? []
   const mLast = mSamples.length ? mSamples[mSamples.length - 1] : null
@@ -947,7 +1046,7 @@ export default function MissionControl() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-            <Chip tone="warn">{health?.round ?? 'R83'} · WATCH</Chip>
+            <Chip tone="warn">{health?.round ?? 'R83'} · VERIFY</Chip>
             <Chip tone={daemonUp ? 'ok' : 'p0'}>
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
@@ -963,6 +1062,15 @@ export default function MissionControl() {
               title={soundOn ? 'звук оповещений включён: смена exit-gate · milestone-события · расхождение mirror (клик — выкл)' : 'звук оповещений выключен (клик — вкл) — WebAudio, без внешних ассетов'}
             >
               {soundOn ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost" size="sm"
+              className="h-8 w-8 p-0 font-mono text-[10px] font-bold text-zinc-400 hover:text-teal-400"
+              onClick={() => { cycleLevel(); if (soundOn) beep('milestone') }}
+              aria-label={`Громкость оповещений: ${SOUND_LEVELS[levelIdx].label} (клик — следующая)`}
+              title={`громкость: ${SOUND_LEVELS[levelIdx].label} (клик — переключает тихо→средне→громко; звучит пробный сигнал)`}
+            >
+              {SOUND_LEVELS[levelIdx].id === 'quiet' ? '◦' : SOUND_LEVELS[levelIdx].id === 'medium' ? '◦◦' : '◦◦◦'}
             </Button>
           </div>
         </div>
@@ -1489,7 +1597,7 @@ export default function MissionControl() {
                     return oppo > 0 ? <Chip tone="info">oppo-проб {oppo}</Chip> : null
                   })()}
                 </div>
-                <DraftTimeline samples={readback.draft.samples} threshold={readback.draft.threshold} />
+                <DraftTimeline samples={readback.draft.samples} threshold={readback.draft.threshold} clearedAt={readback.draft.cleared_at} />
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
                   <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Последние пробы</div>
                   <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
@@ -1840,6 +1948,28 @@ export default function MissionControl() {
           defaultOpen
         >
           <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {EV_CLASSES.map((c) => {
+                const n = events.filter((e) => c.match(e.type)).length
+                const active = evClasses.includes(c.id)
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => toggleEvClass(c.id)}
+                    aria-pressed={active}
+                    title={`${c.title} · событий в буфере: ${n}`}
+                    className={`rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${active ? 'border-teal-500/40 bg-teal-500/10 text-teal-300' : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
+                  >
+                    {c.label} · {n}
+                  </button>
+                )
+              })}
+              {evClasses.length > 0 && (
+                <button onClick={() => setEvClasses([])} className="rounded-full border border-zinc-700 px-2.5 py-1 font-mono text-[10px] text-zinc-500 transition-colors hover:border-zinc-600 hover:text-zinc-300" title="снять все class-фильтры">
+                  × классы
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <Input
                 ref={filterRef}
@@ -1986,6 +2116,50 @@ export default function MissionControl() {
                   </div>
                 </div>
               )}
+              {/* R83-VERIFY: independent in-process contract check — port of
+                  verify-mirror.mjs as POST /mirror/verify; one click, no shell */}
+              {mirrorVerifyRes && (
+                <div className={`rounded-lg border p-3 ${mirrorVerifyRes.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/30 bg-rose-500/10'}`}>
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    <span className={`text-xs font-semibold ${mirrorVerifyRes.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
+                      {mirrorVerifyRes.ok ? '✓ Контракт держит' : `✗ Нарушений: ${mirrorVerifyRes.violations}`}
+                    </span>
+                    <Chip tone="neutral" title="строк прочитано из Supabase (paged, ascending) и проверено">{mirrorVerifyRes.rows_checked} строк</Chip>
+                    <Chip tone="neutral" title="последний seq непрерывной цепи от якоря">хвост #{mirrorVerifyRes.head_seq ?? '?'}</Chip>
+                    <Chip tone="neutral">{mirrorVerifyRes.duration_ms}ms</Chip>
+                    <span className="text-[10px] text-zinc-500" title={mirrorVerifyRes.started_at}>{hhmmss(mirrorVerifyRes.started_at)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                    {([
+                      ['seq-непрерывность', mirrorVerifyRes.checks.seq_continuity, 'каждая строка = prev+1 от якоря #90013992'],
+                      ['prev_hash-цепь', mirrorVerifyRes.checks.prev_hash_chain, 'первая строка биндится к hash якоря, каждая — к предыдущей'],
+                      ['hash-пересчёт', mirrorVerifyRes.checks.row_hashes, 'sha256(seq·ts·type·actor·subject·payload·prev_hash·daemon_version) пересчитан для каждой строки'],
+                      ['кросс-биндинги', mirrorVerifyRes.checks.bindings, 'payload.local_seq/local_hash ↔ локальная цепь: hash + тип/актор/subject + payload + ts'],
+                    ] as const).map(([label, ok, hint]) => (
+                      <div key={label} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] ${ok ? 'border-emerald-500/25 text-emerald-300/90' : 'border-rose-500/30 text-rose-300'}`} title={hint}>
+                        {ok ? <Check className="h-3 w-3 shrink-0" /> : <AlertTriangle className="h-3 w-3 shrink-0" />}
+                        <span className="truncate">{label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {mirrorVerifyRes.samples.length > 0 && (
+                    <div className={`mt-2 space-y-0.5 ${scrollCls} pr-1`}>
+                      {mirrorVerifyRes.samples.map((s, i) => (
+                        <div key={i} className="font-mono text-[10px] text-rose-300/90" title={s}>{s.slice(0, 120)}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {mirror?.last_verify && !mirrorVerifyRes && (
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+                  <span className="text-zinc-600">последняя проверка:</span>
+                  <Chip tone={mirror.last_verify.ok ? 'ok' : 'p0'} title={`журнальное событие MIRROR_VERIFY: ${mirror.last_verify.ok ? 'контракт держит' : `${mirror.last_verify.violations} нарушений`} · ${mirror.last_verify.rows} строк · ${mirror.last_verify.duration_ms}ms`}>
+                    {mirror.last_verify.ok ? '✓ держит' : '✗ нарушен'} · {mirror.last_verify.rows} строк
+                  </Chip>
+                  <span title={mirror.last_verify.at}>{humanS(Math.round((now - Date.parse(mirror.last_verify.at)) / 1000))} назад</span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   onClick={syncMirrorNow} disabled={busy === 'mirror-sync' || mirror.pending === 0}
@@ -1993,6 +2167,14 @@ export default function MissionControl() {
                 >
                   {busy === 'mirror-sync' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
                   <span className="ml-1.5">синхронизировать сейчас{mirror.pending > 0 ? ` (${mirror.pending})` : ''}</span>
+                </Button>
+                <Button
+                  onClick={runMirrorVerify} disabled={busy === 'mirror-verify'}
+                  variant="outline" className="h-11 border-emerald-500/40 bg-emerald-500/10 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
+                  title="Независимая проверка контракта me2-mirror-v1: читает ВСЕ строки из Supabase (paged) и проверяет seq-непрерывность, prev_hash-цепь, пересчёт hash и кросс-биндинги к локальной цепи. Порт verify-mirror.mjs в демоне — без shell. Прогон пишется в hash-chain как MIRROR_VERIFY."
+                >
+                  {busy === 'mirror-verify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                  <span className="ml-1.5">проверить контракт</span>
                 </Button>
                 <span className="text-[10px] leading-snug text-zinc-600">
                   авто: boot+15с → каждые 2 мин · контракт <span className="font-mono text-zinc-500">{mirror.contract.marker}</span>: payload {'{mirror, local_seq, local_hash, event}'}, hash = sha256(seq·ts·type·actor·subject·payload·prev_hash·daemon_version), fail-closed на расхождении

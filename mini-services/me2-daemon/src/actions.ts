@@ -16,7 +16,7 @@ import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
 import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus } from "./readback";
-import { mirrorStatus, syncMirror } from "./mirror";
+import { mirrorStatus, mirrorVerify, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -54,6 +54,7 @@ export const ACTIONS: ActionDef[] = [
   { name: "r82.readback", family: "controlplane", description: "R82 exit-gate watch: release CI terminal, self-update landing, draft canary history, cycle growth — deterministic stage machine" },
   { name: "mirror.status", family: "controlplane", description: "R83 evidence auto-mirror status: chain cursor, live tail match, pending lag, sync history" },
   { name: "mirror.sync", family: "controlplane", description: "Operator-triggered evidence sync: batch-replicate pending local events into me2_event_mirror (fail-closed on divergence)" },
+  { name: "mirror.verify", family: "controlplane", description: "Independent mirror-contract check (in-process port of verify-mirror.mjs): reads ALL rows paged, verifies seq continuity + prev_hash chain + row-hash recompute + local cross-bindings; the run lands in the hash-chain as MIRROR_VERIFY evidence" },
 ];
 
 export async function dispatch(action: string, args: Record<string, unknown>): Promise<unknown> {
@@ -131,6 +132,8 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return mirrorStatus(args.fresh === true);
     case "mirror.sync":
       return syncMirror("operator");
+    case "mirror.verify":
+      return mirrorVerify();
     default:
       throw new OpError("action_not_implemented", `${action} registered but not implemented`, 500);
   }
