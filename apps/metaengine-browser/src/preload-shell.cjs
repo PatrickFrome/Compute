@@ -121,6 +121,32 @@ async function refreshBrainBaseline() {
   return brainBaselinePromise;
 }
 
+// R84/R75 installed UI contract readback. This is observation-only and remains
+// inside the trusted preload; the renderer receives no new ipcRenderer/send
+// capability. It proves the packaged ME2 composition actually rendered instead
+// of merely proving that the loopback URL loaded.
+window.addEventListener('DOMContentLoaded', () => {
+  queueMicrotask(() => {
+    try {
+      const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
+      const present = Object.fromEntries(required.map((id) => [id, Boolean(document.querySelector(`[data-testid="${id}"]`))]));
+      ipcRenderer.send('metaengine:shell:ui-contract-readback', {
+        schema: 'metaengine.browser.me2-ui-contract-readback.v1',
+        location_class: location.origin.startsWith('http://127.0.0.1:') ? 'PACKAGED_ME2_LOOPBACK' : 'OTHER',
+        hash: String(location.hash || ''),
+        required,
+        present,
+        complete: required.every((id) => present[id] === true),
+        scheduler_authority: false,
+        browser_command_authority: false,
+        update_authority: false,
+        release_authority: false,
+        authority_effect: false,
+      });
+    } catch {}
+  });
+});
+
 ipcRenderer.on('metaengine:shell:snapshot', (_event, value) => emitSnapshot(value));
 ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
   if (
