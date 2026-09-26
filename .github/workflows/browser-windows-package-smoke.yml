@@ -479,6 +479,14 @@ jobs:
             if ($me2Output -notmatch '"legacy_shell_is_normal_path":false') {
               throw 'normal_ui_primary_shell_contract_missing'
             }
+            if ($me2Output -notmatch '"state":"ME2_R75_UI_CONTRACT_CONFIRMED"') {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'normal_ui_r75_dom_contract_not_confirmed'
+            }
+            if ($me2Output -match '"state":"ME2_R75_UI_CONTRACT_INCOMPLETE"') {
+              throw 'normal_ui_r75_dom_contract_incomplete'
+            }
             if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
               throw 'normal_ui_me2_integration_degraded'
             }
@@ -490,6 +498,7 @@ jobs:
             $proof | Add-Member -NotePropertyName me2_browser_integration_verified -NotePropertyValue $true -Force
             $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'primary_me2_shell' -Force
             $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_r75_dom_contract_verified -NotePropertyValue $true -Force
             $proof | Add-Member -NotePropertyName legacy_shell_used_on_normal_startup -NotePropertyValue $false -Force
             $proof.normal_ui_boot_verified = $true
             $proof.runtime_import_observability_verified = $true
