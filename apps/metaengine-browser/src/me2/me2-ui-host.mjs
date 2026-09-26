@@ -69,12 +69,18 @@ export function resolveMe2UiLaunch({
   env = process.env,
   exists = existsSync,
 } = {}) {
+  const packagedRuntime = Boolean(
+    (resourcesPath && exists(join(resourcesPath, 'app.asar')))
+      || (execPath && exists(join(dirname(execPath), 'resources', 'app.asar'))),
+  );
   const candidates = [
     { dir: env.ME2_UI_DIR, source: 'ENV' },
     { dir: resourcesPath ? join(resourcesPath, 'me2-ui') : null, source: 'PACKAGED_RESOURCE' },
     { dir: execPath ? join(dirname(execPath), 'resources', 'me2-ui') : null, source: 'PACKAGED_EXEC_RESOURCE' },
-    { dir: join(cwd, 'me2-ui'), source: 'SOURCE_CWD' },
-    { dir: join(cwd, '..', 'me2-ui'), source: 'SOURCE_PARENT' },
+    ...(packagedRuntime ? [] : [
+      { dir: join(cwd, 'me2-ui'), source: 'SOURCE_CWD' },
+      { dir: join(cwd, '..', 'me2-ui'), source: 'SOURCE_PARENT' },
+    ]),
   ];
   let selected = null;
   for (const candidate of candidates) {
