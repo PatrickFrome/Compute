@@ -533,6 +533,34 @@ Decision after research:
 - effects remain on their owning Page, task sheet, or Command Palette, not in the inspector.
 
 
+
+## 6.8 UI slice checkpoint F — explicit follow-selection inspector policy
+
+Checkpoint source head before this note: `0e5678c57bb284c3d90b3f76c9cb84d756a0c84b`.
+
+Implemented:
+- Workspace layout now persists `drawerFollowSelection` with a safe default of `true`;
+- the Drawer exposes an explicit `follow` toggle instead of hiding the behavior;
+- when the Drawer is already open and follow is enabled, selecting an agent or opening a task moves the secondary context to `Selection`;
+- selecting an object never auto-opens the Drawer, so normal Page focus is not stolen;
+- disabling follow pins the operator's current drawer tab;
+- workspace reset restores the default follow policy;
+- the previous redundant Workspace → Drawer geometry reconciliation call was removed because `setPage()` already owns that presentation transition.
+
+Post-step research:
+- **Figma's right Properties/Inspect sidebar** follows the selected layer and changes the displayed properties accordingly, including in view-only access. This confirms follow-selection as a natural inspector default, while the access model confirms that following selection does not imply edit authority. https://help.figma.com/hc/en-us/articles/360039832014-Design-prototype-and-explore-layer-properties-in-the-right-sidebar
+- **Figma's minimized UI** automatically re-opens only the right properties sidebar when a layer is selected, then minimizes it again after deselection. METAENGINE deliberately chooses a more conservative variant: follow changes content only if the Drawer is already open, so selection cannot unexpectedly steal Browser space. https://help.figma.com/hc/en-us/articles/360039831974-Explore-the-navigation-bar-and-left-sidebar
+- **VS Code Outline** can track the active editor/cursor but exposes tracking as configurable behavior. This supports making follow-selection an explicit policy rather than a hard-coded coupling. https://code.visualstudio.com/docs/editing/getting-started/userinterface
+- **IntelliJ tool windows** distinguish pinned and unpinned modes; pinned context remains visible, while unpinned context disappears when no longer active. METAENGINE's `follow` toggle is the first bounded analogue: follow = selection-driven, off = effectively pinned to the chosen secondary tab. https://www.jetbrains.com/help/idea/viewing-modes.html
+- **IntelliJ Run tool window** separately supports pinning output tabs so a new run cannot replace the operator's preserved context. The same principle should guide future task/agent inspector pinning. https://www.jetbrains.com/help/idea/run-tool-window.html
+
+Decision after research:
+- follow-selection stays explicit and workspace-scoped;
+- selection must never auto-open the Drawer;
+- future inspector pinning should pin an exact typed identity (task/session/Browser target), not copied display text;
+- automatic context changes remain presentation-only and must never initiate an effect.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
