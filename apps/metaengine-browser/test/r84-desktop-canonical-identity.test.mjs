@@ -78,6 +78,9 @@ test('R84 ME2 tab host projects canonical Browser identity without creating auth
   assert.equal(status.browsercell_fallback_allowed, false);
   assert.equal(status.target_fallback_allowed, false);
   assert.equal(status.second_tab_registry, false);
+  assert.equal(status.canonical_runtime_binding_only, true);
+  assert.equal(status.browsercell_fallback_allowed, false);
+  assert.equal(status.target_fallback_allowed, false);
   assert.equal(typeof me2FleetTabsGetHost().resolveIdentity, 'function');
 });
 
@@ -96,6 +99,8 @@ test('R84 Browser root wires Mission Control to existing exact WebContents/CDP i
   assert.doesNotMatch(main, /target_id:\s*runtime\?\.target_id \|\| semantic\?\.target_id \|\|/);
   assert.match(main, /resolveIdentity:\s*\(tabId\) => canonicalTabRuntimeIdentity\(tabId\)/);
   assert.match(main, /closeTab:\s*\(tabId\) => closeTab\(tabId\)/);
+  assert.match(main, /webcontents_target_fallback:\s*false/);
+  assert.doesNotMatch(main, /target_id:\s*runtimeTargetId\s*\|\|/);
 
   assert.match(mission, /me2FleetTabsResolveIdentity/);
   assert.match(mission, /runtime_identity:\s*nativeIdentity/);
