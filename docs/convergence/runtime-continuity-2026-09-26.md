@@ -6,6 +6,8 @@ Native web conversations now checkpoint normalized provider addresses in userDat
 
 CI failure on 5f878c2 was a missing Prisma Client generated artifact under the frozen Bun dependency install. The build command now explicitly runs prisma generate before next build. The subsequent run 36203988061 passed contract and package-proof jobs. This fixes reproducibility without weakening TypeScript checks.
 
-Local verification for this increment: 91 desktop tests, 90 passed, one physical packaging probe skipped. Added coverage exercises real ENOENT handling, stale child events, unconfirmed termination, output draining, cached health degradation, checkpoint validation, restart readback, timeout cleanup and stopped restore behavior. Authenticated provider execution and installed Windows update activation are not proven by these tests.
+Local verification for this increment: 92 desktop tests, 91 passed, one physical packaging probe skipped. Added coverage exercises real ENOENT handling, stale child events, unconfirmed termination, output draining, cached health degradation, checkpoint validation, restart readback, timeout cleanup and stopped restore behavior. Authenticated provider execution and installed Windows update activation are not proven by these tests.
 
 Outstanding: attach the canonical legacy fleet/lease/semantic execution kernel to this registry; package daemon/runtime; qualify update activation and rollback; connect durable task receipts, supervisor continuation and measured learning. Address restoration is workspace continuity, not permission to replay an ambiguous task.
+
+Shutdown follow-up: gateway tracks HTTP and upgraded TCP connections and closes both directions. A real upgrade/socket test proves that persistent WebSocket connections cannot block the awaited desktop shutdown.
