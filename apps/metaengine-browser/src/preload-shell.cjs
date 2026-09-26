@@ -127,7 +127,8 @@ async function refreshBrainBaseline() {
 // microtask is insufficient. Observe DOM mutations and emit CONFIRMED as soon as
 // the exact R75 composition exists; emit incomplete only after one bounded
 // hydration deadline. No interval/polling loop and no renderer authority.
-window.addEventListener('DOMContentLoaded', () => {
+if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof MutationObserver !== 'undefined') {
+  window.addEventListener('DOMContentLoaded', () => {
   const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
   let settled = false;
   let observer = null;
@@ -177,7 +178,8 @@ window.addEventListener('DOMContentLoaded', () => {
     if (settled) return;
     try { finish(snapshot()); } catch {}
   }, 8000);
-}, { once: true });
+  }, { once: true });
+}
 
 ipcRenderer.on('metaengine:shell:snapshot', (_event, value) => emitSnapshot(value));
 ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
