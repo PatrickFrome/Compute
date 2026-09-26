@@ -253,11 +253,83 @@ export async function startMe2UiHost() {
 export function stopMe2UiHost({ killChild = false } = {}) {
   stopped = true;
   if (healthTimer) clearInterval(healthTimer);
+  healthTimer = null;
   state = 'STOPPED';
   if (killChild && child) {
     try { child.kill('SIGTERM'); } catch { /* уже мёртв */ }
   }
   return me2UiHostStatus();
+}
+
+function waitForUiChildExit(target, timeoutMs) {
+  if (!target || target.exitCode != null || target.signalCode != null) return Promise.resolve(true);
+  const boundedMs = Math.max(25, Math.min(10000, Number(timeoutMs) || 2500));
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      target.removeListener('exit', onExit);
+      resolve(value);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(false), boundedMs);
+    target.once('exit', onExit);
+  });
+}
+
+/**
+ * R85 upgrade fence: stop the Browser-owned UI and prove the process actually
+ * exited before Electron is allowed to finish quitting. A plain child.kill()
+ * is only a request; without readback the next Browser incarnation can race the
+ * old Next server on :3000 and mistake it for a valid runtime.
+ */
+export async function stopMe2UiHostAndWait({ graceMs = 2500, forceMs = 2500 } = {}) {
+  stopped = true;
+  if (healthTimer) clearInterval(healthTimer);
+  healthTimer = null;
+
+  const ownedChild = mode === 'spawned' ? child : null;
+  if (!ownedChild) {
+    state = 'STOPPED';
+    return {
+      ...me2UiHostStatus(),
+      shutdown: Object.freeze({ confirmed: true, owned_child: false, forced: false, pid: null }),
+    };
+  }
+
+  const pid = ownedChild.pid ?? null;
+  state = 'STOPPING';
+  let graceful = false;
+  try {
+    ownedChild.kill('SIGTERM');
+    graceful = await waitForUiChildExit(ownedChild, graceMs);
+  } catch { /* force path below */ }
+
+  let forced = false;
+  if (!graceful && child === ownedChild) {
+    forced = true;
+    emitRow(row({ event: 'UI_FORCE_KILL', pid }), { error: true });
+    try { ownedChild.kill('SIGKILL'); } catch { /* already dead */ }
+    await waitForUiChildExit(ownedChild, forceMs);
+  }
+
+  const confirmed = child !== ownedChild || ownedChild.exitCode != null || ownedChild.signalCode != null;
+  if (confirmed) {
+    if (child === ownedChild) child = null;
+    state = 'STOPPED';
+    emitRow(row({ event: 'UI_STOP_CONFIRMED', pid, forced }));
+  } else {
+    state = 'DEGRADED';
+    lastError = 'ui_shutdown_unconfirmed';
+    emitRow(row({ event: 'UI_STOP_UNCONFIRMED', pid, forced }), { error: true });
+  }
+
+  return {
+    ...me2UiHostStatus(),
+    shutdown: Object.freeze({ confirmed, owned_child: true, forced, pid }),
+  };
 }
 
 export function me2UiHostStatus() {
