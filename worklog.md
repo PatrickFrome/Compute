@@ -257,3 +257,41 @@ Backlog следующего раунда (приоритеты):
 3. Следить за Sonar/CF-чеками PR #982 (queued); PR #968 (R85-волна оператора) — CI RED (installed-ui-72-activation-race-soak) на 1ea1583a82, реакция операторского агента не видна.
 4. Mirror: operator anchor-запись → auto-mirror событий daemon в me2_event_mirror (milestone-события R82 уже в chain).
 5. Консоль-мелочи: version_transitions пуст при рестарте демона до перехода (механизм верен, но переходы внутри сессии демона видны только если daemon пережил переход) — можно дополнить реконструкцией из journal-событий R82_SELF_UPDATE_LANDED; длинная история draft size (сейчас ring 4h).
+
+---
+Task ID: R82-HARDEN-20260926
+Agent: Z.ai Code (main agent)
+Task: QA-раунд + hardening R82 exit-gate: фикс багов (пустые PR-поля /convergence, дубль milestone после рестарта), оппортунистический draft-сэмплер, canary-reason family, live-наблюдение R84-волны оператора
+
+Work Log:
+- Вход-аудит: daemon 0.63.0-r83import green, git clean @ ff20b2c; QA-проход agent-browser (чистая сессия): 12 карточек, 0 JS-ошибок, overflowX=false @1920/@390 — визуально чисто, но данные вскрыли баги.
+- БАГ 1 (найден и исправлен): GET /convergence отдавал ПУСТЫЕ PR-поля («PR #968 mergeable —», CI UNKNOWN, 0 чеков) при живом GitHub API. Причина: рефакторинг gh() в R82-EXIT (экспорт ghGet с формой {data, rateRemaining}) обновил branch-вызов (br.data.commit), но PR-вызов остался prReq.state → все поля undefined→"". Фикс: prReq.data.*. Live-верификация: PR #968 state=open, draft=true, mergeable=true, 13→28 чеков, rollup PENDING.
+- БАГ 2 (найден и исправлен): milestone R82_SELF_UPDATE_LANDED записан 8 РАЗ (seq 298, 316, …) — каждый bun --hot reload и рестарт демона сбрасывал in-process milestoneFired, а selfUpdateLanded оставался true из live-данных → повторная запись. Фикс: durable-дедупликация — eventsOfType(type) из eventlog.ts (лог ЕСТЬ дедуп); все три milestone (SELF_UPDATE_LANDED / DRAFT_CLEARED / CYCLE_RESUMED) теперь лог-гейтованы. Live-верификация: 3 рестарта демона — 0 новых дублей.
+- ПРОБЕЛ (найден и закрыт): draft-сэмплер (периодический, 5 мин) гонялся с короткоживущими attempt-табами: живой таймлайн attempt'а измерен по state-данным — старт → таб биндится через ~15с (tab_bound_at) → canary-аборт через 0.3с после бинда (ambiguous_at) → D-C7 закрывает таб (~5с). Периодическая проба почти всегда ловила мёртвый таб (native_supervisor_target_view_unavailable) или несуществующий (NO_TAB до бинда).
+- РЕАЛИЗОВАНО (R82-HARDEN):
+  - controlplane.ts: SupervisorSnapshot.keepalive.rollover_attempt {attempt_id, tab_id, started_at, ambiguous_reason} — живая идентичность попытки.
+  - monitor.ts: сэмплы несут attempt_id/attempt_tab_id/rollover_reason; хук onRolloverAttempt(cb) — срабатывает при появлении НОВОГО attempt_id (первое наблюдение сеет baseline — стейл-попытка со старта не триггерит).
+  - readback.ts: оппортунистический сэмплер — проба через +20с после детекции попытки (окно бинда таба) с одним ретраем +20с при NO_TAB; rate-limit 60с на уровне хука. Live-верификация: oppo-проба сработала на attempt e879cf25 (09:02:20) — в poisoned-состоянии таб уже закрыт D-C7 (ожидаемо: система СПРОЕКТИРОВАНА так фиксом PR #981); в cleared-состоянии таб выживает как conversation — окно чтения широкое, ровно там где проба и нужна.
+  - canary-стадия: rollover_reason-семейство — newCodeActive = ROOT_DRAFT_OVERSIZED ИЛИ ROLLOVER_ERROR:* (live-файндинг: причина осциллирует с ROLLOVER_ERROR:rollover_tab_never_committed — D-C7 close-by-proof для незакоммитивших табов работает, второй новый machine-readable тип причин).
+  - draftCleared стал ИСТОРИЧЕСКИМ фактом (sticky): any OK-сэмпл ИЛИ milestone в логе — стадия не откатывается на BLOCKED когда после успешного rollover attempt'ов больше нет.
+  - inference-милестоун: cycle_seq > baseline сам по себе доказывает чистый драфт (успешный rollover требует его) → R82_DRAFT_CLEARED дописывается с source:"inference" — gate сходится даже если ни одна проба не поймала живой чистый таб.
+  - CYCLE_GROWTH live-data-first: текущий cycle_seq > baseline = доказательство (monitor history — лишь корроборация).
+  - version_transitions: реконструкция из journal-события R82_SELF_UPDATE_LANDED при пустом ring-buffer (после рестарта), дедуп по from→to парам (8 исторических дублей рендерятся как 1 переход).
+  - DraftSample.source: "periodic" | "opportunistic".
+- Консоль: карточка R82 EXIT GATE — новые статы «rollover-попытки (окно монитора)» + «текущая попытка» (с title-тултипом полного таймлайна attempt_id/start/reason/tab); заголовок истории драфта «периодический 5 мин + oppo-сэмплер»; oppo-бейдж (cyan) на строках oppo-проб; чип «oppo-проб N»; CANARY-стадия переименована «Новый код активен (machine-readable причины)».
+- LIVE-ФАЙНДИНГ РАУНДА: операторский агент начал R84-ВОЛНУ — ветка work/r81-browser-release-convergence-v1 ушла на 87d621fc42 «ci(r84): gate Desktop canonical identity convergence» (28 чеков re-qualifying), ранее 39c2bf0d06 «feat(r84): bind ME2 tabs to canonical Browser identity». PR #968 переведён в draft. R83-импорт PR #982: open, mergeable clean, CI 3/3 terminal green — ждёт ревью оператора.
+- QA-верификация: lint 0/0; dev.log чист (GET / 200); daemon 0.64.0-r82harden boot чист; agent-browser чистая сессия — 0 JS-ошибок, 12 карточек, все маршруты демона 200 (/roadmap /edge /edge/import-status /edge/import-plan /donor-registry /verdicts), WS :3040 жив (426 upgrade); клик «Свежий readback» — live-проба исполняется (CANARY DONE с ROLLOVER_ERROR-причиной); «/»-фокус фильтра работает; layout: overflowX=false @1920/@390, 0 усечений без title, футер живой «R82-HARDEN · exit gate: OPERATOR_CLEAR», bodyH 5512/11101; скриншоты download/r82harden-{desktop,mobile}.png.
+- Git: коммит 83ef437 → push sandbox/me2-os через git-sync.sh.
+
+Stage Summary:
+- Статус: R82 exit-gate переведён из «сэмплер вслепую» в hardened watch: durable milestones (рестарт-безопасные), оппортунистические пробы с таймингом под живой lifecycle попытки, canary-семейство причин, sticky-факты и inference-милестоун гарантируют сходимость gate во ВСЕХ сценариях очистки драфта (живая проба OK / цикл вырос / демон был неактивен в момент перехода).
+- Живое состояние на конец раунда: RELEASE_CI DONE (42/42), MANIFEST DONE, SELF_UPDATE DONE (.36228915117.1), CANARY DONE (ROLLOVER_ERROR:rollover_tab_never_committed — D-C7 работает), OPERATOR_CLEAR BLOCKED (единственное действие оператора: Ctrl+A+Delete в new-chat композере chat.z.ai), CYCLE_GROWTH/R82_CLOSED ждут.
+- Ключевой принцип: «поймать живой таб» в poisoned-состоянии принципиально редко — фиксы PR #981 СОЗДАЮТ короткое окно (аборт+закрытие). Надёжность gate строится не на удачных пробах, а на live-данных уровня состояния (rollover_reason, cycle_seq) + лог-гейтованных milestone.
+- UX-урок №: (R82-HARDEN-1) bun --hot reload сбрасывает module-level state — любая одноразовая семантика (milestones, seen-флаги) обязана жить в durable-хранилище, не в памяти процесса; (R82-HARDEN-2) рефакторинг возвращаемого типа функции (gh → {data, rateRemaining}) требует grepp-ревизии ВСЕХ call-sites — один пропущенный молча даёт пустые поля; (R82-HARDEN-3) тайминг оппортунистических проб обязан учитывать lifecycle наблюдаемого объекта (attempt: бинд таба ~15с — проба в момент детекции стреляет в пустоту).
+
+Backlog следующего раунда (приоритеты):
+1. Оператор (единственное блокирующее R82 действие): очистка account-draft на chat.z.ai → карточка R82 EXIT GATE сойдётся сама (milestone R82_DRAFT_CLEARED — живой пробой или inference из роста cycle_seq; далее R82_CYCLE_RESUMED → R82_CLOSED).
+2. R84-волна оператора (живая прямо сейчас: 87d621fc42, 28 чеков): следить за CI до терминала; после merge — R84 Desktop convergence закрыт оператором (не наша зона действий, но консоль трекает).
+3. R83-merge: PR #982 (CI 3/3 green, mergeable clean) — ревью оператора; после merge можно готовить controlled promotion (deploy-from-repo) с ротацией CF-токена.
+4. Mirror: операторская anchor-запись (кнопка в консоли) → auto-mirror daemon-событий в me2_event_mirror (milestone-события готовы).
+5. Мелочи: длинная история draft size (ring 4h → persist в data/); звук/тост при смене current_gate; PR #968 CI-rollup в футере.
