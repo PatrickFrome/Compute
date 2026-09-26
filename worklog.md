@@ -9130,3 +9130,22 @@ Stage Summary:
 - Дыра R22–R80 ЗАКРЫТА (78 донорских блоков); линераж сохранён (RAIL-DONOR-LINERAGE-20260926).
 - sandbox/me2-os = A(7877f671) → B; архив-ветки sha-идентичны; guard 416526 отныне сам публикует ветку context-vault (PAT на месте).
 - Риски/ next: (1) параллельные чаты продолжают пушить в rail — перед любой публикацией fetch+union по protocols/wl-merge, никогда force; (2) новый PAT передан в чат открытым текстом — рекомендовать оператору ротацию после стабилизации; (3) рабочее дерево этого чата остаётся на скаффолде — унификация на rail-код отдельным решением; (4) heartbeat/compactor-шарды подхватят новый worklog в течение часа.
+
+---
+Task ID: R80-PUSH-B
+Agent: Z.ai Code (main session, trace 1a0de518baaf14f1)
+Task: Job 413338 — публикация отложенного (main→sandbox/me2-os ff + 2 архив-ветки) после возврата PAT; верификация ls-remote
+
+Work Log:
+- PAT получен от оператора в 00:45, записан в /home/z/.a2/.github.env (perm 0600), API-валидация HTTP 200 (значение не печаталось и не логировалось).
+- Прогон scripts/push-pending-r80.sh: push main→sandbox/me2-os ОТКЛОНЁН (non-fast-forward) — premise скрипта «локальный main впереди» устарела.
+- Диагностика: remote sandbox/me2-os=7877f671 (JOURNAL-SYNC A) строго впереди локального main ee597893 на 194 коммита (merge-base = локальный HEAD, counts 0/194); force-push исключён.
+- Обнаружен параллельный исполнитель того же Job 413338: обе архив-ветки УЖЕ на remote (73486dd me2/archive-r21-sandbox-snapshot, c95de21 me2/archive-v040-main-archive — ровно ожидаемые orphan-SHA), rail-union опубликован (A=7877f671 → B=d2328dc0).
+- Гонка разрешена контентной сверкой: worklog blob b4f3f69da00705fe ИДЕНТИЧЕН в c99ece14 (локальный union-коммит параллельного чата) и d2328dc0 (remote tip); 1,740,108B = remote-union 1,732,312B + 7,796B = ровно две локально-уникальные секции (R80-PUSH, RAIL-DONOR-LINERAGE-20260926), извлечены и сохранены до реконсиляции; построчные потери старого локального канона (ee597893) = 0; R22–R89 дыра закрыта.
+- Локальный main переведён на d2328dc0 (контент-идентичная реконсиляция divergence; c99ece14 сохранён в reflog; scripts/push-pending-r80.sh в d2328dc0, контент идентичен).
+- ls-remote верификация (финал): sandbox/me2-os=d2328dc0, me2/archive-r21-sandbox-snapshot=73486dd, me2/archive-v040-main-archive=c95de21; локальный main=d2328dc0 → push JOURNAL-SYNC C выполняется этим же коммитом (ff).
+- Guard 416526 (ctx-vault) отработал в этом же раунде; write-ahead снапшот phoenix-snapshot.sh сделан перед первой правкой worklog.
+
+Stage Summary:
+- Публикация ЗАВЕРШЕНА: main≡sandbox/me2-os, обе архив-ветки sha-верифицированы на remote, канонический worklog (276 секций, история R22–R89 восстановлена) на GitHub.
+- push-pending-r80.sh premise устарела (локальный больше не впереди) — скрипт оставить как артефакт, при следующем сбросе среды пересобрать premise.
