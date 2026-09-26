@@ -20,6 +20,8 @@ export const ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT = 28;
 export const ME2_PRIMARY_BROWSER_URLBAR_HEIGHT = 36;
 export const ME2_PRIMARY_BROWSER_STATUS_HEIGHT = 24;
 export const ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT = 200;
+export const ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT = 160;
+export const ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT = 360;
 export const ME2_PRIMARY_MIN_BROWSER_HEIGHT = 320;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
@@ -66,6 +68,7 @@ export function planShellLayout({
   surface_profile = 'LEGACY_BROWSER_SHELL',
   me2_command_rail_open = true,
   me2_context_drawer_open = false,
+  me2_context_drawer_height = ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT,
 } = {}) {
   const windowWidth = finiteDimension(width, 'width');
   const windowHeight = finiteDimension(height, 'height');
@@ -126,13 +129,24 @@ export function planShellLayout({
       Math.max(0, windowHeight - top),
     );
     const drawerRequested = me2_context_drawer_open === true;
-    const drawerFits = windowHeight - top - baseBottom - ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT >= ME2_PRIMARY_MIN_BROWSER_HEIGHT;
-    const drawerEffective = drawerRequested && drawerFits;
+    const requestedDrawerHeight = Math.max(
+      ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
+      Math.min(ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT, Math.floor(Number(me2_context_drawer_height) || ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT)),
+    );
+    const drawerCapacity = Math.max(0, windowHeight - top - baseBottom - ME2_PRIMARY_MIN_BROWSER_HEIGHT);
+    const effectiveDrawerHeight = drawerRequested && drawerCapacity >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT
+      ? Math.min(requestedDrawerHeight, drawerCapacity)
+      : 0;
+    const drawerEffective = effectiveDrawerHeight >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT;
     bottom = Math.min(
-      baseBottom + (drawerEffective ? ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT : 0),
+      baseBottom + effectiveDrawerHeight,
       Math.max(0, windowHeight - top),
     );
-    if (drawerRequested && !drawerFits) adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
+    if (drawerRequested && !drawerEffective) {
+      adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
+    } else if (drawerRequested && effectiveDrawerHeight < requestedDrawerHeight) {
+      adaptations.push('ME2_CONTEXT_DRAWER_CLAMPED_FOR_ACTIVE_SURFACE');
+    }
     const preferredLeft = ME2_PRIMARY_PAGE_PADDING
       + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH
       + ME2_PRIMARY_COMMAND_GAP;
@@ -174,12 +188,22 @@ export function planShellLayout({
     active_surface_priority: true,
     me2_command_rail_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_command_rail_open !== false : null,
     me2_context_drawer_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_context_drawer_open === true : null,
+    me2_context_drawer_requested_height: surfaceProfile === 'ME2_R75_COMMAND'
+      ? Math.max(
+          ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
+          Math.min(ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT, Math.floor(Number(me2_context_drawer_height) || ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT)),
+        )
+      : null,
     me2_context_drawer_effective_open: surfaceProfile === 'ME2_R75_COMMAND'
       ? (me2_context_drawer_open === true && !adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE'))
       : null,
-    me2_context_drawer_height: surfaceProfile === 'ME2_R75_COMMAND' && me2_context_drawer_open === true
-      && !adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE')
-      ? ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT
+    me2_context_drawer_height: surfaceProfile === 'ME2_R75_COMMAND'
+      ? Math.max(0, bottom - (
+          ME2_PRIMARY_PAGEBAR_HEIGHT
+            + ME2_PRIMARY_STATUSBAR_HEIGHT
+            + ME2_PRIMARY_PAGE_PADDING
+            + ME2_PRIMARY_BROWSER_STATUS_HEIGHT
+        ))
       : 0,
     chrome_degrades_before_active_surface: true,
     adaptations: Object.freeze(adaptations),
