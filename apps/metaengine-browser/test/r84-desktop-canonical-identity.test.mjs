@@ -28,8 +28,8 @@ test('R84 ME2 tab host projects canonical Browser identity without creating auth
     selectTab: () => true,
     resolveIdentity: (id) => ({
       tab_id: id,
-      browsercell_identity: id,
-      browsercell_identity_source: 'CANONICAL_TAB_ID',
+      browsercell_identity: 'cell:worker-7',
+      browsercell_identity_source: 'BROWSER_RUNTIME_BINDING_INDEX',
       web_contents_id: 77,
       webcontents_binding_generation: 9,
       runtime_binding_generation: 12,
@@ -40,6 +40,9 @@ test('R84 ME2 tab host projects canonical Browser identity without creating auth
       document_generation: 4,
       semantic_revision: 18,
       runtime_binding_live: true,
+      runtime_identity_complete: true,
+      runtime_binding_source: 'BROWSER_RUNTIME_BINDING_INDEX_O1',
+      identity_lookup_complexity: 'O(1)',
       exact_identity: true,
       execution_authority: true,
       command_leasing: true,
@@ -50,12 +53,17 @@ test('R84 ME2 tab host projects canonical Browser identity without creating auth
   const identity = me2FleetTabsResolveIdentity(tabId);
   assert.equal(identity.schema, 'metaengine.browser.me2.native-conversation-identity.v1');
   assert.equal(identity.tab_id, tabId);
-  assert.equal(identity.browsercell_identity, tabId);
+  assert.equal(identity.browsercell_identity, 'cell:worker-7');
+  assert.equal(identity.browsercell_identity_source, 'BROWSER_RUNTIME_BINDING_INDEX');
   assert.equal(identity.web_contents_id, 77);
   assert.equal(identity.webcontents_binding_generation, 9);
   assert.equal(identity.runtime_binding_generation, 12);
   assert.equal(identity.cell_id, 'cell:worker-7');
   assert.equal(identity.target_id, 'target-77');
+  assert.equal(identity.runtime_identity_complete, true);
+  assert.equal(identity.runtime_binding_source, 'BROWSER_RUNTIME_BINDING_INDEX_O1');
+  assert.equal(identity.identity_lookup_complexity, 'O(1)');
+  assert.equal(identity.webcontents_target_fallback, false);
   assert.equal(identity.exact_identity, true);
   assert.equal(identity.execution_authority, false);
   assert.equal(identity.command_leasing, false);
@@ -66,6 +74,9 @@ test('R84 ME2 tab host projects canonical Browser identity without creating auth
   assert.equal(status.exact_identity_resolver_registered, true);
   assert.equal(status.physical_close_registered, true);
   assert.equal(status.select_registered, true);
+  assert.equal(status.canonical_runtime_binding_only, true);
+  assert.equal(status.browsercell_fallback_allowed, false);
+  assert.equal(status.target_fallback_allowed, false);
   assert.equal(status.second_tab_registry, false);
   assert.equal(typeof me2FleetTabsGetHost().resolveIdentity, 'function');
 });
@@ -75,13 +86,62 @@ test('R84 Browser root wires Mission Control to existing exact WebContents/CDP i
   const mission = await fs.readFile(new URL('../src/me2/me2-mission-control.mjs', import.meta.url), 'utf8');
 
   assert.match(main, /ExactBrowserTabViewMap, resolveExactWebContentsTabBinding/);
-  assert.match(main, /browsercell_identity:\s*id/);
-  assert.match(main, /browsercell_identity_source:\s*'CANONICAL_TAB_ID'/);
   assert.match(main, /nativeSupervisor\?\.runtimeBinding\?\.\(id\)/);
+  assert.match(main, /browsercell_identity:\s*cellId/);
+  assert.match(main, /browsercell_identity_source:\s*cellId \? 'BROWSER_RUNTIME_BINDING_INDEX' : null/);
+  assert.match(main, /target_id:\s*runtimeTargetId/);
+  assert.match(main, /identity_lookup_complexity:\s*'O\(1\)'/);
+  assert.doesNotMatch(main, /runtimeRows\.find/);
+  assert.doesNotMatch(main, /semanticRows\.find/);
+  assert.doesNotMatch(main, /target_id:\s*runtime\?\.target_id \|\| semantic\?\.target_id \|\|/);
   assert.match(main, /resolveIdentity:\s*\(tabId\) => canonicalTabRuntimeIdentity\(tabId\)/);
   assert.match(main, /closeTab:\s*\(tabId\) => closeTab\(tabId\)/);
 
   assert.match(mission, /me2FleetTabsResolveIdentity/);
   assert.match(mission, /runtime_identity:\s*nativeIdentity/);
   assert.match(mission, /await host\.closeTab\(known\.tab_id\)/);
+});
+
+test('R84 identity projection never fabricates BrowserCell or CDP target when Brain binding is absent', () => {
+  const tabId = 'tab_22222222-2222-4222-8222-222222222222';
+  const rows = new Map([[tabId, { tab_id: tabId, role: 'FLEET', url: 'https://chat.z.ai/c/no-brain-binding' }]]);
+  me2FleetTabsSetHost({
+    registry: {
+      get: (id) => rows.get(String(id)) || null,
+      snapshot: () => ({ tabs: [...rows.values()] }),
+      census: () => ({ by_role: { FLEET: 1 } }),
+    },
+    createTab: async () => ({ tab_id: tabId }),
+    resolveIdentity: (id) => ({
+      tab_id: id,
+      browsercell_identity: null,
+      browsercell_identity_source: null,
+      web_contents_id: 88,
+      webcontents_binding_generation: 2,
+      runtime_binding_generation: null,
+      cell_id: null,
+      cell_generation: null,
+      renderer_process_key: null,
+      target_id: null,
+      document_generation: 0,
+      semantic_revision: 0,
+      runtime_binding_live: false,
+      runtime_identity_complete: false,
+      runtime_binding_source: null,
+      identity_lookup_complexity: 'O(1)',
+      exact_identity: true,
+      authority_effect: false,
+    }),
+  });
+
+  const identity = me2FleetTabsResolveIdentity(tabId);
+  assert.equal(identity.browsercell_identity, null);
+  assert.equal(identity.browsercell_identity_source, null);
+  assert.equal(identity.cell_id, null);
+  assert.equal(identity.target_id, null);
+  assert.equal(identity.runtime_binding_live, false);
+  assert.equal(identity.runtime_identity_complete, false);
+  assert.equal(identity.webcontents_target_fallback, false);
+  assert.equal(identity.execution_authority, false);
+  assert.equal(identity.authority_effect, false);
 });
