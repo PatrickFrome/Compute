@@ -19,10 +19,11 @@
 | Job | Расписание | Суть |
 |-----|-----------|------|
 | 413338 | каждые 15 мин (agentTurn) | Проверка /home/z/.a2/.github.env (GITHUB_TOKEN_ADMIN). Если есть → `cd /home/z/my-project && bash scripts/push-pending-r80.sh` (main→sandbox/me2-os ff + 2 архив-ветки me2/archive-r21-sandbox-snapshot, me2/archive-v040-main-archive) + запись ls-remote в worklog. Если нет → однострочная пометка «PAT ожидается, push-pending готов (ba623a59)». Секреты не печатать. |
-| Context Guard | каждые 15 мин (fixed_rate 900s, agentTurn) | Выполняет /home/z/context-vault/context-guard.sh — снапшоты worklog/CONTEXT, детект усечения, авторестор, git-история, /tmp-зеркало, push context-vault при PAT. Феникс-скрипт встроен в текст самой cron-задачи (пересоздаёт vault при wipe). |
+| Context Guard (416526) | каждые 15 мин (fixed_rate 900s) | Выполняет /home/z/context-vault/context-guard.sh — снапшоты worklog/CONTEXT, детект усечения, авторестор, git-история, /tmp-зеркало, push context-vault при PAT. Феникс-скрипт встроен в payload задачи. |
+| PHX-HEARTBEAT (416629) | каждые 30 мин (fixed_rate 1800s) | phoenix-heartbeat.sh v2.0: строит CONTEXT-CURRENT.md digest, грузит latest/* + versioned в Supabase (sha-дедуп), зеркалит в ossfs + /tmp + PolarFS. Феникс-скрипт (компакт-эталон) встроен в payload. |
 | CTX-SHARD-A (416554) | ежегодно 09.09 (cron «0 0 0 9 9 ?») | ОФЛАЙН-копия CONTEXT.md + эталон guard-скрипта внутри payload — переживает env-reset VM. Read-only; при срабатывании отвечать «shard-ok». |
 | CTX-SHARD-B (416555) | ежегодно 09.09 (cron «0 0 0 9 9 ?») | ОФЛАЙН-копия: протокол восстановления + хвост worklog + ключевые факты R80. Read-only. |
-| CTX-VAULT-COMPACTOR (416558) | ежедневно 04:20 (cron «0 20 4 * * ?») | Рефреш шардов: читает CONTEXT/worklog → создаёт CTX-SHARD-A/B gen<сегодня> → верифицирует через get → удаляет старые. Стареие шарда ≤24ч. |
+| CTX-VAULT-COMPACTOR (416631) | каждый час (fixed_rate 3600s) | Рефреш шардов: CONTEXT.md + PHOENIX-PROTOCOL.md + guard → SHARD-A; индекс 15 секций + хвост worklog 60 строк + протокол v2 → SHARD-B; верификация get → удаление старых генераций. Устаревание шарда ≤1ч (было 24ч). Лимит payload ≤10000 симв. |
 
 ## 3. Текущий блокер (главный)
 
@@ -49,35 +50,44 @@
 ## 6. Ключевые пути
 
 - /home/z/my-project/worklog.md — канонический МНОГОЧАТОВЫЙ журнал (~1MB, append-only)
+- /home/z/my-project/CONTEXT-CURRENT.md — авто-digest «как получить полный контекст» (обновляет heartbeat)
+- /home/z/my-project/PHOENIX-PROTOCOL.md — полный протокол защиты/восстановления контекста
+- /home/z/my-project/scripts/phoenix/ — phoenix-heartbeat.sh, phoenix-restore.sh (--check/--restore/--merge), phoenix-snapshot.sh (write-ahead)
 - /home/z/my-project/worklog-archive-pre-reset.md — копия глубокого архива (954e1b2)
 - /home/z/my-project/CONTEXT.md — этот файл
-- /home/z/context-vault/ — snapshots/, latest/, journal/, repo/ (git), context-guard.sh, supabase-persist.sh
-- **/home/sync/** (OSS, rw) — сетевое хранилище ВНЕ overlay: me2-context-backups/vault-*.tar.gz + repo.tar (платформенный, не трогать)
+- /home/z/context-vault/ — snapshots/, snapshots-wa/ (write-ahead), latest/, journal/, repo/ (git), context-guard.sh, supabase-persist.sh
+- **/home/sync/** (OSS, rw) — вне overlay: me2-context-backups/{latest,versioned,bundles}/ + repo.tar (платформенный, НЕ ТРОГАТЬ); bundles/repo-all-*.bundle — полный git-архив 125MB
 - **/tmp/my-project/** (PolarFS) — staging платформы: .a2-backup/me2.env.20260922 (креды Supabase/GitHub), context-vault-mirror/
-- Supabase Storage: бакет me2-evidence, префикс context-vault/ (6 объектов: worklog, CONTEXT, guard, journals, creds-restore-key)
+- Supabase Storage: бакет me2-evidence, context-vault/latest/ (worklog, CONTEXT, CONTEXT-CURRENT, PROTOCOL, 5 скриптов, 2 журнала) + versioned/<ts>/ + bundles/ (125MB bundle НЕ влезает — лимит объекта ~50MB, HTTP 400)
 - /home/z/.a2/.github.env — токен (создаётся оператором; никогда не печатать)
 
-## 7. Механизм защиты контекста (Phoenix Context Vault)
+## 7. Механизм защиты контекста (Phoenix Context Vault v2)
 
-1. context-guard.sh (каждые 15 мин): снапшот worklog/CONTEXT при изменении; если worklog удалён/усечён >40% при эталоне >1000B — автокопия «truncated-*» и РЕСТОР из последнего снапшота; журнал; git-коммит в vault/repo; зеркало в /tmp; push ветки context-vault при PAT.
-2. Феникс-свойство: полный текст guard-скрипта встроен в cron-задачу Context Guard → даже при полном wipe vault пересоздаётся автоматически.
-3. Протокол агентов: (a) в начале работы читать CONTEXT.md + хвост worklog; (b) значимые события — append в worklog; (c) изменения состояния — обновлять CONTEXT.md; (d) секреты не печатать/не логировать; (e) новые важные скрипты дублировать в /home/z/context-vault/snapshots/.
-4. Cron-шард-хранилище (уровень 8): CTX-SHARD-A/B (Job 416554/416555) хранят CONTEXT.md + guard-скрипт + протокол восстановления ВНУТРИ payload задач cron — серверное хранилище вне песочницы. COMPACTOR (Job 416558) ежедневно 04:20 пересоздаёт шарды (генерация gen<дата>). Roundtrip >13KB верифицирован.
-5. Supabase (уровень 9, ВНЕ платформы): supabase-persist.sh грузит worklog/CONTEXT/guard/journals в бакет me2-evidence/context-vault/ (sha-дедуп, HTTP 200 контроль). Жив, верифицирован (6 объектов).
-6. OSS/PolarFS (уровень 10): /home/sync/me2-context-backups/vault-*.tar.gz + /tmp/my-project/context-vault-mirror/. repo.tar в /home/sync — МЕХАНИЗМ RESET (extract при рестарте VM), не трогать.
+0. **phoenix-restore.sh v2.0** — кворум 8 источников (local, vault/latest, vault-snapshot, vault-git, /tmp, PolarFS, ossfs, Supabase): `--check` (вердикт OK/НЕПОЛНАЯ/УСЕЧЕНИЕ), `--restore` (рестор из наибольшего, truncated-архив), `--merge` (СЕКЦИОННЫЙ merge-append: добавляет только отсутствующие блоки «---/Task ID», dedup по sha тела — безопасно для мульти-чатов, ничего не удаляет).
+0a. **phoenix-snapshot.sh v2.0** — write-ahead снапшот ПЕРЕД любой правкой worklog/CONTEXT (snapshots-wa/, ротация 60, sha-дедуп).
+0b. **phoenix-heartbeat.sh v2.0** (каждые 30 мин, Job 416629) — CONTEXT-CURRENT.md digest + Supabase latest/versioned + ossfs зеркала + /tmp/PolarFS. Окно внешней копии ≤30 мин (было: только вручную).
+1. context-guard.sh v1.0 (каждые 15 мин, Job 416526): снапшот worklog/CONTEXT при изменении; если worklog удалён/усечён >40% при эталоне >1000B — автокопия «truncated-*» и РЕСТОР из последнего снапшота; журнал; git-коммит в vault/repo; зеркало в /tmp; push ветки context-vault при PAT.
+2. Феникс-свойство ×2: guard-скрипт встроен в Job 416526, heartbeat-скрипт (компакт-эталон) встроен в Job 416629 — при полном wipe оба пересоздаются из cron-хранилища автоматически.
+3. Протокол агентов: (a) в начале работы: `bash scripts/phoenix/phoenix-restore.sh --check` → CONTEXT.md → CONTEXT-CURRENT.md → хвост worklog; (b) ПЕРЕД правкой worklog/CONTEXT — `phoenix-snapshot.sh`; (c) append-only, незнакомые Task ID = валидные мульти-чат записи; (d) изменения состояния — обновлять CONTEXT.md; (e) секреты не печатать/не логировать; (f) после значимой работы — дать heartbeat/guard отработать (≤30 мин до внешней копии).
+4. Cron-шард-хранилище: CTX-SHARD-A/B (Job 416554/416555) — CONTEXT.md + guard + протокол + хвост worklog ВНУТРИ payload. COMPACTOR (Job 416631) ежечасно пересоздаёт (gen<дата>). Roundtrip верифицирован; лимит payload 10000 символов (компакт-эталоны).
+5. Supabase (ВНЕ платформы): heartbeat грузит latest/* (11 объектов, sha-дедуп) + versioned/<ts>/worklog.md (раз в ≥3ч при изменении). Верифицирован бит-в-бит (GET=локаль sha12 243cb67bda33).
+6. OSS/PolarFS: /home/sync/me2-context-backups/{latest,versioned,bundles}/ + /tmp/my-project/context-vault-mirror/. Git-bundle 125MB (--all, verify OK) в bundles/ — полная история репо. repo.tar — МЕХАНИЗМ RESET, не трогать.
 
 ## 8b. Runbook восстановления v2 (после ЛЮБОГО wipe)
 
+0. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — если скрипты живы, они сами покажут кворум источников и вердикт; при УСЕЧЕНИИ: `--restore`; при НЕПОЛНОЙ: `--merge` (без потерь секций).
 1. Проверить /tmp/my-project/context-vault-mirror/ и /home/sync/me2-context-backups/ (сетевые ФС, наиболее вероятное выживание) → восстановить vault + worklog.
-2. Проверить /home/z/my-project/.git (глубокие блобы, reflog) — история в git-объектах могла пережить reset.
-3. Supabase: bash /home/z/context-vault/supabase-persist.sh (creds в /tmp/my-project/.a2-backup/) — скачать context-vault/* обратно: GET $SU/storage/v1/object/me2-evidence/context-vault/worklog.md.
-4. Cron-шарды: cron get 416554/416555 (или list по префиксу CTX-SHARD) — CONTEXT.md + guard-скрипт + протокол.
-5. Проверить probe-файлы (reset-probe-*.md в 5 локациях) → определить актуальную границу reset.
-6. Выполнить bash /home/z/context-vault/context-guard.sh; дальше — §8.
+2. Проверить /home/z/my-project/.git (глубокие блобы, reflog) — история в git-объектах могла пережить reset; полный клон из bundle: `git clone /home/sync/me2-context-backups/bundles/repo-all-*.bundle`.
+3. Supabase: GET $SU/storage/v1/object/me2-evidence/context-vault/latest/worklog.md (creds в /tmp/my-project/.a2-backup/me2.env.20260922) или `phoenix-restore.sh --merge` (скачает сам).
+4. Cron-шарды: cron list/get по префиксу CTX-SHARD — CONTEXT.md + guard-скрипт + протокол + индекс секций.
+5. Феникс: Job 416526 и 416629 пересоздают guard/heartbeat скрипты из своих payload автоматически при следующих тиках.
+6. Проверить probe-файлы (reset-probe-*.md в 5 локациях) → определить актуальную границу reset.
+7. Выполнить bash /home/z/context-vault/context-guard.sh; дальше — §8.
 
 ## 8. Если ты — новая сессия после потери контекста
 
-1. Прочитай этот файл и хвост worklog.md (150 строк).
+0. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум-вердикт целостности worklog (10 сек).
+1. Прочитай этот файл, /home/z/my-project/CONTEXT-CURRENT.md (авто-digest) и хвост worklog.md (150 строк).
 2. Проверь: `test -s /home/z/.a2/.github.env && echo PAT-OK || echo PAT-MISSING`.
 3. Если PAT-OK → выполни протокол Job 413338 (push-pending-r80.sh; если скрипта нет — сообщи оператору, восстанови по описанию в worklog).
 4. Если vault пуст → запусти cron-задачу Context Guard руками или дай guard отработать по расписанию (скрипт пересоздаст всё, кроме старых снапшотов).
