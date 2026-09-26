@@ -287,6 +287,18 @@ R85 now treats global overlays as a presentation-composition state:
 
 This is intentionally not implemented with CSS. A renderer cannot z-index above a sibling native `WebContentsView`; the owner of native view composition must resolve the occlusion.
 
+### Native viewport finding: BrowserStage controls must live outside WebContentsView bounds
+
+A second composition review found that the old R75 geometry started the native Browser `WebContentsView` at the top of `BrowserStage`. That means the renderer-owned browser tab strip, URL bar and status strip could exist in DOM but be physically covered by the native page surface.
+
+R85 now makes compact BrowserStage chrome deterministic and reserves it in main-process layout:
+- tab strip: 28 px;
+- URL bar: 36 px;
+- bottom Browser status: 24 px;
+- the native Browser surface begins below the tab strip + URL bar and ends above the Browser status strip.
+
+This turns COMMAND into a true hybrid workbench: ME2 owns controls and context, while the native Browser owns only the page viewport. The same constants are tested against `planShellLayout()`, so CSS/main-process geometry drift fails CI instead of silently hiding controls.
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
