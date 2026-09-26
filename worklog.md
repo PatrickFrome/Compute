@@ -1796,3 +1796,4 @@ Stage Summary:
 - Cursor-сравнение — самая глубокая линия ресёрча: от точечных аналогов (R49) до capability-паритета (R61, ~100 capabilities) и внедрения P0 в код (R63–R64: Plan Mode, 3-tier approvals, OS-sandbox); DAG R61 из 15 P0-гэпов — измеримый бенчмарк паритета, остаток гэпов требует переоткрытия в R81+ (частично покрыт convergence-планом R80-BRANCH-GRAPH-EXTERNAL-AUDIT).
 - Артефакты-референсы капсулы: docs/legacy-mission-control.tsx.txt (389K), research-файлы в дереве релиза (R22/R24/electron-analogs-master.md, r49–r58-analogues).
 - Запись фиксирует базу для R81: пере-инвентаризация DAG R61 против текущего release cf747798.
+- [cron 413338 2026-09-26T11:07+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
