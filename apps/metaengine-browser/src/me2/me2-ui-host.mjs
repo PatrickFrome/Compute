@@ -17,9 +17,9 @@
  *
  * Fail-open и zero-authority: недоступность UI не роняет браузер и не трогает self-update.
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export const ME2_UI_HOST_SCHEMA = 'metaengine.browser.me2.ui-host.v1';
 
@@ -38,6 +38,7 @@ let lastHealthOkAt = null;
 let healthTimer = null;
 let stopped = false;
 let mode = null; // 'spawned' | 'adopted' | null
+let lastLaunchMode = null;
 
 function emitRow(row, { error = false } = {}) {
   const text = JSON.stringify(row);
@@ -46,7 +47,7 @@ function emitRow(row, { error = false } = {}) {
 }
 
 function row(statePatch) {
-  return { schema: ME2_UI_HOST_SCHEMA, state, mode, restarts, last_error: lastError, last_health_ok_at: lastHealthOkAt, ...statePatch };
+  return { schema: ME2_UI_HOST_SCHEMA, state, mode, restarts, last_error: lastError, last_health_ok_at: lastHealthOkAt, launch_mode: lastLaunchMode, ...statePatch };
 }
 
 /** Здоровье UI: GET / отвечает HTML → жив (панели v5). */
@@ -61,49 +62,65 @@ export async function me2UiHealthProbe(timeout_ms = 4000) {
   }
 }
 
-function resolveUiDir() {
+export function resolveMe2UiLaunch({
+  resourcesPath = process.resourcesPath || '',
+  execPath = process.execPath || '',
+  cwd = process.cwd(),
+  env = process.env,
+  exists = existsSync,
+} = {}) {
   const candidates = [
-    process.env.ME2_UI_DIR,
-    join(process.resourcesPath || '', 'me2-ui'),
-    join(process.cwd(), 'me2-ui'),
-    join(process.cwd(), '..', 'me2-ui'),
-  ].filter(Boolean);
-  for (const dir of candidates) {
+    { dir: env.ME2_UI_DIR, source: 'ENV' },
+    { dir: resourcesPath ? join(resourcesPath, 'me2-ui') : null, source: 'PACKAGED_RESOURCE' },
+    { dir: execPath ? join(dirname(execPath), 'resources', 'me2-ui') : null, source: 'PACKAGED_EXEC_RESOURCE' },
+    { dir: join(cwd, 'me2-ui'), source: 'SOURCE_CWD' },
+    { dir: join(cwd, '..', 'me2-ui'), source: 'SOURCE_PARENT' },
+  ];
+  let selected = null;
+  for (const candidate of candidates) {
+    if (!candidate.dir) continue;
     try {
-      if (dir && existsSync(join(dir, 'package.json'))) return dir;
+      if (exists(join(candidate.dir, 'package.json'))) {
+        selected = {
+          dir: candidate.dir,
+          source: candidate.source,
+          standalone: exists(join(candidate.dir, 'server.js')),
+        };
+        break;
+      }
     } catch { /* следующий кандидат */ }
   }
-  return null;
+  if (!selected) return null;
+
+  const dev = env.ME2_UI_DEV === '1';
+  if (!dev && !env.ME2_UI_BIN && selected.standalone) {
+    return Object.freeze({
+      ...selected,
+      bin: execPath,
+      args: ['server.js'],
+      launch_mode: 'EMBEDDED_NODE_STANDALONE',
+      env_patch: Object.freeze({ ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' }),
+    });
+  }
+  return Object.freeze({
+    ...selected,
+    bin: env.ME2_UI_BIN || 'bun',
+    args: dev ? ['run', 'dev'] : ['run', 'start'],
+    launch_mode: dev ? 'SOURCE_DEV' : 'PACKAGE_SCRIPT',
+    env_patch: Object.freeze({}),
+  });
 }
 
-/** Ленивая проба bun (кэшируется): машины оператора не обязаны иметь bun (R77). */
-let bunProbe = null;
-function bunAvailable() {
-  if (bunProbe !== null) return bunProbe;
-  try {
-    const r = spawnSync('bun', ['--version'], { timeout: 5000, windowsHide: true, encoding: 'utf8' });
-    bunProbe = r.status === 0;
-  } catch {
-    bunProbe = false;
-  }
-  return bunProbe;
-}
-
-function spawnUi(dir) {
-  const bin = process.env.ME2_UI_BIN || 'bun';
-  const dev = process.env.ME2_UI_DEV === '1';
-  let cmd = bin;
-  let args = dev ? ['run', 'dev'] : ['run', 'start'];
-  let env = { ...process.env, PORT: String(UI_PORT), ME2_HOSTED_BY_BROWSER: '1' };
-  // R77: без bun и без явного ME2_UI_BIN — Electron-бинарник в роли node запускает
-  // standalone server.js напрямую (production-контракт pack-me2-ui не требует bun).
-  if (!dev && !process.env.ME2_UI_BIN && !bunAvailable()) {
-    cmd = process.execPath;
-    args = ['server.js'];
-    env = { ...env, ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' };
-  }
-  child = spawn(cmd, args, {
-    cwd: dir,
+function spawnUi(launch) {
+  lastLaunchMode = launch.launch_mode;
+  const env = {
+    ...process.env,
+    ...launch.env_patch,
+    PORT: String(UI_PORT),
+    ME2_HOSTED_BY_BROWSER: '1',
+  };
+  child = spawn(launch.bin, launch.args, {
+    cwd: launch.dir,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
@@ -149,16 +166,16 @@ function scheduleRestart() {
   restarts += 1;
   setTimeout(() => {
     if (stopped) return;
-    const dir = resolveUiDir();
-    if (!dir) {
+    const launch = resolveMe2UiLaunch();
+    if (!launch) {
       state = 'DEGRADED';
       lastError = 'me2_ui_dir_not_found (Mission Control остаётся на GET /ui daemon\'а)';
       emitRow(row({ event: 'UI_DIR_NOT_FOUND' }), { error: true });
       return;
     }
     state = 'STARTING';
-    spawnUi(dir);
-    emitRow(row({ event: 'UI_SPAWN', dir }));
+    spawnUi(launch);
+    emitRow(row({ event: 'UI_SPAWN', dir: launch.dir, source: launch.source, launch_mode: launch.launch_mode }));
   }, delay);
 }
 
@@ -172,8 +189,8 @@ export async function startMe2UiHost() {
     lastHealthOkAt = new Date().toISOString();
     emitRow(row({ event: 'UI_ADOPTED', port: UI_PORT }));
   } else {
-    const dir = resolveUiDir();
-    if (!dir) {
+    const launch = resolveMe2UiLaunch();
+    if (!launch) {
       mode = null;
       state = 'DEGRADED';
       lastError = 'me2_ui_dir_not_found (Mission Control остаётся на GET /ui daemon\'а)';
@@ -181,8 +198,8 @@ export async function startMe2UiHost() {
     } else {
       mode = 'spawned';
       state = 'STARTING';
-      spawnUi(dir);
-      emitRow(row({ event: 'UI_SPAWN', dir }));
+      spawnUi(launch);
+      emitRow(row({ event: 'UI_SPAWN', dir: launch.dir, source: launch.source, launch_mode: launch.launch_mode }));
     }
   }
   healthTimer = setInterval(async () => {
@@ -219,6 +236,7 @@ export function me2UiHostStatus() {
     restarts,
     last_error: lastError,
     last_health_ok_at: lastHealthOkAt,
+    launch_mode: lastLaunchMode,
     child_pid: child?.pid ?? null,
     stopped,
     health_url: UI_HEALTH_URL,
