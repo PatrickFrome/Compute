@@ -387,9 +387,19 @@ test('R85 workspace switch restores workspace-scoped layout preferences', () => 
   assert.match(store, /const layoutPreference = readWorkspaceLayout\(w\)/);
   assert.match(store, /contextDrawerPreferredOpen: layoutPreference\.drawerOpen/);
   assert.match(store, /contextDrawerTab: layoutPreference\.drawerTab/);
-  assert.match(me2Command, /me2\.command\.agent-rail\.v2/);
-  assert.match(me2Command, /commandRailStorageKey\(workspace\)/);
-  assert.match(me2Command, /COMMAND_RAIL_LEGACY_LS/);
+  assert.match(store, /commandRailPreferredOpen: layoutPreference\.commandRailOpen/);
+  assert.match(store, /setCommandRailPreference/);
+  assert.match(store, /me2\.command\.agent-rail\.v2:/);
+  assert.match(me2Command, /commandRailPreferredOpen/);
+  assert.match(me2Command, /storeCommandRailPreference\(open\)/);
+});
+
+test('R85 workspace layout has an explicit reset path', () => {
+  assert.match(store, /resetWorkspaceLayout/);
+  assert.match(store, /drawerOpen: false, drawerTab: "events", commandRailOpen: true/);
+  assert.match(store, /me2:workspace-layout-reset/);
+  assert.match(me2Pagebar, /data-testid="workspace-reset-layout"/);
+  assert.match(me2Pagebar, /Reset layout · \{activeWs\.label\}/);
 });
 
 test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
