@@ -218,7 +218,7 @@ export function CommandPage() {
   }, []);
 
   return (
-    <div className="flex h-full min-h-0 border border-zinc-800/90 bg-[#0b0b0d]" data-testid="page-command" data-panel-command>
+    <div className="flex h-full min-h-0 bg-[#0b0b0d]" data-testid="page-command" data-panel-command>
       {sidebarOpen && <AgentSidebar />}
       {/* центр: тонкая строка выбранного агента + НАСТОЯЩИЙ браузер (всё остальное пространство) */}
       <div className="flex min-w-0 flex-1 flex-col">
