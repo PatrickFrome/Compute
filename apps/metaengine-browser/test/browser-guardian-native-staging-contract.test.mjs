@@ -46,6 +46,11 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     to: 'browser-shared',
     filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
   }, {
+    // R85: ship the compiled standalone daemon so installed Browser needs no Bun/dev checkout.
+    from: 'me2-daemon-dist',
+    to: 'me2-daemon',
+    filter: ['**/*'],
+  }, {
     // R52 (фаза C7): панели Mission Control едут в установщике (контракт me2-ui-host, R50)
     from: 'me2-ui-dist',
     to: 'me2-ui',
