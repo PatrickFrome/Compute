@@ -14,6 +14,11 @@ export const ME2_PRIMARY_PAGE_PADDING = 6;
 export const ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH = 252;
 export const ME2_PRIMARY_COMMAND_GAP = 0;
 export const ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT = 32;
+// Compact BrowserStage chrome remains renderer-owned and must stay physically
+// clickable above/below the native WebContentsView viewport.
+export const ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT = 28;
+export const ME2_PRIMARY_BROWSER_URLBAR_HEIGHT = 36;
+export const ME2_PRIMARY_BROWSER_STATUS_HEIGHT = 24;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const OPERATIONS_MODES = new Set(['OPEN', 'CLOSED']);
@@ -99,13 +104,16 @@ export function planShellLayout({ width, height, state, surface_profile = 'LEGAC
       ME2_PRIMARY_TOP_HEIGHT
         + ME2_PRIMARY_PAGE_PADDING
         + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT
-        + ME2_PRIMARY_COMMAND_GAP,
+        + ME2_PRIMARY_COMMAND_GAP
+        + ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT
+        + ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
       windowHeight,
     );
     bottom = Math.min(
       ME2_PRIMARY_PAGEBAR_HEIGHT
         + ME2_PRIMARY_STATUSBAR_HEIGHT
-        + ME2_PRIMARY_PAGE_PADDING,
+        + ME2_PRIMARY_PAGE_PADDING
+        + ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
       Math.max(0, windowHeight - top),
     );
     const preferredLeft = ME2_PRIMARY_PAGE_PADDING
