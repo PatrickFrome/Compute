@@ -78,7 +78,11 @@ test('worker observation and DevOS run only as idle work after remote command ad
   assert.ok(admissionIndex > waitMaintenanceIndex, 'DevOS must remain behind authoritative continuous-service admission');
   assert.ok(devosIndex > admissionIndex, 'bounded DevOS runOnce must remain behind idle observation, maintenance, and admission fences');
   assert.doesNotMatch(source, /#devosTaskCycle\.cycle\(\)/, 'continuous DevOS cycle must not be reintroduced');
-  assert.match(source, /if \(Number\(supervisor\?\.control_fast_lane\?\.last_batch_count \|\| 0\) === 0\) this\.#kickIdleWork\(\)/);
+  assert.match(
+    source,
+    /if \(Number\(supervisor\?\.control_fast_lane\?\.last_batch_count \|\| 0\) === 0\s*&& supervisor\?\.control_fast_lane\?\.maintenance_in_flight !== true\) \{\s*this\.#kickIdleWork\(\);\s*\}/,
+    'DevOS idle work must require both an empty remote-command turn and settled base maintenance',
+  );
   assert.match(source, /worker_observer_source:\s*this\.#workerObserver\s*\?\s*'NATIVE_SUPERVISOR_HEARTBEAT'/);
   assert.match(source, /worker_observer_second_polling_loop:\s*false/);
   assert.match(source, /command_lease_precedes_idle_work:\s*true/);
