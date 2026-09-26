@@ -24,6 +24,7 @@ import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
 // ME2 smart merge (R41): узкая capability вкладок для ME2-плоскости (fail-open, zero-authority).
 // Плоскость не переписывает createTab — она вызывает его штатно, политика навигации браузера авторитетна.
 import { me2FleetTabsSetHost } from './me2/me2-fleet-tabs-host.mjs';
@@ -569,6 +570,22 @@ function wireRemoteView(tab, view) {
   view.webContents.on('did-navigate-in-page', sync);
   view.webContents.on('page-title-updated', sync);
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
+  // R82 live repair: ExactBrowserTabViewMap removes the physical view binding
+  // on Electron's destroyed event. Retire the matching logical TabRegistry row
+  // on that exact physical proof as well; otherwise supervisor state can keep a
+  // ghost tab forever and ambiguity reconciliation repeatedly targets a view
+  // that no longer exists. Explicit closeTab() is safe because registry.close
+  // is idempotent and the helper becomes a no-op when close won the race.
+  view.webContents.once('destroyed', () => {
+    void reconcileDestroyedTabView({
+      tabId: tab.tab_id,
+      registry,
+      fleet,
+      invalidatePerception,
+      attachSelected,
+      publishSnapshot,
+    });
+  });
 }
 
 async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
