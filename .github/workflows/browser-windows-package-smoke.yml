@@ -144,7 +144,16 @@ jobs:
           }
           if (@($evidence.captures).Count -ne 2) { throw 'r85_visual_evidence_capture_count_invalid' }
           foreach ($capture in @($evidence.captures)) {
-            if ([int64]$capture.bytes -lt 4096 -or [string]$capture.sha256 -notmatch '^[a-f0-9]{64}
+            $digest = [string]$capture.sha256
+            if ([int64]$capture.bytes -lt 4096 -or $digest.Length -ne 64 -or $digest -notmatch '^[a-f0-9]+') {
+              throw "r85_visual_evidence_png_invalid:$($capture.name)"
+            }
+            $png = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR ([string]$capture.file)
+            if (-not (Test-Path $png -PathType Leaf)) { throw "r85_visual_evidence_png_missing:$($capture.name)" }
+          }
+          Write-Host ($evidence | ConvertTo-Json -Compress -Depth 10)
+
+      - name: Build exact-head unsigned NSIS package through native staging hook
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
