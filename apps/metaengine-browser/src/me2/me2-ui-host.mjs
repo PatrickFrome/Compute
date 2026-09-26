@@ -358,12 +358,27 @@ export async function stopMe2UiHostAndWait({ graceMs = 2500, forceMs = 2500 } = 
   };
 }
 
-export function me2UiHostStatus() {
+export function projectMe2UiRoutingAuthority({
+  mode = null, state = 'IDLE', child = null, stopped = false, allowExternalAdopt = false,
+} = {}) {
+  const running = !stopped && !['STOPPED', 'STOPPING', 'DEGRADED'].includes(state);
   const childOwned = mode === 'spawned'
+    && running
     && child != null
-    && state !== 'STOPPED'
-    && state !== 'DEGRADED';
-  const externalAdoptAuthorized = mode === 'adopted' && me2UiExternalAdoptionAllowed();
+    && Number.isInteger(child.pid) && child.pid > 0
+    && child.exitCode == null && child.signalCode == null;
+  const externalAdoptAuthorized = running && mode === 'adopted'
+    && state === 'ADOPTED' && allowExternalAdopt === true;
+  const ready = (childOwned && state === 'HEALTHY') || externalAdoptAuthorized;
+  return Object.freeze({
+    child_owned: childOwned,
+    external_adopt_authorized: externalAdoptAuthorized,
+    routing_authorized: ready,
+    initial_readiness_confirmed: ready,
+  });
+}
+
+export function me2UiHostStatus() {
   return {
     schema: ME2_UI_HOST_SCHEMA,
     state,
@@ -373,10 +388,7 @@ export function me2UiHostStatus() {
     last_health_ok_at: lastHealthOkAt,
     launch_mode: lastLaunchMode,
     child_pid: child?.pid ?? null,
-    child_owned: childOwned,
-    external_adopt_authorized: externalAdoptAuthorized,
-    routing_authorized: (childOwned && state === 'HEALTHY') || externalAdoptAuthorized,
-    initial_readiness_confirmed: state === 'HEALTHY' || externalAdoptAuthorized,
+    ...projectMe2UiRoutingAuthority({ mode, state, child, stopped, allowExternalAdopt: me2UiExternalAdoptionAllowed() }),
     stopped,
     health_url: UI_HEALTH_URL,
   };

@@ -78,8 +78,7 @@ test('packaged ME2 UI routing waits for bounded initial readiness', () => {
   assert.match(uiHost, /const ready = await waitForMe2UiReady\(\)/);
   assert.match(uiHost, /event: 'UI_HEALTHY', readiness_attempt: ready\.attempt/);
   assert.match(uiHost, /event: 'UI_INITIAL_READINESS_FAILED'/);
-  assert.match(uiHost, /routing_authorized: \(childOwned && state === 'HEALTHY'\) \|\| externalAdoptAuthorized/);
-  assert.match(uiHost, /initial_readiness_confirmed: state === 'HEALTHY' \|\| externalAdoptAuthorized/);
+  assert.match(uiHost, /\.\.\.projectMe2UiRoutingAuthority\(\{ mode, state, child, stopped,/);
 });
 
 test('concurrent primary-window startup joins the same ME2 readiness barrier', () => {
