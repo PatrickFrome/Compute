@@ -111,6 +111,7 @@ export class BrowserRealtimeProcessPlane {
   #app;
   #getWebContents;
   #resolveTabId;
+  #resolveBrowserCell;
   #clock;
   #sampleMs;
   #eventLimit;
@@ -141,6 +142,7 @@ export class BrowserRealtimeProcessPlane {
     app,
     getWebContents,
     resolveTabId = resolveTabIdForWebContents,
+    resolveBrowserCell = null,
     brainCoordinator = null,
     mainLoopPressure = null,
     clock = () => Date.now(),
@@ -154,10 +156,12 @@ export class BrowserRealtimeProcessPlane {
     }
     if (typeof getWebContents !== 'function') throw new Error('browser_realtime_process_plane_webcontents_required');
     if (resolveTabId != null && typeof resolveTabId !== 'function') throw new Error('browser_realtime_process_plane_tab_resolver_invalid');
+    if (resolveBrowserCell != null && typeof resolveBrowserCell !== 'function') throw new Error('browser_realtime_process_plane_cell_resolver_invalid');
     if (onChange != null && typeof onChange !== 'function') throw new Error('browser_realtime_process_plane_onchange_invalid');
     this.#app = app;
     this.#getWebContents = getWebContents;
     this.#resolveTabId = resolveTabId;
+    this.#resolveBrowserCell = resolveBrowserCell;
     this.#clock = clock;
     this.#sampleMs = boundedInt(sampleMs, DEFAULT_SAMPLE_MS, 50, 5000);
     this.#eventLimit = boundedInt(eventLimit, DEFAULT_EVENT_LIMIT, 32, 4096);
@@ -226,9 +230,33 @@ export class BrowserRealtimeProcessPlane {
     });
   }
 
+  #cellByTab() {
+    if (!this.#resolveBrowserCell) return null;
+    const cells = new Map();
+    for (const row of this.#webContents) {
+      const tabId = String(row?.tab_id || '');
+      if (!tabId || row?.destroyed === true) continue;
+      let cell = null;
+      try { cell = this.#resolveBrowserCell(tabId); } catch { cell = null; }
+      const cellId = cell?.cell_id == null ? '' : String(cell.cell_id);
+      const cellGeneration = Number(cell?.cell_generation || 0);
+      if (!cellId || !Number.isSafeInteger(cellGeneration) || cellGeneration < 1) continue;
+      cells.set(tabId, Object.freeze({
+        cell_id: cellId,
+        cell_generation: cellGeneration,
+        provider: cell?.provider == null ? null : String(cell.provider).slice(0, 64),
+        role: cell?.role == null ? null : String(cell.role).slice(0, 64),
+      }));
+    }
+    return cells;
+  }
+
   #dispatchBrainEdge(event) {
     try {
-      const result = this.#brain.observeEdge(event, { process_snapshot: this.#brainProcessSnapshot() });
+      const result = this.#brain.observeEdge(event, {
+        process_snapshot: this.#brainProcessSnapshot(),
+        cell_by_tab: this.#cellByTab(),
+      });
       if (!this.#brainLastError?.startsWith('DURABLE_')) this.#brainLastError = null;
       return result;
     } catch (error) {
