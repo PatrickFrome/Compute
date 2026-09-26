@@ -9149,3 +9149,17 @@ Work Log:
 Stage Summary:
 - Публикация ЗАВЕРШЕНА: main≡sandbox/me2-os, обе архив-ветки sha-верифицированы на remote, канонический worklog (276 секций, история R22–R89 восстановлена) на GitHub.
 - push-pending-r80.sh premise устарела (локальный больше не впереди) — скрипт оставить как артефакт, при следующем сбросе среды пересобрать premise.
+
+---
+Task ID: R80-PUSH-C
+Agent: Z.ai Code (main session, Job 413338, повторный тик 00:52+08)
+Task: Контрольный прогон push-pending-r80.sh после устранения PAT-блокера (публикация уже выполнена в R80-PUSH-B)
+
+Work Log:
+- Блокер публикации отсутствует: /home/z/.a2/.github.env существует и непуст (GITHUB_TOKEN_ADMIN, значение не печаталось), API-валидация 200 из раунда R80-PUSH-B.
+- Идемпотентный прогон scripts/push-pending-r80.sh: push main→sandbox/me2-os УСПЕШЕН как fast-forward c8894255..048d20d3 (новый локальный cron-коммит 09190bb1-…-cron, появившийся после раунда R80-PUSH-B); обе архив-ветки — «Everything up-to-date».
+- ls-remote верификация: sandbox/me2-os=048d20d3 (≡ локальный main), me2/archive-r21-sandbox-snapshot=73486dd, me2/archive-v040-main-archive=c95de21. Вывод скрипта: «DONE: all local state published.»
+- Write-ahead снапшот phoenix-snapshot.sh выполнен перед этой записью (made=1).
+
+Stage Summary:
+- R80 публикация ПОЛНОСТЬЮ ЗАВЕРШЕНА и подтверждена повторным прогоном: все три ref-а на remote соответствуют локальным, рабочее дерево чистое, секреты не печатались. Задача 413338 закрыта; premise скрипта требует пересборки только при следующем env-reset.
