@@ -86,6 +86,30 @@ test('R75 primary shell releases rail reservation before starving the Browser ce
   assert.equal(plan.authority_effect, false);
 });
 
+test('R85 command rail visibility and native Browser bounds share one presentation state', () => {
+  const open = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+    me2_command_rail_open: true,
+  });
+  const closed = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+    me2_command_rail_open: false,
+  });
+  assert.equal(open.effective_sidebar, 'EXPANDED');
+  assert.equal(open.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH + ME2_PRIMARY_COMMAND_GAP);
+  assert.equal(closed.effective_sidebar, 'HIDDEN');
+  assert.equal(closed.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING);
+  assert.ok(closed.remote_bounds.width > open.remote_bounds.width);
+  assert.ok(closed.adaptations.includes('ME2_AGENT_RAIL_HIDDEN_BY_PRESENTATION'));
+  assert.equal(closed.authority_effect, false);
+});
+
 test('normal Browser startup prefers packaged ME2 and retains legacy shell only as recovery', () => {
   assert.match(main, /await preparePrimaryShellTarget\(\)/);
   assert.match(main, /PACKAGED_ME2_UI_PROVEN/);
@@ -159,7 +183,7 @@ test('installed ME2 primary shell is attested from main-process CDP DOM geometry
   assert.doesNotMatch(main, /executeJavaScript/);
   assert.doesNotMatch(preload, /reportUiContract/);
   assert.doesNotMatch(preload, /ui-contract-readback/);
-  for (const id of ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']) {
+  for (const id of ['me2-shell', 'topbar', 'page-command', 'cc-sidebar-toggle', 'pagebar', 'statusbar']) {
     assert.match(main, new RegExp(id));
   }
   assert.match(main, /legacy_shell_is_normal_path:\s*false/);
@@ -298,6 +322,32 @@ test('R85 page history uses a real cursor for Alt back and forward', () => {
   assert.match(store, /set\(\{ page: target, pageHistoryIndex: nextIndex \}\)/);
   assert.match(store, /const prefix = st\.recentPages\.slice\(0, st\.pageHistoryIndex \+ 1\)/);
   assert.doesNotMatch(store, /rp\.length - 2/);
+});
+
+test('R85 command rail bridge is presentation-only and reconciles effective geometry', () => {
+  assert.match(preload, /const setPrimaryCommandRail = \(open\) => ipcRenderer\.invoke\('metaengine:shell:primary-command-rail'/);
+  const primaryBranch = preload.slice(
+    preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
+    preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
+  );
+  assert.match(primaryBranch, /setPrimaryCommandRail/);
+  assert.match(main, /let primaryCommandRailOpen = true/);
+  assert.match(main, /me2_command_rail_open: primaryCommandRailOpen/);
+  assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-command-rail'/);
+  const railHandler = main.slice(
+    main.indexOf("ipcMain.handle('metaengine:shell:primary-command-rail'"),
+    main.indexOf("ipcMain.handle('metaengine:shell:system-deltas'", main.indexOf("ipcMain.handle('metaengine:shell:primary-command-rail'")),
+  );
+  assert.match(railHandler, /presentation_only:\s*true/);
+  assert.match(railHandler, /scheduler_authority:\s*false/);
+  assert.match(railHandler, /browser_command_authority:\s*false/);
+  assert.match(railHandler, /update_authority:\s*false/);
+  assert.match(railHandler, /release_authority:\s*false/);
+  assert.match(railHandler, /authority_effect:\s*false/);
+  assert.match(me2Command, /me2\.command\.agent-rail\.v1/);
+  assert.match(me2Command, /setPrimaryCommandRail/);
+  assert.match(me2Command, /effective_open/);
+  assert.match(me2Command, /window\.addEventListener\("resize", onResize\)/);
 });
 
 test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
