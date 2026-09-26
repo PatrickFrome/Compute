@@ -9659,3 +9659,32 @@ Work Log:
 Stage Summary:
 - rail sandbox/me2-os = 57c8efa1 = local main — публикация завершена, DONE: all local state published
 - origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
+
+---
+Task ID: R80-PUSH-P
+Agent: Super-Z (cron Job 413338 2026-09-27 04:52)
+Task: push-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки
+
+Work Log:
+- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались
+- push-pending-r80.sh: main→sandbox/me2-os ff 57c8efa1..9ec68678 (R84-LIVE-AUDIT-1 + cron-коммиты); архив-ветки up-to-date
+- ls-remote verify: sandbox/me2-os=9ec68678 ≡ local main HEAD; рабочее дерево чистое
+
+Stage Summary:
+- rail sandbox/me2-os = 9ec68678 = local main, DONE: all local state published
+
+---
+Task ID: UI-AUDIT-P1 (implemented-UI-P1, engine v1.12→v1.13)
+Agent: Super-Z (main session, 2026-09-27 05:05 MSK+8, директива оператора)
+Task: критический аудит механик/UI + ресёрч аналогов + фаза 1 пересборки Mission Control
+
+Work Log:
+- АУДИТ (page.tsx, 15 панелей): ① навигация — 0 anchor-ID на 15 панелей, единственный способ добраться до Mirror = скролл ~12 экранов; ② loading-состояния — 54 текстовых «загрузка…» против 4 skeleton-использований, text-jank при каждом poll; ③ empty-states — отсутствуют как компонент (сухие однострочники без иконки/hint/action); ④ header-анатомия Panel уже хорошая (icon/title/chip/actions + collapsible); ⑤ механики сильные: WS+poll-гибрид, hash-chain события, sound-gate, donor-lane фильтры — не трогал
+- РЕСЁРЧ (web-search дал слабую выдачу → синтез из эталонов): Grafana — sticky section-nav + reduce-jump; Linear/Vercel — command-nav чипы, моментальный переход, минимум визуального шума; Datadog — skeleton-first loading, атомарные empty-states с hint; Supabase dashboard — chip-анатомия статусов; общий паттерн: навигация обязательна при >5 секциях
+- ФАЗА 1 РЕАЛИЗОВАНА: (1) 12 id-якорей панелей (p-daemon…p-mirror) + scroll-mt-24; (2) sticky jump-nav под header (12 чипов, smooth scrollIntoView, hidden md:block — мобильный оставлен на natural scroll); (3) Skeleton/PanelLoading примитивы — 9 текстовых loading заменено skeleton-блоками с role=status/aria-live; (4) EmptyState (icon+title+hint) — 3 ключевые пустые ветки: check-runs пусты, событий нет, живой хвост недоступен
+- ВЕРИФИКАЦИЯ gateway :81 + agent-browser: nav 12 чипов, все 12 id в DOM, клик «Mirror» → панель ложится на scroll-mt 96px, «Демон» → возврат; тема dark/light не затронута; УРОК ПОВТОРИЛСЯ: nohup next dev убит между вызовами → setsid-рестарт (новый стандарт); консоль чистая (0 errors в свежей сессии); tsc — 0 ошибок в новом коде (34 pre-existing Chip-title паттерна — отдельный кандидат в backlog: типизировать title на Chip)
+- lint 0/0; self-update implemented-UI-P1 → engine v1.13; зеркала 2/2
+
+Stage Summary:
+- UI-P1 закрыт: навигация/skeleton/empty-states — фундамент пересборки по паттернам Linear/Vercel/Datadog
+- следующие фазы (кандидаты backlog): Phase-2 — группировка 15 панелей в 3 домена (Runtime/Convergence/Evidence) с секционными заголовками; Phase-3 — ⌘K command palette; Phase-4 — Chip title типизация (34 tsc-шума); Phase-5 — persisted collapse-state панелей

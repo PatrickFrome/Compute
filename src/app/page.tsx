@@ -510,17 +510,91 @@ function eventTypeTone(t: string): string {
   return 'text-zinc-400'
 }
 
+// ------------------------------------------- UI-KIT R85 (research-driven) ----
+// Skeleton/PanelLoading/EmptyState живут ниже (UI-P1, параллельный раунд) — единые примитивы.
+// ErrBox — семантика «severity ≠ confidence» (research: alarm fatigue).
+// Постоянные известные ограничения (JWT/cred pending → HTTP 401/403/404) рендерятся
+// приглушённым known-issue стилем; неожиданные ошибки — громким rose + role=alert.
+function ErrBox({ label, error, hint, muted = false }: { label: string; error: string | null | undefined; hint?: string; muted?: boolean }) {
+  if (!error) return null
+  const known = muted || /HTTP 40[134]|JWT|pending|секрет|missing|unreachable/i.test(error)
+  return known ? (
+    <div className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] leading-relaxed text-zinc-500">
+      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400/70" aria-hidden />
+      <span className="min-w-0 flex-1">
+        <span className="font-medium text-zinc-400">{label}</span>
+        <span className="text-zinc-600"> · известное ограничение: </span>
+        <span className="break-words text-zinc-500" title={error}>{error}</span>
+        {hint && <span className="block text-zinc-600">{hint}</span>}
+      </span>
+    </div>
+  ) : (
+    <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300" role="alert">{label}: {error}</div>
+  )
+}
+
+// eventHuman — человекочитаемый payload вместо raw JSON-дампа (readability audit):
+// payload/subject могут быть объектом ИЛИ JSON-строкой — парсим, вытаскиваем смысловые
+// поля (title/role/id/…), иначе k=v-пары; полный JSON остаётся в tooltip строки.
+function eventHuman(e: { subject?: string | null; payload?: unknown }): string {
+  const cand: unknown = e.payload ?? e.subject
+  let p: Record<string, unknown> | null = null
+  if (cand && typeof cand === 'object') p = cand as Record<string, unknown>
+  else if (typeof cand === 'string' && cand.trim().startsWith('{')) {
+    try { const j = JSON.parse(cand); if (j && typeof j === 'object' && !Array.isArray(j)) p = j as Record<string, unknown> } catch { /* не JSON — вернём как есть ниже */ }
+  }
+  if (p) {
+    const t = p.title ?? p.name ?? p.action ?? p.role ?? p.id ?? p.kind ?? p.key ?? p.file ?? p.path
+    if (typeof t === 'string' && t) return t
+    const keys = Object.keys(p)
+    if (keys.length) return keys.slice(0, 2).map((k) => `${k}=${String(p![k]).slice(0, 28)}`).join(' ')
+  }
+  if (e.subject) return e.subject
+  return '—'
+}
+
+// -------------------------------------------------------- ui-primitives ----
+// UI-P1: скелет-примитив (pulse-блок) — заменяет текстовые «загрузка…»
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-zinc-800/70 ${className ?? ''}`} aria-hidden="true" />
+}
+
+// UI-P1: стандартизованный loading-ряд панели (skeleton-блоки + a11y)
+function PanelLoading({ label }: { label?: string }) {
+  return (
+    <div className="space-y-2.5" role="status" aria-live="polite" aria-label={label ?? 'загрузка данных'}>
+      <Skeleton className="h-4 w-1/3" />
+      <Skeleton className="h-16 w-full" />
+      <Skeleton className="h-4 w-2/3" />
+    </div>
+  )
+}
+
+// UI-P1: стандартизованный empty-state (иконка + заголовок + hint + action)
+function EmptyState({ icon, title, hint, action }: {
+  icon: React.ReactNode; title: string; hint?: string; action?: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 px-4 py-8 text-center">
+      <span className="text-zinc-600">{icon}</span>
+      <div className="text-sm font-medium text-zinc-400">{title}</div>
+      {hint && <div className="max-w-md text-xs leading-relaxed text-zinc-600">{hint}</div>}
+      {action}
+    </div>
+  )
+}
+
 // -------------------------------------------------------------- card ------
 function Panel({
-  icon, title, chip, children, defaultOpen = true, actions,
+  id, icon, title, chip, children, defaultOpen = true, actions,
 }: {
-  icon: React.ReactNode; title: string; chip?: React.ReactNode
+  id?: string; icon: React.ReactNode; title: string; chip?: React.ReactNode
   children: React.ReactNode; defaultOpen?: boolean; actions?: React.ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 shadow-lg shadow-black/20 transition-colors hover:border-zinc-700/80">
+      <section id={id} className="scroll-mt-24 rounded-xl border border-zinc-800 bg-zinc-900/60 shadow-lg shadow-black/20 transition-colors hover:border-zinc-700/80">
         <div className="flex items-center gap-1 pr-2">
           <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-zinc-800/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 rounded-t-xl">
             <span className="text-teal-400">{icon}</span>
@@ -756,6 +830,23 @@ function beep(kind: BeepKind): void {
     /* audio is a nicety, never a dependency */
   }
 }
+
+// UI-P1 (ресёрч Linear/Vercel/Grafana): jump-навигация по секциям —
+// 15 панелей без навигации = непроходимый scroll; якоря + sticky-чипы решают
+const NAV_SECTIONS: { id: string; label: string }[] = [
+  { id: 'p-daemon', label: 'Демон' },
+  { id: 'p-donors', label: 'Доноры' },
+  { id: 'p-supabase', label: 'Supabase' },
+  { id: 'p-github', label: 'GitHub' },
+  { id: 'p-qual', label: 'Квалификация' },
+  { id: 'p-r82', label: 'R82 диагноз' },
+  { id: 'p-exitgate', label: 'Exit gate' },
+  { id: 'p-edge', label: 'Edge' },
+  { id: 'p-monitor', label: 'Монитор' },
+  { id: 'p-roadmap', label: 'Роадмап' },
+  { id: 'p-events', label: 'События' },
+  { id: 'p-mirror', label: 'Mirror' },
+]
 
 // ================================================================ page =====
 export default function MissionControl() {
@@ -1403,6 +1494,22 @@ export default function MissionControl() {
         </div>
       </header>
 
+      {/* UI-P1: jump-навигация по секциям (desktop; паттерн Linear/Vercel command-nav).
+          sticky под header, горизонтальный скролл при переполнении, smooth scrollIntoView. */}
+      <nav aria-label="Навигация по панелям" className="sticky top-[60px] z-10 hidden border-b border-zinc-800/70 bg-zinc-950/85 backdrop-blur md:block">
+        <div className="mx-auto flex w-full max-w-7xl items-center gap-1 overflow-x-auto px-4 py-1.5">
+          {NAV_SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
       {/* R88-RESILIENCE: global env-reset banner — fires when ≥2 credential
           planes are missing (the daemon aggregates per-call in /health.planes).
           Single-plane loss is NOT a reset (could be one file being rotated) —
@@ -1453,10 +1560,11 @@ export default function MissionControl() {
       )}
 
       {/* ------------------------------------------------------------ main */}
-      <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+      <main className="mx-auto grid w-full max-w-7xl flex-1 content-start grid-cols-1 gap-4 p-4 lg:grid-cols-2">
         {/* ------------------------------------------------- DAEMON card */}
         <Panel
           icon={<HeartPulse className="h-4 w-4" />}
+          id="p-daemon"
           title="Демон · ME2 daemon"
           chip={<Chip tone={daemonUp ? 'ok' : 'p0'}>{daemonUp ? 'UP' : 'DOWN'}</Chip>}
           actions={
@@ -1466,7 +1574,7 @@ export default function MissionControl() {
           }
         >
           {healthErr && !health ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">daemon недоступен: {healthErr}</div>
+            <ErrBox label="daemon недоступен" error={healthErr} />
           ) : health ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1507,13 +1615,14 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+            <PanelLoading />
           )}
         </Panel>
 
         {/* ---------------------------------------------- DONOR REGISTRY card */}
         <Panel
           icon={<Layers className="h-4 w-4" />}
+          id="p-donors"
           title="Донор-реестр · 57 действий"
           chip={donorReg ? <Chip tone="info">{donorReg.total} · {donorReg.reconciliation.counterparts_count}/{donorReg.total} local</Chip> : <Chip tone="neutral">…</Chip>}
         >
@@ -1672,15 +1781,16 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка донор-реестра…</div>
+            <PanelLoading label="загрузка донор-реестра" />
           )}
         </Panel>
 
         {/* ------------------------------------------ CONTROL PLANE card */}
         <Panel
           icon={<Database className="h-4 w-4" />}
+          id="p-supabase"
           title="Control Plane · Supabase live"
-          chip={supErr ? <Chip tone="p0">ERR</Chip> : supLive ? <Chip tone={supervisor!.p0_flags.length ? 'p0' : 'ok'}>{supervisor!.p0_flags.length ? `${supervisor!.p0_flags.length} P0` : 'CLEAN'}</Chip> : <Chip tone="neutral">…</Chip>}
+          chip={supErr ? <Chip tone="warn" title="known-issue: readback недоступен (JWT/cred pending) — не авария, локальный контур жив">known</Chip> : supLive ? <Chip tone={supervisor!.p0_flags.length ? 'p0' : 'ok'}>{supervisor!.p0_flags.length ? `${supervisor!.p0_flags.length} P0` : 'CLEAN'}</Chip> : <Chip tone="neutral">…</Chip>}
           actions={
             <Button variant="ghost" size="sm" className="h-9 w-9 touch-hit p-0 text-zinc-400 hover:text-teal-400" disabled={supLoading} onClick={() => loadSupervisor(true)} aria-label="Свежий снапшот">
               <RefreshCw className={`h-4 w-4 ${supLoading ? 'animate-spin' : ''}`} />
@@ -1688,7 +1798,7 @@ export default function MissionControl() {
           }
         >
           {supErr && !supervisor ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">control plane: {supErr}</div>
+            <ErrBox label="control plane" error={supErr} hint="readback-поверхность недоступна до восстановления credential-плоскостей — локальные панели живут" />
           ) : supervisor ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1739,16 +1849,17 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+            <PanelLoading />
           )}
         </Panel>
 
         {/* ------------------------------------------ R81 CONVERGENCE (GitHub) */}
         <Panel
           icon={<GitPullRequest className="h-4 w-4" />}
+          id="p-github"
           title="R81 Convergence · GitHub live"
           chip={
-            convErr ? <Chip tone="p0">ERR</Chip>
+            convErr ? <Chip tone="warn" title="known-issue: readback недоступен (cred pending)">known</Chip>
               : conv ? (
                 <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : conv.rollup_state === 'PENDING' ? 'warn' : 'neutral'}>
                   CI {conv.rollup_state}
@@ -1762,7 +1873,7 @@ export default function MissionControl() {
           }
         >
           {convErr && !conv ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">GitHub: {convErr}</div>
+            <ErrBox label="GitHub" error={convErr} hint="convergence-readback требует GITHUB_TOKEN на daemon-стороне — см. planes в banner" />
           ) : conv ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1798,23 +1909,24 @@ export default function MissionControl() {
                     </div>
                   )
                 })}
-                {conv.checks.items.length === 0 && <div className="py-4 text-center text-xs text-zinc-600">check-runs пусты — CI ещё не стартовал</div>}
+                {conv.checks.items.length === 0 && <EmptyState icon={<GitBranch className="h-5 w-5" />} title="check-runs пусты" hint="CI ещё не стартовал на выбранном ref — нажмите Refresh после пуша, либо выберите другой workflow-head" />}
               </div>
               <p className="text-[11px] leading-relaxed text-zinc-500">
                 Read-only GitHub-клиент демона (PAT только серверно в /home/z/.a2). Rollup честный: cancelled ≠ green — терминальный повтор обязателен.
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка GitHub-статуса…</div>
+            <PanelLoading label="загрузка GitHub-статуса" />
           )}
         </Panel>
 
         {/* ----------------------------- R89 QUALIFICATION MATRIX (R86→R90) */}
         <Panel
           icon={<BadgeCheck className="h-4 w-4" />}
+          id="p-qual"
           title="R86–R90 · Qualification · что CI реально доказывает"
           chip={
-            qualErr ? <Chip tone="p0">ERR</Chip>
+            qualErr ? <Chip tone="warn" title="known-issue: readback недоступен (cred pending)">known</Chip>
               : qual ? (
                 <Chip tone={qual.r89_exit_gate.pass ? 'ok' : 'warn'} title="R89 exit gate: все mandatory gates terminal PASS на одном неизменном SHA + подтверждённый Windows-кандидат">
                   {qual.r89_exit_gate.pass ? 'TERMINAL PASS' : 'QUALIFYING'}
@@ -1828,7 +1940,7 @@ export default function MissionControl() {
           }
         >
           {qualErr && !qual ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">Qualify: {qualErr}</div>
+            <ErrBox label="Qualify" error={qualErr} />
           ) : qual ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1922,16 +2034,17 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка матрицы квалификации…</div>
+            <PanelLoading label="загрузка матрицы квалификации" />
           )}
         </Panel>
 
         {/* ------------------------------------------ R82 LIVE DIAGNOSIS */}
         <Panel
           icon={<Stethoscope className="h-4 w-4" />}
+          id="p-r82"
           title="R82 · Supervisor live-диагноз"
           chip={
-            r82Err ? <Chip tone="p0">ERR</Chip>
+            r82Err ? <Chip tone="warn" title="known-issue: readback недоступен (cred pending)">known</Chip>
               : r82 ? (
                 <Chip tone={r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'p0' : r82.supervisor.keepalive.state === 'ACTIVE' ? 'ok' : 'warn'}>
                   {r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'DRAFT POISONED' : r82.supervisor.keepalive.state}
@@ -1945,7 +2058,7 @@ export default function MissionControl() {
           }
         >
           {r82Err && !r82 ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">R82: {r82Err}</div>
+            <ErrBox label="R82" error={r82Err} />
           ) : r82 ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2000,16 +2113,17 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> live-проба tab'а супервизора…</div>
+            <PanelLoading label="live-проба tab'а супервизора" />
           )}
         </Panel>
 
         {/* ------------------------------------------ R82 EXIT GATE WATCH */}
         <Panel
           icon={<Rocket className="h-4 w-4" />}
+          id="p-exitgate"
           title="R82 EXIT GATE · SELF-UPDATE WATCH"
           chip={
-            readbackErr ? <Chip tone="p0">ERR</Chip>
+            readbackErr ? <Chip tone="warn" title="known-issue: readback недоступен (cred pending)">known</Chip>
               : readback ? (
                 <Chip tone={readback.current_gate === 'R82_CLOSED' ? 'ok' : readback.stages.find((s) => s.state === 'BLOCKED') ? 'p0' : 'warn'}>
                   {readback.current_gate}
@@ -2023,7 +2137,7 @@ export default function MissionControl() {
           }
         >
           {readbackErr && !readback ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">readback: {readbackErr}</div>
+            <ErrBox label="readback" error={readbackErr} />
           ) : readback ? (
             <div className="space-y-3">
               {/* stage machine */}
@@ -2198,16 +2312,17 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> сборка exit-gate снимка…</div>
+            <PanelLoading label="сборка exit-gate снимка" />
           )}
         </Panel>
 
         {/* -------------------------------------------- R83 EDGE CONVERGENCE */}
         <Panel
           icon={<Cloud className="h-4 w-4" />}
+          id="p-edge"
           title="R83 · Edge convergence · Cloudflare live"
           chip={
-            edgeErr ? <Chip tone="p0">ERR</Chip>
+            edgeErr ? <Chip tone="warn" title="known-issue: readback недоступен (CF-token pending)">known</Chip>
               : edge ? (
                 <Chip tone={edge.workers.some((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000) ? 'p0' : 'ok'}>
                   {edge.workers.filter((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000).length}/2 NO SOURCE
@@ -2226,7 +2341,7 @@ export default function MissionControl() {
           }
         >
           {edgeErr && !edge ? (
-            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">Edge: {edgeErr}</div>
+            <ErrBox label="Edge" error={edgeErr} hint="edge-convergence readback ожидает CF-токен на daemon-стороне" />
           ) : edge ? (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-1.5">
@@ -2398,13 +2513,14 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> квалификация Cloudflare Edge…</div>
+            <PanelLoading label="квалификация Cloudflare Edge" />
           )}
         </Panel>
 
         {/* -------------------------------------------- CONVERGENCE MONITOR */}
         <Panel
           icon={<TrendingUp className="h-4 w-4" />}
+          id="p-monitor"
           title="Монитор конвергенции · R82"
           chip={
             monitor ? (
@@ -2439,7 +2555,7 @@ export default function MissionControl() {
               </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка монитора…</div>
+            <PanelLoading label="загрузка монитора" />
           )}
         </Panel>
 
@@ -2465,7 +2581,7 @@ export default function MissionControl() {
         </Panel>
 
         {/* ---------------------------------------------------- ROADMAP */}
-        <Panel icon={<ListChecks className="h-4 w-4" />} title="Роадмап R81 → R90 · convergence" chip={<Chip tone="info">{roadmap ? `${roadmap.roadmap.filter((r) => r.status === 'IN_PROGRESS').length}/10 active` : '…'}</Chip>}>
+        <Panel icon={<ListChecks className="h-4 w-4" />} id="p-roadmap" title="Роадмап R81 → R90 · convergence" chip={<Chip tone="info">{roadmap ? `${roadmap.roadmap.filter((r) => r.status === 'IN_PROGRESS').length}/10 active` : '…'}</Chip>}>
           {roadmap ? (
             <div className="space-y-3">
               {/* progress rail */}
@@ -2507,13 +2623,14 @@ export default function MissionControl() {
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+            <PanelLoading />
           )}
         </Panel>
 
         {/* -------------------------------------------------- EVENT LOG */}
         <Panel
           icon={<Activity className="h-4 w-4" />}
+          id="p-events"
           title={`Журнал событий · hash-chain${events.length ? ` · #${events[0].seq}` : ''}`}
           chip={<Chip tone={wsLive ? 'ok' : 'neutral'}>{wsLive ? 'ws live' : 'poll 5s'}</Chip>}
           actions={
@@ -2567,12 +2684,12 @@ export default function MissionControl() {
                   <span className={`w-44 shrink-0 truncate font-semibold ${eventTypeTone(e.type)}`} title={e.type}>{e.type}</span>
                   <span className="hidden w-16 shrink-0 text-zinc-600 sm:inline">{e.actor}</span>
                   <span className="min-w-0 flex-1 truncate text-zinc-500" title={JSON.stringify(e.payload)}>
-                    {e.subject ?? JSON.stringify(e.payload ?? null).slice(0, 80)}
+                    {eventHuman(e)}
                   </span>
                   <span className="shrink-0 text-zinc-600">{hhmmss(e.ts)}</span>
                 </div>
               ))}
-              {filtered.length === 0 && <div className="py-6 text-center text-xs text-zinc-600">событий нет — daemon молчит или фильтр пуст</div>}
+              {filtered.length === 0 && <EmptyState icon={<Radio className="h-5 w-5" />} title="событий нет" hint="daemon молчит или фильтр отсеял всё — очистите поиск/чипы фильтра или подождите новый event по WS" />}
             </div>
           </div>
         </Panel>
@@ -2580,6 +2697,7 @@ export default function MissionControl() {
         {/* ----------------------------------------------- EVIDENCE MIRROR */}
         <Panel
           icon={<Database className="h-4 w-4" />}
+          id="p-mirror"
           title="Mirror · Supabase evidence"
           chip={
             mirror ? (
@@ -2699,7 +2817,7 @@ export default function MissionControl() {
                       )}
                     </div>
                   ))}
-                  {mirror.live.tail.length === 0 && <div className="py-4 text-center text-xs text-zinc-600">живой хвост недоступен (Supabase?)</div>}
+                  {mirror.live.tail.length === 0 && <EmptyState icon={<Database className="h-5 w-5" />} title="живой хвост недоступен" hint="Supabase-плоскость не отвечает (service JWT pending) — локальная hash-chain продолжается, зеркало догонит после восстановления" />}
                 </div>
               </div>
               {mirror.history.length > 0 && (
@@ -2844,7 +2962,7 @@ export default function MissionControl() {
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+            <PanelLoading />
           )}
         </Panel>
 
@@ -2958,7 +3076,7 @@ export default function MissionControl() {
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+            <PanelLoading />
           )}
         </Panel>
       </main>
