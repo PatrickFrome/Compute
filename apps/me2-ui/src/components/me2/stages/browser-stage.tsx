@@ -311,28 +311,33 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
           <Globe className="h-3 w-3" aria-hidden /> ME2
         </span>
         {browserTabs.map((t) => (
-          <span
+          <div
             key={t.id}
-            title={`${t.title}\n${t.url}`}
-            role="tab"
-            aria-selected={t.active}
-            onClick={() => void activateTab(t)}
-            className={`group/tab flex max-w-52 shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 py-1 text-[10px] transition ${
+            className={`group/tab flex max-w-52 shrink-0 items-center rounded-t-md border border-b-0 transition ${
               t.active ? "border-zinc-600 bg-zinc-800 text-zinc-100" : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "animate-pulse bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
-            <span className="truncate">{t.title.slice(0, 30) || t.url}</span>
+            <button
+              type="button"
+              title={`${t.title}\n${t.url}`}
+              role="tab"
+              aria-selected={t.active}
+              onClick={() => void activateTab(t)}
+              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1 text-left text-[10px] focus-visible:outline-none"
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "animate-pulse bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
+              <span className="truncate">{t.title.slice(0, 30) || t.url}</span>
+            </button>
             <button
               type="button"
               aria-label={`Закрыть вкладку ${t.title || t.url}`}
               title="BROWSER_CLOSE — закрыть вкладку"
-              onClick={(e) => { e.stopPropagation(); void closeTab(t); }}
-              className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-rose-950 hover:text-rose-300 group-hover/tab:opacity-100"
+              onClick={() => void closeTab(t)}
+              className="mr-1 shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-rose-950 hover:text-rose-300 focus:opacity-100 group-hover/tab:opacity-100"
             >
               <X className="h-2.5 w-2.5" aria-hidden />
             </button>
-          </span>
+          </div>
         ))}
         <button
           type="button"
