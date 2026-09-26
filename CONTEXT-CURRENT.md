@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.0)
 
-gen: 2026-09-26T18:25:16Z | worklog: 1774530B / 9367L | sha12=72d96d0e5dbd
+gen: 2026-09-26T18:48:28Z | worklog: 1786004B / 9467L | sha12=a2c271fd42ab
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -8,7 +8,7 @@ gen: 2026-09-26T18:25:16Z | worklog: 1774530B / 9367L | sha12=72d96d0e5dbd
 3. Прочитай хвост /home/z/my-project/worklog.md (последние 150+ строк) — канонический журнал ВСЕХ чатов
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1774530B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1786004B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -23,12 +23,6 @@ gen: 2026-09-26T18:25:16Z | worklog: 1774530B / 9367L | sha12=72d96d0e5dbd
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- R80-PUSH-B → ob 413338 — публикация отложенного (main→sandbox/me2-os ff + 2 архив-ветки) после возврата PAT; верификация ls-remote
-- R80-PUSH-C → �онтрольный прогон push-pending-r80.sh после устранения PAT-блокера (публикация уже выполнена в R80-PUSH-B)
-- SEC-PHOENIX-1 → �еникс-восстановление секретов после env-reset + честный отчёт об инциденте при реализации
-- SEC-RESTORE-1 → �амовосстановление секретов после env-reset — sealed-bootstrap на выживающих каналах + repo-safe оркестратор
-- R80-PUSH-D → �онтрольный идемпотентный прогон push-pending (после закрытия в R80-PUSH-C)
-- SEC-SEALED-2 → �се операторские секреты запечатаны в переживающий reset контур; валидация Cloudflare-токенов
 - AUD-1 → �олный аудит v1 — первый проход (Git/Worklog/SQLite/Supabase/Pigsty/капсулы/отчёты/секреты)
 - R80-PUSH-D → �онтрольный тик публикации (после закрытия R80-PUSH-C)
 - SEC-SEALED-3 → -й канал выживания секретов — sealed-скрипт с литералами внутри проекта + авто-аудит; full-audit v2.0 (AUD-2)
@@ -38,47 +32,53 @@ gen: 2026-09-26T18:25:16Z | worklog: 1774530B / 9367L | sha12=72d96d0e5dbd
 - EVOLVE-ROUND-3 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
 - SEC-JWT-1+EVOLVE-1 → �апечатать JWT от оператора; движок самоэволюции (self-update, переживает reset'ы, двигает разработку клиента)
 - EVOLVE-ROUND-4 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
+- EVOLVE-ROUND-5 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-DARKMODE] next-themes: переключатель темы с персистом на /
+- EVOLVE-ROUND-4 → V-RESPONSIVE — mobile-first аудит Mission Control: touch-цели >=44px, брейкпоинты
+- SEC-PHOENIX-JWT → �охранение секретов в скрипт навсегда (пережить любые ресеты) + авто-полный аудит + самообновление и движение разработки клиента
+- SEC-JWT-RESTORE-1 → �охранить переданное оператором значение SUPABASE_SERVICE_ROLE_JWT в sealed-скрипт, попытка реактивации Supabase-канала
+- EVOLVE-ROUND-4 (implemented-RESPONSIVE) → elf-evolve round 4 — EV-RESPONSIVE (mobile-first аудит Mission Control)
+- R80-PUSH-G → ush-pending R80 — публикация main→sandbox/me2-os + 2 архив-ветки, verify ls-remote
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.2
-- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-FOOTER] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-FOOTER'
+- гипотеза «это JWT Secret»: смонтирован HS256 service_role (3 варианта: строка-ключ / декодированные 64 байта / +claim ref) → все 401; storage apikey → 400; рутины дешифровки в secrets-bootstrap.sh нет; публичный fetch me2-evidence restore-key → NoSuchBucket (приватный)
+- вывод: переданное значение не аутентифицирует проект sibnfciqcpkuquxzduqr; вероятно это legacy JWT Secret при включённых new signing keys, либо скопирован не тот ключ
+- test-скрипты минта удалены после диагностики
 
 Stage Summary:
-- раунд 3 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+- секрет сохранён по директиве (sealed+ENVF+зеркала) — переживёт ресеты, но канал Supabase остаётся BLOCKED
+- нужно от оператора: ЛИБО классический service_role JWT (формат eyJxxx.yyy.zzz), ЛИБО новый sb_secret_... (Settings→API→API Keys), ЛИБО подтвердить, что 88B-блоб расшифровывается известным способом
+- audit score: 73% → 80% (DONE=16 PARTIAL=2 BLOCKED=3); оставшиеся блокеры: Supabase JWT (уточнение формата), R2 secret access key
 
 ---
-Task ID: SEC-JWT-1+EVOLVE-1
-Agent: Super-Z (main session, операторская директива 2026-09-27)
-Task: Запечатать JWT от оператора; движок самоэволюции (self-update, переживает reset'ы, двигает разработку клиента)
+Task ID: EVOLVE-ROUND-4 (implemented-RESPONSIVE)
+Agent: Super-Z (main session, Job 416839 2026-09-27 02:17, доработано 02:4x после прерывания)
+Task: self-evolve round 4 — EV-RESPONSIVE (mobile-first аудит Mission Control)
 
 Work Log:
-- SEC-JWT-1: оператор передал blob (88 chars, base64) в слот SUPABASE_SERVICE_ROLE_JWT; запечатан в scripts/phoenix/phoenix-secrets-restore.sealed.sh (SB_JWT) + /tmp/my-project/.a2-backup/me2.env.20260922 (ключ добавлен, placeholder-комментарий сохранён) + зеркала; значения нигде не печатались; check-ignore OK, perm 600
-- честный вердикт: blob НЕ eyJ-JWT (decode: 59-64 байта binary, 0 x "eyJ"); Supabase REST root=401, auth/v1/admin/users=401 → канонический service-JWT по-прежнему pending operator (блоб сохранён as-is — возможно, ключ другого назначения)
-- phoenix-secrets-restore.sh v1.2: github.env api=200, SECRETS OK; auto_audit → full-audit v2.0: score 73% → 83% (DONE=17 PARTIAL=1 BLOCKED=3; отчёты audit-20260926-180*.md); остаточные блокеры только внешние: настоящий service-JWT + R2 secret access key
-- EVOLVE-1: создан scripts/phoenix/self-evolve.sealed.sh v1.3 (gitignored, 700): режимы status/self-check/self-update/reinstall/hook-audit/evolve/bootstrap-info; 10-задачный EV-* бэклог клиента; состояние PolarFS evolve.state; зеркала x2; 4 канала выживания как у секретов
-- drill выживания: rm self → reinstall=OK с зеркала (найдена и закрыта дыра: синк зеркал теперь и в self_check-самолечении, и сразу при создании); self-check rc-инверсия исправлена
-- врезка v1.2 в phoenix auto_audit: после каждого full-audit автоматически tick движка (score подхватывается в state)
-- первый реальный раунд: round=3, client HTTP 200, lint 0/0, score 83%, next_task=EV-FOOTER → EVOLVE-ROUND-3 в worklog; движок самоподнялся 1.1→1.3
-- QA клиента через gateway :81 (НЕ raw :3000 — через :3000 XTransformPort не трансформируется, ложные 404): пойманы и исправлены 4 Runtime TypeError — клиент R83 vs демон v0.21.0 slim-схемы: (1) health.head_hash.slice → normalizeHealth() с честными дефолтами (uptime из boot, actions:number→{implemented}, planes fallback 4/5 env-reset); (2) roadmap.filter → null-guard; (3) worktrees двойная вложенность → unwrap; (4) events payload/actor отсутствуют → map data/agent_id
-- коммит 2fa5bee2 R84-CLIENT (без секретов); итоговый браузерный QA: баннер живой (daemon UP 0.21.0, uptime 11.0h, hash-chain #226, planes 4/5), клик «Обновить health» OK, ERR-чипы только на удалённых из демона маршрутах (honest), lint 0/0
-- cron-каналы: Job 416838 webDevReview каждые 15 мин (priority 10) + Job 416839 SELF-EVOLVE tick каждые 2ч (Europe/Moscow) — разработка клиента движется без оператора
+- evolve: round=4, client=HTTP 200 (gateway :81), lint 0/0, next_task=EV-RESPONSIVE
+- реализация: globals.css — утилита touch-hit (::after inset:-8px, border-radius inherit; h-7→44px/h-8→48px/h-9→52px без изменения визуала); page.tsx — 12 сайтов: 10 refresh-кнопок h-9 w-9 + звук/громкость h-8 w-8 + import-PR h-7 w-7 + wt-remove h-9 w-9 → touch-hit; 4 типа чипов-пилюль (lane/sort/ev-class/×-классы) → min-h-9 + touch-hit; ×-сброс поиска → h-7 w-7 flex-центр (AA); «показать ещё» → touch-hit
+- брейкпоинт-аудит: grid-cols-1 lg:grid-cols-2, grid-cols-2 sm:grid-cols-4, header flex-wrap md:ml-auto, overflow-x-auto таблицы — уже mobile-first; фиксов не потребовалось
+- верификация: agent-browser через gateway :81 (НЕ raw :3000), viewport 390x844: touch-hit=16 элементов, min-h-9=4, горизонтального скролла НЕТ, page errors 0; скриншот /tmp/ev-responsive-mobile.png
+- lint: bun run lint → exit 0 (0/0); self-update implemented-RESPONSIVE → engine v1.8
+- самоулучшение движка: в BACKLOG добавлена EV-PWA (manifest/theme-color/offline-fallback); зеркала self-evolve.sealed.sh + sealed-скрипта синхронизированы (PolarFS + ossfs + vault)
 
 Stage Summary:
-- Секреты: 4 канала целы; blob запечатан, но это НЕ service-JWT — Supabase/R2 остаются честными блокерами до реального eyJ-ключа
-- Аудит: 83% (цикл продолжается cron-ом до 100%)
-- Эволюция: self-evolve v1.3 пережил удаление, самообновляется по ходу аудита, двигает клиент по EV-бэклогу; следующий EV-FOOTER (sticky footer)
+- Mission Control: все touch-цели >=44px (hit-area расширение без визуального сдвига), мобильный рендер без overflow — EV-RESPONSIVE закрыт
+- следующая задача движка: EV-FOOTER (первая в BACKLOG); движок v1.8, backlog 11 задач
 
 ---
-Task ID: EVOLVE-ROUND-4
-Agent: self-evolve v1.3 (sealed engine)
-Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
+Task ID: R80-PUSH-G
+Agent: Super-Z (main session, Job 413338 2026-09-27 02:37)
+Task: push-pending R80 — публикация main→sandbox/me2-os + 2 архив-ветки, verify ls-remote
 
 Work Log:
-- client health: GET / = 200, lint = 0/0, audit score = 83%
-- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.3
-- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-RESPONSIVE] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-RESPONSIVE'
+- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались
+- push-pending-r80.sh: main→sandbox/me2-os ff bf0393af..70647150 (5 новых коммитов cron-сессий + worklog SEC-JWT-1/EVOLVE-1); me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
+- ls-remote verify: sandbox/me2-os=70647150 ≡ local main HEAD (rail current); обе архив-ветки подтверждены
+- SEC-контекст: коммиты cron-сессий прошли leak-screen своих авторов; в этот прогон секреты не добавлялись
 
 Stage Summary:
-- раунд 4 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+- rail sandbox/me2-os = 70647150 = local main — публикация завершена, DONE: all local state published
+- origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
 ```
