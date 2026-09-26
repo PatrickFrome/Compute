@@ -168,3 +168,4 @@ cron 413338 tick 111 (20:37 +08): PAT ожидается; после env-reset 1
 cron 413338 tick 112 (20:52 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
 cron 413338 tick 113 (21:07 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
 cron 413338 tick 114 (21:22 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
+cron 413338 tick 115 (21:37 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
