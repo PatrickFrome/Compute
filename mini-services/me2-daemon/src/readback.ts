@@ -81,6 +81,9 @@ export interface ReleaseCi {
     publish_manifest: "SUCCESS" | "FAILED" | "PENDING" | "NOT_FOUND";
     failed_names: string[];
   };
+  // R83-AUTONOMY: when publish-exact-verified-target completed (the manifest
+  // rail went live at this moment — feeds the R82 before/after timeline)
+  publish_manifest_completed_at: string | null;
   terminal: boolean; // every check-run completed (no pending/in_progress)
   green: boolean; // terminal AND zero failures AND zero cancellations
 }
@@ -102,7 +105,7 @@ export async function releaseCi(fresh = false): Promise<ReleaseCi> {
       }
     : null;
   const cr = await ghGet<{
-    check_runs?: { name?: string; status?: string; conclusion?: string | null }[];
+    check_runs?: { name?: string; status?: string; conclusion?: string | null; completed_at?: string | null }[];
   }>(`/repos/${REPO}/commits/${head?.sha ?? ""}/check-runs?per_page=100`);
   const runs = cr.data.check_runs ?? [];
   const checks: ReleaseCi["checks"] = {
@@ -116,6 +119,10 @@ export async function releaseCi(fresh = false): Promise<ReleaseCi> {
     publish_manifest: "NOT_FOUND",
     failed_names: [],
   };
+  // R83-AUTONOMY: completion timestamp of the manifest-publish check — the
+  // before/after report timeline needs the exact moment the self-update rail
+  // went live (null while the check runs / not found)
+  let publishManifestAt: string | null = null;
   for (const r of runs) {
     const name = String(r.name ?? "");
     const status = String(r.status ?? "");
@@ -132,11 +139,13 @@ export async function releaseCi(fresh = false): Promise<ReleaseCi> {
     if (/publish-exact-verified-target/i.test(name)) {
       checks.publish_manifest =
         status !== "completed" ? "PENDING" : conclusion === "success" ? "SUCCESS" : "FAILED";
+      if (status === "completed" && r.completed_at) publishManifestAt = String(r.completed_at);
     }
   }
   const out: ReleaseCi = {
     head,
     checks,
+    publish_manifest_completed_at: publishManifestAt,
     terminal: checks.total > 0 && checks.pending === 0,
     green: checks.total > 0 && checks.pending === 0 && checks.failed === 0 && checks.cancelled === 0,
   };
@@ -239,6 +248,13 @@ async function sampleDraft(source: DraftSample["source"] = "periodic"): Promise<
   }
 }
 
+// R83-AUTONOMY: read-only view of the durable draft history for the
+// before/after report — the SAME in-memory ring the console chart renders
+// (warmed from data/draft-history.jsonl on boot). No probe, no network.
+export function draftHistory(): DraftSample[] {
+  return [...draftSamples];
+}
+
 export function startReadbackWatch(): void {
   if (!draftTimer) {
     draftTimer = setInterval(() => void sampleDraft("periodic"), DRAFT_SAMPLE_MS);
@@ -318,6 +334,7 @@ export interface ReadbackStatus {
     last: DraftSample | null;
     max_chars: number | null;
     cleared: boolean;
+    cleared_at: string | null; // journal milestone ts (R83-VERIFY) — timeline marker
     threshold: number;
   };
   // R82-HARDEN: rollover attempt churn within the monitor window — how many
@@ -336,6 +353,9 @@ export interface ReadbackStatus {
     growth: number;
     monotonic_growth_observed: boolean;
     stale_completed_s: number | null;
+    // R83-AUTONOMY: journal timestamp of the cycle-resume milestone — the
+    // DraftTimeline renders a second vertical marker at this moment
+    resumed_at: string | null;
   };
   stages: StageInfo[];
   current_gate: GateStage;
@@ -398,8 +418,13 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
   // observed is PROOF the new code physically executed — it can never un-happen.
   // Proof chain (any hit wins): live reason ∨ monitor-window history ∨ in-process
   // sticky set ∨ durable journal milestone (restart-safe).
+  // R83-AUTONOMY (live finding): the machine-readable family is wider than the
+  // original two — live observed ROLLOVER_AMBIGUOUS_NO_PROGRESS_FRESH_TAB
+  // (fresh tab made no progress) alongside ROOT_DRAFT_OVERSIZED and
+  // ROLLOVER_ERROR:*; none of these existed in the pre-#981 code
   const isCanaryReason = (r: string | null | undefined): boolean =>
-    r === "ROOT_DRAFT_OVERSIZED" || (typeof r === "string" && r.startsWith("ROLLOVER_ERROR:"));
+    r === "ROOT_DRAFT_OVERSIZED" ||
+    (typeof r === "string" && (r.startsWith("ROLLOVER_ERROR:") || r.startsWith("ROLLOVER_AMBIGUOUS_NO_PROGRESS")));
   const reason = sup.keepalive.rollover_reason;
   const historyReasons = [...new Set(history.map((s) => s.rollover_reason).filter(isCanaryReason))];
   for (const r of historyReasons) if (!canaryReasonsSeen.includes(r)) canaryReasonsSeen.push(r);
@@ -630,6 +655,7 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       growth: cycleGrowth,
       monotonic_growth_observed: monotonic,
       stale_completed_s: sup.keepalive.stale_completed_s,
+      resumed_at: monotonic ? (eventsOfType("R82_CYCLE_RESUMED")[0]?.ts ?? null) : null,
     },
     attempts,
     stages,

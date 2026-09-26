@@ -510,7 +510,49 @@ const VERIFY_MAX_ROWS = 20000; // safety cap (24h churn is ~450 rows; 20k = week
 
 let verifyInFlight: Promise<MirrorVerifyResult> | null = null;
 
-export function mirrorVerify(): Promise<MirrorVerifyResult> {
+// R83-AUTONOMY: auto-periodic verification — the contract check runs itself
+// every 6 hours (backlog item from R83-VERIFY: "авто-периодический MIRROR_VERIFY
+// (раз в 6ч, silent)"). Restart-safe BY CONSTRUCTION: the schedule is derived
+// from the durable journal (last MIRROR_VERIFY event ts), never from process
+// memory — a daemon restart picks up the countdown where it left off.
+// Orphan-generation protection (lesson R83-MIRROR-1): a timer run refuses to
+// execute when the journal shows a verify newer than interval − 5 min, so two
+// hot-reload generations can never double-fire.
+const AUTO_VERIFY_INTERVAL_MS = 6 * 3600_000;
+const AUTO_VERIFY_MIN_GAP_MS = AUTO_VERIFY_INTERVAL_MS - 5 * 60_000;
+let autoVerifyTimer: ReturnType<typeof setTimeout> | null = null;
+let autoVerifyNextAt: number | null = null;
+
+function lastVerifyAt(): number | null {
+  const evs = eventsOfType("MIRROR_VERIFY");
+  const ev = evs[evs.length - 1];
+  if (!ev) return null;
+  const t = Date.parse(ev.ts);
+  return Number.isFinite(t) ? t : null;
+}
+
+function scheduleNextAutoVerify(delayMs: number): void {
+  if (autoVerifyTimer) clearTimeout(autoVerifyTimer);
+  autoVerifyNextAt = Date.now() + delayMs;
+  autoVerifyTimer = setTimeout(() => {
+    autoVerifyTimer = null;
+    const last = lastVerifyAt();
+    const since = last == null ? Infinity : Date.now() - last;
+    if (since < AUTO_VERIFY_MIN_GAP_MS) {
+      // someone verified recently (operator click or an orphaned generation's
+      // timer) — skip this tick, keep the 6h cadence from that verify
+      scheduleNextAutoVerify(Math.max(60_000, AUTO_VERIFY_INTERVAL_MS - since));
+      return;
+    }
+    mirrorVerify("timer")
+      .catch(() => {
+        /* failures surface in the journal event + console alerting */
+      })
+      .finally(() => scheduleNextAutoVerify(AUTO_VERIFY_INTERVAL_MS));
+  }, delayMs);
+}
+
+export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promise<MirrorVerifyResult> {
   if (verifyInFlight) return verifyInFlight;
   verifyInFlight = (async (): Promise<MirrorVerifyResult> => {
     const startedAt = new Date().toISOString();
@@ -603,14 +645,17 @@ export function mirrorVerify(): Promise<MirrorVerifyResult> {
         },
         samples: violations,
       };
-      // evidence: the verification run itself is an auditable fact (operator
-      // action or manual click; NOT auto-run — bounded network use on purpose)
-      appendEvent("MIRROR_VERIFY", "operator", out.head_seq ? String(out.head_seq) : null, {
+      // evidence: the verification run itself is an auditable fact. Operator
+      // clicks and timer ticks both land in the chain (payload.trigger tells
+      // them apart; the console toasts only operator runs — auto runs are the
+      // silent 6h cadence by design)
+      appendEvent("MIRROR_VERIFY", trigger === "timer" ? "daemon" : "operator", out.head_seq ? String(out.head_seq) : null, {
         ok,
         rows_checked: out.rows_checked,
         duration_ms: out.duration_ms,
         violations: out.violations,
         first_broken_seq: out.first_broken_seq,
+        trigger,
         daemon_version: VERSION,
       });
       return out;
@@ -627,9 +672,10 @@ export function mirrorVerify(): Promise<MirrorVerifyResult> {
         checks: { seq_continuity: false, prev_hash_chain: false, row_hashes: false, bindings: false },
         samples: [`verify failed: ${String((e as Error)?.message ?? e).slice(0, 160)}`],
       };
-      appendEvent("MIRROR_VERIFY", "operator", null, {
+      appendEvent("MIRROR_VERIFY", trigger === "timer" ? "daemon" : "operator", null, {
         ok: false,
         error: out.samples[0],
+        trigger,
         daemon_version: VERSION,
       });
       return out;
@@ -674,7 +720,10 @@ export interface MirrorStatus {
   // R83-VERIFY: the last verification run recorded in the journal (null if
   // the contract has never been verified in this chain) — surfaces as the
   // "last checked" line next to the verify button.
-  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number } | null;
+  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number; trigger: string | null } | null;
+  // R83-AUTONOMY: the silent 6h self-check cadence — countdown derived from
+  // the journal, so it survives restarts; a "due soon" surface for the console
+  auto_verify: { interval_ms: number; last_at: string | null; next_in_ms: number | null; running: boolean };
   history: Me2Event[]; // last MIRROR_SYNC events from the local chain
 }
 
@@ -710,6 +759,14 @@ export function startAutoMirror(): void {
       });
     }, SYNC_INTERVAL_MS);
   }, BOOT_DELAY_MS);
+  // R83-AUTONOMY: auto-verify timer — the countdown starts from the journal's
+  // last MIRROR_VERIFY (restart-safe); first run no sooner than 90s after boot
+  // (lets the boot sync land first so the verify sees the fresh tail)
+  if (!autoVerifyTimer) {
+    const last = lastVerifyAt();
+    const since = last == null ? Infinity : Date.now() - last;
+    scheduleNextAutoVerify(since >= AUTO_VERIFY_INTERVAL_MS ? 90_000 : AUTO_VERIFY_INTERVAL_MS - since);
+  }
 }
 
 export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
@@ -777,9 +834,18 @@ export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
       const evs = eventsOfType("MIRROR_VERIFY");
       const ev = evs[evs.length - 1];
       if (!ev) return null;
-      const p = (ev.payload ?? {}) as { ok?: boolean; rows_checked?: number; duration_ms?: number; violations?: number };
-      return { at: ev.ts, ok: !!p.ok, rows: p.rows_checked ?? 0, duration_ms: p.duration_ms ?? 0, violations: p.violations ?? 0 };
+      const p = (ev.payload ?? {}) as { ok?: boolean; rows_checked?: number; duration_ms?: number; violations?: number; trigger?: string };
+      return { at: ev.ts, ok: !!p.ok, rows: p.rows_checked ?? 0, duration_ms: p.duration_ms ?? 0, violations: p.violations ?? 0, trigger: p.trigger ?? null };
     })(),
+    auto_verify: {
+      interval_ms: AUTO_VERIFY_INTERVAL_MS,
+      last_at: (() => {
+        const t = lastVerifyAt();
+        return t == null ? null : new Date(t).toISOString();
+      })(),
+      next_in_ms: autoVerifyNextAt ? Math.max(0, autoVerifyNextAt - Date.now()) : null,
+      running: !!autoVerifyTimer,
+    },
     history: eventsOfType("MIRROR_SYNC").slice(-8).reverse(),
   };
 }

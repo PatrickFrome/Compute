@@ -202,7 +202,7 @@ interface Readback {
     current: { attempt_id: string; tab_id: string | null; started_at: string | null; ambiguous_reason: string | null } | null
     rollover_reason: string | null
   }
-  cycle: { baseline: number; current: number; growth: number; monotonic_growth_observed: boolean; stale_completed_s: number | null }
+  cycle: { baseline: number; current: number; growth: number; monotonic_growth_observed: boolean; stale_completed_s: number | null; resumed_at: string | null }
   stages: ReadbackStage[]
   current_gate: string
   summary: string
@@ -288,7 +288,9 @@ interface MirrorStatus {
     window_since: string
   } | null
   // R83-VERIFY: journal-recorded last contract-verification run
-  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number } | null
+  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number; trigger: string | null } | null
+  // R83-AUTONOMY: the silent 6h self-check cadence (journal-derived schedule)
+  auto_verify: { interval_ms: number; last_at: string | null; next_in_ms: number | null; running: boolean } | null
   history: Me2Event[]
 }
 
@@ -305,9 +307,66 @@ interface MirrorVerifyResult {
   samples: string[]
 }
 
+// R83-AUTONOMY: R82 before/after diff report (GET /r82/report) — poisoned
+// baseline (live-verified at diagnosis) vs live-now, metric by metric +
+// key-moment timeline. Release-readiness material for R89; fills in as the
+// exit gate converges.
+interface ReportMetric {
+  name: string
+  before: string
+  after: string
+  status: 'improved' | 'pending' | 'same' | 'regressed'
+  note: string
+}
+interface ReportTimelineItem {
+  at: string | null
+  event: string
+  source: 'github' | 'journal' | 'live' | 'pending'
+  detail?: string
+}
+interface R82Report {
+  ok: boolean
+  generated_at: string
+  daemon_version: string
+  gate: { current: string; closed: boolean }
+  before: {
+    diagnosed_at: string
+    keepalive_state: string
+    rollover_reason: string
+    cycle_seq: number
+    last_completed_cycle_at: string
+    stale_completed_s_approx: number
+    ambiguous_history_count: number
+    extension_version: string
+    dev_plane_head: string
+    draft_chars_first_probe: number
+    cognitive_state: string
+    resync_count_approx: number
+    fix_state: string
+    provenance: string
+  }
+  after: {
+    fetched_at: string
+    extension_version: string
+    dev_plane_head: string
+    keepalive_state: string
+    rollover_reason: string | null
+    cycle_seq: number
+    stale_completed_s: number | null
+    last_completed_cycle_at: string | null
+    ambiguous_history_count: number
+    draft: { canary: string | null; chars: number | null; max_chars: number | null; cleared: boolean }
+    cognitive: { state: string; resync_count: number; sent_events: number; acked: number }
+    fix_state: string
+  }
+  metrics: ReportMetric[]
+  timeline: ReportTimelineItem[]
+  verdict: string
+}
+
 // ---------------------------------------------------------- gap matrix ----
 const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
-  { pri: 'P0', title: 'Supervisor useful cycle', status: 'EXIT-GATE WATCH live: PR #981 слит (e7fccd08), release-CI терминален → manifest → self-update → ручная очистка драфта оператором → рост cycle_seq; смотрите карточку R82 EXIT GATE', live: 'keepalive' },
+  { pri: 'P0', title: 'Supervisor useful cycle', status: 'EXIT-GATE WATCH live: PR #981 слит (e7fccd08), release-CI терминален → manifest → self-update → ручная очистка драфта оператором → рост cycle_seq; смотрите карточку R82 EXIT GATE + Before/After diff (материал R89)', live: 'keepalive' },
   { pri: 'P0', title: 'DevOS maintenance liveness', status: 'idle-gate fix в source; live timeout сохраняется до installer' },
   { pri: 'P0', title: 'Edge convergence', status: 'R83-импорт РЕАЛИЗОВАН: PR #982 (23 файла +4631/−0 под edge/, digest-контракт верифицирован: fabric 9c55419e37b0 == LIVE, aop1 29b36254b0b4cb4f == LIVE) под ревью оператора; promotion-gate = tools/verify-digests.mjs; деплой только после ревью + ротации CF-токена' },
   { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
@@ -424,8 +483,8 @@ function Spark({ data, color, label, value }: { data: { t: string; v: number }[]
 // fakes a draft value). The dashed amber line is the 4000-char canary
 // threshold. The rose→emerald drop is the operator-clear moment — the live
 // visual proof the whole OPERATOR_CLEAR stage waits for.
-function DraftTimeline({ samples, threshold, clearedAt }: { samples: ReadbackDraftSample[]; threshold: number; clearedAt: string | null }) {
-  const { data, counts, downsampledFrom, markerT } = useMemo(() => {
+function DraftTimeline({ samples, threshold, clearedAt, resumedAt }: { samples: ReadbackDraftSample[]; threshold: number; clearedAt: string | null; resumedAt?: string | null }) {
+  const { data, counts, downsampledFrom, markerT, markerRT } = useMemo(() => {
     const MAX_POINTS = 140
     let used = samples
     let from: number | null = null
@@ -464,8 +523,16 @@ function DraftTimeline({ samples, threshold, clearedAt }: { samples: ReadbackDra
       const at = used.find((s) => Date.parse(s.ts) >= clearedMs) ?? used[used.length - 1]
       markerT = at ? hhmmss(at.ts) : null
     }
-    return { data, counts, downsampledFrom: from, markerT }
-  }, [samples, clearedAt])
+    // R83-AUTONOMY: cycle-resume marker (journal milestone R82_CYCLE_RESUMED)
+    // — same categorical exact-hit mechanics, violet, second vertical line
+    let markerRT: string | null = null
+    if (resumedAt) {
+      const resumedMs = Date.parse(resumedAt)
+      const at = used.find((s) => Date.parse(s.ts) >= resumedMs) ?? used[used.length - 1]
+      markerRT = at ? hhmmss(at.ts) : null
+    }
+    return { data, counts, downsampledFrom: from, markerT, markerRT }
+  }, [samples, clearedAt, resumedAt])
 
   const maxChars = Math.max(threshold * 1.25, ...data.map((d) => d.oversize ?? d.ok ?? 0))
 
@@ -515,6 +582,15 @@ function DraftTimeline({ samples, threshold, clearedAt }: { samples: ReadbackDra
                   strokeWidth={1.5}
                   strokeDasharray="2 3"
                   label={{ value: 'драфт очищен', fill: '#34d399', fontSize: 9, position: 'insideTopLeft' }}
+                />
+              )}
+              {markerRT && (
+                <ReferenceLine
+                  x={markerRT}
+                  stroke="#a78bfa"
+                  strokeWidth={1.5}
+                  strokeDasharray="2 3"
+                  label={{ value: 'cycle растёт', fill: '#a78bfa', fontSize: 9, position: 'insideTopLeft' }}
                 />
               )}
               <Line type="monotone" dataKey="oversize" stroke="#fb7185" strokeWidth={1.5} dot={{ r: 1.5, fill: '#fb7185', strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} name="OVERSIZED" />
@@ -615,6 +691,11 @@ export default function MissionControl() {
   const [donorLane, setDonorLane] = useState<'ALL' | DonorAction['lane']>('ALL')
   const [donorQuery, setDonorQuery] = useState('')
   const [donorSort, setDonorSort] = useState<'name' | 'cost-asc' | 'cost-desc'>('name')
+  // R83-AUTONOMY: donor-browser limit — lanes start collapsed to their first
+  // 8 action cards; «показать ещё N» expands per-lane (limit at full list)
+  const [donorLaneOpen, setDonorLaneOpen] = useState<Record<string, boolean>>({})
+  // R83-AUTONOMY: R82 before/after diff report (poller 120s — mostly cache hits)
+  const [r82report, setR82Report] = useState<R82Report | null>(null)
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -757,6 +838,7 @@ export default function MissionControl() {
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
     jfetch<DonorRegistry>('/donor-registry').then(setDonorReg).catch(() => {})
     jfetch<EdgeImportPlan>('/edge/import-plan').then(setEdgePlan).catch(() => {})
+    jfetch<R82Report>('/r82/report').then(setR82Report).catch(() => {})
     loadEdgeImport()
     loadMirror()
     const a = setInterval(loadHealth, 5000)
@@ -769,9 +851,12 @@ export default function MissionControl() {
     const j = setInterval(() => { loadEdgeImport(false) }, 120000)
     const i = setInterval(() => { loadReadback(false) }, 60000)
     const k = setInterval(() => { loadMirror(false) }, 60000)
+    // R83-AUTONOMY: the before/after report rides its own gentle cadence — the
+    // daemon side reads cached supervisor/CI state, so this is a cheap call
+    const m = setInterval(() => { jfetch<R82Report>('/r82/report').then(setR82Report).catch(() => {}) }, 120000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j); clearInterval(k) }
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j); clearInterval(k); clearInterval(m) }
   }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback, loadEdgeImport, loadMirror])
 
   // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears.
@@ -789,6 +874,12 @@ export default function MissionControl() {
       } else if (ev.key === 'Escape' && target === filterRef.current) {
         setFilter('')
         filterRef.current?.blur()
+      } else if (ev.key === 'Escape' && target === donorSearchRef.current) {
+        // R83-AUTONOMY: Esc in the donor search behaves like the journal filter
+        // — clear + blur (QA-found inconsistency: journal filter had it, donor
+        // search did not, so Esc silently did nothing and trapped the '/'-hint)
+        setDonorQuery('')
+        donorSearchRef.current?.blur()
       } else if (ev.altKey && !ev.ctrlKey && !ev.metaKey) {
         if (ev.code === 'KeyD') {
           ev.preventDefault()
@@ -829,7 +920,12 @@ export default function MissionControl() {
     MIRROR_VERIFY: 'Контракт зеркала проверен',
   }
   useEffect(() => {
-    const milestones = events.filter((e) => MILESTONE_LABELS[e.type] != null)
+    // R83-AUTONOMY: timer-triggered MIRROR_VERIFY runs are the SILENT 6h
+    // cadence — they update the «последняя проверка» line, but never toast
+    // (payload.trigger distinguishes operator clicks from the daemon timer)
+    const milestones = events.filter((e) =>
+      MILESTONE_LABELS[e.type] != null
+      && !(e.type === 'MIRROR_VERIFY' && (e.payload as { trigger?: string } | null)?.trigger === 'timer'))
     if (milestones.length === 0) return
     const top = Math.max(...milestones.map((m) => m.seq))
     if (milestoneSeqRef.current < 0) {
@@ -847,6 +943,35 @@ export default function MissionControl() {
       })
     }
   }, [events, toast, soundOn])
+
+  // ---- R83-AUTONOMY: sound unlock on the first user gesture. Browsers keep a
+  // freshly-created AudioContext suspended until a user gesture happens in the
+  // page — the first milestone/gate beep could otherwise be swallowed. A
+  // one-time pointerdown/keydown resumes the context so every later cue plays
+  // instantly. Silent by design (no unlock tone — the cue itself stays rare).
+  useEffect(() => {
+    let done = false
+    const unlock = () => {
+      if (done) return
+      done = true
+      try {
+        const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        if (!AC) return
+        if (!audioCtx) audioCtx = new AC()
+        if (audioCtx.state === 'suspended') void audioCtx.resume()
+      } catch {
+        /* audio is a nicety, never a dependency */
+      }
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [])
 
   // ---- R83-WATCH: mirror-divergence auto-alert (backlog R83-MIRROR-3
   // «авто-алерт в тост при mirror_diverged»). The mirror is the evidence
@@ -1046,7 +1171,7 @@ export default function MissionControl() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-            <Chip tone="warn">{health?.round ?? 'R83'} · VERIFY</Chip>
+            <Chip tone="warn">{health?.round ?? 'R83'} · AUTONOMY</Chip>
             <Chip tone={daemonUp ? 'ok' : 'p0'}>
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
@@ -1226,16 +1351,27 @@ export default function MissionControl() {
                           : donorSort === 'cost-asc' ? a.cost - b.cost || a.action.localeCompare(b.action)
                           : b.cost - a.cost || a.action.localeCompare(b.action)
                         )
+                        // R83-AUTONOMY: limit at full list — each lane renders its
+                        // first 8 cards until expanded (57 cards → ~32 rendered).
+                        // A SEARCH QUERY BYPASSES the limit: matches hidden inside
+                        // a collapsed lane would be silently unfindable otherwise
+                        // (QA-found: «mirror» missed MIRROR_SYNC/MIRROR_VERIFY)
+                        const LANE_LIMIT = 8
+                        const expanded = donorLaneOpen[lane] || q.length > 0
+                        const visible = expanded ? sorted : sorted.slice(0, LANE_LIMIT)
                         const meta = laneMeta[lane]
                         return (
                           <div key={lane}>
                             <div className="sticky top-0 z-[1] -mx-1 mb-1.5 flex items-center gap-2 bg-zinc-900/95 px-1 py-1 backdrop-blur-sm">
                               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${meta.cls}`}>{meta.label}</span>
                               <span className="font-mono text-[10px] text-zinc-500">{acts.length}</span>
+                              {!expanded && sorted.length > LANE_LIMIT && (
+                                <span className="font-mono text-[9px] text-zinc-600" title={`первые ${LANE_LIMIT} из ${sorted.length} — «показать ещё» развернёт lane`}>показано {LANE_LIMIT}</span>
+                              )}
                               <span className="ml-auto font-mono text-[9px] text-zinc-600">priority {meta.pri}</span>
                             </div>
                             <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                              {sorted.map((a) => {
+                              {visible.map((a) => {
                                 const cp = cpMap.get(a.action)
                                 return (
                                   <div key={a.action} className="group rounded-lg border border-zinc-800 bg-zinc-950/40 p-2 transition-colors hover:border-zinc-700 hover:bg-zinc-900/60">
@@ -1257,6 +1393,15 @@ export default function MissionControl() {
                                 )
                               })}
                             </div>
+                            {!expanded && sorted.length > LANE_LIMIT && (
+                              <button
+                                onClick={() => setDonorLaneOpen((prev) => ({ ...prev, [lane]: true }))}
+                                className="mt-1.5 w-full rounded-lg border border-dashed border-zinc-700 bg-zinc-900/40 px-3 py-1.5 text-[10px] font-semibold text-zinc-400 transition-colors hover:border-teal-600/50 hover:bg-teal-500/10 hover:text-teal-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+                                title={`развернуть lane ${meta.label}: ещё ${sorted.length - LANE_LIMIT} действий (сейчас скрыты)`}
+                              >
+                                показать ещё {sorted.length - LANE_LIMIT} из {sorted.length} · {meta.label}
+                              </button>
+                            )}
                           </div>
                         )
                       })}
@@ -1567,7 +1712,7 @@ export default function MissionControl() {
                 </div>
               )}
 
-              {/* R82-STICKY: canary proof chain — observed machine-readable reasons */}
+              {/* R82-HARDEN: canary proof chain — observed machine-readable reasons */}
               {readback.canary?.observed_reasons && readback.canary.observed_reasons.length > 0 && (
                 <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-2.5">
                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -1580,6 +1725,69 @@ export default function MissionControl() {
                     ))}
                   </div>
                   {readback.canary.confirmed_at && <div className="mt-1.5 font-mono text-[9px] text-zinc-600">подтверждено: {readback.canary.confirmed_at.slice(11, 19)}Z · источник: {readback.canary.confirmed_source}</div>}
+                </div>
+              )}
+
+              {/* R83-AUTONOMY: before/after diff report — the R89 release-readiness
+                  material. Fills in live as the gate converges: every metric row
+                  shows poisoned-baseline → live-now with a status badge. */}
+              {r82report && (
+                <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 p-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-violet-300" title={`до: живоверифицированный отравленный baseline при диагностике R82 (${r82report.before.diagnosed_at}) · после: live сейчас (${r82report.after.fetched_at}) — ${r82report.before.provenance}`}>Before / After · diff R82</span>
+                    <Chip tone={r82report.gate.closed ? 'ok' : 'warn'}>{r82report.gate.closed ? 'ЗАКРЫТ' : r82report.gate.current}</Chip>
+                    <Chip tone="neutral" title="метрик improved / всего">{r82report.metrics.filter((mm) => mm.status === 'improved').length}/{r82report.metrics.length} improved</Chip>
+                    <span className="ml-auto font-mono text-[9px] text-zinc-600" title={r82report.generated_at}>обновлён {hhmmss(r82report.generated_at)}Z</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[520px] border-collapse text-left">
+                      <thead>
+                        <tr className="text-[9px] uppercase tracking-wider text-zinc-600">
+                          <th className="w-[26%] pb-1 pr-2 font-medium">метрика</th>
+                          <th className="w-[30%] pb-1 pr-2 font-medium">до (диагноз)</th>
+                          <th className="w-[32%] pb-1 pr-2 font-medium">после (live)</th>
+                          <th className="pb-1 font-medium">статус</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r82report.metrics.map((mm) => (
+                          <tr key={mm.name} className="border-t border-zinc-800/60 align-top">
+                            <td className="py-1.5 pr-2 text-[11px] font-medium text-zinc-300" title={mm.note}>{mm.name}</td>
+                            <td className="py-1.5 pr-2 font-mono text-[10px] text-zinc-500" title={mm.before}>{mm.before}</td>
+                            <td className="py-1.5 pr-2 font-mono text-[10px] text-zinc-200" title={mm.after}>{mm.after}</td>
+                            <td className="py-1.5">
+                              <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[9px] font-bold ${
+                                mm.status === 'improved' ? 'bg-emerald-500/15 text-emerald-300'
+                                  : mm.status === 'pending' ? 'bg-amber-500/15 text-amber-300'
+                                    : mm.status === 'regressed' ? 'bg-rose-500/15 text-rose-300'
+                                      : 'bg-zinc-500/15 text-zinc-400'}`}
+                                title={mm.note}>
+                                {mm.status === 'improved' ? '↑ improved' : mm.status === 'pending' ? '… pending' : mm.status === 'regressed' ? '↓ regressed' : '= same'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-2.5 space-y-1">
+                    <div className="text-[9px] font-medium uppercase tracking-wider text-zinc-600">Ключевые моменты (durable: journal + GitHub)</div>
+                    {r82report.timeline.map((t, idx) => (
+                      <div key={idx} className="flex items-baseline gap-2 font-mono text-[10px]">
+                        <span className={`w-[64px] shrink-0 ${t.at ? 'text-zinc-400' : 'text-zinc-700'}`}>{t.at ? hhmmss(t.at) : 'pending'}</span>
+                        <span className={`shrink-0 rounded px-1 text-[8px] font-bold uppercase ${
+                          t.source === 'journal' ? 'bg-teal-500/15 text-teal-300'
+                            : t.source === 'github' ? 'bg-cyan-500/15 text-cyan-300'
+                              : t.source === 'live' ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-zinc-700/40 text-zinc-500'}`}
+                          title={t.source === 'journal' ? 'hash-chain журнал демона' : t.source === 'github' ? 'GitHub check-runs / commit metadata' : t.source === 'live' ? 'живой readback' : 'ещё не произошло — ожидаем'}>
+                          {t.source}
+                        </span>
+                        <span className={`min-w-0 flex-1 ${t.at ? 'text-zinc-300' : 'text-zinc-600'}`} title={t.detail ?? t.event}>{t.event}{t.detail ? ` — ${t.detail}` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 border-t border-zinc-800/60 pt-2 text-[10px] leading-relaxed text-zinc-500">{r82report.verdict}</p>
                 </div>
               )}
 
@@ -1597,7 +1805,7 @@ export default function MissionControl() {
                     return oppo > 0 ? <Chip tone="info">oppo-проб {oppo}</Chip> : null
                   })()}
                 </div>
-                <DraftTimeline samples={readback.draft.samples} threshold={readback.draft.threshold} clearedAt={readback.draft.cleared_at} />
+                <DraftTimeline samples={readback.draft.samples} threshold={readback.draft.threshold} clearedAt={readback.draft.cleared_at} resumedAt={readback.cycle.resumed_at} />
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5">
                   <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Последние пробы</div>
                   <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
@@ -2154,10 +2362,25 @@ export default function MissionControl() {
               {mirror?.last_verify && !mirrorVerifyRes && (
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
                   <span className="text-zinc-600">последняя проверка:</span>
-                  <Chip tone={mirror.last_verify.ok ? 'ok' : 'p0'} title={`журнальное событие MIRROR_VERIFY: ${mirror.last_verify.ok ? 'контракт держит' : `${mirror.last_verify.violations} нарушений`} · ${mirror.last_verify.rows} строк · ${mirror.last_verify.duration_ms}ms`}>
-                    {mirror.last_verify.ok ? '✓ держит' : '✗ нарушен'} · {mirror.last_verify.rows} строк
+                  <Chip tone={mirror.last_verify.ok ? 'ok' : 'p0'} title={`журнальное событие MIRROR_VERIFY: ${mirror.last_verify.ok ? 'контракт держит' : `${mirror.last_verify.violations} нарушений`} · ${mirror.last_verify.rows} строк · ${mirror.last_verify.duration_ms}ms${mirror.last_verify.trigger ? ` · источник: ${mirror.last_verify.trigger === 'timer' ? 'авто-таймер 6ч' : 'оператор'}` : ''}`}>
+                    {mirror.last_verify.ok ? '✓ держит' : '✗ нарушен'} · {mirror.last_verify.rows} строк{mirror.last_verify.trigger === 'timer' ? ' · авто' : ''}
                   </Chip>
                   <span title={mirror.last_verify.at}>{humanS(Math.round((now - Date.parse(mirror.last_verify.at)) / 1000))} назад</span>
+                </div>
+              )}
+              {/* R83-AUTONOMY: the silent 6h self-check cadence — journal-derived
+                  schedule (restart-safe), surfaced as live countdown chips */}
+              {mirror?.auto_verify && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Chip tone={mirror.auto_verify.running ? 'ok' : 'warn'} title="тихая само-проверка контракта каждые 6 ч: расписание выводится из durable journal (последний MIRROR_VERIFY), не из памяти — переживает рестарты демона; таймерные прогоны не тостят (silent by design)">
+                    авто 6ч {mirror.auto_verify.running ? 'жив' : 'выкл'}
+                  </Chip>
+                  {mirror.auto_verify.next_in_ms != null && (
+                    <Chip tone="neutral" title="до следующей авто-проверки контракта зеркала">след. через {humanS(Math.round(mirror.auto_verify.next_in_ms / 1000))}</Chip>
+                  )}
+                  {mirror.last_verify?.trigger === 'timer' && (
+                    <Chip tone="info" title="последняя проверка исполнена авто-таймером демона — тост не показывался (silent cadence)">последняя — авто</Chip>
+                  )}
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-2">

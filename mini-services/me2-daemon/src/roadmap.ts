@@ -177,6 +177,15 @@ export const CONVERGENCE_EVIDENCE = {
     sound_levels: "3 уровня громкости (тихо 0.018 / средне 0.045 / громко 0.09) — кнопка ◦/◦◦/◦◦◦ в хедере рядом с bell, persist localStorage 'me2-sound-level', пробный сигнал milestone при переключении",
     event_class_chips: "журнал событий: class-фильтры milestone/evidence/lifecycle/ops (multi-select, живые счётчики, комбинируются с текстовым фильтром через AND, кнопка × классы для сброса)",
   },
+  r83_autonomy: {
+    built: "2026-09-26T11:00:00Z",
+    module: "daemon src/mirror.ts auto-verify + src/report.ts + консоль (0.69.0-r83autonomy)",
+    auto_verify_6h: "тихая само-проверка контракта каждые 6 ч: расписание выводится из durable journal (последний MIRROR_VERIFY), не из памяти — рестарт подхватывает отсчёт; защита от осиротевших поколений bun --hot: таймерный прогон отказывается исполняться, если в journal верификация свежеe interval−5 мин; payload.trigger различает operator/timer — консоль тостит только operator-прогоны",
+    r82_report: "GET /r82/report (+ action r82.report) — before/after diff-отчёт R82: отравленный baseline (живоверифицирован при диагностике: ROLLOVER_AMBIGUOUS · TYPE_EFFECT_AMBIGUOUS · cycle 2109 · stale >31ч · драфт 28 432 chars · resync ~2.3k) против live сейчас, метрика-за-метрикой (8 метрик со статусами improved/pending/same) + timeline ключевых моментов из durable источников (journal milestones + GitHub completed_at); заполняется по мере схождения gate — материал release-готовности R89",
+    publish_manifest_at: "releaseCi теперь несёт publish_manifest_completed_at (check-runs completed_at) — момент публикации self-update rail виден в timeline отчёта",
+    cycle_resumed_at: "readback cycle.resumed_at (journal milestone ts) — консоль рендерит второй маркер на timeline драфта («cycle растёт»)",
+    console_polish: "донор-браузер: per-lane лимит 8 + «показать ещё N» (limit при полном списке); Esc очищает+блерит донорский поиск (паритет с журнальным фильтром); sound-unlock при первом жесте (AudioContext.resume — первый сигнал больше не проглатывается); Mirror-карточка: чипы авто-проверки (последняя · следующая)",
+  },
 } as const;
 
 export const RECOVERY_STATUS = {

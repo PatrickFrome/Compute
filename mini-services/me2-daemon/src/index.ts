@@ -17,6 +17,7 @@ import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
 import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus, startReadbackWatch } from "./readback";
+import { r82Report } from "./report";
 import { mirrorStatus, mirrorHealth, mirrorVerify, startAutoMirror, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
@@ -137,6 +138,14 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     method: "GET",
     path: "/readback",
     handler: (_r, url) => readbackStatus(url.searchParams.get("fresh") === "1"),
+  },
+  {
+    method: "GET",
+    // R83-AUTONOMY: the R82 before/after diff report — poisoned-baseline vs
+    // live-now, metric by metric + key-moment timeline. Release-readiness
+    // material for R89; fills in as the exit gate converges.
+    path: "/r82/report",
+    handler: (_r, url) => r82Report(url.searchParams.get("fresh") === "1"),
   },
   {
     method: "GET",
