@@ -32,6 +32,18 @@ const DEFERRED_ROLLOVER_AUTO_RELEASE_MS = 15 * 60 * 1000;
 // rollover black hole was exactly this class: fresh root tab → full
 // rollover message → TYPE_EFFECT_AMBIGUOUS → no-progress rerequest loop.
 const GLM_SUPERVISOR_CONVERSATION_SEED = 'METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
+// R82-DRAFT-CANARY: a PRECONVERSATION_ROOT can restore an account-synced
+// oversized draft into every fresh tab. Such a draft can silently refuse
+// submit and grow on every attempted append. Abort before any physical write;
+// an operator can clear the account draft once and the bounded rollover loop
+// can then converge without poisoning it further.
+const ROOT_DRAFT_MAX_CHARS = 4000;
+// R82-BLANK-TAB: bounded navigation can leave an uncommitted WebContents at
+// url:'' with no semantic surface. Never type into it. Demand a committed URL,
+// close the unsent attempt tab, and retry a bounded number of fresh tabs.
+const ROLLOVER_TAB_COMMIT_ATTEMPTS = 6;
+const ROLLOVER_TAB_COMMIT_WAIT_MS = 1500;
+const ROLLOVER_NEW_TAB_RETRIES = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
@@ -485,6 +497,14 @@ export class SupervisorLifecycleRuntime {
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
     let box = composerTarget(before);
     if (!box) throw new Error('supervisor_composer_not_unique');
+    // R82-DRAFT-CANARY: explicit pre-effect fence for an oversized root draft.
+    // No insert, click, Enter, or fallback is allowed before this check.
+    if (classifyAgentPlatformSurface(before?.url)?.stage === 'PRECONVERSATION_ROOT'
+      && Number.isFinite(Number(box.value_length))
+      && Number(box.value_length) > ROOT_DRAFT_MAX_CHARS) {
+      this.#lastError = `root_draft_oversized:${Number(box.value_length)}`;
+      return { ok: false, reason: 'ROOT_DRAFT_OVERSIZED', clicked: false, event_driven_readback: true };
+    }
     // R-SUP-SEED (live 2026-09-21): a PRECONVERSATION_ROOT surface (fresh
     // rollover tab, RECOVERING bootstrap) silently refuses Enter on oversized
     // prompts — the exact failure class the fleet dispatcher fixed with the
@@ -1267,9 +1287,9 @@ export class SupervisorLifecycleRuntime {
         supervisorEpoch: before.supervisor_epoch,
         rolloverAttemptId: attempt.attempt_id,
       });
-      tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
-      if (!tab?.tab_id) throw new Error('rollover_tab_creation_no_readback');
-      await this.#keepalive.bindRolloverAttemptTab(tab.tab_id);
+      // R82-BLANK-TAB: prove the fresh tab committed navigation before any
+      // composer write. The durable rollover attempt is already fenced above.
+      tab = await this.#openCommittedRolloverTab();
       const sent = await this.#typeAndSend(tab.tab_id, message, attempt.attempt_id);
       if (!sent.ok) {
         await this.#keepalive.markRolloverAmbiguous(sent.reason || 'ROLLOVER_WITHOUT_POSITIVE_READBACK');
@@ -1297,6 +1317,24 @@ export class SupervisorLifecycleRuntime {
       this.#lastError = String(e?.message || e).slice(0, 240);
     }
     return false;
+  }
+
+  // R82-BLANK-TAB: open a fresh rollover tab and require a committed
+  // navigation readback before typing. Every attempt is unsent until this
+  // helper returns, so closing an uncommitted tab cannot duplicate an effect.
+  async #openCommittedRolloverTab() {
+    for (let round = 0; round <= ROLLOVER_NEW_TAB_RETRIES; round += 1) {
+      const tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
+      if (!tab?.tab_id) throw new Error('rollover_tab_creation_no_readback');
+      await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
+      for (let i = 0; i < ROLLOVER_TAB_COMMIT_ATTEMPTS; i += 1) {
+        if (i > 0) await sleep(ROLLOVER_TAB_COMMIT_WAIT_MS);
+        const frame = await this.#capture(tab.tab_id).catch(() => null);
+        if (frame && String(frame?.url || '') !== '') return tab;
+      }
+      await this.#execute({ action: 'CLOSE_TAB', payload: { tab_id: tab.tab_id }, platform: null }).catch(() => {});
+    }
+    throw new Error('rollover_tab_never_committed');
   }
 
   // D-C5 (live 2026-09-19): ROLLOVER_AMBIGUOUS with no reconciliation
