@@ -15,6 +15,7 @@ const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8')
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
 const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
 const integration = await readFile(new URL('../src/me2/me2-integration-entry.mjs', import.meta.url), 'utf8');
+const uiHost = await readFile(new URL('../src/me2/me2-ui-host.mjs', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -69,6 +70,17 @@ test('ME2 page navigation controls presentation only through the trusted preload
   assert.match(main, /authority_effect:\s*false/);
 });
 
+
+test('packaged ME2 UI routing waits for bounded initial readiness', () => {
+  assert.match(uiHost, /export async function waitForMe2UiReady/);
+  assert.match(uiHost, /attempts = 60/);
+  assert.match(uiHost, /intervalMs = 250/);
+  assert.match(uiHost, /const ready = await waitForMe2UiReady\(\)/);
+  assert.match(uiHost, /event: 'UI_HEALTHY', readiness_attempt: ready\.attempt/);
+  assert.match(uiHost, /event: 'UI_INITIAL_READINESS_FAILED'/);
+  assert.match(uiHost, /routing_authorized: \(childOwned && state === 'HEALTHY'\) \|\| externalAdoptAuthorized/);
+  assert.match(uiHost, /initial_readiness_confirmed: state === 'HEALTHY' \|\| externalAdoptAuthorized/);
+});
 
 test('concurrent primary-window startup joins the same ME2 readiness barrier', () => {
   const inflight = integration.indexOf('if (startPromise) return startPromise;');
