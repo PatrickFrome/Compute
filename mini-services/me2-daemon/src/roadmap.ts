@@ -37,14 +37,15 @@ export const ROADMAP: RoadmapItem[] = [
     goal: "Закрыть P0: deterministic composer resolver, устранить supervisor_composer_not_unique и residual maintenance starvation.",
     exit_gate: "cycle_seq монотонно растёт; wake→effect→readback; нет maintenance timeout; restart не ломает цикл.",
     status: "IN_PROGRESS",
-    evidence: "LIVE-ДИАГНОЗ ЗАВЕРШЁН (2026-09-26, через command fastlane): runtime .36089462649.1 = release head cf747798 (посылка R80-аудита «старый код» ОПРОВЕРГНУТА). Полная причинная цепочка: capped conversation → отравленный account-draft 28.7k chars (растёт от каждой попытки) + blank-zombie tabs (navigation deadline) + atomic-save race. Фиксы: PR #981 (root-draft canary, blank-tab commit proof + close-by-proof, unique-tmp writeJson; 3 новых теста + 39 смежных зелёные). Операторское действие: однократная ручная очистка драфта на chat.z.ai. Exit-gate остаётся открытым до cycle_seq роста после очистки + self-update на PR #981.",
+    evidence: "LIVE-ДИАГНОЗ ЗАВЕРШЁН (2026-09-26, через command fastlane): runtime .36089462649.1 = release head cf747798 (посылка R80-аудита «старый код» ОПРОВЕРГНУТА). Полная причинная цепочка: capped conversation → отравленный account-draft 28.7k chars (растёт от каждой попытки) + blank-zombie tabs (navigation deadline) + atomic-save race. Фиксы: PR #981 (root-draft canary, blank-tab commit proof + close-by-proof, unique-tmp writeJson; 3 новых теста + 39 смежных зелёные). MERGED: PR #981 влит в release (head e7fccd08, CI 8/8 SUCCESS включая Self Update E2E) — verified-dev-release rail опубликовал новый манифест; установленный Browser подхватит self-update в пределах hint_retry 5 мин. Операторское действие остаётся: однократная ручная очистка драфта на chat.z.ai (Ctrl+A+Delete в new-chat композере). Exit-gate закроется live readback: cycle_seq растёт + ROOT_DRAFT_OVERSIZED вместо TYPE_EFFECT_AMBIGUOUS в rollover_reason (если драфт ещё не очищен).",
   },
   {
     round: "R83",
     title: "EDGE CONVERGENCE",
     goal: "Repo == deployed backend: квалифицировать v14 canary, Postgres NOTIFY, result receipt, emergency routes, controlled promotion.",
     exit_gate: "production Edge digest/source binding соответствует candidate; signed E2E + rollback PASS.",
-    status: "PENDING",
+    status: "IN_PROGRESS",
+    evidence: "LIVE-КВАЛИФИКАЦИЯ (2026-09-26, CF API read-only): 3 workers @ metaengine-d9186d31.workers.dev. ФАЙНДИНГ: 2/2 registry workers (fabric-worker-h205f21r4 v15 dispatch gateway; h205f22-aop1 v64 операторный DO + SUPABASE_SERVICE_ROLE_KEY + GitHub writes) БЕЗ source-of-truth в репо (маркеры отсутствуют в main/release 4471/donor 1627). Живые скрипты сняты в evidence (data/edge/ + EDGE_SNAPSHOT). Промоушн заблокирован до импорта source + ротации CF-токена.",
   },
   {
     round: "R84",
@@ -159,8 +160,8 @@ export const RECOVERY_STATUS = {
     { item: "credentials rotation (P0 security)", reason: "raw credentials в chat export; ротация — только у оператора" },
   ],
   pending_next: [
-    "R82-разблок: оператор очищает account-draft на chat.z.ai вручную (Ctrl+A+Delete в new-chat композере) → rollover retry loop сходится сам; PR #981 мержится → self-update подхватывает → live readback cycle_seq роста",
-    "R83: квалификация v14 Edge canary (после R82 proof) — production v13 всё ещё pinned к d8b239e7",
+    "R82-verify: live readback self-update (runtime версия сменится с 0.7.0-dev.36089462649.1 на новый digest; cycle_seq рост после очистки драфта оператором; ROOT_DRAFT_OVERSIZED в rollover_reason пока драфт не очищен)",
+    "R83-импорт: вернуть source обоих production workers (fabric + aop1) в canonical репо из снапшотов data/edge/ → затем только возможен controlled promotion",
     "полный donor bus (57 действий): реализация вместе с Browser control plane (R84–R86)",
     "auto-mirror событий в me2_event_mirror_h205f22 (после ревью оператором anchor-записи)",
   ],

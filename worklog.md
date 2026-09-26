@@ -145,3 +145,35 @@ Work Log:
 Stage Summary:
 - Source-invariant тесты — часть контракта репо: рефактор обязан сохранять текстовые порядки, которые они проверяют; правится исходник, не тест.
 - PR #981 head = dbe41d60; работа раунда завершена: диагноз → фиксы → тесты → CI-реакция в одном цикле.
+
+---
+Task ID: R83-EDGE-QUALIFICATION-AND-R82-MERGE-20260926
+Agent: Z.ai Code (main agent, cron round)
+Task: QA консоли + R83 Edge convergence (Cloudflare API) + merge PR #981 после терминального CI
+
+Work Log:
+- Аудит входа: daemon 0.60.0-r82 green, CI PR #981 ещё не терминален. QA через agent-browser: все карточки рендерятся, JS-консоль чистая.
+- **R82 ЗАКРЫТ MERGE'М**: CI на dbe41d60 завершился 8/8 SUCCESS (ME2 Unified Gate, Shell V1, Critical Audit, Windows Installed Chat Qualification, Final Runtime Activation, Autonomous Soak, Package Smoke, Self Update E2E — включая ранее падавший). PR #981 влит в release/self-update-ambiguity-live-v2 (merge commit e7fccd08, parents cf747798+dbe41d60). Release-CI стартовал: 8 workflows, включая Fast Verified Dev Release (self-update manifest rail — установленный Browser опрашивает hint каждые 5 мин).
+- **R83: Edge convergence — live-квалификация через Cloudflare API** (токен scoped: verify-эндпоинт 401, но workers API жив):
+  - Инвентарь: 3 workers @ metaengine-d9186d31.workers.dev — enginetest (v2, 275b, probe-остаток), metaengine-fabric-worker-h205f21r4 (v15, 16.9KiB, 7 модулей: dispatch gateway с DISPATCH_QUEUE + FABRIC_WORKFLOW + AI; Supabase worker-gateway RPC PULL/HEARTBEAT/FAIL/PUBLISH), metaengine-h205f22-aop1 (v64, 95KiB: операторный authority — DurableObject AOP_SUPERVISOR + workflow + queue + SUPABASE_SERVICE_ROLE_KEY + CF_AI_TOKEN + GitHub writeFile путь).
+  - ГЛАВНЫЙ ФАЙНДИНГ R83: **2/2 registry workers не имеют source-of-truth в canonical репо** — маркеры (pullDispatch/WORKER_CAPABILITY; h205f22_aop1_lease_run_v1/ALLOWED_RPC) отсутствуют в main (default), release (4471 файлов) и donor me2-os (1627 файлов). R80-аудит называл это «drift» — реальность сильнее: полный источник отсутствует; production edge наблюдаем только через живой контент.
+  - Контракты digest: обнаружено и побеждено — API рандомит multipart boundary И порядок модулей на каждый вызов; нормализация = parse→sort by name→digest; стабильность доказана 3 последовательными fetch (fabric 9c55419e, aop1 29b36254, enginetest 5f1bddfd).
+  - Evidence-восстановление: снапшоты живых скриптов в data/edge/ (fabric 16.9KiB, aop1 95KiB) + hash-chained события EDGE_SNAPSHOT (seq 205-206).
+  - Вердикты source-binding: NO_SOURCE_IN_REPO для обоих registry workers (после исправления таксономии: слабые path-кандидаты — чужие wrangler.jsonc/aop1-миграции — не считаются source; маркеры решают).
+  - Promotion blockers зафиксированы: (1) нет source в репо → source-built promotion невозможен до импорта; (2) enginetest — unclassified остаток; (3) CF-токен из chat export требует ротации до промоушна.
+- Песочница: новый модуль daemon src/edge.ts (read-only CF client: inventory/versions/settings/live-content/normalized digest/source-binding/snapshot; TTL 60s) + маршрут GET /edge (+?fresh=1&snapshot=1) + действие edge.status (22 действия); roadmap.ts: R82 → MERGED-evidence, R83 → IN_PROGRESS с live-файндингами; VERSION 0.61.0-r83.
+- Консоль: карточка «R83 · Edge convergence · Cloudflare live» (чипы NO SRC, worker-карточки с DO/queue/workflow бейджами, versions/live digest/size/source-in-repo статы, находки + блокеры промоушна, кнопка-камера live-снапшота + fresh); poller 120s.
+- QA-фиксы в ходе раунда: (1) bug durable_object shorthand → 500 на /edge (исправлено); (2) React duplicate-key «read-only-lineage-audit/static-canary-equivalence» — старый key={c.name} падал на re-run чеках с одинаковыми именами; исправлено на `${c.name}-${i}`; подтверждено чистой браузер-сессией (0 ошибок); (3) H2-заголовки карточек усечены на 390px без тултипа → добавлен title во все Panel-заголовки (0 усечений без title).
+- Layout-верификация: overflowX=false @1920 и @390; 11 карточек; футер естественно проталкивается (8358px @390); lint 0/0; dev.log чист (GET / 200); скриншоты download/r83-{final-desktop,final-mobile}.png.
+
+Stage Summary:
+- Статус: R82 source-фиксы СТАЛИ release-кодом (merge e7fccd08); self-update rail опубликован — установленный runtime обновится в пределах ~5 мин после терминального release-CI. R83 переведён из «дождёмся R82» в live-квалифицированный: инвентарь, контракты digest, evidence-снапшоты, вердикты и блокеры зафиксированы.
+- Парадигма R83: production edge — НЕ «отстающая версия репо», а «код вне репо». Следующий шаг — не promotion, а импорт source (снапшоты уже в evidence) в canonical репо под ревью оператора.
+- Exit-gate R82 (cycle_seq рост) остаётся открытым до: (а) завершения release-CI → self-update → смена версии runtime с 0.7.0-dev.36089462649.1; (б) ручной очистки драфта оператором (единственное оставшееся операторское действие, 10 секунд).
+- UX-урок №: (R83-1) CF scripts API рандомит boundary И порядок модулей — любой digest-контракт обязан нормализовать оба; (R83-2) консольный буфер agent-browser накапливает историю через сессии — вердикт об ошибках требует чистой сессии или in-page хука; (R83-3) список CI-чеков может содержать одинаковые имена (re-runs) — ключи должны быть name+index.
+
+Backlog следующего раунда (приоритеты):
+1. Live readback R82: монитор cycle_seq/версии runtime после self-update (release-CI терминален ~15-20 мин; проверять /r82 + монитор — ожидание: версия сменится, rollover_reason станет ROOT_DRAFT_OVERSIZED пока драфт не очищен; после очистки оператором — cycle_seq рост).
+2. R83-импорт: конвертировать снапшоты data/edge/ в source-дерево в canonical репо (ветка work/r83-edge-source-import-v1) — fabric worker разборчив на модули (7 файлов), aop1 bundle требует разборки; под ревью оператора.
+3. Mirror: operator anchor-запись → auto-mirror событий daemon (EDGE_SNAPSHOT уже в локальном chain).
+4. Мелочи консоли: keyboard-навигация фильтра событий; график draft size из history сэмплов.

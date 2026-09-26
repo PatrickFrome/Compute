@@ -14,6 +14,7 @@ import { monitorHistory } from "./monitor";
 import { donorRegistry } from "./donor-registry";
 import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
+import { edgeStatus } from "./edge";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -45,6 +46,7 @@ export const ACTIONS: ActionDef[] = [
   { name: "donor.registry", family: "recovery", description: "Recovered donor 57-action manifest (sandbox/me2-os @ 56ba1b87) + local reconciliation" },
   { name: "convergence.status", family: "controlplane", description: "R81 convergence branch live status from GitHub (PR #968, head, CI rollup)" },
   { name: "r82.diagnosis", family: "controlplane", description: "R82 live supervisor diagnosis via command fastlane (READ-ONLY probes: attempt tab, draft canary, PR #981 CI)" },
+  { name: "edge.status", family: "controlplane", description: "R83 Cloudflare Edge qualification (read-only): workers, versions, live digests, source-binding verdicts" },
 ];
 
 export async function dispatch(action: string, args: Record<string, unknown>): Promise<unknown> {
@@ -110,6 +112,8 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return convergenceStatus(args.fresh === true);
     case "r82.diagnosis":
       return r82Diagnosis(args.fresh === true);
+    case "edge.status":
+      return edgeStatus(args.fresh === true, args.snapshot === true);
     default:
       throw new OpError("action_not_implemented", `${action} registered but not implemented`, 500);
   }

@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
-  Activity, AlertTriangle, Boxes, ChevronDown, Database, Download, GitBranch, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, Boxes, Camera, ChevronDown, Cloud, Database, Download, GitBranch, GitPullRequest, HeartPulse,
   ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -135,12 +135,34 @@ interface R82Diag {
   operator_action: string
   fix: { pr: { number: number; url: string; state: string; head_sha: string; ci: { success: number; failed: number; cancelled: number; pending: number; total: number } } | null; branch: string }
 }
+interface EdgeWorker {
+  id: string
+  role: string
+  modified_on: string | null
+  versions_total: number | null
+  latest_version: { id: string; number: number } | null
+  live_sha256: string | null
+  live_bytes: number | null
+  bindings: string[]
+  secret_bindings: string[]
+  durable_object: string | null
+  queue: string | null
+  workflow: boolean
+  source: { verdict: 'CONVERGED' | 'DRIFT' | 'NO_SOURCE_IN_REPO'; release_candidates: string[]; markers_checked: string[]; note: string }
+}
+interface EdgeStatus {
+  fetched_at: string
+  subdomain: string | null
+  workers: EdgeWorker[]
+  findings: string[]
+  promotion_blockers: string[]
+}
 
 // ---------------------------------------------------------- gap matrix ----
 const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
   { pri: 'P0', title: 'Supervisor useful cycle', status: 'ДИАГНОЗ ЗАВЕРШЁН: отравленный account-draft 28.7k + zombie tabs; фикс PR #981; ждёт ручной очистки драфта оператором', live: 'keepalive' },
   { pri: 'P0', title: 'DevOS maintenance liveness', status: 'idle-gate fix в source; live timeout сохраняется до installer' },
-  { pri: 'P0', title: 'Edge convergence', status: 'production v13 ≠ release source cf747… (v14 canary активен, pinned ef04d60…)' },
+  { pri: 'P0', title: 'Edge convergence', status: 'R83-квалификация ЗАВЕРШЕНА (live): 2/2 registry workers БЕЗ source в репо (только живой контент через CF API); снапшоты сняты; промоушн заблокирован до импорта source' },
   { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
   { pri: 'P0', title: 'Full installer', status: 'R85 in-flight: standalone daemon payload + version unify (18 commits, CI re-qualifying @ 2c28aa85)' },
   { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION — блокировано ТЕМ ЖЕ отравленным драфтом (общая причина с supervisor rollover)' },
@@ -193,7 +215,7 @@ function Panel({
         <div className="flex items-center gap-1 pr-2">
           <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-zinc-800/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 rounded-t-xl">
             <span className="text-teal-400">{icon}</span>
-            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold uppercase tracking-wider text-zinc-200">{title}</h2>
+            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold uppercase tracking-wider text-zinc-200" title={title}>{title}</h2>
             {chip}
             <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${open ? '' : '-rotate-90'}`} />
           </CollapsibleTrigger>
@@ -267,6 +289,9 @@ export default function MissionControl() {
   const [r82, setR82] = useState<R82Diag | null>(null)
   const [r82Err, setR82Err] = useState<string | null>(null)
   const [r82Loading, setR82Loading] = useState(false)
+  const [edge, setEdge] = useState<EdgeStatus | null>(null)
+  const [edgeErr, setEdgeErr] = useState<string | null>(null)
+  const [edgeLoading, setEdgeLoading] = useState(false)
   const [donorReg, setDonorReg] = useState<DonorRegistry | null>(null)
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -313,8 +338,15 @@ export default function MissionControl() {
     finally { setR82Loading(false) }
   }, [])
 
+  const loadEdge = useCallback(async (fresh = false, snapshot = false) => {
+    setEdgeLoading(true)
+    try { setEdge(await jfetch<EdgeStatus>(`/edge${fresh ? '?fresh=1' : ''}${snapshot ? (fresh ? '&' : '?') + 'snapshot=1' : ''}`)); setEdgeErr(null) }
+    catch (e) { setEdgeErr((e as Error).message) }
+    finally { setEdgeLoading(false) }
+  }, [])
+
   useEffect(() => {
-    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82()
+    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
@@ -325,10 +357,11 @@ export default function MissionControl() {
     const e = setInterval(() => { jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {}) }, 15000)
     const f = setInterval(() => { loadConvergence(false) }, 30000)
     const g = setInterval(() => { loadR82(false) }, 60000)
+    const h = setInterval(() => { loadEdge(false) }, 120000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g) }
-  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge])
 
   // ---- REST events poll (fallback) + WS live stream (primary)
   useEffect(() => {
@@ -640,12 +673,12 @@ export default function MissionControl() {
                 {conv.api.rate_remaining != null && <Chip tone="neutral">rate {conv.api.rate_remaining}</Chip>}
               </div>
               <div className={`space-y-1 ${scrollCls} pr-1`}>
-                {conv.checks.items.map((c) => {
+                {conv.checks.items.map((c, i) => {
                   const tone: 'ok' | 'warn' | 'p0' | 'neutral' = c.status !== 'completed'
                     ? 'warn'
                     : c.conclusion === 'success' ? 'ok' : (c.conclusion === 'failure' || c.conclusion === 'timed_out' || c.conclusion === 'action_required') ? 'p0' : 'neutral'
                   return (
-                    <div key={c.name} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 hover:border-zinc-700">
+                    <div key={`${c.name}-${i}`} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 hover:border-zinc-700">
                       <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={c.name}>{c.name}</span>
                       <Chip tone={tone}>{c.status === 'completed' ? (c.conclusion ?? '—') : c.status}</Chip>
                     </div>
@@ -733,6 +766,95 @@ export default function MissionControl() {
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> live-проба tab'а супервизора…</div>
+          )}
+        </Panel>
+
+        {/* -------------------------------------------- R83 EDGE CONVERGENCE */}
+        <Panel
+          icon={<Cloud className="h-4 w-4" />}
+          title="R83 · Edge convergence · Cloudflare live"
+          chip={
+            edgeErr ? <Chip tone="p0">ERR</Chip>
+              : edge ? (
+                <Chip tone={edge.workers.some((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000) ? 'p0' : 'ok'}>
+                  {edge.workers.filter((w) => w.source.verdict === 'NO_SOURCE_IN_REPO' && w.live_bytes && w.live_bytes > 1000).length}/2 NO SOURCE
+                </Chip>
+              ) : <Chip tone="neutral">…</Chip>
+          }
+          actions={
+            <div className="flex items-center">
+              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true, true)} aria-label="Снять live-снапшот воркеров" title="Свежая квалификация + снапшот живых скриптов в evidence">
+                <Camera className={`h-4 w-4 ${edgeLoading ? 'animate-pulse' : ''}`} />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={edgeLoading} onClick={() => loadEdge(true)} aria-label="Свежий Edge-статус">
+                <RefreshCw className={`h-4 w-4 ${edgeLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+          }
+        >
+          {edgeErr && !edge ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">Edge: {edgeErr}</div>
+          ) : edge ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-1.5">
+                <Chip tone="info">{edge.subdomain ?? '—'}.workers.dev</Chip>
+                <Chip tone="neutral">{edge.workers.length} workers</Chip>
+                {edge.workers.map((w) => (
+                  <Chip key={w.id} tone={w.source.verdict === 'NO_SOURCE_IN_REPO' ? (w.live_bytes && w.live_bytes > 1000 ? 'p0' : 'neutral') : w.source.verdict === 'DRIFT' ? 'warn' : 'ok'}>
+                    {w.id.replace('metaengine-', '').replace('metaengine-fabric-worker-h205f21r4', 'fabric')} · {w.source.verdict === 'NO_SOURCE_IN_REPO' ? 'NO SRC' : w.source.verdict}
+                  </Chip>
+                ))}
+              </div>
+              <div className={`space-y-2 ${scrollCls} pr-1`}>
+                {edge.workers.map((w) => (
+                  <div key={w.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="min-w-0 break-all font-mono text-xs text-teal-300">{w.id}</span>
+                      <span className="ml-auto flex items-center gap-1.5">
+                        {w.durable_object && <Chip tone="warn">DO {w.durable_object}</Chip>}
+                        {w.queue && <Chip tone="neutral">queue {w.queue}</Chip>}
+                        {w.workflow && <Chip tone="neutral">workflow</Chip>}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-snug text-zinc-500">{w.role}</p>
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <Stat label="versions" value={w.versions_total != null ? `${w.versions_total} (latest v${w.latest_version?.number ?? '—'})` : '—'} />
+                      <Stat label="live digest" value={w.live_sha256 ?? '—'} tone="text-cyan-300" />
+                      <Stat label="live size" value={w.live_bytes != null ? `${(w.live_bytes / 1024).toFixed(1)} KiB` : '—'} />
+                      <Stat label="source in repo" value={w.source.verdict} tone={w.source.verdict === 'NO_SOURCE_IN_REPO' ? 'text-rose-400' : w.source.verdict === 'DRIFT' ? 'text-amber-400' : 'text-emerald-400'} />
+                    </div>
+                    <p className="mt-2 text-[11px] leading-snug text-zinc-500">
+                      <span className="text-zinc-400">binding:</span> {w.source.note}
+                      {w.secret_bindings.length > 0 && (
+                        <>
+                          <br />
+                          <span className="text-zinc-400">secrets (имена, значения не возвращаются API):</span> {w.secret_bindings.join(', ')}
+                        </>
+                      )}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className={`space-y-1 ${scrollCls} pr-1`}>
+                <div className="px-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Находки квалификации</div>
+                {edge.findings.map((f) => (
+                  <div key={f} className="rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 text-[11px] leading-snug text-zinc-400 hover:border-zinc-700">
+                    {f}
+                  </div>
+                ))}
+                <div className="px-0.5 pt-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Блокеры промоушна</div>
+                {edge.promotion_blockers.map((b) => (
+                  <div key={b} className="rounded-md border border-rose-500/20 bg-rose-500/5 px-2.5 py-1.5 text-[11px] leading-snug text-rose-200/90">
+                    {b}
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Read-only CF-клиент демона (токен только серверно в /home/z/.a2/cloudflare.env). Кнопка-камера снимает живые скрипты в evidence (data/edge/ + hash-chained EDGE_SNAPSHOT события). Промоушн v14 → production требует source-of-truth в репо — сейчас его нет ни в main, ни в release, ни в donor.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> квалификация Cloudflare Edge…</div>
           )}
         </Panel>
 
