@@ -496,9 +496,10 @@ test('R85 contextual drawer is a read-only presentation plane with native geomet
   assert.match(me2ContextDrawer, /data-testid="context-drawer"/);
   assert.match(me2ContextDrawer, /data-drawer-height=\{height\}/);
   assert.match(me2ContextDrawer, /style=\{\{ height: \`\$\{height\}px\` \}\}/);
-  assert.match(me2ContextDrawer, /Drawer 160px/);
-  assert.match(me2ContextDrawer, /Drawer 200px/);
-  assert.match(me2ContextDrawer, /Drawer 300px/);
+  assert.match(me2ContextDrawer, /\[160, "S"\]/);
+  assert.match(me2ContextDrawer, /\[200, "M"\]/);
+  assert.match(me2ContextDrawer, /\[300, "L"\]/);
+  assert.match(me2ContextDrawer, /title=\{\`Drawer \$\{value\}px\`\}/);
   assert.match(store, /setContextDrawerHeight/);
   assert.match(store, /drawerHeight: wantedHeight/);
   assert.doesNotMatch(me2ContextDrawer, /sendCommand\(|me2Fetch\(|agentChatOp\(/);
