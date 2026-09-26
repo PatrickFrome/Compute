@@ -9252,3 +9252,20 @@ Work Log:
 
 Stage Summary:
 - R80 публикация остаётся стабильной; задача 413338 в регулярном тике не требует действий.
+
+---
+Task ID: SEC-SEALED-3
+Agent: Z.ai Code (main session, прямое распоряжение оператора «сохрани секреты прямо в скрипт… переживали любые ресеты»)
+Task: 4-й канал выживания секретов — sealed-скрипт с литералами внутри проекта + авто-аудит; full-audit v2.0 (AUD-2)
+
+Work Log:
+- Создан scripts/phoenix/phoenix-secrets-restore.sealed.sh (SEC-SEALED-3, ~9.7KB, chmod 600): ВСЕ живые литералы (GitHub PAT, SB_URL, CF×4, DATABASE_URL) ЗАШИТЫ прямо в скрипт по распоряжению оператора. Режимы: full/restore/validate/audit/mirrors. gitguard: самопроверка git-check-ignore + git rm --cached при трекинге + chmod 600. ENVF-merge: дописывает ТОЛЬКО отсутствующие ключи, существующие и любые SUPABASE_SERVICE_ROLE_JWT-строки не трогает.
+- gitignore-щит: scripts/phoenix/*.sealed.* → файл untracked, git status его не видит (проверено). Прогон full: restore=keep×3, github_api=200, cf_account=200, cf_ai=success:true, JWT=LOST — pending operator, mirrors 3/3 (phoenix-sealed-local.sh в PolarFS + /tmp/context-vault-mirror + /home/sync ossfs).
+- Оркестратор scripts/phoenix/phoenix-secrets-restore.sh → v1.1: sealed-local — первый кандидат в SEALED_CANDIDATES; auto_audit() — после OK/RESTORED АВТОМАТИЧЕСКИ запускает полный аудит (директива «скрипт автоматически запускал полный аудит»).
+- full-audit.sh → v2.0: +§7 GitHub API (repo HTTP=200, private=false, default_branch=main, rate_limit 5000), +§8 Cloudflare/R2 REST (account 200; buckets list — скоуп-токен без R2-скоупа, cfut_ проверен — тоже false; SIGv4 BLOCKED — secret key не передан), +§9 vault-капсула (11 снапшотов, 3 инцидента, CONTEXT/CONTEXT-CURRENT/PHOENIX-PROTOCOL sha12), +§10 runtime (prisma 2 модели, mini-services a2-edge-local+me2-daemon, bun 1.3.14, dev.log 0 errors), §6 — инвентарь 4 каналов секретов.
+- AUD-2 прогон: score=73% (DONE=15 PARTIAL=1 BLOCKED=5), отчёт audit/audit-20260926-175141.md. До 100%: перевыпуск Supabase service JWT (корневой блокер §3.2/§4) + R2 secret access key (опционально).
+- Зафикс: local main ≡ origin/sandbox/me2-os (behind/ahead 0/0); worklog 1760736B / 284 секции, guard-эталон совпадал до этого append'а.
+
+Stage Summary:
+- Секреты переживают ЛЮБОЙ reset через 4 независимых канала: (1) sealed-local в проекте (литералы, git-ignored), (2) PolarFS /tmp/my-project/phoenix-sealed + 2 зеркала, (3) ossfs /home/sync, (4) cron 416759 payload вне песочницы. Одна команда восстановления: bash scripts/phoenix/phoenix-secrets-restore.sealed.sh full — restore+validate+mirrors+auto-audit.
+- Литеры по-прежнему НЕ попадают в git (repo анонимно читаем — GitHub отозвал бы PAT); leak-screen перед push.
