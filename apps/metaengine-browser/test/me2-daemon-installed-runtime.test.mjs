@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { resolveMe2DaemonLaunch, waitForMe2DaemonReady } from '../src/me2/me2-daemon-host.mjs';
-import { resolveMe2UiLaunch } from '../src/me2/me2-ui-host.mjs';
+import { decideMe2UiInitialAction, me2UiExternalAdoptionAllowed, resolveMe2UiLaunch } from '../src/me2/me2-ui-host.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
@@ -70,6 +70,15 @@ test('R85 packaged ME2 UI prefers installed resources and embedded Electron node
   assert.equal(missingPackagedLaunch, null, 'packaged runtime must not escape to a source-tree UI');
 });
 
+
+test('R85 Browser owns packaged ME2 UI lifecycle and never adopts a healthy port by default', () => {
+  assert.equal(me2UiExternalAdoptionAllowed({ env: {} }), false);
+  assert.equal(me2UiExternalAdoptionAllowed({ env: { ME2_UI_ALLOW_EXTERNAL_ADOPT: '1' } }), true);
+  assert.equal(decideMe2UiInitialAction({ healthOk: false, allowExternalAdopt: false }), 'SPAWN');
+  assert.equal(decideMe2UiInitialAction({ healthOk: true, allowExternalAdopt: false }), 'WAIT_FOR_PORT_RELEASE');
+  assert.equal(decideMe2UiInitialAction({ healthOk: true, allowExternalAdopt: true }), 'ADOPT');
+});
+
 test('source checkout remains an explicit Bun fallback only', () => {
   const cwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
   const sourceDir = path.join(cwd, '..', 'me2-daemon');
@@ -105,7 +114,12 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
 
   const integration = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-integration-entry.mjs'), 'utf8');
   assert.match(integration, /startMe2DaemonHost\(\{ dataDir:/);
+  assert.match(integration, /stopMe2UiHost\(\{ killChild: true \}\)/);
   assert.match(integration, /stopMe2DaemonHost\(\{ killChild: true \}\)/);
+  const uiHost = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-ui-host.mjs'), 'utf8');
+  assert.match(uiHost, /event: 'UI_UNOWNED_PORT'/);
+  assert.match(uiHost, /state = 'WAITING_FOR_PORT_RELEASE'/);
+  assert.match(uiHost, /ME2_UI_ALLOW_EXTERNAL_ADOPT/);
   const finalEntry = await fs.readFile(path.join(appRoot, 'src', 'final-runtime-entry.mjs'), 'utf8');
   assert.match(
     finalEntry,
