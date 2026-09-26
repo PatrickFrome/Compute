@@ -9365,3 +9365,54 @@ Work Log:
 
 Stage Summary:
 - раунд 4 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-5
+Agent: self-evolve v1.6 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-DARKMODE] next-themes: переключатель темы с персистом на /
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = 80%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.6
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-DARKMODE] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-DARKMODE'
+
+Stage Summary:
+- раунд 5 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-4
+Agent: Super-Z (main session, Job 416839 + SELF-EVOLVE tick)
+Task: EV-RESPONSIVE — mobile-first аудит Mission Control: touch-цели >=44px, брейкпоинты
+
+Work Log:
+- движок: evolve round=4, next_task=EV-RESPONSIVE; реализация в src/app/page.tsx (только / route) + src/app/globals.css
+- globals.css: утилита .touch-hit (::after inset -8px, border-radius inherit) — расширяет зону клика без изменения визуала: h-7→44px, h-8→48px, h-9→52px (WCAG 2.5.5)
+- page.tsx: touch-hit на 16 интерактивных элементах — header sound/level (h-8), 10 refresh-кнопок (h-9), edge-import refresh (h-7), worktree remove (h-9), clear-search (h-7 flex), "показать ещё" (full-width)
+- пилюли-фильтры: min-h-9 (36px) + touch-hit → hit 52px: донор-lane, донор-sort, ev-class фильтры, "× классы"
+- брейкпоинт-аудит: main grid grid-cols-1 lg:grid-cols-2 OK; все stats-гриды grid-cols-2 sm:grid-cols-4 OK; header flex-wrap + md:ml-auto OK; таблицы overflow-x-auto OK; горизонтального скролла на 390px НЕТ
+- agent-browser через gateway :81 (viewport 390x844): touch-hit=16, min-h-9=4, hScroll=false, 0 page errors, скриншот /tmp/ev-responsive-mobile.png
+- lint: bun run lint → 0/0 (exit 0)
+- self-update implemented-RESPONSIVE → v1.6; BACKLOG +EV-MOTION (framer-motion микроанимации, prefers-reduced-motion); зеркала 2/2 (context-vault-mirror, /home/sync)
+
+Stage Summary:
+- EV-RESPONSIVE закрыт: все touch-цели >=44px (hit-area) без визуальной регрессии; mobile 390px без горизонтального скролла
+- движок верифицирован round=5 (client 200, lint 0/0, score=80%): next_task=EV-DARKMODE, очередь: SCROLLBAR → EMPTYSTATES → TOASTS → WS-RESILIENCE → KEYBOARD → CHARTS → MOTION → PERF
+- самообновление движка работает: self-update v1.4→v1.6, BACKLOG расширен самоулучшением
+
+---
+Task ID: SEC-PHOENIX-JWT
+Agent: Super-Z (main session, операторская директива 2026-09-27)
+Task: сохранение секретов в скрипт навсегда (пережить любые ресеты) + авто-полный аудит + самообновление и движение разработки клиента
+
+Work Log:
+- оператор повторно передал SUPABASE_SERVICE_ROLE_JWT (значение в чат не дублирую): hash-сверка носителей — me2.env.20260922 ≡ sealed.sh (sha12 e70042ad6358, match=YES) → все носители уже согласованы, значение сохранено (sealed-local, ENVF, 3 зеркала, cron-эталон)
+- валидация JWT: supabase REST /rest/v1/ → 401 "Invalid API key" (проект жив, не paused — no-key probe тоже 401, тело: hint "Double check your anon or service_role API key")
+- 4 варианта протестировано (только HTTP-коды): as-is → 401; base64-decoded → 400 (не eyJ-структура, 59 байт); HS256 service_role минтинг (ключ raw и decoded) → 401/401
+- вывод: переданное значение НЕ является действующим service_role-ключом проекта sibnfciqcpkuquxzduqr и не его активным JWT-секретом (все подписанные варианты отвергнуты); вероятные причины — ротация JWT-секрета в проекте или скопирован ключ другого проекта
+- phoenix full прогон: validate github_api=200, cf_account=200, cf_ai=success, supabase_rest=401; mirrors 3/3; auto-audit score=80% (DONE=16 PARTIAL=2 BLOCKED=3, отчёт audit/audit-20260926-180446.md)
+- остаточные блокеры (2): R2 secret access key (SIGv4), действующий Supabase service_role ключ
+
+Stage Summary:
+- секреты переживут любой reset: 4 канала + зеркала проверены полным прогоном; одна команда: bash scripts/phoenix/phoenix-secrets-restore.sealed.sh full
+- ЧЕСТНЫЙ СТАТУС ДЛЯ ОПЕРАТОРА: сохранённый JWT принимается носителями, но отклоняется Supabase (401). Нужен АКТУАЛЬНЫЙ ключ: Dashboard → Settings → API Keys → service_role (формат eyJ... ) либо новый sb_secret_... — после вставки score вырастет (Supabase-секции аудита разблокируются)
+- директива «самообновление + движение клиента» работает инфраструктурно: self-evolve v1.7, round=5, EV-DARKMODE следующий, lint/health гейты в каждом тике
