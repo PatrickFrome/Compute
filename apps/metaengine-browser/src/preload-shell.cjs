@@ -214,38 +214,66 @@ ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
   port.start();
 });
 
-contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
-  snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot').then(decorateSnapshot),
-  command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
-  // R84 primary ME2 shell presentation hint. This controls only which native
-  // Browser WebContentsView is composed into the ME2 page; it grants no task,
-  // scheduler, browser-command, update, or release authority.
-  setPrimaryPage: (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? '')),
-  presentationFocus: Object.freeze({
-    snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
-    selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
-    selectSurface: (sessionId, surfaceId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-surface', String(sessionId ?? ''), String(surfaceId ?? '')),
-    setLayout: (sessionId, layoutMode) => ipcRenderer.invoke('metaengine:shell:presentation-layout:set', String(sessionId ?? ''), String(layoutMode ?? '')),
-    clear: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:clear'),
-  }),
-  onSnapshot: (listener) => {
-    if (typeof listener !== 'function') return () => {};
-    snapshotListeners.add(listener);
-    return () => snapshotListeners.delete(listener);
-  },
-  onBrainDelta: (listener) => {
-    if (typeof listener !== 'function') return () => {};
-    brainDeltaListeners.add(listener);
-    return () => brainDeltaListeners.delete(listener);
-  },
-  brainStreamStatus: () => Object.freeze({
-    connected: brainPort != null,
-    stream_id: brainStreamId,
-    acknowledged_through_sequence: brainSequence,
-    long_lived_message_port: true,
-    full_snapshot_per_delta: false,
-    control_authority: false,
-    command_leasing: false,
+function isPrimaryMe2PresentationDocument(locationLike = globalThis.location) {
+  try {
+    if (!locationLike || locationLike.protocol !== 'http:' || locationLike.hostname !== '127.0.0.1') return false;
+    const configuredPort = typeof process === 'object' && process?.env?.ME2_UI_GATEWAY_PORT
+      ? String(process.env.ME2_UI_GATEWAY_PORT)
+      : '8137';
+    return String(locationLike.port || '80') === configuredPort;
+  } catch {
+    return false;
+  }
+}
+
+const setPrimaryPage = (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? ''));
+
+if (isPrimaryMe2PresentationDocument()) {
+  // R84 capability fence: the Browser-owned loopback ME2 renderer is a
+  // presentation surface, not the legacy trusted Browser control shell. Do not
+  // leak metaengineShell.command, snapshot, DevOS focus or the cognitive port
+  // API into the ME2 origin. The only bridge it needs is page→native-surface
+  // composition, which is validated again in main.mjs.
+  contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
+    setPrimaryPage,
+    presentation_only: true,
+    browser_command_authority: false,
+    scheduler_authority: false,
+    update_authority: false,
+    release_authority: false,
     authority_effect: false,
-  }),
-}));
+  }));
+} else {
+  contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
+    snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot').then(decorateSnapshot),
+    command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
+    setPrimaryPage,
+    presentationFocus: Object.freeze({
+      snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
+      selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
+      selectSurface: (sessionId, surfaceId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-surface', String(sessionId ?? ''), String(surfaceId ?? '')),
+      setLayout: (sessionId, layoutMode) => ipcRenderer.invoke('metaengine:shell:presentation-layout:set', String(sessionId ?? '')),
+      clear: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:clear'),
+    }),
+    onSnapshot: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      snapshotListeners.add(listener);
+      return () => snapshotListeners.delete(listener);
+    },
+    onBrainDelta: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      brainDeltaListeners.add(listener);
+      return () => brainDeltaListeners.delete(listener);
+    },
+    brainStreamStatus: () => Object.freeze({
+      connected: brainPort != null,
+      stream_id: brainStreamId,
+      acknowledged_through_sequence: brainSequence,
+      long_lived_message_port: true,
+      full_snapshot_per_delta: false,
+      control_authority: false,
+      command_leasing: false,
+      authority_effect: false,
+    }),
+  }));
+}
