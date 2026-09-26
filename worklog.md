@@ -187,3 +187,4 @@ Work Log:
 
 Stage Summary:
 - Ориентация линии изменена: приоритет — не довыяснение старых веток, а R81–R90 convergence/release closure от exact release authority. Запись служит мостом для следующей сессии (локальный worklog после env-reset не содержал этого аудита).
+PAT ожидается, push-pending готов (ba623a59)
