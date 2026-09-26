@@ -4,11 +4,14 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/tab-registry.mjs'
       - 'apps/metaengine-browser/src/browser-webcontents-tab-index.mjs'
       - 'apps/metaengine-browser/src/browser-realtime-process-plane.mjs'
       - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
       - 'apps/metaengine-browser/src/me2/**'
       - 'apps/metaengine-browser/test/r84-desktop-canonical-identity.test.mjs'
+      - 'apps/metaengine-browser/test/tab-registry.test.mjs'
+      - 'apps/metaengine-browser/test/browser-realtime-process-plane.test.mjs'
       - 'apps/metaengine-browser/test/browser-webcontents-tab-index.test.mjs'
       - 'apps/metaengine-browser/test/browser-brain-runtime-binding-memory.test.mjs'
       - 'apps/metaengine-browser/test/browser-runtime-binding-generation-fence.test.mjs'
@@ -67,6 +70,8 @@ jobs:
         run: >-
           node --test
           test/r84-desktop-canonical-identity.test.mjs
+          test/tab-registry.test.mjs
+          test/browser-realtime-process-plane.test.mjs
           test/browser-webcontents-tab-index.test.mjs
           test/browser-brain-runtime-binding-memory.test.mjs
           test/browser-runtime-binding-generation-fence.test.mjs
