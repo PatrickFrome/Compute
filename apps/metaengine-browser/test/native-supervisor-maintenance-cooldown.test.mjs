@@ -35,9 +35,12 @@ test('maintenance completion creates a real DevOS idle turn instead of a same-pa
   );
   assert.match(
     coreSource,
-    /await this\.#waitForBaseMaintenanceIdle\(\);[\s\S]*this\.#idleWorkLastError\s*=\s*null;/,
-    'a successful maintenance barrier must clear historical idle-wait failure evidence',
+    /await this\.#observeWorkers\(\);[\s\S]*maintenance_in_flight === true[\s\S]*this\.#idleWorkLastError\s*=\s*null;[\s\S]*return;/,
+    'maintenance that races read-only observation must defer the DevOS turn without retaining a mutating-command fence',
   );
-  assert.match(coreSource, /const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;/,
-    'the bounded wait remains a race guard; R82 fixes scheduling rather than inflating the timeout');
+  assert.doesNotMatch(
+    coreSource,
+    /native_supervisor_idle_maintenance_wait_timeout|IDLE_MAINTENANCE_WAIT_MAX_MS|#waitForBaseMaintenanceIdle/,
+    'R82 must not reintroduce a polling timeout between maintenance and DevOS admission',
+  );
 });
