@@ -1,0 +1,80 @@
+name: R84 Desktop Convergence V1
+
+on:
+  pull_request:
+    paths:
+      - 'apps/metaengine-browser/src/main.mjs'
+      - 'apps/metaengine-browser/src/browser-webcontents-tab-index.mjs'
+      - 'apps/metaengine-browser/src/browser-realtime-process-plane.mjs'
+      - 'apps/metaengine-browser/src/native-supervisor-client.mjs'
+      - 'apps/metaengine-browser/src/me2/**'
+      - 'apps/metaengine-browser/test/r84-desktop-canonical-identity.test.mjs'
+      - 'apps/metaengine-browser/test/browser-webcontents-tab-index.test.mjs'
+      - 'apps/metaengine-browser/test/browser-brain-runtime-binding-memory.test.mjs'
+      - 'apps/metaengine-browser/test/browser-runtime-binding-generation-fence.test.mjs'
+      - 'apps/metaengine-browser/test/native-supervisor-exact-target.test.mjs'
+      - '.github/workflows/r84-desktop-convergence-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r84-desktop-convergence-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  canonical-desktop-identity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.EXACT_HEAD }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install Browser dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Parse R84 convergence sources
+        working-directory: apps/metaengine-browser
+        run: |
+          node --check src/main.mjs
+          node --check src/browser-realtime-process-plane.mjs
+          node --check src/native-supervisor-client.mjs
+          node --check src/me2/me2-fleet-tabs-host.mjs
+          node --check src/me2/me2-mission-control.mjs
+
+      - name: Prove canonical WebContents BrowserCell CDP identity convergence
+        working-directory: apps/metaengine-browser
+        run: >-
+          node --test
+          test/r84-desktop-canonical-identity.test.mjs
+          test/browser-webcontents-tab-index.test.mjs
+          test/browser-brain-runtime-binding-memory.test.mjs
+          test/browser-runtime-binding-generation-fence.test.mjs
+          test/native-supervisor-exact-target.test.mjs
+
+      - name: Prove no source drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXACT_HEAD"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/test)"
