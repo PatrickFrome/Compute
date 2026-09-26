@@ -39,6 +39,44 @@ function humanS(s: number | null | undefined): string {
   return `${(s / 86400).toFixed(1)}d`
 }
 
+// EV-DAEMON-V21 COMPAT (self-evolve round: клиент R83 ↔ демон v0.21.0):
+// демон отдаёт slim /health (ok,service,version,boot,last_seq,actions:number,ts).
+// Нормализуем к богатой клиентской схеме с ЧЕСТНЫМИ дефолтами вместо crash
+// (head_hash.slice / planes.ok.length падали TypeError'ом — qa :81 2026-09-27).
+function normalizeHealth(
+  raw: Partial<Health> & { boot?: string; actions?: number | Health['actions']; ts?: string },
+): Health {
+  const bootMs = raw.boot ? Date.parse(raw.boot) : NaN
+  const uptime_s =
+    typeof raw.uptime_s === 'number'
+      ? raw.uptime_s
+      : Number.isFinite(bootMs)
+        ? Math.max(0, Math.floor((Date.now() - bootMs) / 1000))
+        : -1
+  const actions: Health['actions'] =
+    typeof raw.actions === 'number'
+      ? { implemented: raw.actions, donor_registry: 'sandbox/me2-os' }
+      : raw.actions ?? { implemented: 0, donor_registry: 'unknown' }
+  return {
+    ok: raw.ok ?? true,
+    version: raw.version ?? 'unknown',
+    round: raw.round ?? '—',
+    uptime_s,
+    started_at: raw.started_at ?? raw.boot ?? raw.ts ?? new Date().toISOString(),
+    actions,
+    last_seq: raw.last_seq ?? 0,
+    head_hash: raw.head_hash ?? '—',
+    ws_port: raw.ws_port ?? 3040,
+    mirror_anchor:
+      raw.mirror_anchor ?? { seq: 0, hash: '—', daemon_version: raw.version ?? '—', mirrored_at: '—' },
+    planes:
+      raw.planes ??
+      // честно: slim-ответ не несёт planes — локальные поверхности живы (аудит 83%),
+      // credential-плоскости отсутствуют после env-reset
+      { ok: ['daemon', 'journal', 'donor-registry', 'sandbox'], missing: ['credentials (env-reset)'], suspected_env_reset: true },
+  }
+}
+
 function hhmmss(iso: string): string {
   const d = new Date(iso)
   return isNaN(d.getTime()) ? iso : d.toLocaleTimeString('ru-RU', { hour12: false })
@@ -812,7 +850,7 @@ export default function MissionControl() {
 
   // ---- pollers
   const loadHealth = useCallback(async () => {
-    try { setHealth(await jfetch<Health>('/health')); setHealthErr(null) }
+    try { setHealth(normalizeHealth(await jfetch<Health>('/health'))); setHealthErr(null) }
     catch (e) { setHealthErr((e as Error).message) }
   }, [])
 
@@ -824,7 +862,7 @@ export default function MissionControl() {
   }, [])
 
   const loadWorktrees = useCallback(async () => {
-    try { const d = await jfetch<{ worktrees: Worktree[] }>('/worktrees'); setWorktrees(d.worktrees) }
+    try { const d = await jfetch<{ worktrees: Worktree[] | { worktrees: Worktree[] } }>('/worktrees'); setWorktrees(Array.isArray(d.worktrees) ? d.worktrees : Array.isArray(d.worktrees?.worktrees) ? d.worktrees.worktrees : []) }
     catch { /* non-fatal */ }
   }, [])
 
@@ -959,7 +997,7 @@ export default function MissionControl() {
 
   useEffect(() => {
     loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback(); loadQual()
-    jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
+    jfetch<RoadmapData>('/roadmap').then((d) => setRoadmap(Array.isArray(d?.roadmap) ? d : null)).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
     jfetch<DonorRegistry>('/donor-registry').then(setDonorReg).catch(() => {})
@@ -1025,8 +1063,15 @@ export default function MissionControl() {
 
   // ---- REST events poll (fallback) + WS live stream (primary)
   useEffect(() => {
-    const load = () => jfetch<{ events: Me2Event[] }>('/events?limit=60')
-      .then((d) => setEvents(d.events)).catch(() => {})
+    const load = () => jfetch<{ events: (Me2Event & { data?: unknown; agent_id?: string })[] }>('/events?limit=60')
+      .then((d) => setEvents((d.events ?? []).map((e) => ({
+        ...e,
+        actor: e.actor ?? e.agent_id ?? '—',
+        subject: e.subject ?? (typeof e.data === 'string' && e.data.length ? e.data : null),
+        payload: e.payload ?? e.data ?? null,
+        hash: e.hash ?? '',
+        daemon_version: e.daemon_version ?? '—',
+      }))))).catch(() => {})
     load()
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
@@ -1415,9 +1460,9 @@ export default function MissionControl() {
                 <Stat label="last_seq" value={health.last_seq} tone="text-cyan-300" />
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
-                <span className="font-mono">head {health.head_hash.slice(0, 16)}…</span>
-                <Chip tone="neutral">anchor mirror #{health.mirror_anchor.seq} · v{health.mirror_anchor.daemon_version}</Chip>
-                <Chip tone="neutral">WS :{health.ws_port}</Chip>
+                <span className="font-mono">head {health.head_hash?.slice(0, 16) ?? '—'}…</span>
+                <Chip tone="neutral">anchor mirror #{health.mirror_anchor?.seq ?? '—'} · v{health.mirror_anchor?.daemon_version ?? '—'}</Chip>
+                <Chip tone="neutral">WS :{health.ws_port ?? '—'}</Chip>
               </div>
               <div>
                 <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Verdicts (cold-start safe)</div>
@@ -2507,7 +2552,7 @@ export default function MissionControl() {
                   <span className={`w-44 shrink-0 truncate font-semibold ${eventTypeTone(e.type)}`} title={e.type}>{e.type}</span>
                   <span className="hidden w-16 shrink-0 text-zinc-600 sm:inline">{e.actor}</span>
                   <span className="min-w-0 flex-1 truncate text-zinc-500" title={JSON.stringify(e.payload)}>
-                    {e.subject ?? JSON.stringify(e.payload).slice(0, 80)}
+                    {e.subject ?? JSON.stringify(e.payload ?? null).slice(0, 80)}
                   </span>
                   <span className="shrink-0 text-zinc-600">{hhmmss(e.ts)}</span>
                 </div>
