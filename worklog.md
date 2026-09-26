@@ -1721,3 +1721,24 @@ Stage Summary:
 - [cron 413338 2026-09-26T09:52+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
 - [cron 413338 2026-09-26T10:07+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
 - [cron 413338 2026-09-26T10:22+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
+
+---
+Task ID: R80-BRANCH-GRAPH-EXTERNAL-AUDIT
+Agent: Super Z (main agent, cron 413338 session)
+Task: Верифицировать и зафиксировать 30-секционный внешний аудит branch-графа (616 веток, PR #960–#967, lineage auditor, convergence).
+
+Work Log:
+- Верификация топологии (ls-remote/rev-parse/merge-base): release/self-update-ambiguity-live-v2=cf747798 ✅, main=85767548 ✅, me2/r78-desktop-from-scratch=8cf09ad7 ✅, merge-base acc7d60e ✅, divergence main↔release = 7/3046 ✅, me2/r78 vs release = 2/21 ✅. Все числовые утверждения аудита совпали точно.
+- Верификация слепой зоны auditor'а: .github/workflows/branch-lineage-audit-v1.yml (в release) строка 71 --include '^(work|integration|release)/' подтверждена; из 616 remote-веток вне фильтра ровно 78 (31 repair, 12 me2, 10 fix, 3 scratch, 3 perf, 2 tmp, 2 analysis, 1 update, 2 tmp-recovery-safe*) ✅.
+- Триггер workflow 'work/browser-continuous-fleet-audit-v1' на remote отсутствует (ls-remote = 0) — аудит физически не может запуститься ✅.
+- Верификация регрессии repair: coordination/devos/branch-lineage-auditor.mjs (release) — 'UNRELATED_HISTORY' = 0 вхождений, строка 243 throw branch_lineage_merge_base_invalid:<branch> для diverged-веток ✅. Классификация потеряна, регрессия подтверждена.
+- Blob-сравнение: apps/metaengine-browser/test/native-supervisor-maintenance-cooldown.test.mjs в release = c0b3ba79cb0b6935b546212585b608c9cb26790c ✅ (совпадает с заявленным). Ссылки #965v2/r77-proof на remote по имени не резолвятся (вероятно удалены) — трёхстороннее сравнение частично воспроизводимо; superseded-вывод для PR #965 принят с этой оговоркой.
+- Desktop full stack tip: work/desktop-web-conversation-integration-v1 = 7495ce9f ✅ (5 commits #967 поверх release).
+- PR-статусы #965/#822/#830 (superseded/open) API-неверифицируемы без PAT (403) — требуется проверка оператором при наличии токена.
+
+Stage Summary:
+- Внешний аудит подтверждён по всем локально проверяемым утверждениям (9/9 числовых и структурных совпадений, 1 оговорка по удалённым refs).
+- ПРИНЯТЫЕ РЕШЕНИЯ: (1) release/self-update-ambiguity-live-v2=cf747798 — единственная авторитетная линия Browser; main diverged и прямому merge не подлежит; (2) PR #965/#822/#830 — рекомендация close as superseded (blob c0b3ba79 в release уже содержит семантику #965); (3) me2/r78 — боковая линия, salvage 2 commits; (4) integration/metaengine-development-os-v1 — salvage-остров Guardian effect contracts.
+- НОВЫЙ P0 (первый приоритет): починить branch audit — расширить фильтр покрытия (me2/repair/fix/tmp/scratch/perf и т.д. — 78 веток вне аудита), восстановить UNRELATED_HISTORY-классификацию в auditor.mjs, сменить/добавить триггерную ветку.
+- convergence-план (R81): от cf747798 новая ветка: +2 desktop commits (me2/r78) +5 commits #967 + Guardian effect contracts (admission/dispatch permit) + Browser execution adapter + root-seed rollover fix; Supervisor P0 ROOT_SEED_CONVERSATION_NOT_PROVEN остаётся открытым гейтом.
+- Публикация: запись в local worklog, уйдёт на GitHub скриптом push-pending (ba623a59) сразу после появления PAT; cron 413338 продолжает мониторинг (тик 73, 10:22 — токена нет).
