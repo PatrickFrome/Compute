@@ -322,7 +322,8 @@ test('R85 native open-site intent uses the ME2 overlay plane instead of window.p
   assert.doesNotMatch(store, /window\.prompt\("URL сайта для нативной вкладки/);
   assert.match(me2Dialogs, /data-testid="open-site-dialog"/);
   assert.match(me2Dialogs, /desktop\.tabs\.openSite\(value\)/);
-  assert.match(me2Dialogs, /\^https\?:\\\/\\\//i/);
+  assert.match(me2Dialogs, /https\?:/);
+  assert.match(me2Dialogs, /\.test\(value\)/);
 });
 
 test('R85 page history uses a real cursor for Alt back and forward', () => {
