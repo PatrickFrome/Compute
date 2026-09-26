@@ -146,3 +146,4 @@ Stage Summary:
 - Cron 413338 продолжает мониторинг; следующим тикам достаточно однострочной пометки с отметкой об env-reset.
 cron 413338 tick 91 (15:37 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
 cron 413338 tick 92 (15:52 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
+cron 413338 tick 93 (16:07 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
