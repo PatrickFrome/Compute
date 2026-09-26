@@ -9793,3 +9793,20 @@ Work Log:
 Stage Summary:
 - EV-TOPO закрыт: плоский список 12 панелей стал 3 сканируемыми доменами (паттерн Grafana section headers)
 - правило раунда: каждый SELF-EVOLVE tick обязан заканчиваться кодом в src/app/page.tsx (не только планом) — фиксируется как протокол для следующих раундов; следующая задача бэклога: EV-EMPTYSTATES
+---
+Task ID: EVOLVE-ROUND-8 (implemented-EV-TOPO, engine v1.15→v1.17)
+Agent: Super-Z (direct operator directive «скрипт не продвигает разработку» → немедленный dev-раунд)
+Task: EV-TOPO — доменная топология: 15 панелей → 3 домена Runtime/Convergence/Evidence со sticky-заголовками (Phase-2 UI-аудита)
+
+Work Log:
+- аудит main-грида: 15 панелей (12 с id + gapmatrix/worktrees/recovery), найден конфликт — устаревшие DomainHeader от параллельного раунда со старой семантикой (Convergence перед MIRROR, Evidence перед WORKTREES)
+- scripts/phoenix/ev-topo-reorder.py: физическая перестановка сегментов main + обёртка в 3 <section> со sticky-заголовками (top-16 md:top-[96px], z-[5], backdrop-blur, номер 01/02/03, счётчик панелей, тэглайн-состав домена)
+- домены: Runtime=daemon,donors,edge,worktrees,monitor (5) · Convergence=qual,r82,exitgate,gapmatrix,roadmap,events (6) · Evidence=supabase,github,mirror,recovery (4); main → space-y-5 контейнер секций
+- удалены DomainHeader + PANEL_DOMAINS (неиспользуемое), NAV_SECTIONS +3 доменных якоря (01 Runtime/02 Convergence/03 Evidence) — автоматически в sticky-nav и footer
+- верификация agent-browser через :81: sec-* якоря=3, panels=15, sticky=3, порядок Runtime=daemon,donors,edge,monitor(+worktrees) Evidence=supabase,github,mirror; клик «02 Convergence» → scrollY=1050, заголовок pinned top=96px; 0 console errors; lint 0/0
+- светлая тема и mobile 390px: без h-scroll, nav скрыт, домены в одну колонку — OK
+- самоулучшение: self-update implemented-EV-TOPO → v1.17 (v1.16 = параллельный cron-раунд)
+
+Stage Summary:
+- EV-TOPO закрыт: оператор сканирует 3 домена вместо плоского списка 15 панелей; sticky-навигация доменов на всех экранах; старая конфликтная разметка устранена
+- следующая задача бэклога: колонки по реальной высоте панелей (masonry-оценка) / дедупликация chip-строк header
