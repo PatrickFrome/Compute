@@ -8,6 +8,7 @@ import { Gauge, Bot, ListChecks, Timer, Server } from "lucide-react";
 
 export function StatusBar() {
   const snap = useMe2((s) => s.snap);
+  const connected = useMe2((s) => s.connected);
   const setDialog = useMe2((s) => s.setDialog);
   const setPage = useMe2((s) => s.setPage);
   const stats = snap?.stats ?? {};
@@ -23,7 +24,7 @@ export function StatusBar() {
     >
       <button type="button" className="flex shrink-0 items-center gap-1 hover:text-zinc-300" onClick={() => setPage("observability")} title="Runtime details">
         <Server className="h-2.5 w-2.5" aria-hidden />
-        {snap ? "runtime live" : "runtime offline"}
+        {connected ? "runtime live" : snap ? "runtime cached" : "runtime offline"}
       </button>
       <button type="button" className="flex shrink-0 items-center gap-1 hover:text-zinc-300" onClick={() => setPage("agents")} title="Agents">
         <Bot className="h-2.5 w-2.5" aria-hidden />
