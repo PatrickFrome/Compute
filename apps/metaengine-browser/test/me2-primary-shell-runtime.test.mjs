@@ -200,6 +200,12 @@ test('R85 semantic workbench avoids nested interactive agent rows', () => {
   assert.match(me2Command, /aria-label=\{\`Открыть вкладку z\.ai агента/);
 });
 
+test('R85 Browser tabs use sibling controls instead of nested interactive semantics', () => {
+  assert.match(me2BrowserStage, /type="button"\s+title=\{\`\$\{t\.title\}\\n\$\{t\.url\}\`}\s+role="tab"/);
+  assert.match(me2BrowserStage, /aria-label=\{\`Закрыть вкладку/);
+  assert.doesNotMatch(me2BrowserStage, /<span[\s\S]{0,240}role="tab"[\s\S]{0,900}<button/);
+});
+
 test('R85 Command hides browser transport tuning while full Browser retains it', () => {
   assert.match(me2BrowserStage, /\{!compact && \(\s*<div role="group" aria-label="Профиль полосы стрима"/);
   assert.match(me2BrowserStage, /compact \? \(\s*<span className="ml-auto text-zinc-600">/);
