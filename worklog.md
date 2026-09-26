@@ -9416,3 +9416,37 @@ Stage Summary:
 - секреты переживут любой reset: 4 канала + зеркала проверены полным прогоном; одна команда: bash scripts/phoenix/phoenix-secrets-restore.sealed.sh full
 - ЧЕСТНЫЙ СТАТУС ДЛЯ ОПЕРАТОРА: сохранённый JWT принимается носителями, но отклоняется Supabase (401). Нужен АКТУАЛЬНЫЙ ключ: Dashboard → Settings → API Keys → service_role (формат eyJ... ) либо новый sb_secret_... — после вставки score вырастет (Supabase-секции аудита разблокируются)
 - директива «самообновление + движение клиента» работает инфраструктурно: self-evolve v1.7, round=5, EV-DARKMODE следующий, lint/health гейты в каждом тике
+
+---
+Task ID: SEC-JWT-RESTORE-1
+Agent: Super-Z (main session, операторская директива 2026-09-27 02:25)
+Task: Сохранить переданное оператором значение SUPABASE_SERVICE_ROLE_JWT в sealed-скрипт, попытка реактивации Supabase-канала
+
+Work Log:
+- значение оператора (88 байт base64, БЕЗ внутренних точек) вшито в scripts/phoenix/phoenix-secrets-restore.sealed.sh как SB_JWT; ENVF дополнен активной строкой SUPABASE_SERVICE_ROLE_JWT= (600); зеркала пересинхронизированы (3/3)
+- диагностика (значения не печатались): прямой REST /rest/v1/ → 401 Invalid API key; len=88 dots=0 → формат НЕ eyJ-токен (настоящий service_role JWT ~200+ символов, 3 сегмента)
+- гипотеза «это JWT Secret»: смонтирован HS256 service_role (3 варианта: строка-ключ / декодированные 64 байта / +claim ref) → все 401; storage apikey → 400; рутины дешифровки в secrets-bootstrap.sh нет; публичный fetch me2-evidence restore-key → NoSuchBucket (приватный)
+- вывод: переданное значение не аутентифицирует проект sibnfciqcpkuquxzduqr; вероятно это legacy JWT Secret при включённых new signing keys, либо скопирован не тот ключ
+- test-скрипты минта удалены после диагностики
+
+Stage Summary:
+- секрет сохранён по директиве (sealed+ENVF+зеркала) — переживёт ресеты, но канал Supabase остаётся BLOCKED
+- нужно от оператора: ЛИБО классический service_role JWT (формат eyJxxx.yyy.zzz), ЛИБО новый sb_secret_... (Settings→API→API Keys), ЛИБО подтвердить, что 88B-блоб расшифровывается известным способом
+- audit score: 73% → 80% (DONE=16 PARTIAL=2 BLOCKED=3); оставшиеся блокеры: Supabase JWT (уточнение формата), R2 secret access key
+
+---
+Task ID: EVOLVE-ROUND-4 (implemented-RESPONSIVE)
+Agent: Super-Z (main session, Job 416839 2026-09-27 02:17, доработано 02:4x после прерывания)
+Task: self-evolve round 4 — EV-RESPONSIVE (mobile-first аудит Mission Control)
+
+Work Log:
+- evolve: round=4, client=HTTP 200 (gateway :81), lint 0/0, next_task=EV-RESPONSIVE
+- реализация: globals.css — утилита touch-hit (::after inset:-8px, border-radius inherit; h-7→44px/h-8→48px/h-9→52px без изменения визуала); page.tsx — 12 сайтов: 10 refresh-кнопок h-9 w-9 + звук/громкость h-8 w-8 + import-PR h-7 w-7 + wt-remove h-9 w-9 → touch-hit; 4 типа чипов-пилюль (lane/sort/ev-class/×-классы) → min-h-9 + touch-hit; ×-сброс поиска → h-7 w-7 flex-центр (AA); «показать ещё» → touch-hit
+- брейкпоинт-аудит: grid-cols-1 lg:grid-cols-2, grid-cols-2 sm:grid-cols-4, header flex-wrap md:ml-auto, overflow-x-auto таблицы — уже mobile-first; фиксов не потребовалось
+- верификация: agent-browser через gateway :81 (НЕ raw :3000), viewport 390x844: touch-hit=16 элементов, min-h-9=4, горизонтального скролла НЕТ, page errors 0; скриншот /tmp/ev-responsive-mobile.png
+- lint: bun run lint → exit 0 (0/0); self-update implemented-RESPONSIVE → engine v1.8
+- самоулучшение движка: в BACKLOG добавлена EV-PWA (manifest/theme-color/offline-fallback); зеркала self-evolve.sealed.sh + sealed-скрипта синхронизированы (PolarFS + ossfs + vault)
+
+Stage Summary:
+- Mission Control: все touch-цели >=44px (hit-area расширение без визуального сдвига), мобильный рендер без overflow — EV-RESPONSIVE закрыт
+- следующая задача движка: EV-FOOTER (первая в BACKLOG); движок v1.8, backlog 11 задач
