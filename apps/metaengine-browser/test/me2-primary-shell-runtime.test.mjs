@@ -402,6 +402,17 @@ test('R85 workspace layout has an explicit reset path', () => {
   assert.match(me2Pagebar, /Reset layout · \{activeWs\.label\}/);
 });
 
+test('R85 Context Drawer exposes selection-driven inspection without a second data plane', () => {
+  assert.match(store, /ContextDrawerTab = "selection" \| "events" \| "commands" \| "runtime"/);
+  assert.match(store, /inspectedTaskId:\s*string \| null/);
+  assert.match(store, /detail: task, inspectedTaskId: task\?\.id \?\? id/);
+  assert.match(me2ContextDrawer, /data-testid="context-drawer-selection"/);
+  assert.match(me2ContextDrawer, /useAgentChatSessions\(\)/);
+  assert.match(me2ContextDrawer, /Selected agent/);
+  assert.match(me2ContextDrawer, /Last inspected task/);
+  assert.doesNotMatch(me2ContextDrawer, /me2Fetch\(|sendCommand\(|agentChatOp\(/);
+});
+
 test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
   assert.match(preload, /const setPrimaryContextDrawer = \(open\) => ipcRenderer\.invoke\('metaengine:shell:primary-context-drawer'/);
   const primaryBranch = preload.slice(
