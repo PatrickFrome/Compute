@@ -6,6 +6,8 @@ import {
   ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
   ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT,
   ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT,
+  ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
+  ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT,
   ME2_PRIMARY_MIN_BROWSER_HEIGHT,
   ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
   ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT,
@@ -129,10 +131,26 @@ test('R85 contextual drawer reserves native Browser height and degrades before s
     me2_context_drawer_open: true,
   });
   assert.equal(open.me2_context_drawer_effective_open, true);
+  assert.equal(open.me2_context_drawer_requested_height, ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
   assert.equal(open.me2_context_drawer_height, ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
   assert.equal(open.remote_bounds.height, closed.remote_bounds.height - ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
   assert.ok(open.remote_bounds.height >= ME2_PRIMARY_MIN_BROWSER_HEIGHT);
   assert.equal(open.authority_effect, false);
+
+  const large = planShellLayout({
+    width: 1440,
+    height: 800,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+    me2_context_drawer_open: true,
+    me2_context_drawer_height: ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT,
+  });
+  assert.equal(large.me2_context_drawer_effective_open, true);
+  assert.equal(large.me2_context_drawer_requested_height, ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT);
+  assert.ok(large.me2_context_drawer_height >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT);
+  assert.ok(large.me2_context_drawer_height < ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT);
+  assert.ok(large.adaptations.includes('ME2_CONTEXT_DRAWER_CLAMPED_FOR_ACTIVE_SURFACE'));
+  assert.equal(large.remote_bounds.height, ME2_PRIMARY_MIN_BROWSER_HEIGHT);
 
   const short = planShellLayout({
     width: 1440,
@@ -396,7 +414,9 @@ test('R85 workspace switch restores workspace-scoped layout preferences', () => 
 
 test('R85 workspace layout has an explicit reset path', () => {
   assert.match(store, /resetWorkspaceLayout/);
-  assert.match(store, /drawerOpen: false, drawerTab: "events", drawerFollowSelection: true, commandRailOpen: true/);
+  assert.match(store, /drawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT/);
+  assert.match(store, /drawerFollowSelection: true/);
+  assert.match(store, /commandRailOpen: true/);
   assert.match(store, /me2:workspace-layout-reset/);
   assert.match(me2Pagebar, /data-testid="workspace-reset-layout"/);
   assert.match(me2Pagebar, /Reset layout · \{activeWs\.label\}/);
@@ -425,7 +445,8 @@ test('R85 Context Drawer follows selection only when explicitly enabled and alre
 });
 
 test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
-  assert.match(preload, /const setPrimaryContextDrawer = \(open\) => ipcRenderer\.invoke\('metaengine:shell:primary-context-drawer'/);
+  assert.match(preload, /const setPrimaryContextDrawer = \(open, height\) => ipcRenderer\.invoke\(/);
+  assert.match(preload, /'metaengine:shell:primary-context-drawer'/);
   const primaryBranch = preload.slice(
     preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
     preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
@@ -434,7 +455,9 @@ test('R85 contextual drawer is a read-only presentation plane with native geomet
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
 
   assert.match(main, /let primaryContextDrawerOpen = false/);
+  assert.match(main, /let primaryContextDrawerHeight = 200/);
   assert.match(main, /me2_context_drawer_open: primaryContextDrawerOpen/);
+  assert.match(main, /me2_context_drawer_height: primaryContextDrawerHeight/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-context-drawer'/);
   const drawerHandler = main.slice(
     main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'"),
@@ -453,7 +476,13 @@ test('R85 contextual drawer is a read-only presentation plane with native geomet
   assert.match(me2Topbar, /data-testid="context-drawer-toggle"/);
   assert.match(me2Shell, /<ContextDrawer \/>/);
   assert.match(me2ContextDrawer, /data-testid="context-drawer"/);
-  assert.match(me2ContextDrawer, /h-\[200px\]/);
+  assert.match(me2ContextDrawer, /data-drawer-height=\{height\}/);
+  assert.match(me2ContextDrawer, /style=\{\{ height: \`\$\{height\}px\` \}\}/);
+  assert.match(me2ContextDrawer, /Drawer 160px/);
+  assert.match(me2ContextDrawer, /Drawer 200px/);
+  assert.match(me2ContextDrawer, /Drawer 300px/);
+  assert.match(store, /setContextDrawerHeight/);
+  assert.match(store, /drawerHeight: wantedHeight/);
   assert.doesNotMatch(me2ContextDrawer, /sendCommand\(|me2Fetch\(|agentChatOp\(/);
 });
 
