@@ -168,11 +168,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
     void me2Fetch<{ ok?: boolean; actions: ActionMeta[] }>("/actions?XTransformPort=3041").then((d) => {
       if (d?.ok) set({ catalog: d.actions ?? [] });
     });
-    const ev = setInterval(() => {
+    const loadMirror = () => {
       void me2Fetch<Mirror & { ok: boolean }>("/evidence?XTransformPort=3041").then((d) => {
         if (d?.ok) set({ mirror: { mode: d.mode, pending: d.pending, method: d.method, last_error: d.last_error, last_sent_seq: d.last_sent_seq, storage: d.storage, ddl: d.ddl } });
       });
-    }, 10_000);
+    };
+    loadMirror();
+    const ev = setInterval(loadMirror, 10_000);
     const tick = setInterval(() => set({ nowMs: Date.now() }), 1000);
 
     // selection-мост (legacy-совместимость): fleet-grid → me2:select-chat → store
