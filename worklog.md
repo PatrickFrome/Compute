@@ -177,3 +177,52 @@ Backlog следующего раунда (приоритеты):
 2. R83-импорт: конвертировать снапшоты data/edge/ в source-дерево в canonical репо (ветка work/r83-edge-source-import-v1) — fabric worker разборчив на модули (7 файлов), aop1 bundle требует разборки; под ревью оператора.
 3. Mirror: operator anchor-запись → auto-mirror событий daemon (EDGE_SNAPSHOT уже в локальном chain).
 4. Мелочи консоли: keyboard-навигация фильтра событий; график draft size из history сэмплов.
+
+---
+Task ID: R82-EXIT-READBACK-WATCH-20260926
+Agent: Z.ai Code (main agent)
+Task: R82 exit-gate реализация: детекция self-update landing + live readback cycle_seq (после merge PR #981) + R83 import-plan prep
+
+Work Log:
+- Аудит входа: daemon 0.61.0-r83 green (перезапуск bun --hot, git clean @ e7482bb), PR #981 closed (CI 8/8), release-branch head = e7fccd08 (merge PR #981). Release-CI на merge-коммите идёт: 29→33→34/38 SUCCESS, 0 failed, в том числе publish-exact-verified-target in_progress (это публикация self-update manifest).
+- Live-файндинг: runtime ВСЁ ЕЩЁ 0.7.0-dev.36089462649.1, dev_plane.head = cf747798 (pre-merge) — self-update rail ещё не доставлен (ждём терминала release-CI + hint_retry ~5 мин). Supervisor: ROLLOVER_AMBIGUOUS, cycle_seq 2109 stale ~33.6h, cognitive ack растёт (103267), resync ~4.5k.
+- QA консоли через gateway :81 (agent-browser): все карточки рендерятся, JS-консоль чистая; клик «Свежая R82-диагностика» — live-проба исполнилась: свежий attempt-таб tab_4351c13a (гидратирован, https://chat.z.ai/), драфт 28,432 chars, canary OVERSIZED, статус карточки → DRAFT POISONED. Rollover-цикл живёт, драфт по-прежнему отравлен.
+- Live-файндинг по PR #968 (R85-волна оператора): head ушёл на 1ea1583a82, CI RED — installed-ui-72-activation-race-soak failure (34/35) — волну оператора видно в карточке R81 (не наша зона действий).
+- РЕАЛИЗОВАНО (главный deliverable): R82 exit-gate watch — daemon src/readback.ts:
+  - Детерминированная 7-стадийная stage-машина: RELEASE_CI → MANIFEST → SELF_UPDATE → CANARY → OPERATOR_CLEAR → CYCLE_GROWTH → R82_CLOSED; каждая стадия вычисляется из живых данных (check-runs release-head, publish-exact-verified-target, версия runtime vs baseline, rollover_reason, draft canary, монотонный рост cycle_seq из monitor history), никогда не предполагается.
+  - Baselines зафиксированы live-верифицированными: extension_version 0.7.0-dev.36089462649.1, dev_plane_head cf747798, merge_head e7fccd08, cycle_seq 2109.
+  - READ-ONLY draft-сэмплер: probeDraft() (CAPTURE через command fastlane — никогда не типизирует/не навигирует, урок R82) каждые 5 мин, ring buffer 48 сэмплов (4 часа), canary OVERSIZED/OK/NO_COMPOSER/NO_TAB/UNKNOWN.
+  - Milestone-события в hash-chain (однократно при переходе, не per-probe — урок R81-1): R82_SELF_UPDATE_LANDED (смена версии runtime), R82_DRAFT_CLEARED (OVERSIZED → OK, операторская очистка), R82_CYCLE_RESUMED (монотонный рост cycle_seq).
+  - Маршрут GET /readback (+?fresh=1) + действие r82.readback → 24 действия.
+- monitor.ts: сэмплы теперь несут extension_version + dev_plane_head — переход версии виден в ring-buffer истории (version_transitions), консоль строит timeline момента self-update.
+- github.ts: экспортирован ghGet (единый read-path демона, токен серверно, machine-coded errors) — readback использует его для release CI rollup.
+- r82.ts: экспортирован probeDraft() — лёгкая READ-ONLY проба драфта attempt-таба (переиспользует captureTab + чтение state-таблицы).
+- РЕАЛИЗОВАНО R83-import prep: edge.ts edgeImportPlan() — разбор живых снапшотов data/edge/ на source-дерево:
+  - fabric-worker-h205f21r4: IMPORT_READY — 7/7 именованных читаемых модулей (src/gateway.js 2.2KB, handlers, index, workflow, ai, auth, core.mjs; 57-122 строк каждый), каждый с sha256_12 digest-binding, proposed prefix edge/fabric-worker-h205f21r4/, wrangler-stub из live bindings (AI, DISPATCH_QUEUE:queue, FABRIC_WORKFLOW:workflow, WAKE_TOKEN/WAKE_TOKEN1/WORKER_CAPABILITY:secret).
+  - h205f22-aop1: NEEDS_UNBUNDLING — единый esbuild-бандл 95.2KB/1962 строк, 7 src-секций (// src/index.ts, supabase.ts, github.ts, executor.ts, duel_microstep.ts, peer_relay_v4.ts, …) — границы модулей восстановимы разборкой под ревью; wrangler-stub: AOP_SUPERVISOR:DO, AOP_WAKE_QUEUE:queue, AOP_RUN_WORKFLOW:workflow, 5 secret-биндингов.
+  - Маршрут GET /edge/import-plan + действие edge.import-plan. План evidence-only: никаких мутаций репо — импорт в work/r83-edge-source-import-v1 PR под ревью оператора (следующий раунд).
+- Консоль (page.tsx):
+  - НОВАЯ карточка «R82 EXIT GATE · SELF-UPDATE WATCH»: вертикальный stage-stepper с соединителями (DONE=emerald ✓ / ACTIVE=amber spinner / BLOCKED=rose ✗ / PENDING=zinc), статы release head/CI/manifest rail/runtime vs baseline/cycle_seq, блок переходов версии runtime (monitor history), история драфта (sparkline chars + лог последних 8 проб с canary), footer-card «свежий readback», poller 60s.
+  - R83-карточка: секция «Импорт-план source-дерева» — per-worker вердикты IMPORT_READY/NEEDS_UNBUNDLING, модульные строки (path/строки/KiB/sha256_12/src-секции), wrangler-stub bindings, summary-строки.
+  - R82-карточка: surface probe.error (backlog-пункт).
+  - Журнал событий: keyboard-навигация — «/» фокусирует фильтр (глобально, вне input), Esc очищает + blur, кнопка «сброс», placeholder-подсказка (backlog-пункт).
+  - Футер: «exit gate: <current_gate>» из readback (динамический прогресс вместо статичного BLOCKED).
+  - Gap matrix обновлён: Supervisor useful cycle → EXIT-GATE WATCH live; Edge convergence → импорт-план готов (fabric IMPORT_READY, aop1 NEEDS_UNBUNDLING).
+- roadmap.ts (daemon): R83 evidence дополнен импорт-планом; CONVERGENCE_EVIDENCE.r82_exit_gate (mechanism, baselines, draft_sampler, live_at_build).
+- VERSION 0.62.0-r82exit, ROUND R82-EXIT.
+- QA: /readback?fresh=1 — stage-машина живая (gate: RELEASE_CI, 34/38, manifest PENDING, runtime=baseline, cycle 2109=baseline); /edge/import-plan — fabric 7 модулей + aop1 бандл с секциями; agent-browser: карточка рендерится, клик «Свежий readback» OK, «/»-навигация фильтра проверена (focus + ввод R82 + Escape очистка); программный layout-аудит: 12 карточек, overflowX=false @1920 и @390, 0 усечений без title, footer естественно проталкивается (10198px @390), единственный zero-size — пустой span бейджей enginetest (доброкачественный); lint 0/0; dev.log чист; daemon.log чист (boot 0.62.0-r82exit); скриншоты download/r82exit-final-{desktop,mobile}.png.
+- Git: commit c637560 (локально; push в sandbox/me2-os — при следующем git-sync).
+
+Stage Summary:
+- Статус: R82 exit-gate переведён из «ждём и смотрим вручную» в АВТОМАТИЗИРОВАННЫЙ live-watch: 7-стадийная gate-машина верифицирует каждый шаг (CI terminal → manifest rail → self-update landing → новый код (канарей) → операторская очистка драфта → рост cycle_seq → R82 CLOSED) против живых данных с зафиксированными baseline'ами. Момент закрытия R82 будет виден в консоли и записан в hash-chain milestone-событиями.
+- Ключевой принцип: gate-стадии никогда не предполагаются — только живые доказательства (check-runs на merge-head, версия runtime, rollover_reason, draft canary, монотонный cycle_seq).
+- R83 подготовлен к импорту: fabric IMPORT_READY (7 модулей 1:1 на source-дерево), aop1 требует разборки бандла; план с digest-binding уже в консоли для ревью оператора.
+- Exit-gate R82 на момент завершения раунда: RELEASE_CI (34/38, publish-exact-verified-target PENDING); runtime = baseline; драфт 28.4k OVERSIZED; cycle_seq 2109.
+- UX-урок №: (R82-EXIT-1) hot-reload bun --hot может подхватить version.ts раньше маршрутов — после добавления маршрутов требуется полный restart через start.sh; (R82-EXIT-2) gate-машина обязана отличать «нет данных» (сэмплер разогревается) от «стадия провалена» — UNKNOWN canary не должен рендериться как провал.
+
+Backlog следующего раунда (приоритеты):
+1. Мониторинг R82 exit-gate до закрытия: release-CI терминал → manifest SUCCESS → runtime версия меняется (milestone R82_SELF_UPDATE_LANDED) → операторская очистка драфта (milestone R82_DRAFT_CLEARED) → рост cycle_seq (milestone R82_CYCLE_RESUMED). После закрытия — diff-отчёт «до/после» в evidence.
+2. R83-импорт: work/r83-edge-source-import-v1 — fabric 7 модулей как source-дерево + wrangler.jsonc stub из bindings; aop1 разборка бандла по src-секциям (7 файлов); PR под ревью оператора. НЕ деплоить — только импорт source.
+3. PR #968 (R85-волна оператора): следить за installed-ui-72-activation-race-soak failure на 1ea1583a82 — если операторский агент не отреагирует, предложить помощь.
+4. Mirror: операторская anchor-запись → auto-mirror событий daemon в me2_event_mirror (milestone-события R82 уже готовы к зеркалированию).
+5. Мелочи консоли: авто-скролл stage-машины к ACTIVE стадии; звук/тост при milestone-событии (R82_SELF_UPDATE_LANDED и др.); график draft size из длинной истории (сейчас ring 4h).
