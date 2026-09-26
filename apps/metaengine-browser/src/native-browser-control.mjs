@@ -78,11 +78,14 @@ function normalizedSemanticRole(node) {
   const role = axValue(node, 'role').toLowerCase();
   if (TEXT_INPUT_ROLES.has(role)) return role;
   // R82 liveness hardening: controlled editors can expose an explicitly
-  // editable AX node without Chromium preserving the historical textbox role.
-  // Normalize only explicit AX editability; never infer write authority from
-  // names, geometry, focus, DOM text, or provider-specific selectors.
+  // editable AX generic node without Chromium preserving the historical
+  // textbox role. Keep this normalization scoped to the generic editor node:
+  // Chromium may also mark StaticText/paragraph descendants as editable when
+  // they live inside a contenteditable composer. Promoting those descendants
+  // to textbox creates dozens of false composers and makes the supervisor
+  // fail closed with supervisor_composer_not_unique.
   const editable = String(axPropertyValue(node, 'editable') ?? '').trim().toLowerCase();
-  return ['true', 'plaintext', 'richtext'].includes(editable) ? 'textbox' : role;
+  return role === 'generic' && ['true', 'plaintext', 'richtext'].includes(editable) ? 'textbox' : role;
 }
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
