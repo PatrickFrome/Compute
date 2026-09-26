@@ -90,8 +90,45 @@ interface Me2State {
 let initGuard = false;
 const PAGE_LS = "me2.page.v1";
 const WS_LS = "me2.workspace.v1";
-const CONTEXT_DRAWER_LS = "me2.context-drawer.open.v1";
-const CONTEXT_DRAWER_TAB_LS = "me2.context-drawer.tab.v1";
+const CONTEXT_DRAWER_LS = "me2.context-drawer.open.v1"; // legacy migration
+const CONTEXT_DRAWER_TAB_LS = "me2.context-drawer.tab.v1"; // legacy migration
+const WORKSPACE_LAYOUTS_LS = "me2.workspace-layouts.v1";
+
+type WorkspaceLayoutPreference = {
+  drawerOpen: boolean;
+  drawerTab: ContextDrawerTab;
+};
+
+function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_LAYOUTS_LS);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<Record<WorkspaceKey, Partial<WorkspaceLayoutPreference>>>;
+      const row = parsed?.[workspace];
+      const tab = row?.drawerTab;
+      if (row && typeof row.drawerOpen === "boolean" && (tab === "events" || tab === "commands" || tab === "runtime")) {
+        return { drawerOpen: row.drawerOpen, drawerTab: tab };
+      }
+    }
+    const legacyTab = localStorage.getItem(CONTEXT_DRAWER_TAB_LS);
+    return {
+      drawerOpen: localStorage.getItem(CONTEXT_DRAWER_LS) === "1",
+      drawerTab: legacyTab === "commands" || legacyTab === "runtime" ? legacyTab : "events",
+    };
+  } catch {
+    return { drawerOpen: false, drawerTab: "events" };
+  }
+}
+
+function writeWorkspaceLayout(workspace: WorkspaceKey, patch: Partial<WorkspaceLayoutPreference>) {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_LAYOUTS_LS);
+    const parsed = raw ? JSON.parse(raw) as Partial<Record<WorkspaceKey, Partial<WorkspaceLayoutPreference>>> : {};
+    const current = readWorkspaceLayout(workspace);
+    parsed[workspace] = { ...current, ...patch };
+    localStorage.setItem(WORKSPACE_LAYOUTS_LS, JSON.stringify(parsed));
+  } catch { /* private mode */ }
+}
 
 function syncPagePresentation(p: PageKey) {
   try {
@@ -172,13 +209,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
 
   setContextDrawer: (open) => {
     set({ contextDrawerPreferredOpen: open });
-    try { localStorage.setItem(CONTEXT_DRAWER_LS, open ? "1" : "0"); } catch { /* private mode */ }
+    writeWorkspaceLayout(get().workspace, { drawerOpen: open });
     get().syncContextDrawer(open);
   },
 
   setContextDrawerTab: (tab) => {
     set({ contextDrawerTab: tab });
-    try { localStorage.setItem(CONTEXT_DRAWER_TAB_LS, tab); } catch { /* private mode */ }
+    writeWorkspaceLayout(get().workspace, { drawerTab: tab });
   },
 
   init: () => {
@@ -204,14 +241,16 @@ export const useMe2 = create<Me2State>((set, get) => ({
             void shell?.setPrimaryPage?.("command");
           } catch { /* Browser preload bridge absent in web-only mode */ }
         }
-        const ws = localStorage.getItem(WS_LS) as WorkspaceKey | null;
-        if (ws) set({ workspace: ws });
-        const drawerStored = localStorage.getItem(CONTEXT_DRAWER_LS);
-        const drawerPreferred = drawerStored === "1";
-        const drawerTab = localStorage.getItem(CONTEXT_DRAWER_TAB_LS) as ContextDrawerTab | null;
-        if (drawerTab && ["events", "commands", "runtime"].includes(drawerTab)) set({ contextDrawerTab: drawerTab });
-        set({ contextDrawerPreferredOpen: drawerPreferred });
-        get().syncContextDrawer(drawerPreferred);
+        const storedWs = localStorage.getItem(WS_LS) as WorkspaceKey | null;
+        const activeWorkspace = storedWs && WORKSPACES.some((item) => item.key === storedWs) ? storedWs : get().workspace;
+        if (activeWorkspace !== get().workspace) set({ workspace: activeWorkspace });
+        const workspaceLayout = readWorkspaceLayout(activeWorkspace);
+        set({
+          contextDrawerPreferredOpen: workspaceLayout.drawerOpen,
+          contextDrawerTab: workspaceLayout.drawerTab,
+        });
+        writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
+        get().syncContextDrawer(workspaceLayout.drawerOpen);
       } catch { /* приватный режим */ }
     }, 0);
 
@@ -359,10 +398,16 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   setWorkspace: (w) => {
-    set({ workspace: w });
+    const layoutPreference = readWorkspaceLayout(w);
+    set({
+      workspace: w,
+      contextDrawerPreferredOpen: layoutPreference.drawerOpen,
+      contextDrawerTab: layoutPreference.drawerTab,
+    });
     try { localStorage.setItem(WS_LS, w); } catch { /* приватный режим */ }
     const ws = WORKSPACES.find((x) => x.key === w);
     if (ws) get().setPage(ws.page);
+    get().syncContextDrawer(layoutPreference.drawerOpen);
   },
 
   setPalette: (open) => set({ paletteOpen: open }),
