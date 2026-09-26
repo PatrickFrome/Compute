@@ -106,7 +106,9 @@ function canonicalTabRuntimeIdentity(tabId) {
 
   const cellId = runtime?.cell_id == null ? null : String(runtime.cell_id);
   const cellGeneration = Number(runtime?.cell_generation || 0) || null;
-  const runtimeTargetId = runtime?.target_id == null ? null : String(runtime.target_id);
+  const observedTargetId = runtime?.target_id == null ? null : String(runtime.target_id);
+  const webContentsFallbackTarget = `webcontents:${exact.web_contents_id}`;
+  const runtimeTargetId = observedTargetId && observedTargetId !== webContentsFallbackTarget ? observedTargetId : null;
   const rendererProcessKey = runtime?.renderer_process_key == null ? null : String(runtime.renderer_process_key);
   const runtimeIdentityComplete = Boolean(
     runtime
