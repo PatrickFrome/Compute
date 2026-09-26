@@ -130,3 +130,18 @@ Backlog следующего раунда (приоритеты):
 3. R83: Edge convergence — Cloudflare API (cloudflare.env): сравнение production v13 (d8b239e7) vs release source, квалификация v14 canary, digest-binding отчёт.
 4. Mirror: operator anchor-запись → auto-mirror событий daemon.
 5. Мелочи консоли: probe.error в карточке R82, график draft size history, keyboard-навигация фильтра событий.
+
+---
+Task ID: R82-CI-INVARIANT-FIX-20260926
+Agent: Z.ai Code (main agent)
+Task: Реакция на CI-регресс PR #981 (Self Update E2E: source-invariant «durable rollover barrier must precede NEW_TAB»)
+
+Work Log:
+- Первый head (be791f8) CI: ME2 Unified Gate success, Windows Installed Chat Qualification success, но Self Update E2E + Shell V1 failure. Логи скачаны: единственный упавший тест — continuous-autonomy-hardening.test.mjs «autonomy source invariants…»: assert «durable rollover barrier must precede NEW_TAB».
+- Причина: рефактор вынес NEW_TAB в #openCommittedRolloverTab() и поместил helper ВЫШЕ #rollover() — текстовый порядок-инвариант (indexOf beginRolloverAttempt < indexOf NEW_TAB) нарушен при сохранённой семантике (barrier-вызов по-прежнему исполняется до NEW_TAB).
+- Фикс без ослабления инварианта: helper перенесён ПОД #rollover() (commit dbe41d6). Локально: 7/7 зелёные (3 R82-теста + continuous-autonomy-hardening полностью).
+- CI перезапущен на dbe41d60 (8 workflows: 3 in_progress, 5 queued на момент проверки) — терминальный статус в следующем раунде.
+
+Stage Summary:
+- Source-invariant тесты — часть контракта репо: рефактор обязан сохранять текстовые порядки, которые они проверяют; правится исходник, не тест.
+- PR #981 head = dbe41d60; работа раунда завершена: диагноз → фиксы → тесты → CI-реакция в одном цикле.
