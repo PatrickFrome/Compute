@@ -1,30 +1,26 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-26T23:31:09Z | worklog: 1844874B / 10040L | sha12=7abefac4bf97
+gen: 2026-09-26T23:37:34Z | worklog: 1846031B / 10053L | sha12=e5dfedd3e13a
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
-2. Прочитай: /home/z/my-project/CONTEXT.md (handoff-документ) + /home/z/my-project/PHOENIX-PROTOCOL.md
-3. Прочитай хвост /home/z/my-project/worklog.md (последние 150+ строк) — канонический журнал ВСЕХ чатов
-4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
-5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
+2. Прочитай: /home/z/my-project/CONTEXT.md (handoff) + /home/z/my-project/PHOENIX-PROTOCOL.md
+3. Хвост /home/z/my-project/worklog.md (150+ строк) — канонический журнал ВСЕХ чатов
+4. worklog усечён/пуст → `phoenix-restore.sh --merge`; диагностика Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1844874B)
-| Канал | Путь | Переживает env-reset |
-|-------|------|---------------------|
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1846031B)
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
 | OSS (ossfs) | /home/sync/me2-context-backups/latest/worklog.md | ДА (сетевой) |
 | Vault | /home/z/context-vault/{latest,snapshots,repo}/ | частично |
 | cron-KV | шарды CTX-SHARD-A/B (payload cron-задач) | ДА (серверный) |
 
-## ПОСТОЯННЫЕ CRON-ЗАДАЧИ КОНТЕКСТА
-- 413338: PAT watcher (15m) — при появлении GITHUB_TOKEN_ADMIN в /home/z/.a2/.github.env делает push-pending
-- 416526: Context Guard (15m) — снапшоты/детект усечения/авторестор/феникс (скрипт в payload задачи)
-- PHX-HEARTBEAT: (30m) — этот digest + Supabase/ossfs пульс (скрипт в payload задачи)
+## CRON-ЗАДАЧИ КОНТЕКСТА
+- 413338: PAT watcher (15m) — push-pending при валидном GITHUB_TOKEN_ADMIN
+- 416526: Context Guard (15m) — снапшоты/детект усечения/авторестор/феникс
+- PHX-HEARTBEAT: (30m) — этот digest + Supabase/ossfs пульс
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- R80-PUSH-N → PAT-watcher прогон: push-pending-r80 (main→sandbox/me2-os ff + 2 архив-ветки), верификация ls-remote
 - EVOLVE-ROUND-9 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
 - EV-RESPONSIVE (implemented, round 9, engine v1.19→v1.20) → EV-RESPONSIVE — mobile-first аудит Mission Control: брейкпоинты sm/md/lg, touch-цели >=44px
 - EVOLVE-ROUND-10 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-TOASTS] toast-фидбек на все мутирующие действия клиента (use-toast)
@@ -39,22 +35,10 @@ gen: 2026-09-26T23:31:09Z | worklog: 1844874B / 10040L | sha12=7abefac4bf97
 - EVOLVE-ROUND-11-IMPL → [EV-WS-RESILIENCE] WS (:3040): reconnect c backoff + бейдж состояния связи в UI
 - R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 - R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
+- AUD-20260926-233328 → авто-аудит полноты контекста; фиксация смены статусов
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-Task: [EV-WS-RESILIENCE] WS (:3040): reconnect c backoff + бейдж состояния связи в UI
-
-Work Log:
-- движок evolve: round=11, client=HTTP 200, lint=0/0, score=83%, v1.23 → задача EV-WS-RESILIENCE
-- page.tsx (только /): state netOnline+wsInfo (retries/nextIn/lastCode); WS-эффект — jitter-exponential backoff (1→15s ±30%), countdown-тик, capture close-кода, online/offline-awareness ('online' событие срезает backoff, offline не жжёт попытки)
-- header-бейдж: bus live (info) / bus retry #N·Xs (warn) / bus offline (p0) + tooltip с close-кодом
-- bugfix попутный: Chip не форвардил title — проп title добавлен (оживили tooltip'ы всех существующих чипов)
-- верификация: gateway :81 (не raw :3000) agent-browser — бейдж «bus retry #1·2s», tooltip «WS потерян (close 1006); reconnect #1 через 2s», 0 page errors, 0 console errors; bun run lint 0/0
-- self-update: implemented-EV-WS-RESILIENCE → движок v1.24; BACKLOG + EV-A11Y (aria-live/focus-visible/role=status); зеркала phoenix-sealed синхронизированы (/tmp/context-vault-mirror + /home/sync)
-
-Stage Summary:
-- EV-WS-RESILIENCE закрыт и проверен вживую на разрыве WS (close 1006 → retry-бейдж с отсчётом); hot-tree чужих правок не затронуто; секретов нет, *.sealed.* не коммитился
----
 Task ID: R80
 Agent: Super-Z (cron Job 413338, 2026-09-27 07:07)
 Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
@@ -82,4 +66,17 @@ Work Log:
 
 Stage Summary:
 - DONE: all local state published; следующий цикл стартует с d276754b
+---
+Task ID: AUD-20260926-233328
+Agent: Super-Z (cron Job 416761, full-audit)
+Task: авто-аудит полноты контекста; фиксация смены статусов
+
+Work Log:
+- full-audit.sh v2.0: score=88% (было 83%), DONE=18 PARTIAL=1 BLOCKED=2
+- Снятие блокера: SUPABASE_SERVICE_ROLE_JWT пере-выдан оператором — REST=200, «JWT жив с 2026-09-27» (канал Supabase-бэкапов heartbeat/supabase-persist снова активен; следующий HB-прогон должен показать sb=Nok/0fail)
+- Остаточный BLOCKED: R2 S3 (SIGv4) — secret access key не передан (есть только Access Key ID); без него нет прямого S3-доступа к бакету (REST/Bearer-каналы Cloudflare работают)
+- write-ahead snapshot перед правкой ok
+
+Stage Summary:
+- Полнота контекста выросла до 88%; до 100% остаётся R2 secret access key (опционально — прямой SIGv4-доступ); дублирующих запросов оператору не создаётся
 ```
