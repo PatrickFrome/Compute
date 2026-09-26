@@ -425,6 +425,34 @@ Decision after research:
 - next Saved Views iteration should persist a structured bundle `{query,lane,density,time_horizon,columns}` with explicit scope, rather than multiplying dashboard pages.
 
 
+
+## 6.4 UI slice checkpoint B — native-aware Context Drawer
+
+Checkpoint source head before this note: `6e9f66a7f8a66495422638e3b4e15e702ece5441`.
+
+Implemented:
+- a global 200px read-only Context Drawer with `Events | Commands | Runtime` tabs and `Ctrl/Cmd+J`;
+- the drawer reuses already-present bounded store data and issues no command, fetch, agent or mutation effects;
+- on COMMAND, the actual Browser `WebContentsView` is physically shrunk by the same drawer height in main-process geometry;
+- main process enforces a protected 320px Browser minimum and can reject the drawer on short windows;
+- renderer stores the operator's preferred state separately from the effective state, so temporary geometry constraints do not erase preference;
+- the preload bridge is presentation-only and explicitly exposes no Browser command / scheduler / update / release authority;
+- drawer open state and selected tab persist across sessions.
+
+Post-step research:
+- **Chrome DevTools / Quick Source** validates the core Drawer pattern: keep one primary panel while a secondary source/diagnostic context remains visible instead of replacing the main task. METAENGINE's drawer follows that exact information-architecture role, but its geometry must additionally coordinate with a native Electron `WebContentsView`. https://developer.chrome.com/docs/devtools/quick-source
+- **VS Code Custom Layout** lets users toggle Panel/Secondary Side Bar from global layout controls and remembers view placement across sessions. This supports a persistent operator preference plus an explicit layout toggle rather than hidden automatic UI. https://code.visualstudio.com/docs/configure/custom-layout
+- **Cursor 3.1 tiled Agents Window** persists pane arrangements and lets operators focus or compare concurrent agents without tab hopping. This suggests the future METAENGINE drawer should evolve into a typed secondary context that can host an agent/session comparison, but only after native geometry is generalized beyond a fixed height. https://cursor.com/changelog/3-1
+- **Figma Dev Mode Inspect** keeps the selected canvas object central and renders contextual properties/code in an Inspect panel. This reinforces the rule that the drawer should be selection/context-driven, not another general dashboard. https://help.figma.com/hc/en-us/articles/15023124644247-Guide-to-Dev-Mode
+- **Zed Agent Panel** exposes a dedicated agent context from a panel while the editor stays available. The useful lesson is shortcut/panel continuity, not copying chat into every page. https://zed.dev/docs/ai/agent-panel
+
+Decision after research:
+- keep the new drawer read-only in this slice;
+- do not add mutation buttons to it;
+- next drawer iteration should react to explicit selection (task/agent/browser target) and show typed inspector content;
+- resize handles must not be CSS-only: any variable drawer height must be accepted and clamped by main-process geometry before the renderer presents it.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
