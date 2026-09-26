@@ -4,7 +4,7 @@
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
 import { PAGES, WORKSPACES, useMe2, useKpis } from "@/components/me2/store";
-import { Search, Command, Boxes, Play, AlertTriangle, Radio, Layers3, BellRing, X } from "lucide-react";
+import { Search, Command, Boxes, Play, AlertTriangle, Radio, BellRing, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 import { useState } from "react";
@@ -95,18 +95,6 @@ export function TopBar() {
           <span>{kpi.ready} ready</span>
           {kpi.fail > 0 ? <><span className="text-zinc-700">·</span><span>{kpi.fail} fail</span></> : null}
         </span>
-
-        {mirrorAttention ? (
-          <button
-            type="button"
-            onClick={() => setPage("observability")}
-            className="hidden h-7 items-center gap-1 border border-amber-900/70 bg-amber-950/20 px-2 text-amber-300 xl:flex"
-            title={`Mirror ${mirror?.mode ?? "unknown"} · outbox ${mirror?.pending ?? 0}`}
-          >
-            <Layers3 className="h-3 w-3" aria-hidden />
-            mirror {mirror?.mode ?? "…"}
-          </button>
-        ) : null}
 
         <div className="relative">
           <button
