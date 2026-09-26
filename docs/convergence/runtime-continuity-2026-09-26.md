@@ -1,0 +1,11 @@
+# Runtime continuity integration — 2026-09-26
+
+The desktop now shares process ownership rules between daemon and UI. Asynchronous spawn errors degrade the host rather than becoming unhandled errors. Both output pipes are consumed without recording raw data. A timed-out stop retains ownership and prevents spawning a duplicate. Late events from an older child cannot clear a replacement. Plane snapshots override cached healthy results after child failure. Shutdown awaits bounded native process termination and does not kill adopted services.
+
+Native web conversations now checkpoint normalized provider addresses in userData/me2-conversations.json. Resume opens at most two views concurrently, with bounded navigation timeouts, without changing focus or submitting prompts. Restored views must establish identity through current WebContents readback. Cookies, prompt text, leases and execution authority are never stored in this checkpoint. Shutdown cancels further restoration and retains addresses; explicit tab close forgets an address. Failed navigation releases tab capacity but retains the resume address for a later startup.
+
+CI failure on 5f878c2 was a missing Prisma Client generated artifact under the frozen Bun dependency install. The build command now explicitly runs prisma generate before next build. The subsequent run 36203988061 passed contract and package-proof jobs. This fixes reproducibility without weakening TypeScript checks.
+
+Local verification for this increment: 91 desktop tests, 90 passed, one physical packaging probe skipped. Added coverage exercises real ENOENT handling, stale child events, unconfirmed termination, output draining, cached health degradation, checkpoint validation, restart readback, timeout cleanup and stopped restore behavior. Authenticated provider execution and installed Windows update activation are not proven by these tests.
+
+Outstanding: attach the canonical legacy fleet/lease/semantic execution kernel to this registry; package daemon/runtime; qualify update activation and rollback; connect durable task receipts, supervisor continuation and measured learning. Address restoration is workspace continuity, not permission to replay an ambiguous task.

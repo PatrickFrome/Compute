@@ -68,8 +68,8 @@ export class Me2Plane {
   /** Honest snapshot for the window / preload bridge. */
   snapshot() {
     return {
-      daemon: { ...this.status.daemon, ...this.daemonHost.snapshot() },
-      ui: { ...this.status.ui, ...this.uiHost.snapshot() },
+      daemon: { ...this.status.daemon, ...this.daemonHost.snapshot(), ok: this.status.daemon.ok && this.daemonHost.status !== 'degraded' },
+      ui: { ...this.status.ui, ...this.uiHost.snapshot(), ok: this.status.ui.ok && this.uiHost.status !== 'degraded' },
       gateway: this.status.gateway,
       update: this.status.update,
       fence: this.fence.snapshot(),
@@ -134,8 +134,8 @@ export class Me2Plane {
   async shutdown() {
     this.stopKeepalive();
     await this.gateway.close();
-    this.daemonHost.child?.kill?.();
-    this.uiHost.child?.kill?.();
-    this.log({ plane: 'me2-plane', event: 'shutdown' });
+    const children = await Promise.all([this.daemonHost.stop(), this.uiHost.stop()]);
+    this.log({ plane: 'me2-plane', event: 'shutdown', children });
+    return { ok: children.every(result => result.ok), children };
   }
 }

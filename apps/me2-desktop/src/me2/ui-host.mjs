@@ -5,6 +5,7 @@
  * itself runs server.js with ELECTRON_RUN_AS_NODE=1 (operator machines need no
  * bun — the R77 lesson made honest-fallback mandatory).
  */
+import { startOwned, stopOwned } from './owned-process.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -75,17 +76,10 @@ export class UiHost {
       args = plan.args;
       env.ELECTRON_RUN_AS_NODE = '1';
     }
-    this.child = this.spawnImpl(bin, args, {
-      cwd: this.uiDistDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
+    const started = startOwned(this, bin, args, {
+      cwd: this.uiDistDir, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     });
-    this.child.on('exit', (code) => {
-      this.log({ plane: 'ui-host', event: 'child_exit', code, mode: plan.mode });
-      this.child = null;
-      if (this.status === 'live') this.status = 'degraded';
-    });
+    if (!started.ok) return started;
     this.status = 'starting';
     this.log({ plane: 'ui-host', event: 'spawn', mode: plan.mode, pid: this.child.pid });
     return { ok: true, mode: plan.mode, pid: this.child.pid };
@@ -100,11 +94,12 @@ export class UiHost {
       this.status = 'live';
       return { ok: true, mode: 'adopted', status: this.status };
     }
-    const health = await pollUntil(() => probeUi(UI.PORT, { timeoutMs: 2500 }), {
+    const health = await pollUntil(async () => this.processFailure ? { ok: false, terminal: true } : probeUi(UI.PORT, { timeoutMs: 2500 }), {
       tries: Math.ceil(UI_HOST.START_TIMEOUT_MS / UI_HOST.PROBE_INTERVAL_MS),
       intervalMs: UI_HOST.PROBE_INTERVAL_MS,
     });
-    if (!health.ok) {
+    if (!health.ok || this.processFailure || !this.child) {
+      await this.stop();
       this.status = 'degraded';
       this.log({ plane: 'ui-host', event: 'degraded', reason: 'no_health_on_port' });
       return { ok: false, reason: 'no_health_on_port', status: this.status };
@@ -112,6 +107,8 @@ export class UiHost {
     this.status = 'live';
     return { ok: true, status: this.status };
   }
+
+  stop(options) { return stopOwned(this, options); }
 
   snapshot() {
     return { status: this.status, pid: this.child?.pid ?? null };

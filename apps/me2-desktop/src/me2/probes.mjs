@@ -39,7 +39,7 @@ export async function pollUntil(fn, { tries, intervalMs }) {
   let last;
   for (let i = 0; i < tries; i += 1) {
     last = await fn();
-    if (last?.ok) return last;
+    if (last?.ok || last?.terminal) return last;
     if (i < tries - 1) await sleep(intervalMs);
   }
   return last ?? { ok: false };

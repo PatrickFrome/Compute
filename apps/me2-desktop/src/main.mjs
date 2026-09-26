@@ -6,6 +6,7 @@
  * exit 0 — the honest machine-checkable probe for CI/operator.
  */
 import { app, BrowserWindow, WebContentsView, Menu } from 'electron';
+import { ConversationCheckpoint } from './me2/conversation-checkpoint.mjs';
 import { FleetTabs, conversationUrl } from './me2/fleet-tabs.mjs';
 import { join } from 'node:path';
 import { LifecycleJournal } from './core/journal.mjs';
@@ -71,6 +72,7 @@ async function boot() {
       }
     }
     fleet = new FleetTabs({
+      checkpoint: new ConversationCheckpoint({ file: join(userDataDir, 'me2-conversations.json'), log: row => journal.record('fleet', row) }),
       viewFactory: ({ id, role }) => {
         const result = shell.addView({ id, role });
         if (!result.ok) throw new Error(result.reason);
@@ -79,6 +81,7 @@ async function boot() {
       activate: id => shell.activate(id), remove: id => shell.removeView(id),
       log: row => journal.record('fleet', row),
     });
+    void fleet.restore().then(result => journal.record('fleet_restored', result)).catch(() => journal.record('fleet_restore_failed'));
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'METAENGINE', submenu: [
       { label: 'Mission Control', accelerator: 'CmdOrCtrl+1', click: () => shell.activate('MAIN') },
       { label: 'New web conversation', accelerator: 'CmdOrCtrl+N', click: () => void fleet.createConversation() },
@@ -130,9 +133,14 @@ app.on('window-all-closed', () => {
   journal?.record('window_all_closed', {});
   app.quit();
 });
-app.on('before-quit', () => {
+let quitting = false;
+app.on('before-quit', event => {
+  if (quitting) return;
+  quitting = true;
+  event.preventDefault();
   journal?.record('exit', {});
-  plane?.shutdown();
+  fleet?.stop();
+  Promise.resolve(plane?.shutdown()).catch(() => journal?.record('shutdown_failed', {})).finally(() => app.quit());
 });
 app.on('second-instance', (_event, argv, _workingDirectory, additionalData) => {
   const ack = verifyResurrectionData(additionalData, { now: Date.now() });
