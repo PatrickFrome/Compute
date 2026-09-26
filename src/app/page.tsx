@@ -12,9 +12,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
+import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
-  Activity, AlertTriangle, Boxes, ChevronDown, Database, GitBranch, HeartPulse,
-  ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Terminal, Trash2, Zap,
+  Activity, AlertTriangle, Boxes, ChevronDown, Database, Download, GitBranch, HeartPulse,
+  ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------- utils ----
@@ -90,6 +91,16 @@ interface Recovery {
   blocked: { item: string; reason: string }[]
   pending_next: string[]
 }
+interface MonitorSample {
+  ts: string; uptime_ms: number; hb_age_s: number; cycle_seq: number
+  stale_completed_s: number | null; resync_count: number
+  ambiguous_history_count: number; keepalive_state: string
+  cognitive_state: string; compute_state: string; p0_count: number
+}
+interface MonitorHistory {
+  status: { running: boolean; started_at: string | null; interval_ms: number; capacity: number; sample_count: number; last_error: string | null }
+  samples: MonitorSample[]
+}
 interface ExecResult {
   cmd: string[]; ok: boolean; exit_code: number | null
   stdout: string; stderr: string; elapsed_ms: number
@@ -148,7 +159,7 @@ function Panel({
   const [open, setOpen] = useState(defaultOpen)
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 shadow-lg shadow-black/20">
+      <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 shadow-lg shadow-black/20 transition-colors hover:border-zinc-700/80">
         <div className="flex items-center gap-1 pr-2">
           <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-zinc-800/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 rounded-t-xl">
             <span className="text-teal-400">{icon}</span>
@@ -178,6 +189,32 @@ function Stat({ label, value, tone, span }: { label: string; value: React.ReactN
 
 const scrollCls = 'max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent'
 
+// ------------------------------------------------------- sparkline -------
+const TOOLTIP_STYLE = { background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11, color: '#e4e4e7', padding: '4px 8px' } as const
+
+function Spark({ data, color, label, value }: { data: { t: string; v: number }[]; color: string; label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 transition-colors hover:border-zinc-700">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</span>
+        <span className="shrink-0 font-mono text-xs" style={{ color }}>{value}</span>
+      </div>
+      <div className="mt-1.5 h-14">
+        {data.length >= 2 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
+              <RTooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#a1a1aa' }} itemStyle={{ color }} cursor={{ stroke: '#3f3f46' }} />
+              <Line type="monotone" dataKey="v" stroke={color} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex h-full items-center justify-center text-[10px] text-zinc-600">накапливаем сэмплы…</div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ================================================================ page =====
 export default function MissionControl() {
   const { toast } = useToast()
@@ -193,6 +230,7 @@ export default function MissionControl() {
   const [verdicts, setVerdicts] = useState<Verdicts | null>(null)
   const [recovery, setRecovery] = useState<Recovery | null>(null)
   const [execResult, setExecResult] = useState<ExecResult | null>(null)
+  const [monitor, setMonitor] = useState<MonitorHistory | null>(null)
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -228,12 +266,14 @@ export default function MissionControl() {
     loadHealth(); loadSupervisor(); loadWorktrees()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
+    jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
     const a = setInterval(loadHealth, 5000)
     const b = setInterval(() => loadSupervisor(false), 10000)
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
+    const e = setInterval(() => { jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {}) }, 15000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d) }
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e) }
   }, [loadHealth, loadSupervisor, loadWorktrees])
 
   // ---- REST events poll (fallback) + WS live stream (primary)
@@ -315,6 +355,24 @@ export default function MissionControl() {
     finally { setBusy(null) }
   }
 
+  const exportEvents = async () => {
+    setBusy('export')
+    try {
+      const d = await jfetch<{ events: Me2Event[]; last_seq: number }>('/events?limit=500')
+      const blob = new Blob([d.events.map((e) => JSON.stringify(e)).join('\n')], { type: 'application/x-ndjson' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `me2-events-seq${d.last_seq}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.jsonl`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast({ title: 'Журнал экспортирован', description: `${d.events.length} событий (до seq #${d.last_seq}) · .jsonl` })
+    } catch (e) { toast({ title: 'Экспорт не удался', description: (e as Error).message, variant: 'destructive' }) }
+    finally { setBusy(null) }
+  }
+
   // ---- derived
   const daemonUp = !!health && !healthErr
   const supLive = !!supervisor
@@ -327,11 +385,16 @@ export default function MissionControl() {
     () => events.filter((e) => !filter || e.type.toLowerCase().includes(filter.toLowerCase())),
     [events, filter]
   )
+  const mSamples = monitor?.samples ?? []
+  const mLast = mSamples.length ? mSamples[mSamples.length - 1] : null
+  const mkSeries = (get: (s: MonitorSample) => number | null) =>
+    mSamples.filter((s) => get(s) != null).map((s) => ({ t: hhmmss(s.ts), v: get(s) as number }))
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100 selection:bg-teal-500/30">
       {/* ---------------------------------------------------------- header */}
       <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/80">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-teal-500/60 via-cyan-500/30 to-transparent" />
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-teal-500/40 bg-teal-500/10 font-mono text-sm font-bold text-teal-400">M2</div>
@@ -467,6 +530,45 @@ export default function MissionControl() {
           )}
         </Panel>
 
+        {/* -------------------------------------------- CONVERGENCE MONITOR */}
+        <Panel
+          icon={<TrendingUp className="h-4 w-4" />}
+          title="Монитор конвергенции · R82"
+          chip={
+            monitor ? (
+              <Chip tone={mLast && mLast.keepalive_state === 'ACTIVE' ? 'ok' : 'p0'}>
+                {mLast ? mLast.keepalive_state : '…'}
+              </Chip>
+            ) : (
+              <Chip tone="neutral">…</Chip>
+            )
+          }
+          defaultOpen
+        >
+          {monitor ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <Spark label="heartbeat, s" color="#34d399" value={mLast ? `${mLast.hb_age_s}s` : '—'} data={mkSeries((s) => s.hb_age_s)} />
+                <Spark label="cycle_seq" color="#fbbf24" value={mLast ? String(mLast.cycle_seq) : '—'} data={mkSeries((s) => s.cycle_seq)} />
+                <Spark label="resync_count" color="#22d3ee" value={mLast ? String(mLast.resync_count) : '—'} data={mkSeries((s) => s.resync_count)} />
+                <Spark label="stale cycle, h" color="#fb7185" value={mLast && mLast.stale_completed_s != null ? `${(mLast.stale_completed_s / 3600).toFixed(1)}h` : '—'} data={mkSeries((s) => (s.stale_completed_s != null ? +(s.stale_completed_s / 3600).toFixed(2) : null))} />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Chip tone="neutral">интервал {Math.round(monitor.status.interval_ms / 1000)}с</Chip>
+                <Chip tone="neutral">сэмплов {monitor.status.sample_count}/{monitor.status.capacity}</Chip>
+                <Chip tone={monitor.status.last_error ? 'p0' : 'ok'}>{monitor.status.last_error ? 'sampler error' : 'sampler ok'}</Chip>
+                {mLast && <Chip tone="neutral">cognitive {mLast.cognitive_state}</Chip>}
+                {mLast && <Chip tone="neutral">compute {mLast.compute_state}</Chip>}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Критерий успеха R82: <span className="text-amber-300">cycle_seq</span> начинает расти монотонно, а <span className="text-rose-300">stale cycle</span> сбрасывается в секунды. Графики накапливаются в ring-buffer демона (1 час, silent-сэмплинг без записи в evidence log).
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка монитора…</div>
+          )}
+        </Panel>
+
         {/* ------------------------------------------------- GAP MATRIX */}
         <Panel icon={<ShieldAlert className="h-4 w-4" />} title="P0/P1 разрывы · release gap matrix" chip={<Chip tone="p0">BLOCKED</Chip>}>
           <div className={`space-y-1.5 ${scrollCls} pr-1`}>
@@ -492,6 +594,22 @@ export default function MissionControl() {
         <Panel icon={<ListChecks className="h-4 w-4" />} title="Роадмап R81 → R90 · convergence" chip={<Chip tone="info">{roadmap ? `${roadmap.roadmap.filter((r) => r.status === 'IN_PROGRESS').length}/10 active` : '…'}</Chip>}>
           {roadmap ? (
             <div className="space-y-3">
+              {/* progress rail */}
+              <div className="relative pt-1 pb-2">
+                <div className="absolute left-0 right-0 top-[11px] h-0.5 bg-zinc-800" />
+                <div className="absolute left-0 top-[11px] h-0.5 bg-gradient-to-r from-amber-500/70 to-amber-500/20" style={{ width: `${(roadmap.roadmap.findIndex((r) => r.status === 'IN_PROGRESS') + 1) * 10}%` }} />
+                <div className="relative flex justify-between">
+                  {roadmap.roadmap.map((r) => {
+                    const active = r.status === 'IN_PROGRESS'
+                    return (
+                      <div key={r.round} className="flex flex-col items-center gap-1" title={`${r.round} · ${r.title}`}>
+                        <span className={`h-2.5 w-2.5 rounded-full border ${active ? 'border-amber-400 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)] animate-pulse' : 'border-zinc-600 bg-zinc-800'}`} />
+                        <span className={`font-mono text-[9px] ${active ? 'text-amber-300' : 'text-zinc-600'}`}>{r.round.slice(1)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
               <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-3">
                 <div className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">Release authority (verified live)</div>
                 <div className="mt-1 break-all font-mono text-[11px] text-zinc-300">
@@ -523,6 +641,11 @@ export default function MissionControl() {
           icon={<Activity className="h-4 w-4" />}
           title={`Журнал событий · hash-chain${events.length ? ` · #${events[0].seq}` : ''}`}
           chip={<Chip tone={wsLive ? 'ok' : 'neutral'}>{wsLive ? 'ws live' : 'poll 5s'}</Chip>}
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={exportEvents} disabled={busy === 'export'} aria-label="Экспорт журнала в .jsonl">
+              {busy === 'export' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            </Button>
+          }
           defaultOpen
         >
           <div className="space-y-2">
@@ -667,7 +790,8 @@ export default function MissionControl() {
 
       {/* ---------------------------------------------------------- footer */}
       <footer className="mt-auto border-t border-zinc-800 bg-zinc-950 pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-[11px] text-zinc-500">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-teal-500/50" />
+        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-[11px] text-zinc-500">
           <span className="flex items-center gap-1.5">
             <span className={`inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
             daemon {daemonUp ? 'online' : 'offline'}

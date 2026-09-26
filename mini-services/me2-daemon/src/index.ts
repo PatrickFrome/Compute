@@ -11,6 +11,7 @@ import { execWhitelisted, probe, whitelist } from "./sandbox";
 import { evaluateVerdicts } from "./verdicts";
 import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS } from "./roadmap";
 import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor } from "./controlplane";
+import { monitorHistory, monitorStatus, startMonitor } from "./monitor";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -33,6 +34,7 @@ const routes: { method: string; path: string; handler: Handler }[] = [
       head_hash: headHash(),
       ws_port: WS_PORT,
       mirror_anchor: MIRROR_ANCHOR,
+      monitor: monitorStatus(),
     }),
   },
   {
@@ -100,6 +102,7 @@ const routes: { method: string; path: string; handler: Handler }[] = [
   },
   { method: "GET", path: "/control-plane/mirror-tail", handler: () => mirrorTail() },
   { method: "GET", path: "/control-plane/capabilities", handler: () => runtimeCapabilities() },
+  { method: "GET", path: "/control-plane/history", handler: () => monitorHistory() },
   { method: "POST", path: "/control-plane/mirror-anchor", handler: () => writeMirrorAnchor() },
 ];
 
@@ -218,5 +221,8 @@ appendEvent("DAEMON_BOOT", "daemon", null, {
   ws_port: WS_PORT,
   anchor: MIRROR_ANCHOR.seq,
 });
+
+// convergence monitor: silent sampler, starts after boot (never blocks listen)
+startMonitor();
 
 console.log(`[me2-daemon] ${VERSION} (${ROUND}) REST :${restServer.port} · WS bus :${wsServer.port} · anchor seq ${MIRROR_ANCHOR.seq}`);

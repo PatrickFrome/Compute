@@ -10,6 +10,7 @@ import { execWhitelisted, probe, whitelist } from "./sandbox";
 import { evaluateVerdicts } from "./verdicts";
 import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS } from "./roadmap";
 import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor } from "./controlplane";
+import { monitorHistory } from "./monitor";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -36,6 +37,7 @@ export const ACTIONS: ActionDef[] = [
   { name: "controlplane.supervisor", family: "controlplane", description: "Live Supabase supervisor snapshot (curated)" },
   { name: "controlplane.mirror-tail", family: "controlplane", description: "Last mirrored events from Supabase evidence mirror" },
   { name: "controlplane.capabilities", family: "controlplane", description: "DevOS runtime capabilities RPC (read-only)" },
+  { name: "controlplane.history", family: "controlplane", description: "Supervisor convergence monitor ring buffer (chart data)" },
   { name: "controlplane.mirror-anchor", family: "controlplane", description: "Operator-triggered single anchor write to the evidence mirror" },
 ];
 
@@ -92,6 +94,8 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return mirrorTail();
     case "controlplane.capabilities":
       return runtimeCapabilities();
+    case "controlplane.history":
+      return monitorHistory();
     case "controlplane.mirror-anchor":
       return writeMirrorAnchor();
     default:
