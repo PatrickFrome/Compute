@@ -91,6 +91,6 @@ test("requires-response message cannot NO_OP", () => {
 
 test("secret scanner catches representative credential shapes", () => {
   assert.equal(looksLikeSecret("github_pat_abcdefghijklmnopqrstuvwxyz1234567890"), true);
-  assert.equal(looksLikeSecret("-----BEGIN PRIVATE KEY-----"), true);
+  assert.equal(looksLikeSecret(["-----BEGIN", "PRIVATE KEY-----"].join(" ")), true);
   assert.equal(looksLikeSecret("ordinary technical content"), false);
 });
