@@ -187,7 +187,8 @@ try {
         if (-not [string]$line -or -not ([string]$line).Trim().StartsWith('{')) { continue }
         try { $row = $line | ConvertFrom-Json } catch { continue }
         $schema = [string]$row.schema
-        $event = [string]$row.event
+        $eventProperty = $row.PSObject.Properties['event']
+        $event = if ($eventProperty) { [string]$eventProperty.Value } else { '' }
         if ($schema -eq 'metaengine.browser.me2.daemon-host.v1' -and @('DAEMON_HEALTHY','DAEMON_ADOPTED') -contains $event) { $me2DaemonReady = $true }
         if ($schema -eq 'metaengine.browser.me2.integration.v1' -and $event -eq 'ME2_CONTRACT_OK') { $me2ContractOk = $true }
         if ($schema -eq 'metaengine.browser.me2.ui-host.v1' -and @('UI_SPAWN','UI_ADOPTED') -contains $event) { $me2UiStarted = $true }
