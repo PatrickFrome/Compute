@@ -40,7 +40,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
 ];
 
 export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
-export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | null;
+export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 
 interface Me2State {
   // связь
@@ -253,10 +253,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
         d.onNativeEvent((p) => {
           const type = String(p?.type ?? "");
           if (type === "open-site-prompt") {
-            const url = window.prompt("URL сайта для нативной вкладки (http/https):", "https://");
-            if (url && /^https?:\/\//i.test(url)) void d.tabs.openSite(url).then((r) => {
-              if (!r.ok) toastBus({ title: "вкладка не открыта", description: r.error ?? "ошибка", variant: "destructive" });
-            });
+            // Renderer-owned dialog participates in primary-overlay composition,
+            // unlike window.prompt which bypassed ME2 semantic/visual state.
+            set({ dialog: "openSite" });
           } else if (type === "update-check") {
             void d.update.check().then((u) => {
               toastBus({ title: u.updateAvailable ? `обновление доступно: ${u.latest}` : `актуальная версия (${u.current})`, description: u.updateAvailable ? "Применить обновление может только оболочка MetaEngine" : u.error ?? "GitHub Releases" });
