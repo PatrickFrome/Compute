@@ -83,39 +83,63 @@ let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
 
-function canonicalTabRuntimeIdentity(tabId, supervisorSnapshot = null) {
+function canonicalTabRuntimeIdentity(tabId) {
   const id = String(tabId || '');
   const tab = registry.get(id);
   const view = views.get(id);
   const exact = resolveExactWebContentsTabBinding(id);
   if (!tab || !view || view.webContents.isDestroyed() || !exact) return null;
 
-  const supervisor = supervisorSnapshot || nativeSupervisor?.snapshot?.() || null;
-  // O(1) read through the already-running Brain binding index. Mission Control
-  // never scans or owns a parallel identity table.
-  const runtime = nativeSupervisor?.runtimeBinding?.(id) || null;
-  const semanticRows = supervisor?.realtime_process_plane?.semantic_plane?.targets || [];
-  const semantic = semanticRows.find((row) => String(row?.tab_id || '') === id) || null;
+  // R84: consume the already-live Browser Brain runtime binding through the
+  // NativeSupervisorClient. This is an O(1) read from BrowserRuntimeBindingIndex;
+  // do not scan snapshots and do not manufacture BrowserCell/CDP identity from
+  // URL, title, selected tab, WebContents id, or canonical tab id.
+  let runtime = null;
+  try { runtime = nativeSupervisor?.runtimeBinding?.(id) || null; } catch { runtime = null; }
+  if (runtime
+    && (runtime.schema !== 'metaengine.browser.runtime-binding.v1'
+      || runtime.valid !== true
+      || String(runtime.tab_id || '') !== id
+      || Number(runtime.web_contents_id || 0) !== Number(exact.web_contents_id))) {
+    runtime = null;
+  }
+
+  const cellId = runtime?.cell_id == null ? null : String(runtime.cell_id);
+  const cellGeneration = Number(runtime?.cell_generation || 0) || null;
+  const runtimeTargetId = runtime?.target_id == null ? null : String(runtime.target_id);
+  const rendererProcessKey = runtime?.renderer_process_key == null ? null : String(runtime.renderer_process_key);
+  const runtimeIdentityComplete = Boolean(
+    runtime
+    && cellId
+    && cellGeneration
+    && runtimeTargetId
+    && rendererProcessKey
+    && runtime.renderer_process_identity_complete === true
+  );
 
   return Object.freeze({
     schema: 'metaengine.browser.canonical-tab-runtime-identity.v1',
     tab_id: id,
-    browsercell_identity: id,
-    browsercell_identity_source: 'CANONICAL_TAB_ID',
+    browsercell_identity: cellId,
+    browsercell_identity_source: cellId ? 'BROWSER_RUNTIME_BINDING_INDEX' : null,
     web_contents_id: Number(exact.web_contents_id),
     webcontents_binding_generation: Number(exact.binding_generation),
-    runtime_binding_generation: runtime?.binding_generation ?? null,
-    cell_id: runtime?.cell_id ?? null,
-    cell_generation: runtime?.cell_generation ?? null,
-    renderer_process_key: runtime?.renderer_process_key ?? null,
-    target_id: runtime?.target_id || semantic?.target_id || `webcontents:${exact.web_contents_id}`,
-    document_generation: Number(runtime?.document_generation ?? semantic?.document_generation ?? 0),
-    semantic_revision: Number(runtime?.semantic_revision ?? semantic?.semantic_revision ?? 0),
+    runtime_binding_generation: Number(runtime?.binding_generation || 0) || null,
+    cell_id: cellId,
+    cell_generation: cellGeneration,
+    renderer_process_key: rendererProcessKey,
+    target_id: runtimeTargetId,
+    document_generation: Number(runtime?.document_generation || 0),
+    semantic_revision: Number(runtime?.semantic_revision || 0),
     runtime_binding_live: runtime?.valid === true,
+    runtime_identity_complete: runtimeIdentityComplete,
+    runtime_binding_source: runtime ? 'BROWSER_RUNTIME_BINDING_INDEX_O1' : null,
+    identity_lookup_complexity: 'O(1)',
     exact_identity: true,
     selected_tab_fallback: false,
     url_identity_fallback: false,
     title_identity_fallback: false,
+    webcontents_target_fallback: false,
     execution_authority: false,
     command_leasing: false,
     automatic_retry_allowed: false,
@@ -411,7 +435,7 @@ async function shellSnapshot() {
     ...rawTabs,
     tabs: Object.freeze((rawTabs?.tabs || []).map((tab) => Object.freeze({
       ...tab,
-      runtime_identity: canonicalTabRuntimeIdentity(tab.tab_id, supervisor),
+      runtime_identity: canonicalTabRuntimeIdentity(tab.tab_id),
     }))),
   });
   const compute = await currentComputeHealth();
