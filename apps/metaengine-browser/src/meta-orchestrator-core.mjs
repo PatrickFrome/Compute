@@ -208,10 +208,13 @@ export function deriveProgressLedger({ plan, tasks = [], evidence = [] } = {}) {
   });
 }
 
-function riskCompanions(node) {
+function verificationCompanions(node) {
+  // R86 closed-loop sequencing: every implementation result is independently
+  // verified after RESULT_READY. CRITICAL work keeps the stronger dual review.
+  // These are task proposals only; scheduler/browser identity remains owned by
+  // the existing DevOS scheduler and native Browser runtime.
   if (node.risk === 'CRITICAL') return ['CRITIC', 'FALSIFIER'];
-  if (node.risk === 'HIGH') return ['CRITIC'];
-  return [];
+  return ['CRITIC'];
 }
 function activePointSet(tasks) {
   return new Set(tasks.filter((task) => !['COMPLETED', 'FAILED', 'CANCELLED', 'FENCED', 'AMBIGUOUS'].includes(String(task?.state || '').toUpperCase()))
@@ -308,8 +311,104 @@ export function reconcileMetaOrchestrator({
     });
   }
 
-  const pending = plan.nodes.filter((node) => progressByPoint.get(node.point_id)?.state === 'PENDING');
+  const availableSlots = integer(capacity.available_slots ?? 0, 'available_slots', { min: 0, max: 4096 });
+  const maxParallel = integer(policy.max_parallel_proposals ?? 8, 'max_parallel_proposals', { min: 1, max: 128 });
   const activePoints = activePointSet(tasks);
+
+  // R86 autonomous closed loop: RESULT_READY is not completion. Before any
+  // successor can advance, create independent verification work only after the
+  // primary result exists. This prevents critics/falsifiers from racing the
+  // implementation they are meant to evaluate.
+  const resultReadyNodes = plan.nodes.filter((node) => progressByPoint.get(node.point_id)?.state === 'RESULT_READY');
+  if (resultReadyNodes.length) {
+    const verifierActions = [];
+    const acceptanceActions = [];
+    const waitPoints = [];
+    for (const node of resultReadyNodes.sort((a, b) => b.priority - a.priority || a.point_id.localeCompare(b.point_id))) {
+      const roles = verificationCompanions(node);
+      let allReady = true;
+      for (const companion of roles) {
+        const companionPoint = `${node.point_id}.${companion.toLowerCase()}`;
+        const observed = taskStateForPoint(companionPoint, tasks);
+        if (observed.state === 'UNSCHEDULED') {
+          allReady = false;
+          if (verifierActions.length < Math.min(availableSlots, maxParallel)) {
+            verifierActions.push(nodeProposal(node, plan, companion));
+          }
+          continue;
+        }
+        if (observed.state === 'AMBIGUOUS') {
+          allReady = false;
+          verifierActions.push(action('REQUEST_RECONCILIATION', {
+            point_id: companionPoint,
+            parent_point_id: node.point_id,
+            reason: 'VERIFIER_AMBIGUOUS_EFFECT_REQUIRES_READBACK',
+            automatic_retry_allowed: false,
+          }));
+          continue;
+        }
+        if (TERMINAL_FAILURE.has(observed.state)) {
+          allReady = false;
+          verifierActions.push(action('REQUEST_REASONING', {
+            point_id: companionPoint,
+            parent_point_id: node.point_id,
+            reason: 'VERIFIER_TERMINAL_FAILURE',
+          }));
+          continue;
+        }
+        if (!['RESULT_READY', 'COMPLETED'].includes(observed.state)) {
+          allReady = false;
+          waitPoints.push(companionPoint);
+        }
+      }
+      if (allReady) {
+        acceptanceActions.push(action('REQUEST_ACCEPTANCE', {
+          point_id: node.point_id,
+          verifier_points: roles.map((roleName) => `${node.point_id}.${roleName.toLowerCase()}`),
+          reason: 'PRIMARY_RESULT_AND_VERIFIERS_READY',
+          automatic_retry_allowed: false,
+        }));
+      }
+    }
+    if (verifierActions.length) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'VERIFYING',
+        reason: 'RESULT_READY_REQUIRES_INDEPENDENT_VERIFICATION',
+        progress,
+        actions: Object.freeze(verifierActions.slice(0, maxParallel)),
+      });
+    }
+    if (acceptanceActions.length) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'ACCEPTANCE_PENDING',
+        reason: 'VERIFIERS_RESULT_READY',
+        progress,
+        actions: Object.freeze(acceptanceActions.slice(0, maxParallel)),
+      });
+    }
+    if (waitPoints.length) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'VERIFYING',
+        reason: 'VERIFIER_TASKS_ACTIVE',
+        progress,
+        actions: Object.freeze([action('NOOP', { reason: 'VERIFIER_TASKS_ACTIVE', verifier_points: waitPoints.slice(0, 32) })]),
+      });
+    }
+    if (availableSlots === 0) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'CAPACITY_WAIT',
+        reason: 'NO_VERIFIER_CAPACITY',
+        progress,
+        actions: Object.freeze([action('REQUEST_CAPACITY', { required_slots: Math.min(maxParallel, resultReadyNodes.length), reason: 'RESULT_VERIFICATION' })]),
+      });
+    }
+  }
+
+  const pending = plan.nodes.filter((node) => progressByPoint.get(node.point_id)?.state === 'PENDING');
   const eligible = pending.filter((node) => node.dependencies.every((dep) => progressByPoint.get(dep)?.state === 'VERIFIED'));
   const blocked = pending.filter((node) => node.dependencies.some((dep) => ['FAILED', 'AMBIGUOUS', 'EVIDENCE_PENDING', 'UNKNOWN'].includes(progressByPoint.get(dep)?.state)));
 
@@ -320,8 +419,6 @@ export function reconcileMetaOrchestrator({
     });
   }
 
-  const availableSlots = integer(capacity.available_slots ?? 0, 'available_slots', { min: 0, max: 4096 });
-  const maxParallel = integer(policy.max_parallel_proposals ?? 8, 'max_parallel_proposals', { min: 1, max: 128 });
   const fanout = Math.min(availableSlots, maxParallel, eligible.length);
   if (eligible.length > 0 && fanout === 0) {
     return authorityEnvelope({
@@ -336,10 +433,6 @@ export function reconcileMetaOrchestrator({
     .slice(0, fanout);
   for (const node of selected) {
     actions.push(nodeProposal(node, plan));
-    for (const companion of riskCompanions(node)) {
-      const companionPoint = `${node.point_id}.${companion.toLowerCase()}`;
-      if (!activePoints.has(companionPoint) && actions.length < maxParallel) actions.push(nodeProposal(node, plan, companion));
-    }
   }
 
   if (actions.length) {
