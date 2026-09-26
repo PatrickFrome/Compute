@@ -71,3 +71,8 @@ tool-results/
 /capsule/
 *.zip
 me2-os-capsule-*.zip
+
+# SEC-SEALED (SEC-SEALED-3): local-only secret carriers — literal secrets inside.
+# NEVER commit: repo is anon-readable, GitHub secret-scanning would auto-revoke the PAT.
+scripts/phoenix/*.sealed.sh
+scripts/phoenix/*.sealed.*
