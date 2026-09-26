@@ -277,6 +277,13 @@ test('R85 Task Sheet schedules scroll after commit, never during render', () => 
   assert.doesNotMatch(me2Dialogs, /if \(detail\) setTimeout\(/);
 });
 
+test('R85 command palette exposes full authority lanes instead of abbreviated color-only hints', () => {
+  assert.match(me2Palette, /Authority lane: \$\{m\.lane\}/);
+  assert.match(me2Palette, /aria-label=\{\`Authority lane \$\{m\.lane\}\`\}/);
+  assert.match(me2Palette, /m\.lane\.replace\("_", " "\)/);
+  assert.doesNotMatch(me2Palette, /m\.lane\.slice\(0, 4\)/);
+});
+
 test('R85 native open-site intent uses the ME2 overlay plane instead of window.prompt', () => {
   assert.match(store, /type === "open-site-prompt"[\s\S]{0,240}dialog: "openSite"/);
   assert.doesNotMatch(store, /window\.prompt\("URL сайта для нативной вкладки/);
