@@ -65,7 +65,7 @@ for DBF in $(ls -1 db/*.db 2>/dev/null | sort -u); do
   else echo "  (bun недоступен)"; fi
 done
 [ -f db/custom.db ] && verdict DONE || { echo "- db/custom.db: ОТСУТСТВУЕТ"; verdict BLOCKED; }
-echo "### 3.2 Supabase (живой проект h205f22)"
+echo "### 3.2 Supabase (context-vault carrier xpei…, JWT жив с 2026-09-27)"
 if [ -n "$SB_JWT" ]; then
   echo "- host: $SB_URL (JWT присутствует — аудит REST)"
   SPEC=$(curl -s --max-time 20 -H "apikey: $SB_JWT" -H "Authorization: Bearer $SB_JWT" "$SB_URL/rest/v1/" 2>/dev/null)
