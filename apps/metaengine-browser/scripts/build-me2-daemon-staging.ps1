@@ -19,7 +19,7 @@ $bunPrefix = if ($bun) { @() } else { @('--yes', 'bun@1.3.3') }
 $sourceHead = (git -C $repoRoot rev-parse HEAD).Trim().ToLowerInvariant()
 if ($sourceHead -notmatch '^[0-9a-f]{40}$') { throw 'me2_daemon_source_head_invalid' }
 if ($ExpectedSourceHead -and $sourceHead -ne $ExpectedSourceHead.ToLowerInvariant()) {
-  throw "me2_daemon_source_head_mismatch:$sourceHead:$ExpectedSourceHead"
+  throw "me2_daemon_source_head_mismatch:${sourceHead}:${ExpectedSourceHead}"
 }
 
 $package = Get-Content (Join-Path $daemonRoot 'package.json') -Raw | ConvertFrom-Json
@@ -29,7 +29,7 @@ if (-not $match.Success) { throw 'me2_daemon_runtime_version_missing' }
 $runtimeVersion = [string]$match.Groups[1].Value
 $packageVersion = [string]$package.version
 if (-not $packageVersion -or $packageVersion -ne $runtimeVersion) {
-  throw "me2_daemon_version_drift:$packageVersion:$runtimeVersion"
+  throw "me2_daemon_version_drift:${packageVersion}:${runtimeVersion}"
 }
 
 Remove-Item $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
