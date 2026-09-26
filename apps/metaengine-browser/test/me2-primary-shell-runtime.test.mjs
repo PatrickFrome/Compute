@@ -14,7 +14,6 @@ import {
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
 const store = await readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
-const me2Shell = await readFile(new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url), 'utf8');
 const integration = await readFile(new URL('../src/me2/me2-integration-entry.mjs', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
@@ -82,21 +81,20 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
 });
 
 
-test('installed ME2 renderer attests mounted R75 composition through a narrow trusted bridge', () => {
-  assert.match(preload, /reportUiContract:\s*\(input\) =>/);
-  assert.match(preload, /metaengine:shell:ui-contract-readback/);
-  assert.match(preload, /metaengine\.browser\.me2-ui-contract-readback\.v1/);
-  assert.doesNotMatch(preload, /MutationObserver/);
-  assert.doesNotMatch(preload, /executeJavaScript/);
-  assert.match(me2Shell, /useLayoutEffect\(\(\) =>/);
-  assert.match(me2Shell, /reportUiContract\?\.\(present\)/);
-  for (const id of ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']) {
-    assert.match(preload, new RegExp(id));
-    assert.match(me2Shell, new RegExp(id));
-    assert.match(main, new RegExp(id));
-  }
+test('installed ME2 primary shell is attested from main-process CDP DOM geometry', () => {
+  assert.match(main, /probeMe2R75InstalledDom/);
+  assert.match(main, /DOM\.getDocument/);
+  assert.match(main, /DOM\.querySelector/);
+  assert.match(main, /DOM\.getBoxModel/);
+  assert.match(main, /MAIN_PROCESS_CDP_DOM_BOX_MODEL/);
   assert.match(main, /ME2_R75_UI_CONTRACT_CONFIRMED/);
   assert.match(main, /ME2_R75_UI_CONTRACT_INCOMPLETE/);
+  assert.doesNotMatch(main, /executeJavaScript/);
+  assert.doesNotMatch(preload, /reportUiContract/);
+  assert.doesNotMatch(preload, /ui-contract-readback/);
+  for (const id of ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']) {
+    assert.match(main, new RegExp(id));
+  }
   assert.match(main, /legacy_shell_is_normal_path:\s*false/);
   assert.match(main, /scheduler_authority:\s*false/);
   assert.match(main, /browser_command_authority:\s*false/);
