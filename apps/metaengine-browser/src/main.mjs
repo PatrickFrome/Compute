@@ -1394,6 +1394,19 @@ async function initNativeSupervisor() {
       hostResilience: globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || false,
       getState: nativeSupervisorState,
       executeCommand: executeNativeSupervisorCommand,
+      // R84: one canonical logical BrowserCell allocation lives inside the
+      // existing TabRegistry. The realtime Brain consumes this metadata on the
+      // same process/semantic event path; no URL/title inference or second map.
+      resolveBrowserCell: (tabId) => {
+        const tab = registry.get(String(tabId));
+        if (!tab?.browser_cell_id || !Number.isSafeInteger(Number(tab.browser_cell_generation))) return null;
+        return Object.freeze({
+          cell_id: String(tab.browser_cell_id),
+          cell_generation: Number(tab.browser_cell_generation),
+          provider: tab.kind === 'GLM_CHAT' ? 'ZAI' : (tab.kind === 'CHATGPT' ? 'CHATGPT' : null),
+          role: tab.role || null,
+        });
+      },
       observeLocalTarget,
       workerObservationBudget: 4,
       controlStatePath: supervisorControlStatePath(),
