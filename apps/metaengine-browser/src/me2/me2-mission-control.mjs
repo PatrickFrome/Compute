@@ -15,6 +15,7 @@
  * вкладки создаются штатным createTab() браузера (навигационная политика браузера авторитетна —
  * loopback LOCAL_DEV разрешён её же контрактом).
  */
+import { normalizeAgentPlatformConversationUrl } from '../browser-agent-platform.mjs';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
 import { me2FleetTabsGetHost, me2FleetTabsResolveIdentity } from './me2-fleet-tabs-host.mjs';
 import { me2UiGatewayStatus } from './me2-ui-gateway.mjs';
@@ -79,6 +80,23 @@ function nativeIdentity(tabId) {
   return me2FleetTabsResolveIdentity(tabId);
 }
 
+export function me2NativeConversationUrl(session) {
+  try { return normalizeAgentPlatformConversationUrl(session?.conversation_url); }
+  catch { return null; }
+}
+
+function existingExactConversationTab(url) {
+  const host = me2FleetTabsGetHost();
+  if (!host) return { state: 'NONE', tab_id: null };
+  try {
+    const matches = host.registry.snapshot().tabs.filter((tab) =>
+      tab.role === 'FLEET' && String(tab.url || '') === String(url || ''));
+    if (matches.length === 1) return { state: 'EXACT', tab_id: matches[0].tab_id };
+    if (matches.length > 1) return { state: 'AMBIGUOUS', tab_id: null };
+  } catch {}
+  return { state: 'NONE', tab_id: null };
+}
+
 function existingTabByUrlPrefix(urlPrefix, role) {
   const host = me2FleetTabsGetHost();
   if (!host) return null;
@@ -124,36 +142,92 @@ async function ensureSupervisorTab() {
 async function ensureAgentTab(session) {
   const host = me2FleetTabsGetHost();
   if (!host) return;
-  const { url: UI_URL } = resolveUiUrl();
-  if (agentTabs.size >= AGENT_TAB_CEILING) return; // честный потолок видимости флота
+
+  // R84 donor invariant: daemon/API session IDs are not browser URLs and never
+  // become WebContents identity. A native agent tab is permitted only when the
+  // daemon supplies an exact provider conversation_url accepted by the same
+  // Browser platform policy as the trusted execution kernel.
+  const url = me2NativeConversationUrl(session);
+  if (!url) {
+    emitRow(row('AGENT_WEB_CONVERSATION_UNBOUND', {
+      session_id: session?.id || null,
+      reason: 'conversation_url_required',
+      native_tab_created: false,
+      authority_effect: false,
+    }));
+    return;
+  }
+
+  if (agentTabs.size >= AGENT_TAB_CEILING) return;
   const known = agentTabs.get(session.id);
   if (known) {
-    if (host.registry.get(known.tab_id)) return; // вкладка жива
-    agentTabs.delete(session.id); // вкладку снаружи закрыли — разрешим пересоздание по churn-лимиту
+    const live = host.registry.get(known.tab_id);
+    if (live && known.conversation_url === url) return;
+    // A daemon session may be rebound to a different provider conversation.
+    // Only tabs created by this Mission Control bridge are physically retired;
+    // an adopted canonical Fleet tab remains owned by its original lifecycle.
+    if (live && known.owned === true && typeof host.closeTab === 'function') {
+      await host.closeTab(known.tab_id).catch(() => {});
+    }
+    agentTabs.delete(session.id);
   }
+
+  const existing = existingExactConversationTab(url);
+  if (existing.state === 'AMBIGUOUS') {
+    emitRow(row('AGENT_TAB_BINDING_AMBIGUOUS', {
+      session_id: session.id,
+      conversation_url: url,
+      native_tab_created: false,
+      authority_effect: false,
+    }), { error: true });
+    return;
+  }
+  if (existing.state === 'EXACT') {
+    agentTabs.set(session.id, {
+      tab_id: existing.tab_id,
+      conversation_url: url,
+      title: session.title || session.id,
+      created_at: new Date().toISOString(),
+      owned: false,
+    });
+    emitRow(row('AGENT_TAB_ADOPTED', {
+      session_id: session.id,
+      tab_id: existing.tab_id,
+      conversation_url: url,
+      runtime_identity: nativeIdentity(existing.tab_id),
+    }));
+    return;
+  }
+
   const last = lastRecreateAt.get(session.id) || 0;
   if (Date.now() - last < CHURN_COOLDOWN_MS) return;
-  const url = `${UI_URL}#chat=${encodeURIComponent(session.id)}`;
   try {
     const tab = await host.createTab(url, { role: 'FLEET', select: false, awaitLoad: false });
-    agentTabs.set(session.id, { tab_id: tab.tab_id, title: session.title || session.id, created_at: new Date().toISOString() });
+    agentTabs.set(session.id, {
+      tab_id: tab.tab_id,
+      conversation_url: url,
+      title: session.title || session.id,
+      created_at: new Date().toISOString(),
+      owned: true,
+    });
     lastRecreateAt.set(session.id, Date.now());
     try {
       host.registry.update(tab.tab_id, {
         title: `ME2 · ${String(session.title || session.id).slice(0, 40)}`,
         kind: 'ME2_AGENT_CHAT',
       });
-    } catch { /* косметика */ }
+    } catch { /* cosmetic metadata only */ }
     emitRow(row('AGENT_TAB_CREATED', {
       session_id: session.id,
       tab_id: tab.tab_id,
+      conversation_url: url,
       role: session.role || 'CODE',
       runtime_identity: nativeIdentity(tab.tab_id),
     }));
   } catch (e) {
-    lastRecreateAt.set(session.id, Date.now()); // и при отказе (quota/wall) — без шторма повторов
+    lastRecreateAt.set(session.id, Date.now());
     lastError = `agent_tab ${session.id}: ${String(e?.message || e).slice(0, 120)}`;
-    emitRow(row('AGENT_TAB_FAILED', { session_id: session.id, error: lastError }), { error: true });
+    emitRow(row('AGENT_TAB_FAILED', { session_id: session.id, conversation_url: url, error: lastError }), { error: true });
   }
 }
 
@@ -162,9 +236,13 @@ async function closeAgentTab(sessionId, reason) {
   const known = agentTabs.get(sessionId);
   if (!host || !known) return;
   try {
-    if (typeof host.closeTab === 'function') await host.closeTab(known.tab_id);
-    else host.registry.close(known.tab_id);
-    emitRow(row('AGENT_TAB_CLOSED', { session_id: sessionId, tab_id: known.tab_id, reason }));
+    if (known.owned === true) {
+      if (typeof host.closeTab === 'function') await host.closeTab(known.tab_id);
+      else host.registry.close(known.tab_id);
+      emitRow(row('AGENT_TAB_CLOSED', { session_id: sessionId, tab_id: known.tab_id, reason, owned: true }));
+    } else {
+      emitRow(row('AGENT_TAB_UNBOUND', { session_id: sessionId, tab_id: known.tab_id, reason, owned: false }));
+    }
   } catch { /* tab may already be physically gone; reconciliation stays idempotent */ }
   agentTabs.delete(sessionId);
 }
