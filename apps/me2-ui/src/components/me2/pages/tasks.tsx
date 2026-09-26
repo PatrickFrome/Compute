@@ -7,16 +7,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AppWindow, Activity, GitBranch, ListChecks, MonitorPlay, MousePointerClick, Plus, RefreshCw,
+  Activity, GitBranch, ListChecks, Plus,
 } from "lucide-react";
 import {
-  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, loadBrowserTabs, me2Fetch, taskAction,
-  type BranchTabKey, type BrowserTab, type Task,
+  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, me2Fetch, taskAction,
+  type BranchTabKey, type Task,
 } from "@/lib/me2-bus";
 import { agentChatOp } from "@/lib/me2-socket";
 import { useMe2 } from "@/components/me2/store";
 import { Chip, PageHeader, Sec, StatusBadge } from "@/components/me2/ui/primitives";
-import MirrorPanel from "@/components/me2/mirror-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -399,28 +398,6 @@ export function TasksPage() {
   // retry ↻ на ветви — TASK_RETRY через шину
   const retryBranch = useCallback(async (t: Task) => { await taskAction("TASK_RETRY", t.id); }, []);
 
-  // v0.6.0 legacy: живые вкладки agent-browser в шапке секции ВЕТКИ
-  const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
-  const [browserBusy, setBrowserBusy] = useState(false);
-  const [castOn, setCastOn] = useState(false);
-  const [castCtl, setCastCtl] = useState(false);
-  const refreshTabs = useCallback(async () => {
-    setBrowserBusy(true);
-    try { setBrowserTabs(await loadBrowserTabs()); }
-    finally { setBrowserBusy(false); }
-  }, []);
-  useEffect(() => { void refreshTabs(); const iv = setInterval(() => void refreshTabs(), 15_000); return () => clearInterval(iv); }, [refreshTabs]);
-  // тумблеры live/руль управляют стримом :3042 глобально (BrowserStage на COMMAND) —
-  // мост через window-события (расширение legacy-контракта window-событий)
-  const toggleCast = useCallback((on: boolean) => {
-    setCastOn(on);
-    window.dispatchEvent(new CustomEvent("me2:cast-toggle", { detail: { on } }));
-  }, []);
-  const toggleCastCtl = useCallback((on: boolean) => {
-    setCastCtl(on);
-    window.dispatchEvent(new CustomEvent("me2:cast-ctl", { detail: { on } }));
-  }, []);
-
   // ── панель ВЕТКИ: данные + счётчики вкладок (порт legacy L2124-2139) ──────────
   const branchData = useMemo(() => [...(snap?.tasks ?? []), ...(snap?.archived ?? [])], [snap]);
   const branchCounts = useMemo(() => {
@@ -475,7 +452,7 @@ export function TasksPage() {
         actions={retryChip}
       />
       <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
-        {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + вкладки + вкладки браузера) ── */}
+        {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + task-фильтры; Browser живёт на COMMAND/BROWSER) ── */}
         <div className="flex min-h-0 min-w-0 flex-col lg:flex-[2]">
           <Sec
             id="tasks-branches"
@@ -514,65 +491,6 @@ export function TasksPage() {
                 })}
               </div>
             </div>
-            {/* вкладки браузера: живые вкладки agent-browser (v0.6.0) */}
-            <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-800/60 bg-black/20 px-1 py-1.5" aria-label="Ветки браузера">
-              <span className="flex shrink-0 items-center gap-1 pr-1 text-[9px] font-semibold tracking-widest text-zinc-500">
-                <AppWindow className="h-3 w-3 text-sky-400" aria-hidden /> БРАУЗЕР
-              </span>
-              {browserTabs.length === 0 && !browserBusy && (
-                <button type="button" onClick={() => void refreshTabs()} className="shrink-0 text-[10px] text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline">
-                  показать вкладки
-                </button>
-              )}
-              {browserTabs.map((t) => (
-                <span
-                  key={t.id}
-                  title={`${t.title}\n${t.url}`}
-                  className={`flex max-w-44 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 py-1 text-[10px] transition ${
-                    t.active
-                      ? "border-zinc-600 bg-zinc-800 text-zinc-100"
-                      : "border-zinc-800 bg-zinc-900/60 text-zinc-400"
-                  }`}
-                >
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
-                  <span className="truncate">{t.title.slice(0, 26) || t.url}</span>
-                </span>
-              ))}
-              <button
-                type="button"
-                onClick={() => toggleCast(!castOn)}
-                aria-pressed={castOn}
-                title="Живой вид активной вкладки — WS-стрим агента-браузера (:3042, Stage на COMMAND)"
-                className={`ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition ${
-                  castOn ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                }`}
-              >
-                <MonitorPlay className="h-3 w-3" aria-hidden />
-                live
-              </button>
-              {castOn && (
-                <button
-                  type="button"
-                  onClick={() => toggleCastCtl(!castCtl)}
-                  aria-pressed={castCtl}
-                  title="Руль: клики, клавиатура и колесо в кадре идут в активную вкладку. Ctrl/Meta-комбо остаются у оператора."
-                  className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition ${
-                    castCtl ? "bg-amber-500/15 text-amber-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                  }`}
-                >
-                  <MousePointerClick className="h-3 w-3" aria-hidden />
-                  руль
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void refreshTabs()}
-                aria-label="Обновить вкладки браузера"
-                className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
-              >
-                <RefreshCw className={`h-3 w-3 ${browserBusy ? "animate-spin" : ""}`} aria-hidden />
-              </button>
-            </div>
             <div className="px-1 py-1">
               {branchTasks.length === 0 ? (
                 <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
@@ -589,7 +507,7 @@ export function TasksPage() {
           </Sec>
         </div>
 
-        {/* ── право: ОЧЕРЕДЬ + METRICS + MIRROR ── */}
+        {/* ── право: ОЧЕРЕДЬ + METRICS; Mirror живёт в OBSERVABILITY/Attention ── */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll lg:flex-[1]">
           <Sec
             id="tasks-queue"
@@ -665,8 +583,6 @@ export function TasksPage() {
               </div>
             )}
           </Sec>
-
-          <MirrorPanel />
         </div>
       </div>
     </div>
