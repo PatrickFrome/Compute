@@ -3,7 +3,7 @@
 // On COMMAND, main-process native geometry reserves the same 200px so renderer
 // controls cannot be covered by the Browser WebContentsView.
 
-import { Activity, Bot, Database, ListChecks, ScanSearch, Server, X } from "lucide-react";
+import { Activity, Bot, Crosshair, Database, ListChecks, ScanSearch, Server, X } from "lucide-react";
 import { useMe2, type ContextDrawerTab } from "@/components/me2/store";
 import { EVENT_STYLE, hhmmss } from "@/lib/me2-bus";
 import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
@@ -101,6 +101,8 @@ export function ContextDrawer() {
   const tab = useMe2((s) => s.contextDrawerTab);
   const setOpen = useMe2((s) => s.setContextDrawer);
   const setTab = useMe2((s) => s.setContextDrawerTab);
+  const followSelection = useMe2((s) => s.contextDrawerFollowSelection);
+  const setFollowSelection = useMe2((s) => s.setContextDrawerFollowSelection);
   const events = useMe2((s) => s.events);
   const snap = useMe2((s) => s.snap);
   const mirror = useMe2((s) => s.mirror);
@@ -134,7 +136,22 @@ export function ContextDrawer() {
             </button>
           ))}
         </div>
-        <span className="ml-auto hidden font-mono text-[8px] text-zinc-700 sm:inline">Ctrl/Cmd+J</span>
+        <button
+          type="button"
+          onClick={() => setFollowSelection(!followSelection)}
+          aria-pressed={followSelection}
+          data-testid="context-drawer-follow-selection"
+          className={`ml-auto flex h-6 items-center gap-1 border px-1.5 font-mono text-[8px] uppercase tracking-wide transition-colors ${
+            followSelection
+              ? "border-cyan-900/70 bg-cyan-950/20 text-cyan-300"
+              : "border-zinc-800 text-zinc-600 hover:text-zinc-300"
+          }`}
+          title="Когда Drawer открыт, новая task/agent selection переводит его на Selection. Drawer никогда не открывается автоматически."
+        >
+          <Crosshair className="h-3 w-3" aria-hidden />
+          follow
+        </button>
+        <span className="ml-2 hidden font-mono text-[8px] text-zinc-700 sm:inline">Ctrl/Cmd+J</span>
         <button
           type="button"
           onClick={() => setOpen(false)}
