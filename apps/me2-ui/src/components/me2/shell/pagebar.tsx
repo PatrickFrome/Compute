@@ -87,7 +87,7 @@ export function PageBar() {
                 title={`${p.label} · Alt+${p.num}`}
               >
                 <Icon className={`h-3.5 w-3.5 shrink-0 ${active ? "text-emerald-400" : "text-zinc-500 group-hover:text-zinc-300"}`} aria-hidden />
-                <span className={`hidden 2xl:inline ${active ? "text-emerald-300" : "text-zinc-500 group-hover:text-zinc-300"}`}>{p.label}</span>
+                <span className={`hidden xl:inline ${active ? "text-emerald-300" : "text-zinc-500 group-hover:text-zinc-300"}`}>{p.label}</span>
                 {active ? <span className="absolute inset-x-1 bottom-0 h-px bg-emerald-400" aria-hidden /> : null}
               </button>
             </div>
