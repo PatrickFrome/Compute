@@ -616,7 +616,7 @@ async function preparePrimaryShellTarget() {
   return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
-const ME2_R75_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']);
+const ME2_R75_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'page-command', 'cc-sidebar-toggle', 'pagebar', 'statusbar']);
 
 function cdpBoxVisible(model) {
   const points = Array.isArray(model?.content) && model.content.length >= 8
