@@ -48,6 +48,8 @@ export function CommandPalette() {
   const openTask = useMe2((s) => s.openTask);
   const setChatId = useMe2((s) => s.setChatId);
   const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks" | "actions">("all");
+  const [pendingAction, setPendingAction] = useState<ActionMeta | null>(null);
+  const [pendingArgs, setPendingArgs] = useState("{}");
 
   const confirmBudgetFlush = () => {
     setOpen(false);
@@ -81,19 +83,28 @@ export function CommandPalette() {
     if (fn) {
       fn();
       if (meta.action !== "ENVIRONMENT_RESET" && meta.action !== "TASK_ENQUEUE" && meta.action !== "TASK_SCHEDULE") setOpen(false);
+    } else if (meta.args) {
+      // Keep argument entry inside the ME2 semantic overlay instead of falling
+      // out to window.prompt, which was invisible to the composition model.
+      setPendingArgs("{}");
+      setPendingAction(meta);
     } else {
       setOpen(false);
-      if (meta.args) {
-        const raw = window.prompt(`Аргументы ${meta.action} (${meta.args}) — JSON, напр. {"id":"tk_..."}`, "{}");
-        if (raw) {
-          try {
-            const payload = JSON.parse(raw) as Record<string, unknown>;
-            void sendCommand(meta.action, payload, {});
-          } catch {
-            window.dispatchEvent(new CustomEvent("me2:toast", { detail: { title: `${meta.action} ✗`, description: "аргументы не JSON", variant: "destructive" } }));
-          }
-        }
-      }
+    }
+  };
+
+  const runPendingRegistryAction = () => {
+    if (!pendingAction) return;
+    try {
+      const payload = JSON.parse(pendingArgs) as Record<string, unknown>;
+      void sendCommand(pendingAction.action, payload, {});
+      setPendingAction(null);
+      setPendingArgs("{}");
+      setOpen(false);
+    } catch {
+      window.dispatchEvent(new CustomEvent("me2:toast", {
+        detail: { title: `${pendingAction.action} ✗`, description: "аргументы не JSON", variant: "destructive" },
+      }));
     }
   };
 
@@ -108,7 +119,7 @@ export function CommandPalette() {
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
+    <CommandDialog open={open} onOpenChange={(next) => { if (!next) { setPendingAction(null); setPendingArgs("{}"); } setOpen(next); }}>
       <CommandInput placeholder="ME2: найти страницу · агента · задачу · команду…" />
       <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5" aria-label="Режим Command Palette">
         {([
@@ -133,6 +144,43 @@ export function CommandPalette() {
           </button>
         ))}
       </div>
+      {pendingAction ? (
+        <div className="space-y-3 p-3" data-testid="registry-action-args">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" title={`Authority lane: ${pendingAction.lane}`} className={`h-5 border px-1.5 font-mono text-[8px] ${laneChip(pendingAction.lane)}`}>
+              {pendingAction.lane.replace("_", " ")}
+            </Badge>
+            <span className="font-mono text-xs text-zinc-200">{pendingAction.action}</span>
+          </div>
+          <p className="text-[10px] leading-relaxed text-zinc-500">
+            {pendingAction.desc}{pendingAction.args ? ` · args: ${pendingAction.args}` : ""}
+          </p>
+          <textarea
+            value={pendingArgs}
+            onChange={(event) => setPendingArgs(event.target.value)}
+            rows={6}
+            spellCheck={false}
+            aria-label={`JSON аргументы для ${pendingAction.action}`}
+            className="w-full resize-y border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-200 outline-none focus:border-emerald-900"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setPendingAction(null); setPendingArgs("{}"); }}
+              className="border border-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            >
+              назад
+            </button>
+            <button
+              type="button"
+              onClick={runPendingRegistryAction}
+              className="border border-emerald-900 bg-emerald-950/30 px-2 py-1 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-950/60"
+            >
+              выполнить
+            </button>
+          </div>
+        </div>
+      ) : (
       <CommandList>
         <CommandEmpty>не найдено</CommandEmpty>
 
@@ -243,6 +291,7 @@ export function CommandPalette() {
           </>
         )}
       </CommandList>
+      )}
     </CommandDialog>
   );
 }
