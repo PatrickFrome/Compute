@@ -123,29 +123,61 @@ async function refreshBrainBaseline() {
 
 // R84/R75 installed UI contract readback. This is observation-only and remains
 // inside the trusted preload; the renderer receives no new ipcRenderer/send
-// capability. It proves the packaged ME2 composition actually rendered instead
-// of merely proving that the loopback URL loaded.
+// capability. Next/React may hydrate after DOMContentLoaded, so a one-shot
+// microtask is insufficient. Observe DOM mutations and emit CONFIRMED as soon as
+// the exact R75 composition exists; emit incomplete only after one bounded
+// hydration deadline. No interval/polling loop and no renderer authority.
 window.addEventListener('DOMContentLoaded', () => {
-  queueMicrotask(() => {
+  const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
+  let settled = false;
+  let observer = null;
+  let deadline = null;
+
+  const snapshot = () => {
+    const present = Object.fromEntries(required.map((id) => [id, Boolean(document.querySelector(`[data-testid="${id}"]`))]));
+    return { present, complete: required.every((id) => present[id] === true) };
+  };
+
+  const emit = ({ present, complete }) => {
+    ipcRenderer.send('metaengine:shell:ui-contract-readback', {
+      schema: 'metaengine.browser.me2-ui-contract-readback.v1',
+      location_class: location.origin.startsWith('http://127.0.0.1:') ? 'PACKAGED_ME2_LOOPBACK' : 'OTHER',
+      hash: String(location.hash || ''),
+      required,
+      present,
+      complete,
+      scheduler_authority: false,
+      browser_command_authority: false,
+      update_authority: false,
+      release_authority: false,
+      authority_effect: false,
+    });
+  };
+
+  const finish = (state) => {
+    if (settled) return;
+    settled = true;
+    try { observer?.disconnect(); } catch {}
+    if (deadline != null) clearTimeout(deadline);
+    emit(state);
+  };
+
+  const inspect = () => {
+    if (settled) return;
     try {
-      const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
-      const present = Object.fromEntries(required.map((id) => [id, Boolean(document.querySelector(`[data-testid="${id}"]`))]));
-      ipcRenderer.send('metaengine:shell:ui-contract-readback', {
-        schema: 'metaengine.browser.me2-ui-contract-readback.v1',
-        location_class: location.origin.startsWith('http://127.0.0.1:') ? 'PACKAGED_ME2_LOOPBACK' : 'OTHER',
-        hash: String(location.hash || ''),
-        required,
-        present,
-        complete: required.every((id) => present[id] === true),
-        scheduler_authority: false,
-        browser_command_authority: false,
-        update_authority: false,
-        release_authority: false,
-        authority_effect: false,
-      });
+      const state = snapshot();
+      if (state.complete) finish(state);
     } catch {}
-  });
-});
+  };
+
+  observer = new MutationObserver(inspect);
+  try { observer.observe(document.documentElement, { childList: true, subtree: true }); } catch {}
+  inspect();
+  deadline = setTimeout(() => {
+    if (settled) return;
+    try { finish(snapshot()); } catch {}
+  }, 8000);
+}, { once: true });
 
 ipcRenderer.on('metaengine:shell:snapshot', (_event, value) => emitSnapshot(value));
 ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
