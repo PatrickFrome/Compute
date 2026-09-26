@@ -9090,3 +9090,43 @@ Backlog следующего раунда (приоритеты):
 1. ОПЕРАТОР (без изменений): очистка account-draft (Ctrl+A+Delete) → R82 закроется сам; ревью+merge PR #982; PR #968 → R89/R90 seal-фаза (манифест на артефакте 10908498280).
 2. Бакет me2-capsule теперь постоянная точка раздачи капсул — при следующих капсулах загружать туда же (версионировать имена файлов датой, x-upsert при пересборке).
 3. Консоль (мелочи, без изменений): авто-тост при падении r89_exit_gate; per-round фильтр в Qualification; edge-карточка retry-политика для медленных CF-вызовов.
+---
+Task ID: RAIL-DONOR-LINERAGE-20260926
+Agent: (синтетический блок сохранения линеража — Job 413338 journal-sync)
+Task: Сохранить заголовок rail-worklog (создан заново после env-reset #2) и провенанс донорского worklog
+
+Work Log:
+- Дословная цитата заголовка rail-worklog (sandbox/me2-os @ 1f27004, до journal-sync):
+> ПРЕДУПРЕЖДЕНИЕ О LINERAGE: этот файл создан заново после полного env-reset
+> песочницы (пропали /home/z/.a2/, daemon, git-история, прежний worklog).
+> Донорская история живёт в GitHub sandbox/me2-os @ 56ba1b87 (worklog до R80)
+> и недоступна из песочницы без GitHub-credentials. R-линия продолжена с R81
+> согласно R80 cross-audit (см. ниже). Никаких заявлений о 47/47 реестре —
+> только честно реализованное.
+- Донорский worklog извлечён из 56ba1b87 (ancestor rail tip, объект пришёл с fetch sandbox/me2-os) и влит в этот канонический журнал: 78 новых блоков линии R21…R80 (5 дедуплицировано с локальными по sha тела).
+
+Stage Summary:
+- Линераж единого многочатового журнала теперь полный: глубокая история (pre-reset) + R15→CTX + донор R21→R80 + rail R81→R89/CAPSULE — один файл, append-only, ничего не удалено.
+---
+Task ID: R80-PUSH
+Agent: Z.ai Code (main session — Job 413338, PAT восстановлен оператором)
+Task: Публикация push-pending R80: архив-ветки верифицированы, rail обновлён journal-sync-ом (без force), дыра R22–R80 закрыта
+
+Work Log:
+- Оператор передал новый PAT в чат: записан в /home/z/.a2/.github.env (chmod 600; значение нигде не печаталось и не логировалось). Валидация GitHub API: /user = 200, /repos/PatrickFrome/Compute = 200, scopes repo+workflow+admin:*. Кандидаты из CTX-5 оставались мертвы (401) — этот жив.
+- scripts/push-pending-r80.sh обнаружен только в /tmp-зеркале (в проекте отсутствовал) — восстановлен в репозиторий и в rail.
+- Шаг 1 скрипта (main→sandbox/me2-os ff) отклонён: remote ушёл далеко вперёд — 1f27004 (CAPSULE 2026-09-26), R82→R89 сделаны параллельными чатами; merge-base локального main с rail = R21 (93b6cff). Force-пуш ЗАПРЕЩЁН и не выполнялся ни в какой форме.
+- Шаги 2–3 (архив-ветки): push вернул «Everything up-to-date» — me2/archive-r21-sandbox-snapshot=73486dd и me2/archive-v040-main-archive=c95de21 уже на remote с sha-идентичными кончиками (ls-remote верифицирован; судя по записи R89 «GitHub plane restored post env-reset #2 (operator token)», их опубликовал параллельный чат). Локально потерянный ref local/r21-snapshot восстановлен update-ref-ом на 73486dd (объект был жив, fsck-подтверждён).
+- Ключевое открытие из заголовка rail-worklog: донорская история до R80 живёт в GitHub-коммите 56ba1b87; объект оказался АНКЕСТОРОМ rail tip (пришёл с fetch) → дыра R22–R80 восстановима целиком — что и сделано ниже.
+- Journal-sync: тройной секционный union local(1.07MB, 169 блоков) ∪ donor(530KB @56ba1b87, 83 блока) ∪ rail(166KB, 17 блоков) инструментом scripts/wl-merge.mjs (CTX-4 протокол: блоки «---/Task ID:», dedup ТОЛЬКО по sha тела, одноимённые ID разных чатов сохраняются): 264 блока, +78 донорских (5 дедуплицировано), +17 rail; 0 потеряно (localAllPresent/donorAllPresent/railAllPresent=true, noDupShas=true); итог 1.73MB.
+- Секрет-скрин всех 12 стейджируемых файлов по 10 паттернам (ghp_/gho_/github_pat_/x-access-token/sk-ant/sk-proj/JWT/PRIVATE KEY/postgres-URL/service-role literal): 0 попаданий — публикация разрешена. Значения токенов не печатались ни на одном шаге.
+- Plumbing-коммит БЕЗ переключения веток и БЕЗ касания рабочего дерева: tree = rail 1f27004 + аддитивные файлы (worklog.md union, worklog-archive-pre-reset.md, CONTEXT.md, CONTEXT-CURRENT.md, PHOENIX-PROTOCOL.md, scripts/phoenix/{phoenix-snapshot,phoenix-heartbeat,phoenix-restore}.sh, wl-merge.mjs, supabase-persist.sh, context-guard.sh, push-pending-r80.sh); родители 1f27004 × ee59789.
+- PUSH A = 7877f671 VERIFIED: ls-remote sandbox/me2-os = 7877f671 (fast-forward 1f27004b..7877f671, rail-код не тронут, ни один существующий файл rail не перезаписан).
+- Файлы оператора из этого чата (zai-chat-20260926-1612.txt, me2-os-capsule-2026-09-26.zip) на диск НЕ материализовались (upload/ содержит только файлы Sep 20/23). Капсула и так в безопасности: rail-коммит 1f27004 фиксирует me2-os-capsule-2026-09-26.zip в Supabase bucket me2-capsule (sha256 607435d0, round-trip verified). При необходимости оператор может перезагрузить.
+- Финализация: commit B (этот файл + linerage-блок) поверх A → push → локальный main получает тот же финальный worklog собственным коммитом (код rail в рабочее дерево этого чата НЕ сливался).
+
+Stage Summary:
+- R80-блокер снят полностью: всё локально-уникальное опубликовано на GitHub БЕЗ единого force. Канонический worklog = 264 блока: глубокая история + R15→CTX-5 + донор R21→R80 + rail R81→R89/CAPSULE; phoenix-инструментарий и контекстный слой теперь живут в rail → переживают env-reset.
+- Дыра R22–R80 ЗАКРЫТА (78 донорских блоков); линераж сохранён (RAIL-DONOR-LINERAGE-20260926).
+- sandbox/me2-os = A(7877f671) → B; архив-ветки sha-идентичны; guard 416526 отныне сам публикует ветку context-vault (PAT на месте).
+- Риски/ next: (1) параллельные чаты продолжают пушить в rail — перед любой публикацией fetch+union по protocols/wl-merge, никогда force; (2) новый PAT передан в чат открытым текстом — рекомендовать оператору ротацию после стабилизации; (3) рабочее дерево этого чата остаётся на скаффолде — унификация на rail-код отдельным решением; (4) heartbeat/compactor-шарды подхватят новый worklog в течение часа.
