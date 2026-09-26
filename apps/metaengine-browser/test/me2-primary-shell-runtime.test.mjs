@@ -5,6 +5,8 @@ import test from 'node:test';
 import {
   ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
   ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT,
+  ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT,
+  ME2_PRIMARY_MIN_BROWSER_HEIGHT,
   ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
   ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT,
   ME2_PRIMARY_COMMAND_GAP,
@@ -36,6 +38,7 @@ const me2AgentChatFeed = await readFile(new URL('../../me2-ui/src/hooks/use-agen
 const me2CodePage = await readFile(new URL('../../me2-ui/src/components/me2/pages/code.tsx', import.meta.url), 'utf8');
 const me2TasksPage = await readFile(new URL('../../me2-ui/src/components/me2/pages/tasks.tsx', import.meta.url), 'utf8');
 const me2Dialogs = await readFile(new URL('../../me2-ui/src/components/me2/shell/dialogs.tsx', import.meta.url), 'utf8');
+const me2ContextDrawer = await readFile(new URL('../../me2-ui/src/components/me2/shell/context-drawer.tsx', import.meta.url), 'utf8');
 
 test('R75 primary shell keeps ME2 chrome and agent rail outside the native Browser surface', () => {
   const plan = planShellLayout({
@@ -108,6 +111,40 @@ test('R85 command rail visibility and native Browser bounds share one presentati
   assert.ok(closed.remote_bounds.width > open.remote_bounds.width);
   assert.ok(closed.adaptations.includes('ME2_AGENT_RAIL_HIDDEN_BY_PRESENTATION'));
   assert.equal(closed.authority_effect, false);
+});
+
+test('R85 contextual drawer reserves native Browser height and degrades before starving the active surface', () => {
+  const closed = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+    me2_context_drawer_open: false,
+  });
+  const open = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+    me2_context_drawer_open: true,
+  });
+  assert.equal(open.me2_context_drawer_effective_open, true);
+  assert.equal(open.me2_context_drawer_height, ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
+  assert.equal(open.remote_bounds.height, closed.remote_bounds.height - ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT);
+  assert.ok(open.remote_bounds.height >= ME2_PRIMARY_MIN_BROWSER_HEIGHT);
+  assert.equal(open.authority_effect, false);
+
+  const short = planShellLayout({
+    width: 1440,
+    height: 640,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R75_COMMAND',
+    me2_context_drawer_open: true,
+  });
+  assert.equal(short.me2_context_drawer_effective_open, false);
+  assert.equal(short.me2_context_drawer_height, 0);
+  assert.ok(short.adaptations.includes('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE'));
+  assert.ok(short.remote_bounds.height >= ME2_PRIMARY_MIN_BROWSER_HEIGHT);
 });
 
 test('normal Browser startup prefers packaged ME2 and retains legacy shell only as recovery', () => {
@@ -341,6 +378,39 @@ test('R85 page history uses a real cursor for Alt back and forward', () => {
   assert.match(store, /set\(\{ page: target, pageHistoryIndex: nextIndex \}\)/);
   assert.match(store, /const prefix = st\.recentPages\.slice\(0, st\.pageHistoryIndex \+ 1\)/);
   assert.doesNotMatch(store, /rp\.length - 2/);
+});
+
+test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
+  assert.match(preload, /const setPrimaryContextDrawer = \(open\) => ipcRenderer\.invoke\('metaengine:shell:primary-context-drawer'/);
+  const primaryBranch = preload.slice(
+    preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
+    preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
+  );
+  assert.match(primaryBranch, /setPrimaryContextDrawer/);
+  assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
+
+  assert.match(main, /let primaryContextDrawerOpen = false/);
+  assert.match(main, /me2_context_drawer_open: primaryContextDrawerOpen/);
+  assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-context-drawer'/);
+  const drawerHandler = main.slice(
+    main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'"),
+    main.indexOf("ipcMain.handle('metaengine:shell:system-deltas'", main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'")),
+  );
+  assert.match(drawerHandler, /presentation_only:\s*true/);
+  assert.match(drawerHandler, /scheduler_authority:\s*false/);
+  assert.match(drawerHandler, /browser_command_authority:\s*false/);
+  assert.match(drawerHandler, /update_authority:\s*false/);
+  assert.match(drawerHandler, /release_authority:\s*false/);
+  assert.match(drawerHandler, /authority_effect:\s*false/);
+
+  assert.match(store, /me2\.context-drawer\.open\.v1/);
+  assert.match(store, /Ctrl\/Cmd\+J|e\.key === "j"/);
+  assert.match(store, /setPrimaryContextDrawer/);
+  assert.match(me2Topbar, /data-testid="context-drawer-toggle"/);
+  assert.match(me2Shell, /<ContextDrawer \/>/);
+  assert.match(me2ContextDrawer, /data-testid="context-drawer"/);
+  assert.match(me2ContextDrawer, /h-\[200px\]/);
+  assert.doesNotMatch(me2ContextDrawer, /sendCommand\(|me2Fetch\(|agentChatOp\(/);
 });
 
 test('R85 command rail bridge is presentation-only and reconciles effective geometry', () => {
