@@ -7,7 +7,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  allowedDevOrigins: ["https://*.space-z.ai", "http://*.space-z.ai"],
+  // R88-RESILIENCE: Next 16 expects hostname patterns WITHOUT protocol —
+  // protocol-prefixed entries silently never match, blocking /_next/* for
+  // the preview origin (observed live: "Blocked cross-origin request from
+  // preview-chat-*.space-z.ai" despite the config being present).
+  allowedDevOrigins: ["*.space-z.ai", "space-z.ai", "127.0.0.1", "localhost"],
 };
 
 export default nextConfig;

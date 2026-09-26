@@ -54,6 +54,9 @@ interface Health {
   actions: { implemented: number; donor_registry: string }
   last_seq: number; head_hash: string; ws_port: number
   mirror_anchor: { seq: number; hash: string; daemon_version: string; mirrored_at: string }
+  // R88-RESILIENCE: aggregated credential-plane liveness (env-reset #2 made
+  // this first-class — the global banner keys off suspected_env_reset)
+  planes?: { ok: string[]; missing: string[]; suspected_env_reset: boolean }
 }
 interface Supervisor {
   client_id: string; last_seen_at: string; heartbeat_age_s: number
@@ -87,6 +90,8 @@ interface Verdicts {
 }
 interface Recovery {
   env_reset_detected: boolean
+  reset_count?: number
+  history?: string
   restored: { item: string; state: string }[]
   blocked: { item: string; reason: string }[]
   pending_next: string[]
@@ -288,7 +293,7 @@ interface MirrorStatus {
     window_since: string
   } | null
   // R83-VERIFY: journal-recorded last contract-verification run
-  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number; trigger: string | null } | null
+  last_verify: { at: string; ok: boolean; rows: number; duration_ms: number; violations: number; trigger: string | null; error_class?: string | null } | null
   // R83-AUTONOMY: the silent 6h self-check cadence (journal-derived schedule)
   auto_verify: { interval_ms: number; last_at: string | null; next_in_ms: number | null; running: boolean } | null
   history: Me2Event[]
@@ -305,6 +310,9 @@ interface MirrorVerifyResult {
   first_broken_seq: number | null
   checks: { seq_continuity: boolean; prev_hash_chain: boolean; row_hashes: boolean; bindings: boolean }
   samples: string[]
+  // R88-RESILIENCE: "secrets_missing" = проверка не выполнилась (env-degraded) —
+  // это НЕ нарушение контракта; консоль рендерит amber вместо rose
+  error_class?: 'secrets_missing' | 'unknown'
 }
 
 // R83-AUTONOMY: R82 before/after diff report (GET /r82/report) — poisoned
@@ -807,13 +815,23 @@ export default function MissionControl() {
     try {
       const r = await jfetch<MirrorVerifyResult>('/mirror/verify', { method: 'POST' })
       setMirrorVerifyRes(r)
-      toast({
-        title: r.ok ? `✓ Контракт зеркала держит: ${r.rows_checked} строк` : `✗ Нарушений: ${r.violations}`,
-        description: r.ok
-          ? `seq-непрерывность + prev_hash-цепь + hash-пересчёт + кросс-биндинги — всё OK · ${r.duration_ms}ms · хвост #${r.head_seq}`
-          : `${r.samples.slice(0, 2).join(' · ') || 'первое нарушение см. в карточке'}`,
-        variant: r.ok ? undefined : 'destructive',
-      })
+      // R88-RESILIENCE: a credentials-blocked run is env-degradation, not a
+      // broken contract — amber toast, never destructive red
+      const secretsBlocked = !r.ok && r.error_class === 'secrets_missing'
+      if (secretsBlocked) {
+        toast({
+          title: '⚠ Верификация не выполнена: секреты отсутствуют',
+          description: 'контракт НЕ признан нарушенным — чтение зеркала заблокировано отсутствием /home/z/.a2/supabase-cloud.env (см. баннер env-reset)',
+        })
+      } else {
+        toast({
+          title: r.ok ? `✓ Контракт зеркала держит: ${r.rows_checked} строк` : `✗ Нарушений: ${r.violations}`,
+          description: r.ok
+            ? `seq-непрерывность + prev_hash-цепь + hash-пересчёт + кросс-биндинги — всё OK · ${r.duration_ms}ms · хвост #${r.head_seq}`
+            : `${r.samples.slice(0, 2).join(' · ') || 'первое нарушение см. в карточке'}`,
+          variant: r.ok ? undefined : 'destructive',
+        })
+      }
       loadMirror(true)
     } catch (e) {
       toast({ title: 'Верификация не удалась', description: (e as Error).message, variant: 'destructive' })
@@ -827,8 +845,17 @@ export default function MissionControl() {
       const r = await jfetch<{ synced: number; mirror_to_seq: number; duration_ms: number }>('/mirror/sync', { method: 'POST' })
       toast({ title: `Mirror sync: ${r.synced} событий`, description: `mirror #${r.mirror_to_seq} · ${r.duration_ms}ms` })
       loadMirror(true)
-    } catch (e) { toast({ title: 'Mirror sync отклонён', description: (e as Error).message, variant: 'destructive' }) }
-    finally { setBusy(null) }
+    } catch (e) {
+      // R88-RESILIENCE: secrets-blocked sync = env-degraded (amber), not a
+      // pipeline failure — the local chain keeps writing and will catch up
+      const msg = (e as Error).message
+      const secretsGone = /secrets_missing|\.env|not found|отсутствует/i.test(msg)
+      toast({
+        title: secretsGone ? '⚠ Mirror sync: env-degraded — секреты отсутствуют' : 'Mirror sync отклонён',
+        description: secretsGone ? 'запись в Supabase приостановлена fail-closed; события копятся локально и будут отзеркалированы после восстановления секретов' : msg,
+        variant: secretsGone ? undefined : 'destructive',
+      })
+    } finally { setBusy(null) }
   }
 
   useEffect(() => {
@@ -925,7 +952,10 @@ export default function MissionControl() {
     // (payload.trigger distinguishes operator clicks from the daemon timer)
     const milestones = events.filter((e) =>
       MILESTONE_LABELS[e.type] != null
-      && !(e.type === 'MIRROR_VERIFY' && (e.payload as { trigger?: string } | null)?.trigger === 'timer'))
+      && !(e.type === 'MIRROR_VERIFY' && (e.payload as { trigger?: string } | null)?.trigger === 'timer')
+      // R88-RESILIENCE: a FAILED verify run is not a milestone worth toasting
+      // (the operator-click handler already reports the outcome)
+      && !(e.type === 'MIRROR_VERIFY' && (e.payload as { ok?: boolean } | null)?.ok === false))
     if (milestones.length === 0) return
     const top = Math.max(...milestones.map((m) => m.seq))
     if (milestoneSeqRef.current < 0) {
@@ -1003,11 +1033,22 @@ export default function MissionControl() {
       mirrorErrRef.current = err
       if (err) {
         const le = mirror.state.last_error
-        if (soundOn) beep('alert')
-        toast({
-          title: '⚠ Mirror: ошибка синка',
-          description: `${le?.code ?? '?'}: ${(le?.message ?? '').slice(0, 120)} — fail-closed, записи остановлены`,
-        })
+        // R88-RESILIENCE: credentials-missing is env-degradation — amber,
+        // distinct title, no 'alert' beep (it is not a divergence of the
+        // evidence pipeline; the banner already explains it)
+        const secretsGone = le?.code === 'mirror_secrets_missing' || /\.env|not found|отсутствует/i.test(le?.message ?? '')
+        if (secretsGone) {
+          toast({
+            title: '⚠ Mirror: env-degraded — секреты отсутствуют',
+            description: 'синк с Supabase приостановлен fail-closed; локальная цепь продолжает писаться и будет отзеркалирована после восстановления /home/z/.a2/supabase-cloud.env',
+          })
+        } else {
+          if (soundOn) beep('alert')
+          toast({
+            title: '⚠ Mirror: ошибка синка',
+            description: `${le?.code ?? '?'}: ${(le?.message ?? '').slice(0, 120)} — fail-closed, записи остановлены`,
+          })
+        }
       } else {
         toast({ title: 'Mirror восстановлен', description: 'последний синк без ошибок — запись в Supabase продолжается' })
       }
@@ -1200,6 +1241,55 @@ export default function MissionControl() {
           </div>
         </div>
       </header>
+
+      {/* R88-RESILIENCE: global env-reset banner — fires when ≥2 credential
+          planes are missing (the daemon aggregates per-call in /health.planes).
+          Single-plane loss is NOT a reset (could be one file being rotated) —
+          per-plane chips still appear once the banner is up. Survivors are
+          listed explicitly so the operator sees the blast radius at a glance. */}
+      {health?.planes?.suspected_env_reset && (
+        <div className="mx-auto w-full max-w-7xl px-4 pt-4" role="alert" aria-live="polite">
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.07] p-4 shadow-[0_0_24px_rgba(245,158,11,0.06)]">
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/10">
+                <AlertTriangle className="h-5 w-5 text-amber-400" />
+              </div>
+              <div className="min-w-0 flex-1 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-bold tracking-wide text-amber-300">ENV-RESET #{recovery?.reset_count ?? 2} · внешние credential-плоскости недоступны</span>
+                  <Chip tone="warn" title="агрегирует /health.planes — пересчитывается при каждом poll (5с), а не кешируется с boot">planes {health.planes.ok.length}/{health.planes.ok.length + health.planes.missing.length}</Chip>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {([
+                    ['github', 'GitHub'],
+                    ['supabase', 'Supabase'],
+                    ['cloudflare', 'Cloudflare'],
+                    ['supervisor', 'supervisor'],
+                  ] as const).map(([id, label]) => {
+                    const ok = health.planes!.ok.includes(id)
+                    return (
+                      <span
+                        key={id}
+                        className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[10px] ${ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-rose-500/30 bg-rose-500/10 text-rose-300'}`}
+                        title={ok ? `${label}: файл секретов на месте` : `${label}: файл секретов отсутствует — все зависимые поверхности fail-closed (machine-coded ошибки)`}
+                      >
+                        {ok ? '✓' : '✗'} {label}
+                      </span>
+                    )
+                  })}
+                </div>
+                <div className="text-[11px] leading-relaxed text-zinc-300">
+                  Локальные поверхности живы: daemon <span className="font-mono text-teal-300">{health.version}</span> · hash-chain <span className="font-mono text-teal-300">#{health.last_seq}</span> (якорь mirror #90013992) · журнал · донор-реестр · песочница · worktrees. Внешние (CI/PR, control plane, edge, mirror-синк, R82 readback) — fail-closed с machine-coded ошибками; локальная цепь продолжит писаться и догонит зеркало после восстановления.
+                </div>
+                <div className="rounded-md border border-amber-500/25 bg-zinc-950/60 px-2.5 py-1.5 font-mono text-[10px] leading-relaxed text-amber-200/90">
+                  восстановление: воссоздать /home/z/.a2/ → .github.env (GITHUB_TOKEN_ADMIN) · supabase-cloud.env (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY) · cloudflare.env (CF_API_TOKEN + CF_ACCOUNT_ID) · supervisor.env — perms 600; pollers подхватят сами, даунтайм = 0
+                </div>
+                {recovery?.history && <div className="text-[10px] leading-relaxed text-zinc-500" title={recovery.history}>{recovery.history}</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------ main */}
       <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-2">
@@ -2325,45 +2415,60 @@ export default function MissionControl() {
                 </div>
               )}
               {/* R83-VERIFY: independent in-process contract check — port of
-                  verify-mirror.mjs as POST /mirror/verify; one click, no shell */}
+                  verify-mirror.mjs as POST /mirror/verify; one click, no shell.
+                  R88-RESILIENCE: secrets-blocked runs render amber (не выпол-
+                  нена), never red — env-degradation ≠ broken contract */}
               {mirrorVerifyRes && (
-                <div className={`rounded-lg border p-3 ${mirrorVerifyRes.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-rose-500/30 bg-rose-500/10'}`}>
+                <div className={`rounded-lg border p-3 ${mirrorVerifyRes.ok ? 'border-emerald-500/30 bg-emerald-500/5' : mirrorVerifyRes.error_class === 'secrets_missing' ? 'border-amber-500/30 bg-amber-500/5' : 'border-rose-500/30 bg-rose-500/10'}`}>
                   <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                    <span className={`text-xs font-semibold ${mirrorVerifyRes.ok ? 'text-emerald-300' : 'text-rose-300'}`}>
-                      {mirrorVerifyRes.ok ? '✓ Контракт держит' : `✗ Нарушений: ${mirrorVerifyRes.violations}`}
+                    <span className={`text-xs font-semibold ${mirrorVerifyRes.ok ? 'text-emerald-300' : mirrorVerifyRes.error_class === 'secrets_missing' ? 'text-amber-300' : 'text-rose-300'}`}>
+                      {mirrorVerifyRes.ok ? '✓ Контракт держит' : mirrorVerifyRes.error_class === 'secrets_missing' ? '⚠ Не выполнена: секреты отсутствуют' : `✗ Нарушений: ${mirrorVerifyRes.violations}`}
                     </span>
-                    <Chip tone="neutral" title="строк прочитано из Supabase (paged, ascending) и проверено">{mirrorVerifyRes.rows_checked} строк</Chip>
-                    <Chip tone="neutral" title="последний seq непрерывной цепи от якоря">хвост #{mirrorVerifyRes.head_seq ?? '?'}</Chip>
+                    {mirrorVerifyRes.error_class !== 'secrets_missing' && <>
+                      <Chip tone="neutral" title="строк прочитано из Supabase (paged, ascending) и проверено">{mirrorVerifyRes.rows_checked} строк</Chip>
+                      <Chip tone="neutral" title="последний seq непрерывной цепи от якоря">хвост #{mirrorVerifyRes.head_seq ?? '?'}</Chip>
+                    </>}
                     <Chip tone="neutral">{mirrorVerifyRes.duration_ms}ms</Chip>
                     <span className="text-[10px] text-zinc-500" title={mirrorVerifyRes.started_at}>{hhmmss(mirrorVerifyRes.started_at)}</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-                    {([
-                      ['seq-непрерывность', mirrorVerifyRes.checks.seq_continuity, 'каждая строка = prev+1 от якоря #90013992'],
-                      ['prev_hash-цепь', mirrorVerifyRes.checks.prev_hash_chain, 'первая строка биндится к hash якоря, каждая — к предыдущей'],
-                      ['hash-пересчёт', mirrorVerifyRes.checks.row_hashes, 'sha256(seq·ts·type·actor·subject·payload·prev_hash·daemon_version) пересчитан для каждой строки'],
-                      ['кросс-биндинги', mirrorVerifyRes.checks.bindings, 'payload.local_seq/local_hash ↔ локальная цепь: hash + тип/актор/subject + payload + ts'],
-                    ] as const).map(([label, ok, hint]) => (
-                      <div key={label} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] ${ok ? 'border-emerald-500/25 text-emerald-300/90' : 'border-rose-500/30 text-rose-300'}`} title={hint}>
-                        {ok ? <Check className="h-3 w-3 shrink-0" /> : <AlertTriangle className="h-3 w-3 shrink-0" />}
-                        <span className="truncate">{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                  {mirrorVerifyRes.samples.length > 0 && (
-                    <div className={`mt-2 space-y-0.5 ${scrollCls} pr-1`}>
-                      {mirrorVerifyRes.samples.map((s, i) => (
-                        <div key={i} className="font-mono text-[10px] text-rose-300/90" title={s}>{s.slice(0, 120)}</div>
-                      ))}
+                  {mirrorVerifyRes.error_class === 'secrets_missing' ? (
+                    <div className="font-mono text-[10px] leading-relaxed text-amber-300/90">
+                      проверка контракта не исполнялась: чтение me2_event_mirror требует /home/z/.a2/supabase-cloud.env — нарушения НЕ найдены (проверять было нечего). Порядок: восстановить секреты → повторить проверку.
                     </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                        {([
+                          ['seq-непрерывность', mirrorVerifyRes.checks.seq_continuity, 'каждая строка = prev+1 от якоря #90013992'],
+                          ['prev_hash-цепь', mirrorVerifyRes.checks.prev_hash_chain, 'первая строка биндится к hash якоря, каждая — к предыдущей'],
+                          ['hash-пересчёт', mirrorVerifyRes.checks.row_hashes, 'sha256(seq·ts·type·actor·subject·payload·prev_hash·daemon_version) пересчитан для каждой строки'],
+                          ['кросс-биндинги', mirrorVerifyRes.checks.bindings, 'payload.local_seq/local_hash ↔ локальная цепь: hash + тип/актор/subject + payload + ts'],
+                        ] as const).map(([label, ok, hint]) => (
+                          <div key={label} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] ${ok ? 'border-emerald-500/25 text-emerald-300/90' : 'border-rose-500/30 text-rose-300'}`} title={hint}>
+                            {ok ? <Check className="h-3 w-3 shrink-0" /> : <AlertTriangle className="h-3 w-3 shrink-0" />}
+                            <span className="truncate">{label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {mirrorVerifyRes.samples.length > 0 && (
+                        <div className={`mt-2 space-y-0.5 ${scrollCls} pr-1`}>
+                          {mirrorVerifyRes.samples.map((s, i) => (
+                            <div key={i} className="font-mono text-[10px] text-rose-300/90" title={s}>{s.slice(0, 120)}</div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
               {mirror?.last_verify && !mirrorVerifyRes && (
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
                   <span className="text-zinc-600">последняя проверка:</span>
-                  <Chip tone={mirror.last_verify.ok ? 'ok' : 'p0'} title={`журнальное событие MIRROR_VERIFY: ${mirror.last_verify.ok ? 'контракт держит' : `${mirror.last_verify.violations} нарушений`} · ${mirror.last_verify.rows} строк · ${mirror.last_verify.duration_ms}ms${mirror.last_verify.trigger ? ` · источник: ${mirror.last_verify.trigger === 'timer' ? 'авто-таймер 6ч' : 'оператор'}` : ''}`}>
-                    {mirror.last_verify.ok ? '✓ держит' : '✗ нарушен'} · {mirror.last_verify.rows} строк{mirror.last_verify.trigger === 'timer' ? ' · авто' : ''}
+                  <Chip
+                    tone={mirror.last_verify.ok ? 'ok' : mirror.last_verify.error_class === 'secrets_missing' ? 'warn' : 'p0'}
+                    title={`журнальное событие MIRROR_VERIFY: ${mirror.last_verify.ok ? 'контракт держит' : mirror.last_verify.error_class === 'secrets_missing' ? 'НЕ ВЫПОЛНЕНА — секреты отсутствуют (env-degraded), контракт НЕ признан нарушенным' : `${mirror.last_verify.violations} нарушений`} · ${mirror.last_verify.rows} строк · ${mirror.last_verify.duration_ms}ms${mirror.last_verify.trigger ? ` · источник: ${mirror.last_verify.trigger === 'timer' ? 'авто-таймер 6ч' : 'оператор'}` : ''}`}
+                  >
+                    {mirror.last_verify.ok ? '✓ держит' : mirror.last_verify.error_class === 'secrets_missing' ? '⚠ не выполнена · секреты' : '✗ нарушен'} · {mirror.last_verify.rows} строк{mirror.last_verify.trigger === 'timer' ? ' · авто' : ''}
                   </Chip>
                   <span title={mirror.last_verify.at}>{humanS(Math.round((now - Date.parse(mirror.last_verify.at)) / 1000))} назад</span>
                 </div>
@@ -2470,9 +2575,14 @@ export default function MissionControl() {
         </Panel>
 
         {/* -------------------------------------------------- RECOVERY */}
-        <Panel icon={<AlertTriangle className="h-4 w-4" />} title="Восстановление после env-reset" chip={<Chip tone="warn">R81-PHASE0</Chip>} defaultOpen>
+        <Panel icon={<AlertTriangle className="h-4 w-4" />} title="Восстановление после env-reset" chip={<Chip tone={recovery?.env_reset_detected ? 'p0' : 'ok'}>{recovery?.reset_count ? `ENV-RESET #${recovery.reset_count} · LIVE` : 'R81-PHASE0'}</Chip>} defaultOpen>
           {recovery ? (
             <div className="space-y-3">
+              {recovery.history && (
+                <div className="rounded-lg border border-zinc-700/60 bg-zinc-800/30 p-3 text-[11px] leading-relaxed text-zinc-400" title={recovery.history}>
+                  {recovery.history}
+                </div>
+              )}
               <div className="grid gap-2 sm:grid-cols-2">
                 <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
                   <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">Restored</div>
@@ -2537,6 +2647,11 @@ export default function MissionControl() {
             <span className={`font-mono ${mirror.pending === 0 && !mirror.state.last_error ? 'text-cyan-400/80' : mirror.pending > 20 || mirror.state.last_error ? 'text-amber-400/80' : 'text-zinc-500'}`} title={`evidence mirror me2_event_mirror_h205f22 · зеркальный хвост #${mirror.state.last_mirror_seq} · отзеркалировано ${mirror.state.mirrored_local_seq}/${mirror.local_last_seq}${mirror.state.last_error ? ` · ${mirror.state.last_error.code}` : ''}`}>
             · mirror #{mirror.state.last_mirror_seq}{mirror.pending > 0 ? ` (+${mirror.pending})` : ' ✓'}
           </span>
+          )}
+          {health?.planes?.suspected_env_reset && (
+            <span className="font-mono text-amber-400/90" title={`env-reset: отсутствуют credential-плоскости ${health.planes.missing.join(', ')} — внешний readback недоступен; локальная цепь и консоль живы (см. баннер)`}>
+              · env-reset · planes {health.planes.ok.length}/{health.planes.ok.length + health.planes.missing.length}
+            </span>
           )}
           {conv && (
             <span className={`font-mono ${conv.rollup_state === 'GREEN' ? 'text-emerald-400' : conv.rollup_state === 'RED' ? 'text-rose-400' : conv.rollup_state === 'PENDING' ? 'text-amber-400/80' : 'text-zinc-500'}`} title={`PR #${conv.pr?.number ?? 968} (${conv.pr?.state ?? '?'}${conv.pr?.draft ? ', draft' : ''}) — R84/R85 волна оператора · CI: ${conv.checks.success}/${conv.checks.total} success, ${conv.checks.failed} failed, ${conv.checks.pending} pending`}>

@@ -94,6 +94,7 @@ export function loadEventLog(): void {
     return;
   }
   const parsed: Me2Event[] = [];
+  const rawLines: string[] = [];
   for (const line of readFileSync(DATA_FILE, "utf8").split("\n")) {
     const t = line.trim();
     if (!t) continue;
@@ -103,6 +104,7 @@ export function loadEventLog(): void {
     } catch {
       throw new ChainError("eventlog_line_invalid_json", `unparsable line in ${DATA_FILE}`);
     }
+    rawLines.push(t);
     parsed.push(obj);
   }
   if (parsed.length === 0) {
@@ -111,10 +113,28 @@ export function loadEventLog(): void {
     loaded = true;
     return;
   }
+  // R88-RESILIENCE (env-reset #2 live incident, boot-stage race): two daemon
+  // generations booted simultaneously right after the sandbox reset and BOTH
+  // wrote RECOVERY_GENESIS — the file then held a BYTE-IDENTICAL duplicate
+  // line and every later boot failed closed on eventlog_seq_gap. An identical
+  // duplicate carries zero new information (same seq, same hash, same ts) —
+  // it is the boot-race signature and is skipped idempotently. Any duplicate
+  // with DIFFERENT content stays a hard ChainError (real corruption).
+  const deduped: Me2Event[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    if (i > 0 && rawLines[i] === rawLines[i - 1]) continue; // identical boot-race twin
+    if (deduped.length > 0) {
+      const prevEv = deduped[deduped.length - 1];
+      if (parsed[i].seq === prevEv.seq && rawLines[i] !== rawLines[i - 1]) {
+        throw new ChainError("eventlog_seq_duplicate", `seq ${parsed[i].seq} appears twice with different content — manual reconcile required`);
+      }
+    }
+    deduped.push(parsed[i]);
+  }
   // fail-closed integrity check of the persisted chain
   let prev = "0".repeat(64);
-  for (let i = 0; i < parsed.length; i++) {
-    const e = parsed[i];
+  for (let i = 0; i < deduped.length; i++) {
+    const e = deduped[i];
     if (e.seq !== i + 1) {
       throw new ChainError("eventlog_seq_gap", `expected seq ${i + 1}, got ${e.seq}`);
     }
@@ -127,7 +147,7 @@ export function loadEventLog(): void {
     }
     prev = e.hash;
   }
-  events = parsed;
+  events = deduped;
   loaded = true;
 }
 

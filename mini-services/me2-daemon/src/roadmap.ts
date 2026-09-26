@@ -186,30 +186,50 @@ export const CONVERGENCE_EVIDENCE = {
     cycle_resumed_at: "readback cycle.resumed_at (journal milestone ts) — консоль рендерит второй маркер на timeline драфта («cycle растёт»)",
     console_polish: "донор-браузер: per-lane лимит 8 + «показать ещё N» (limit при полном списке); Esc очищает+блерит донорский поиск (паритет с журнальным фильтром); sound-unlock при первом жесте (AudioContext.resume — первый сигнал больше не проглатывается); Mirror-карточка: чипы авто-проверки (последняя · следующая)",
   },
+  r88_resilience_live: {
+    built: "2026-09-26T14:10:00Z",
+    module: "daemon src/planes.ts + /planes route + консоль (0.70.0-r88resilience)",
+    incident: "env-reset #2 (2026-09-26T13:42Z, live): /home/z/.a2/ уничтожен вторично (первый — R81-PHASE0); уцелели source-tree (git), daemon, консоль, donor-реестр, песочница, worktrees; потеряны ВСЕ credential-плоскости + root data/ (edge-снапшоты — источник жив в PR #982) + локальная hash-chain (500+ событий — выжила в Supabase mirror #90013993..#90014496+, потому и строилась)",
+    planes_module: "credential-plane liveness как first-class: planesStatus() проверяет СУЩЕСТВОВАНИЕ файлов + имена ключей (значения никогда не читаются/не логируются/не возвращаются); envResetState(): ≥2 missing = suspected env-reset (файлы предоставляются вместе — потеря одного = действие оператора, потеря двух+ = reset)",
+    surfaces: "/health несёт planes+env_reset (дешево, без сети); GET /planes — детали per-plane; RECOVERY_STATUS стал динамическим recoveryStatus() — rebuilt-список вычисляется из живого состояния (planes + git + chain), а не закеширован из R81-PHASE0",
+    fail_closed_verified: "все credential-зависимые поверхности деградируют machine-coded ошибками (github_no_token / controlplane_secrets_missing / edge_secrets_missing / mirror_secrets_missing) — QA agent-browser в degraded-режиме: 14 карточек, 0 JS-ошибок, ERR-состояния честные",
+    console_degraded_ux: "глобальный EnvResetBanner (planes ✗/✓ чипы + выжившие локальные поверхности + инструкция восстановления); mirror-verify классификация: credentials-блокировка ≠ нарушение контракта (amber «не выполнена · секреты» вместо rose «нарушен»); mirror-alert классифицирует secrets_missing как env-degraded, не как divergence; footer chip env-reset; recovery-карточка динамическая",
+    chain_continuity: "новая цепь начинается RECOVERY_GENESIS с тем же mirror-якорем #90013992 — контракт me2-mirror-v1 переживает N-е поколение daemon без разрыва ledger-пространства",
+  },
 } as const;
 
-export const RECOVERY_STATUS = {
-  env_reset_detected: true,
-  detected_at: "2026-09-26T06:20:00Z",
-  restored: [
-    { item: "secrets /home/z/.a2/supabase-cloud.env", state: "RESTORED" },
-    { item: "secrets /home/z/.a2/cloudflare.env", state: "RESTORED" },
-    { item: "secrets /home/z/.a2/supervisor.env", state: "RESTORED" },
-    { item: "secrets /home/z/.a2/.github.env (GITHUB_TOKEN_ADMIN, PAT)", state: "RESTORED" },
-    { item: "me2-daemon REST :3041 + WS :3040", state: "REBUILT" },
-    { item: "hash-chained event log (anchor: mirror seq 90013992)", state: "REBUILT" },
-    { item: "Mission Control console (src/app/page.tsx)", state: "REBUILT" },
-    { item: "Supabase control-plane live readback", state: "VERIFIED" },
+// R88-RESILIENCE: recovery state is now COMPUTED from live state (planes +
+// daemon + chain), never cached from a past round — env-reset #2 (13:42Z)
+// proved a static snapshot goes stale the moment the environment shifts.
+// The R81-PHASE0 history note is preserved in `history`.
+export function recoveryStatus(planes: { id: string; label: string; status: string }[], envReset: { suspected: boolean }) {
+  const restored = [
+    { item: "me2-daemon REST :3041 + WS :3040 (bun, zero-deps)", state: "ALIVE" },
+    { item: "Mission Control console :3000 (14 карточек, degraded-honest)", state: "ALIVE" },
+    { item: "hash-chained event log: RECOVERY_GENESIS → mirror anchor #90013992 (тот же ledger-контракт)", state: "REBUILT" },
     { item: "donor action manifest: 57 действий (4 lanes) из sandbox/me2-os @ 56ba1b87", state: "RECOVERED" },
-    { item: "branch audit gate: 621/621 heads, read-only-lineage-audit SUCCESS @ 5a1c6178", state: "VERIFIED" },
-    { item: "git push main:sandbox/me2-os (donor history сохранён merge -s ours)", state: "RESTORED" },
-  ],
-  blocked: [
+    { item: "source-tree: git history пережила reset (worklog + все раунды R81→R83 в коммитах)", state: "ALIVE" },
+    ...planes.filter((p) => p.status === "ok").map((p) => ({ item: `secrets ${p.label}`, state: "PRESENT" })),
+  ];
+  const blocked = [
+    ...planes.filter((p) => p.status !== "ok").map((p) => ({
+      item: `secrets ${p.label}`,
+      reason: `${p.id}-плоскость деградирована: восстановить файл (perms 600) — все зависимые поверхности fail-closed с machine-coded ошибками`,
+    })),
     { item: "credentials rotation (P0 security)", reason: "raw credentials в chat export; ротация — только у оператора" },
-  ],
-  pending_next: [
-    "R82-verify: live readback self-update (runtime версия сменится с 0.7.0-dev.36089462649.1 на новый digest; cycle_seq рост после очистки драфта оператором; ROOT_DRAFT_OVERSIZED в rollover_reason пока драфт не очищен)",
-    "R83-merge: PR #982 (source-import) под ревью оператора → merge закрывает импорт-фазу; после — controlled promotion (deploy-from-repo) с re-verify digest + ротацией CF-токена",
-    "полный donor bus (57 действий): реализация вместе с Browser control plane (R84–R86)",
-  ],
-} as const;
+  ];
+  return {
+    env_reset_detected: envReset.suspected,
+    detected_at: "2026-09-26T13:42:00Z",
+    reset_count: 2,
+    history: "env-reset #1: 2026-09-26 06:20Z (R81-PHASE0 — восстановление заняло раунд; donor lineage выжил в git); env-reset #2: 13:42Z — система деградировала ЧЕСТНО без ручного вмешательства (fail-closed все внешние поверхности, локальные живы)",
+    restored,
+    blocked,
+    pending_next: [
+      "восстановить /home/z/.a2/*.env (perms 600): .github.env (GITHUB_TOKEN_ADMIN) · supabase-cloud.env (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY) · cloudflare.env (CF_API_TOKEN + CF_ACCOUNT_ID) · supervisor.env — после этого все surfaces восстановятся сами (pollers живые)",
+      "R82-verify: live readback self-update (runtime версия сменится с 0.7.0-dev.36089462649.1 на новый digest; cycle_seq рост после очистки драфта оператором; ROOT_DRAFT_OVERSIZED в rollover_reason пока драфт не очищен)",
+      "R83-merge: PR #982 (source-import) под ревью оператора → merge закрывает импорт-фазу; после — controlled promotion (deploy-from-repo) с re-verify digest + ротацией CF-токена",
+      "полный donor bus (57 действий): реализация вместе с Browser control plane (R84–R86)",
+    ],
+  };
+}

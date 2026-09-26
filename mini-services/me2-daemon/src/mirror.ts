@@ -40,6 +40,7 @@ import { join } from "node:path";
 import { OpError } from "./errors";
 import { Me2Event, MIRROR_ANCHOR, appendEvent, eventsSince, eventsOfType, lastSeq } from "./eventlog";
 import { VERSION, ROUND } from "./version";
+import { secretsClassFromError } from "./planes";
 
 const ENV_FILE = "/home/z/.a2/supabase-cloud.env";
 const DATA_DIR = join(import.meta.dir, "..", "data");
@@ -503,6 +504,10 @@ export interface MirrorVerifyResult {
   first_broken_seq: number | null;
   checks: { seq_continuity: boolean; prev_hash_chain: boolean; row_hashes: boolean; bindings: boolean };
   samples: string[]; // first N violation descriptions (bounded)
+  // R88-RESILIENCE: "secrets_missing" = проверка НЕ ВЫПОЛНИЛАСЬ (env-degraded,
+  // amber) — нарушения НЕ найдены, потому что читать было нечего; любое другое
+  // значение/отсутствие = обычная семантика ok/violations.
+  error_class?: "secrets_missing" | "unknown";
 }
 
 const VERIFY_PAGE = 1000;
@@ -660,6 +665,11 @@ export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promis
       });
       return out;
     } catch (e) {
+      // R88-RESILIENCE: classify WHY the verify could not run — a missing
+      // credentials file is env-degradation (amber), NOT a broken contract;
+      // the console renders these differently and the journal keeps the class.
+      const errMsg = String((e as Error)?.message ?? e).slice(0, 160);
+      const errorClass = secretsClassFromError(errMsg);
       const out: MirrorVerifyResult = {
         ok: false,
         schema: "metaengine.mirror.verify.v1",
@@ -667,14 +677,16 @@ export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promis
         duration_ms: Date.now() - t0,
         rows_checked: 0,
         head_seq: null,
-        violations: 1,
+        violations: errorClass === "secrets_missing" ? 0 : 1,
         first_broken_seq: null,
         checks: { seq_continuity: false, prev_hash_chain: false, row_hashes: false, bindings: false },
-        samples: [`verify failed: ${String((e as Error)?.message ?? e).slice(0, 160)}`],
+        samples: [`verify failed: ${errMsg}`],
+        error_class: errorClass,
       };
       appendEvent("MIRROR_VERIFY", trigger === "timer" ? "daemon" : "operator", null, {
         ok: false,
         error: out.samples[0],
+        error_class: errorClass,
         trigger,
         daemon_version: VERSION,
       });
@@ -834,8 +846,12 @@ export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
       const evs = eventsOfType("MIRROR_VERIFY");
       const ev = evs[evs.length - 1];
       if (!ev) return null;
-      const p = (ev.payload ?? {}) as { ok?: boolean; rows_checked?: number; duration_ms?: number; violations?: number; trigger?: string };
-      return { at: ev.ts, ok: !!p.ok, rows: p.rows_checked ?? 0, duration_ms: p.duration_ms ?? 0, violations: p.violations ?? 0, trigger: p.trigger ?? null };
+      const p = (ev.payload ?? {}) as { ok?: boolean; rows_checked?: number; duration_ms?: number; violations?: number; trigger?: string; error_class?: string; error?: string };
+      // R88-RESILIENCE: legacy journal events (pre-0.70.0) lack error_class —
+      // derive it from the error string so an env-degraded PAST run never
+      // renders as a broken contract after a daemon upgrade
+      const errorClass = p.ok ? null : p.error_class ?? secretsClassFromError(p.error);
+      return { at: ev.ts, ok: !!p.ok, rows: p.rows_checked ?? 0, duration_ms: p.duration_ms ?? 0, violations: p.violations ?? 0, trigger: p.trigger ?? null, error_class: errorClass };
     })(),
     auto_verify: {
       interval_ms: AUTO_VERIFY_INTERVAL_MS,

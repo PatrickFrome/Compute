@@ -8,7 +8,8 @@ import { appendEvent, tail, verifyChain, lastSeq } from "./eventlog";
 import { listWorktrees, createWorktree, removeWorktree } from "./worktrees";
 import { execWhitelisted, probe, whitelist } from "./sandbox";
 import { evaluateVerdicts } from "./verdicts";
-import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS } from "./roadmap";
+import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, recoveryStatus } from "./roadmap";
+import { planesStatus, envResetState } from "./planes";
 import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor } from "./controlplane";
 import { monitorHistory } from "./monitor";
 import { donorRegistry } from "./donor-registry";
@@ -105,7 +106,7 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
     case "roadmap.get":
       return { roadmap: ROADMAP, release_authority: RELEASE_AUTHORITY, donors: DONOR_AUTHORITIES };
     case "recovery.status":
-      return RECOVERY_STATUS;
+      return recoveryStatus(planesStatus(), envResetState(planesStatus()));
     case "controlplane.supervisor":
       return supervisorSnapshot(args.fresh === true);
     case "controlplane.mirror-tail":

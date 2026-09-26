@@ -9,7 +9,7 @@ import { ACTIONS, dispatch } from "./actions";
 import { listWorktrees, createWorktree, removeWorktree } from "./worktrees";
 import { execWhitelisted, probe, whitelist } from "./sandbox";
 import { evaluateVerdicts } from "./verdicts";
-import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS, CONVERGENCE_EVIDENCE } from "./roadmap";
+import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, recoveryStatus, CONVERGENCE_EVIDENCE } from "./roadmap";
 import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor } from "./controlplane";
 import { monitorHistory, monitorStatus, startMonitor } from "./monitor";
 import { donorRegistry } from "./donor-registry";
@@ -21,8 +21,14 @@ import { r82Report } from "./report";
 import { mirrorStatus, mirrorHealth, mirrorVerify, startAutoMirror, syncMirror } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
+import { planesStatus, envResetState } from "./planes";
 
 loadEventLog();
+
+// R88-RESILIENCE: credential-plane liveness is computed per-call (cheap
+// file-existence checks, no values) — /health and /planes always tell the
+// truth about the CURRENT environment, never a boot-time snapshot.
+const planesNow = () => planesStatus();
 
 type Handler = (req: Request, url: URL, body: Record<string, unknown>) => Promise<unknown> | unknown;
 
@@ -48,7 +54,22 @@ const routes: { method: string; path: string; handler: Handler }[] = [
       mirror_anchor: MIRROR_ANCHOR,
       mirror: mirrorHealth(),
       monitor: monitorStatus(),
+      // R88-RESILIENCE: aggregated credential-plane state (env-reset #2 made
+      // this first-class — the console banner keys off env_reset.suspected)
+      planes: (() => {
+        const pl = planesNow();
+        const er = envResetState(pl);
+        return { ok: er.ok, missing: er.missing, suspected_env_reset: er.suspected };
+      })(),
     }),
+  },
+  {
+    method: "GET",
+    path: "/planes",
+    handler: () => {
+      const pl = planesNow();
+      return { planes: pl, env_reset: envResetState(pl), note: "существование файлов + имена ключей; значения никогда не покидают файлы" };
+    },
   },
   {
     method: "GET",
@@ -107,7 +128,7 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     path: "/roadmap",
     handler: () => ({ roadmap: ROADMAP, release_authority: RELEASE_AUTHORITY, donors: DONOR_AUTHORITIES, convergence_evidence: CONVERGENCE_EVIDENCE }),
   },
-  { method: "GET", path: "/recovery", handler: () => RECOVERY_STATUS },
+  { method: "GET", path: "/recovery", handler: () => recoveryStatus(planesNow(), envResetState(planesNow())) },
   { method: "GET", path: "/donor-registry", handler: () => donorRegistry(ACTIONS.map((a) => ({ name: a.name, family: a.family }))) },
   {
     method: "GET",
