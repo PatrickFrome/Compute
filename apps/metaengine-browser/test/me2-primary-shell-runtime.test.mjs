@@ -256,6 +256,15 @@ test('R85 native Browser overlays only the viewport and preserves compact Browse
   assert.equal(plan.authority_effect, false);
 });
 
+test('R85 Observability exposes persisted operator view presets without new effect authority', () => {
+  assert.match(me2Observability, /data-testid="event-view-presets"/);
+  assert.match(me2Observability, /me2\.obs\.events\.preset\.v1/);
+  assert.match(me2Observability, /EVENT_ATTENTION_TOKENS/);
+  assert.match(me2Observability, /applyViewPreset/);
+  assert.match(me2Observability, /localStorage\.setItem\(EVENT_VIEW_PRESET_LS, key\)/);
+  assert.doesNotMatch(me2Observability, /setPrimaryCommandRail|metaengine:shell:primary-overlay/);
+});
+
 test('R85 attention and observability use progressive disclosure without effect authority', () => {
   assert.match(me2Topbar, /data-testid="attention-button"/);
   assert.match(me2Topbar, /data-testid="attention-center"/);
