@@ -57,7 +57,7 @@ function sidebarWidth(mode) {
   return 0;
 }
 
-export function planShellLayout({ width, height, state, surface_profile = 'LEGACY_BROWSER_SHELL' } = {}) {
+export function planShellLayout({ width, height, state, surface_profile = 'LEGACY_BROWSER_SHELL', me2_command_rail_open = true } = {}) {
   const windowWidth = finiteDimension(width, 'width');
   const windowHeight = finiteDimension(height, 'height');
   const requested = state?.schema === 'metaengine.browser-shell.layout-state.v1'
@@ -119,7 +119,9 @@ export function planShellLayout({ width, height, state, surface_profile = 'LEGAC
     const preferredLeft = ME2_PRIMARY_PAGE_PADDING
       + ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH
       + ME2_PRIMARY_COMMAND_GAP;
-    left = windowWidth - preferredLeft >= SHELL_MIN_REMOTE_WIDTH
+    const railRequested = me2_command_rail_open !== false;
+    const railFits = windowWidth - preferredLeft - ME2_PRIMARY_PAGE_PADDING >= SHELL_MIN_REMOTE_WIDTH;
+    left = railRequested && railFits
       ? preferredLeft
       : ME2_PRIMARY_PAGE_PADDING;
     right = ME2_PRIMARY_PAGE_PADDING;
@@ -127,7 +129,11 @@ export function planShellLayout({ width, height, state, surface_profile = 'LEGAC
     remoteHeight = Math.max(0, windowHeight - top - bottom);
     effectiveSidebar = left === preferredLeft ? 'EXPANDED' : 'HIDDEN';
     effectiveOperations = 'CLOSED';
-    if (left !== preferredLeft) adaptations.push('ME2_AGENT_RAIL_RESERVED_SPACE_RELEASED_FOR_ACTIVE_SURFACE');
+    if (!railRequested) {
+      adaptations.push('ME2_AGENT_RAIL_HIDDEN_BY_PRESENTATION');
+    } else if (!railFits) {
+      adaptations.push('ME2_AGENT_RAIL_RESERVED_SPACE_RELEASED_FOR_ACTIVE_SURFACE');
+    }
   } else if (surfaceProfile !== 'LEGACY_BROWSER_SHELL') {
     surfaceProfile = 'LEGACY_BROWSER_SHELL';
   }
@@ -149,6 +155,7 @@ export function planShellLayout({ width, height, state, surface_profile = 'LEGAC
     active_surface_width_target: activeSurfaceWidthTarget,
     active_surface_target_satisfied: contentWidth >= activeSurfaceWidthTarget,
     active_surface_priority: true,
+    me2_command_rail_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_command_rail_open !== false : null,
     chrome_degrades_before_active_surface: true,
     adaptations: Object.freeze(adaptations),
     adapted: adaptations.length > 0,
