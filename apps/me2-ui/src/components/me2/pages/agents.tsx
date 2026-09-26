@@ -6,7 +6,7 @@
 // Верх: FleetGrid | AgentChatPanel (река рассуждений + чат выбранного).
 // Низ: РЕЕСТР·АГЕНТЫ | CRON·ЧАТОВ. Точные payload'ы шины — из legacy (L1972-1998).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bot, ChevronDown, Clock, Pause, Play, Plus, X, Zap } from "lucide-react";
 import FleetGrid from "@/components/me2/fleet-grid";
 import AgentChatPanel from "@/components/me2/agent-chat-panel";
@@ -21,9 +21,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-
-// /agentchat: сессии несут agent_id (daemon agentchat.ts) — мост «агент → его чат»
-type ChatSession = { id: string; agent_id: string; status: string; role: string };
+import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 
 // /cron (G7, daemon cron.ts): ChatCron + policyCaps
 type CronRow = {
@@ -43,22 +41,10 @@ export function AgentsPage() {
 
   const [modelSel, setModelSel] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const [chatMap, setChatMap] = useState<Record<string, string>>({});
+  const { sessions: chatSessions } = useAgentChatSessions();
   const [crons, setCrons] = useState<CronRow[]>([]);
   const [caps, setCaps] = useState<CronCaps | null>(null);
   const [cronBusy, setCronBusy] = useState(false);
-
-  // маппинг agent_id → чат-сессия (поллинг /agentchat, 15s)
-  const loadChats = useCallback(async () => {
-    const d = await me2Fetch<{ sessions?: ChatSession[] }>("/agentchat?XTransformPort=3041");
-    if (d?.sessions) {
-      const map: Record<string, string> = {};
-      for (const s of d.sessions) {
-        if (s.status === "ACTIVE" && s.agent_id && !map[s.agent_id]) map[s.agent_id] = s.id;
-      }
-      setChatMap(map);
-    }
-  }, []);
 
   // CRON·ЧАТОВ (G7): список + caps (15s — как cron-поллинг fleet-grid)
   const loadCrons = useCallback(async () => {
@@ -70,12 +56,21 @@ export function AgentsPage() {
   }, []);
 
   useEffect(() => {
-    // начальная загрузка — через микрозадержку (react-hooks/set-state-in-effect)
-    const t0 = window.setTimeout(() => { void loadChats(); void loadCrons(); }, 0);
-    const a = window.setInterval(() => void loadChats(), 15_000);
-    const b = window.setInterval(() => void loadCrons(), 15_000);
-    return () => { window.clearTimeout(t0); window.clearInterval(a); window.clearInterval(b); };
-  }, [loadChats, loadCrons]);
+    // AgentChat polling is shared with COMMAND through useAgentChatSessions().
+    const t0 = window.setTimeout(() => { void loadCrons(); }, 0);
+    const b = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadCrons();
+    }, 15_000);
+    return () => { window.clearTimeout(t0); window.clearInterval(b); };
+  }, [loadCrons]);
+
+  const chatMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of chatSessions) {
+      if (s.status === "ACTIVE" && s.agent_id && !map[s.agent_id]) map[s.agent_id] = s.id;
+    }
+    return map;
+  }, [chatSessions]);
 
   // ── действия реестра (payload'ы 1:1 из legacy L1972-1998) ─────────────────────
   const saveAgentModel = useCallback(async (id: string, model: string) => {
