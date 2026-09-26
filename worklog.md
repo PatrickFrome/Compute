@@ -9269,3 +9269,36 @@ Work Log:
 Stage Summary:
 - Секреты переживают ЛЮБОЙ reset через 4 независимых канала: (1) sealed-local в проекте (литералы, git-ignored), (2) PolarFS /tmp/my-project/phoenix-sealed + 2 зеркала, (3) ossfs /home/sync, (4) cron 416759 payload вне песочницы. Одна команда восстановления: bash scripts/phoenix/phoenix-secrets-restore.sealed.sh full — restore+validate+mirrors+auto-audit.
 - Литеры по-прежнему НЕ попадают в git (repo анонимно читаем — GitHub отозвал бы PAT); leak-screen перед push.
+
+---
+Task ID: R80-PUSH-E
+Agent: Super-Z (main session, Job 413338 replay 2026-09-27)
+Task: Повторный push-pending R80 после SEC-SEALED-2/AUD-1 коммита
+
+Work Log:
+- precondition: /home/z/.a2/.github.env present (600), phoenix-secrets-restore.sh → "state: github.env present (api=200) → SECRETS: OK — nothing to restore"
+- push-pending-r80.sh: main→sandbox/me2-os ff 6a049e5b..1db570eb; me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
+- ls-remote verify: sandbox/me2-os=1db570eb ≡ local main (rail current); архив-ветки подтверждены
+- origin/main=85767548 — НЕ предок local main (shallow fetch ok: "metaengine rsi phase34b lifecycle cas admission v3 (#821)" + ci/operator серия): проектная линия ожидаемо расходится с рельсом; force запрещён, слияние только контент-уровнем при необходимости
+- SEC-скан трекаемых файлов: ghp_/gho_/cfat_/cfut_ литералов НЕТ; в build-sealed-bootstrap.sh — только Account ID и R2 Access Key ID (без secret key, по отдельности неаутентифицируемы)
+
+Stage Summary:
+- rail sandbox/me2-os = 1db570eb = local main — публикация завершена, Job 413338 (replay) закрыт
+- Разведено для full-audit: origin/main divergence (85767548) — не покрыто отчётом audit-20260926-175141.md, брать из этой секции
+
+---
+Task ID: SEC-PHOENIX-AUD-2
+Agent: Super-Z (main session, Jobs 416759 + операторская директива 2026-09-27)
+Task: Феникс секретов + полный аудит (до максимальной полноты контекста)
+
+Work Log:
+- /tmp/my-project/.a2-backup/me2.env.20260922: kept — все 5 эталонных ключей на месте, 600
+- /home/z/.a2/.github.env: kept, api=200 (валидация phoenix v1.1)
+- параллельная cron-сессия (не дублирую): full-audit.sh v2.0 (CF/R2-размерность), phoenix v1.1 с auto_audit(), .gitignore SEC-SEALED-3 (*.sealed.* local-only), отчёт audit-20260926-175141.md: score 73% (DONE=15 PARTIAL=1 BLOCKED=5)
+- мои v1.1-правки full-audit.sh отменены (конфликт с v2.0 параллельной сессии) — протокол: не перезаписывать hot tree
+- R2 buckets list: недоступен скоупом CF-токена; R2 S3 SIGv4: BLOCKED (secret access key не передан оператором)
+- известные блокеры: Supabase service JWT утерян 2026-09-26 17:11 (JWT pending operator); облачная копия циклична
+
+Stage Summary:
+- Директива оператора выполнена инфраструктурно: секреты живут в sealed-local носителе (gitignored) + cron-эталонах + /tmp-зеркалах; каждый phoenix-прогон автоматически запускает полный аудит
+- Аудит-цикл продолжается cron-ом до снятия блокеров; следующие шаги оператора: перевыпуск SUPABASE_SERVICE_ROLE_JWT и R2 secret access key → build-sealed-bootstrap.sh → score→100%
