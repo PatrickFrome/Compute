@@ -453,6 +453,33 @@ Decision after research:
 - resize handles must not be CSS-only: any variable drawer height must be accepted and clamped by main-process geometry before the renderer presents it.
 
 
+
+## 6.5 UI slice checkpoint C — Workspace becomes a layout scope
+
+Checkpoint source head before this note: `1c5f13b0136ee59e1321961da6b649e2804eef73`.
+
+Implemented:
+- Context Drawer open/tab preferences are no longer global; they are persisted per METAENGINE workspace under `me2.workspace-layouts.v1`;
+- the old global drawer keys are treated only as a one-time migration source;
+- switching Workspace restores that workspace's Drawer preference and tab;
+- Command Agent Rail preference is now also workspace-scoped (`me2.command.agent-rail.v2:<workspace>`) with legacy migration;
+- Page remains the functional domain, while Workspace now begins to own a real arrangement preference instead of being only `{label,page,hint}`.
+
+Post-step research:
+- **Blender 5.2 Workspaces** are predefined window layouts made of Areas/Editors, geared to tasks and persisted with the file/defaults. This is the strongest direct confirmation that METAENGINE's Workspace should own arrangements while Page owns functional domain. https://docs.blender.org/manual/en/latest/interface/window_system/workspaces.html
+- **IntelliJ IDEA 2026.2 Layouts** saves tool-window positions, sizes and view modes as named layouts and supports switching/restoring them. This is a better target than one monolithic global UI preference. https://www.jetbrains.com/help/idea/tool-window-layouts.html
+- **VS Code Custom Layout** persists layout density, sidebars, panels and moved views across sessions and has an explicit Restore Defaults operation. METAENGINE should add workspace-level Reset Layout before adding arbitrary drag/drop. https://code.visualstudio.com/docs/configure/custom-layout
+- **Cursor 3.1 tiled Agents Window** persists pane arrangements across sessions. This validates storing agent-oriented pane state by working context rather than treating tiling as transient CSS. https://cursor.com/changelog/3-1
+- **JetBrains Tool Window view modes** distinguishes pinned, unpinned, undocked, floating and separate-window modes and allows saving those in layouts. METAENGINE can eventually expose typed pane modes, but Browser-native geometry must stay main-process-authoritative. https://www.jetbrains.com/help/idea/viewing-modes.html
+- **DaVinci Resolve** historically couples task pages with resizable/hideable inspector/index/effects regions and resettable UI layout. The useful rule remains: panel size/visibility is user state, but the page's functional contract remains stable.
+
+Decision after research:
+- evolve `me2.workspace-layouts.v1` into a typed layout record instead of creating unrelated localStorage keys for every future pane;
+- next properties should be `drawerHeight`, `agentRailWidth`, `density`, and later typed pane placements;
+- add explicit workspace `Reset layout` before freeform drag/drop;
+- every size that touches native Browser pixels must be accepted/clamped by main process first.
+
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
