@@ -228,6 +228,7 @@ function isPrimaryMe2PresentationDocument(locationLike = globalThis.location) {
 
 const setPrimaryPage = (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? ''));
 const setPrimaryOverlay = (active) => ipcRenderer.invoke('metaengine:shell:primary-overlay', active === true);
+const setPrimaryCommandRail = (open) => ipcRenderer.invoke('metaengine:shell:primary-command-rail', open === true);
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is a
@@ -238,6 +239,7 @@ if (isPrimaryMe2PresentationDocument()) {
   contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
     setPrimaryPage,
     setPrimaryOverlay,
+    setPrimaryCommandRail,
     presentation_only: true,
     browser_command_authority: false,
     scheduler_authority: false,
@@ -251,6 +253,7 @@ if (isPrimaryMe2PresentationDocument()) {
     command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
     setPrimaryPage,
     setPrimaryOverlay,
+    setPrimaryCommandRail,
     presentationFocus: Object.freeze({
       snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
       selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
