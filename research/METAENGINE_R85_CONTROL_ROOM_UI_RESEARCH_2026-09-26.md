@@ -226,6 +226,53 @@ When chrome density changes, main-process WebContentsView bounds must change wit
    - contrast;
    - exact semantic refs remain stable across page switching.
 
+## 6.1 Repeat critical audit delta — 2026-09-26 21:01 UTC
+
+The second audit deliberately re-read the physical installed R84 instead of trusting the first design pass.
+
+Exact live evidence:
+- Browser `0.7.0-dev.3.1`, `native-electron-supervisor-v1`, CONTROL, armed, Compute HEALTHY.
+- Fleet converged to 4 ACTIVE / 0 BOUND_UNVERIFIED / 0 LOST.
+- read-only CAPTURE command `4565ec5b-5aeb-42f7-92d5-760b7cae0c6b` completed in 52 ms against the physical local Mission Control tab.
+- the closed Command Palette was still present in the installed R84 accessibility/interaction projection;
+- persistent `flush` was still an actionable StatusBar control;
+- mirror was OFF with outbox 853;
+- Command exposed stream profile + CDP q/w tuning that belongs to Browser infrastructure, not the daily workbench;
+- the agent row exposed nested interactive semantics (session pseudo-button containing a child button);
+- the browser stream was unavailable and operating through CDP fallback.
+
+R85 repeat-pass response:
+- agent rows are sibling real buttons, never nested interactive controls;
+- advanced stream/CDP tuning is hidden in compact COMMAND and retained in full BROWSER;
+- mirror/task/command/transport/worker/budget degradation is deduplicated into a read-only Attention Center;
+- duplicate AgentChat polling is replaced by a shared in-flight-fenced feed that pauses when the document is hidden;
+- OBSERVABILITY Event Log now has persisted `compact | full` modes and groups adjacent related events in compact mode;
+- unavailable legacy SANDBOXES PLANE is collapsed and explicitly marked LEGACY LOCKED;
+- stale R74 geometry literals in the R85 layout test were removed after exact CI failure evidence (80 vs 90 px).
+
+### Additional reference findings
+
+**VS Code**
+The workbench supports persistent movable views/panels and layout density controls, while Command Palette remains a universal navigation/action surface. R85 therefore keeps the primary work surface stable and treats persistent chrome as context, not a dashboard.
+
+**Chrome DevTools**
+Panels and panes can move to/from a Drawer, layout can adapt to window width, and the Command Menu offers fast access even when the operator does not remember placement. The next R85 slice should use a contextual Drawer/Inspector for logs, task detail and diagnostics instead of permanent columns.
+
+**Temporal**
+Temporal's redesign explicitly separates Compact, Timeline and Full History. Compact groups related events and preserves high-value information; Full History remains available for deep debugging. R85 Event Log adopts the same progressive-disclosure direction while retaining exact raw events.
+
+**Linear**
+Display options and Custom Views persist grouping/filter/layout preferences; Priority Inbox separates items requiring attention from normal updates. This directly supports Saved Views plus the R85 Attention Center.
+
+**Cursor**
+Agent/Ask/Plan/Debug and approval/run modes make capability level explicit. METAENGINE should surface READ_ONLY / CONTROL / MUTATION / EMERGENCY as first-class operator-visible authority, not infer it from color or location.
+
+**Blender / DaVinci Resolve**
+Task-specific Workspaces/Pages validate the current METAENGINE model: Page = functional domain; Workspace = persisted arrangement/preferences for a way of working.
+
+**Ray / Grafana**
+Operational views are separated by question (jobs, logs, cluster, metrics) and dashboards are parameterized rather than cloned. METAENGINE should keep TASKS / COMPUTE / OBSERVABILITY distinct and add Saved View variables instead of duplicating panels.
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
