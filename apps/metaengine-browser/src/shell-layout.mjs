@@ -4,17 +4,15 @@ export const SHELL_SIDEBAR_COMPACT_WIDTH = 52;
 export const SHELL_OPERATIONS_WIDTH = 320;
 export const SHELL_MIN_REMOTE_WIDTH = 720;
 
-// R84/R75 primary ME2 Desktop composition. These constants mirror the actual
-// packaged ME2 shell geometry: TopBar h-12, PageBar h-11, StatusBar h-7,
-// PageOutlet p-2, Command agent rail w-[264px], gap-2, current-agent row h-8.
-// The native Browser WebContentsView occupies only the center stage; it never
-// overlays the ME2 chrome or agent list.
-export const ME2_PRIMARY_TOP_HEIGHT = 48;
-export const ME2_PRIMARY_PAGEBAR_HEIGHT = 44;
-export const ME2_PRIMARY_STATUSBAR_HEIGHT = 28;
-export const ME2_PRIMARY_PAGE_PADDING = 8;
-export const ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH = 264;
-export const ME2_PRIMARY_COMMAND_GAP = 8;
+// R85/R75 primary ME2 Desktop composition. Presentation density changed, so
+// the native WebContents geometry moves with the exact visible chrome rather
+// than retaining stale R74 dimensions. The renderer still owns no authority.
+export const ME2_PRIMARY_TOP_HEIGHT = 42;
+export const ME2_PRIMARY_PAGEBAR_HEIGHT = 36;
+export const ME2_PRIMARY_STATUSBAR_HEIGHT = 22;
+export const ME2_PRIMARY_PAGE_PADDING = 6;
+export const ME2_PRIMARY_COMMAND_SIDEBAR_WIDTH = 252;
+export const ME2_PRIMARY_COMMAND_GAP = 0;
 export const ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT = 32;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
