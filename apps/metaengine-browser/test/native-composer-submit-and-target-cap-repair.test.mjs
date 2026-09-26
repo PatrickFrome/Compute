@@ -77,6 +77,64 @@ test('D-P1: source contract — input reservation precedes the 120 slice', () =>
   assert.match(source, /return \[\.\.\.inputRows, \.\.\.otherRows\]\.slice\(0, 120\)/);
 });
 
+test('R82: explicitly editable AX generic composer is normalized to a semantic textbox', async () => {
+  const { captureSemanticFrame } = await import('../src/native-browser-control.mjs');
+  const nodes = [
+    {
+      nodeId: 'ax-composer',
+      ignored: false,
+      role: { value: 'generic' },
+      name: { value: 'Send a Message' },
+      value: { value: '' },
+      backendDOMNodeId: 2201,
+      frameId: 'frame-root',
+      properties: [{ name: 'editable', value: { type: 'token', value: 'richtext' } }],
+    },
+    ax('button', 'Chat Menu', 2202),
+  ];
+
+  const listeners = new Map();
+  let attached = false;
+  const debuggerApi = {
+    isAttached: () => attached,
+    attach: () => { attached = true; },
+    detach: () => { attached = false; },
+    on(name, fn) { const rows = listeners.get(name) || new Set(); rows.add(fn); listeners.set(name, rows); },
+    off(name, fn) { listeners.get(name)?.delete(fn); },
+    async sendCommand(method) {
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'frame-root', url: 'https://chat.z.ai/c/live-r82' } } };
+      if (method === 'Runtime.enable') {
+        for (const fn of listeners.get('message') || []) {
+          fn({}, 'Runtime.executionContextCreated', { context: { id: 1, uniqueId: 'ctx-r82', auxData: { frameId: 'frame-root', isDefault: true } } }, null);
+        }
+        return {};
+      }
+      if (method === 'Accessibility.getFullAXTree') return { nodes };
+      if (method === 'Page.getLayoutMetrics') return { cssVisualViewport: { clientWidth: 1200, clientHeight: 800 } };
+      if (['Page.enable', 'DOM.enable', 'Accessibility.enable', 'Page.setLifecycleEventsEnabled', 'Network.enable', 'Target.setAutoAttach', 'DOM.getDocument'].includes(method)) return {};
+      throw new Error(`unexpected_debugger_command:${method}`);
+    },
+  };
+  const webContents = {
+    id: 9201,
+    debugger: debuggerApi,
+    isDestroyed: () => false,
+    getURL: () => 'https://chat.z.ai/c/live-r82',
+    getTitle: () => 'Z.ai',
+    getOSProcessId: () => 99201,
+    getOrCreateDevToolsTargetId: () => 'target-9201',
+  };
+
+  const frame = await captureSemanticFrame(webContents);
+  const composer = frame.semantic_targets.find((row) => row.backend_node_id === 2201);
+  assert.ok(composer, 'explicitly editable AX node must survive semantic projection');
+  assert.equal(composer.role, 'textbox');
+  assert.equal(composer.name, 'Send a Message');
+  assert.ok(composer.semantic_ref, 'normalized composer retains exact backend-node semantic identity');
+  assert.equal(composer.semantic_ref.evidence.role, 'textbox');
+  assert.equal(composer.value_length, 0);
+});
+
 // ---------------------------------------------------------------------------
 // D-P2 (2026-09-18): the ChatGPT composer stopped acting on a synthetic Enter;
 // the submit path must keep Enter (zero-geometry background contract) but fall
