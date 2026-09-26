@@ -3,15 +3,98 @@
 // On COMMAND, main-process native geometry reserves the same 200px so renderer
 // controls cannot be covered by the Browser WebContentsView.
 
-import { Activity, Database, ListChecks, Server, X } from "lucide-react";
+import { Activity, Bot, Database, ListChecks, ScanSearch, Server, X } from "lucide-react";
 import { useMe2, type ContextDrawerTab } from "@/components/me2/store";
 import { EVENT_STYLE, hhmmss } from "@/lib/me2-bus";
+import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 
 const TABS: Array<{ key: ContextDrawerTab; label: string; icon: typeof Activity }> = [
+  { key: "selection", label: "Selection", icon: ScanSearch },
   { key: "events", label: "Events", icon: Activity },
   { key: "commands", label: "Commands", icon: ListChecks },
   { key: "runtime", label: "Runtime", icon: Server },
 ];
+
+function SelectionPane() {
+  const chatId = useMe2((s) => s.chatId);
+  const inspectedTaskId = useMe2((s) => s.inspectedTaskId);
+  const snap = useMe2((s) => s.snap);
+  const page = useMe2((s) => s.page);
+  const workspace = useMe2((s) => s.workspace);
+  const { sessions, status, loading, error } = useAgentChatSessions();
+
+  const agent = chatId ? sessions.find((session) => session.id === chatId) ?? null : null;
+  const task = inspectedTaskId
+    ? (snap?.tasks ?? []).find((item) => item.id === inspectedTaskId)
+      ?? (snap?.archived ?? []).find((item) => item.id === inspectedTaskId)
+      ?? null
+    : null;
+
+  return (
+    <div className="grid min-h-full grid-cols-1 gap-px bg-zinc-900 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_220px]" data-testid="context-drawer-selection">
+      <section className="min-w-0 bg-[#09090b] p-3" aria-label="Selected agent">
+        <p className="flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-widest text-zinc-600">
+          <Bot className="h-3 w-3" aria-hidden /> Selected agent
+        </p>
+        {agent ? (
+          <div className="mt-2 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`h-1.5 w-1.5 rounded-full ${agent.state === "THINKING" ? "bg-violet-400" : "bg-emerald-400"}`} aria-hidden />
+              <strong className="truncate text-[12px] text-zinc-200">{agent.title}</strong>
+              <span className="shrink-0 border border-zinc-800 px-1 font-mono text-[8px] text-zinc-500">{agent.role}</span>
+            </div>
+            <p className="mt-1 truncate font-mono text-[9px] text-zinc-500">{agent.model} · {agent.id}</p>
+            {agent.objective ? <p className="mt-2 line-clamp-2 text-[10px] leading-4 text-zinc-400">{agent.objective}</p> : null}
+            <p className="mt-2 font-mono text-[9px] text-zinc-600">
+              {agent.turns_ok} ok · {agent.turns_fail} fail · compact {agent.compactions}
+              {agent.outcome_status ? ` · outcome ${agent.outcome_status}` : ""}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-3 text-[10px] text-zinc-600">
+            {loading ? "загрузка agent context…" : error ? `agent feed: ${error}` : "выберите агента в COMMAND или AGENTS"}
+          </p>
+        )}
+      </section>
+
+      <section className="min-w-0 bg-[#09090b] p-3" aria-label="Last inspected task">
+        <p className="flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-widest text-zinc-600">
+          <ListChecks className="h-3 w-3" aria-hidden /> Last inspected task
+        </p>
+        {task ? (
+          <div className="mt-2 min-w-0">
+            <div className="flex items-center gap-2">
+              <strong className="truncate text-[12px] text-zinc-200">{task.title}</strong>
+              <span className={`shrink-0 border px-1 font-mono text-[8px] ${
+                task.status === "FAILED"
+                  ? "border-rose-900 text-rose-300"
+                  : task.status === "COMPLETED"
+                    ? "border-emerald-900 text-emerald-300"
+                    : "border-zinc-800 text-zinc-500"
+              }`}>{task.status}</span>
+            </div>
+            <p className="mt-1 truncate font-mono text-[9px] text-zinc-500">{task.id}</p>
+            <p className="mt-2 line-clamp-2 text-[10px] leading-4 text-zinc-400">{task.spec}</p>
+            <p className="mt-2 font-mono text-[9px] text-zinc-600">
+              {task.steps}/{task.max_steps} steps{task.role ? ` · ${task.role}` : ""}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-3 text-[10px] text-zinc-600">откройте задачу в TASKS, чтобы закрепить её контекст</p>
+        )}
+      </section>
+
+      <section className="bg-[#09090b] p-3" aria-label="Current workspace context">
+        <p className="font-mono text-[8px] uppercase tracking-widest text-zinc-600">Context</p>
+        <p className="mt-2 font-mono text-[10px] text-zinc-300">{workspace}</p>
+        <p className="font-mono text-[9px] text-zinc-600">page {page}</p>
+        <p className="mt-3 font-mono text-[9px] text-zinc-600">
+          fleet {status?.active ?? 0}/{status?.total ?? 0} · thinking {status?.thinking ?? 0}
+        </p>
+      </section>
+    </div>
+  );
+}
 
 export function ContextDrawer() {
   const open = useMe2((s) => s.contextDrawerOpen);
@@ -63,6 +146,7 @@ export function ContextDrawer() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto mc-scroll">
+        {tab === "selection" ? <SelectionPane /> : null}
         {tab === "events" ? (
           <div className="font-mono text-[10px]" data-testid="context-drawer-events">
             {events.slice(0, 24).map((event) => (
