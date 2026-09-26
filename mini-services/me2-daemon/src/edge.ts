@@ -321,3 +321,181 @@ export async function edgeStatus(fresh = false, snapshot = false): Promise<EdgeS
   cache = { at: Date.now(), data: status };
   return status;
 }
+
+// ---------------------------------------------------------------------------
+// R83-IMPORT: source-tree import plan — decompose the live snapshots into a
+// reviewable source layout for the canonical repo (operator review gate).
+// The snapshots on disk ARE the only surviving source of truth for the two
+// production workers; this plan turns them into an auditable tree proposal
+// WITHOUT mutating any repo (the actual import lands in a work-branch PR).
+// ---------------------------------------------------------------------------
+
+interface ParsedModule {
+  name: string;
+  body: string;
+}
+
+function parseModules(raw: string): ParsedModule[] {
+  const parts: ParsedModule[] = [];
+  const lines = raw.split("\n");
+  let current: { name: string; body: string[] } | null = null;
+  for (const line of lines) {
+    if (/^--[0-9a-f]{8,}(--)?$/.test(line.trim())) {
+      if (current) parts.push({ name: current.name, body: current.body.join("\n") });
+      current = null;
+      continue;
+    }
+    const m = /^Content-Disposition: form-data; name="([^"]+)"/.exec(line.trim());
+    if (m) {
+      if (current) parts.push({ name: current.name, body: current.body.join("\n") });
+      current = { name: m[1], body: [] };
+      continue;
+    }
+    if (current) current.body.push(line);
+  }
+  if (current) parts.push({ name: current.name, body: current.body.join("\n") });
+  parts.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return parts;
+}
+
+export interface ImportModulePlan {
+  module_path: string; // name inside the live bundle (multipart part name)
+  bytes: number;
+  sha256_12: string;
+  lines: number;
+  readable: boolean; // heuristic: multi-line human-readable source vs minified blob
+  bundle_sections: string[]; // for BUNDLED modules: the // src/*.ts markers found
+}
+
+export interface WorkerImportPlan {
+  worker: string;
+  snapshot_available: boolean;
+  snapshot_sha256_12: string | null;
+  source_character: "ORIGINAL_MODULES" | "BUNDLED" | "UNCLASSIFIED" | "NO_SNAPSHOT";
+  proposed_repo_prefix: string;
+  modules: ImportModulePlan[];
+  wrangler_stub: {
+    bindings: string[];
+    durable_object: string | null;
+    queue: string | null;
+    workflow: boolean;
+    note: string;
+  } | null;
+  import_verdict: "IMPORT_READY" | "NEEDS_UNBUNDLING" | "BLOCKED_NO_SNAPSHOT" | "NOT_IN_REGISTRY";
+  notes: string[];
+}
+
+const WORKER_REPO_PREFIX: Record<string, string> = {
+  "metaengine-fabric-worker-h205f21r4": "edge/fabric-worker-h205f21r4/",
+  "metaengine-h205f22-aop1": "edge/h205f22-aop1/",
+};
+
+function analyzeModule(m: ParsedModule): ImportModulePlan {
+  const body = m.body;
+  const lines = body.split("\n").length;
+  // readable heuristic: average line length sane + no giant minified runs
+  const avgLen = body.length / Math.max(lines, 1);
+  const readable = lines >= 5 && avgLen < 200;
+  // bundle sections: esbuild keeps "// src/xxx.ts" comments
+  const sections = Array.from(new Set(body.match(/^\/\/ src\/[A-Za-z0-9_./-]+$/gm) ?? [])).slice(0, 24);
+  return {
+    module_path: m.name,
+    bytes: Buffer.byteLength(body, "utf8"),
+    sha256_12: sha256(body).slice(0, 12),
+    lines,
+    readable,
+    bundle_sections: sections,
+  };
+}
+
+export async function edgeImportPlan(): Promise<{
+  ok: true;
+  schema: "metaengine.r83.edge.import-plan.v1";
+  fetched_at: string;
+  daemon_version: string;
+  workers: WorkerImportPlan[];
+  summary: string[];
+}> {
+  const out: WorkerImportPlan[] = [];
+  // live bindings for wrangler stubs (best-effort, read-only)
+  const { account } = cfCreds();
+  for (const workerId of Object.keys(WORKER_SOURCE)) {
+    const prefix = WORKER_REPO_PREFIX[workerId] ?? `edge/${workerId}/`;
+    const snapPath = `${SNAPSHOT_DIR}${workerId}.snapshot.txt`;
+    const plan: WorkerImportPlan = {
+      worker: workerId,
+      snapshot_available: existsSync(snapPath),
+      snapshot_sha256_12: null,
+      source_character: "NO_SNAPSHOT",
+      proposed_repo_prefix: prefix,
+      modules: [],
+      wrangler_stub: null,
+      import_verdict: "BLOCKED_NO_SNAPSHOT",
+      notes: [],
+    };
+    if (plan.snapshot_available) {
+      const raw = readFileSync(snapPath, "utf8");
+      plan.snapshot_sha256_12 = sha256(normalizedContent(raw)).slice(0, 12);
+      const mods = parseModules(raw);
+      plan.modules = mods.map(analyzeModule);
+      const readableCount = plan.modules.filter((m) => m.readable).length;
+      const bundleSections = plan.modules.flatMap((m) => m.bundle_sections);
+      if (mods.length > 1) {
+        plan.source_character = "ORIGINAL_MODULES";
+        plan.import_verdict = "IMPORT_READY";
+        plan.notes.push(
+          `${mods.length} named modules (${readableCount} readable) — the bundle maps 1:1 onto a source tree; import as-is under ${prefix}`
+        );
+      } else if (bundleSections.length > 0) {
+        plan.source_character = "BUNDLED";
+        plan.import_verdict = "NEEDS_UNBUNDLING";
+        plan.notes.push(
+          `single esbuild bundle with ${bundleSections.length} src-section markers (${bundleSections.slice(0, 6).join(", ")}${bundleSections.length > 6 ? ", …" : ""}) — original module boundaries are recoverable but require unbundling before review`
+        );
+      } else {
+        plan.source_character = "UNCLASSIFIED";
+        plan.import_verdict = "NEEDS_UNBUNDLING";
+        plan.notes.push("single module without section markers — manual decomposition required");
+      }
+    } else {
+      plan.notes.push("no evidence snapshot on disk — run the snapshot camera (POST /edge?snapshot=1) first");
+    }
+    // wrangler stub from live settings (binding NAMES only)
+    const sres = await cf(`/accounts/${account}/workers/scripts/${encodeURIComponent(workerId)}/settings`).catch(() => null);
+    const st = (sres?.result ?? {}) as Any;
+    if (st.bindings) {
+      const bindings: string[] = [];
+      let durableObject: string | null = null;
+      let queue: string | null = null;
+      let workflow = false;
+      for (const b of st.bindings ?? []) {
+        bindings.push(`${b.name}:${b.type}`);
+        if (b.type === "durable_object_namespace") durableObject = String(b.name);
+        if (b.type === "queue") queue = String(b.name);
+        if (b.type === "workflow") workflow = true;
+      }
+      plan.wrangler_stub = {
+        bindings,
+        durable_object: durableObject,
+        queue,
+        workflow,
+        note: "binding NAMES only (secret values are never returned by the API) — a wrangler.jsonc stub must be authored from these during import",
+      };
+    }
+    out.push(plan);
+  }
+  const ready = out.filter((p) => p.import_verdict === "IMPORT_READY");
+  const unbundling = out.filter((p) => p.import_verdict === "NEEDS_UNBUNDLING");
+  return {
+    ok: true,
+    schema: "metaengine.r83.edge.import-plan.v1",
+    fetched_at: new Date().toISOString(),
+    daemon_version: VERSION,
+    workers: out,
+    summary: [
+      `import plan: ${ready.length} worker(s) IMPORT_READY (original modules preserved), ${unbundling.length} NEEDS_UNBUNDLING`,
+      "the plan is evidence-only: no repo mutation happens here; the actual import lands in a work-branch PR (work/r83-edge-source-import-v1) under operator review",
+      "digest binding: every imported file carries its sha256_12 so the promotion gate can prove the built worker equals the live one",
+    ],
+  };
+}

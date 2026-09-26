@@ -22,6 +22,11 @@ export interface MonitorSample {
   cognitive_state: string;
   compute_state: string;
   p0_count: number;
+  // R82-EXIT: runtime identity per sample — the self-update landing shows up
+  // here as an extension_version / dev_plane head transition, and the console
+  // charts the exact moment the installed runtime picks up the merged release.
+  extension_version: string;
+  dev_plane_head: string;
 }
 
 const SAMPLE_INTERVAL_MS = 15_000;
@@ -48,6 +53,8 @@ function takeSample(): void {
         cognitive_state: s.cognitive.state,
         compute_state: s.compute_state,
         p0_count: s.p0_flags.length,
+        extension_version: s.extension_version,
+        dev_plane_head: (s.dev_plane.head ?? "").slice(0, 12),
       };
       samples.push(m);
       if (samples.length > MAX_SAMPLES) samples = samples.slice(-MAX_SAMPLES);

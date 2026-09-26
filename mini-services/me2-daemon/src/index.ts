@@ -15,7 +15,8 @@ import { monitorHistory, monitorStatus, startMonitor } from "./monitor";
 import { donorRegistry } from "./donor-registry";
 import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
-import { edgeStatus } from "./edge";
+import { edgeStatus, edgeImportPlan } from "./edge";
+import { readbackStatus, startReadbackWatch } from "./readback";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -119,6 +120,16 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     method: "GET",
     path: "/edge",
     handler: (_r, url) => edgeStatus(url.searchParams.get("fresh") === "1", url.searchParams.get("snapshot") === "1"),
+  },
+  {
+    method: "GET",
+    path: "/edge/import-plan",
+    handler: () => edgeImportPlan(),
+  },
+  {
+    method: "GET",
+    path: "/readback",
+    handler: (_r, url) => readbackStatus(url.searchParams.get("fresh") === "1"),
   },
   {
     method: "GET",
@@ -249,5 +260,8 @@ appendEvent("DAEMON_BOOT", "daemon", null, {
 
 // convergence monitor: silent sampler, starts after boot (never blocks listen)
 startMonitor();
+// R82-EXIT readback watch: READ-ONLY draft sampler (5 min) + one-shot
+// milestones; starts after boot (never blocks listen)
+startReadbackWatch();
 
 console.log(`[me2-daemon] ${VERSION} (${ROUND}) REST :${restServer.port} · WS bus :${wsServer.port} · anchor seq ${MIRROR_ANCHOR.seq}`);

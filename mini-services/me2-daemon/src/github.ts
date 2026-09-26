@@ -60,6 +60,14 @@ function githubToken(): string | null {
   }
 }
 
+// R82-EXIT: exported for the readback watch (release-branch CI rollup) — the
+// daemon's single GitHub read path (token stays server-side, machine-coded errors).
+export async function ghGet<T>(path: string): Promise<{ data: T; rateRemaining: number | null }> {
+  const token = githubToken();
+  if (!token) throw new OpError("github_no_token", "/home/z/.a2/.github.env: GITHUB_TOKEN_ADMIN отсутствует", 503);
+  return gh<T>(path, token);
+}
+
 async function gh<T>(path: string, token: string): Promise<{ data: T; rateRemaining: number | null }> {
   let res: Response;
   try {

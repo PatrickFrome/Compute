@@ -45,7 +45,7 @@ export const ROADMAP: RoadmapItem[] = [
     goal: "Repo == deployed backend: квалифицировать v14 canary, Postgres NOTIFY, result receipt, emergency routes, controlled promotion.",
     exit_gate: "production Edge digest/source binding соответствует candidate; signed E2E + rollback PASS.",
     status: "IN_PROGRESS",
-    evidence: "LIVE-КВАЛИФИКАЦИЯ (2026-09-26, CF API read-only): 3 workers @ metaengine-d9186d31.workers.dev. ФАЙНДИНГ: 2/2 registry workers (fabric-worker-h205f21r4 v15 dispatch gateway; h205f22-aop1 v64 операторный DO + SUPABASE_SERVICE_ROLE_KEY + GitHub writes) БЕЗ source-of-truth в репо (маркеры отсутствуют в main/release 4471/donor 1627). Живые скрипты сняты в evidence (data/edge/ + EDGE_SNAPSHOT). Промоушн заблокирован до импорта source + ротации CF-токена.",
+    evidence: "LIVE-КВАЛИФИКАЦИЯ (2026-09-26, CF API read-only): 3 workers @ metaengine-d9186d31.workers.dev. ФАЙНДИНГ: 2/2 registry workers (fabric-worker-h205f21r4 v15 dispatch gateway; h205f22-aop1 v64 операторный DO + SUPABASE_SERVICE_ROLE_KEY + GitHub writes) БЕЗ source-of-truth в репо (маркеры отсутствуют в main/release 4471/donor 1627). Живые скрипты сняты в evidence (data/edge/ + EDGE_SNAPSHOT). ИМПОРТ-ПЛАН ГОТОВ (edge.import-plan): fabric IMPORT_READY — 7/7 именованных читаемых модулей (src/gateway.js, handlers, index, workflow, ai, auth, core.mjs; каждое с sha256_12 digest-binding) → edge/fabric-worker-h205f21r4/; aop1 NEEDS_UNBUNDLING — единый esbuild-бандл 95KiB, 7 src-секций (index/supabase/github/executor/duel_microstep/peer_relay_v4/…) восстановимы разборкой. Следующий шаг: work/r83-edge-source-import-v1 PR под ревью оператора. Промоушн заблокирован до импорта source + ротации CF-токена.",
   },
   {
     round: "R84",
@@ -138,6 +138,13 @@ export const CONVERGENCE_EVIDENCE = {
   },
   live_runtime_gap:
     "installed Browser ROLLOVER_AMBIGUOUS (cycle 2109, >57h). ДИАГНОЗ ЗАВЕРШЁН 2026-09-26: (1) установленная сборка = release head cf747798 — это НЕ старый код; (2) корневая причина — отравленный account-draft на root-поверхности (28.7k chars, синтетически неочищаемый: клавиши игнорируются, Enter отказывает, 'New Chat' сохраняет драфт, send-кнопка nameless) + blank-zombie tabs от navigation deadline + atomic-save race. Фикс: PR #981; разблокировка: однократная ручная очистка драфта оператором.",
+  r82_exit_gate: {
+    built: "2026-09-26T08:20:00Z",
+    mechanism: "daemon /readback + консольная карточка R82 EXIT GATE: детерминированная stage-машина (RELEASE_CI → MANIFEST → SELF_UPDATE → CANARY → OPERATOR_CLEAR → CYCLE_GROWTH → R82_CLOSED), каждая стадия верифицируется против живых данных",
+    baselines: { extension_version: "0.7.0-dev.36089462649.1", dev_plane_head: "cf747798", merge_head: "e7fccd08", cycle_seq: 2109 },
+    draft_sampler: "READ-ONLY CAPTURE каждые 5 мин (ring buffer 48 сэмплов = 4h); milestone-события R82_DRAFT_CLEARED / R82_SELF_UPDATE_LANDED / R82_CYCLE_RESUMED пишутся в hash-chain однократно при переходе",
+    live_at_build: "release CI на e7fccd08: 34/38 success, 4 in_progress (publish-exact-verified-target PENDING); runtime = baseline (self-update ещё не подхвачен)",
+  },
 } as const;
 
 export const RECOVERY_STATUS = {

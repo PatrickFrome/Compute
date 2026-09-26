@@ -15,7 +15,7 @@ import { useToast } from '@/hooks/use-toast'
 import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   Activity, AlertTriangle, Boxes, Camera, ChevronDown, Cloud, Database, Download, GitBranch, GitPullRequest, HeartPulse,
-  ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
+  Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------- utils ----
@@ -158,11 +158,59 @@ interface EdgeStatus {
   promotion_blockers: string[]
 }
 
+// R82-EXIT: readback watch (exit-gate stage machine)
+interface ReadbackStage {
+  stage: string; title: string; state: 'DONE' | 'ACTIVE' | 'PENDING' | 'BLOCKED'; detail: string
+}
+interface ReadbackDraftSample {
+  ts: string; tab_id: string | null; chars: number | null
+  canary: 'OVERSIZED' | 'OK' | 'NO_COMPOSER' | 'NO_TAB' | 'UNKNOWN'; error?: string
+}
+interface Readback {
+  fetched_at: string
+  baseline: { extension_version: string; dev_plane_head: string; merge_head: string; cycle_seq: number }
+  release_ci: {
+    head: { sha: string; short: string; message: string; committed_at: string } | null
+    checks: { total: number; success: number; failed: number; cancelled: number; skipped: number; pending: number; in_progress: number; publish_manifest: string; failed_names: string[] }
+    terminal: boolean; green: boolean
+  } | null
+  release_ci_error: string | null
+  runtime: { extension_version: string; dev_plane_head: string; self_update_landed: boolean; version_transitions: { ts: string; from: string; to: string }[] }
+  canary: { rollover_reason: string | null; new_code_active: boolean }
+  draft: { samples: ReadbackDraftSample[]; last: ReadbackDraftSample | null; max_chars: number | null; cleared: boolean; threshold: number }
+  cycle: { baseline: number; current: number; growth: number; monotonic_growth_observed: boolean; stale_completed_s: number | null }
+  stages: ReadbackStage[]
+  current_gate: string
+  summary: string
+}
+
+// R83-IMPORT: source-tree import plan
+interface ImportModulePlan {
+  module_path: string; bytes: number; sha256_12: string; lines: number
+  readable: boolean; bundle_sections: string[]
+}
+interface WorkerImportPlan {
+  worker: string
+  snapshot_available: boolean
+  snapshot_sha256_12: string | null
+  source_character: 'ORIGINAL_MODULES' | 'BUNDLED' | 'UNCLASSIFIED' | 'NO_SNAPSHOT'
+  proposed_repo_prefix: string
+  modules: ImportModulePlan[]
+  wrangler_stub: { bindings: string[]; durable_object: string | null; queue: string | null; workflow: boolean; note: string } | null
+  import_verdict: 'IMPORT_READY' | 'NEEDS_UNBUNDLING' | 'BLOCKED_NO_SNAPSHOT' | 'NOT_IN_REGISTRY'
+  notes: string[]
+}
+interface EdgeImportPlan {
+  fetched_at: string
+  workers: WorkerImportPlan[]
+  summary: string[]
+}
+
 // ---------------------------------------------------------- gap matrix ----
 const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
-  { pri: 'P0', title: 'Supervisor useful cycle', status: 'ДИАГНОЗ ЗАВЕРШЁН: отравленный account-draft 28.7k + zombie tabs; фикс PR #981; ждёт ручной очистки драфта оператором', live: 'keepalive' },
+  { pri: 'P0', title: 'Supervisor useful cycle', status: 'EXIT-GATE WATCH live: PR #981 слит (e7fccd08), release-CI терминален → manifest → self-update → ручная очистка драфта оператором → рост cycle_seq; смотрите карточку R82 EXIT GATE', live: 'keepalive' },
   { pri: 'P0', title: 'DevOS maintenance liveness', status: 'idle-gate fix в source; live timeout сохраняется до installer' },
-  { pri: 'P0', title: 'Edge convergence', status: 'R83-квалификация ЗАВЕРШЕНА (live): 2/2 registry workers БЕЗ source в репо (только живой контент через CF API); снапшоты сняты; промоушн заблокирован до импорта source' },
+  { pri: 'P0', title: 'Edge convergence', status: 'R83-квалификация live: 2/2 registry workers БЕЗ source в репо; импорт-план готов — fabric IMPORT_READY (7/7 модулей), aop1 NEEDS_UNBUNDLING (7 src-секций); импорт в work-branch под ревью оператора' },
   { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
   { pri: 'P0', title: 'Full installer', status: 'R85 in-flight: standalone daemon payload + version unify (18 commits, CI re-qualifying @ 2c28aa85)' },
   { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION — блокировано ТЕМ ЖЕ отравленным драфтом (общая причина с supervisor rollover)' },
@@ -292,6 +340,10 @@ export default function MissionControl() {
   const [edge, setEdge] = useState<EdgeStatus | null>(null)
   const [edgeErr, setEdgeErr] = useState<string | null>(null)
   const [edgeLoading, setEdgeLoading] = useState(false)
+  const [edgePlan, setEdgePlan] = useState<EdgeImportPlan | null>(null)
+  const [readback, setReadback] = useState<Readback | null>(null)
+  const [readbackErr, setReadbackErr] = useState<string | null>(null)
+  const [readbackLoading, setReadbackLoading] = useState(false)
   const [donorReg, setDonorReg] = useState<DonorRegistry | null>(null)
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -299,6 +351,7 @@ export default function MissionControl() {
   const [wsLive, setWsLive] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const backoffRef = useRef(1000)
+  const filterRef = useRef<HTMLInputElement | null>(null)
 
   // ---- 1s live clock for relative ages
   useEffect(() => {
@@ -345,12 +398,20 @@ export default function MissionControl() {
     finally { setEdgeLoading(false) }
   }, [])
 
+  const loadReadback = useCallback(async (fresh = false) => {
+    setReadbackLoading(true)
+    try { setReadback(await jfetch<Readback>(`/readback${fresh ? '?fresh=1' : ''}`)); setReadbackErr(null) }
+    catch (e) { setReadbackErr((e as Error).message) }
+    finally { setReadbackLoading(false) }
+  }, [])
+
   useEffect(() => {
-    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge()
+    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
     jfetch<DonorRegistry>('/donor-registry').then(setDonorReg).catch(() => {})
+    jfetch<EdgeImportPlan>('/edge/import-plan').then(setEdgePlan).catch(() => {})
     const a = setInterval(loadHealth, 5000)
     const b = setInterval(() => loadSupervisor(false), 10000)
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
@@ -358,10 +419,28 @@ export default function MissionControl() {
     const f = setInterval(() => { loadConvergence(false) }, 30000)
     const g = setInterval(() => { loadR82(false) }, 60000)
     const h = setInterval(() => { loadEdge(false) }, 120000)
+    const i = setInterval(() => { loadReadback(false) }, 60000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h) }
-  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback])
+
+  // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      const target = ev.target as HTMLElement | null
+      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      if (ev.key === '/' && !typing) {
+        ev.preventDefault()
+        filterRef.current?.focus()
+      } else if (ev.key === 'Escape' && target === filterRef.current) {
+        setFilter('')
+        filterRef.current?.blur()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // ---- REST events poll (fallback) + WS live stream (primary)
   useEffect(() => {
@@ -725,6 +804,10 @@ export default function MissionControl() {
                 <Stat label="draft, chars" value={r82.attempt_tab_probe.composer_value_length != null ? String(r82.attempt_tab_probe.composer_value_length) : '—'} tone={r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'text-rose-400' : 'text-emerald-400'} />
                 <Stat label="draft canary" value={r82.attempt_tab_probe.draft_canary} tone={r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'text-rose-400' : r82.attempt_tab_probe.draft_canary === 'OK' ? 'text-emerald-400' : 'text-zinc-400'} />
               </div>
+              {/* probe error surface (R82 card backlog) */}
+              {r82.attempt_tab_probe.error && (
+                <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 font-mono text-[10px] text-amber-200/80">probe error: {r82.attempt_tab_probe.error}</div>
+              )}
               <div className="flex flex-wrap gap-1.5">
                 <Chip tone="info">runtime = release head cf747798</Chip>
                 {r82.fix.pr && (
@@ -766,6 +849,125 @@ export default function MissionControl() {
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> live-проба tab'а супервизора…</div>
+          )}
+        </Panel>
+
+        {/* ------------------------------------------ R82 EXIT GATE WATCH */}
+        <Panel
+          icon={<Rocket className="h-4 w-4" />}
+          title="R82 EXIT GATE · SELF-UPDATE WATCH"
+          chip={
+            readbackErr ? <Chip tone="p0">ERR</Chip>
+              : readback ? (
+                <Chip tone={readback.current_gate === 'R82_CLOSED' ? 'ok' : readback.stages.find((s) => s.state === 'BLOCKED') ? 'p0' : 'warn'}>
+                  {readback.current_gate}
+                </Chip>
+              ) : <Chip tone="neutral">…</Chip>
+          }
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={readbackLoading} onClick={() => loadReadback(true)} aria-label="Свежий readback">
+              <RefreshCw className={`h-4 w-4 ${readbackLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          }
+        >
+          {readbackErr && !readback ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">readback: {readbackErr}</div>
+          ) : readback ? (
+            <div className="space-y-3">
+              {/* stage machine */}
+              <div className="space-y-0">
+                {readback.stages.map((s, i) => {
+                  const icon =
+                    s.state === 'DONE' ? <span className="text-emerald-400">✓</span>
+                      : s.state === 'ACTIVE' ? <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                        : s.state === 'BLOCKED' ? <span className="text-rose-400">✗</span>
+                          : <span className="text-zinc-600">•</span>
+                  const rowCls =
+                    s.state === 'DONE' ? 'border-emerald-500/25 bg-emerald-500/5'
+                      : s.state === 'ACTIVE' ? 'border-amber-500/40 bg-amber-500/5'
+                        : s.state === 'BLOCKED' ? 'border-rose-500/30 bg-rose-500/5'
+                          : 'border-zinc-800 bg-zinc-950/60'
+                  return (
+                    <div key={s.stage} className="relative flex gap-2.5">
+                      {i < readback.stages.length - 1 && <span className="absolute left-[13px] top-7 h-[calc(100%-8px)] w-px bg-zinc-800" />}
+                      <div className={`z-10 mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${rowCls}`}>{icon}</div>
+                      <div className={`mb-1.5 min-w-0 flex-1 rounded-lg border px-2.5 py-2 ${rowCls}`}>
+                        <div className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">{i + 1}. {s.stage}</span>
+                          <span className={`text-xs font-semibold ${s.state === 'DONE' ? 'text-emerald-300' : s.state === 'ACTIVE' ? 'text-amber-300' : s.state === 'BLOCKED' ? 'text-rose-300' : 'text-zinc-400'}`}>{s.title}</span>
+                          <Chip tone={s.state === 'DONE' ? 'ok' : s.state === 'ACTIVE' ? 'warn' : s.state === 'BLOCKED' ? 'p0' : 'neutral'} className="ml-auto shrink-0">{s.state}</Chip>
+                        </div>
+                        <div className="mt-0.5 break-words font-mono text-[10px] leading-snug text-zinc-500">{s.detail}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* release CI + runtime identity */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="release head" value={readback.release_ci?.head?.short ?? '—'} tone="text-cyan-300" span="col-span-2" />
+                <Stat label="release CI" value={readback.release_ci ? `${readback.release_ci.checks.success}/${readback.release_ci.checks.total}${readback.release_ci.terminal ? '' : ' ↻'}` : '—'} tone={readback.release_ci?.green ? 'text-emerald-400' : readback.release_ci?.terminal ? 'text-rose-400' : 'text-amber-400'} span="col-span-2" />
+                <Stat label="runtime сейчас" value={readback.runtime.extension_version} tone={readback.runtime.self_update_landed ? 'text-emerald-400' : 'text-zinc-400'} span="col-span-2" />
+                <Stat label="baseline (до фикса)" value={readback.baseline.extension_version} tone="text-zinc-600" span="col-span-2" />
+                <Stat label="manifest rail" value={readback.release_ci?.checks.publish_manifest ?? '—'} tone={readback.release_ci?.checks.publish_manifest === 'SUCCESS' ? 'text-emerald-400' : 'text-amber-400'} />
+                <Stat label="cycle_seq" value={`${readback.cycle.current}${readback.cycle.growth > 0 ? ` (+${readback.cycle.growth})` : ''}`} tone={readback.cycle.growth > 0 ? 'text-emerald-400' : 'text-zinc-400'} />
+              </div>
+
+              {/* version transitions */}
+              {readback.runtime.version_transitions.length > 0 && (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-emerald-300">Переходы версии runtime (monitor history)</div>
+                  {readback.runtime.version_transitions.map((t, i) => (
+                    <div key={i} className="break-all font-mono text-[10px] text-emerald-200/90">
+                      {hhmmss(t.ts)}: {t.from} → <span className="font-bold">{t.to}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* draft history */}
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">История драфта (READ-ONLY сэмплер, 5 мин)</span>
+                  <Chip tone={readback.draft.cleared ? 'ok' : readback.draft.last?.canary === 'OVERSIZED' ? 'p0' : 'neutral'}>
+                    {readback.draft.cleared ? 'CLEARED' : readback.draft.last?.canary ?? '…'}
+                  </Chip>
+                  {readback.draft.max_chars != null && <Chip tone="neutral">max {readback.draft.max_chars} chars</Chip>}
+                  <Chip tone="neutral">порог {readback.draft.threshold}</Chip>
+                </div>
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                  <Spark
+                    label="draft, chars"
+                    color="#fb7185"
+                    value={readback.draft.last?.chars != null ? String(readback.draft.last.chars) : '—'}
+                    data={readback.draft.samples.filter((s) => s.chars != null).map((s) => ({ t: hhmmss(s.ts), v: s.chars as number }))}
+                  />
+                  <div className="col-span-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 lg:col-span-3">
+                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Последние пробы</div>
+                    <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                      {readback.draft.samples.slice(-8).reverse().map((s, i) => (
+                        <div key={i} className="flex items-baseline gap-2 font-mono text-[10px]">
+                          <span className="text-zinc-600">{hhmmss(s.ts)}</span>
+                          <span className={s.canary === 'OVERSIZED' ? 'text-rose-400' : s.canary === 'OK' ? 'text-emerald-400' : 'text-zinc-500'}>{s.canary}</span>
+                          <span className="ml-auto text-zinc-400">{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
+                        </div>
+                      ))}
+                      {readback.draft.samples.length === 0 && <div className="py-2 text-center text-[10px] text-zinc-600">сэмплер разогревается (первый сэмпл ~1 мин)…</div>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {readback.release_ci_error && (
+                <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 font-mono text-[10px] text-amber-200/80">release CI: {readback.release_ci_error}</div>
+              )}
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Gate-машина верифицирует каждый этап против живых данных: release CI на merge-head {readback.baseline.merge_head} → публикация manifest (publish-exact-verified-target) → смена версии runtime (baseline {readback.baseline.extension_version}) → канарей ROOT_DRAFT_OVERSIZED → ручная очистка драфта → монотонный рост cycle_seq от {readback.cycle.baseline}. Драфт-пробы строго READ-ONLY (CAPTURE); milestone-события пишутся в hash-chain однократно при переходе.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> сборка exit-gate снимка…</div>
           )}
         </Panel>
 
@@ -849,6 +1051,58 @@ export default function MissionControl() {
                   </div>
                 ))}
               </div>
+              {/* import plan (R83-import) */}
+              {edgePlan && (
+                <div className={`space-y-2 ${scrollCls} pr-1`}>
+                  <div className="flex flex-wrap items-center gap-2 px-0.5">
+                    <Layers className="h-3.5 w-3.5 text-cyan-300" />
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">Импорт-план source-дерева (R83-import)</span>
+                    {edgePlan.workers.filter((w) => w.import_verdict === 'IMPORT_READY').length > 0 && (
+                      <Chip tone="ok">{edgePlan.workers.filter((w) => w.import_verdict === 'IMPORT_READY').length} IMPORT_READY</Chip>
+                    )}
+                    {edgePlan.workers.filter((w) => w.import_verdict === 'NEEDS_UNBUNDLING').length > 0 && (
+                      <Chip tone="warn">{edgePlan.workers.filter((w) => w.import_verdict === 'NEEDS_UNBUNDLING').length} NEEDS_UNBUNDLING</Chip>
+                    )}
+                  </div>
+                  {edgePlan.workers.map((w) => (
+                    <div key={w.worker} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="min-w-0 break-all font-mono text-[11px] text-teal-300">{w.worker}</span>
+                        <Chip tone={w.import_verdict === 'IMPORT_READY' ? 'ok' : w.import_verdict === 'NEEDS_UNBUNDLING' ? 'warn' : 'p0'} className="ml-auto shrink-0">{w.import_verdict}</Chip>
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <Stat label="снапшот" value={w.snapshot_sha256_12 ?? '—'} tone="text-cyan-300" />
+                        <Stat label="характер" value={w.source_character} tone={w.source_character === 'ORIGINAL_MODULES' ? 'text-emerald-400' : 'text-amber-400'} />
+                        <Stat label="модулей" value={String(w.modules.length)} />
+                        <Stat label="в репо" value={w.proposed_repo_prefix} tone="text-zinc-400" />
+                      </div>
+                      {w.modules.length > 0 && (
+                        <div className="mt-2 space-y-0.5">
+                          {w.modules.map((m) => (
+                            <div key={m.module_path} className="flex items-baseline gap-2 rounded border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 font-mono text-[10px] hover:border-zinc-700">
+                              <span className="min-w-0 flex-1 truncate text-zinc-300" title={m.module_path}>{m.module_path}</span>
+                              <span className="shrink-0 text-zinc-600">{m.lines}L · {(m.bytes / 1024).toFixed(1)}KiB</span>
+                              <span className="shrink-0 text-cyan-300/70">{m.sha256_12}</span>
+                              {m.bundle_sections.length > 0 && <span className="shrink-0 text-amber-300/80" title={m.bundle_sections.join('\n')}>{m.bundle_sections.length} src-секций</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {w.wrangler_stub && (
+                        <p className="mt-1.5 text-[10px] leading-snug text-zinc-500">
+                          <span className="text-zinc-400">wrangler stub (bindings):</span> {w.wrangler_stub.bindings.join(', ')}
+                        </p>
+                      )}
+                      {w.notes.map((n) => (
+                        <p key={n} className="mt-1 text-[10px] leading-snug text-zinc-500">— {n}</p>
+                      ))}
+                    </div>
+                  ))}
+                  {edgePlan.summary.map((s) => (
+                    <div key={s} className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-cyan-200/80">{s}</div>
+                  ))}
+                </div>
+              )}
               <p className="text-[11px] leading-relaxed text-zinc-500">
                 Read-only CF-клиент демона (токен только серверно в /home/z/.a2/cloudflare.env). Кнопка-камера снимает живые скрипты в evidence (data/edge/ + hash-chained EDGE_SNAPSHOT события). Промоушн v14 → production требует source-of-truth в репо — сейчас его нет ни в main, ни в release, ни в donor.
               </p>
@@ -980,10 +1234,16 @@ export default function MissionControl() {
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Input
-                value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="фильтр по типу…"
+                ref={filterRef}
+                value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="фильтр по типу… (нажмите /)"
                 className="h-11 border-zinc-700 bg-zinc-950 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/50"
-                aria-label="Фильтр событий по типу"
+                aria-label="Фильтр событий по типу (клавиша / — фокус, Esc — очистка)"
               />
+              {filter && (
+                <Button variant="ghost" size="sm" className="h-11 shrink-0 px-3 text-zinc-400 hover:text-teal-400" onClick={() => { setFilter(''); filterRef.current?.focus() }} aria-label="Очистить фильтр">
+                  сброс
+                </Button>
+              )}
               <span className="shrink-0 text-[11px] text-zinc-500">{filtered.length}/{events.length}</span>
             </div>
             <div className={`space-y-1 ${scrollCls} pr-1`}>
@@ -1131,7 +1391,7 @@ export default function MissionControl() {
           <span>bus {wsLive ? 'ws' : 'poll'}</span>
           <span>·</span>
           <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
-          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R82'} · release readiness: BLOCKED (см. gap matrix)</span>
+          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R82'} · {readback ? `exit gate: ${readback.current_gate}` : 'release readiness: BLOCKED (см. gap matrix)'}</span>
         </div>
       </footer>
     </div>

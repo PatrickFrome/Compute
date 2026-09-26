@@ -91,6 +91,55 @@ export async function captureTab(tabId: string): Promise<Any> {
 }
 
 // ---------------------------------------------------------------------------
+// R82-EXIT: lightweight READ-ONLY draft probe for the periodic readback
+// sampler. Reuses the command fastlane (CAPTURE only — never types, never
+// navigates; R82 lesson: diagnosis must never mutate the observed surface).
+// ---------------------------------------------------------------------------
+
+export interface DraftProbe {
+  ts: string;
+  tab_id: string | null;
+  url: string | null;
+  chars: number | null;
+  canary: "OVERSIZED" | "OK" | "NO_COMPOSER" | "NO_TAB" | "UNKNOWN";
+  error?: string;
+}
+
+export async function probeDraft(): Promise<DraftProbe> {
+  const out: DraftProbe = {
+    ts: new Date().toISOString(),
+    tab_id: null,
+    url: null,
+    chars: null,
+    canary: "UNKNOWN",
+  };
+  try {
+    const rows = (await supa(
+      "/rest/v1/compute_fabric_a2_browser_supervisor_state_h205f22?select=state&order=last_seen_at.desc&limit=1"
+    )) as Any[];
+    const keepalive = rows?.[0]?.state?.supervisor_lifecycle?.keepalive ?? {};
+    const attempt = keepalive.rollover_attempt ?? null;
+    out.tab_id = attempt?.tab_id ? String(attempt.tab_id) : null;
+    if (!out.tab_id) {
+      out.canary = "NO_TAB";
+      return out;
+    }
+    const frame = await captureTab(out.tab_id);
+    out.url = frame?.url ? String(frame.url) : "";
+    const composer = (frame?.semantic_targets ?? []).find((t: Any) => t?.role === "textbox");
+    if (composer && Number.isFinite(Number(composer?.value_length))) {
+      out.chars = Number(composer.value_length);
+      out.canary = out.chars > ROOT_DRAFT_MAX_CHARS ? "OVERSIZED" : "OK";
+    } else {
+      out.canary = out.url === "" ? "UNKNOWN" : "NO_COMPOSER";
+    }
+  } catch (e) {
+    out.error = String((e as Error)?.message ?? e).slice(0, 160);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Diagnosis
 // ---------------------------------------------------------------------------
 
