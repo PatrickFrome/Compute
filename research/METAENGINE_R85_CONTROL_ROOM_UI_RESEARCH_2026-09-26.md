@@ -346,6 +346,11 @@ The component called `setTimeout(...scrollIntoView...)` directly during render w
 **6. Command authority existed but was visually abbreviated.**  
 Registry actions displayed the lane as the first four characters. This made the strongest control boundary less explicit exactly where agents/operators select actions. R85 now renders the full authority lane text (`READ ONLY / CONTROL / MUTATION / EMERGENCY`) with text + border semantics and accessible label, rather than relying on color or abbreviation.
 
+**7. Manual Agent Rail state was not part of native Browser geometry.**  
+This was a deeper composition defect. React could hide the 252px Command agent rail with Ctrl/Cmd+B while main-process `planShellLayout()` still reserved it. At intermediate window widths the inverse could also happen: main-process geometry released the rail to preserve the 720px Browser minimum while the renderer still showed the rail. Either direction breaks the invariant that native Browser pixels and renderer chrome never overlap or leave phantom reserved space.
+
+R85 now has one bounded presentation state for that geometry. The primary ME2 preload exposes only `setPrimaryCommandRail(boolean)`; main-process layout remains authoritative, clamps the rail away when Browser minimum width would be violated, and returns `effective_open`. Command UI persists the operator's preferred rail state but renders the main-process effective result, and re-reconciles it after window resize. The bridge explicitly carries no Browser command, scheduler, update or release authority. Installed UI attestation now requires the always-visible rail toggle rather than requiring the optional rail itself, so a legitimate collapsed preference cannot fail startup qualification.
+
 ### 2026 reference synthesis
 
 **DaVinci Resolve 21** continues to organize the application as dedicated task Pages with one-click switching. This supports the strict domain rule now enforced in TASKS: a Page should own its task workflow, not accumulate Browser/Observability controls merely because those data are available.  
