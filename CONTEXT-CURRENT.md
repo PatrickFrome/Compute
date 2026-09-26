@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.0)
 
-gen: 2026-09-26T20:48:32Z | worklog: 1805111B / 9661L | sha12=f3896a41085e
+gen: 2026-09-26T21:18:48Z | worklog: 1816938B / 9756L | sha12=ddce750cd2cc
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -8,7 +8,7 @@ gen: 2026-09-26T20:48:32Z | worklog: 1805111B / 9661L | sha12=f3896a41085e
 3. Прочитай хвост /home/z/my-project/worklog.md (последние 150+ строк) — канонический журнал ВСЕХ чатов
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1805111B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1816938B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -23,12 +23,6 @@ gen: 2026-09-26T20:48:32Z | worklog: 1805111B / 9661L | sha12=f3896a41085e
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- EVOLVE-ROUND-4 (implemented-RESPONSIVE) → elf-evolve round 4 — EV-RESPONSIVE (mobile-first аудит Mission Control)
-- R80-PUSH-G → ush-pending R80 — публикация main→sandbox/me2-os + 2 архив-ветки, verify ls-remote
-- R80-PUSH-H → ush-pending R80 — публикация main→sandbox/me2-os + 2 архив-ветки, verify ls-remote
-- EVOLVE-ROUND-6 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-SCROLLBAR] custom scrollbar + max-h-96 overflow-y-auto для длинных списков панелей
-- EVOLVE-ROUND-6 (implemented-SCROLLBAR) → elf-evolve round 6 — EV-SCROLLBAR (custom scrollbar + max-h-96 для длинных списков)
-- R80-PUSH-I → ush-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (при наличии GITHUB_TOKEN_ADMIN)
 - R80-PUSH-J → ush-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (при наличии GITHUB_TOKEN_ADMIN)
 - EVOLVE-ROUND-7 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-DARKMODE] next-themes: переключатель темы с персистом на /
 - EVOLVE-ROUND-7 (implemented-EV-DARKMODE) → elf-evolve round 7 — EV-DARKMODE (переключатель тёмной/светлой темы, next-themes)
@@ -38,47 +32,53 @@ gen: 2026-09-26T20:48:32Z | worklog: 1805111B / 9661L | sha12=f3896a41085e
 - R80-PUSH-N → ush-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (при наличии GITHUB_TOKEN_ADMIN)
 - R84-LIVE-AUDIT-1 → �ивой аудит R84 — daemon surfaces (fleet/commands/brain/memory) + подтверждение командного канала установленного браузера
 - R80-PUSH-O → ush-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (при наличии GITHUB_TOKEN_ADMIN)
+- R80-PUSH-P → ush-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки
+- UI-AUDIT-P1 (implemented-UI-P1, engine v1.12→v1.13) → �ритический аудит механик/UI + ресёрч аналогов + фаза 1 пересборки Mission Control
+- R85-UI-REBUILD-1 → �ритический аудит механик/интерфейса/UI, глубокий ресёрч лучших аналогов, оптимизация и пересборка UI (round 8, / route)
+- EVOLVE-ROUND-8 → �аунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
+- EVOLVE-ROUND-8 (implemented-EV-FOOTER, engine v1.14→v1.15) → elf-evolve round 8 — EV-FOOTER (footer-навигация для мобильных + back-to-top + uptime в vitals)
+- R80-PUSH-J → �роверка блокера публикации; при наличии GITHUB_TOKEN_ADMIN — push-pending-r80 (main→sandbox/me2-os + 2 архив-ветки), верификация ls-remote, запись результата
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
+
 Work Log:
-- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались и не логировались
-- push-pending-r80.sh: main→sandbox/me2-os = 74115b53 (cron-коммиты параллельных сессий опубликованы, deltas up-to-date); me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
-- ls-remote verify: sandbox/me2-os=74115b53 ≡ local main HEAD (rail current); обе архив-ветки подтверждены
+- client health: GET / = 200, lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.13
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-FOOTER] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-FOOTER'
 
 Stage Summary:
-- rail sandbox/me2-os = 74115b53 = local main — публикация завершена, DONE: all local state published
-- origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
+- раунд 8 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
 
 ---
-Task ID: R84-LIVE-AUDIT-1
-Agent: Super-Z (main session, 2026-09-27 04:25 MSK+8, директива оператора)
-Task: живой аудит R84 — daemon surfaces (fleet/commands/brain/memory) + подтверждение командного канала установленного браузера
+Task ID: EVOLVE-ROUND-8 (implemented-EV-FOOTER, engine v1.14→v1.15)
+Agent: Super-Z (cron Job 416839 2026-09-27 05:15 MSK+8)
+Task: self-evolve round 8 — EV-FOOTER (footer-навигация для мобильных + back-to-top + uptime в vitals)
 
 Work Log:
-- milestone командного канала (подтверждено оператором): chat → control plane → installed Browser (0.7.0-dev.3.1, native-electron-supervisor-v1) → physical readback → receipt; CAPTURE 28bc2d5c-b63c-476d-801a-e0388c97917b арендован и COMPLETED за 171ms; fleet: 1 ACTIVE + 3 BOUND_UNVERIFIED, LOST=0; semantic perception живой (state_revision_id + semantic targets); 7 вкладок, активна Z.ai
-- sandbox daemon :3041 (v0.21.0, boot 2026-09-26T07:18Z, last_seq=226, actions=47): /fleet — 1 узел node_daemon ACTIVE verified age_s=7 beats=5821, capacity 1/64, backlog пуст; /commands — 52/52 COMPLETED, все BROWSER_TABS lane=READ_ONLY (sandbox-плоскость без присоединённого браузера → count:0; реальный браузер — в плоскости оператора)
-- /brain: probe eventloop 0ms, db_probe 0ms, llm=ready; memory 3 rows (все episodic), db_bytes=299008, db=data/me2.db; /memory: 2 FAILED-памяти ранних smoke-задач (401 missing X-Token — исторические, до запрета токена)
-- клиент Mission Control (/ route): живые панели ДЕМОН (UP, VERSION 0.21.0) и state-чипы рендерят daemon-данные через /api?XTransformPort=3041 — интеграция клиент↔daemon подтверждена
-- SECURITY-СИГНАЛ (от оператора, live-аудит Supabase): 24 таблицы с отключённым RLS; вслепую не включать — нужны policies на каждую таблицу, иначе сломаются рабочие контуры; зафиксировано как ОТДЕЛЬНЫЙ security-fix (pending: список таблиц + policies; полный аудит возможен когда оператор выдаст service JWT — сейчас Supabase REST 401)
+- evolve: round=8, client=HTTP 200 (gateway :81), lint 0/0, next_task=EV-FOOTER
+- page.tsx footer: добавлен навигационный ряд — 12 jump-чипов NAV_SECTIONS (единственная навигация для <md, где sticky top-nav скрыт) + кнопка «наверх» (ArrowUp, smooth scrollTo top, паттерн Grafana back-to-top) с ml-auto
+- vitals row: + «up {humanS(uptime_s)}» с title «непрерывный uptime демона»
+- верификация agent-browser через gateway :81: footerChips=13, hasTop=true, клик «наверх» → scrollY=0, vitalsUp=true, 0 console errors, lint 0/0
+- самоулучшение: BACKLOG +EV-TOPO (группировка 15 панелей в 3 домена Runtime/Convergence/Evidence с секционными заголовками — Phase-2 из UI-аудита); зеркала self-evolve.sealed.sh 3/3 (phoenix-sealed PolarFS + context-vault-mirror + ossfs)
 
 Stage Summary:
-- командный канал физического браузера подтверждён end-to-end (не только heartbeat, но двусторонний read-only вызов) — R84 живой
-- sandbox-плоскость здорова: fleet 1/64 ACTIVE, 52 команды COMPLETED без ошибок, brain/llm ready
-- pending security-fix: Supabase RLS на 24 таблицах (требуются policies; не блокирует локальный контур)
-- JWT pending operator (Supabase) + R2 secret access key — прежние блокеры审计 остаются
-
+- EV-FOOTER закрыт: мобильные пользователи получили полноценную навигацию, desktop — back-to-top
+- движок v1.15, следующая задача бэклога: EV-TOPO (доменная группировка панелей)
 ---
-Task ID: R80-PUSH-O
-Agent: Super-Z (cron Job 413338 2026-09-27 04:37)
-Task: push-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (при наличии GITHUB_TOKEN_ADMIN)
+Task ID: R80-PUSH-J
+Agent: Super-Z (cron Job 413338 2026-09-27 05:07 MSK+8)
+Task: Проверка блокера публикации; при наличии GITHUB_TOKEN_ADMIN — push-pending-r80 (main→sandbox/me2-os + 2 архив-ветки), верификация ls-remote, запись результата
 
 Work Log:
-- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались и не логировались
-- push-pending-r80.sh: main→sandbox/me2-os = 57c8efa1 (cron-коммиты параллельных сессий опубликованы, deltas up-to-date); me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
-- ls-remote verify: sandbox/me2-os=57c8efa1 ≡ local main HEAD (rail current); обе архив-ветки подтверждены
+- /home/z/.a2/.github.env существует, непуст, GITHUB_TOKEN_ADMIN присутствует (значение не печаталось)
+- bash scripts/push-pending-r80.sh: main→sandbox/me2-os a5f268cc..36696ffa (ff, без force)
+- архив-ветки: me2/archive-r21-sandbox-snapshot (73486ddf) и me2/archive-v040-main-archive (c95de219) — Everything up-to-date (были опубликованы ранее)
+- ls-remote verify: sandbox/me2-os=36696ffa, обе архив-ветки присутствуют в remote
+- контрольный git rev-parse main = 36696ffa ≡ ls-remote origin sandbox/me2-os — rail ff-only целостен
+- секреты не печатались и не логировались (санитизация вывода применена)
 
 Stage Summary:
-- rail sandbox/me2-os = 57c8efa1 = local main — публикация завершена, DONE: all local state published
-- origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
+- БЛОКЕР ПУБЛИКАЦИИ СНЯТ: PAT обнаружен, push-pending выполнен успешно, DONE: all local state published
+- local main ≡ sandbox/me2-os = 36696ffa; архив-ветки актуальны; railway готов к следующим задачам (EV-TOPO в бэклоге)
 ```
