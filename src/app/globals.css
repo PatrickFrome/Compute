@@ -135,3 +135,30 @@
     border-radius: inherit;
   }
 }
+
+@layer base {
+  /* EV-SCROLLBAR: единый тонкий скроллбар в zinc-палитре Mission Control.
+     Firefox: */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #3f3f46 transparent;
+  }
+  /* WebKit: */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3f3f46; /* zinc-700 */
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #14b8a6; /* teal-500 при hover */
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

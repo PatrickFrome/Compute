@@ -2123,7 +2123,7 @@ export default function MissionControl() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-2.5 space-y-1">
+                  <div className={`mt-2.5 space-y-1 ${scrollCls} pr-1`}>
                     <div className="text-[9px] font-medium uppercase tracking-wider text-zinc-600">Ключевые моменты (durable: journal + GitHub)</div>
                     {r82report.timeline.map((t, idx) => (
                       <div key={idx} className="flex items-baseline gap-2 font-mono text-[10px]">
@@ -2670,7 +2670,7 @@ export default function MissionControl() {
                   <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Живой хвост me2_event_mirror_h205f22</span>
                   <span className="text-[10px] text-zinc-600">(последние {mirror.live.tail.length})</span>
                 </div>
-                <div className="space-y-1">
+                <div className={`space-y-1 ${scrollCls} pr-1`}>
                   {mirror.live.tail.map((t) => (
                     <div key={t.seq} className="flex items-baseline gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 font-mono text-[11px]">
                       <span className="w-20 shrink-0 text-right text-cyan-300/80">#{t.seq}</span>
@@ -2850,7 +2850,7 @@ export default function MissionControl() {
                 <span className="ml-1.5 hidden sm:inline">создать</span>
               </Button>
             </div>
-            <div className="space-y-1">
+            <div className={`space-y-1 ${scrollCls} pr-1`}>
               {worktrees.map((w) => {
                 const name = w.path.split('/').pop() ?? w.path
                 const isMain = w.path === '/home/z/my-project'
