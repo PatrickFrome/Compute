@@ -46,6 +46,11 @@ const ROLLOVER_TAB_COMMIT_WAIT_MS = 1500;
 const ROLLOVER_NEW_TAB_RETRIES = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
+// R82-BLANK-TAB: a provably blank frame never held a conversation and can
+// never hold a landed send; it is safe for the rollover leak ledger.
+const provablyBlankFrame = (frame) => frame != null
+  && String(frame?.url || '') === ''
+  && Number((frame?.interaction_tree?.element_count ?? (frame?.interaction_tree?.elements || []).length) || 0) === 0;
 
 function generating(frame) {
   return Boolean(frame?.semantic_targets?.some((x) => x?.role === 'button' && chatGptControlMatches('STOP', x?.name)));
@@ -96,7 +101,7 @@ async function readJson(file) {
 }
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  const temp = `${file}.tmp`;
+  const temp = `${file}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
   await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temp, file);
 }
@@ -923,7 +928,7 @@ export class SupervisorLifecycleRuntime {
     try {
       const frame = await this.#capture(id);
       const url = String(frame?.url || '');
-      if (CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url)) this.#rolloverLeakedTabIds.add(id);
+      if (provablyBlankFrame(frame) || (CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url))) this.#rolloverLeakedTabIds.add(id);
     } catch {
       // Unobservable tab: record optimistically; #closeFailedRolloverTab
       // re-proves against the live registry before any CLOSE_TAB.
@@ -955,7 +960,7 @@ export class SupervisorLifecycleRuntime {
       }
       const frame = await this.#capture(id);
       const url = String(frame?.url || '');
-      if (!(CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url))) {
+      if (!(provablyBlankFrame(frame) || (CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url)))) {
         // Conversation or foreign surface: not ours to close.
         this.#rolloverLeakedTabIds.delete(id);
         return;
