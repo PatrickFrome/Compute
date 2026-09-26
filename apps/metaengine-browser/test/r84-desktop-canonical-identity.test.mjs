@@ -77,7 +77,7 @@ test('R84 Browser root wires Mission Control to existing exact WebContents/CDP i
   assert.match(main, /ExactBrowserTabViewMap, resolveExactWebContentsTabBinding/);
   assert.match(main, /browsercell_identity:\s*id/);
   assert.match(main, /browsercell_identity_source:\s*'CANONICAL_TAB_ID'/);
-  assert.match(main, /runtime_binding_index\?\.bindings/);
+  assert.match(main, /nativeSupervisor\?\.runtimeBinding\?\.\(id\)/);
   assert.match(main, /resolveIdentity:\s*\(tabId\) => canonicalTabRuntimeIdentity\(tabId\)/);
   assert.match(main, /closeTab:\s*\(tabId\) => closeTab\(tabId\)/);
 
