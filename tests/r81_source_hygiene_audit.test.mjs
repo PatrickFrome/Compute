@@ -11,7 +11,7 @@ test('R81 source hygiene scanner detects representative raw secret formats witho
     ['ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY=sk-ant-' + 'A'.repeat(40)],
     ['AWS_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID=AKIA' + 'A'.repeat(16)],
     ['SLACK_TOKEN', 'token=xoxb-' + '12345678901234567890'],
-    ['PRIVATE_KEY_BLOCK', '-----BEGIN PRIVATE KEY-----'],
+    ['PRIVATE_KEY_BLOCK', ['-----BEGIN', 'PRIVATE KEY-----'].join(' ')],
   ];
   for (const [kind, source] of fixtures) {
     const findings = scanText(source, 'fixture.txt');
