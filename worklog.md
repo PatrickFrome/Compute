@@ -1852,3 +1852,21 @@ Stage Summary:
 - [cron 413338 2026-09-26T11:52+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
 - [cron 413338 2026-09-26T12:07+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
 - [cron 413338 2026-09-26T12:22+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
+
+---
+Task ID: R80-ZAI-CHAT-EXPORT-TOOL
+Agent: Super Z (main agent)
+Task: «разработай скрипт или плагин, который скачает весь текст всего этого чата в z.ai».
+
+Work Log:
+- Ограничение зафиксировано: у агента нет API-доступа к аккаунту Z.ai — экспорт реализован браузер-сайд (консоль DevTools + Tampermonkey).
+- Создан scripts/zai-chat-export/zai-chat-export-console.js: каскад селекторов сообщений (data-message-id / data-testid / class*=message|chat-item|bubble / article) с отбраковкой контейнеров и невидимых узлов; определение роли (data-role, классы user|human|self vs assistant|bot|ai|markdown|prose, затем flex-выравнивание); auto-scroll вверх с детектом «нет роста 10 шагов» и накоплением в Map по стабильному id — устойчиво к виртуализации DOM; сохранение code-blocks (language-*) и time[datetime]; сериализация MD/JSON/TXT; скачивание через Blob; публичный API window.__zaiExportChat({FORMAT,DOWNLOAD}) + window.__ZAI_CHAT_EXPORT.
+- Создан scripts/zai-chat-export/zai-chat-export.user.js (Tampermonkey v1.0.0, @match *.z.ai): кнопка «Export chat» fixed bottom-right (клик=md, Shift=json, Alt=txt), MutationObserver против SPA-навигации, та же логика экспорта.
+- Создан scripts/zai-chat-export/test/mock.html: мок чата с lazy-load (10 в DOM + 10 подгружаются при прокрутке вверх), дубли id, код-блок language-js, time[datetime].
+- Тест через agent-browser (open file:// → eval base64-инъекция → wait → проверка): собрано 20/20 уникальных сообщений (побочный баг мока с дублями id невольно подтвердил дедуп: 25 вместо 30 до фикса), роли 10 User/10 Assistant/0 Unknown, хронологический порядок (первое=новое), код-блок сохранён (payload содержит 'const acc = new Map()'), MD-заголовки «## N. User/Assistant» корректны; JSON: 20 messages, role/time/codeBlocks на месте; TXT: шапка + [N] ROLE; userscript: кнопка смонтирована, click → экспорт → файл zai-chat-*.md, скриншот /tmp/zai-export-test.png подтверждает рендер кнопки и восстановление скролла. Браузер закрыт.
+- Создан scripts/zai-chat-export/README.md: два способа установки (консоль с allow pasting / Tampermonkey), принцип работы, таблица troubleshooting (0 сообщений → подстройка MESSAGE_SELECTORS; медленная сеть → SCROLL_SETTLE_MS; unknown → USER_HINT), ограничения (смена DOM Z.ai, приватность экспорта — не публиковать, проверить встроенный Share в UI).
+
+Stage Summary:
+- Инструмент готов и протестирован: scripts/zai-chat-export/ (console-скрипт 12K, userscript-плагин 13K, мок-тест, README). Экспорт всего текста чата Z.ai в MD/JSON/TXT двумя способами.
+- Публикация в GitHub — после возврата PAT (файлы в локальном main, попадут в очередной ff-push через push-pending-r80.sh).
+- Если селекторы не подойдут к реальному DOM Z.ai (проверить нечем — нет сессии), пользовательская подстройка описана в README; структура кода делает это правкой одного блока CONFIG.
