@@ -494,7 +494,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json)"
+          test -z "$(git diff --name-only HEAD -- apps/metaengine-browser/src apps/metaengine-browser/ui apps/metaengine-browser/native apps/metaengine-browser/scripts apps/metaengine-browser/test/browser-startup-observability.test.mjs apps/metaengine-browser/test/browser-shell-visual-evidence.mjs apps/metaengine-browser/package.json apps/metaengine-browser/electron-builder.test.json apps/me2-daemon)"
 
       - name: Upload exact-head Windows candidate and startup evidence
         if: always()
@@ -504,6 +504,7 @@ jobs:
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/installed-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json
             ${{ runner.temp }}/browser-sentinel-v1.json
             ${{ runner.temp }}/browser-parent-progress-v1.json
