@@ -284,3 +284,47 @@
   .branch-merge { animation: none; }
   .branch-tooltip { animation: none; }
 }
+
+
+/* ── R85 CONTROL-ROOM DENSITY OVERRIDES ───────────────────────────────────── */
+/* The UI is an instrument panel, not a card dashboard. Motion is reserved for
+   operational state changes; normal hover must not move the information plane. */
+.card-lift,
+.kpi-tile {
+  transform: none !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.card-lift:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: rgba(82, 82, 91, 0.78);
+}
+.kpi-hot {
+  animation: none !important;
+}
+.mc-terminal {
+  text-shadow: none;
+  background-image: none;
+}
+.mc-scroll::-webkit-scrollbar,
+.mc-terminal::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ev-in,
+  .mirror-live,
+  .kpi-hot,
+  .branch-draw,
+  .branch-dot,
+  .branch-merge,
+  .svg-ping,
+  .svg-beat {
+    animation: none !important;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+}
