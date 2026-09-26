@@ -32,6 +32,10 @@ export const ME2_EXPECTED_CONTRACT = 'me2-daemon-contract.v1';
 
 let started = false;
 let stoppedFlag = false;
+// Concurrent Browser startup paths (final-runtime prewarm + primary window
+// creation) must join the same ME2 boot. started means activation has begun;
+// startPromise is the readiness barrier callers must await.
+let startPromise = null;
 let contractState = { checked: false, ok: false, contract: null, expected: ME2_EXPECTED_CONTRACT, capabilities: null, at: null, error: null };
 
 function emitRow(row, { error = false } = {}) {
@@ -90,7 +94,7 @@ export function me2IntegrationStatus() {
   };
 }
 
-export async function startMe2Integration({ app } = {}) {
+async function startMe2IntegrationOnce({ app } = {}) {
   if (started || stoppedFlag) return me2IntegrationStatus();
   started = true;
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_START', version: ME2_INTEGRATION_VERSION });
@@ -206,4 +210,19 @@ export async function startMe2Integration({ app } = {}) {
     });
   }
   return me2IntegrationStatus();
+}
+
+export async function startMe2Integration({ app } = {}) {
+  // Important ordering: a concurrent caller must observe/join the in-flight
+  // readiness barrier before consulting started. Returning status merely
+  // because activation began caused a physical race where gateway/ui were
+  // still IDLE and the Browser incorrectly opened the legacy recovery shell.
+  if (startPromise) return startPromise;
+  if (started || stoppedFlag) return me2IntegrationStatus();
+  startPromise = startMe2IntegrationOnce({ app });
+  try {
+    return await startPromise;
+  } finally {
+    startPromise = null;
+  }
 }
