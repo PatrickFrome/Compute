@@ -82,8 +82,10 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
 
 
 test('installed ME2 renderer waits for hydration with bounded event-driven DOM observation', () => {
-  assert.match(preload, /new MutationObserver\(inspect\)/);
+  assert.match(preload, /const Observer = window\.MutationObserver \|\| globalThis\.MutationObserver/);
+  assert.match(preload, /observer = new Observer\(inspect\)/);
   assert.match(preload, /observer\.observe\(document\.documentElement, \{ childList: true, subtree: true \}\)/);
+  assert.match(preload, /window\.addEventListener\('load', inspect, \{ once: true \}\)/);
   assert.match(preload, /setTimeout\(\(\) => \{[\s\S]*finish\(snapshot\(\)\)[\s\S]*\}, 8000\)/);
   assert.doesNotMatch(preload, /setInterval\(/);
   assert.match(preload, /observer\?\.disconnect\(\)/);
