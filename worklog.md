@@ -10038,3 +10038,16 @@ Work Log:
 
 Stage Summary:
 - DONE: all local state published; следующий цикл стартует с d276754b
+---
+Task ID: AUD-20260926-233328
+Agent: Super-Z (cron Job 416761, full-audit)
+Task: авто-аудит полноты контекста; фиксация смены статусов
+
+Work Log:
+- full-audit.sh v2.0: score=88% (было 83%), DONE=18 PARTIAL=1 BLOCKED=2
+- Снятие блокера: SUPABASE_SERVICE_ROLE_JWT пере-выдан оператором — REST=200, «JWT жив с 2026-09-27» (канал Supabase-бэкапов heartbeat/supabase-persist снова активен; следующий HB-прогон должен показать sb=Nok/0fail)
+- Остаточный BLOCKED: R2 S3 (SIGv4) — secret access key не передан (есть только Access Key ID); без него нет прямого S3-доступа к бакету (REST/Bearer-каналы Cloudflare работают)
+- write-ahead snapshot перед правкой ok
+
+Stage Summary:
+- Полнота контекста выросла до 88%; до 100% остаётся R2 secret access key (опционально — прямой SIGv4-доступ); дублирующих запросов оператору не создаётся
