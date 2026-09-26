@@ -184,6 +184,7 @@ let primaryShellMode = 'LEGACY_RECOVERY';
 let primaryShellPage = 'command';
 let primaryShellOverlayActive = false;
 let primaryCommandRailOpen = true;
+let primaryContextDrawerOpen = false;
 let primaryShellUrl = null;
 const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
 let devosSourceSnapshot = null;
@@ -602,6 +603,7 @@ async function preparePrimaryShellTarget() {
       primaryShellPage = 'command';
       primaryShellOverlayActive = false;
       primaryCommandRailOpen = true;
+      primaryContextDrawerOpen = false;
       primaryShellUrl = `${gateway.url}/#command`;
       return { mode: primaryShellMode, url: primaryShellUrl, reason: 'PACKAGED_ME2_UI_PROVEN' };
     }
@@ -758,6 +760,7 @@ function layout() {
       ? 'ME2_R75_COMMAND'
       : 'LEGACY_BROWSER_SHELL',
     me2_command_rail_open: primaryCommandRailOpen,
+    me2_context_drawer_open: primaryContextDrawerOpen,
   });
   shellView?.setBounds(shellLayoutPlan.shell_bounds);
   if (shellView) { try { windowRef.contentView.addChildView(shellView); } catch {} }
@@ -1989,6 +1992,25 @@ ipcMain.handle('metaengine:shell:primary-command-rail', async (event, rawOpen) =
     schema: 'metaengine.browser.me2-primary-command-rail.v1',
     requested_open: primaryCommandRailOpen,
     effective_open: shellLayoutPlan?.effective_sidebar === 'EXPANDED',
+    remote_bounds: shellLayoutPlan ? structuredClone(shellLayoutPlan.remote_bounds) : null,
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:primary-context-drawer', async (event, rawOpen) => {
+  assertShellSender(event);
+  if (typeof rawOpen !== 'boolean') throw new Error('primary_shell_context_drawer_state_invalid');
+  primaryContextDrawerOpen = rawOpen;
+  layout();
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-context-drawer.v1',
+    requested_open: primaryContextDrawerOpen,
+    effective_open: shellLayoutPlan?.me2_context_drawer_effective_open === true,
+    drawer_height: Number(shellLayoutPlan?.me2_context_drawer_height || 0),
     remote_bounds: shellLayoutPlan ? structuredClone(shellLayoutPlan.remote_bounds) : null,
     presentation_only: true,
     scheduler_authority: false,
