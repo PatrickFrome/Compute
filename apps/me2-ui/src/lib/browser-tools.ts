@@ -129,7 +129,7 @@ export async function issueCommand(opts: {
     status: rec?.status ?? "PENDING",
     result: (rec?.receipt?.result ?? null) as Record<string, unknown> | null,
     receipt: rec?.receipt ?? null,
-    error: rec?.receipt?.error ?? null,
+    error: receiptError(rec?.receipt?.error),
   };
 }
 
@@ -173,7 +173,7 @@ export async function batchIssue(
       status: err ? "ISSUE_ERROR" : rec?.status ?? "PENDING",
       result: (rec?.receipt?.result ?? null) as Record<string, unknown> | null,
       receipt: rec?.receipt ?? null,
-      error: err ?? rec?.receipt?.error ?? null,
+      error: err ?? receiptError(rec?.receipt?.error),
     };
   });
 }
@@ -342,4 +342,8 @@ export async function closeExtraTabs(opts: {
     { issuedBy: opts.issuedBy ?? "AGENT_FACTORY", waitMs: 25000 },
   );
   return { closed: results.filter((r) => r.ok).length, results };
+}
+
+function receiptError(value: unknown): string | null {
+  return value == null ? null : typeof value === "string" ? value : JSON.stringify(value);
 }

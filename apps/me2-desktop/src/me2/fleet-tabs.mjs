@@ -1,64 +1,143 @@
-/**
- * ME2 fleet-tabs — bridge between the daemon fleet (12 persistent chat sessions)
- * and desktop FLEET tabs on chat.z.ai. Pure mapping logic is testable; the
- * electron WebContentsView wiring is injected (view factory), so the module
- * never imports electron itself.
+/** Web conversations have provider URLs; daemon session IDs are never URLs.
+ * Only native WebContents readback establishes a binding. This registry grants
+ * no dispatch/lease authority and deliberately does not submit prompts.
  */
+import { randomUUID } from 'node:crypto';
 import { FLEET } from '../shared/me2-constants.mjs';
 
+export function conversationUrl(value) {
+  try {
+    const u = new URL(value);
+    if (u.origin !== FLEET.ORIGIN || u.username || u.password ||
+        !/^\/c\/[A-Za-z0-9_-]+\/?$/.test(u.pathname)) return null;
+    return `${u.origin}${u.pathname.replace(/\/$/, '')}`;
+  } catch { return null; }
+}
+
 export function agentTabUrl(session) {
-  if (!session?.id) return null;
-  return `${FLEET.ORIGIN}/c/${encodeURIComponent(session.id)}`;
+  return conversationUrl(session?.conversation_url);
 }
 
 export function matchTabForSession(session, tabs) {
-  if (!session?.id) return null;
-  const suffix = `/c/${session.id}`;
-  const byUrl = tabs.filter((t) => typeof t.url === 'string' && t.url.includes(suffix));
-  if (byUrl.length === 1) return byUrl[0];
-  const zai = byUrl.filter((t) => t.url.startsWith(FLEET.ORIGIN));
-  if (zai.length === 1) return zai[0];
-  const byTitle = session.title ? tabs.filter((t) => typeof t.title === 'string' && t.title.includes(session.title)) : [];
-  if (byTitle.length === 1) return byTitle[0];
-  return null;
+  const url = agentTabUrl(session);
+  if (!url) return null;
+  const matches = tabs.filter(t => conversationUrl(t.url) === url);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export class FleetTabs {
-  constructor({ viewFactory, log = () => {} } = {}) {
-    this.viewFactory = viewFactory; // ({url, role}) => WebContentsView-like
+  constructor({ viewFactory, activate = () => {}, remove = () => {}, log = () => {}, ceiling = FLEET.TAB_CEILING, checkpoint = null, loadTimeoutMs = 15000 } = {}) {
+    this.viewFactory = viewFactory;
+    this.activate = activate;
+    this.remove = remove;
     this.log = log;
-    this.tabs = new Map(); // sessionId -> view
+    this.ceiling = ceiling;
+    this.checkpoint = checkpoint;
+    this.loadTimeoutMs = loadTimeoutMs;
+    this.tabs = new Map();
+    this.pending = new Map();
   }
 
-  /** Open (or focus) the z.ai tab for one fleet session. Honest result. */
-  openAgent(session) {
+  openAgent(session, { background = false } = {}) {
     const url = agentTabUrl(session);
-    if (!url) return { ok: false, reason: 'session_invalid' };
-    if (this.tabs.size >= FLEET.TAB_CEILING && !this.tabs.has(session.id)) {
-      return { ok: false, reason: 'tab_ceiling_reached', ceiling: FLEET.TAB_CEILING };
-    }
-    let view = this.tabs.get(session.id);
-    if (!view) {
-      view = this.viewFactory({ url, role: 'FLEET' });
-      this.tabs.set(session.id, view);
-      this.log({ plane: 'fleet-tabs', event: 'opened', session: session.id });
-    }
-    return { ok: true, url, reused: Boolean(view) };
+    if (!url) return Promise.resolve({ ok: false, reason: 'web_conversation_url_required' });
+    // Singleflight is keyed by exact provider conversation, not daemon identity.
+    if (this.pending.has(url)) return this.pending.get(url);
+    const job = this.open(url, { background }).finally(() => this.pending.delete(url));
+    this.pending.set(url, job);
+    return job;
   }
 
-  closeAgent(sessionId) {
-    const view = this.tabs.get(sessionId);
-    if (!view) return { ok: false, reason: 'tab_not_found' };
-    this.tabs.delete(sessionId);
-    try {
-      view.webContents?.close?.();
-    } catch {
-      /* view already gone */
+  createConversation() { return this.open(FLEET.ORIGIN + '/'); }
+
+  async open(url, { background = false } = {}) {
+    if (this.stopped) return { ok: false, reason: 'fleet_stopped' };
+    for (const entry of this.tabs.values()) {
+      if (url !== FLEET.ORIGIN + '/' && entry.view && !entry.crashed && !entry.view.webContents.isDestroyed() &&
+          conversationUrl(entry.view.webContents.getURL()) === url) {
+        if (!background) this.activate(entry.tab_id);
+        return { ok: true, reused: true, ...this.readback(entry) };
+      }
     }
+    if (this.tabs.size >= this.ceiling) return { ok: false, reason: 'tab_ceiling_reached', ceiling: this.ceiling };
+    const tab_id = randomUUID();
+    const entry = { tab_id, view: null, generation: 0, crashed: false };
+    this.tabs.set(tab_id, entry); // Reserve capacity before any asynchronous load.
+    try {
+      entry.view = this.viewFactory({ id: tab_id, role: 'FLEET' });
+      const wc = entry.view.webContents;
+      wc.on('did-start-navigation', (_e, _url, inPlace, mainFrame) => {
+        if (mainFrame && !inPlace) { entry.generation += 1; entry.crashed = false; }
+      });
+      wc.on('render-process-gone', () => { entry.generation += 1; entry.crashed = true; });
+      wc.once('destroyed', () => { this.tabs.delete(tab_id); this.remove(tab_id); });
+      const remember = () => {
+        const observed = conversationUrl(wc.getURL());
+        if (observed && !entry.crashed && this.tabs.has(tab_id)) {
+          entry.lastConversation = observed;
+          this.checkpoint?.remember(observed);
+        }
+      };
+      wc.on('did-navigate', remember);
+      wc.on('did-navigate-in-page', remember);
+      let timer;
+      try {
+        await Promise.race([wc.loadURL(url), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('conversation_load_timeout')), this.loadTimeoutMs);
+        })]);
+      } finally { clearTimeout(timer); }
+      remember();
+      if (!this.tabs.has(tab_id) || wc.isDestroyed()) throw new Error('tab_destroyed_during_load');
+      const proof = this.readback(entry);
+      if (url !== FLEET.ORIGIN + '/' && proof.conversation_url !== url) {
+        if (!background) this.activate(tab_id); // Keep login/error surface inspectable; no resend.
+        return { ok: false, reason: 'conversation_not_proven', ...proof };
+      }
+      if (!background) this.activate(tab_id);
+      this.log({ plane: 'fleet-tabs', event: 'opened', tab_id, state: proof.state });
+      return { ok: true, reused: false, ...proof };
+    } catch (error) {
+      this.closeAgent(tab_id, { forget: false });
+      return { ok: false, reason: 'tab_open_failed', detail: String(error?.message ?? error).slice(0, 160) };
+    }
+  }
+
+  readback(entry) {
+    const wc = entry.view?.webContents;
+    const alive = wc && !wc.isDestroyed() && !entry.crashed;
+    const url = alive ? conversationUrl(wc.getURL()) : null;
+    return { tab_id: entry.tab_id, web_contents_id: alive ? wc.id : null,
+      generation: entry.generation, conversation_url: url,
+      state: !alive ? 'INVALIDATED' : url ? 'CONVERSATION_OBSERVED' : 'UNBOUND',
+      // A URL is identity readback, not proof of a submitted/finished task.
+      execution_authority: false };
+  }
+
+  async restore() {
+    const urls = this.checkpoint?.list() ?? [];
+    const results = [];
+    // Bounded batches; startup UI remains active and no prompt is ever sent.
+    for (let i = 0; i < urls.length; i += 2) {
+      if (this.stopped) break;
+      results.push(...await Promise.all(urls.slice(i, i + 2).map(conversation_url =>
+        this.openAgent({ conversation_url }, { background: true }))));
+    }
+    return { restored: results.filter(row => row.ok).length, failed: results.filter(row => !row.ok).length };
+  }
+
+  closeAgent(tab_id, { forget = true } = {}) {
+    const entry = this.tabs.get(tab_id);
+    if (!entry) return { ok: false, reason: 'tab_not_found' };
+    if (forget) this.checkpoint?.forget(entry.lastConversation);
+    this.tabs.delete(tab_id);
+    this.remove(tab_id);
+    const wc = entry.view?.webContents;
+    if (wc && !wc.isDestroyed()) wc.close();
     return { ok: true };
   }
-
-  list() {
-    return [...this.tabs.keys()];
+  stop() {
+    this.stopped = true;
+    for (const id of [...this.tabs.keys()]) this.closeAgent(id, { forget: false });
   }
+  list() { return [...this.tabs.values()].map(entry => this.readback(entry)); }
 }

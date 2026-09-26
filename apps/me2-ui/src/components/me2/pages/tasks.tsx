@@ -478,7 +478,7 @@ export function TasksPage() {
         {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + вкладки + вкладки браузера) ── */}
         <div className="flex min-h-0 min-w-0 flex-col lg:flex-[2]">
           <Sec
-            id="tasks-branches"
+            id="tasks-branches" defaultOpen
             title={`ВЕТКИ · ЗАДАЧИ (${branchData.length})`}
             icon={GitBranch}
             tone="violet"

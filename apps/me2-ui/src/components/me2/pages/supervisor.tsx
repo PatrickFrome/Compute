@@ -250,7 +250,7 @@ export function SupervisorPage() {
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 xl:grid-cols-3">
         {/* ══ колонка 1: OBJECTIVES + WORKGRAPH ══ */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll">
-          <Sec id="sup-objectives" title="OBJECTIVES" icon={Target} tone="violet"
+          <Sec id="sup-objectives" defaultOpen title="OBJECTIVES" icon={Target} tone="violet"
             right={
               <span data-testid="wg-chips" className="flex shrink-0 flex-wrap items-center gap-1 font-mono text-[9px]">
                 <span className="rounded border border-zinc-800 bg-zinc-900/60 px-1 py-0.5 text-zinc-400" title={`цели: active=${wg?.stats.objectives_active ?? 0}, achieved=${wg?.stats.objectives_achieved ?? 0}, failed=${wg?.stats.objectives_failed ?? 0}, parked=${wg?.stats.objectives_parked ?? 0}`}>цели {wg?.stats.objectives_total ?? "—"}</span>

@@ -158,7 +158,7 @@ export function AgentsPage() {
         {/* низ: реестр агентов + cron чатов */}
         <div className="grid gap-3 lg:grid-cols-2">
           <Sec
-            id="agents-registry"
+            id="agents-registry" defaultOpen
             title={`РЕЕСТР · АГЕНТЫ (${agents.length})`}
             icon={Bot}
             tone="emerald"

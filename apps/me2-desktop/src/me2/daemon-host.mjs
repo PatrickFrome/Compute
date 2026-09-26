@@ -4,6 +4,7 @@
  * handshake. Adopt first (a daemon may already run from the sandbox start.sh);
  * spawn only when adopt fails; honest DEGRADED after restart caps — never storms.
  */
+import { startOwned, stopOwned } from './owned-process.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ export class DaemonHost {
     if (!health.ok) return null;
     const state = await probeJson(`http://127.0.0.1:${DAEMON.REST_PORT}${CONTRACT.HANDSHAKE_PATH}`);
     const handshake = parseHandshake(state.json ?? state.text ?? '');
-    this.status = 'adopted';
+    this.status = handshake.ok ? 'adopted' : 'degraded';
     this.log({ plane: 'daemon-host', event: 'adopted', handshake: handshake.ok, contract: handshake.ok ? CONTRACT.SCHEMA : handshake.reason });
     return { health, handshake };
   }
@@ -40,21 +41,17 @@ export class DaemonHost {
       this.log({ plane: 'daemon-host', event: 'spawn_refused', reason: 'daemon_dir_invalid' });
       return { ok: false, reason: 'daemon_dir_invalid' };
     }
-    this.child = this.spawnImpl('bun', ['index.ts'], {
-      cwd: this.daemonDir,
-      env: this.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
+    const started = startOwned(this, 'bun', ['index.ts'], {
+      cwd: this.daemonDir, env: this.env,
+      stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     });
-    this.child.on('exit', (code) => {
-      this.log({ plane: 'daemon-host', event: 'child_exit', code, restarts: this.restarts });
-      this.child = null;
-    });
-    const health = await pollUntil(() => probeDaemon(DAEMON.REST_PORT, { timeoutMs: DAEMON_HOST.HEALTH_TIMEOUT_MS }), {
+    if (!started.ok) return started;
+    const health = await pollUntil(async () => this.processFailure ? { ok: false, terminal: true } : probeDaemon(DAEMON.REST_PORT, { timeoutMs: DAEMON_HOST.HEALTH_TIMEOUT_MS }), {
       tries: 20,
       intervalMs: 500,
     });
-    if (!health.ok) {
+    if (!health.ok || this.processFailure || !this.child) {
+      await this.stop();
       this.status = 'degraded';
       return { ok: false, reason: 'spawn_no_health' };
     }
@@ -70,13 +67,16 @@ export class DaemonHost {
    */
   async bringUp({ backoffMs = DAEMON_HOST.RESTART_BACKOFF_MS } = {}) {
     const adopted = await this.adopt();
-    if (adopted) return { ok: true, mode: 'adopted', ...adopted };
+    if (adopted) return { ok: adopted.handshake.ok, mode: adopted.handshake.ok ? 'adopted' : 'degraded', ...adopted };
     for (let attempt = 0; attempt <= DAEMON_HOST.MAX_RESTARTS; attempt += 1) {
       const spawned = await this.spawnDaemon();
       if (spawned.ok) {
         const state = await probeJson(`http://127.0.0.1:${DAEMON.REST_PORT}${CONTRACT.HANDSHAKE_PATH}`);
-        return { ok: true, mode: 'spawned', handshake: parseHandshake(state.json ?? '') };
+        const handshake = parseHandshake(state.json ?? '');
+        this.status = handshake.ok ? 'spawned' : 'degraded';
+        return { ok: handshake.ok, mode: this.status, handshake };
       }
+      if (this.child) return { ok: false, mode: 'degraded', reason: 'owned_process_stop_unconfirmed' };
       this.restarts += 1;
       if (this.restarts > DAEMON_HOST.MAX_RESTARTS) break;
       await new Promise((r) => setTimeout(r, backoffMs));
@@ -85,6 +85,8 @@ export class DaemonHost {
     this.log({ plane: 'daemon-host', event: 'degraded', restarts: this.restarts });
     return { ok: false, mode: 'degraded', restarts: this.restarts };
   }
+
+  stop(options) { return stopOwned(this, options); }
 
   snapshot() {
     return { status: this.status, restarts: this.restarts, pid: this.child?.pid ?? null };

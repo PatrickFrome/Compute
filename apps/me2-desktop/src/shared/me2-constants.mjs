@@ -96,7 +96,8 @@ export function resolveGatewayRoute({ url, allowlist }) {
     return { allow: false, reason: 'url_unparseable' };
   }
   const raw = parsed.searchParams.get('XTransformPort');
-  if (!raw) return { allow: false, reason: 'no_xtransformport' };
+  if (raw === null) return { allow: true, target: UI.PORT, pathname: parsed.pathname + parsed.search };
+  if (!/^[0-9]+$/.test(raw)) return { allow: false, reason: 'port_invalid' };
   const port = Number(raw);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     return { allow: false, reason: 'port_invalid' };
@@ -115,7 +116,7 @@ export function parseHandshake(body) {
   }
   const caps = json?.capabilities ?? json?.data?.capabilities;
   if (!caps || typeof caps !== 'object') return { ok: false, reason: 'capabilities_missing' };
-  const contract = caps.contract ?? caps.CONTRACT_VERSION;
+  const contract = json?.contract ?? json?.data?.contract ?? caps.contract ?? caps.CONTRACT_VERSION;
   if (contract !== CONTRACT.SCHEMA) {
     return { ok: false, reason: 'contract_mismatch', seen: contract ?? null };
   }

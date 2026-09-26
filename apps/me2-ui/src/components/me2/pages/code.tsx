@@ -391,7 +391,7 @@ export function CodePage() {
             </div>
           </Sec>
 
-          <Sec id="code-exec" title="EXEC · EDIT" icon={Terminal} tone="emerald"
+          <Sec id="code-exec" defaultOpen title="EXEC · EDIT" icon={Terminal} tone="emerald"
             right={<>
               {ex && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="белый список бинарей по сегментам · prlimit as=4GiB/nofile=256/core=0 · cwd только в песочницах/worktrees">run {ex.counters.runs} · отказ {ex.counters.denied}{fx ? ` · edit ${fx.counters.applied}` : ""}</span>}
               {refreshBtn(() => void loadEx(), exBusy, "Обновить статус exec/edit-плоскостей")}

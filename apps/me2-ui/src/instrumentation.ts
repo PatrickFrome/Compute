@@ -3,7 +3,8 @@
 // dynamically only when running in the Node.js runtime.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  if (process.env.ME2_WATCHDOG === "off") return;
+  // Desktop owns daemon lifecycle. A standalone host must opt in explicitly.
+  if (process.env.ME2_WATCHDOG !== "on") return;
   const { startWatchdog } = await import("./me2-watchdog");
   startWatchdog();
 }

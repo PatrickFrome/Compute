@@ -41,12 +41,13 @@ test('gateway: proxies to allowed XTransformPort target', async () => {
   }
 });
 
-test('gateway: rejects missing / disallowed / invalid XTransformPort', async () => {
-  const gw = createUiGateway({ port: 0 });
+test('gateway: routes UI and rejects disallowed / invalid XTransformPort', async () => {
+  const gw = createUiGateway({ port: 0, targetMap: { 3000: upstream.address().port } });
   const { port } = await gw.listen();
   try {
     const noParam = await fetch(`http://127.0.0.1:${port}/health`);
-    assert.equal(noParam.status, 400);
+    assert.equal(noParam.status, 200);
+    assert.equal(await noParam.text(), upstreamBody);
     const disallowed = await fetch(`http://127.0.0.1:${port}/x?XTransformPort=9999`);
     assert.equal(disallowed.status, 403);
     const invalid = await fetch(`http://127.0.0.1:${port}/x?XTransformPort=abc`);
@@ -73,5 +74,33 @@ test('gateway: upstream down → honest 502', async () => {
     assert.equal(body.error, 'upstream_unreachable');
   } finally {
     await gw.close();
+  }
+});
+
+test('gateway shutdown closes upgraded sockets in both directions', { timeout: 3000 }, async () => {
+  const { connect } = await import('node:net');
+  const ws = createServer();
+  let remote;
+  const upgraded = new Promise(resolve => ws.on('upgrade', (_req, socket) => {
+    remote = socket;
+    socket.on('error', error => assert.equal(error.code, 'ECONNRESET'));
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+    socket.resume(); resolve();
+  }));
+  await new Promise(resolve => ws.listen(0, '127.0.0.1', resolve));
+  const gw = createUiGateway({ port: 0, targetMap: { 3040: ws.address().port } });
+  const { port } = await gw.listen();
+  const client = connect(port, '127.0.0.1'); client.resume();
+  client.on('error', error => assert.equal(error.code, 'ECONNRESET'));
+  try {
+    await new Promise(resolve => client.once('connect', resolve));
+    client.write('GET /socket?XTransformPort=3040 HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+    await upgraded;
+    const closed = Promise.all([new Promise(resolve => client.once('close', resolve)), new Promise(resolve => remote.once('close', resolve))]);
+    await gw.close(); await closed;
+    assert.equal(client.destroyed, true); assert.equal(remote.destroyed, true);
+  } finally {
+    client.destroy(); remote?.destroy(); await gw.close();
+    await new Promise(resolve => ws.close(resolve));
   }
 });

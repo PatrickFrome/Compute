@@ -170,7 +170,7 @@ export function ComputePage() {
         {/* ── колонка 1: пул + воркеры ── */}
         <div className="flex min-w-0 flex-col gap-3">
           <Sec
-            id="compute-pool"
+            id="compute-pool" defaultOpen
             title="EXECUTOR · POOL"
             icon={Cpu}
             tone="cyan"

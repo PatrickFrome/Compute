@@ -17,16 +17,16 @@ export type PageKey =
   | "supervisor" | "compute" | "memory" | "observability" | "system";
 
 export const PAGES: { key: PageKey; label: string; num: string }[] = [
-  { key: "command", label: "COMMAND", num: "1" },
-  { key: "agents", label: "AGENTS", num: "2" },
-  { key: "browser", label: "BROWSER", num: "3" },
-  { key: "code", label: "CODE", num: "4" },
-  { key: "tasks", label: "TASKS", num: "5" },
-  { key: "supervisor", label: "SUPERVISOR", num: "6" },
-  { key: "compute", label: "COMPUTE", num: "7" },
-  { key: "memory", label: "MEMORY", num: "8" },
-  { key: "observability", label: "OBSERV", num: "9" },
-  { key: "system", label: "SYSTEM", num: "0" },
+  { key: "command", label: "Работа", num: "1" },
+  { key: "agents", label: "Агенты", num: "2" },
+  { key: "browser", label: "Браузер", num: "3" },
+  { key: "code", label: "Код", num: "4" },
+  { key: "tasks", label: "Задачи", num: "5" },
+  { key: "supervisor", label: "Контроль", num: "6" },
+  { key: "compute", label: "Ресурсы", num: "7" },
+  { key: "memory", label: "Память", num: "8" },
+  { key: "observability", label: "Диагностика", num: "9" },
+  { key: "system", label: "Настройки", num: "0" },
 ];
 
 // ── Workspaces (пресеты рабочих контекстов) ─────────────────────────────────────

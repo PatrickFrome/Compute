@@ -131,7 +131,7 @@ function EventLogPanel() {
 
   return (
     <Sec
-      id="obs-event-log" title="EVENT LOG" icon={ScrollText}
+      id="obs-event-log" defaultOpen title="EVENT LOG" icon={ScrollText}
       right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {filtered.length}</span>}
     >
       <div className="flex h-full min-h-0 flex-col gap-2">

@@ -12,6 +12,12 @@ import { resolveGatewayRoute } from '../shared/me2-constants.mjs';
 export function createUiGateway({ port = GATEWAY.PORT, allowlist = GATEWAY.ALLOWED_TARGETS, targetMap = null, log = () => {} } = {}) {
   // targetMap: test/diagnostic override {3041: <port>} — production routes 1:1.
   const resolveTarget = (t) => (targetMap && targetMap[t]) ?? t;
+  const sockets = new Set();
+  const track = socket => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    return socket;
+  };
   const server = createServer((req, res) => {
     const route = resolveGatewayRoute({ url: req.url, allowlist });
     if (!route.allow) {
@@ -33,13 +39,19 @@ export function createUiGateway({ port = GATEWAY.PORT, allowlist = GATEWAY.ALLOW
         up.pipe(res);
       },
     );
+    upstream.on('socket', track);
+    res.on('close', () => upstream.destroy());
     upstream.on('error', (err) => {
+      if (res.destroyed) return;
+      if (res.headersSent) { res.destroy(); return; }
       res.writeHead(502, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'upstream_unreachable', target: route.target, detail: String(err?.code ?? err).slice(0, 80) }));
       log({ plane: 'ui-gateway', event: 'upstream_error', target: route.target });
     });
     req.pipe(upstream);
   });
+
+  server.on('connection', track);
 
   // WS upgrade → raw TCP pipe to the allowed target (socket.io :3040, screencast :3042)
   server.on('upgrade', (req, socket, head) => {
@@ -58,6 +70,9 @@ export function createUiGateway({ port = GATEWAY.PORT, allowlist = GATEWAY.ALLOW
       upstream.pipe(socket);
       socket.pipe(upstream);
     });
+    track(upstream);
+    socket.on('close', () => upstream.destroy());
+    upstream.on('close', () => socket.destroy());
     upstream.on('error', () => socket.destroy());
     socket.on('error', () => upstream.destroy());
   });
@@ -78,7 +93,11 @@ export function createUiGateway({ port = GATEWAY.PORT, allowlist = GATEWAY.ALLOW
       });
     },
     close() {
-      return new Promise((resolve) => server.close(() => resolve()));
+      return new Promise(resolve => {
+        server.close(() => resolve());
+        // server.close does not terminate upgraded WebSocket connections.
+        for (const socket of sockets) socket.destroy();
+      });
     },
   };
 }

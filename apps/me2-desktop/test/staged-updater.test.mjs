@@ -85,3 +85,17 @@ test('staged updater: schema mismatch → manifest_rejected', async () => {
   assert.equal(r.reason, 'schema_mismatch');
   bad.close();
 });
+
+test('constructor update channel is used; staging persists state without false activation proof', async () => {
+  const u = newUpdater('0.8.0-dev.1.1'); u.manifestUrl = `${baseUrl}/manifest.json`;
+  assert.equal((await u.checkOnce()).staged, true);
+  const recreated = new StagedUpdater({ userDataDir: u.userDataDir, currentVersion: u.currentVersion });
+  assert.equal(recreated.state.last_staged, MANIFEST.version);
+  assert.equal(u.journalHistory().records.find(r => r.stage === 'staged').handed_off, false);
+});
+test('staging rejects path escape versions before writing', async () => {
+  const u = newUpdater('0.8.0-dev.1.1');
+  const result = await u.stageManifest({ ...MANIFEST, version: '0.8.0/../../escape' });
+  assert.equal(result.reason, 'version_invalid');
+  assert.equal(existsSync(u.stagedDir), false);
+});

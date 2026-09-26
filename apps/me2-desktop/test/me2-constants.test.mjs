@@ -41,7 +41,8 @@ test('gateway route: allowlist enforced', () => {
   assert.equal(notAllowed.allow, false);
   assert.equal(notAllowed.reason, 'port_not_allowed');
   const missing = resolveGatewayRoute({ url: '/x', allowlist: GATEWAY.ALLOWED_TARGETS });
-  assert.equal(missing.allow, false);
+  assert.equal(missing.allow, true);
+  assert.equal(missing.target, 3000);
   const junk = resolveGatewayRoute({ url: '/x?XTransformPort=abc', allowlist: GATEWAY.ALLOWED_TARGETS });
   assert.equal(junk.allow, false);
 });
@@ -55,4 +56,8 @@ test('handshake: contract v1 accepted, mismatch rejected', () => {
   assert.equal(bad.reason, 'contract_mismatch');
   const junk = parseHandshake('not json');
   assert.equal(junk.ok, false);
+});
+
+test('handshake accepts daemon top-level contract shape', () => {
+  assert.equal(parseHandshake({ contract: CONTRACT.SCHEMA, version: 'test', capabilities: { ops: [] } }).ok, true);
 });
