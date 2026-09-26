@@ -37,7 +37,7 @@ export const ROADMAP: RoadmapItem[] = [
     goal: "Закрыть P0: deterministic composer resolver, устранить supervisor_composer_not_unique и residual maintenance starvation.",
     exit_gate: "cycle_seq монотонно растёт; wake→effect→readback; нет maintenance timeout; restart не ломает цикл.",
     status: "IN_PROGRESS",
-    evidence: "Source-фиксы в ветке (ghost-tab retire по destroyed proof; idle-work после пустого command turn; CI all-green @ 5a1c6178). Live readback ОТКРЫТ: installed runtime всё ещё ROLLOVER_AMBIGUOUS, cycle 2109 — ждёт exact-head installer.",
+    evidence: "LIVE-ДИАГНОЗ ЗАВЕРШЁН (2026-09-26, через command fastlane): runtime .36089462649.1 = release head cf747798 (посылка R80-аудита «старый код» ОПРОВЕРГНУТА). Полная причинная цепочка: capped conversation → отравленный account-draft 28.7k chars (растёт от каждой попытки) + blank-zombie tabs (navigation deadline) + atomic-save race. Фиксы: PR #981 (root-draft canary, blank-tab commit proof + close-by-proof, unique-tmp writeJson; 3 новых теста + 39 смежных зелёные). Операторское действие: однократная ручная очистка драфта на chat.z.ai. Exit-gate остаётся открытым до cycle_seq роста после очистки + self-update на PR #981.",
   },
   {
     round: "R83",
@@ -136,7 +136,7 @@ export const CONVERGENCE_EVIDENCE = {
     ci: "re-qualifying (25 checks queued/in_progress на момент проверки)",
   },
   live_runtime_gap:
-    "installed Browser остаётся ROLLOVER_AMBIGUOUS (cycle_seq 2109, TYPE_EFFECT_AMBIGUOUS, stale >32h) — закрытие R82 требует exact-head installer → установку → положительный live readback",
+    "installed Browser ROLLOVER_AMBIGUOUS (cycle 2109, >57h). ДИАГНОЗ ЗАВЕРШЁН 2026-09-26: (1) установленная сборка = release head cf747798 — это НЕ старый код; (2) корневая причина — отравленный account-draft на root-поверхности (28.7k chars, синтетически неочищаемый: клавиши игнорируются, Enter отказывает, 'New Chat' сохраняет драфт, send-кнопка nameless) + blank-zombie tabs от navigation deadline + atomic-save race. Фикс: PR #981; разблокировка: однократная ручная очистка драфта оператором.",
 } as const;
 
 export const RECOVERY_STATUS = {
@@ -159,7 +159,7 @@ export const RECOVERY_STATUS = {
     { item: "credentials rotation (P0 security)", reason: "raw credentials в chat export; ротация — только у оператора" },
   ],
   pending_next: [
-    "R82: физический installed readback (exact-head installer после терминального CI на 2c28aa85+)",
+    "R82-разблок: оператор очищает account-draft на chat.z.ai вручную (Ctrl+A+Delete в new-chat композере) → rollover retry loop сходится сам; PR #981 мержится → self-update подхватывает → live readback cycle_seq роста",
     "R83: квалификация v14 Edge canary (после R82 proof) — production v13 всё ещё pinned к d8b239e7",
     "полный donor bus (57 действий): реализация вместе с Browser control plane (R84–R86)",
     "auto-mirror событий в me2_event_mirror_h205f22 (после ревью оператором anchor-записи)",

@@ -14,6 +14,7 @@ import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor 
 import { monitorHistory, monitorStatus, startMonitor } from "./monitor";
 import { donorRegistry } from "./donor-registry";
 import { convergenceStatus } from "./github";
+import { r82Diagnosis } from "./r82";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -107,6 +108,11 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     method: "GET",
     path: "/convergence",
     handler: (_r, url) => convergenceStatus(url.searchParams.get("fresh") === "1"),
+  },
+  {
+    method: "GET",
+    path: "/r82",
+    handler: (_r, url) => r82Diagnosis(url.searchParams.get("fresh") === "1"),
   },
   {
     method: "GET",

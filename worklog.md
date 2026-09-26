@@ -85,3 +85,48 @@ Backlog следующего раунда (приоритеты):
 3. R83-prep: Edge v14 canary квалификация (digest/source binding vs release) — можно готовить из песочницы через Cloudflare API (cloudflare.env уже на месте).
 4. Mirror: операторская anchor-запись → затем auto-mirror событий daemon в me2_event_mirror.
 5. Мелочи консоли: keyboard-навигация фильтра событий, донор-манифест-браузер (57 действий с фильтром по lane).
+
+---
+Task ID: R82-LIVE-DIAGNOSIS-AND-FIX-20260926
+Agent: Z.ai Code (main agent)
+Task: Реализация roadmap R82 (Supervisor liveness) — не мониторинг, а прямая реализация: живая диагностика P0 через command fastlane + source-фиксы в Browser repo + PR
+
+Work Log:
+- Директива оператора: «ты должен не мониторить а реализовывать roadmap» — раунд перестроен с наблюдения на прямое действие.
+- Разведан RPC-забор Supabase: 243 RPC; найдено семейство `h205f22_a2_browser_supervisor_*` (issue_native_v1 с параметрами p_client_id/p_action/p_payload/p_ttl/p_issued_by/p_idempotency_key из миграции 20260829192000). Живой allow-list уже не содержит TAB_CENSUS (DB-функция старее release-ветки).
+- ДОКАЗАН РАБОЧИЙ command fastlane: issue → lease → receipt за ~9s (CAPTURE/NEW_TAB/TYPED_CLICK/SEMANTIC_TYPE/NAVIGATE/SELF_UPDATE_STATUS — все исполнены живым браузером с чек-ридами). Хелперы: scripts/r82cmd.sh, scripts/r82type.py.
+- ГЛАВНОЕ ОПРОВЕРЖЕНИЕ R80-АУДИТА: SELF_UPDATE_STATUS → state CURRENT, current_version 0.7.0-dev.36089462649.1; run 36089462649 = release/self-update-ambiguity-live-v2 @ cf747798 (release head!). Установленный runtime — НЕ старый код: все фиксы (D-C5/C6/C7, R-SUP-SEED, R-DRAFT-FOCUS) физически установлены, но баг воспроизводится на новейшем коде.
+- Полная причинная цепочка P0 #1 установлена живыми пробами (каждый шаг — receipt):
+  1) Беседа e1ec5063 length-capped → композер ОТСУТСТВУЕТ на keepalive-табе (первопричина rollover).
+  2) Каждая rollover-попытка жива (новые attempt_id каждые ~2.5 мин, D-C5 re-request работает) — это НЕ мёртвый, а бесконечно ретраящий цикл.
+  3) Ролловер-табы: часть рождается BLANK (url:'', 0 элементов, viewport 0×0, webcontents:68 — навигация остановлена 15s bounded-navigation deadline до commit; при этом мой ручной NEW_TAB гидратировался).
+  4) Гидратированные табы: account-draft восстановлен в каждый новый таб — 28,708 chars (2 fleet task prompt'а CRITIC f3e381ab + RESEARCHER 7712c43a + supervisor seed; растёт с 19 сентября).
+  5) Replace проваливается: native_semantic_type_replace_unverified (root-поверхность игнорирует Ctrl+A+Delete; live-проба, value не изменился).
+  6) Enter отказывает на oversized: append+submit → AMBIGUOUS_AFTER_ENTER, URL не сменился (R-SUP-SEED black hole на живом коде).
+  7) Кнопка 'New Chat' сохраняет драфт (клик COMPLETED, драфт 29,778 не изменился).
+  8) Драфт РАСТЁТ от каждой попытки supervisor'а: +202 chars между пробами за 4 минуты (общий account-draft отравляется самой системой).
+  9) ?q= URL-параметр срезается SPA-роутером (auto-prompt недоступен); сайдбар виртуализирован (клик по элементу истории не навигирует).
+  10) Fleet-агенты на ROOT (PRECONVERSATION_ROOT, NO_ELIGIBLE_CONVERSATION) — transport promotion блокирован ТЕМ ЖЕ драфтом: одна причина держит всю систему.
+- Попытка живого ремонта исчерпала 6 синтетических векторов (replace/append+submit/New-Chat/NAVIGATE-query/sidebar/send-button-nameless) — вывод: драфт синтетически неочищаем, разблокировка = однократная ручная очистка оператором.
+-SOURCE-ФИКСЫ (главный deliverable раунда) — ветка work/r82-supervisor-rollover-draft-hardening-v1 @ be791f8, PR #981 → release:
+  1) R82-DRAFT-CANARY: PRECONVERSATION_ROOT композер >4000 chars → abort ДО любой вставки, машиночитаемая причина ROOT_DRAFT_OVERSIZED, clicked:false (provable pre-effect). Драфт больше никогда не растёт от активности supervisor'а.
+  2) R82-BLANK-TAB: #openCommittedRolloverTab() — navigation-commit readback до типинга; provably-blank таб закрывается немедленно (никогда не держал send) + bounded retry свежими табами; D-C7 close-by-proof расширен blankness-доказательством (конец накопления зомби).
+  3) R82-ATOMIC-SAVE: уникальные tmp-имена в writeJson — гонка un-awaited requestRollover-save vs next-cycle-save больше не роняет циклы через rename-ENOENT (воспроизведено в тесте: цикл умирал ДО dispatch rollover).
+  Тесты: supervisor-rollover-draft-hardening.test.mjs (3 новых: canary abort без вставок + D-C7 drain закрывает leaked таб; blank-retry + полный happy-path rollover с bindRollover; regression-guard seed на чистом драфте) + 39 смежных существующих (lifecycle/bootstrap/composer) зелёные.
+- Песочница: новый модуль daemon src/r82.ts (READ-ONLY live-диагностика через fastlane: probe attempt-таба, draft canary, хвост ambiguous_history, PR #981 CI) + маршрут GET /r82 + действие r82.diagnosis (21 действие); roadmap.ts: R82 evidence переписан под живой диагноз, gap matrix обновлён (closed task loop = та же причина); VERSION 0.60.0-r82.
+- Консоль: карточка «R82 · Supervisor live-диагноз» (live keepalive/cycle/attempt-таб/draft canary, чипы PR #981 + CI, причинная цепочка, хвост истории, блок «Действие оператора», правило READ-ONLY проб); poller 60s + fresh-кнопка; header/footer → R82.
+- QA: REST /r82?fresh=1 (live-данные: ROLLOVER_AMBIGUOUS → ROLLOVER_PENDING → новый attempt rollover_199c35aa пойман в реальном времени); lint 0/0; agent-browser на :81 — карточка рендерится, клик «Свежая R82-диагностика» исполняет live-пробу (значения обновились); скриншоты download/r82-{desktop,mobile}.png; программная layout-проверка: overflowX=false @1920 и @390, 0 усечений без title, футер естественно проталкивается (7255px @390); dev.log чист.
+- CI на PR #981: ME2 Unified Gate success; Browser Windows Installed Chat Qualification / Package Smoke / Self Update E2E in_progress; остальное queued (терминальный статус — в следующем раунде).
+
+Stage Summary:
+- Статус: R82 переведён из «ждём installer» в РЕАЛИЗОВАННЫЙ диагноз + source-фиксы: полная причинная цепочка доказана живыми пробами, фиксы в PR #981 с тестами, CI в процессе. Система песочницы запущена, зелёная, запушенная (этот коммит).
+- Поворот парадигмы: (1) установленный runtime = release head (не старый код) — R80-посылка опровергнута; (2) главный блокер — отравленный account-draft (общий для supervisor rollover И fleet transport promotion) + blank-zombie tabs + atomic-save race; (3) команда fastlane — полноценный рычаг оператора.
+- Exit-gate R82 остаётся открытым до: (а) ручной очистки драфта оператором (Ctrl+A+Delete в new-chat композере chat.z.ai — 10 секунд) → rollover retry сходится сам; (б) merge PR #981 → self-update rail подхватывает (manifest) → live readback: cycle_seq растёт, maintenance timeout исчезает.
+- UX-урок №: (R82-1) диагностика никогда не должна мутировать наблюдаемую поверхность — каждая вставка в отравленный композер растит общий account-draft; только READ-ONLY пробы; (R82-2) fire-and-forget keepalive-мутации (.catch(()=>{})) требуют атомарных сейвов без общих tmp-имён.
+
+Backlog следующего раунда (приоритеты):
+1. Терминальный CI PR #981 → merge → верифицировать self-update manifest rail (hint_retry 5 мин) → live readback cycle_seq.
+2. Оператор: ручная очистка account-draft (кнопка-инструкция уже в консоли) — после неё контроль cycle_seq роста через монитор + /r82.
+3. R83: Edge convergence — Cloudflare API (cloudflare.env): сравнение production v13 (d8b239e7) vs release source, квалификация v14 canary, digest-binding отчёт.
+4. Mirror: operator anchor-запись → auto-mirror событий daemon.
+5. Мелочи консоли: probe.error в карточке R82, график draft size history, keyboard-навигация фильтра событий.

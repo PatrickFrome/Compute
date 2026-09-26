@@ -13,6 +13,7 @@ import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor 
 import { monitorHistory } from "./monitor";
 import { donorRegistry } from "./donor-registry";
 import { convergenceStatus } from "./github";
+import { r82Diagnosis } from "./r82";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -43,6 +44,7 @@ export const ACTIONS: ActionDef[] = [
   { name: "controlplane.mirror-anchor", family: "controlplane", description: "Operator-triggered single anchor write to the evidence mirror" },
   { name: "donor.registry", family: "recovery", description: "Recovered donor 57-action manifest (sandbox/me2-os @ 56ba1b87) + local reconciliation" },
   { name: "convergence.status", family: "controlplane", description: "R81 convergence branch live status from GitHub (PR #968, head, CI rollup)" },
+  { name: "r82.diagnosis", family: "controlplane", description: "R82 live supervisor diagnosis via command fastlane (READ-ONLY probes: attempt tab, draft canary, PR #981 CI)" },
 ];
 
 export async function dispatch(action: string, args: Record<string, unknown>): Promise<unknown> {
@@ -106,6 +108,8 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return donorRegistry(ACTIONS.map((a) => ({ name: a.name, family: a.family })));
     case "convergence.status":
       return convergenceStatus(args.fresh === true);
+    case "r82.diagnosis":
+      return r82Diagnosis(args.fresh === true);
     default:
       throw new OpError("action_not_implemented", `${action} registered but not implemented`, 500);
   }

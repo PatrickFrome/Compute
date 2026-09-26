@@ -15,7 +15,7 @@ import { useToast } from '@/hooks/use-toast'
 import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
   Activity, AlertTriangle, Boxes, ChevronDown, Database, Download, GitBranch, GitPullRequest, HeartPulse,
-  ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Terminal, Trash2, TrendingUp, Zap,
+  ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------- utils ----
@@ -120,15 +120,30 @@ interface DonorRegistry {
   total: number
   reconciliation: { counterparts_count: number; full: number; partial: number; pending_count: number; local_only_count: number }
 }
+interface R82Probe {
+  tab_id: string | null; probed: boolean; blank: boolean; url: string | null
+  element_count: number | null; composer_value_length: number | null
+  draft_canary: 'OVERSIZED' | 'OK' | 'NO_COMPOSER' | 'UNKNOWN'; error?: string
+}
+interface R82Diag {
+  fetched_at: string
+  supervisor: Supervisor
+  attempt: { attempt_id: string | null; started_at: string | null; ambiguous_at: string | null; ambiguous_reason: string | null; tab_id: string | null } | null
+  attempt_tab_probe: R82Probe
+  attempt_history_tail: { cycle_seq: number | null; ambiguous_reason: string | null; ambiguous_at: string | null; retired_reason: string | null }[]
+  root_cause_chain: string[]
+  operator_action: string
+  fix: { pr: { number: number; url: string; state: string; head_sha: string; ci: { success: number; failed: number; cancelled: number; pending: number; total: number } } | null; branch: string }
+}
 
 // ---------------------------------------------------------- gap matrix ----
 const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
-  { pri: 'P0', title: 'Supervisor useful cycle', status: 'ROLLOVER_AMBIGUOUS · cycle 2109 >32h; fix в source @ 5a1c6178 — ждёт exact-head installer', live: 'keepalive' },
+  { pri: 'P0', title: 'Supervisor useful cycle', status: 'ДИАГНОЗ ЗАВЕРШЁН: отравленный account-draft 28.7k + zombie tabs; фикс PR #981; ждёт ручной очистки драфта оператором', live: 'keepalive' },
   { pri: 'P0', title: 'DevOS maintenance liveness', status: 'idle-gate fix в source; live timeout сохраняется до installer' },
   { pri: 'P0', title: 'Edge convergence', status: 'production v13 ≠ release source cf747… (v14 canary активен, pinned ef04d60…)' },
   { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
   { pri: 'P0', title: 'Full installer', status: 'R85 in-flight: standalone daemon payload + version unify (18 commits, CI re-qualifying @ 2c28aa85)' },
-  { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION · fresh E2E не доказан' },
+  { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION — блокировано ТЕМ ЖЕ отравленным драфтом (общая причина с supervisor rollover)' },
   { pri: 'P0', title: 'Source authority', status: 'DB roadmap baseline b69f… ≠ release cf747…' },
   { pri: 'P0', title: 'Credentials (security)', status: 'raw credentials в chat export → ротация у оператора' },
   { pri: 'P0', title: 'Cognitive convergence', status: 'улучшилось: SUPPORTED · ack 64525 (застой 157 снят); hard gate до R87', live: 'cognitive' },
@@ -249,6 +264,9 @@ export default function MissionControl() {
   const [conv, setConv] = useState<Convergence | null>(null)
   const [convErr, setConvErr] = useState<string | null>(null)
   const [convLoading, setConvLoading] = useState(false)
+  const [r82, setR82] = useState<R82Diag | null>(null)
+  const [r82Err, setR82Err] = useState<string | null>(null)
+  const [r82Loading, setR82Loading] = useState(false)
   const [donorReg, setDonorReg] = useState<DonorRegistry | null>(null)
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -288,8 +306,15 @@ export default function MissionControl() {
     finally { setConvLoading(false) }
   }, [])
 
+  const loadR82 = useCallback(async (fresh = false) => {
+    setR82Loading(true)
+    try { setR82(await jfetch<R82Diag>(`/r82${fresh ? '?fresh=1' : ''}`)); setR82Err(null) }
+    catch (e) { setR82Err((e as Error).message) }
+    finally { setR82Loading(false) }
+  }, [])
+
   useEffect(() => {
-    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence()
+    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
@@ -299,10 +324,11 @@ export default function MissionControl() {
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
     const e = setInterval(() => { jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {}) }, 15000)
     const f = setInterval(() => { loadConvergence(false) }, 30000)
+    const g = setInterval(() => { loadR82(false) }, 60000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f) }
-  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82])
 
   // ---- REST events poll (fallback) + WS live stream (primary)
   useEffect(() => {
@@ -432,7 +458,7 @@ export default function MissionControl() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-            <Chip tone="warn">{health?.round ?? 'R81-PHASE1'} · CONVERGENCE</Chip>
+            <Chip tone="warn">{health?.round ?? 'R82'} · SUPERVISOR LIVENESS</Chip>
             <Chip tone={daemonUp ? 'ok' : 'p0'}>
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
@@ -633,6 +659,80 @@ export default function MissionControl() {
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка GitHub-статуса…</div>
+          )}
+        </Panel>
+
+        {/* ------------------------------------------ R82 LIVE DIAGNOSIS */}
+        <Panel
+          icon={<Stethoscope className="h-4 w-4" />}
+          title="R82 · Supervisor live-диагноз"
+          chip={
+            r82Err ? <Chip tone="p0">ERR</Chip>
+              : r82 ? (
+                <Chip tone={r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'p0' : r82.supervisor.keepalive.state === 'ACTIVE' ? 'ok' : 'warn'}>
+                  {r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'DRAFT POISONED' : r82.supervisor.keepalive.state}
+                </Chip>
+              ) : <Chip tone="neutral">…</Chip>
+          }
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={r82Loading} onClick={() => loadR82(true)} aria-label="Свежая R82-диагностика">
+              <RefreshCw className={`h-4 w-4 ${r82Loading ? 'animate-spin' : ''}`} />
+            </Button>
+          }
+        >
+          {r82Err && !r82 ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">R82: {r82Err}</div>
+          ) : r82 ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="keepalive" value={r82.supervisor.keepalive.state} tone="text-amber-300" span="col-span-2" />
+                <Stat label="cycle_seq" value={String(r82.supervisor.keepalive.cycle_seq)} tone="text-amber-300" span="col-span-2" />
+                <Stat label="attempt tab" value={r82.attempt_tab_probe.tab_id ? r82.attempt_tab_probe.tab_id.slice(0, 14) + '…' : '—'} />
+                <Stat label="tab state" value={r82.attempt_tab_probe.blank ? 'BLANK ZOMBIE' : r82.attempt_tab_probe.probed ? (r82.attempt_tab_probe.url || '—') : 'нет активной'} tone={r82.attempt_tab_probe.blank ? 'text-rose-400' : 'text-zinc-200'} />
+                <Stat label="draft, chars" value={r82.attempt_tab_probe.composer_value_length != null ? String(r82.attempt_tab_probe.composer_value_length) : '—'} tone={r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'text-rose-400' : 'text-emerald-400'} />
+                <Stat label="draft canary" value={r82.attempt_tab_probe.draft_canary} tone={r82.attempt_tab_probe.draft_canary === 'OVERSIZED' ? 'text-rose-400' : r82.attempt_tab_probe.draft_canary === 'OK' ? 'text-emerald-400' : 'text-zinc-400'} />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                <Chip tone="info">runtime = release head cf747798</Chip>
+                {r82.fix.pr && (
+                  <>
+                    <Chip tone={r82.fix.pr.state === 'open' ? 'warn' : 'ok'}>PR #{r82.fix.pr.number} {r82.fix.pr.state}</Chip>
+                    <Chip tone={r82.fix.pr.ci.failed > 0 ? 'p0' : r82.fix.pr.ci.success === r82.fix.pr.ci.total && r82.fix.pr.ci.total > 0 ? 'ok' : 'warn'}>
+                      CI {r82.fix.pr.ci.success}/{r82.fix.pr.ci.total}{r82.fix.pr.ci.pending > 0 ? ` · ${r82.fix.pr.ci.pending} pending` : ''}
+                    </Chip>
+                  </>
+                )}
+                {r82.attempt && <Chip tone="neutral">attempt {r82.attempt.attempt_id ? r82.attempt.attempt_id.slice(0, 18) + '…' : '—'}</Chip>}
+              </div>
+              <div className={`space-y-1 ${scrollCls} pr-1`}>
+                <div className="px-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Причинная цепочка (live-proven 2026-09-26)</div>
+                {r82.root_cause_chain.map((c) => (
+                  <div key={c} className="rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 font-mono text-[11px] leading-snug text-zinc-400 hover:border-zinc-700">
+                    {c}
+                  </div>
+                ))}
+              </div>
+              {r82.attempt_history_tail.length > 0 && (
+                <div className={`space-y-1 ${scrollCls} pr-1`}>
+                  <div className="px-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Хвост ambiguous_history</div>
+                  {r82.attempt_history_tail.map((h, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 hover:border-zinc-700">
+                      <span className="font-mono text-[11px] text-amber-300">#{h.cycle_seq ?? '—'}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-400" title={h.ambiguous_reason ?? ''}>{h.ambiguous_reason ?? '—'}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-zinc-600">{h.ambiguous_at ? hhmmss(h.ambiguous_at) : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] leading-relaxed text-amber-200">
+                <span className="font-semibold uppercase tracking-wider">Действие оператора:</span> {r82.operator_action}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Пробы только READ-ONLY (CAPTURE через command fastlane) — урок R82: каждая вставка в отравленный root-композер растит общий account-draft. Диагностика никогда не мутирует наблюдаемую поверхность.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> live-проба tab'а супервизора…</div>
           )}
         </Panel>
 
@@ -909,7 +1009,7 @@ export default function MissionControl() {
           <span>bus {wsLive ? 'ws' : 'poll'}</span>
           <span>·</span>
           <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
-          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R81-PHASE1'} · release readiness: BLOCKED (см. gap matrix)</span>
+          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R82'} · release readiness: BLOCKED (см. gap matrix)</span>
         </div>
       </footer>
     </div>
