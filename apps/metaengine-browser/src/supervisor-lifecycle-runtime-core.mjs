@@ -1306,33 +1306,6 @@ export class SupervisorLifecycleRuntime {
     return true;
   }
 
-  // R82-BLANK-TAB: open a rollover tab and demand a navigation-commit
-  // readback before any typing. A blank WebContents (url:'', zero DOM nodes)
-  // can never grow a composer and can never hold a landed send, so it is
-  // closed immediately and a fresh tab is opened, bounded by
-  // ROLLOVER_NEW_TAB_RETRIES. The historical path bound the attempt tab and
-  // typed straight into a possibly-blank surface — 8x1.8s of recaptures that
-  // always ended in supervisor_composer_not_unique plus a leaked tab the
-  // D-C7 root-proof could never retire (live 2026-09-24..26: cycle_seq stuck
-  // at 2109 for >57h with every attempt leaking a zombie WebContents —
-  // webcontents:68 was still url:'' five minutes after creation).
-  async #openCommittedRolloverTab() {
-    for (let round = 0; round <= ROLLOVER_NEW_TAB_RETRIES; round += 1) {
-      const tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
-      if (!tab?.tab_id) throw new Error('rollover_tab_creation_no_readback');
-      await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
-      for (let i = 0; i < ROLLOVER_TAB_COMMIT_ATTEMPTS; i += 1) {
-        if (i > 0) await sleep(ROLLOVER_TAB_COMMIT_WAIT_MS);
-        const frame = await this.#capture(tab.tab_id).catch(() => null);
-        if (frame && String(frame?.url || '') !== '') return tab;
-      }
-      // Provably blank (or unobservable) tab: never held a conversation,
-      // never held a send — close it and try a fresh one.
-      await this.#execute({ action: 'CLOSE_TAB', payload: { tab_id: tab.tab_id }, platform: null }).catch(() => {});
-    }
-    throw new Error('rollover_tab_never_committed');
-  }
-
   async #rollover() {
     if (this.#canActuate() !== true) return false;
     const before = this.#keepalive.snapshot();
@@ -1379,6 +1352,33 @@ export class SupervisorLifecycleRuntime {
       this.#lastError = String(e?.message || e).slice(0, 240);
     }
     return false;
+  }
+
+  // R82-BLANK-TAB: open a rollover tab and demand a navigation-commit
+  // readback before any typing. A blank WebContents (url:'', zero DOM nodes)
+  // can never grow a composer and can never hold a landed send, so it is
+  // closed immediately and a fresh tab is opened, bounded by
+  // ROLLOVER_NEW_TAB_RETRIES. The historical path bound the attempt tab and
+  // typed straight into a possibly-blank surface — 8x1.8s of recaptures that
+  // always ended in supervisor_composer_not_unique plus a leaked tab the
+  // D-C7 root-proof could never retire (live 2026-09-24..26: cycle_seq stuck
+  // at 2109 for >57h with every attempt leaking a zombie WebContents —
+  // webcontents:68 was still url:'' five minutes after creation).
+  async #openCommittedRolloverTab() {
+    for (let round = 0; round <= ROLLOVER_NEW_TAB_RETRIES; round += 1) {
+      const tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
+      if (!tab?.tab_id) throw new Error('rollover_tab_creation_no_readback');
+      await this.#keepalive.bindRolloverAttemptTab(tab.tab_id).catch(() => {});
+      for (let i = 0; i < ROLLOVER_TAB_COMMIT_ATTEMPTS; i += 1) {
+        if (i > 0) await sleep(ROLLOVER_TAB_COMMIT_WAIT_MS);
+        const frame = await this.#capture(tab.tab_id).catch(() => null);
+        if (frame && String(frame?.url || '') !== '') return tab;
+      }
+      // Provably blank (or unobservable) tab: never held a conversation,
+      // never held a send — close it and try a fresh one.
+      await this.#execute({ action: 'CLOSE_TAB', payload: { tab_id: tab.tab_id }, platform: null }).catch(() => {});
+    }
+    throw new Error('rollover_tab_never_committed');
   }
 
   // D-C5 (live 2026-09-19): ROLLOVER_AMBIGUOUS with no reconciliation
