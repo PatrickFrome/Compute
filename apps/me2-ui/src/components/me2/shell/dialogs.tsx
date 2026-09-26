@@ -2,7 +2,7 @@
 // ── GLOBAL DIALOGS: НОВАЯ ЗАДАЧА · EVENTS_SEARCH · BUDGET · RESET · TASK SHEET ──
 // Все оверлеи — Global UI (доступны из любой Page, §2 дизайн-дока).
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -340,8 +340,14 @@ function TaskSheet() {
     }
   };
 
-  const streamEndRef = useMemo(() => ({ current: null as HTMLDivElement | null }), []);
-  if (detail) setTimeout(() => streamEndRef.current?.scrollIntoView({ block: "end" }), 50);
+  const streamEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!detail) return;
+    const frame = window.requestAnimationFrame(() => {
+      streamEndRef.current?.scrollIntoView({ block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [detail?.id, stream.length]);
 
   return (
     <Sheet open={!!detail} onOpenChange={(o) => { if (!o) closeTask(); }}>
