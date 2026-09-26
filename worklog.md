@@ -9909,3 +9909,31 @@ Work Log:
 
 Stage Summary:
 - rail sandbox/me2-os = f132387d = local main — публикация завершена; известные блокеры вне скоупа публикации: Supabase JWT pending operator (sb=0ok/4fail), R2 S3 BLOCKED
+---
+Task ID: R80-PUSH-20260927-0627
+Agent: Super-Z (PAT-watcher R80, Job 413338 — запись восстановлена задним числом)
+Task: push main→sandbox/me2-os + 2 архивных ветки, ls-remote верификация
+
+Work Log:
+- .github.env валиден → push-pending-r80.sh исполнен
+- main → sandbox/me2-os: 9b94a781 (f37b6f28-cron), ls-remote OK, main ≡ remote = 9b94a781
+- архивы: me2/archive-r21-sandbox-snapshot (73486ddf), me2/archive-v040-main-archive (c95de219) — актуальны
+- дерево чистое; секреты не печатались, git чист
+
+Stage Summary:
+- push 9b94a781 подтверждён; следующая синхронизация продолжит с чистого дерева
+---
+Task ID: DB-GITHUB-20260927
+Agent: Super-Z (операторская директива trace 1a0dfdda6e76124d «бд гитхаб»)
+Task: подключить БД (db/custom.db) к GitHub-треку sandbox/me2-os
+
+Work Log:
+- вход: guard ok (snaps=31 sha=554ee12d); worklog-хвост проверен — запись R80-DESKTOP-1A на месте, 9b94a781 отсутствовал → восстановлена выше
+- диагностика: db/custom.db (24KB SQLite) игнорировался правилом db/*.db (.gitignore:62); prisma/schema.prisma (User/Post) трекался; remote PatrickFrome/Compute.git
+- секрет-скан БД (strings: ghp_/eyJ/cfat_/PRIVATE KEY и др.) — чисто; git-sync.sh несёт второй слой guard'а
+- изменение: .gitignore + `!db/custom.db` (точечное исключение, прочие *.db остаются ignored)
+- push: b751deff → sandbox/me2-os через scripts/git-sync.sh (PAT-safe), ls-remote верифицирован: remote ≡ local = b751def
+
+Stage Summary:
+- БД теперь git-трекается и уезжает на GitHub при каждом cron-sync (git add -A) — непрерывный бэкап
+- схема БД остаётся контролируемой prisma/schema.prisma; крупные/секретные .db по-прежнему вне трека по умолчанию
