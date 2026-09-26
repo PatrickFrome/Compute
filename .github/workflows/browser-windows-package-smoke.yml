@@ -18,7 +18,10 @@ on:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs'
+      - 'apps/metaengine-browser/scripts/build-me2-daemon-staging.ps1'
+      - 'apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs'
       - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
 concurrency:
@@ -182,6 +185,19 @@ jobs:
           if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) { throw 'package_smoke_me2_ui_proof_invalid' }
           $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
           $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
+
+          $daemonEvidence = "$env:RUNNER_TEMP\installed-me2-daemon-proof.json"
+          node scripts/verify-me2-daemon-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-daemon') `
+            --expected-sha ([string]$proof.source_head) `
+            --smoke --evidence $daemonEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'package_smoke_installed_me2_daemon_invalid' }
+          $daemonProof = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
+          if ($daemonProof.runtime_smoke -ne 'PASS' -or $daemonProof.external_bun_required -ne $false) { throw 'package_smoke_me2_daemon_proof_invalid' }
+          $proof | Add-Member -NotePropertyName me2_daemon_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_executable_sha256 -NotePropertyValue ([string]$daemonProof.executable_sha256) -Force
+
           $out = "$env:RUNNER_TEMP\package-version-probe.out"
           $err = "$env:RUNNER_TEMP\package-version-probe.err"
           $probe = Start-Process -FilePath $app -ArgumentList '--metaengine-version-probe' -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
