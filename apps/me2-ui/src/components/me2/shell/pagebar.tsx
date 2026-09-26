@@ -9,7 +9,7 @@ import {
   Activity, Settings2, ChevronDown, Check,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const PAGE_ICONS: Record<PageKey, LucideIcon> = {
   command: LayoutDashboard, agents: Bot, browser: Globe, code: Code2, tasks: ListChecks,
@@ -22,8 +22,25 @@ export function PageBar() {
   const setPage = useMe2((s) => s.setPage);
   const workspace = useMe2((s) => s.workspace);
   const setWorkspace = useMe2((s) => s.setWorkspace);
+  const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
   const [wsOpen, setWsOpen] = useState(false);
   const activeWs = WORKSPACES.find((w) => w.key === workspace) ?? WORKSPACES[0];
+
+  const setWorkspaceMenu = (open: boolean) => {
+    setWsOpen(open);
+    setChromeOverlay("workspace-menu", open);
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && wsOpen) setWorkspaceMenu(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      setChromeOverlay("workspace-menu", false);
+    };
+  }, [wsOpen, setChromeOverlay]);
 
   return (
     <nav
@@ -34,7 +51,7 @@ export function PageBar() {
       <div className="relative flex items-center pr-1">
         <button
           type="button"
-          onClick={() => setWsOpen((o) => !o)}
+          onClick={() => setWorkspaceMenu(!wsOpen)}
           aria-expanded={wsOpen}
           aria-haspopup="menu"
           data-testid="workspace-switcher"
@@ -47,7 +64,7 @@ export function PageBar() {
         </button>
         {wsOpen ? (
           <>
-            <button type="button" aria-hidden className="fixed inset-0 z-40 cursor-default" onClick={() => setWsOpen(false)} tabIndex={-1} />
+            <button type="button" aria-hidden className="fixed inset-0 z-40 cursor-default" onClick={() => setWorkspaceMenu(false)} tabIndex={-1} />
             <div role="menu" className="absolute bottom-9 left-0 z-50 w-60 overflow-hidden border border-zinc-800 bg-[#0b0b0d] shadow-2xl">
               <p className="border-b border-zinc-800 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-zinc-500">Рабочие контексты</p>
               {WORKSPACES.map((w) => (
@@ -55,7 +72,7 @@ export function PageBar() {
                   key={w.key}
                   role="menuitem"
                   type="button"
-                  onClick={() => { setWorkspace(w.key); setWsOpen(false); }}
+                  onClick={() => { setWorkspace(w.key); setWorkspaceMenu(false); }}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] hover:bg-zinc-900 ${w.key === workspace ? "text-emerald-300" : "text-zinc-300"}`}
                 >
                   {w.key === workspace ? <Check className="h-3 w-3 shrink-0" aria-hidden /> : <span className="w-3" />}
