@@ -32,22 +32,34 @@ const DEFERRED_ROLLOVER_AUTO_RELEASE_MS = 15 * 60 * 1000;
 // rollover black hole was exactly this class: fresh root tab → full
 // rollover message → TYPE_EFFECT_AMBIGUOUS → no-progress rerequest loop.
 const GLM_SUPERVISOR_CONVERSATION_SEED = 'METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
-// R82-DRAFT-CANARY: a PRECONVERSATION_ROOT can restore an account-synced
-// oversized draft into every fresh tab. Such a draft can silently refuse
-// submit and grow on every attempted append. Abort before any physical write;
-// an operator can clear the account draft once and the bounded rollover loop
-// can then converge without poisoning it further.
+// R82-DRAFT-CANARY (live 2026-09-26, shell .36089462649.1 = release cf747798): the
+// chat.z.ai PRECONVERSATION_ROOT composer restores an account-synced draft into
+// EVERY fresh tab. A poisoned oversized draft (live-observed: 28,708 chars
+// accumulated since 2026-09-19, two fleet task prompts + supervisor seed)
+// cannot be cleared synthetically — live probes proved the root surface
+// ignores Ctrl+A+Delete (replace stays unverified), Enter silently refuses
+// oversized prompts (AMBIGUOUS_AFTER_ENTER), the site's "New Chat" button
+// preserves the draft, and every seed append GROWS the shared account draft
+// (live-observed: +202 chars per rollover attempt). Typing into such a
+// composer is actively harmful: the canary aborts BEFORE any insert so the
+// account draft never grows from supervisor activity. The condition is
+// operator-clearable only (a human clears the new-chat draft once); after
+// that the rollover retry loop converges on its own.
 const ROOT_DRAFT_MAX_CHARS = 4000;
-// R82-BLANK-TAB: bounded navigation can leave an uncommitted WebContents at
-// url:'' with no semantic surface. Never type into it. Demand a committed URL,
-// close the unsent attempt tab, and retry a bounded number of fresh tabs.
+// R82-BLANK-TAB (live 2026-09-26): bounded-navigation stops an uncommitted
+// load (DEADLINE_EXCEEDED) and leaves a WebContents that is permanently
+// blank — url:'', zero DOM nodes, 0×0 viewport (live: rollover tabs
+// webcontents:68+ stayed empty for 5+ minutes while a manually opened tab
+// hydrated). A blank tab can never resolve a composer, and the D-C7
+// close-by-proof can never retire it because it has no URL to prove against
+// the root pattern. These bounds govern the commit readback before typing.
 const ROLLOVER_TAB_COMMIT_ATTEMPTS = 6;
 const ROLLOVER_TAB_COMMIT_WAIT_MS = 1500;
 const ROLLOVER_NEW_TAB_RETRIES = 2;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 // R82-BLANK-TAB: a provably blank frame never held a conversation and can
-// never hold a landed send; it is safe for the rollover leak ledger.
+// never hold a landed send — closing it is always safe.
 const provablyBlankFrame = (frame) => frame != null
   && String(frame?.url || '') === ''
   && Number((frame?.interaction_tree?.element_count ?? (frame?.interaction_tree?.elements || []).length) || 0) === 0;
@@ -101,6 +113,12 @@ async function readJson(file) {
 }
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
+  // R82-ATOMIC-SAVE (live 2026-09-26): keepalive mutations fire from
+  // un-awaited call sites (e.g. requestRollover(...).catch(() => {})); two
+  // overlapping saves sharing one `.tmp` path race the rename into ENOENT
+  // and the loser throws into an unrelated cycle — live-observed as a cycle
+  // aborting before its rollover dispatch. A unique temp name per save makes
+  // concurrent writers last-writer-wins instead of intermittent ENOENT.
   const temp = `${file}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`;
   await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(temp, file);
@@ -502,8 +520,13 @@ export class SupervisorLifecycleRuntime {
     if (generating(before)) return { ok: false, reason: 'GENERATION_STILL_ACTIVE', clicked: false };
     let box = composerTarget(before);
     if (!box) throw new Error('supervisor_composer_not_unique');
-    // R82-DRAFT-CANARY: explicit pre-effect fence for an oversized root draft.
-    // No insert, click, Enter, or fallback is allowed before this check.
+    // R82-DRAFT-CANARY: a PRECONVERSATION_ROOT composer holding an oversized
+    // account-synced draft is provably unusable (Enter refuses oversized
+    // prompts) and every insert into it grows the shared account draft.
+    // Abort BEFORE any physical effect — clicked:false is the provable
+    // pre-effect contract, so the wake/rollover marks carry the distinct
+    // machine reason ROOT_DRAFT_OVERSIZED instead of looping through
+    // TYPE_EFFECT_AMBIGUOUS while silently poisoning the account further.
     if (classifyAgentPlatformSurface(before?.url)?.stage === 'PRECONVERSATION_ROOT'
       && Number.isFinite(Number(box.value_length))
       && Number(box.value_length) > ROOT_DRAFT_MAX_CHARS) {
@@ -928,6 +951,11 @@ export class SupervisorLifecycleRuntime {
     try {
       const frame = await this.#capture(id);
       const url = String(frame?.url || '');
+      // R82-BLANK-TAB: a provably blank tab has no URL to match the root
+      // pattern, but it can never hold a landed send either — it qualifies
+      // for the leak ledger (and the close-by-proof below) on blankness
+      // alone. Before this, blank rollover tabs accumulated forever
+      // (live: webcontents id climbed to 68+ over a 57h stall).
       if (provablyBlankFrame(frame) || (CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url))) this.#rolloverLeakedTabIds.add(id);
     } catch {
       // Unobservable tab: record optimistically; #closeFailedRolloverTab
@@ -960,6 +988,8 @@ export class SupervisorLifecycleRuntime {
       }
       const frame = await this.#capture(id);
       const url = String(frame?.url || '');
+      // R82-BLANK-TAB: blank tabs close on blankness proof (never held a
+      // send); every other surface keeps the historical root-only proof.
       if (!(provablyBlankFrame(frame) || (CHAT_ROOT_RE.test(url) && !CHAT_RE.test(url)))) {
         // Conversation or foreign surface: not ours to close.
         this.#rolloverLeakedTabIds.delete(id);
@@ -1292,8 +1322,8 @@ export class SupervisorLifecycleRuntime {
         supervisorEpoch: before.supervisor_epoch,
         rolloverAttemptId: attempt.attempt_id,
       });
-      // R82-BLANK-TAB: prove the fresh tab committed navigation before any
-      // composer write. The durable rollover attempt is already fenced above.
+      // R82-BLANK-TAB: the tab is proven to have committed its navigation
+      // before the rollover message is typed into it.
       tab = await this.#openCommittedRolloverTab();
       const sent = await this.#typeAndSend(tab.tab_id, message, attempt.attempt_id);
       if (!sent.ok) {
@@ -1324,9 +1354,16 @@ export class SupervisorLifecycleRuntime {
     return false;
   }
 
-  // R82-BLANK-TAB: open a fresh rollover tab and require a committed
-  // navigation readback before typing. Every attempt is unsent until this
-  // helper returns, so closing an uncommitted tab cannot duplicate an effect.
+  // R82-BLANK-TAB: open a rollover tab and demand a navigation-commit
+  // readback before any typing. A blank WebContents (url:'', zero DOM nodes)
+  // can never grow a composer and can never hold a landed send, so it is
+  // closed immediately and a fresh tab is opened, bounded by
+  // ROLLOVER_NEW_TAB_RETRIES. The historical path bound the attempt tab and
+  // typed straight into a possibly-blank surface — 8x1.8s of recaptures that
+  // always ended in supervisor_composer_not_unique plus a leaked tab the
+  // D-C7 root-proof could never retire (live 2026-09-24..26: cycle_seq stuck
+  // at 2109 for >57h with every attempt leaking a zombie WebContents —
+  // webcontents:68 was still url:'' five minutes after creation).
   async #openCommittedRolloverTab() {
     for (let round = 0; round <= ROLLOVER_NEW_TAB_RETRIES; round += 1) {
       const tab = await this.#execute({ action: 'NEW_TAB', payload: { url: AGENT_PLATFORM_HOME_URL, select: false }, platform: null });
@@ -1337,6 +1374,8 @@ export class SupervisorLifecycleRuntime {
         const frame = await this.#capture(tab.tab_id).catch(() => null);
         if (frame && String(frame?.url || '') !== '') return tab;
       }
+      // Provably blank (or unobservable) tab: never held a conversation,
+      // never held a send — close it and try a fresh one.
       await this.#execute({ action: 'CLOSE_TAB', payload: { tab_id: tab.tab_id }, platform: null }).catch(() => {});
     }
     throw new Error('rollover_tab_never_committed');
