@@ -1812,6 +1812,35 @@ async function createWindow() {
   });
 }
 
+ipcMain.on('metaengine:shell:ui-contract-readback', (event, payload) => {
+  assertShellSender(event);
+  if (primaryShellMode !== 'ME2_PRIMARY') return;
+  const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
+  const present = payload?.present && typeof payload.present === 'object' ? payload.present : {};
+  const complete = payload?.schema === 'metaengine.browser.me2-ui-contract-readback.v1'
+    && payload?.location_class === 'PACKAGED_ME2_LOOPBACK'
+    && payload?.complete === true
+    && required.every((id) => present[id] === true)
+    && payload?.scheduler_authority === false
+    && payload?.browser_command_authority === false
+    && payload?.update_authority === false
+    && payload?.release_authority === false
+    && payload?.authority_effect === false;
+  console.log(JSON.stringify({
+    schema: 'metaengine.browser.me2-r75-installed-ui.v1',
+    state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
+    page: primaryShellPage,
+    required,
+    present: Object.fromEntries(required.map((id) => [id, present[id] === true])),
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    legacy_shell_is_normal_path: false,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  }));
+});
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
   assertShellSender(event);
