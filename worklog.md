@@ -9896,3 +9896,16 @@ Work Log:
 Stage Summary:
 - Desktop: GAP #1a закрыт — staged-обновление применяет себя: detached-установщик при выходе, qualification-окно после перезапуска, честный откат; курсор 5.5/8; CI gate на 8d276feb — 3-й зелёный прогон даст оператору основание для PR в release/self-update-ambiguity-live-v2
 - Console: бэклог движка = EV-TOASTS (следующий консольный тик); протокол раунда соблюдён: тик закончился кодом, версия bump, suite зелёный, ветка запушена
+
+---
+Task ID: R80-PUSH-Q
+Agent: Super-Z (cron Job 413338 2026-09-27 06:37)
+Task: push-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (GITHUB_TOKEN_ADMIN на месте)
+
+Work Log:
+- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались и не логировались
+- push-pending-r80.sh: main→sandbox/me2-os ff 9b94a781..f132387d (DESKTOP-1A worklog + cron-коммиты); me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
+- ls-remote verify: sandbox/me2-os=f132387d ≡ local main HEAD (rail current); DONE: all local state published
+
+Stage Summary:
+- rail sandbox/me2-os = f132387d = local main — публикация завершена; известные блокеры вне скоупа публикации: Supabase JWT pending operator (sb=0ok/4fail), R2 S3 BLOCKED
