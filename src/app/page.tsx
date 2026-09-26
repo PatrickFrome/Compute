@@ -114,11 +114,26 @@ interface Convergence {
   rollup_state: 'GREEN' | 'RED' | 'PENDING' | 'UNKNOWN'
   api: { token_present: boolean; rate_remaining: number | null }
 }
+interface DonorAction {
+  action: string
+  lane: 'READ_ONLY' | 'TAB_MUTATION' | 'GLOBAL_MUTATION' | 'EMERGENCY'
+  cost: number
+  desc: string
+}
 interface DonorRegistry {
-  provenance: { source_ref: string; source_sha: string; donor_daemon_version: string }
+  provenance: { source_ref: string; source_sha: string; donor_daemon_version: string; source_path?: string; legacy_surface?: string }
   lanes: { EMERGENCY: number; READ_ONLY: number; TAB_MUTATION: number; GLOBAL_MUTATION: number }
   total: number
-  reconciliation: { counterparts_count: number; full: number; partial: number; pending_count: number; local_only_count: number }
+  legacy_surface_count?: number
+  budget?: { limit: number; windowMs: number }
+  lane_priority?: Record<string, number>
+  actions: DonorAction[]
+  reconciliation: {
+    counterparts: { donor: string; local: string; mode: 'full' | 'partial'; note: string }[]
+    counterparts_count: number; full: number; partial: number; pending_count: number
+    pending_by_lane?: Record<string, string[]>
+    local_only_count: number; local_only: string[]; note: string
+  }
 }
 interface R82Probe {
   tab_id: string | null; probed: boolean; blank: boolean; url: string | null
@@ -304,12 +319,13 @@ function Panel({
   )
 }
 
-function Stat({ label, value, tone, span }: { label: string; value: React.ReactNode; tone?: string; span?: string }) {
-  const title = typeof value === 'string' ? value : undefined
+function Stat({ label, value, tone, span, title }: { label: string; value: React.ReactNode; tone?: string; span?: string; title?: string }) {
+  const autoTitle = typeof value === 'string' ? value : undefined
+  const tip = title ?? autoTitle
   return (
     <div className={`min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 ${span ?? ''}`}>
-      <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
-      <div className={`truncate font-mono text-xs ${tone ?? 'text-zinc-200'}`} title={title}>{value}</div>
+      <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500" title={typeof label === 'string' ? label : undefined}>{label}</div>
+      <div className={`truncate font-mono text-xs ${tone ?? 'text-zinc-200'}`} title={tip}>{value}</div>
     </div>
   )
 }
@@ -374,6 +390,8 @@ export default function MissionControl() {
   const [readbackErr, setReadbackErr] = useState<string | null>(null)
   const [readbackLoading, setReadbackLoading] = useState(false)
   const [donorReg, setDonorReg] = useState<DonorRegistry | null>(null)
+  const [donorLane, setDonorLane] = useState<'ALL' | DonorAction['lane']>('ALL')
+  const [donorQuery, setDonorQuery] = useState('')
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -497,6 +515,7 @@ export default function MissionControl() {
   const milestoneSeqRef = useRef<number>(-1)
   const MILESTONE_LABELS: Record<string, string> = {
     R82_SELF_UPDATE_LANDED: 'Self-update доставлен в runtime',
+    R82_CANARY_CONFIRMED: 'Canary подтверждён — новый код живой',
     R82_DRAFT_CLEARED: 'Драфт очищен оператором',
     R82_CYCLE_RESUMED: 'cycle_seq пошёл — R82 закрыт',
     EDGE_SNAPSHOT: 'Edge-снапшот снят в evidence',
@@ -722,6 +741,131 @@ export default function MissionControl() {
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+          )}
+        </Panel>
+
+        {/* ---------------------------------------------- DONOR REGISTRY card */}
+        <Panel
+          icon={<Layers className="h-4 w-4" />}
+          title="Донор-реестр · 57 действий"
+          chip={donorReg ? <Chip tone="info">{donorReg.total} · {donorReg.reconciliation.counterparts_count}/{donorReg.total} local</Chip> : <Chip tone="neutral">…</Chip>}
+        >
+          {donorReg ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="donor actions" value={String(donorReg.total)} tone="text-cyan-300" />
+                <Stat label="counterparts" value={`${donorReg.reconciliation.counterparts_count} (${donorReg.reconciliation.full}f/${donorReg.reconciliation.partial}p)`} tone="text-emerald-400" />
+                <Stat label="pending → R84–R86" value={String(donorReg.reconciliation.pending_count)} tone="text-amber-400" />
+                <Stat label="local-only" value={String(donorReg.reconciliation.local_only_count)} tone="text-zinc-300" />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(['ALL', 'READ_ONLY', 'TAB_MUTATION', 'GLOBAL_MUTATION', 'EMERGENCY'] as const).map((lane) => {
+                  const n = lane === 'ALL' ? donorReg.total : donorReg.lanes[lane]
+                  const active = donorLane === lane
+                  const laneTone = lane === 'READ_ONLY' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : lane === 'TAB_MUTATION' ? 'border-amber-500/40 bg-amber-500/10 text-amber-300' : lane === 'GLOBAL_MUTATION' ? 'border-rose-500/40 bg-rose-500/10 text-rose-300' : lane === 'EMERGENCY' ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-teal-500/40 bg-teal-500/10 text-teal-300'
+                  return (
+                    <button
+                      key={lane}
+                      onClick={() => setDonorLane(lane)}
+                      className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 ${active ? laneTone : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200'}`}
+                      title={lane === 'ALL' ? 'все лены' : `lane priority: ${donorReg.lane_priority?.[lane] ?? '—'}`}
+                    >
+                      {lane === 'ALL' ? 'все' : lane === 'READ_ONLY' ? 'RO' : lane === 'TAB_MUTATION' ? 'TAB' : lane === 'GLOBAL_MUTATION' ? 'GM' : 'EMG'} · {n}
+                    </button>
+                  )
+                })}
+                <div className="relative ml-auto min-w-[140px] flex-1 sm:max-w-[220px]">
+                  <Input
+                    value={donorQuery}
+                    onChange={(e) => setDonorQuery(e.target.value)}
+                    placeholder="поиск действия…"
+                    aria-label="Поиск по донор-реестру"
+                    className="h-8 border-zinc-700 bg-zinc-950/60 pr-7 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/40"
+                  />
+                  {donorQuery && (
+                    <button onClick={() => setDonorQuery('')} aria-label="Сбросить поиск" className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300">×</button>
+                  )}
+                </div>
+              </div>
+              {(() => {
+                const cpMap = new Map(donorReg.reconciliation.counterparts.map((c) => [c.donor, c]))
+                const q = donorQuery.trim().toLowerCase()
+                const matches = (a: DonorAction) => {
+                  if (donorLane !== 'ALL' && a.lane !== donorLane) return false
+                  if (!q) return true
+                  const cp = cpMap.get(a.action)
+                  return a.action.toLowerCase().includes(q) || a.desc.toLowerCase().includes(q) || (cp ? `${cp.local} ${cp.note}`.toLowerCase().includes(q) : false)
+                }
+                const lanesShown = (donorLane === 'ALL' ? ['EMERGENCY', 'GLOBAL_MUTATION', 'TAB_MUTATION', 'READ_ONLY'] as const : [donorLane] as const)
+                const laneMeta: Record<string, { label: string; cls: string; pri: string }> = {
+                  EMERGENCY: { label: 'EMERGENCY', cls: 'text-red-300 border-red-500/40 bg-red-500/10', pri: '0' },
+                  GLOBAL_MUTATION: { label: 'GLOBAL_MUTATION', cls: 'text-rose-300 border-rose-500/40 bg-rose-500/10', pri: '2' },
+                  TAB_MUTATION: { label: 'TAB_MUTATION', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10', pri: '4' },
+                  READ_ONLY: { label: 'READ_ONLY', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10', pri: '9' },
+                }
+                const shown = donorReg.actions.filter(matches).length
+                return (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+                      <span>показано <span className="font-mono text-zinc-300">{shown}</span> из <span className="font-mono">{donorReg.total}</span></span>
+                      {donorQuery && <span>· фильтр: <span className="font-mono text-cyan-300">{donorQuery}</span></span>}
+                      <span className="ml-auto font-mono text-zinc-600">cost: ●=1 · budget {donorReg.budget?.limit ?? 24}/{Math.round((donorReg.budget?.windowMs ?? 60000) / 1000)}s</span>
+                    </div>
+                    <div className={`max-h-96 space-y-2.5 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-zinc-800/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-600`}>
+                      {lanesShown.map((lane) => {
+                        const acts = donorReg.actions.filter((a) => a.lane === lane && matches(a))
+                        if (acts.length === 0) return null
+                        const meta = laneMeta[lane]
+                        return (
+                          <div key={lane}>
+                            <div className="sticky top-0 z-[1] -mx-1 mb-1.5 flex items-center gap-2 bg-zinc-900/95 px-1 py-1 backdrop-blur-sm">
+                              <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${meta.cls}`}>{meta.label}</span>
+                              <span className="font-mono text-[10px] text-zinc-500">{acts.length}</span>
+                              <span className="ml-auto font-mono text-[9px] text-zinc-600">priority {meta.pri}</span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                              {acts.map((a) => {
+                                const cp = cpMap.get(a.action)
+                                return (
+                                  <div key={a.action} className="group rounded-lg border border-zinc-800 bg-zinc-950/40 p-2 transition-colors hover:border-zinc-700 hover:bg-zinc-900/60">
+                                    <div className="flex items-baseline gap-1.5">
+                                      <span className="min-w-0 truncate font-mono text-[11px] font-semibold text-zinc-200" title={a.action}>{a.action}</span>
+                                      <span className="ml-auto shrink-0 font-mono text-[9px] text-zinc-500" title={`scheduler cost: ${a.cost}`}>{a.cost > 0 ? '●'.repeat(a.cost) : '·'}</span>
+                                    </div>
+                                    <div className="mt-0.5 text-[10px] leading-snug text-zinc-500" title={a.desc}>{a.desc}</div>
+                                    <div className="mt-1 flex items-center gap-1.5">
+                                      {cp ? (
+                                        <span className={`inline-flex min-w-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[9px] ${cp.mode === 'full' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300'}`} title={`локальный аналог: ${cp.local} — ${cp.note}`}>
+                                          {cp.mode === 'full' ? '✓' : '◐'} <span className="truncate">{cp.local}</span>
+                                        </span>
+                                      ) : (
+                                        <span className="rounded bg-zinc-800/60 px-1.5 py-0.5 font-mono text-[9px] text-zinc-500" title="требует installed Browser control plane (R84–R86) — не может быть честно заявлена из песочницы">pending</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {shown === 0 && <div className="py-6 text-center text-[11px] text-zinc-600">ничего не найдено — ослабьте фильтр или запрос</div>}
+                    </div>
+                  </div>
+                )
+              })()}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Chip tone="neutral" title={donorReg.provenance.source_path}>источник: {donorReg.provenance.source_ref} @ {donorReg.provenance.source_sha.slice(0, 8)}</Chip>
+                <Chip tone="neutral">donor v{donorReg.provenance.donor_daemon_version}</Chip>
+                {donorReg.legacy_surface_count && <Chip tone="neutral" title={donorReg.provenance.legacy_surface}>legacy surface: {donorReg.legacy_surface_count}</Chip>}
+                <Chip tone="neutral">priorities EMG 0 · GM 2 · TAB 4 · RO 9</Chip>
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Манифест восстановлен дословно из donor-линии. Браузер показывает все {donorReg.total} действий с lane-фильтром и поиском: <span className="text-emerald-300">✓</span> — локальный аналог реализован, <span className="text-amber-300">◐</span> — частично, <span className="text-zinc-400">pending</span> — требует Browser control plane (R84–R86). Полная реализация bus — вместе с R84–R86, не из песочницы.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка донор-реестра…</div>
           )}
         </Panel>
 
@@ -1012,10 +1156,26 @@ export default function MissionControl() {
                 </div>
               )}
 
+              {/* R82-STICKY: canary proof chain — observed machine-readable reasons */}
+              {readback.canary?.observed_reasons && readback.canary.observed_reasons.length > 0 && (
+                <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-2.5">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">Canary-доказательства (sticky — исторический факт)</span>
+                    <Chip tone="ok" className="ml-auto">{readback.canary.confirmed_source ?? '—'}</Chip>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {readback.canary.observed_reasons.map((r) => (
+                      <span key={r} className="rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[9px] text-cyan-200" title="machine-readable rollover-причина, которую старый код не мог породить — доказательство, что фиксы PR #981 физически исполняются">{r}</span>
+                    ))}
+                  </div>
+                  {readback.canary.confirmed_at && <div className="mt-1.5 font-mono text-[9px] text-zinc-600">подтверждено: {readback.canary.confirmed_at.slice(11, 19)}Z · источник: {readback.canary.confirmed_source}</div>}
+                </div>
+              )}
+
               {/* draft history */}
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">История драфта (READ-ONLY: периодический 5 мин + oppo-сэмплер на новые попытки)</span>
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500" title="durable-история: data/draft-history.jsonl, до 24 ч (288 проб), переживает рестарты демона">История драфта (READ-ONLY: периодический 5 мин + oppo-сэмплер · durable 24 ч)</span>
                   <Chip tone={readback.draft.cleared ? 'ok' : readback.draft.last?.canary === 'OVERSIZED' ? 'p0' : 'neutral'}>
                     {readback.draft.cleared ? 'CLEARED' : readback.draft.last?.canary ?? '…'}
                   </Chip>
@@ -1041,7 +1201,7 @@ export default function MissionControl() {
                           <span className="text-zinc-600">{hhmmss(s.ts)}</span>
                           {s.source === 'opportunistic' && <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[9px] font-bold uppercase text-cyan-300" title="оппортунистическая проба — снята в момент старта новой rollover-попытки, пока attempt-таб жив">oppo</span>}
                           <span className={s.canary === 'OVERSIZED' ? 'text-rose-400' : s.canary === 'OK' ? 'text-emerald-400' : 'text-zinc-500'}>{s.canary}</span>
-                          <span className="ml-auto truncate text-zinc-400" title={s.error ?? undefined}>{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
+                          <span className="ml-auto truncate text-zinc-400" title={`${s.ts} · ${s.canary}${s.chars != null ? ` · ${s.chars} chars` : ''}${s.error ? ` · ${s.error}` : ''} · ${s.source === 'opportunistic' ? 'оппортунистическая проба' : 'периодическая проба'}`}>{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
                         </div>
                       ))}
                       {readback.draft.samples.length === 0 && <div className="py-2 text-center text-[10px] text-zinc-600">сэмплер разогревается (первый сэмпл ~1 мин)…</div>}
@@ -1279,11 +1439,13 @@ export default function MissionControl() {
         >
           {monitor ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
                 <Spark label="heartbeat, s" color="#34d399" value={mLast ? `${mLast.hb_age_s}s` : '—'} data={mkSeries((s) => s.hb_age_s)} />
                 <Spark label="cycle_seq" color="#fbbf24" value={mLast ? String(mLast.cycle_seq) : '—'} data={mkSeries((s) => s.cycle_seq)} />
                 <Spark label="resync_count" color="#22d3ee" value={mLast ? String(mLast.resync_count) : '—'} data={mkSeries((s) => s.resync_count)} />
                 <Spark label="stale cycle, h" color="#fb7185" value={mLast && mLast.stale_completed_s != null ? `${(mLast.stale_completed_s / 3600).toFixed(1)}h` : '—'} data={mkSeries((s) => (s.stale_completed_s != null ? +(s.stale_completed_s / 3600).toFixed(2) : null))} />
+                <Spark label="ambiguous hist" color="#f97316" value={mLast ? String(mLast.ambiguous_history_count) : '—'} data={mkSeries((s) => s.ambiguous_history_count)} />
+                <Spark label="p0 flags" color="#e879f9" value={mLast ? String(mLast.p0_count) : '—'} data={mkSeries((s) => s.p0_count)} />
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Chip tone="neutral">интервал {Math.round(monitor.status.interval_ms / 1000)}с</Chip>
@@ -1293,7 +1455,7 @@ export default function MissionControl() {
                 {mLast && <Chip tone="neutral">compute {mLast.compute_state}</Chip>}
               </div>
               <p className="text-[11px] leading-relaxed text-zinc-500">
-                Критерий успеха R82: <span className="text-amber-300">cycle_seq</span> начинает расти монотонно, а <span className="text-rose-300">stale cycle</span> сбрасывается в секунды. Графики накапливаются в ring-buffer демона (1 час, silent-сэмплинг без записи в evidence log).
+                Критерий успеха R82: <span className="text-amber-300">cycle_seq</span> начинает расти монотонно, а <span className="text-rose-300">stale cycle</span> сбрасывается в секунды. Графики накапливаются в ring-buffer демона (1 час, silent-сэмплинг без записи в evidence log). История драфта — durable (data/draft-history.jsonl, 24 ч, переживает рестарты демона).
               </p>
             </div>
           ) : (
@@ -1541,6 +1703,11 @@ export default function MissionControl() {
           <span>bus {wsLive ? 'ws' : 'poll'}</span>
           <span>·</span>
           <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
+          {conv && (
+            <span className={`font-mono ${conv.rollup_state === 'GREEN' ? 'text-emerald-400' : conv.rollup_state === 'RED' ? 'text-rose-400' : conv.rollup_state === 'PENDING' ? 'text-amber-400/80' : 'text-zinc-500'}`} title={`PR #${conv.pr?.number ?? 968} (${conv.pr?.state ?? '?'}${conv.pr?.draft ? ', draft' : ''}) — R84/R85 волна оператора · CI: ${conv.checks.success}/${conv.checks.total} success, ${conv.checks.failed} failed, ${conv.checks.pending} pending`}>
+            PR#{conv.pr?.number ?? 968} CI {conv.rollup_state}
+          </span>
+          )}
           <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R82'} · {readback ? `exit gate: ${readback.current_gate}` : 'release readiness: BLOCKED (см. gap matrix)'}</span>
         </div>
       </footer>

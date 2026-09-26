@@ -31,6 +31,9 @@ import { monitorHistory, onRolloverAttempt, type MonitorSample } from "./monitor
 import { probeDraft, ROOT_DRAFT_MAX_CHARS, type DraftProbe } from "./r82";
 import { supervisorSnapshot } from "./controlplane";
 import { VERSION } from "./version";
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const REPO = "PatrickFrome/Compute";
 const RELEASE_BRANCH = "release/self-update-ambiguity-live-v2";
@@ -45,7 +48,12 @@ export const BASELINE = {
 } as const;
 
 const DRAFT_SAMPLE_MS = 5 * 60_000; // 5 min — READ-ONLY, bounded fastlane use
-const DRAFT_MAX_SAMPLES = 48; // 4 hours of draft history
+// R82-STICKY: draft history is now DURABLE — every sample is appended to
+// data/draft-history.jsonl and reloaded on boot, so the console keeps the
+// long arc (24h) across daemon restarts instead of losing the in-memory ring
+// (the R82-HARDEN backlog item: "длинная история draft size, ring 4h").
+const DRAFT_MAX_SAMPLES = 288; // 24 hours at 5 min
+const DRAFT_HISTORY_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "data", "draft-history.jsonl");
 const CI_TTL_MS = 60_000;
 // R82-HARDEN: opportunistic probes are triggered by the monitor the moment a
 // NEW rollover attempt opens a fresh tab (attempt tabs live ~2.5 min before
@@ -155,6 +163,34 @@ let draftSamples: DraftSample[] = [];
 let draftTimer: ReturnType<typeof setInterval> | null = null;
 let draftInFlight = false;
 let lastOppoAt = 0;
+// R82-STICKY: canary-family reasons observed THIS process lifetime — makes
+// the CANARY stage sticky within a session (the journal milestone below makes
+// it durable across restarts)
+let canaryReasonsSeen: string[] = [];
+
+// R82-STICKY: load the durable draft history on module init — the ring starts
+// warm (up to 24h), so a daemon restart no longer blanks the console chart.
+// Malformed lines are skipped (fail-open: history is evidence, not a gate).
+(function loadDraftHistory(): void {
+  try {
+    if (!existsSync(DRAFT_HISTORY_PATH)) return;
+    const lines = readFileSync(DRAFT_HISTORY_PATH, "utf8").split("\n").filter((l) => l.trim());
+    for (const line of lines.slice(-DRAFT_MAX_SAMPLES)) {
+      try {
+        const s = JSON.parse(line) as DraftSample;
+        if (s && typeof s.ts === "string" && s.canary) draftSamples.push(s);
+      } catch {
+        /* skip malformed line */
+      }
+    }
+    // rolling trim: keep the file bounded too (append-only between boots)
+    if (lines.length > DRAFT_MAX_SAMPLES * 2) {
+      writeFileSync(DRAFT_HISTORY_PATH, lines.slice(-DRAFT_MAX_SAMPLES).join("\n") + "\n");
+    }
+  } catch {
+    /* history must never break the daemon */
+  }
+})();
 
 // R82-HARDEN (QA bug): one-shot milestones deduped against the DURABLE event
 // log, not in-process flags — a daemon restart used to re-fire
@@ -164,8 +200,17 @@ function milestoneInLog(type: string): boolean {
 }
 
 function recordDraft(p: DraftProbe, source: DraftSample["source"]): void {
-  draftSamples.push({ ts: p.ts, tab_id: p.tab_id, chars: p.chars, canary: p.canary, source, error: p.error });
+  const sample: DraftSample = { ts: p.ts, tab_id: p.tab_id, chars: p.chars, canary: p.canary, source, error: p.error };
+  draftSamples.push(sample);
   if (draftSamples.length > DRAFT_MAX_SAMPLES) draftSamples = draftSamples.slice(-DRAFT_MAX_SAMPLES);
+  // R82-STICKY: durable append — the long arc survives restarts (best-effort;
+  // a write failure must never break the sampler)
+  try {
+    mkdirSync(dirname(DRAFT_HISTORY_PATH), { recursive: true });
+    appendFileSync(DRAFT_HISTORY_PATH, JSON.stringify(sample) + "\n");
+  } catch {
+    /* durable history is best-effort */
+  }
   // one-shot milestone: a live composer reads ≤ threshold — the poisoned
   // account-draft is gone (the manual step the whole R82 exit gate waits for).
   // Durable dedupe: fires at most once EVER (log-gated), idempotent across
@@ -262,6 +307,11 @@ export interface ReadbackStatus {
   canary: {
     rollover_reason: string | null;
     new_code_active: boolean; // new machine-readable reasons observed → PR #981 code live
+    // R82-STICKY: the canary is a HISTORICAL fact, not a current-state property
+    // (same principle as draftCleared). Fields below expose the proof chain.
+    observed_reasons: string[]; // deduped canary-family reasons ever observed
+    confirmed_source: "live" | "monitor-history" | "journal" | null;
+    confirmed_at: string | null;
   };
   draft: {
     samples: DraftSample[];
@@ -340,12 +390,36 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
   const journalTransitions = liveTransitions.length > 0 ? [] : reconstructTransition(eventsOfType("R82_SELF_UPDATE_LANDED"));
   const transitions = [...liveTransitions, ...journalTransitions];
   const selfUpdateLanded = sup.extension_version !== BASELINE.extension_version || transitions.length > 0;
-  // R82-HARDEN: the new code emits a FAMILY of machine-readable reasons the
-  // old code never produced — ROOT_DRAFT_OVERSIZED (canary abort) AND
-  // ROLLOVER_ERROR:* (D-C7 close-by-proof for tabs that never commit;
-  // observed live oscillating with the canary). Both prove the new code runs.
+  // R82-STICKY (QA gate-flicker bug, observed live 2026-09-26): the canary
+  // used to be recomputed from the CURRENT rollover_reason only — the reason
+  // oscillates (ROOT_DRAFT_OVERSIZED ↔ ROLLOVER_ERROR:rollover_tab_never_committed
+  // ↔ momentary gaps between attempts), so the gate flickered OPERATOR_CLEAR →
+  // CANARY → OPERATOR_CLEAR between polls. A machine-readable reason once
+  // observed is PROOF the new code physically executed — it can never un-happen.
+  // Proof chain (any hit wins): live reason ∨ monitor-window history ∨ in-process
+  // sticky set ∨ durable journal milestone (restart-safe).
+  const isCanaryReason = (r: string | null | undefined): boolean =>
+    r === "ROOT_DRAFT_OVERSIZED" || (typeof r === "string" && r.startsWith("ROLLOVER_ERROR:"));
   const reason = sup.keepalive.rollover_reason;
-  const newCodeActive = reason === "ROOT_DRAFT_OVERSIZED" || (reason?.startsWith("ROLLOVER_ERROR:") ?? false);
+  const historyReasons = [...new Set(history.map((s) => s.rollover_reason).filter(isCanaryReason))];
+  for (const r of historyReasons) if (!canaryReasonsSeen.includes(r)) canaryReasonsSeen.push(r);
+  if (isCanaryReason(reason) && !canaryReasonsSeen.includes(reason)) canaryReasonsSeen.push(reason);
+  const canaryInJournal = milestoneInLog("R82_CANARY_CONFIRMED");
+  const newCodeActive = isCanaryReason(reason) || canaryReasonsSeen.length > 0 || canaryInJournal;
+  const canarySource: "live" | "monitor-history" | "journal" | null = isCanaryReason(reason)
+    ? "live"
+    : canaryReasonsSeen.length > 0
+      ? "monitor-history"
+      : canaryInJournal
+        ? "journal"
+        : null;
+  let canaryConfirmedAt: string | null = null;
+  if (canarySource === "journal") {
+    const ev = eventsOfType("R82_CANARY_CONFIRMED")[0];
+    canaryConfirmedAt = ev?.ts ?? null;
+  } else if (canarySource != null) {
+    canaryConfirmedAt = sup.fetched_at;
+  }
 
   const lastDraft = draftSamples.length > 0 ? draftSamples[draftSamples.length - 1] : null;
   const maxChars = draftSamples.reduce((m, s) => (s.chars != null && s.chars > m ? s.chars : m), 0);
@@ -424,7 +498,7 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       title: "Новый код активен (machine-readable причины)",
       state: newCodeActive ? "DONE" : selfUpdateLanded ? "ACTIVE" : "PENDING",
       detail: newCodeActive
-        ? `rollover_reason = ${reason} — фиксы PR #981 физически исполняются (canary-аборт + D-C7 close-by-proof)`
+        ? `rollover_reason = ${reason ?? canaryReasonsSeen[canaryReasonsSeen.length - 1] ?? "?"}${canarySource === "live" ? " (live)" : canarySource ? ` (sticky: ${canarySource})` : ""} — фиксы PR #981 физически исполняются`
         : `rollover_reason = ${reason ?? "—"} (старый цикл)`,
     },
     {
@@ -485,6 +559,18 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       daemon_version: VERSION,
     });
   }
+  // R82-STICKY: durable canary confirmation — makes the CANARY stage sticky
+  // across daemon restarts (the observed reason family is proof the PR #981
+  // fixes physically executed; it can never un-happen)
+  if (newCodeActive && !milestoneInLog("R82_CANARY_CONFIRMED")) {
+    appendEvent("R82_CANARY_CONFIRMED", "daemon", sup.client_id, {
+      live_reason: isCanaryReason(reason) ? reason : null,
+      observed_reasons: canaryReasonsSeen.length > 0 ? canaryReasonsSeen : isCanaryReason(reason) ? [reason] : [],
+      source: canarySource,
+      note: "machine-readable rollover reasons observed — PR #981 code physically executing",
+      daemon_version: VERSION,
+    });
+  }
   // R82-HARDEN: a successful rollover REQUIRES a clean draft (the whole
   // causal chain) — cycle growth past the poisoned baseline is itself proof
   // the operator cleared the draft, even if no probe caught a live clean tab
@@ -520,7 +606,13 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       self_update_landed: selfUpdateLanded,
       version_transitions: transitions,
     },
-    canary: { rollover_reason: sup.keepalive.rollover_reason, new_code_active: newCodeActive },
+    canary: {
+      rollover_reason: sup.keepalive.rollover_reason,
+      new_code_active: newCodeActive,
+      observed_reasons: [...new Set([...canaryReasonsSeen, ...(isCanaryReason(reason) ? [reason] : [])])],
+      confirmed_source: canarySource,
+      confirmed_at: canaryConfirmedAt,
+    },
     draft: {
       samples: [...draftSamples],
       last: lastDraft,

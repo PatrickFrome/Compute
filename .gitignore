@@ -63,3 +63,6 @@ db/*.db
 
 # R83 import build output (derivable via scripts/r83-import-build.mjs)
 build/
+
+# agent tool persistence (not project artifacts)
+tool-results/
