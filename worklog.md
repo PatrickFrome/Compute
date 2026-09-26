@@ -9722,3 +9722,19 @@ Work Log:
 
 Stage Summary:
 - раунд 8 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-8 (implemented-EV-FOOTER, engine v1.14→v1.15)
+Agent: Super-Z (cron Job 416839 2026-09-27 05:15 MSK+8)
+Task: self-evolve round 8 — EV-FOOTER (footer-навигация для мобильных + back-to-top + uptime в vitals)
+
+Work Log:
+- evolve: round=8, client=HTTP 200 (gateway :81), lint 0/0, next_task=EV-FOOTER
+- page.tsx footer: добавлен навигационный ряд — 12 jump-чипов NAV_SECTIONS (единственная навигация для <md, где sticky top-nav скрыт) + кнопка «наверх» (ArrowUp, smooth scrollTo top, паттерн Grafana back-to-top) с ml-auto
+- vitals row: + «up {humanS(uptime_s)}» с title «непрерывный uptime демона»
+- верификация agent-browser через gateway :81: footerChips=13, hasTop=true, клик «наверх» → scrollY=0, vitalsUp=true, 0 console errors, lint 0/0
+- самоулучшение: BACKLOG +EV-TOPO (группировка 15 панелей в 3 домена Runtime/Convergence/Evidence с секционными заголовками — Phase-2 из UI-аудита); зеркала self-evolve.sealed.sh 3/3 (phoenix-sealed PolarFS + context-vault-mirror + ossfs)
+
+Stage Summary:
+- EV-FOOTER закрыт: мобильные пользователи получили полноценную навигацию, desktop — back-to-top
+- движок v1.15, следующая задача бэклога: EV-TOPO (доменная группировка панелей)

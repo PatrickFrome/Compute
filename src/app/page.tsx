@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts'
 import {
-  Activity, AlertTriangle, BadgeCheck, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitMerge, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, ArrowUp, BadgeCheck, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitMerge, GitPullRequest, HeartPulse,
   Layers, ListChecks, Loader2, Moon, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Sun, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -3084,6 +3084,29 @@ export default function MissionControl() {
       {/* ---------------------------------------------------------- footer */}
       <footer className="mt-auto border-t border-zinc-800 bg-zinc-950 pb-[env(safe-area-inset-bottom)]">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-teal-500/50" />
+        {/* EV-FOOTER: навигационный ряд — единственный для <md (top-nav скрыт),
+            дублирует jump-чипы + «наверх» (паттерн Grafana «back to top») */}
+        <div className="relative mx-auto w-full max-w-7xl px-4 pt-2.5">
+          <div className="flex flex-wrap items-center gap-0.5">
+            {NAV_SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                className="rounded-md px-1.5 py-1 text-[10px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+              >
+                {s.label}
+              </button>
+            ))}
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              aria-label="Прокрутить наверх"
+              title="наверх к header'у (клавиша Home тоже работает для нативного скролла)"
+              className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+            >
+              <ArrowUp className="h-3 w-3" /> наверх
+            </button>
+          </div>
+        </div>
         <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-[11px] text-zinc-500">
           <span className="flex items-center gap-1.5">
             <span className={`inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
@@ -3095,6 +3118,8 @@ export default function MissionControl() {
           <span>bus {wsLive ? 'ws' : 'poll'}</span>
           <span>·</span>
           <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
+          <span>·</span>
+          <span className="font-mono" title="непрерывный uptime демона (перезапуски сбрасывают счётчик)">up {health ? humanS(health.uptime_s) : '—'}</span>
           {mirror && (
             <span className={`font-mono ${mirror.pending === 0 && !mirror.state.last_error ? 'text-cyan-400/80' : mirror.pending > 20 || mirror.state.last_error ? 'text-amber-400/80' : 'text-zinc-500'}`} title={`evidence mirror me2_event_mirror_h205f22 · зеркальный хвост #${mirror.state.last_mirror_seq} · отзеркалировано ${mirror.state.mirrored_local_seq}/${mirror.local_last_seq}${mirror.state.last_error ? ` · ${mirror.state.last_error.code}` : ''}`}>
             · mirror #{mirror.state.last_mirror_seq}{mirror.pending > 0 ? ` (+${mirror.pending})` : ' ✓'}
