@@ -6,7 +6,7 @@
 import { PAGES, WORKSPACES, useMe2, useKpis } from "@/components/me2/store";
 import { Search, Command, Boxes, Play, AlertTriangle, Radio, BellRing, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export function TopBar() {
   const snap = useMe2((s) => s.snap);
@@ -16,8 +16,25 @@ export function TopBar() {
   const workspace = useMe2((s) => s.workspace);
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
+  const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
   const kpi = useKpis();
   const [attentionOpen, setAttentionOpen] = useState(false);
+
+  const setAttention = (open: boolean) => {
+    setAttentionOpen(open);
+    setChromeOverlay("attention", open);
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && attentionOpen) setAttention(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      setChromeOverlay("attention", false);
+    };
+  }, [attentionOpen, setChromeOverlay]);
 
   const pageMeta = PAGES.find((p) => p.key === page);
   const workspaceMeta = WORKSPACES.find((w) => w.key === workspace);
@@ -96,7 +113,7 @@ export function TopBar() {
         <div className="relative">
           <button
             type="button"
-            onClick={() => setAttentionOpen((open) => !open)}
+            onClick={() => setAttention(!attentionOpen)}
             aria-expanded={attentionOpen}
             aria-haspopup="dialog"
             aria-label={attentionItems.length > 0 ? "Attention Center: " + attentionItems.length + " items" : "Attention Center: clear"}
@@ -109,13 +126,13 @@ export function TopBar() {
           </button>
           {attentionOpen ? (
             <>
-              <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setAttentionOpen(false)} />
+              <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setAttention(false)} />
               <section role="dialog" aria-label="Attention Center" data-testid="attention-center" className="absolute right-0 top-8 z-50 w-[360px] max-w-[80vw] border border-zinc-800 bg-[#0b0b0d] shadow-2xl">
                 <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
                   <BellRing className="h-3.5 w-3.5 text-amber-400" aria-hidden />
                   <strong className="text-[10px] uppercase tracking-[0.14em] text-zinc-300">Attention</strong>
                   <span className="font-mono text-[9px] text-zinc-600">{attentionItems.length}</span>
-                  <button type="button" onClick={() => setAttentionOpen(false)} aria-label="Закрыть Attention Center" className="ml-auto p-1 text-zinc-600 hover:text-zinc-300">
+                  <button type="button" onClick={() => setAttention(false)} aria-label="Закрыть Attention Center" className="ml-auto p-1 text-zinc-600 hover:text-zinc-300">
                     <X className="h-3 w-3" aria-hidden />
                   </button>
                 </div>
@@ -124,7 +141,7 @@ export function TopBar() {
                 ) : (
                   <div className="max-h-[55vh] overflow-y-auto py-1 mc-scroll">
                     {attentionItems.map((item) => (
-                      <button key={item.id} type="button" onClick={() => { setPage(item.page); setAttentionOpen(false); }} className="flex w-full items-start gap-2 border-b border-zinc-900 px-3 py-2 text-left hover:bg-zinc-900/70">
+                      <button key={item.id} type="button" onClick={() => { setPage(item.page); setAttention(false); }} className="flex w-full items-start gap-2 border-b border-zinc-900 px-3 py-2 text-left hover:bg-zinc-900/70">
                         <span className={"mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full " + (item.tone === "rose" ? "bg-rose-400" : "bg-amber-400")} aria-hidden />
                         <span className="min-w-0">
                           <span className="block text-[11px] font-medium text-zinc-200">{item.label}</span>
