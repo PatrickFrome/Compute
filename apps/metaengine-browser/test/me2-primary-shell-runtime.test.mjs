@@ -22,6 +22,11 @@ import {
   planShellLayout,
 } from '../src/shell-layout.mjs';
 import { projectMe2UiRoutingAuthority } from '../src/me2/me2-ui-host.mjs';
+import {
+  presentationSyncStillCurrent,
+  resolveExactAgentTab,
+  zAiUrlContainsExactSession,
+} from '../../me2-ui/src/lib/r85-ui-contracts.mjs';
 
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
@@ -277,6 +282,37 @@ test('R85 Command remains an integrated native-stage workbench with R75 anchors'
   assert.match(me2Statusbar, /data-testid="statusbar"/);
 });
 
+test('R85 agent tab binding is exact-session-only and rejects similar-title fallbacks', () => {
+  const sessionId = 'sess-abc-123';
+  const exact = resolveExactAgentTab([
+    { id: 'tab-a', url: 'https://chat.z.ai/c/sess-abc-123', title: 'Refactor auth' },
+    { id: 'tab-b', url: 'https://chat.z.ai/c/other-session', title: 'Refactor auth v2' },
+  ], sessionId);
+  assert.equal(exact.kind, 'exact');
+  assert.equal(exact.tab.id, 'tab-a');
+
+  const titleOnly = resolveExactAgentTab([
+    { id: 'tab-title', url: 'https://chat.z.ai/c/other-session', title: 'Refactor auth' },
+  ], sessionId);
+  assert.equal(titleOnly.kind, 'missing');
+  assert.equal(titleOnly.zai.length, 1);
+
+  assert.equal(zAiUrlContainsExactSession('https://chat.z.ai/c/sess-abc-1234', sessionId), false);
+  assert.equal(zAiUrlContainsExactSession('https://example.com/?session=sess-abc-123', sessionId), false);
+
+  const duplicate = resolveExactAgentTab([
+    { id: 'tab-1', url: 'https://chat.z.ai/c/sess-abc-123', title: 'one' },
+    { id: 'tab-2', url: 'https://chat.z.ai/session/sess-abc-123?view=2', title: 'two' },
+  ], sessionId);
+  assert.equal(duplicate.kind, 'ambiguous');
+  assert.equal(duplicate.matches.length, 2);
+
+  assert.match(me2Command, /resolveExactAgentTab\(tabs, s\.id\)/);
+  assert.doesNotMatch(me2Command, /title \?\?|\.title \?\? ""\)\.toLowerCase\(\)\.includes\(t\)/);
+  assert.doesNotMatch(me2Command, /zai\.length === 1 \? zai\[0\]/);
+  assert.match(me2Command, /title-fallback запрещён/);
+});
+
 test('R85 semantic workbench avoids nested interactive agent rows', () => {
   assert.doesNotMatch(me2Command, /role="button"\s+tabIndex=\{0\}[\s\S]{0,1200}<button/);
   assert.match(me2Command, /type="button"\s+aria-current=\{chatId === s\.id\}/);
@@ -442,6 +478,20 @@ test('R85 Context Drawer follows selection only when explicitly enabled and alre
   assert.doesNotMatch(store, /setContextDrawer\(true\)[\s\S]{0,120}drawerTab: "selection"/);
   assert.match(me2ContextDrawer, /data-testid="context-drawer-follow-selection"/);
   assert.match(me2ContextDrawer, /Drawer никогда не открывается автоматически/);
+});
+
+test('R85 late drawer replies are rejected after page or workspace transitions', () => {
+  const request = { seq: 41, workspace: 'development', page: 'command' };
+  assert.equal(presentationSyncStillCurrent(request, { seq: 41, workspace: 'development', page: 'command' }), true);
+  assert.equal(presentationSyncStillCurrent(request, { seq: 42, workspace: 'development', page: 'command' }), false);
+  assert.equal(presentationSyncStillCurrent(request, { seq: 41, workspace: 'development', page: 'tasks' }), false);
+  assert.equal(presentationSyncStillCurrent(request, { seq: 41, workspace: 'browser-ops', page: 'command' }), false);
+
+  assert.match(store, /presentationSyncStillCurrent/);
+  assert.match(store, /workspace: get\(\)\.workspace,\s*page: get\(\)\.page/);
+  assert.match(store, /setPage: \(p\) => \{[\s\S]{0,220}contextDrawerSyncSeq \+= 1/);
+  assert.match(store, /setWorkspace: \(w\) => \{[\s\S]{0,220}contextDrawerSyncSeq \+= 1/);
+  assert.match(store, /if \(!presentationSyncStillCurrent\(request,/);
 });
 
 test('R85 Context Drawer splitter is keyboard-accessible and native-sync fenced', () => {
