@@ -628,7 +628,7 @@ function cdpBoxVisible(model) {
   return Math.max(...xs) - Math.min(...xs) >= 2 && Math.max(...ys) - Math.min(...ys) >= 2;
 }
 
-async function probeMe2R75InstalledDom(webContents) {
+async function probeMe2R75InstalledDomOnce(webContents) {
   const present = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
   const visible = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
   const dbg = webContents?.debugger;
@@ -666,28 +666,69 @@ async function probeMe2R75InstalledDom(webContents) {
   } finally {
     try { if (attachedHere && dbg?.isAttached()) dbg.detach(); } catch {}
   }
-
   const complete = error == null
     && ME2_R75_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
+  return Object.freeze({
+    complete,
+    present: Object.freeze({ ...present }),
+    visible: Object.freeze({ ...visible }),
+    error,
+  });
+}
+
+async function probeMe2R75InstalledDom(webContents, {
+  timeoutMs = 12000,
+  intervalMs = 150,
+} = {}) {
+  // Read-only convergence fence: loadURL() can settle before Next/React has
+  // committed the final layout/CSS box models on a cold installed machine.
+  // Re-observe the same strict DOM+BoxModel contract for one bounded window.
+  // This is not an effect retry and grants no renderer/browser/scheduler authority.
+  const startedAt = Date.now();
+  const deadline = startedAt + Math.max(0, Number(timeoutMs) || 0);
+  const pauseMs = Math.max(25, Math.min(1000, Number(intervalMs) || 150));
+  let attempts = 0;
+  let last = null;
+
+  do {
+    attempts += 1;
+    last = await probeMe2R75InstalledDomOnce(webContents);
+    if (last.complete === true) break;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, pauseMs));
+  } while (true);
+
+  const complete = last?.complete === true;
   const row = Object.freeze({
     schema: 'metaengine.browser.me2-r75-installed-ui.v1',
     state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
     page: primaryShellPage,
     required: ME2_R75_DOM_IDS,
-    present,
-    visible,
-    evidence_source: 'MAIN_PROCESS_CDP_DOM_BOX_MODEL',
-    error,
+    present: last?.present || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    visible: last?.visible || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    evidence_source: 'MAIN_PROCESS_CDP_DOM_BOX_MODEL_BOUNDED_CONVERGENCE',
+    probe_attempts: attempts,
+    probe_elapsed_ms: Math.max(0, Date.now() - startedAt),
+    probe_timeout_ms: Math.max(0, Number(timeoutMs) || 0),
+    error: last?.error || null,
     native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
     legacy_shell_is_normal_path: false,
     scheduler_authority: false,
     browser_command_authority: false,
     update_authority: false,
     release_authority: false,
+    automatic_effect_retry_allowed: false,
     authority_effect: false,
   });
   console[complete ? 'log' : 'error'](JSON.stringify(row));
-  return Object.freeze({ complete, present: Object.freeze({ ...present }), visible: Object.freeze({ ...visible }), error });
+  return Object.freeze({
+    complete,
+    present: Object.freeze({ ...(last?.present || {}) }),
+    visible: Object.freeze({ ...(last?.visible || {}) }),
+    attempts,
+    elapsed_ms: row.probe_elapsed_ms,
+    error: last?.error || null,
+  });
 }
 
 function computeDevOSSurfaceGrid() {
