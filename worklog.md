@@ -190,3 +190,22 @@ Stage Summary:
 PAT ожидается, push-pending готов (ba623a59)
 PAT ожидается, push-pending готов (ba623a59)
 PAT ожидается, push-pending готов (ba623a59)
+---
+Task ID: CTX-1
+Agent: Z.ai Code (main session)
+Task: Разработка механизма «чат никогда не теряет контекст» — Phoenix Context Vault
+
+Work Log:
+- Аудит: worklog жив (49576B), origin=https://github.com/PatrickFrome/Compute.git (https), vault отсутствовал, push-pending-r80.sh по-прежнему отсутствует (потерян в env-reset).
+- Создан /home/z/context-vault/: snapshots/ (ротация 200), latest/ (актуальные копии + sha256), journal/ (context-journal.log, incidents.log), repo/ (локальная git-история), context-guard.sh v1.0.
+- context-guard.sh: детект усечения/удаления worklog (>40% loss при эталоне >1000B) + авторестор из последнего снапшота (с архивом «truncated-*»); контентные снапшоты только при изменении (sha256); самобэкап скрипта; зеркало /tmp/context-vault-mirror; git-коммит каждого изменения; опциональный push ветки context-vault на GitHub при наличии PAT (секреты не печатаются/не логируются, токен только в argv push).
+- Создан /home/z/my-project/CONTEXT.md — компактный handoff-документ (идентификация, cron-задачи, PAT-блокер, инцидент env-reset, состояние R-линии, roadmap R81–R90, ключевые пути, протокол агентов, инструкция «если ты новая сессия»).
+- Тесты: двойной запуск — идемпотентность ок (1 снапшот, дубль не создан); симуляция усечения через CONTEXT_WL override (10B заглушка) → RESTORE-EVENT, worklog восстановлен до 49576B, инцидент записан. Реальный worklog не пострадал.
+- Создана cron-задача 416526 «Context Guard: Phoenix Vault» (fixed_rate 900s, agentTurn): полный текст guard-скрипта встроен в описание задачи → при полном wipe vault пересоздаётся автоматически (феникс-свойство).
+- Многослойность: vault (~home) + /tmp-зеркало + git-история vault + CONTEXT.md в my-project + ветка context-vault на GitHub (после возврата PAT).
+
+Stage Summary:
+- Контекст работы теперь защищён 7 слоями: снапшоты/рестор, latest-копии, журнал, git-история, /tmp-зеркало, remote-push (при PAT), феникс-восстановление из cron-задачи.
+- Максимальный окна потери контекста снижена с «навсегда» (env-reset) до ≤15 минут.
+- Новый протокол агентов задокументирован в CONTEXT.md §7: читать CONTEXT.md + хвост worklog, append-only worklog, обновлять CONTEXT.md при изменении состояния, секреты не печатать.
+- PAT-блокер без изменений: /home/z/.a2/.github.env отсутствует; push-pending готов (ba623a59); после возврата PAT guard сам запушит ветку context-vault.
