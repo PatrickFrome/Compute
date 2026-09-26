@@ -486,7 +486,7 @@ const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'kee
 ]
 
 // ------------------------------------------------------------- chips ------
-function Chip({ tone, children, className }: { tone: 'ok' | 'warn' | 'p0' | 'info' | 'neutral'; children: React.ReactNode; className?: string }) {
+function Chip({ tone, children, className, title }: { tone: 'ok' | 'warn' | 'p0' | 'info' | 'neutral'; children: React.ReactNode; className?: string; title?: string }) {
   const tones = {
     ok: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
     warn: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
@@ -495,7 +495,7 @@ function Chip({ tone, children, className }: { tone: 'ok' | 'warn' | 'p0' | 'inf
     neutral: 'bg-zinc-500/10 text-zinc-400 border-zinc-600/40',
   } as const
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight ${tones[tone]} ${className ?? ''}`}>
+    <span title={title} className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight ${tones[tone]} ${className ?? ''}`}>
       {children}
     </span>
   )

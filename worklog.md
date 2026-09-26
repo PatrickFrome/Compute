@@ -9995,3 +9995,18 @@ Stage Summary:
 - БЛОКЕР (оператор): SUPABASE_SERVICE_ROLE_JWT невалиден — нужна пере-выдача токена в /tmp/my-project/.a2-backup/me2.env.20260922 (строка SUPABASE_SERVICE_ROLE_JWT=). До этого канал Supabase = auth-fail, всё остальное (ossfs sync=8, vault, зеркала) работает
 - Остаточный риск: cron-payload PHX-HEARTBEAT всё ещё несёт v2.0 (феникс-пересоздание после wipe даст старую версию); суточная ротация Supabase-list держит JWT в ps (1 раз/сутки, принятый риск)
 - Следующий heartbeat-прогон покажет sb=auth-fail сразу (1 запрос вместо 11)
+---
+Task ID: EVOLVE-ROUND-11-IMPL
+Agent: Super-Z (cron Job 416839, self-evolve tick)
+Task: [EV-WS-RESILIENCE] WS (:3040): reconnect c backoff + бейдж состояния связи в UI
+
+Work Log:
+- движок evolve: round=11, client=HTTP 200, lint=0/0, score=83%, v1.23 → задача EV-WS-RESILIENCE
+- page.tsx (только /): state netOnline+wsInfo (retries/nextIn/lastCode); WS-эффект — jitter-exponential backoff (1→15s ±30%), countdown-тик, capture close-кода, online/offline-awareness ('online' событие срезает backoff, offline не жжёт попытки)
+- header-бейдж: bus live (info) / bus retry #N·Xs (warn) / bus offline (p0) + tooltip с close-кодом
+- bugfix попутный: Chip не форвардил title — проп title добавлен (оживили tooltip'ы всех существующих чипов)
+- верификация: gateway :81 (не raw :3000) agent-browser — бейдж «bus retry #1·2s», tooltip «WS потерян (close 1006); reconnect #1 через 2s», 0 page errors, 0 console errors; bun run lint 0/0
+- self-update: implemented-EV-WS-RESILIENCE → движок v1.24; BACKLOG + EV-A11Y (aria-live/focus-visible/role=status); зеркала phoenix-sealed синхронизированы (/tmp/context-vault-mirror + /home/sync)
+
+Stage Summary:
+- EV-WS-RESILIENCE закрыт и проверен вживую на разрыве WS (close 1006 → retry-бейдж с отсчётом); hot-tree чужих правок не затронуто; секретов нет, *.sealed.* не коммитился
