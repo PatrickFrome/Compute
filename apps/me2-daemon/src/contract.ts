@@ -81,7 +81,8 @@ export function capabilitiesJson(): CapabilityContract {
 
 /** Аддитивная надстройка над snapshot(): ничего не ломает существующих потребителей /state. */
 export function withContract(base: Record<string, unknown>): Record<string, unknown> {
-  return { ...base, contract: CONTRACT_VERSION, capabilities: capabilitiesJson() };
+  // R85: expose the same VERSION identity on the top-level /state contract.
+  return { ...base, contract: CONTRACT_VERSION, version: VERSION, capabilities: capabilitiesJson() };
 }
 
 // ── GET /ui — самодостаточная Mission Control (наследие R41-дока, реализовано в R49) ──
