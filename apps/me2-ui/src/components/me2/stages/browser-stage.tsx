@@ -410,25 +410,27 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
             className="min-w-0 flex-1 truncate bg-transparent font-mono text-[10px] text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
           />
         </div>
-        <div role="group" aria-label="Профиль полосы стрима" className="hidden items-center gap-0.5 rounded border border-zinc-800 bg-black/40 p-0.5 md:flex">
-          {(Object.keys(CAST_PROFILES) as CastProfile[]).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setCastProfile(p)}
-              aria-pressed={castProfile === p}
-              title={
-                p === "макс" ? "push-пейсинг, до 12 fps — минимум задержки (для руля)"
-                : p === "баланс" ? "ack-пейсинг, 8 fps — один кадр в полёте, без очередей"
-                : p === "эконом" ? "ack-пейсинг, 2 fps — минимум полосы для слабой сети"
-                : "ack-пейсинг, потолок fps подстраивается под измеренную полосу (2..12)"
-              }
-              className={`rounded px-1.5 py-0.5 font-mono text-[9px] transition ${castProfile === p ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"}`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+        {!compact && (
+          <div role="group" aria-label="Профиль полосы стрима" className="hidden items-center gap-0.5 rounded border border-zinc-800 bg-black/40 p-0.5 md:flex">
+            {(Object.keys(CAST_PROFILES) as CastProfile[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setCastProfile(p)}
+                aria-pressed={castProfile === p}
+                title={
+                  p === "макс" ? "push-пейсинг, до 12 fps — минимум задержки (для руля)"
+                  : p === "баланс" ? "ack-пейсинг, 8 fps — один кадр в полёте, без очередей"
+                  : p === "эконом" ? "ack-пейсинг, 2 fps — минимум полосы для слабой сети"
+                  : "ack-пейсинг, потолок fps подстраивается под измеренную полосу (2..12)"
+                }
+                className={`rounded px-1.5 py-0.5 font-mono text-[9px] transition ${castProfile === p ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"}`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ВЬЮПОРТ: живой сайт (WS-стрим :3042; фолбэк — CDP-кадр :3043) */}
@@ -515,35 +517,45 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
             <Terminal className="h-3 w-3" aria-hidden /> консоль ({castConsole.length})
           </button>
         )}
-        <span className="hidden sm:inline">
-          {cdpInfo?.cdp ? <>cdp :{cdpInfo.cdp.port} · кадров {cdpInfo.frames} · стримов {cdpInfo.streams}</> : "cdp-цель не найдена"}
-        </span>
-        <span className="ml-auto flex items-center gap-1" role="group" aria-label="Качество CDP-фолбэка">
-          {[30, 55, 85].map((q) => (
-            <button
-              key={q}
-              type="button"
-              aria-pressed={cdpQ === q}
-              className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpQ === q ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
-              onClick={() => setCdpQ(q)}
-            >
-              q{q}
-            </button>
-          ))}
-          <span className="text-zinc-700" aria-hidden>·</span>
-          {[480, 640, 960].map((w) => (
-            <button
-              key={w}
-              type="button"
-              aria-pressed={cdpW === w}
-              className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpW === w ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
-              onClick={() => setCdpW(w)}
-            >
-              w{w}
-            </button>
-          ))}
-          {!compact && <span className="hidden text-zinc-600 lg:inline">живая лента — не в audit-журнале</span>}
-        </span>
+        {compact ? (
+          <span className="ml-auto text-zinc-600">
+            {castStat.connected
+              ? `stream ${castStat.fps}fps${castStat.lastAge != null ? ` · ${castStat.lastAge}ms` : ""}`
+              : "CDP fallback"}
+          </span>
+        ) : (
+          <>
+            <span className="hidden sm:inline">
+              {cdpInfo?.cdp ? <>cdp :{cdpInfo.cdp.port} · кадров {cdpInfo.frames} · стримов {cdpInfo.streams}</> : "cdp-цель не найдена"}
+            </span>
+            <span className="ml-auto flex items-center gap-1" role="group" aria-label="Качество CDP-фолбэка">
+              {[30, 55, 85].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  aria-pressed={cdpQ === q}
+                  className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpQ === q ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
+                  onClick={() => setCdpQ(q)}
+                >
+                  q{q}
+                </button>
+              ))}
+              <span className="text-zinc-700" aria-hidden>·</span>
+              {[480, 640, 960].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  aria-pressed={cdpW === w}
+                  className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpW === w ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
+                  onClick={() => setCdpW(w)}
+                >
+                  w{w}
+                </button>
+              ))}
+              <span className="hidden text-zinc-600 lg:inline">живая лента — не в audit-журнале</span>
+            </span>
+          </>
+        )}
       </div>
       {castConOpen && !compact && (
         <div className="mc-scroll max-h-24 shrink-0 overflow-y-auto border-t border-zinc-800 bg-black/60 p-1.5 font-mono text-[9px] leading-relaxed">
