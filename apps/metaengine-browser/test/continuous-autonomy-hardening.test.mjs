@@ -141,6 +141,14 @@ test('autonomy source invariants close UI, restart, host wiring and self-update 
   const rolloverAt = lifecycle.indexOf('await this.#keepalive.beginRolloverAttempt()');
   const newTabAt = lifecycle.indexOf("action: 'NEW_TAB'", rolloverAt);
   assert.ok(rolloverAt >= 0 && newTabAt > rolloverAt, 'durable rollover barrier must precede NEW_TAB');
+  const committedTabAt = lifecycle.indexOf('await this.#openCommittedRolloverTab()', rolloverAt);
+  const rolloverHelperAt = lifecycle.indexOf('async #openCommittedRolloverTab()', committedTabAt);
+  assert.ok(committedTabAt > rolloverAt && rolloverHelperAt > committedTabAt, 'rollover must prove a committed fresh tab after the durable attempt fence');
+  assert.match(lifecycle.slice(rolloverHelperAt), /ROLLOVER_TAB_COMMIT_ATTEMPTS[\s\S]*action: 'CLOSE_TAB'[\s\S]*rollover_tab_never_committed/);
+  const typeAndSendAt = lifecycle.indexOf('async #typeAndSend');
+  const oversizedDraftCanaryAt = lifecycle.indexOf("reason: 'ROOT_DRAFT_OVERSIZED'", typeAndSendAt);
+  const firstSemanticSubmitAt = lifecycle.indexOf("action: 'SEMANTIC_TYPE'", typeAndSendAt);
+  assert.ok(oversizedDraftCanaryAt > typeAndSendAt && firstSemanticSubmitAt > oversizedDraftCanaryAt, 'oversized root-draft canary must fail before any physical submit');
   assert.match(lifecycle, /DURABLE_SINGLE_CONTINUATION_FENCE_THEN_POSITIVE_SEND_READBACK/);
   const continuationFenceCallAt = lifecycle.indexOf('await this.#keepalive.markAmbiguousContinuationAttempt');
   const continuationClickAt = lifecycle.indexOf("action: 'TYPED_CLICK'", continuationFenceCallAt);
