@@ -21,6 +21,7 @@ const MAX_RESTARTS = Number(process.env.ME2_DAEMON_MAX_RESTARTS || 8);
 const HEALTH_INTERVAL_MS = Number(process.env.ME2_DAEMON_HEALTH_INTERVAL_MS || 15000);
 const BACKOFF_BASE_MS = 2000;
 const BACKOFF_MAX_MS = 5 * 60 * 1000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let child = null;
 let state = 'IDLE';
@@ -171,6 +172,19 @@ function scheduleRestart() {
   }, delay);
 }
 
+export async function waitForMe2DaemonReady({ attempts = 60, intervalMs = 250, probe = me2HealthProbe } = {}) {
+  const maxAttempts = Math.max(1, Math.min(120, Number(attempts) || 60));
+  const delayMs = Math.max(25, Math.min(1000, Number(intervalMs) || 250));
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (child?.exitCode != null) return { ok: false, reason: `child_exit_${child.exitCode}`, attempt: attempt + 1 };
+    last = await probe(Math.min(1500, Math.max(250, delayMs * 4)));
+    if (last?.ok === true) return { ok: true, reason: 'READY', attempt: attempt + 1, last_seq: last.last_seq ?? null };
+    if (attempt + 1 < maxAttempts) await sleep(delayMs);
+  }
+  return { ok: false, reason: String(last?.reason || 'readiness_timeout'), attempt: maxAttempts };
+}
+
 /** Старт хоста: если daemon уже жив (внешняя инкарнация) — усыновляем, не спавним. */
 export async function startMe2DaemonHost({ dataDir = null } = {}) {
   stopped = false;
@@ -191,6 +205,17 @@ export async function startMe2DaemonHost({ dataDir = null } = {}) {
       state = 'STARTING';
       spawnDaemon(launch);
       emitRow(row({ event: 'DAEMON_SPAWN', mode: launch.mode }));
+      const ready = await waitForMe2DaemonReady();
+      if (ready.ok) {
+        state = 'HEALTHY';
+        lastError = null;
+        lastHealthOkAt = new Date().toISOString();
+        emitRow(row({ event: 'DAEMON_HEALTHY', last_seq: ready.last_seq, readiness_attempt: ready.attempt }));
+      } else {
+        state = 'DEGRADED';
+        lastError = `initial_readiness_${ready.reason}`;
+        emitRow(row({ event: 'DAEMON_INITIAL_READINESS_FAILED', reason: ready.reason, attempt: ready.attempt }), { error: true });
+      }
     }
   }
   healthTimer = setInterval(async () => {
