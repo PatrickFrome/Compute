@@ -16,7 +16,7 @@
  * loopback LOCAL_DEV разрешён её же контрактом).
  */
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
-import { me2FleetTabsGetHost } from './me2-fleet-tabs-host.mjs';
+import { me2FleetTabsGetHost, me2FleetTabsResolveIdentity } from './me2-fleet-tabs-host.mjs';
 import { me2UiGatewayStatus } from './me2-ui-gateway.mjs';
 
 export const ME2_MISSION_CONTROL_SCHEMA = 'metaengine.browser.me2.mission-control.v1';
@@ -75,6 +75,10 @@ async function me2Fetch(path, init) {
   return r.json();
 }
 
+function nativeIdentity(tabId) {
+  return me2FleetTabsResolveIdentity(tabId);
+}
+
 function existingTabByUrlPrefix(urlPrefix, role) {
   const host = me2FleetTabsGetHost();
   if (!host) return null;
@@ -93,7 +97,7 @@ async function ensureSupervisorTab() {
   const existing = existingTabByUrlPrefix(UI_URL, 'SUPERVISOR');
   if (existing) {
     supervisorTabId = existing;
-    emitRow(row('SUPERVISOR_TAB_EXISTS', { tab_id: existing }));
+    emitRow(row('SUPERVISOR_TAB_EXISTS', { tab_id: existing, runtime_identity: nativeIdentity(existing) }));
     return true;
   }
   try {
@@ -102,7 +106,12 @@ async function ensureSupervisorTab() {
     try {
       host.registry.update(tab.tab_id, { title: 'ME2 Mission Control', kind: 'ME2_MISSION_CONTROL' });
     } catch { /* title/kind — косметика, вкладка уже открыта */ }
-    emitRow(row('SUPERVISOR_TAB_CREATED', { tab_id: tab.tab_id, url: UI_URL, role: 'SUPERVISOR' }));
+    emitRow(row('SUPERVISOR_TAB_CREATED', {
+      tab_id: tab.tab_id,
+      url: UI_URL,
+      role: 'SUPERVISOR',
+      runtime_identity: nativeIdentity(tab.tab_id),
+    }));
     return true;
   } catch (e) {
     lastError = `supervisor_tab: ${String(e?.message || e).slice(0, 120)}`;
@@ -135,7 +144,12 @@ async function ensureAgentTab(session) {
         kind: 'ME2_AGENT_CHAT',
       });
     } catch { /* косметика */ }
-    emitRow(row('AGENT_TAB_CREATED', { session_id: session.id, tab_id: tab.tab_id, role: session.role || 'CODE' }));
+    emitRow(row('AGENT_TAB_CREATED', {
+      session_id: session.id,
+      tab_id: tab.tab_id,
+      role: session.role || 'CODE',
+      runtime_identity: nativeIdentity(tab.tab_id),
+    }));
   } catch (e) {
     lastRecreateAt.set(session.id, Date.now()); // и при отказе (quota/wall) — без шторма повторов
     lastError = `agent_tab ${session.id}: ${String(e?.message || e).slice(0, 120)}`;
@@ -143,14 +157,15 @@ async function ensureAgentTab(session) {
   }
 }
 
-function closeAgentTab(sessionId, reason) {
+async function closeAgentTab(sessionId, reason) {
   const host = me2FleetTabsGetHost();
   const known = agentTabs.get(sessionId);
   if (!host || !known) return;
   try {
-    host.registry.close(known.tab_id);
+    if (typeof host.closeTab === 'function') await host.closeTab(known.tab_id);
+    else host.registry.close(known.tab_id);
     emitRow(row('AGENT_TAB_CLOSED', { session_id: sessionId, tab_id: known.tab_id, reason }));
-  } catch { /* вкладку уже закрыли — это и есть цель */ }
+  } catch { /* tab may already be physically gone; reconciliation stays idempotent */ }
   agentTabs.delete(sessionId);
 }
 
@@ -176,7 +191,7 @@ export async function me2MissionReconcile() {
   for (const s of active) await ensureAgentTab(s);
   // 3. Чат закрылся в daemon'е → вкладка закрывается (контекст не теряется: чат постоянен)
   for (const sessionId of [...agentTabs.keys()]) {
-    if (!active.some((s) => s.id === sessionId)) closeAgentTab(sessionId, 'session_not_active');
+    if (!active.some((s) => s.id === sessionId)) await closeAgentTab(sessionId, 'session_not_active');
   }
   emitRow(row('MISSION_DIGEST', { ...lastDigest, census_roles: host.registry.census().by_role }));
   return lastDigest;
@@ -216,7 +231,11 @@ export function me2MissionControlStatus() {
     ui_url: ui.url,
     ui_mode: ui.mode,
     supervisor_tab_id: supervisorTabId,
-    agent_tabs: [...agentTabs.entries()].map(([session_id, t]) => ({ session_id, ...t })),
+    agent_tabs: [...agentTabs.entries()].map(([session_id, t]) => ({
+      session_id,
+      ...t,
+      runtime_identity: nativeIdentity(t.tab_id),
+    })),
     last_digest: lastDigest,
     last_error: lastError,
     host: me2FleetTabsGetHost() ? 'registered' : 'not_registered',
