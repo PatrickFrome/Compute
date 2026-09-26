@@ -6705,3 +6705,23 @@ Stage Summary:
 - «Каждый ответ из полного контекста» обеспечен триадой: (1) стартовый ритуал `phoenix-restore.sh --check` + CONTEXT-CURRENT.md digest; (2) append-only мульти-чат канон; (3) секционный merge-append без потерь при любых конфликтах.
 - PAT-блокер без изменений: /home/z/.a2/.github.env отсутствует; после возврата PAT: push-pending (413338) + bundle → GitHub + ветка context-vault (guard сделает сам).
 - Открытый пункт: KV-шарды gen20260926 ещё старого формата — первый hourly-тик 416631 обновит их до v2 формата в течение часа.
+
+---
+Task ID: CTX-5
+Agent: Z.ai Code (main session)
+Task: Глубокий аудит всего контекста — инвентаризация PAT/секретов + подключение ко всем БД (по распоряжению оператора)
+
+Work Log:
+- Guard-тик 416526 выполнен в начале раунда (guard ok, snaps=6, sha12=548fe19914c7 — консистентен).
+- Инвентаризация секретоносителей (значения НЕ печатались/не логировались — только имена, размеры, HTTP-коды): (1) /home/z/.a2/.github.env (GITHUB_TOKEN_ADMIN) — ОТСУТСТВУЕТ, перепроверено в конце раунда; (2) /tmp/my-project/.ghtoken (PolarFS, 41B) — GitHub PAT формат, HTTP 401; (3) GHTOKEN из /tmp/my-project/.a2-creds-01.md (мастер-документ кредов по распоряжению оператора от 2026-09-21, «главный рабочий токен, жив по состоянию на 09-21») — HTTP 401; (4) GITHUB_TOKEN из /tmp/my-project/.a2-backup/me2.env.20260922 — HTTP 401. ИТОГ: все 3 реальных кандидата PAT мертвы, восстановить неоткуда — только новый выпуск оператором.
+- Секреты в файле .a2-creds-01.md по разделам: GitHub (главный токен — мёртв), Supabase cloud (проект удалён, исторические), Pigsty/PostgreSQL (интеграция PR #936), Cloudflare (значения не сохранились — rg-поиск CLOUDFLARE/CF_API по a2-capsule и .env: пусто, подтверждено).
+- Подключение к БД №1 — SQLite (DATABASE_URL=file:/home/z/my-project/db/custom.db, есть и в /home/z/my-project/.env, и в /tmp/my-project/.env): подключено read-only; схема Prisma-скэфолда (Post, User), 0 строк в обеих копиях (24KB); живых данных приложения в SQLite НЕТ.
+- Подключение к БД №2 — Supabase (SUPABASE_URL из me2.env.20260922, service-role JWT): ЖИВ и это прод-бэкенд me2-os/METAENGINE H205F22: GoTrue v2.197.0 healthy; PostgREST 17 таблиц compute_fabric_*_h205f22: me2_event_mirror 31419 rows (!), me2_rpc_registry 243, browser_supervisor_state 16, browser_device 3, metaengine_peer_health 0, chat_bridge_remote_peer 0 (счётчики через Prefer count=exact); Storage 3 бакета: me2-evidence (наш context-vault), computefabric-parallel-glm, me2-capsule (внутри me2-os-capsule-2026-09-26.zip — вчерашняя капсула).
+- БД №3 — Pigsty/PostgreSQL: в a2-capsule/reference-from-rail/infra_pigsty_{README,APP-INTEGRATION}.md строки подключения с плейсхолдерами хостов (<pigsty-host>, <host>), реального хоста в песочнице нет → TCP-подключение невозможно (нужен оператор/real endpoint); REST-REPORT-20260920 подтверждает исторический характер.
+- Работоспособные каналы по итогам: Supabase service-role (единственный живой внешний), SQLite локальный (пустой), cron-KV, ossfs. GitHub — полностью заблокирован до нового PAT.
+
+Stage Summary:
+- Паттерн аудита: секреты инвентаризированы, ни одно значение не напечатано; валидация только через HTTP-коды/TCP-флаги.
+- Ключевой вывод для оператора: PAT восстановим только новым выпуском GITHUB_TOKEN_ADMIN → /home/z/.a2/.github.env (Job 413338 подхватит автоматически в ≤15 мин).
+- Живой Supabase содержит прод-данные me2-os (31K+ событий зеркала) — кандидат на экспорт в me2-evidence как часть несгораемого контекста (отдельным раундом по команде оператора).
+- Аудит завершён; контекстная защита Phoenix v2 активна и прошла раунд без инцидентов.
