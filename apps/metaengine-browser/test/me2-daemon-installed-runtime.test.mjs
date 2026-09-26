@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { resolveMe2DaemonLaunch, waitForMe2DaemonReady } from '../src/me2/me2-daemon-host.mjs';
+import { resolveMe2UiLaunch } from '../src/me2/me2-ui-host.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
@@ -26,6 +27,36 @@ test('packaged standalone daemon is preferred and needs no external Bun', () => 
     bin: packagedExe,
     args: [],
     mode: 'PACKAGED_STANDALONE',
+  });
+});
+
+test('R85 packaged ME2 UI prefers installed resources and embedded Electron node', () => {
+  const installRoot = path.join(path.sep, 'installed');
+  const resourcesPath = path.join(installRoot, 'resources');
+  const execPath = path.join(installRoot, 'METAENGINE Browser Test.exe');
+  const packagedDir = path.join(resourcesPath, 'me2-ui');
+  const sourceCwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
+  const sourceDir = path.join(path.sep, 'repo', 'apps', 'me2-ui');
+  const existing = new Set([
+    path.join(packagedDir, 'package.json'),
+    path.join(packagedDir, 'server.js'),
+    path.join(sourceDir, 'package.json'),
+  ]);
+  const launch = resolveMe2UiLaunch({
+    resourcesPath,
+    execPath,
+    cwd: sourceCwd,
+    env: { PATH: 'C:\\Windows\\System32' },
+    exists: (candidate) => existing.has(candidate),
+  });
+  assert.deepEqual(launch, {
+    dir: packagedDir,
+    source: 'PACKAGED_RESOURCE',
+    standalone: true,
+    bin: execPath,
+    args: ['server.js'],
+    launch_mode: 'EMBEDDED_NODE_STANDALONE',
+    env_patch: { ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' },
   });
 });
 
