@@ -258,6 +258,8 @@ test('R85 Tasks is task-focused and does not duplicate Browser or Mirror control
   assert.doesNotMatch(me2TasksPage, /loadBrowserTabs|type BrowserTab|me2:cast-toggle|me2:cast-ctl/);
   assert.doesNotMatch(me2TasksPage, /<MirrorPanel|mirror-panel/);
   assert.doesNotMatch(me2TasksPage, /MonitorPlay|MousePointerClick|AppWindow/);
+  assert.match(me2TasksPage, /me2\\.tasks\\.branch-view\\.v1/);
+  assert.match(me2TasksPage, /localStorage\\.setItem\\(TASKS_BRANCH_VIEW_LS, branchTab\\)/);
 });
 
 test('R85 persistent chrome avoids duplicate task and mirror telemetry', () => {
