@@ -106,6 +106,12 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   const integration = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-integration-entry.mjs'), 'utf8');
   assert.match(integration, /startMe2DaemonHost\(\{ dataDir:/);
   assert.match(integration, /stopMe2DaemonHost\(\{ killChild: true \}\)/);
+  const finalEntry = await fs.readFile(path.join(appRoot, 'src', 'final-runtime-entry.mjs'), 'utf8');
+  assert.match(
+    finalEntry,
+    /if \(primaryInstance && !probeStdoutReserved && primaryUiRecoveryEnabled && process\.env\.ME2_INTEGRATION !== '0'\)/,
+    'only the Electron singleton owner may host or adopt the ME2 daemon plane',
+  );
 });
 
 test('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
