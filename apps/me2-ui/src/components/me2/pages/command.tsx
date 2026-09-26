@@ -183,7 +183,9 @@ const COMMAND_RAIL_WEB_MIN_WIDTH = 984; // mirrors native 6 + 252 + 720 + 6 geom
 
 export function CommandPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [railConstrained, setRailConstrained] = useState(false);
   const preferredRailOpen = useRef(true);
+  const railConstrainedRef = useRef(false);
   const chatId = useMe2((s) => s.chatId);
   const connected = useMe2((s) => s.connected);
 
@@ -194,15 +196,25 @@ export function CommandPage() {
       };
     }).metaengineShell;
     if (!shell?.setPrimaryCommandRail) {
-      setSidebarOpen(preferred && window.innerWidth >= COMMAND_RAIL_WEB_MIN_WIDTH);
+      const effective = preferred && window.innerWidth >= COMMAND_RAIL_WEB_MIN_WIDTH;
+      const constrained = preferred && !effective;
+      railConstrainedRef.current = constrained;
+      setRailConstrained(constrained);
+      setSidebarOpen(effective);
       return;
     }
     try {
       const result = await shell.setPrimaryCommandRail(preferred);
-      setSidebarOpen(typeof result?.effective_open === "boolean" ? result.effective_open : preferred);
+      const effective = typeof result?.effective_open === "boolean" ? result.effective_open : preferred;
+      const constrained = preferred && !effective;
+      railConstrainedRef.current = constrained;
+      setRailConstrained(constrained);
+      setSidebarOpen(effective);
     } catch {
       // Presentation bridge failure must not create command authority or leave a
       // phantom rail over native pixels. Fail closed to the no-rail layout.
+      railConstrainedRef.current = preferred;
+      setRailConstrained(preferred);
       setSidebarOpen(false);
     }
   }, []);
@@ -212,6 +224,14 @@ export function CommandPage() {
     try { localStorage.setItem(COMMAND_RAIL_LS, open ? "1" : "0"); } catch { /* private mode */ }
     void syncPrimaryRail(open);
   }, [syncPrimaryRail]);
+
+  const toggleRailPreference = useCallback(() => {
+    // If main-process geometry forced an otherwise preferred rail closed, a
+    // toggle cannot safely make it visible; preserve the preference until the
+    // window has enough room instead of accidentally flipping it off.
+    if (railConstrainedRef.current && preferredRailOpen.current) return;
+    setRailPreference(!preferredRailOpen.current);
+  }, [setRailPreference]);
 
   // One preference, two projections: React rail + main-process native viewport.
   // The main process remains geometry authority and may force the rail closed
@@ -229,7 +249,7 @@ export function CommandPage() {
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B" || e.key === "ы" || e.key === "Ы")) {
         e.preventDefault();
-        setRailPreference(!preferredRailOpen.current);
+        toggleRailPreference();
       }
     };
     let resizeFrame = 0;
@@ -246,7 +266,7 @@ export function CommandPage() {
       window.removeEventListener("keydown", h);
       window.removeEventListener("resize", onResize);
     };
-  }, [setRailPreference, syncPrimaryRail]);
+  }, [syncPrimaryRail, toggleRailPreference]);
 
   return (
     <div className="flex h-full min-h-0 bg-[#0b0b0d]" data-testid="page-command" data-panel-command>
@@ -256,11 +276,13 @@ export function CommandPage() {
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2">
           <button
             type="button"
-            onClick={() => setRailPreference(!preferredRailOpen.current)}
-            aria-label={sidebarOpen ? "Скрыть список агентов" : "Показать список агентов"}
+            onClick={toggleRailPreference}
+            aria-label={railConstrained ? "Список агентов временно скрыт: окну не хватает ширины" : sidebarOpen ? "Скрыть список агентов" : "Показать список агентов"}
             aria-pressed={sidebarOpen}
+            aria-disabled={railConstrained}
+            disabled={railConstrained}
             data-testid="cc-sidebar-toggle"
-            title="Список агентов (⌘B)"
+            title={railConstrained ? "Agent Rail автоматически скрыт, чтобы сохранить минимум 720px для Browser. Увеличьте окно." : "Список агентов (⌘B)"}
             className="shrink-0 rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
           >
             <PanelLeft className="h-3.5 w-3.5" aria-hidden />
