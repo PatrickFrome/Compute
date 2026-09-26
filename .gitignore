@@ -60,6 +60,8 @@ mini-services/me2-daemon/data/
 *.pid
 .zscripts/dev.log
 db/*.db
+# operator ask «бд гитхаб»: canonical DB tracked as snapshot (other .db stay ignored)
+!db/custom.db
 
 # R83 import build output (derivable via scripts/r83-import-build.mjs)
 build/
