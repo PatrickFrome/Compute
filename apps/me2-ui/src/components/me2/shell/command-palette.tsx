@@ -50,12 +50,16 @@ export function CommandPalette() {
   const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks" | "actions">("all");
   const [pendingAction, setPendingAction] = useState<ActionMeta | null>(null);
   const [pendingArgs, setPendingArgs] = useState("{}");
+  const [confirmFlush, setConfirmFlush] = useState(false);
 
   const confirmBudgetFlush = () => {
-    setOpen(false);
-    const approved = window.confirm("Сбросить очередь command bus? Это EMERGENCY-операция и не может быть действием из постоянного chrome.");
-    if (!approved) return;
+    setConfirmFlush(true);
+  };
+
+  const runBudgetFlush = () => {
     void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" });
+    setConfirmFlush(false);
+    setOpen(false);
   };
 
   const chats = snap?.agents ?? [];
@@ -119,7 +123,7 @@ export function CommandPalette() {
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={(next) => { if (!next) { setPendingAction(null); setPendingArgs("{}"); } setOpen(next); }}>
+    <CommandDialog open={open} onOpenChange={(next) => { if (!next) { setPendingAction(null); setPendingArgs("{}"); setConfirmFlush(false); } setOpen(next); }}>
       <CommandInput placeholder="ME2: найти страницу · агента · задачу · команду…" />
       <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5" aria-label="Режим Command Palette">
         {([
@@ -178,6 +182,20 @@ export function CommandPalette() {
             >
               выполнить
             </button>
+          </div>
+        </div>
+      ) : confirmFlush ? (
+        <div className="space-y-3 p-3" data-testid="emergency-flush-confirm">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="h-5 border border-rose-800 px-1.5 font-mono text-[8px] text-rose-300">EMERGENCY</Badge>
+            <span className="font-mono text-xs font-semibold text-rose-300">BUDGET_FLUSH</span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-zinc-400">
+            Сбросить очередь command bus? Все отложенные команды будут сняты. Это явный effect и он не запускается из постоянного chrome.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setConfirmFlush(false)} className="border border-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-900">отмена</button>
+            <button type="button" onClick={runBudgetFlush} className="border border-rose-800 bg-rose-950/30 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-950/60">подтвердить EMERGENCY</button>
           </div>
         </div>
       ) : (
