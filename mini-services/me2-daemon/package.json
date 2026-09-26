@@ -1,0 +1,9 @@
+{
+  "name": "me2-daemon",
+  "version": "0.58.0-r81-recovery",
+  "private": true,
+  "description": "ME2 OS daemon — R81-PHASE0 recovery build (REST :3041, WS :3040). Rebuilt from protocol after env-reset; zero external deps.",
+  "scripts": {
+    "dev": "bun --hot src/index.ts"
+  }
+}

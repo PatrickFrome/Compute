@@ -1,0 +1,4 @@
+node_modules/
+data/
+daemon.log
+daemon.pid

@@ -1,0 +1,24 @@
+{
+  "skill_name": "me2-round",
+  "note": "eval-кандидаты (документация); прогон запланирован при доступности подагентов без exec-limits",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Продолжи разработку ME2 — выбери что-то из backlog и сделай",
+      "expected_output": "Аудит (health/HEAD/worklog), выбран ОДИН пункт backlog, реализация + REST-тест + lint 0/0 + git-sync + новый worklog entry; система после раунда запущена и зелёная",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Проверь что ME2 жив и покажи статус роадмапа",
+      "expected_output": "health 47/47, GET /roadmap вердикт 7/7 с evidence, agent-browser :81 показывает панель РОАДМАП; без мутаций кода",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Добавь в daemon новый REST-эндпоинт /features (список возможностей)",
+      "expected_output": "Реестр 47/47 не тронут, отдельный GET-маршрут, VERSION bump, curl-тест, бейдж/строка в page.tsx, lint 0/0, push sandbox/me2-os",
+      "files": []
+    }
+  ]
+}
