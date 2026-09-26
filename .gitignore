@@ -60,3 +60,6 @@ mini-services/me2-daemon/data/
 *.pid
 .zscripts/dev.log
 db/*.db
+
+# R83 import build output (derivable via scripts/r83-import-build.mjs)
+build/

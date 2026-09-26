@@ -45,7 +45,7 @@ export const ROADMAP: RoadmapItem[] = [
     goal: "Repo == deployed backend: квалифицировать v14 canary, Postgres NOTIFY, result receipt, emergency routes, controlled promotion.",
     exit_gate: "production Edge digest/source binding соответствует candidate; signed E2E + rollback PASS.",
     status: "IN_PROGRESS",
-    evidence: "LIVE-КВАЛИФИКАЦИЯ (2026-09-26, CF API read-only): 3 workers @ metaengine-d9186d31.workers.dev. ФАЙНДИНГ: 2/2 registry workers (fabric-worker-h205f21r4 v15 dispatch gateway; h205f22-aop1 v64 операторный DO + SUPABASE_SERVICE_ROLE_KEY + GitHub writes) БЕЗ source-of-truth в репо (маркеры отсутствуют в main/release 4471/donor 1627). Живые скрипты сняты в evidence (data/edge/ + EDGE_SNAPSHOT). ИМПОРТ-ПЛАН ГОТОВ (edge.import-plan): fabric IMPORT_READY — 7/7 именованных читаемых модулей (src/gateway.js, handlers, index, workflow, ai, auth, core.mjs; каждое с sha256_12 digest-binding) → edge/fabric-worker-h205f21r4/; aop1 NEEDS_UNBUNDLING — единый esbuild-бандл 95KiB, 7 src-секций (index/supabase/github/executor/duel_microstep/peer_relay_v4/…) восстановимы разборкой. Следующий шаг: work/r83-edge-source-import-v1 PR под ревью оператора. Промоушн заблокирован до импорта source + ротации CF-токена.",
+    evidence: "LIVE-КВАЛИФИКАЦИЯ (2026-09-26, CF API read-only): 3 workers @ metaengine-d9186d31.workers.dev. ФАЙНДИНГ: 2/2 registry workers (fabric-worker-h205f21r4 v15 dispatch gateway; h205f22-aop1 v64 операторный DO + SUPABASE_SERVICE_ROLE_KEY + GitHub writes) БЕЗ source-of-truth в репо (маркеры отсутствуют в main/release 4471/donor 1627). Живые скрипты сняты в evidence (data/edge/ + EDGE_SNAPSHOT). ИМПОРТ РЕАЛИЗОВАН (2026-09-26): PR #982 (work/r83-edge-source-import-v1 @ ad5e01c6c1 → release, 23 файлов +4631/−0 под edge/, Git Data API без force-push) — fabric 7/7 модулей VERBATIM (byte-идентичны live v15, normalized digest 9c55419e37b04d41); aop1 VERBATIM-бандл 95,200 bytes (digest 29b36254b0b4cb4f, wrangler main → bundle/index.js) + 8 recovered-сечений // src/* для ревью; wrangler.jsonc из live settings (DO ComputeFabricSupervisor, workflows, queues, vars; секреты ТОЛЬКО именами в secrets_hint — значений в репо нет); PROVENANCE.json digest-binding + tools/verify-digests.mjs (promotion gate: cd edge && node tools/verify-digests.mjs → == LIVE для обоих). Digest-контракт верифицирован дважды: на сборке и на испущённом дереве. Статус трекается live (edge.import-status). Промоушн (deploy-from-repo) по-прежнему заблокирован до: ревью оператора + re-verify + ротации CF-токена. СРОК ЗАКРЫТИЯ: merge PR #982 под ревью оператора.",
   },
   {
     round: "R84",
@@ -168,7 +168,7 @@ export const RECOVERY_STATUS = {
   ],
   pending_next: [
     "R82-verify: live readback self-update (runtime версия сменится с 0.7.0-dev.36089462649.1 на новый digest; cycle_seq рост после очистки драфта оператором; ROOT_DRAFT_OVERSIZED в rollover_reason пока драфт не очищен)",
-    "R83-импорт: вернуть source обоих production workers (fabric + aop1) в canonical репо из снапшотов data/edge/ → затем только возможен controlled promotion",
+    "R83-merge: PR #982 (source-import) под ревью оператора → merge закрывает импорт-фазу; после — controlled promotion (deploy-from-repo) с re-verify digest + ротацией CF-токена",
     "полный donor bus (57 действий): реализация вместе с Browser control plane (R84–R86)",
     "auto-mirror событий в me2_event_mirror_h205f22 (после ревью оператором anchor-записи)",
   ],

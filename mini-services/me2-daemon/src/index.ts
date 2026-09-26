@@ -15,7 +15,7 @@ import { monitorHistory, monitorStatus, startMonitor } from "./monitor";
 import { donorRegistry } from "./donor-registry";
 import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
-import { edgeStatus, edgeImportPlan } from "./edge";
+import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus, startReadbackWatch } from "./readback";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
@@ -125,6 +125,11 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     method: "GET",
     path: "/edge/import-plan",
     handler: () => edgeImportPlan(),
+  },
+  {
+    method: "GET",
+    path: "/edge/import-status",
+    handler: (_r, url) => edgeImportStatus(url.searchParams.get("fresh") === "1"),
   },
   {
     method: "GET",

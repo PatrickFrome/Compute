@@ -357,11 +357,15 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
 
   const currentGate = stages.find((s) => s.state !== "DONE")?.stage ?? "R82_CLOSED";
   const activeStage = stages.find((s) => s.state === "ACTIVE" || s.state === "BLOCKED");
+  // wording: стадия называется целью (прошедшее время), но summary обязано отражать СОСТОЯНИЕ,
+  // а не цель — иначе ACTIVE-стадия читается как завершённая (QA-баг: «Runtime обновился — наблюдаем live»)
   const summary =
     currentGate === "R82_CLOSED"
       ? "R82 EXIT GATE ПРОЙДЕН: cycle_seq растёт, полезный цикл свежий"
       : activeStage
-        ? `gate: ${activeStage.title} — ${activeStage.state === "BLOCKED" ? "требует оператора" : "наблюдаем live"}`
+        ? activeStage.state === "BLOCKED"
+          ? `gate: ${activeStage.stage} БЛОК: ${activeStage.title} — требует оператора`
+          : `gate: ${activeStage.stage} в процессе: ждём «${activeStage.title}» (не завершено)`
         : `gate: ${currentGate}`;
 
   // one-shot milestones (durable evidence, deduped by current state)

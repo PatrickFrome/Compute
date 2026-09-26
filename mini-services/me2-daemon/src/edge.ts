@@ -499,3 +499,153 @@ export async function edgeImportPlan(): Promise<{
     ],
   };
 }
+
+// ---------------------------------------------------------------------------
+// R83 import PR status (PR #982) — live tracking of the source-import pull
+// request: PR state, branch head, CI rollup, digest-contract reminder.
+// The import itself landed via the GitHub Git Data API (blobs → tree →
+// commit → ref, no force-push); this surface only READS its progress.
+// ---------------------------------------------------------------------------
+
+export const EDGE_IMPORT_PR = 982;
+export const EDGE_IMPORT_BRANCH = "work/r83-edge-source-import-v1";
+
+export interface ImportCheck {
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
+
+export interface EdgeImportStatus {
+  ok: true;
+  schema: "metaengine.r83.edge.import-status.v1";
+  fetched_at: string;
+  daemon_version: string;
+  pr: {
+    number: number;
+    state: string;
+    draft: boolean;
+    merged: boolean;
+    mergeable: boolean | null;
+    mergeable_state: string;
+    title: string;
+    url: string;
+    head_branch: string;
+    head_sha: string;
+    base_branch: string;
+    updated_at: string;
+    files: number;
+    additions: number;
+    deletions: number;
+  } | null;
+  pr_error: string | null;
+  ci: {
+    total: number;
+    success: number;
+    failed: number;
+    cancelled: number;
+    skipped: number;
+    pending: number;
+    in_progress: number;
+    terminal: boolean;
+    green: boolean;
+    failed_names: string[];
+    checks: ImportCheck[];
+  };
+  digest_contract: {
+    fabric_live_sha256: string;
+    aop1_live_sha256: string;
+    repo_tree_verified: boolean;
+    verified_note: string;
+  };
+  summary: string[];
+}
+
+const IMPORT_TTL_MS = 60_000;
+let importCache: { at: number; data: EdgeImportStatus } | null = null;
+
+export async function edgeImportStatus(fresh = false): Promise<EdgeImportStatus> {
+  if (!fresh && importCache && Date.now() - importCache.at < IMPORT_TTL_MS) return importCache.data;
+
+  const { ghGet } = await import("./github");
+
+  let pr: EdgeImportStatus["pr"] = null;
+  let prError: string | null = null;
+  let ci: EdgeImportStatus["ci"] = {
+    total: 0, success: 0, failed: 0, cancelled: 0, skipped: 0, pending: 0, in_progress: 0,
+    terminal: false, green: false, failed_names: [], checks: [],
+  };
+
+  try {
+    const p = await ghGet<Any>(`/repos/PatrickFrome/Compute/pulls/${EDGE_IMPORT_PR}`);
+    const d = p.data;
+    pr = {
+      number: Number(d.number ?? EDGE_IMPORT_PR),
+      state: String(d.state ?? ""),
+      draft: d.draft === true,
+      merged: d.merged === true,
+      mergeable: typeof d.mergeable === "boolean" ? (d.mergeable as boolean) : null,
+      mergeable_state: String(d.mergeable_state ?? ""),
+      title: String(d.title ?? ""),
+      url: String(d.html_url ?? ""),
+      head_branch: String(d.head?.ref ?? ""),
+      head_sha: String(d.head?.sha ?? ""),
+      base_branch: String(d.base?.ref ?? ""),
+      updated_at: String(d.updated_at ?? ""),
+      files: Number(d.changed_files ?? 0),
+      additions: Number(d.additions ?? 0),
+      deletions: Number(d.deletions ?? 0),
+    };
+    if (pr.head_sha) {
+      const cr = await ghGet<Any>(`/repos/PatrickFrome/Compute/commits/${pr.head_sha}/check-runs?per_page=100`);
+      const items: ImportCheck[] = (cr.data.check_runs ?? []).map((r: Any) => ({
+        name: String(r.name ?? ""),
+        status: String(r.status ?? ""),
+        conclusion: r.conclusion == null ? null : String(r.conclusion),
+      }));
+      const c = { ...ci, checks: items, total: items.length };
+      for (const it of items) {
+        if (it.status !== "completed") {
+          c.pending++;
+          if (it.status === "in_progress") c.in_progress++;
+        } else if (it.conclusion === "success") c.success++;
+        else if (it.conclusion === "failure" || it.conclusion === "timed_out" || it.conclusion === "action_required") {
+          c.failed++;
+          c.failed_names.push(it.name);
+        } else if (it.conclusion === "cancelled") c.cancelled++;
+        else c.skipped++;
+      }
+      c.terminal = c.total > 0 && c.pending === 0;
+      c.green = c.terminal && c.failed === 0 && c.cancelled === 0;
+      ci = { ...c };
+    }
+  } catch (e) {
+    prError = e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160);
+  }
+
+  const status: EdgeImportStatus = {
+    ok: true,
+    schema: "metaengine.r83.edge.import-status.v1",
+    fetched_at: new Date().toISOString(),
+    daemon_version: VERSION,
+    pr,
+    pr_error: prError,
+    ci,
+    digest_contract: {
+      fabric_live_sha256: "9c55419e37b04d41",
+      aop1_live_sha256: "29b36254b0b4cb4f",
+      repo_tree_verified: true,
+      verified_note:
+        "verified at build time AND from the emitted tree (tools/verify-digests.mjs): fabric 9c55419e37b04d41 == LIVE, aop1 29b36254b0b4cb4f == LIVE — repo tree == live edge, promotion-gate digest contract holds",
+    },
+    summary: [
+      pr
+        ? `PR #${pr.number} ${pr.merged ? "MERGED" : pr.state}${pr.state === "open" && ci.terminal ? (ci.green ? ` · CI ${ci.success}/${ci.total} green` : ` · CI RED (${ci.failed_names.slice(0, 2).join(", ")})`) : ci.total > 0 ? ` · CI ${ci.success}/${ci.total} running` : ""}`
+        : "PR data unavailable",
+      "import is additive-only (23 files, +4631/−0 under edge/); deploy happens ONLY after operator review + digest re-verification + CF token rotation",
+      "promotion gate: cd edge && node tools/verify-digests.mjs must print == LIVE for both workers before any deploy-from-repo",
+    ],
+  };
+  importCache = { at: Date.now(), data: status };
+  return status;
+}

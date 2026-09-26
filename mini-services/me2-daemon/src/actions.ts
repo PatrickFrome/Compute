@@ -14,7 +14,7 @@ import { monitorHistory } from "./monitor";
 import { donorRegistry } from "./donor-registry";
 import { convergenceStatus } from "./github";
 import { r82Diagnosis } from "./r82";
-import { edgeStatus, edgeImportPlan } from "./edge";
+import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus } from "./readback";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
@@ -49,6 +49,7 @@ export const ACTIONS: ActionDef[] = [
   { name: "r82.diagnosis", family: "controlplane", description: "R82 live supervisor diagnosis via command fastlane (READ-ONLY probes: attempt tab, draft canary, PR #981 CI)" },
   { name: "edge.status", family: "controlplane", description: "R83 Cloudflare Edge qualification (read-only): workers, versions, live digests, source-binding verdicts" },
   { name: "edge.import-plan", family: "controlplane", description: "R83 source-tree import plan: live snapshots decomposed into a reviewable repo layout (IMPORT_READY / NEEDS_UNBUNDLING per worker)" },
+  { name: "edge.import-status", family: "controlplane", description: "R83 import PR #982 live status: state, CI rollup on branch head, digest contract" },
   { name: "r82.readback", family: "controlplane", description: "R82 exit-gate watch: release CI terminal, self-update landing, draft canary history, cycle growth — deterministic stage machine" },
 ];
 
@@ -119,6 +120,8 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return edgeStatus(args.fresh === true, args.snapshot === true);
     case "edge.import-plan":
       return edgeImportPlan();
+    case "edge.import-status":
+      return edgeImportStatus(args.fresh === true);
     case "r82.readback":
       return readbackStatus(args.fresh === true);
     default:

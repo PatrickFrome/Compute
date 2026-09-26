@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
-  Activity, AlertTriangle, Boxes, Camera, ChevronDown, Cloud, Database, Download, GitBranch, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, Boxes, Camera, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
   Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -206,11 +206,29 @@ interface EdgeImportPlan {
   summary: string[]
 }
 
+// R83-IMPORT: import PR #982 live status
+interface ImportCheck { name: string; status: string; conclusion: string | null }
+interface EdgeImportStatus {
+  fetched_at: string
+  pr: {
+    number: number; state: string; draft: boolean; merged: boolean; mergeable: boolean | null; mergeable_state: string
+    title: string; url: string; head_branch: string; head_sha: string; base_branch: string
+    updated_at: string; files: number; additions: number; deletions: number
+  } | null
+  pr_error: string | null
+  ci: {
+    total: number; success: number; failed: number; cancelled: number; skipped: number; pending: number; in_progress: number
+    terminal: boolean; green: boolean; failed_names: string[]; checks: ImportCheck[]
+  }
+  digest_contract: { fabric_live_sha256: string; aop1_live_sha256: string; repo_tree_verified: boolean; verified_note: string }
+  summary: string[]
+}
+
 // ---------------------------------------------------------- gap matrix ----
 const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
   { pri: 'P0', title: 'Supervisor useful cycle', status: 'EXIT-GATE WATCH live: PR #981 слит (e7fccd08), release-CI терминален → manifest → self-update → ручная очистка драфта оператором → рост cycle_seq; смотрите карточку R82 EXIT GATE', live: 'keepalive' },
   { pri: 'P0', title: 'DevOS maintenance liveness', status: 'idle-gate fix в source; live timeout сохраняется до installer' },
-  { pri: 'P0', title: 'Edge convergence', status: 'R83-квалификация live: 2/2 registry workers БЕЗ source в репо; импорт-план готов — fabric IMPORT_READY (7/7 модулей), aop1 NEEDS_UNBUNDLING (7 src-секций); импорт в work-branch под ревью оператора' },
+  { pri: 'P0', title: 'Edge convergence', status: 'R83-импорт РЕАЛИЗОВАН: PR #982 (23 файла +4631/−0 под edge/, digest-контракт верифицирован: fabric 9c55419e37b0 == LIVE, aop1 29b36254b0b4cb4f == LIVE) под ревью оператора; promotion-gate = tools/verify-digests.mjs; деплой только после ревью + ротации CF-токена' },
   { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
   { pri: 'P0', title: 'Full installer', status: 'R85 in-flight: standalone daemon payload + version unify (18 commits, CI re-qualifying @ 2c28aa85)' },
   { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION — блокировано ТЕМ ЖЕ отравленным драфтом (общая причина с supervisor rollover)' },
@@ -341,6 +359,8 @@ export default function MissionControl() {
   const [edgeErr, setEdgeErr] = useState<string | null>(null)
   const [edgeLoading, setEdgeLoading] = useState(false)
   const [edgePlan, setEdgePlan] = useState<EdgeImportPlan | null>(null)
+  const [edgeImport, setEdgeImport] = useState<EdgeImportStatus | null>(null)
+  const [edgeImportLoading, setEdgeImportLoading] = useState(false)
   const [readback, setReadback] = useState<Readback | null>(null)
   const [readbackErr, setReadbackErr] = useState<string | null>(null)
   const [readbackLoading, setReadbackLoading] = useState(false)
@@ -352,6 +372,8 @@ export default function MissionControl() {
   const wsRef = useRef<WebSocket | null>(null)
   const backoffRef = useRef(1000)
   const filterRef = useRef<HTMLInputElement | null>(null)
+  const activeStageRef = useRef<HTMLDivElement | null>(null)
+  const prevGateRef = useRef<string | null>(null)
 
   // ---- 1s live clock for relative ages
   useEffect(() => {
@@ -405,6 +427,13 @@ export default function MissionControl() {
     finally { setReadbackLoading(false) }
   }, [])
 
+  const loadEdgeImport = useCallback(async (fresh = false) => {
+    setEdgeImportLoading(true)
+    try { setEdgeImport(await jfetch<EdgeImportStatus>(`/edge/import-status${fresh ? '?fresh=1' : ''}`)) }
+    catch { /* non-critical card section */ }
+    finally { setEdgeImportLoading(false) }
+  }, [])
+
   useEffect(() => {
     loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
@@ -412,6 +441,7 @@ export default function MissionControl() {
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
     jfetch<DonorRegistry>('/donor-registry').then(setDonorReg).catch(() => {})
     jfetch<EdgeImportPlan>('/edge/import-plan').then(setEdgePlan).catch(() => {})
+    loadEdgeImport()
     const a = setInterval(loadHealth, 5000)
     const b = setInterval(() => loadSupervisor(false), 10000)
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
@@ -419,11 +449,12 @@ export default function MissionControl() {
     const f = setInterval(() => { loadConvergence(false) }, 30000)
     const g = setInterval(() => { loadR82(false) }, 60000)
     const h = setInterval(() => { loadEdge(false) }, 120000)
+    const j = setInterval(() => { loadEdgeImport(false) }, 120000)
     const i = setInterval(() => { loadReadback(false) }, 60000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i) }
-  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f); clearInterval(g); clearInterval(h); clearInterval(i); clearInterval(j) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence, loadR82, loadEdge, loadReadback, loadEdgeImport])
 
   // ---- event filter keyboard navigation: '/' focuses the filter, Esc clears
   useEffect(() => {
@@ -450,6 +481,50 @@ export default function MissionControl() {
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
   }, [])
+
+  // ---- milestone toast: one-shot notification for milestone-grade hash-chain
+  // events (exit-gate transitions, edge evidence, operator mirror). Baseline is
+  // seeded silently on first load — only NEW milestones toast (no storm).
+  const milestoneSeqRef = useRef<number>(-1)
+  const MILESTONE_LABELS: Record<string, string> = {
+    R82_SELF_UPDATE_LANDED: 'Self-update доставлен в runtime',
+    R82_DRAFT_CLEARED: 'Драфт очищен оператором',
+    R82_CYCLE_RESUMED: 'cycle_seq пошёл — R82 закрыт',
+    EDGE_SNAPSHOT: 'Edge-снапшот снят в evidence',
+    MIRROR_ANCHOR: 'Operator anchor записан',
+  }
+  useEffect(() => {
+    const milestones = events.filter((e) => MILESTONE_LABELS[e.type] != null)
+    if (milestones.length === 0) return
+    const top = Math.max(...milestones.map((m) => m.seq))
+    if (milestoneSeqRef.current < 0) {
+      milestoneSeqRef.current = top // silent baseline on first load
+      return
+    }
+    const fresh = milestones.filter((m) => m.seq > milestoneSeqRef.current)
+    if (fresh.length === 0) return
+    milestoneSeqRef.current = top
+    for (const m of fresh.slice(-3)) {
+      toast({
+        title: `Milestone · ${MILESTONE_LABELS[m.type]}`,
+        description: `#${m.seq} · ${m.type}${m.subject ? ` · ${m.subject}` : ''}`,
+      })
+    }
+  }, [events, toast])
+
+  // ---- stage-machine auto-scroll: when the exit-gate current_gate CHANGES,
+  // bring the ACTIVE/BLOCKED stage row into view once (never on every poll).
+  useEffect(() => {
+    const gate = readback?.current_gate ?? null
+    const prev = prevGateRef.current
+    prevGateRef.current = gate
+    if (!gate || gate === prev) return
+    if (prev === null) return // first load: no scroll jump
+    const t = setTimeout(() => {
+      activeStageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 400)
+    return () => clearTimeout(t)
+  }, [readback?.current_gate])
 
   useEffect(() => {
     let closed = false
@@ -888,7 +963,7 @@ export default function MissionControl() {
                         : s.state === 'BLOCKED' ? 'border-rose-500/30 bg-rose-500/5'
                           : 'border-zinc-800 bg-zinc-950/60'
                   return (
-                    <div key={s.stage} className="relative flex gap-2.5">
+                    <div key={s.stage} data-stage={s.stage} ref={s.state === 'ACTIVE' ? activeStageRef : undefined} className="relative flex gap-2.5">
                       {i < readback.stages.length - 1 && <span className="absolute left-[13px] top-7 h-[calc(100%-8px)] w-px bg-zinc-800" />}
                       <div className={`z-10 mt-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${rowCls}`}>{icon}</div>
                       <div className={`mb-1.5 min-w-0 flex-1 rounded-lg border px-2.5 py-2 ${rowCls}`}>
@@ -1103,8 +1178,67 @@ export default function MissionControl() {
                   ))}
                 </div>
               )}
+              {/* import PR live status (R83-import deliverable) */}
+              {edgeImport && (
+                <div className="space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <GitPullRequest className="h-3.5 w-3.5 text-emerald-300" />
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-emerald-300">Импорт-PR · source-of-truth в репо</span>
+                    {edgeImport.pr && (
+                      <Chip tone={edgeImport.pr.merged ? 'ok' : edgeImport.pr.state === 'open' ? (edgeImport.ci.terminal && !edgeImport.ci.green ? 'p0' : 'warn') : 'neutral'}>
+                        PR #{edgeImport.pr.number} {edgeImport.pr.merged ? 'MERGED' : edgeImport.pr.state.toUpperCase()}
+                      </Chip>
+                    )}
+                    {edgeImport.pr && (
+                      <Chip tone={edgeImport.ci.terminal ? (edgeImport.ci.green ? 'ok' : 'p0') : 'warn'}>
+                        CI {edgeImport.ci.success}/{edgeImport.ci.total}{!edgeImport.ci.terminal && ' ↻'}
+                      </Chip>
+                    )}
+                    {edgeImport.digest_contract.repo_tree_verified && <Chip tone="ok">digest == LIVE</Chip>}
+                    <Button variant="ghost" size="sm" className="ml-auto h-7 w-7 p-0 text-zinc-400 hover:text-teal-400" disabled={edgeImportLoading} onClick={() => loadEdgeImport(true)} aria-label="Свежий статус импорт-PR" title="Свежий статус PR #982 (edge.import-status)">
+                      <RefreshCw className={`h-3.5 w-3.5 ${edgeImportLoading ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
+                  {edgeImport.pr && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        <Stat label="ветка" value={edgeImport.pr.head_branch} tone="text-cyan-300" span="col-span-2" />
+                        <Stat label="head" value={edgeImport.pr.head_sha.slice(0, 10)} tone="text-cyan-300" />
+                        <Stat label="mergeable" value={edgeImport.pr.mergeable == null ? '—' : edgeImport.pr.mergeable ? 'yes' : String(edgeImport.pr.mergeable_state)} tone={edgeImport.pr.mergeable ? 'text-emerald-400' : 'text-amber-400'} />
+                        <Stat label="файлы" value={`${edgeImport.pr.files} (+${edgeImport.pr.additions}/−${edgeImport.pr.deletions})`} tone="text-emerald-400" span="col-span-2" />
+                        <Stat label="base" value={edgeImport.pr.base_branch} tone="text-zinc-400" span="col-span-2" />
+                      </div>
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[10px]">
+                        <span className="text-zinc-500">digest contract:</span>
+                        <span className="text-cyan-300/80">fabric {edgeImport.digest_contract.fabric_live_sha256}</span>
+                        <span className="text-cyan-300/80">aop1 {edgeImport.digest_contract.aop1_live_sha256}</span>
+                      </div>
+                      {edgeImport.ci.checks.length > 0 && (
+                        <div className="space-y-0.5">
+                          {edgeImport.ci.checks.map((c, i) => (
+                            <div key={`${c.name}-${i}`} className="flex items-baseline gap-2 rounded border border-zinc-800/60 bg-zinc-950/40 px-2 py-1 font-mono text-[10px]">
+                              <span className="min-w-0 flex-1 truncate text-zinc-300" title={c.name}>{c.name}</span>
+                              <span className={`shrink-0 ${c.conclusion === 'success' ? 'text-emerald-400' : c.conclusion ? 'text-rose-400' : 'text-amber-400'}`}>{c.conclusion ?? c.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <a href={edgeImport.pr.url} target="_blank" rel="noreferrer" className="inline-flex items-baseline gap-1 text-[11px] text-teal-300 underline decoration-teal-500/40 hover:text-teal-200">
+                        открыть PR #{edgeImport.pr.number} на GitHub
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </>
+                  )}
+                  {edgeImport.pr_error && (
+                    <div className="rounded-md border border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 font-mono text-[10px] text-amber-200/80">import-status: {edgeImport.pr_error}</div>
+                  )}
+                  {edgeImport.summary.map((s) => (
+                    <div key={s} className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1.5 text-[10px] leading-snug text-emerald-200/80">{s}</div>
+                  ))}
+                </div>
+              )}
               <p className="text-[11px] leading-relaxed text-zinc-500">
-                Read-only CF-клиент демона (токен только серверно в /home/z/.a2/cloudflare.env). Кнопка-камера снимает живые скрипты в evidence (data/edge/ + hash-chained EDGE_SNAPSHOT события). Промоушн v14 → production требует source-of-truth в репо — сейчас его нет ни в main, ни в release, ни в donor.
+                Read-only CF-клиент демона (токен только серверно в /home/z/.a2/cloudflare.env). Кнопка-камера снимает живые скрипты в evidence (data/edge/ + hash-chained EDGE_SNAPSHOT события). Импорт source РЕАЛИЗОВАН — PR #982 несёт verbatim-дерево с digest-контрактом; промоушн (deploy-from-repo) только после ревью оператора + re-verify + ротации CF-токена.
               </p>
             </div>
           ) : (
