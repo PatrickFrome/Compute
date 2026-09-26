@@ -54,8 +54,16 @@ export class TabRegistry {
     if (tabRole === 'SUPERVISOR' && countRole([...this.#tabs.values()], 'SUPERVISOR') >= SUPERVISOR_TAB_CEILING) {
       throw new Error('tab_capacity_exceeded');
     }
+    const tabId = `tab_${crypto.randomUUID()}`;
     const tab = Object.freeze({
-      tab_id: `tab_${crypto.randomUUID()}`,
+      tab_id: tabId,
+      // R84 Desktop convergence: BrowserCell identity is allocated by the
+      // canonical TabRegistry at the same logical creation boundary as tab_id.
+      // It is never inferred later from URL/title/selection/WebContents and no
+      // second registry is introduced. Physical reincarnation is fenced
+      // independently by BrowserRuntimeBindingIndex.binding_generation.
+      browser_cell_id: `cell:${crypto.randomUUID()}`,
+      browser_cell_generation: 1,
       kind: String(kind),
       role: tabRole,
       url: String(url),
@@ -81,6 +89,8 @@ export class TabRegistry {
       // created_by_continuity_id is likewise immutable provenance.
       tab_id: current.tab_id,
       role: current.role,
+      browser_cell_id: current.browser_cell_id,
+      browser_cell_generation: current.browser_cell_generation,
       created_at: current.created_at,
       ...(current.created_by_continuity_id ? { created_by_continuity_id: current.created_by_continuity_id } : {}),
     });
