@@ -25,9 +25,9 @@
 //    (each fires exactly once per transition, deduped in-process)
 //  - secrets stay server-side; the GitHub client is the daemon's single
 //    read path (github.ts ghGet)
-import { appendEvent } from "./eventlog";
+import { appendEvent, eventsOfType, type Me2Event } from "./eventlog";
 import { ghGet } from "./github";
-import { monitorHistory, type MonitorSample } from "./monitor";
+import { monitorHistory, onRolloverAttempt, type MonitorSample } from "./monitor";
 import { probeDraft, ROOT_DRAFT_MAX_CHARS, type DraftProbe } from "./r82";
 import { supervisorSnapshot } from "./controlplane";
 import { VERSION } from "./version";
@@ -47,6 +47,12 @@ export const BASELINE = {
 const DRAFT_SAMPLE_MS = 5 * 60_000; // 5 min — READ-ONLY, bounded fastlane use
 const DRAFT_MAX_SAMPLES = 48; // 4 hours of draft history
 const CI_TTL_MS = 60_000;
+// R82-HARDEN: opportunistic probes are triggered by the monitor the moment a
+// NEW rollover attempt opens a fresh tab (attempt tabs live ~2.5 min before
+// D-C7 closes them — the periodic 5-min sampler usually finds a dead tab).
+// Rate limit keeps fastlane use bounded: at most one opportunistic probe per
+// minute even if attempts churn faster.
+const OPPORTUNISTIC_MIN_INTERVAL_MS = 60_000;
 
 type Any = Record<string, any>;
 
@@ -131,7 +137,7 @@ export async function releaseCi(fresh = false): Promise<ReleaseCi> {
 }
 
 // ---------------------------------------------------------------------------
-// Draft history (READ-ONLY periodic sampler + one-shot milestones)
+// Draft history (READ-ONLY periodic + opportunistic sampler, durable milestones)
 // ---------------------------------------------------------------------------
 
 export interface DraftSample {
@@ -139,35 +145,48 @@ export interface DraftSample {
   tab_id: string | null;
   chars: number | null;
   canary: DraftProbe["canary"];
+  // R82-HARDEN: where this sample came from — "periodic" (5-min timer) or
+  // "opportunistic" (fired the moment the monitor saw a fresh rollover tab)
+  source: "periodic" | "opportunistic";
   error?: string;
 }
 
 let draftSamples: DraftSample[] = [];
 let draftTimer: ReturnType<typeof setInterval> | null = null;
 let draftInFlight = false;
-let lastDraftCanary: DraftProbe["canary"] | null = null;
+let lastOppoAt = 0;
 
-function recordDraft(p: DraftProbe): void {
-  draftSamples.push({ ts: p.ts, tab_id: p.tab_id, chars: p.chars, canary: p.canary, error: p.error });
+// R82-HARDEN (QA bug): one-shot milestones deduped against the DURABLE event
+// log, not in-process flags — a daemon restart used to re-fire
+// R82_SELF_UPDATE_LANDED (seq 298 + 316 duplicate). The log is the dedupe.
+function milestoneInLog(type: string): boolean {
+  return eventsOfType(type).length > 0;
+}
+
+function recordDraft(p: DraftProbe, source: DraftSample["source"]): void {
+  draftSamples.push({ ts: p.ts, tab_id: p.tab_id, chars: p.chars, canary: p.canary, source, error: p.error });
   if (draftSamples.length > DRAFT_MAX_SAMPLES) draftSamples = draftSamples.slice(-DRAFT_MAX_SAMPLES);
-  // one-shot milestone: the operator clears the poisoned draft (durable
-  // evidence — this is the manual step the whole R82 exit gate waits for)
-  if (lastDraftCanary === "OVERSIZED" && p.canary === "OK") {
+  // one-shot milestone: a live composer reads ≤ threshold — the poisoned
+  // account-draft is gone (the manual step the whole R82 exit gate waits for).
+  // Durable dedupe: fires at most once EVER (log-gated), idempotent across
+  // daemon restarts; if the daemon was down during the clear, the first OK
+  // read after boot still records the observed fact.
+  if (p.canary === "OK" && !milestoneInLog("R82_DRAFT_CLEARED")) {
     appendEvent("R82_DRAFT_CLEARED", "operator", p.tab_id, {
       chars: p.chars,
       canary: p.canary,
-      note: "account-draft cleared manually (observed by the READ-ONLY readback sampler)",
+      source,
+      note: "account-draft cleared (observed by the READ-ONLY readback sampler)",
       daemon_version: VERSION,
     });
   }
-  if (p.canary === "OVERSIZED" || p.canary === "OK") lastDraftCanary = p.canary;
 }
 
-async function sampleDraft(): Promise<void> {
+async function sampleDraft(source: DraftSample["source"] = "periodic"): Promise<void> {
   if (draftInFlight) return;
   draftInFlight = true;
   try {
-    recordDraft(await probeDraft());
+    recordDraft(await probeDraft(), source);
   } catch {
     // sampler never throws — errors land in the sample as probe.error
   } finally {
@@ -176,10 +195,34 @@ async function sampleDraft(): Promise<void> {
 }
 
 export function startReadbackWatch(): void {
-  if (draftTimer) return;
-  draftTimer = setInterval(sampleDraft, DRAFT_SAMPLE_MS);
-  // first sample immediately (non-blocking)
-  void sampleDraft();
+  if (!draftTimer) {
+    draftTimer = setInterval(() => void sampleDraft("periodic"), DRAFT_SAMPLE_MS);
+    // first sample immediately (non-blocking)
+    void sampleDraft("periodic");
+  }
+  // R82-HARDEN: opportunistic sampling — the monitor fires the hook the moment
+  // a NEW rollover attempt starts. Live timeline (verified 2026-09-26):
+  //   t+0s   attempt starts (no tab yet)
+  //   t+15s  tab binds, account-draft hydrates into the composer
+  //   t+15.3s canary aborts (ROOT_DRAFT_OVERSIZED) — poisoned case only
+  //   t+15..55s D-C7 closes the aborted tab
+  // A probe AT detection time races the tab binding (NO_TAB — observed live);
+  // the probe is DELAYED +20s to hit the bound-tab window, with one +40s
+  // retry if the tab was still not bound. In the cleared future the tab
+  // survives as the conversation tab, so the OK read window is wide.
+  onRolloverAttempt((_attemptId, _tabId) => {
+    if (Date.now() - lastOppoAt < OPPORTUNISTIC_MIN_INTERVAL_MS) return;
+    lastOppoAt = Date.now();
+    setTimeout(() => {
+      void sampleDraft("opportunistic").then(() => {
+        // retry once if the tab wasn't bound yet at +20s
+        const last = draftSamples[draftSamples.length - 1];
+        if (last && last.source === "opportunistic" && last.canary === "NO_TAB") {
+          setTimeout(() => void sampleDraft("opportunistic"), 20_000);
+        }
+      });
+    }, 20_000);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +261,7 @@ export interface ReadbackStatus {
   };
   canary: {
     rollover_reason: string | null;
-    new_code_active: boolean; // ROOT_DRAFT_OVERSIZED observed → PR #981 code live
+    new_code_active: boolean; // new machine-readable reasons observed → PR #981 code live
   };
   draft: {
     samples: DraftSample[];
@@ -226,6 +269,16 @@ export interface ReadbackStatus {
     max_chars: number | null;
     cleared: boolean;
     threshold: number;
+  };
+  // R82-HARDEN: rollover attempt churn within the monitor window — how many
+  // fresh attempts the supervisor started (each opens a new tab, hydrates the
+  // account draft, hits the oversized canary, aborts). The console charts
+  // this as the live retry-loop heartbeat while the operator clear pends.
+  attempts: {
+    window_samples: number;
+    distinct_attempts: number;
+    current: { attempt_id: string; tab_id: string | null; started_at: string | null; ambiguous_reason: string | null } | null;
+    rollover_reason: string | null;
   };
   cycle: {
     baseline: number;
@@ -251,6 +304,26 @@ function versionTransitions(samples: MonitorSample[]): { ts: string; from: strin
   return out;
 }
 
+// R82-HARDEN: reconstruct the self-update transition from the durable journal
+// when the in-memory monitor ring buffer is empty (daemon restart) — the
+// milestone event carries the exact from→to pair observed live. Deduped by
+// from→to pair: the pre-hardening duplicate milestones (#298 + #316) describe
+// the SAME transition and must render as one.
+function reconstructTransition(events: Me2Event[]): { ts: string; from: string; to: string }[] {
+  const out: { ts: string; from: string; to: string }[] = [];
+  const seen = new Set<string>();
+  for (const e of events) {
+    const p = (e.payload ?? {}) as Any;
+    if (typeof p.from === "string" && typeof p.to === "string") {
+      const key = `${p.from}→${p.to}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ts: e.ts, from: p.from, to: p.to });
+    }
+  }
+  return out;
+}
+
 export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
   const sup = await supervisorSnapshot(fresh);
   const history = monitorHistory().samples;
@@ -263,26 +336,56 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
     ciError = String((e as Error)?.message ?? e).slice(0, 160);
   }
 
-  const transitions = versionTransitions(history);
+  const liveTransitions = versionTransitions(history);
+  const journalTransitions = liveTransitions.length > 0 ? [] : reconstructTransition(eventsOfType("R82_SELF_UPDATE_LANDED"));
+  const transitions = [...liveTransitions, ...journalTransitions];
   const selfUpdateLanded = sup.extension_version !== BASELINE.extension_version || transitions.length > 0;
-  const newCodeActive = sup.keepalive.rollover_reason === "ROOT_DRAFT_OVERSIZED";
+  // R82-HARDEN: the new code emits a FAMILY of machine-readable reasons the
+  // old code never produced — ROOT_DRAFT_OVERSIZED (canary abort) AND
+  // ROLLOVER_ERROR:* (D-C7 close-by-proof for tabs that never commit;
+  // observed live oscillating with the canary). Both prove the new code runs.
+  const reason = sup.keepalive.rollover_reason;
+  const newCodeActive = reason === "ROOT_DRAFT_OVERSIZED" || (reason?.startsWith("ROLLOVER_ERROR:") ?? false);
 
   const lastDraft = draftSamples.length > 0 ? draftSamples[draftSamples.length - 1] : null;
   const maxChars = draftSamples.reduce((m, s) => (s.chars != null && s.chars > m ? s.chars : m), 0);
+  // R82-HARDEN: "cleared" is a HISTORICAL fact, not a current-state property —
+  // once an OK canary read is observed (or the milestone is in the durable
+  // log), the stage stays DONE even when later probes find no attempt tab
+  // (after a successful rollover there are no more attempts to probe).
   const draftCleared =
-    lastDraft?.canary === "OK" ||
-    (newCodeActive && lastDraft?.canary !== "OVERSIZED" && lastDraft?.chars != null && lastDraft.chars <= ROOT_DRAFT_MAX_CHARS);
+    draftSamples.some((s) => s.canary === "OK") || milestoneInLog("R82_DRAFT_CLEARED");
+
+  // attempt churn from the monitor window (live retry-loop heartbeat)
+  const attemptIds = new Set(history.map((s) => s.attempt_id).filter((id): id is string => !!id));
+  const currentAttempt = sup.keepalive.rollover_attempt;
+  const attempts = {
+    window_samples: history.filter((s) => s.attempt_id != null).length,
+    distinct_attempts: attemptIds.size,
+    current: currentAttempt
+      ? {
+          attempt_id: currentAttempt.attempt_id,
+          tab_id: currentAttempt.tab_id,
+          started_at: currentAttempt.started_at,
+          ambiguous_reason: currentAttempt.ambiguous_reason,
+        }
+      : null,
+    rollover_reason: sup.keepalive.rollover_reason,
+  };
 
   const cycleGrowth = sup.keepalive.cycle_seq - BASELINE.cycle_seq;
-  // monotonic growth: at least 2 distinct increasing cycle_seq values in history
+  // monotonic growth: live-data-first (current cycle_seq above the poisoned
+  // baseline is itself proof), with the monitor ring buffer as corroboration
+  // for in-session transitions
   const seqs = history.map((s) => s.cycle_seq).filter((n) => Number.isFinite(n) && n > 0);
-  let monotonic = false;
+  let historyMonotonic = false;
   for (let i = 1; i < seqs.length; i++) {
     if (seqs[i] > seqs[i - 1] && seqs[i] > BASELINE.cycle_seq) {
-      monotonic = true;
+      historyMonotonic = true;
       break;
     }
   }
+  const monotonic = sup.keepalive.cycle_seq > BASELINE.cycle_seq || historyMonotonic;
 
   // --- stage machine (each DONE requires live proof; BLOCKED = operator) ---
   const ciTerminal = ci?.terminal ?? false;
@@ -318,23 +421,27 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
     },
     {
       stage: "CANARY",
-      title: "Новый код активен (ROOT_DRAFT_OVERSIZED)",
+      title: "Новый код активен (machine-readable причины)",
       state: newCodeActive ? "DONE" : selfUpdateLanded ? "ACTIVE" : "PENDING",
       detail: newCodeActive
-        ? "rollover_reason = ROOT_DRAFT_OVERSIZED — фиксы PR #981 физически исполняются"
-        : `rollover_reason = ${sup.keepalive.rollover_reason ?? "—"} (старый цикл)`,
+        ? `rollover_reason = ${reason} — фиксы PR #981 физически исполняются (canary-аборт + D-C7 close-by-proof)`
+        : `rollover_reason = ${reason ?? "—"} (старый цикл)`,
     },
     {
       stage: "OPERATOR_CLEAR",
       title: "Оператор очистил драфт",
       state: draftCleared ? "DONE" : selfUpdateLanded ? "BLOCKED" : "PENDING",
       detail: draftCleared
-        ? `драфт ≤ ${ROOT_DRAFT_MAX_CHARS} chars (${lastDraft?.chars ?? "?"}) — ручная очистка зафиксирована`
+        ? milestoneInLog("R82_DRAFT_CLEARED")
+            ? `драфт ≤ ${ROOT_DRAFT_MAX_CHARS} chars — очистка зафиксирована в journal (milestone)`
+            : `драфт ≤ ${ROOT_DRAFT_MAX_CHARS} chars (${lastDraft?.chars ?? "?"}) — живое чтение OK`
         : lastDraft?.canary === "OVERSIZED"
           ? `драфт ${lastDraft.chars} chars — ждём Ctrl+A+Delete от оператора (макс. наблюдённый: ${maxChars > 0 ? maxChars : "?"})`
-          : lastDraft
-            ? `attempt-таб без композера (${lastDraft.canary}) — сэмплер повторит через 5 мин`
-            : "сэмплер драфта ещё не снял первый сэмпл",
+          : lastDraft?.error
+            ? `проба не удалась: ${lastDraft.error} — attempt-таб короткоживущ, oppo-сэмплер ловит новые попытки`
+            : lastDraft
+              ? `attempt-таб без композера (${lastDraft.canary}) — сэмплер повторит`
+              : "сэмплер драфта ещё не снял первый сэмпл",
     },
     {
       stage: "CYCLE_GROWTH",
@@ -368,9 +475,9 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
           : `gate: ${activeStage.stage} в процессе: ждём «${activeStage.title}» (не завершено)`
         : `gate: ${currentGate}`;
 
-  // one-shot milestones (durable evidence, deduped by current state)
-  if (selfUpdateLanded && !milestoneFired.self_update) {
-    milestoneFired.self_update = true;
+  // one-shot milestones (durable evidence — deduped against the event log,
+  // NOT in-process flags; restart-safe by construction)
+  if (selfUpdateLanded && !milestoneInLog("R82_SELF_UPDATE_LANDED")) {
     appendEvent("R82_SELF_UPDATE_LANDED", "daemon", sup.client_id, {
       from: BASELINE.extension_version,
       to: sup.extension_version,
@@ -378,8 +485,20 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       daemon_version: VERSION,
     });
   }
-  if (monotonic && !milestoneFired.cycle_resumed) {
-    milestoneFired.cycle_resumed = true;
+  // R82-HARDEN: a successful rollover REQUIRES a clean draft (the whole
+  // causal chain) — cycle growth past the poisoned baseline is itself proof
+  // the operator cleared the draft, even if no probe caught a live clean tab
+  if (monotonic && !milestoneInLog("R82_DRAFT_CLEARED")) {
+    appendEvent("R82_DRAFT_CLEARED", "daemon", sup.client_id, {
+      chars: null,
+      canary: "OK",
+      source: "inference",
+      note: "inferred from cycle_seq growth past the poisoned baseline — a successful rollover requires a clean draft",
+      cycle_seq: sup.keepalive.cycle_seq,
+      daemon_version: VERSION,
+    });
+  }
+  if (monotonic && !milestoneInLog("R82_CYCLE_RESUMED")) {
     appendEvent("R82_CYCLE_RESUMED", "daemon", sup.client_id, {
       baseline: BASELINE.cycle_seq,
       current: sup.keepalive.cycle_seq,
@@ -416,10 +535,9 @@ export async function readbackStatus(fresh = false): Promise<ReadbackStatus> {
       monotonic_growth_observed: monotonic,
       stale_completed_s: sup.keepalive.stale_completed_s,
     },
+    attempts,
     stages,
     current_gate: currentGate,
     summary,
   };
 }
-
-const milestoneFired = { self_update: false, cycle_resumed: false };

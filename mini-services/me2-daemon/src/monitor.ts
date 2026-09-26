@@ -27,6 +27,13 @@ export interface MonitorSample {
   // charts the exact moment the installed runtime picks up the merged release.
   extension_version: string;
   dev_plane_head: string;
+  // R82-HARDEN: live rollover attempt identity per sample — the console charts
+  // attempt churn (how many fresh rollover attempts the supervisor starts per
+  // monitor window), and the attempt-change hook triggers opportunistic draft
+  // probes while the fresh attempt tab is still alive.
+  attempt_id: string | null;
+  attempt_tab_id: string | null;
+  rollover_reason: string | null;
 }
 
 const SAMPLE_INTERVAL_MS = 15_000;
@@ -37,10 +44,24 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let lastError: string | null = null;
 let startedAt: string | null = null;
 
+// R82-HARDEN: rollover-attempt change hook — fires when a NEW attempt_id
+// appears in the live supervisor state (a fresh rollover tab just opened).
+// The readback watch registers a callback that probes the draft canary
+// immediately, while the attempt tab is still alive. Listener errors are
+// swallowed (the monitor must never break on consumer bugs).
+type AttemptHook = (attemptId: string, tabId: string | null) => void;
+let attemptHook: AttemptHook | null = null;
+let lastSeenAttemptId: string | null = null;
+
+export function onRolloverAttempt(h: AttemptHook | null): void {
+  attemptHook = h;
+}
+
 function takeSample(): void {
   supervisorSnapshot(true)
     .then((s: SupervisorSnapshot) => {
       lastError = null;
+      const attempt = s.keepalive.rollover_attempt;
       const m: MonitorSample = {
         ts: s.fetched_at,
         uptime_ms: Date.now() - STARTED_VERSION.started_at_ms,
@@ -55,9 +76,24 @@ function takeSample(): void {
         p0_count: s.p0_flags.length,
         extension_version: s.extension_version,
         dev_plane_head: (s.dev_plane.head ?? "").slice(0, 12),
+        attempt_id: attempt?.attempt_id ?? null,
+        attempt_tab_id: attempt?.tab_id ?? null,
+        rollover_reason: s.keepalive.rollover_reason,
       };
       samples.push(m);
       if (samples.length > MAX_SAMPLES) samples = samples.slice(-MAX_SAMPLES);
+      // attempt-change detection: first observation seeds the baseline (a
+      // stale pre-boot attempt must NOT fire the hook), later NEW ids fire
+      if (m.attempt_id) {
+        if (lastSeenAttemptId != null && m.attempt_id !== lastSeenAttemptId) {
+          try {
+            attemptHook?.(m.attempt_id, m.attempt_tab_id);
+          } catch {
+            /* hook errors must never break the sampler */
+          }
+        }
+        lastSeenAttemptId = m.attempt_id;
+      }
     })
     .catch((e: unknown) => {
       // bounded error surface: keep last error string for the console,

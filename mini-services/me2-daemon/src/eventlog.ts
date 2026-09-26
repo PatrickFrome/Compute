@@ -183,6 +183,15 @@ export function tail(limit: number): Me2Event[] {
   return events.slice(-n).reverse();
 }
 
+// R82-HARDEN: durable milestone dedupe — the log IS the source of truth for
+// "has this milestone fired". In-process flags reset on daemon restart, which
+// duplicated R82_SELF_UPDATE_LANDED (seq 298 + 316). Callers gate one-shot
+// milestone appends on eventsOfType(type).length === 0.
+export function eventsOfType(type: string): Me2Event[] {
+  if (!loaded) loadEventLog();
+  return events.filter((e) => e.type === type);
+}
+
 export function verifyChain(): { valid: boolean; count: number; head_hash: string } {
   if (!loaded) loadEventLog();
   let prev = "0".repeat(64);

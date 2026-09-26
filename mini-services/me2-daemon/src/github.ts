@@ -106,19 +106,23 @@ export async function convergenceStatus(fresh = false): Promise<ConvergenceSnaps
     if (!token) throw new OpError("github_no_token", "/home/z/.a2/.github.env: GITHUB_TOKEN_ADMIN отсутствует", 503);
 
     // 1) PR #968 (draft convergence PR)
+    // QA-фикс (R82-HARDEN): gh() возвращает { data, rateRemaining } — PR-поля
+    // читаются из prReq.data (ранее prReq.state → все поля пустые строки, карточка
+    // R81 показывала «mergeable —» при живом PR)
     const prReq = await gh<Record<string, unknown>>(`/repos/${REPO}/pulls/${CONVERGENCE_PR}`, token).catch((e: unknown) => {
       if (e instanceof OpError && e.code === "github_not_found") return null;
       throw e;
     });
-    const pr = prReq
+    const prData = prReq ? (prReq.data as Record<string, unknown>) : null;
+    const pr = prData
       ? {
           number: CONVERGENCE_PR,
-          state: String(prReq.state ?? ""),
-          draft: prReq.draft === true,
-          mergeable: typeof prReq.mergeable === "boolean" ? (prReq.mergeable as boolean) : null,
-          mergeable_state: String(prReq.mergeable_state ?? ""),
-          title: String(prReq.title ?? ""),
-          updated_at: String(prReq.updated_at ?? ""),
+          state: String(prData.state ?? ""),
+          draft: prData.draft === true,
+          mergeable: typeof prData.mergeable === "boolean" ? (prData.mergeable as boolean) : null,
+          mergeable_state: String(prData.mergeable_state ?? ""),
+          title: String(prData.title ?? ""),
+          updated_at: String(prData.updated_at ?? ""),
         }
       : null;
 

@@ -164,7 +164,8 @@ interface ReadbackStage {
 }
 interface ReadbackDraftSample {
   ts: string; tab_id: string | null; chars: number | null
-  canary: 'OVERSIZED' | 'OK' | 'NO_COMPOSER' | 'NO_TAB' | 'UNKNOWN'; error?: string
+  canary: 'OVERSIZED' | 'OK' | 'NO_COMPOSER' | 'NO_TAB' | 'UNKNOWN'
+  source?: 'periodic' | 'opportunistic'; error?: string
 }
 interface Readback {
   fetched_at: string
@@ -178,6 +179,14 @@ interface Readback {
   runtime: { extension_version: string; dev_plane_head: string; self_update_landed: boolean; version_transitions: { ts: string; from: string; to: string }[] }
   canary: { rollover_reason: string | null; new_code_active: boolean }
   draft: { samples: ReadbackDraftSample[]; last: ReadbackDraftSample | null; max_chars: number | null; cleared: boolean; threshold: number }
+  // R82-HARDEN: rollover attempt churn in the monitor window — the live
+  // retry-loop heartbeat (each attempt = fresh tab + draft hydrate + canary abort)
+  attempts: {
+    window_samples: number
+    distinct_attempts: number
+    current: { attempt_id: string; tab_id: string | null; started_at: string | null; ambiguous_reason: string | null } | null
+    rollover_reason: string | null
+  }
   cycle: { baseline: number; current: number; growth: number; monotonic_growth_observed: boolean; stale_completed_s: number | null }
   stages: ReadbackStage[]
   current_gate: string
@@ -987,6 +996,8 @@ export default function MissionControl() {
                 <Stat label="baseline (до фикса)" value={readback.baseline.extension_version} tone="text-zinc-600" span="col-span-2" />
                 <Stat label="manifest rail" value={readback.release_ci?.checks.publish_manifest ?? '—'} tone={readback.release_ci?.checks.publish_manifest === 'SUCCESS' ? 'text-emerald-400' : 'text-amber-400'} />
                 <Stat label="cycle_seq" value={`${readback.cycle.current}${readback.cycle.growth > 0 ? ` (+${readback.cycle.growth})` : ''}`} tone={readback.cycle.growth > 0 ? 'text-emerald-400' : 'text-zinc-400'} />
+                <Stat label="rollover-попытки (окно монитора)" value={`${readback.attempts?.distinct_attempts ?? '—'}`} tone={readback.attempts?.distinct_attempts ? 'text-amber-400' : 'text-zinc-400'} title="Сколько свежих rollover-попыток стартовал супервизор в окне монитора (~1ч): каждая = новый таб + гидрация драфта + canary-аборт — живой пульс retry-цикла" />
+                <Stat label="текущая попытка" value={readback.attempts?.current ? readback.attempts.current.attempt_id.slice(9, 17) : '—'} tone={readback.attempts?.current ? 'text-cyan-300' : 'text-zinc-400'} title={readback.attempts?.current ? `${readback.attempts.current.attempt_id}\nstart: ${readback.attempts.current.started_at ?? '—'}\nreason: ${readback.attempts.current.ambiguous_reason ?? '—'}\ntab: ${readback.attempts.current.tab_id ?? '—'}` : 'нет активной rollover-попытки'} />
               </div>
 
               {/* version transitions */}
@@ -1004,12 +1015,16 @@ export default function MissionControl() {
               {/* draft history */}
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">История драфта (READ-ONLY сэмплер, 5 мин)</span>
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">История драфта (READ-ONLY: периодический 5 мин + oppo-сэмплер на новые попытки)</span>
                   <Chip tone={readback.draft.cleared ? 'ok' : readback.draft.last?.canary === 'OVERSIZED' ? 'p0' : 'neutral'}>
                     {readback.draft.cleared ? 'CLEARED' : readback.draft.last?.canary ?? '…'}
                   </Chip>
                   {readback.draft.max_chars != null && <Chip tone="neutral">max {readback.draft.max_chars} chars</Chip>}
                   <Chip tone="neutral">порог {readback.draft.threshold}</Chip>
+                  {(() => {
+                    const oppo = readback.draft.samples.filter((s) => s.source === 'opportunistic').length
+                    return oppo > 0 ? <Chip tone="info">oppo-проб {oppo}</Chip> : null
+                  })()}
                 </div>
                 <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                   <Spark
@@ -1024,8 +1039,9 @@ export default function MissionControl() {
                       {readback.draft.samples.slice(-8).reverse().map((s, i) => (
                         <div key={i} className="flex items-baseline gap-2 font-mono text-[10px]">
                           <span className="text-zinc-600">{hhmmss(s.ts)}</span>
+                          {s.source === 'opportunistic' && <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[9px] font-bold uppercase text-cyan-300" title="оппортунистическая проба — снята в момент старта новой rollover-попытки, пока attempt-таб жив">oppo</span>}
                           <span className={s.canary === 'OVERSIZED' ? 'text-rose-400' : s.canary === 'OK' ? 'text-emerald-400' : 'text-zinc-500'}>{s.canary}</span>
-                          <span className="ml-auto text-zinc-400">{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
+                          <span className="ml-auto truncate text-zinc-400" title={s.error ?? undefined}>{s.chars != null ? `${s.chars} chars` : s.error ? s.error.slice(0, 40) : '—'}</span>
                         </div>
                       ))}
                       {readback.draft.samples.length === 0 && <div className="py-2 text-center text-[10px] text-zinc-600">сэмплер разогревается (первый сэмпл ~1 мин)…</div>}

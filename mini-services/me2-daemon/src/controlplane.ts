@@ -62,6 +62,16 @@ export interface SupervisorSnapshot {
     ambiguous_history_count: number;
     queued_wake_count: number;
     updated_at: string;
+    // R82-HARDEN: live rollover attempt identity — the monitor uses attempt_id
+    // changes to trigger opportunistic draft probes while the attempt tab is
+    // still alive (attempt tabs live ~2.5 min; the periodic sampler at 5 min
+    // usually probes a tab that D-C7 already closed → UNKNOWN noise)
+    rollover_attempt: {
+      attempt_id: string;
+      tab_id: string | null;
+      started_at: string | null;
+      ambiguous_reason: string | null;
+    } | null;
   };
   cognitive: {
     state: string;
@@ -145,6 +155,16 @@ export async function supervisorSnapshot(fresh = false): Promise<SupervisorSnaps
       ambiguous_history_count: keepalive.ambiguous_history_count ?? -1,
       queued_wake_count: keepalive.queued_wake_count ?? -1,
       updated_at: keepalive.updated_at ?? "UNKNOWN",
+      rollover_attempt: keepalive.rollover_attempt?.attempt_id
+        ? {
+            attempt_id: String(keepalive.rollover_attempt.attempt_id),
+            tab_id: keepalive.rollover_attempt.tab_id ? String(keepalive.rollover_attempt.tab_id) : null,
+            started_at: keepalive.rollover_attempt.started_at ? String(keepalive.rollover_attempt.started_at) : null,
+            ambiguous_reason: keepalive.rollover_attempt.ambiguous_reason
+              ? String(keepalive.rollover_attempt.ambiguous_reason)
+              : null,
+          }
+        : null,
     },
     cognitive: {
       state: cognitive.state ?? "UNKNOWN",
