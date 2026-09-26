@@ -21,27 +21,39 @@ import { toastBus, sendCommand, loadBrowserTabs, type BrowserTab } from "@/lib/m
 import { agentChatOp } from "@/lib/me2-socket";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
 import { useAgentChatSessions, type AgentChatSession } from "@/hooks/use-agentchat-sessions";
+import { resolveExactAgentTab } from "@/lib/r85-ui-contracts.mjs";
 
-// ── выбор вкладки chat.z.ai под сессию (url∋id → title → единственная z.ai) ─────
+// ── выбор вкладки chat.z.ai под сессию: только exact session identity ─────────
+// Title similarity и "единственная z.ai вкладка" запрещены как identity fallback:
+// они могут перевести оператора на чужую сессию при одинаковых/похожих названиях.
 async function openAgentTab(s: AgentChatSession): Promise<void> {
   const tabs: BrowserTab[] = await loadBrowserTabs();
   if (tabs.length === 0) {
     toastBus({ title: "браузер daemon пуст", description: `вкладка для «${s.title}» не найдена — «+» в адресной строке откроет z.ai` });
     return;
   }
-  const t = s.title.trim().toLowerCase();
-  const zai = tabs.filter((x) => (x.url ?? "").includes("z.ai"));
-  const pick =
-    tabs.find((x) => (x.url ?? "").toLowerCase().includes(s.id.toLowerCase())) ??
-    (t ? tabs.find((x) => (x.title ?? "").toLowerCase().includes(t)) : undefined) ??
-    (zai.length === 1 ? zai[0] : undefined);
-  if (pick) {
-    await sendCommand("BROWSER_SELECT_TAB", { tab: pick.id }, { lane: "CONTROL", quiet: true });
-  } else if (zai.length === 0) {
-    toastBus({ title: "z.ai-вкладка не найдена", description: `«${s.title}»: откройте chat.z.ai кнопкой «+» над скринкастом` });
-  } else {
-    toastBus({ title: "выберите вкладку вручную", description: `«${s.title}»: z.ai-вкладок ${zai.length}, соответствие по имени не найдено` });
+
+  const binding = resolveExactAgentTab(tabs, s.id);
+  if (binding.kind === "exact") {
+    await sendCommand("BROWSER_SELECT_TAB", { tab: binding.tab.id }, { lane: "CONTROL", quiet: true });
+    return;
   }
+  if (binding.kind === "ambiguous") {
+    toastBus({
+      title: "identity неоднозначна",
+      description: `«${s.title}»: session ${s.id.slice(0, 16)} встречается в ${binding.matches.length} z.ai-вкладках; выберите вкладку вручную`,
+      variant: "destructive",
+    });
+    return;
+  }
+  if (binding.zai.length === 0) {
+    toastBus({ title: "z.ai-вкладка не найдена", description: `«${s.title}»: откройте chat.z.ai кнопкой «+» над скринкастом` });
+    return;
+  }
+  toastBus({
+    title: "нет exact session binding",
+    description: `«${s.title}»: ни одна из ${binding.zai.length} z.ai-вкладок не содержит точный session id; title-fallback запрещён`,
+  });
 }
 
 // ── Agent Sidebar (ChatGPT-стиль: только список переписок-агентов) ──────────────
