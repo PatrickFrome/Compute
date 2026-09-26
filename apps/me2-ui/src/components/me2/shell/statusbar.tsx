@@ -21,7 +21,7 @@ export function StatusBar() {
   return (
     <footer
       data-testid="statusbar"
-      className="flex h-[22px] shrink-0 items-center gap-3 overflow-x-auto border-t border-zinc-900 bg-[#08080a] px-2 font-mono text-[8px] text-zinc-600 mc-scroll"
+      className="flex h-[22px] shrink-0 items-center gap-2.5 overflow-x-auto border-t border-zinc-900 bg-[#08080a] px-2 font-mono text-[9px] text-zinc-500 mc-scroll"
     >
       <button type="button" className="flex shrink-0 items-center gap-1 hover:text-zinc-300" onClick={() => setPage("observability")} title="Runtime details">
         <Server className="h-2.5 w-2.5" aria-hidden />
