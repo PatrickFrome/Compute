@@ -300,7 +300,17 @@ jobs:
               Start-Sleep -Milliseconds 250
             }
 
-            if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
+                        $normalText = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
+            if ($normalText -notmatch '"state":"ME2_R75_UI_CONTRACT_CONFIRMED"') {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'installed_me2_r75_dom_contract_not_confirmed'
+            }
+            if ($normalText -match '"state":"ME2_R75_UI_CONTRACT_INCOMPLETE"') {
+              throw 'installed_me2_r75_dom_contract_incomplete'
+            }
+
+if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
@@ -313,6 +323,7 @@ jobs:
 
             $proof.preconnect_armed = $true
             $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_r75_dom_contract_verified -NotePropertyValue $true -Force
             $proof | Add-Member -NotePropertyName legacy_recovery_shell_visible_on_normal_startup -NotePropertyValue $false -Force
             $proof | Add-Member -NotePropertyName normal_shell_mode -NotePropertyValue 'ME2_PRIMARY' -Force
             $proof.clean_genesis_control_verified = $true
