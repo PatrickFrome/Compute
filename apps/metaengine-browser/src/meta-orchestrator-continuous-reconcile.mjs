@@ -110,7 +110,7 @@ function safetyState(plan, tasks) {
     if (!roles.length) continue;
     const parentPoint = String(node.point_id).toLowerCase();
     const parentState = taskState(tasks, parentPoint);
-    if (parentState !== 'RESULT_READY') continue;
+    if (!['RESULT_READY', 'COMPLETED'].includes(parentState)) continue;
 
     const missing = [];
     for (const role of roles) {
