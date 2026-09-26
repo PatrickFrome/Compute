@@ -20,7 +20,7 @@
 |-----|-----------|------|
 | 413338 | каждые 15 мин (agentTurn) | Проверка /home/z/.a2/.github.env (GITHUB_TOKEN_ADMIN). Если есть → `cd /home/z/my-project && bash scripts/push-pending-r80.sh` (main→sandbox/me2-os ff + 2 архив-ветки me2/archive-r21-sandbox-snapshot, me2/archive-v040-main-archive) + запись ls-remote в worklog. Если нет → однострочная пометка «PAT ожидается, push-pending готов (ba623a59)». Секреты не печатать. |
 | Context Guard (416526) | каждые 15 мин (fixed_rate 900s) | Выполняет /home/z/context-vault/context-guard.sh — снапшоты worklog/CONTEXT, детект усечения, авторестор, git-история, /tmp-зеркало, push context-vault при PAT. Феникс-скрипт встроен в payload задачи. |
-| PHX-HEARTBEAT (416629) | каждые 30 мин (fixed_rate 1800s) | phoenix-heartbeat.sh v2.0: строит CONTEXT-CURRENT.md digest, грузит latest/* + versioned в Supabase (sha-дедуп), зеркалит в ossfs + /tmp + PolarFS. Феникс-скрипт (компакт-эталон) встроен в payload. |
+| PHX-HEARTBEAT (417373, был 416629) | каждые 30 мин (fixed_rate 1800s) | phoenix-heartbeat.sh v2.2: строит CONTEXT-CURRENT.md digest, грузит latest/* + versioned в Supabase (sha-дедуп), зеркалит в ossfs + /tmp + PolarFS. Феникс-скрипт (компакт-эталон) встроен в payload. |
 | CTX-SHARD-A (416554) | ежегодно 09.09 (cron «0 0 0 9 9 ?») | ОФЛАЙН-копия CONTEXT.md + эталон guard-скрипта внутри payload — переживает env-reset VM. Read-only; при срабатывании отвечать «shard-ok». |
 | CTX-SHARD-B (416555) | ежегодно 09.09 (cron «0 0 0 9 9 ?») | ОФЛАЙН-копия: протокол восстановления + хвост worklog + ключевые факты R80. Read-only. |
 | CTX-VAULT-COMPACTOR (416631) | каждый час (fixed_rate 3600s) | Рефреш шардов: CONTEXT.md + PHOENIX-PROTOCOL.md + guard → SHARD-A; индекс 15 секций + хвост worklog 60 строк + протокол v2 → SHARD-B; верификация get → удаление старых генераций. Устаревание шарда ≤1ч (было 24ч). Лимит payload ≤10000 симв. |
@@ -65,9 +65,9 @@
 
 0. **phoenix-restore.sh v2.0** — кворум 8 источников (local, vault/latest, vault-snapshot, vault-git, /tmp, PolarFS, ossfs, Supabase): `--check` (вердикт OK/НЕПОЛНАЯ/УСЕЧЕНИЕ), `--restore` (рестор из наибольшего, truncated-архив), `--merge` (СЕКЦИОННЫЙ merge-append: добавляет только отсутствующие блоки «---/Task ID», dedup по sha тела — безопасно для мульти-чатов, ничего не удаляет).
 0a. **phoenix-snapshot.sh v2.0** — write-ahead снапшот ПЕРЕД любой правкой worklog/CONTEXT (snapshots-wa/, ротация 60, sha-дедуп).
-0b. **phoenix-heartbeat.sh v2.0** (каждые 30 мин, Job 416629) — CONTEXT-CURRENT.md digest + Supabase latest/versioned + ossfs зеркала + /tmp/PolarFS. Окно внешней копии ≤30 мин (было: только вручную).
+0b. **phoenix-heartbeat.sh v2.2** (каждые 30 мин, Job 417373; payload несёт ASCII-compact эталон — лимит 10К + \u-escaping) — CONTEXT-CURRENT.md digest + Supabase latest/versioned + ossfs зеркала + /tmp/PolarFS. Окно внешней копии ≤30 мин (было: только вручную).
 1. context-guard.sh v1.0 (каждые 15 мин, Job 416526): снапшот worklog/CONTEXT при изменении; если worklog удалён/усечён >40% при эталоне >1000B — автокопия «truncated-*» и РЕСТОР из последнего снапшота; журнал; git-коммит в vault/repo; зеркало в /tmp; push ветки context-vault при PAT.
-2. Феникс-свойство ×2: guard-скрипт встроен в Job 416526, heartbeat-скрипт (компакт-эталон) встроен в Job 416629 — при полном wipe оба пересоздаются из cron-хранилища автоматически.
+2. Феникс-свойство ×2: guard-скрипт встроен в Job 416526, heartbeat-скрипт (compact-эталон v2.2) встроен в Job 417373 — при полном wipe оба пересоздаются из cron-хранилища автоматически.
 3. Протокол агентов: (a) в начале работы: `bash scripts/phoenix/phoenix-restore.sh --check` → CONTEXT.md → CONTEXT-CURRENT.md → хвост worklog; (b) ПЕРЕД правкой worklog/CONTEXT — `phoenix-snapshot.sh`; (c) append-only, незнакомые Task ID = валидные мульти-чат записи; (d) изменения состояния — обновлять CONTEXT.md; (e) секреты не печатать/не логировать; (f) после значимой работы — дать heartbeat/guard отработать (≤30 мин до внешней копии).
 4. Cron-шард-хранилище: CTX-SHARD-A/B (Job 416554/416555) — CONTEXT.md + guard + протокол + хвост worklog ВНУТРИ payload. COMPACTOR (Job 416631) ежечасно пересоздаёт (gen<дата>). Roundtrip верифицирован; лимит payload 10000 символов (компакт-эталоны).
 5. Supabase (ВНЕ платформы): heartbeat грузит latest/* (11 объектов, sha-дедуп) + versioned/<ts>/worklog.md (раз в ≥3ч при изменении). Верифицирован бит-в-бит (GET=локаль sha12 243cb67bda33).
@@ -80,7 +80,7 @@
 2. Проверить /home/z/my-project/.git (глубокие блобы, reflog) — история в git-объектах могла пережить reset; полный клон из bundle: `git clone /home/sync/me2-context-backups/bundles/repo-all-*.bundle`.
 3. Supabase: GET $SU/storage/v1/object/me2-evidence/context-vault/latest/worklog.md (creds в /tmp/my-project/.a2-backup/me2.env.20260922) или `phoenix-restore.sh --merge` (скачает сам).
 4. Cron-шарды: cron list/get по префиксу CTX-SHARD — CONTEXT.md + guard-скрипт + протокол + индекс секций.
-5. Феникс: Job 416526 и 416629 пересоздают guard/heartbeat скрипты из своих payload автоматически при следующих тиках.
+5. Феникс: Job 416526 и 417373 пересоздают guard/heartbeat скрипты из своих payload автоматически при следующих тиках.
 6. Проверить probe-файлы (reset-probe-*.md в 5 локациях) → определить актуальную границу reset.
 7. Выполнить bash /home/z/context-vault/context-guard.sh; дальше — §8.
 

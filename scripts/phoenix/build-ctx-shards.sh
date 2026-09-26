@@ -39,10 +39,10 @@ grep "^Task ID:" "$PROJ/worklog.md" | tail -n 15 > "$CPW"
   cat << 'PROT'
 (1) bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check → кворум 8 источников
 (2) --merge при усечении worklog
-(3) креды Supabase: /tmp/my-project/.a2-backup/me2.env.20260922 (JWT-статус см. worklog SEC-JWT-RESTORE-1: переданное оператором 88B-значение REST=401, нужен eyJ... или sb_secret_...)
+(3) креды Supabase: /tmp/my-project/.a2-backup/me2.env.20260922 (JWT ВОССТАНОВЛЕН 2026-09-27, REST=200 — см. worklog SEC-RESTORE-2; 88B-blob в архиве)
 (4) full-копии: Supabase me2-evidence/context-vault/latest/ (нужен живой service JWT), ossfs /home/sync/me2-context-backups/latest/
 (5) скрипты phoenix: /home/z/my-project/scripts/phoenix/ и vault/latest (phoenix-restore/heartbeat/snapshot/secrets-restore.sealed/self-evolve.sealed/full-audit)
-(6) PHX-HEARTBEAT=Job 416629, Guard=416526 (ctx-vault), PAT-watcher=413338 (push-pending R80)
+(6) PHX-HEARTBEAT=Job 417373 (v2.2; старый 416629 удалён при обновлении payload), Guard=416526 (ctx-vault), PAT-watcher=413338 (push-pending R80)
 PROT
   echo "<<<CTX-END>>>"
 } > /tmp/CTX-SHARD-B.md
