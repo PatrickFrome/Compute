@@ -10,6 +10,7 @@ import {
   normalizeShellLayoutState,
   planShellLayout,
 } from '../src/shell-layout.mjs';
+import { projectMe2UiRoutingAuthority } from '../src/me2/me2-ui-host.mjs';
 
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
@@ -130,4 +131,69 @@ test('installed ME2 primary shell is attested from main-process CDP DOM geometry
   assert.match(main, /browser_command_authority:\s*false/);
   assert.match(main, /update_authority:\s*false/);
   assert.match(main, /release_authority:\s*false/);
+});
+
+
+test('ME2 UI routing authority is revoked on stop, degradation, or owned-process loss', () => {
+  const liveChild = { pid: 4242, exitCode: null, signalCode: null };
+  const healthy = projectMe2UiRoutingAuthority({
+    mode: 'spawned',
+    state: 'HEALTHY',
+    child: liveChild,
+    stopped: false,
+    allowExternalAdopt: false,
+  });
+  assert.equal(healthy.child_owned, true);
+  assert.equal(healthy.routing_authorized, true);
+  assert.equal(healthy.initial_readiness_confirmed, true);
+
+  const stopped = projectMe2UiRoutingAuthority({
+    mode: 'spawned',
+    state: 'HEALTHY',
+    child: liveChild,
+    stopped: true,
+    allowExternalAdopt: false,
+  });
+  assert.equal(stopped.child_owned, false);
+  assert.equal(stopped.routing_authorized, false);
+  assert.equal(stopped.initial_readiness_confirmed, false);
+
+  const degraded = projectMe2UiRoutingAuthority({
+    mode: 'spawned',
+    state: 'DEGRADED',
+    child: liveChild,
+    stopped: false,
+    allowExternalAdopt: false,
+  });
+  assert.equal(degraded.routing_authorized, false);
+
+  const exited = projectMe2UiRoutingAuthority({
+    mode: 'spawned',
+    state: 'HEALTHY',
+    child: { pid: 4242, exitCode: 1, signalCode: null },
+    stopped: false,
+    allowExternalAdopt: false,
+  });
+  assert.equal(exited.child_owned, false);
+  assert.equal(exited.routing_authorized, false);
+
+  const adopted = projectMe2UiRoutingAuthority({
+    mode: 'adopted',
+    state: 'ADOPTED',
+    child: null,
+    stopped: false,
+    allowExternalAdopt: true,
+  });
+  assert.equal(adopted.external_adopt_authorized, true);
+  assert.equal(adopted.routing_authorized, true);
+
+  const adoptedStopped = projectMe2UiRoutingAuthority({
+    mode: 'adopted',
+    state: 'STOPPED',
+    child: null,
+    stopped: true,
+    allowExternalAdopt: true,
+  });
+  assert.equal(adoptedStopped.external_adopt_authorized, false);
+  assert.equal(adoptedStopped.routing_authorized, false);
 });
