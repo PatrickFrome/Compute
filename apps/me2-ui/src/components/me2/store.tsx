@@ -53,6 +53,7 @@ interface Me2State {
   // навигация
   page: PageKey;
   recentPages: PageKey[];
+  pageHistoryIndex: number;
   workspace: WorkspaceKey;
   // оверлеи
   paletteOpen: boolean;
@@ -82,6 +83,23 @@ let initGuard = false;
 const PAGE_LS = "me2.page.v1";
 const WS_LS = "me2.workspace.v1";
 
+function syncPagePresentation(p: PageKey) {
+  try {
+    localStorage.setItem(PAGE_LS, p);
+    history.replaceState(null, "", `#${p}`);
+  } catch { /* private mode */ }
+  try {
+    const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
+    void shell?.setPrimaryPage?.(p);
+  } catch { /* Browser preload bridge absent in web-only mode */ }
+  void (async () => {
+    try {
+      const { me2Desktop } = await import("@/lib/me2-desktop");
+      me2Desktop()?.tabs.setActive("page", p);
+    } catch { /* bridge absent */ }
+  })();
+}
+
 export const useMe2 = create<Me2State>((set, get) => ({
   connected: false,
   snap: null,
@@ -91,6 +109,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   nowMs: Date.now(),
   page: "command",
   recentPages: ["command"],
+  pageHistoryIndex: 0,
   workspace: "development",
   paletteOpen: false,
   dialog: null,
@@ -125,7 +144,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const stored = localStorage.getItem(PAGE_LS);
         const raw = (PAGES.some((p) => p.key === h) && h) || stored;
         if (raw && PAGES.some((p) => p.key === raw)) {
-          set({ page: raw as PageKey, recentPages: [raw as PageKey] });
+          set({ page: raw as PageKey, recentPages: [raw as PageKey], pageHistoryIndex: 0 });
           try {
             const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
             void shell?.setPrimaryPage?.(raw);
@@ -211,11 +230,14 @@ export const useMe2 = create<Me2State>((set, get) => ({
         } else if (e.key === "0") {
           e.preventDefault(); get().setPage("system");
         } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          const rp = get().recentPages;
-          if (rp.length > 1) {
+          const st = get();
+          const delta = e.key === "ArrowLeft" ? -1 : 1;
+          const nextIndex = st.pageHistoryIndex + delta;
+          if (nextIndex >= 0 && nextIndex < st.recentPages.length) {
             e.preventDefault();
-            const idx = e.key === "ArrowLeft" ? Math.max(0, rp.length - 2) : Math.min(rp.length - 1, 1);
-            get().setPage(rp[idx]);
+            const target = st.recentPages[nextIndex];
+            set({ page: target, pageHistoryIndex: nextIndex });
+            syncPagePresentation(target);
           }
         }
       }
@@ -251,25 +273,17 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   setPage: (p) => {
-    set((st) => ({
-      page: p,
-      recentPages: st.recentPages[0] === p ? st.recentPages : [p, ...st.recentPages.filter((x) => x !== p)].slice(0, 6),
-    }));
-    try {
-      localStorage.setItem(PAGE_LS, p);
-      history.replaceState(null, "", `#${p}`);
-    } catch { /* приватный режим */ }
-    try {
-      const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-      void shell?.setPrimaryPage?.(p);
-    } catch { /* Browser preload bridge absent in web-only mode */ }
-    // Electron TabRegistry
-    void (async () => {
-      try {
-        const { me2Desktop } = await import("@/lib/me2-desktop");
-        me2Desktop()?.tabs.setActive("page", p);
-      } catch { /* мост отсутствует */ }
-    })();
+    set((st) => {
+      if (st.page === p) return st;
+      const prefix = st.recentPages.slice(0, st.pageHistoryIndex + 1);
+      const history = [...prefix, p].slice(-20);
+      return {
+        page: p,
+        recentPages: history,
+        pageHistoryIndex: history.length - 1,
+      };
+    });
+    syncPagePresentation(p);
   },
 
   setWorkspace: (w) => {
