@@ -273,6 +273,12 @@ Task-specific Workspaces/Pages validate the current METAENGINE model: Page = fun
 **Ray / Grafana**
 Operational views are separated by question (jobs, logs, cluster, metrics) and dashboards are parameterized rather than cloned. METAENGINE should keep TASKS / COMPUTE / OBSERVABILITY distinct and add Saved View variables instead of duplicating panels.
 
+### Navigation finding: the advertised back/forward shortcut was not a history
+
+The repeat audit also falsified the old `Alt+← / Alt+→` behavior. `recentPages` was maintained as an MRU list, but the shortcut derived indexes from list length, so “back” could jump several contexts and “forward” did not represent a forward stack.
+
+R85 now keeps a chronological bounded page trail plus an explicit cursor. A normal Page navigation truncates stale forward history, while Alt+Left/Right moves the cursor without appending a synthetic visit. Page persistence, Electron presentation routing and hash state use the same presentation-sync function.
+
 ### Native composition finding: renderer overlays vs WebContentsView
 
 The repeat pass found a cross-process UI composition defect that source-only CSS review would miss. On COMMAND, the actual Browser is a native Electron `WebContentsView` placed above the ME2 renderer. A renderer-only modal, palette, attention popover or workspace menu can therefore be physically occluded by the native Browser even when its CSS z-index is higher.
