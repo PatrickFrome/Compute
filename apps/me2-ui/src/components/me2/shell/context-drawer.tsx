@@ -3,6 +3,8 @@
 // On COMMAND, main-process native geometry reserves the same 200px so renderer
 // controls cannot be covered by the Browser WebContentsView.
 
+import { useCallback, useEffect, useRef } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Activity, Bot, Crosshair, Database, ListChecks, ScanSearch, Server, X } from "lucide-react";
 import { useMe2, type ContextDrawerTab } from "@/components/me2/store";
 import { EVENT_STYLE, hhmmss } from "@/lib/me2-bus";
@@ -110,6 +112,59 @@ export function ContextDrawer() {
   const snap = useMe2((s) => s.snap);
   const mirror = useMe2((s) => s.mirror);
   const connected = useMe2((s) => s.connected);
+  const resizeCleanup = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => {
+    resizeCleanup.current?.();
+    resizeCleanup.current = null;
+  }, []);
+
+  const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    resizeCleanup.current?.();
+
+    const startY = event.clientY;
+    const startHeight = height;
+    let nextHeight = height;
+    let frame = 0;
+
+    const cleanup = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      resizeCleanup.current = null;
+    };
+    const move = (pointerEvent: PointerEvent) => {
+      nextHeight = Math.max(160, Math.min(360, startHeight + startY - pointerEvent.clientY));
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        setHeight(nextHeight, false);
+      });
+    };
+    const finish = () => {
+      cleanup();
+      setHeight(nextHeight, true);
+    };
+
+    resizeCleanup.current = cleanup;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+  }, [height, setHeight]);
+
+  const resizeByKeyboard = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    let next: number | null = null;
+    if (event.key === "ArrowUp") next = Math.min(360, height + 20);
+    else if (event.key === "ArrowDown") next = Math.max(160, height - 20);
+    else if (event.key === "Home") next = 160;
+    else if (event.key === "End") next = 360;
+    if (next == null) return;
+    event.preventDefault();
+    setHeight(next, true);
+  }, [height, setHeight]);
 
   if (!open) return null;
 
@@ -121,6 +176,24 @@ export function ContextDrawer() {
       data-drawer-height={height}
       aria-label="Context Drawer"
     >
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-label="Resize Context Drawer"
+        aria-orientation="horizontal"
+        aria-valuemin={160}
+        aria-valuemax={360}
+        aria-valuenow={height}
+        aria-valuetext={height === preferredHeight ? `${height}px` : `${height}px effective; ${preferredHeight}px preferred`}
+        aria-controls="context-drawer-content"
+        data-testid="context-drawer-resizer"
+        onPointerDown={beginResize}
+        onKeyDown={resizeByKeyboard}
+        className="group relative h-1.5 shrink-0 cursor-row-resize bg-zinc-900 outline-none focus-visible:bg-cyan-950"
+        title="Drag to resize · ↑/↓ 20px · Home/End"
+      >
+        <span className="pointer-events-none absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 bg-zinc-700 group-hover:bg-cyan-700" />
+      </div>
       <div className="flex h-8 shrink-0 items-center border-b border-zinc-800/80 px-2">
         <div className="flex h-full items-stretch" role="tablist" aria-label="Context Drawer tabs">
           {TABS.map(({ key, label, icon: Icon }) => (
@@ -194,7 +267,7 @@ export function ContextDrawer() {
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto mc-scroll">
+      <div id="context-drawer-content" className="min-h-0 flex-1 overflow-auto mc-scroll">
         {tab === "selection" ? <SelectionPane /> : null}
         {tab === "events" ? (
           <div className="font-mono text-[10px]" data-testid="context-drawer-events">
