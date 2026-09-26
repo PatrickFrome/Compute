@@ -9688,3 +9688,37 @@ Work Log:
 Stage Summary:
 - UI-P1 закрыт: навигация/skeleton/empty-states — фундамент пересборки по паттернам Linear/Vercel/Datadog
 - следующие фазы (кандидаты backlog): Phase-2 — группировка 15 панелей в 3 домена (Runtime/Convergence/Evidence) с секционными заголовками; Phase-3 — ⌘K command palette; Phase-4 — Chip title типизация (34 tsc-шума); Phase-5 — persisted collapse-state панелей
+
+---
+Task ID: R85-UI-REBUILD-1
+Agent: Super-Z (main session, директива оператора: критический аудит UI + ресёрч аналогов + пересборка, 2026-09-27 05:0x MSK+8)
+Task: критический аудит механик/интерфейса/UI, глубокий ресёрч лучших аналогов, оптимизация и пересборка UI (round 8, / route)
+
+Work Log:
+- АУДИТ (agent-browser, 6 скриншотов + DOM-метрики): 128 border-элементов, 102 mono-чипа, вечные «загрузка…» спиннеры (10 панелей), 6 постоянных красных ERR-боксов по известным JWT/cred-pending 404 (alarm fatigue), raw JSON-дампы в журнале событий, дисбаланс колонок (мёртвые зоны), chip-перегрузка заголовков
+- РЕСЁРЧ (web-search × 6 запросов): Grafana/Datadog observability patterns; «severity ≠ confidence» (alert fatigue prevention); skeletons > spinners (perceived performance); resilient UI (graceful failures + actionable hints); Linear/Vercel restrained color + density; dashboard 8 rules (visual hierarchy, consistent card anatomy, meaningful color only for status)
+- ПРИМИТИВЫ (консолидировано с параллельным UI-P1 раундом, engine v1.13): Skeleton/PanelLoading/EmptyState (UI-P1) + ErrBox (мой: known-issue muted стиль — авто-детект HTTP 401/403/404/JWT/pending → приглушённый zinc-бокс с amber-точкой + hint, неожиданные ошибки → громкий rose role=alert) + eventHuman (парсинг payload/subject как object|JSON-string → title/name/action/role/id extraction, fallback k=v-пары, полный JSON в tooltip)
+- ПРИМЕНЕНО: 7 ERR-боксов → ErrBox (6 стали known-issue muted, daemon-fail остался громким), 6 header-чипов ERR(p0) → known(warn) с title-объяснением, журнал событий гуманизирован (rawJsonSpans 0, humanSpans 6+: «ME2 smoke…», «Ресёрч…», IMPLEMENTER/RESEARCHER/node_daemon), main grid +content-start
+- ИНФРА: dev-сервер пал mid-session (порт-гонка двух next dev) — рестарт по процедуре (полный путь node_modules/.bin), EADDRINUSE проигравший instancia отмерла, победитель здоров
+- ВЕРИФИКАЦИЯ (gateway :81 + agent-browser): 15 панелей, known-boxes рендерятся в обеих темах (bg oklab 0.985 light / dark surface), theme toggle dark↔light roundtrip жив (localStorage persists), mobile 390×844 без h-scroll, console errors=0 (после чистой загрузки), lint 0/0
+- ПУБЛИКАЦИЯ: консолидированный коммит d262e762 (UI-P1 + R85 вместе) на rail sandbox/me2-os, ls-remote verify
+
+Stage Summary:
+- alarm-fatigue устранён: постоянные известные ограничения больше не кричат красным — семантика «known/degraded» отделена от «down»
+- журнал читаем: человекочитаемые payload вместо JSON-мусора, полный JSON в tooltip
+- загрузка ощущается быстрой: skeleton-примитивы вместо спиннеров
+- движок консолидирован на v1.13 (параллельный раунд добавил jump-nav + panel anchors + EmptyState — принято)
+- следующий шаг пересборки: балансировка колонок под реальные высоты панелей (masonry-оценка), дедупликация chip-строк header
+
+---
+Task ID: EVOLVE-ROUND-8
+Agent: self-evolve v1.13 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.13
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-FOOTER] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-FOOTER'
+
+Stage Summary:
+- раунд 8 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
