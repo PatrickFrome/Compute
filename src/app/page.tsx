@@ -7,6 +7,7 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTheme } from 'next-themes'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,7 +16,7 @@ import { useToast } from '@/hooks/use-toast'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts'
 import {
   Activity, AlertTriangle, BadgeCheck, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitMerge, GitPullRequest, HeartPulse,
-  Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
+  Layers, ListChecks, Loader2, Moon, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Sun, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
 // ---------------------------------------------------------------- utils ----
@@ -760,6 +761,7 @@ function beep(kind: BeepKind): void {
 export default function MissionControl() {
   const { toast } = useToast()
   const [now, setNow] = useState(() => Date.now())
+  const [mounted, setMounted] = useState(false)
   const [health, setHealth] = useState<Health | null>(null)
   const [healthErr, setHealthErr] = useState<string | null>(null)
   const [events, setEvents] = useState<Me2Event[]>([])
@@ -841,6 +843,10 @@ export default function MissionControl() {
   const donorSearchRef = useRef<HTMLInputElement | null>(null)
   const activeStageRef = useRef<HTMLDivElement | null>(null)
   const prevGateRef = useRef<string | null>(null)
+
+  // EV-DARKMODE: тема через next-themes; mounted-флаг защищает SSR-гидрацию иконки
+  const { resolvedTheme, setTheme } = useTheme()
+  useEffect(() => setMounted(true), [])
 
   // ---- 1s live clock for relative ages
   useEffect(() => {
@@ -1383,6 +1389,15 @@ export default function MissionControl() {
               title={`громкость: ${SOUND_LEVELS[levelIdx].label} (клик — переключает тихо→средне→громко; звучит пробный сигнал)`}
             >
               {SOUND_LEVELS[levelIdx].id === 'quiet' ? '◦' : SOUND_LEVELS[levelIdx].id === 'medium' ? '◦◦' : '◦◦◦'}
+            </Button>
+            <Button
+              variant="ghost" size="sm"
+              className="h-8 w-8 touch-hit p-0 text-zinc-400 hover:text-teal-400"
+              onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+              aria-label={mounted && resolvedTheme === 'dark' ? 'Переключить на светлую тему' : 'Переключить на тёмную тему'}
+              title="тема интерфейса: тёмная ↔ светлая (выбор сохраняется в localStorage, переживает перезагрузку)"
+            >
+              {mounted && resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
           </div>
         </div>
