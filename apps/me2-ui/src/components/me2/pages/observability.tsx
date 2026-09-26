@@ -101,6 +101,19 @@ function EventLogPanel() {
   const [laneFilter, setLaneFilter] = useState("ALL");
   const logRef = useRef<HTMLDivElement | null>(null);
   const [frozenSeq, setFrozenSeq] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("me2.obs.events.view.v1");
+      if (saved === "compact" || saved === "full") setViewMode(saved);
+    } catch { /* private mode */ }
+  }, []);
+
+  const changeViewMode = useCallback((mode: "compact" | "full") => {
+    setViewMode(mode);
+    try { localStorage.setItem("me2.obs.events.view.v1", mode); } catch { /* ignore */ }
+  }, []);
 
   // пауза хвоста: фиксируем водяной знак seq в обработчике (список честно заморожен, WS не рвём)
   const toggleTail = useCallback((on: boolean) => {
@@ -129,10 +142,29 @@ function EventLogPanel() {
     return list;
   }, [display, laneFilter, filter]);
 
+  const grouped = useMemo(() => {
+    if (viewMode === "full") return filtered.map((event) => ({ event, count: 1 }));
+    const rows: Array<{ event: Event; count: number }> = [];
+    for (const event of filtered) {
+      const prev = rows[rows.length - 1];
+      if (
+        prev
+        && prev.event.type === event.type
+        && prev.event.task_id === event.task_id
+        && prev.event.agent_id === event.agent_id
+      ) {
+        prev.count += 1;
+      } else {
+        rows.push({ event, count: 1 });
+      }
+    }
+    return rows;
+  }, [filtered, viewMode]);
+
   return (
     <Sec
       id="obs-event-log" title="EVENT LOG" icon={ScrollText}
-      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {filtered.length}</span>}
+      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {grouped.length}/{filtered.length}</span>}
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 pb-2">
@@ -152,6 +184,24 @@ function EventLogPanel() {
               </button>
             ))}
           </div>
+          <div className="flex items-center gap-1 border-l border-zinc-800 pl-2" role="group" aria-label="Плотность Event Log">
+            <button
+              type="button"
+              onClick={() => changeViewMode("compact")}
+              aria-pressed={viewMode === "compact"}
+              className={`px-1.5 py-0.5 font-mono text-[9px] ${viewMode === "compact" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-600 hover:text-zinc-300"}`}
+            >
+              compact
+            </button>
+            <button
+              type="button"
+              onClick={() => changeViewMode("full")}
+              aria-pressed={viewMode === "full"}
+              className={`px-1.5 py-0.5 font-mono text-[9px] ${viewMode === "full" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-600 hover:text-zinc-300"}`}
+            >
+              full
+            </button>
+          </div>
           <label className="flex shrink-0 items-center gap-1 text-[10px] text-zinc-500" title="прилипание к свежим событиям (лента prepend'ит сверху); пауза честно замораживает список">
             {liveTail ? "live" : "пауза"}
             <Switch checked={liveTail} onCheckedChange={toggleTail} aria-label="Живой хвост событий" className="scale-75" />
@@ -165,14 +215,15 @@ function EventLogPanel() {
           ref={logRef} data-testid="event-log"
           className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-0.5 font-mono text-[10.5px] leading-relaxed [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent"
         >
-          {filtered.length === 0 && (
+          {grouped.length === 0 && (
             <p className="p-4 text-center text-zinc-500">{events.length ? "ничего не найдено по фильтру" : "ожидание событий…"}</p>
           )}
-          {filtered.map((e) => (
+          {grouped.map(({ event: e, count }) => (
             <div key={e.seq} className="flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
               <span className="shrink-0 text-zinc-600">{e.seq}</span>
               <span className="shrink-0 text-zinc-500">{hhmmss(e.ts)}</span>
               <span className={`w-36 shrink-0 truncate font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`} title={e.type}>{e.type}</span>
+              {count > 1 ? <span className="shrink-0 border border-zinc-800 px-1 font-mono text-[8px] text-cyan-400">×{count}</span> : null}
               <span className="min-w-0 flex-1 truncate text-zinc-500" title={e.data}>{e.data}</span>
             </div>
           ))}
