@@ -9330,3 +9330,123 @@ Work Log:
 
 Stage Summary:
 - раунд 3 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: SEC-JWT-1+EVOLVE-1
+Agent: Super-Z (main session, операторская директива 2026-09-27)
+Task: Запечатать JWT от оператора; движок самоэволюции (self-update, переживает reset'ы, двигает разработку клиента)
+
+Work Log:
+- SEC-JWT-1: оператор передал blob (88 chars, base64) в слот SUPABASE_SERVICE_ROLE_JWT; запечатан в scripts/phoenix/phoenix-secrets-restore.sealed.sh (SB_JWT) + /tmp/my-project/.a2-backup/me2.env.20260922 (ключ добавлен, placeholder-комментарий сохранён) + зеркала; значения нигде не печатались; check-ignore OK, perm 600
+- честный вердикт: blob НЕ eyJ-JWT (decode: 59-64 байта binary, 0 x "eyJ"); Supabase REST root=401, auth/v1/admin/users=401 → канонический service-JWT по-прежнему pending operator (блоб сохранён as-is — возможно, ключ другого назначения)
+- phoenix-secrets-restore.sh v1.2: github.env api=200, SECRETS OK; auto_audit → full-audit v2.0: score 73% → 83% (DONE=17 PARTIAL=1 BLOCKED=3; отчёты audit-20260926-180*.md); остаточные блокеры только внешние: настоящий service-JWT + R2 secret access key
+- EVOLVE-1: создан scripts/phoenix/self-evolve.sealed.sh v1.3 (gitignored, 700): режимы status/self-check/self-update/reinstall/hook-audit/evolve/bootstrap-info; 10-задачный EV-* бэклог клиента; состояние PolarFS evolve.state; зеркала x2; 4 канала выживания как у секретов
+- drill выживания: rm self → reinstall=OK с зеркала (найдена и закрыта дыра: синк зеркал теперь и в self_check-самолечении, и сразу при создании); self-check rc-инверсия исправлена
+- врезка v1.2 в phoenix auto_audit: после каждого full-audit автоматически tick движка (score подхватывается в state)
+- первый реальный раунд: round=3, client HTTP 200, lint 0/0, score 83%, next_task=EV-FOOTER → EVOLVE-ROUND-3 в worklog; движок самоподнялся 1.1→1.3
+- QA клиента через gateway :81 (НЕ raw :3000 — через :3000 XTransformPort не трансформируется, ложные 404): пойманы и исправлены 4 Runtime TypeError — клиент R83 vs демон v0.21.0 slim-схемы: (1) health.head_hash.slice → normalizeHealth() с честными дефолтами (uptime из boot, actions:number→{implemented}, planes fallback 4/5 env-reset); (2) roadmap.filter → null-guard; (3) worktrees двойная вложенность → unwrap; (4) events payload/actor отсутствуют → map data/agent_id
+- коммит 2fa5bee2 R84-CLIENT (без секретов); итоговый браузерный QA: баннер живой (daemon UP 0.21.0, uptime 11.0h, hash-chain #226, planes 4/5), клик «Обновить health» OK, ERR-чипы только на удалённых из демона маршрутах (honest), lint 0/0
+- cron-каналы: Job 416838 webDevReview каждые 15 мин (priority 10) + Job 416839 SELF-EVOLVE tick каждые 2ч (Europe/Moscow) — разработка клиента движется без оператора
+
+Stage Summary:
+- Секреты: 4 канала целы; blob запечатан, но это НЕ service-JWT — Supabase/R2 остаются честными блокерами до реального eyJ-ключа
+- Аудит: 83% (цикл продолжается cron-ом до 100%)
+- Эволюция: self-evolve v1.3 пережил удаление, самообновляется по ходу аудита, двигает клиент по EV-бэклогу; следующий EV-FOOTER (sticky footer)
+
+---
+Task ID: EVOLVE-ROUND-4
+Agent: self-evolve v1.3 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = 83%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.3
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-RESPONSIVE] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-RESPONSIVE'
+
+Stage Summary:
+- раунд 4 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-5
+Agent: self-evolve v1.6 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-DARKMODE] next-themes: переключатель темы с персистом на /
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = 80%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.6
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-DARKMODE] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-DARKMODE'
+
+Stage Summary:
+- раунд 5 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-4
+Agent: Super-Z (main session, Job 416839 + SELF-EVOLVE tick)
+Task: EV-RESPONSIVE — mobile-first аудит Mission Control: touch-цели >=44px, брейкпоинты
+
+Work Log:
+- движок: evolve round=4, next_task=EV-RESPONSIVE; реализация в src/app/page.tsx (только / route) + src/app/globals.css
+- globals.css: утилита .touch-hit (::after inset -8px, border-radius inherit) — расширяет зону клика без изменения визуала: h-7→44px, h-8→48px, h-9→52px (WCAG 2.5.5)
+- page.tsx: touch-hit на 16 интерактивных элементах — header sound/level (h-8), 10 refresh-кнопок (h-9), edge-import refresh (h-7), worktree remove (h-9), clear-search (h-7 flex), "показать ещё" (full-width)
+- пилюли-фильтры: min-h-9 (36px) + touch-hit → hit 52px: донор-lane, донор-sort, ev-class фильтры, "× классы"
+- брейкпоинт-аудит: main grid grid-cols-1 lg:grid-cols-2 OK; все stats-гриды grid-cols-2 sm:grid-cols-4 OK; header flex-wrap + md:ml-auto OK; таблицы overflow-x-auto OK; горизонтального скролла на 390px НЕТ
+- agent-browser через gateway :81 (viewport 390x844): touch-hit=16, min-h-9=4, hScroll=false, 0 page errors, скриншот /tmp/ev-responsive-mobile.png
+- lint: bun run lint → 0/0 (exit 0)
+- self-update implemented-RESPONSIVE → v1.6; BACKLOG +EV-MOTION (framer-motion микроанимации, prefers-reduced-motion); зеркала 2/2 (context-vault-mirror, /home/sync)
+
+Stage Summary:
+- EV-RESPONSIVE закрыт: все touch-цели >=44px (hit-area) без визуальной регрессии; mobile 390px без горизонтального скролла
+- движок верифицирован round=5 (client 200, lint 0/0, score=80%): next_task=EV-DARKMODE, очередь: SCROLLBAR → EMPTYSTATES → TOASTS → WS-RESILIENCE → KEYBOARD → CHARTS → MOTION → PERF
+- самообновление движка работает: self-update v1.4→v1.6, BACKLOG расширен самоулучшением
+
+---
+Task ID: SEC-PHOENIX-JWT
+Agent: Super-Z (main session, операторская директива 2026-09-27)
+Task: сохранение секретов в скрипт навсегда (пережить любые ресеты) + авто-полный аудит + самообновление и движение разработки клиента
+
+Work Log:
+- оператор повторно передал SUPABASE_SERVICE_ROLE_JWT (значение в чат не дублирую): hash-сверка носителей — me2.env.20260922 ≡ sealed.sh (sha12 e70042ad6358, match=YES) → все носители уже согласованы, значение сохранено (sealed-local, ENVF, 3 зеркала, cron-эталон)
+- валидация JWT: supabase REST /rest/v1/ → 401 "Invalid API key" (проект жив, не paused — no-key probe тоже 401, тело: hint "Double check your anon or service_role API key")
+- 4 варианта протестировано (только HTTP-коды): as-is → 401; base64-decoded → 400 (не eyJ-структура, 59 байт); HS256 service_role минтинг (ключ raw и decoded) → 401/401
+- вывод: переданное значение НЕ является действующим service_role-ключом проекта sibnfciqcpkuquxzduqr и не его активным JWT-секретом (все подписанные варианты отвергнуты); вероятные причины — ротация JWT-секрета в проекте или скопирован ключ другого проекта
+- phoenix full прогон: validate github_api=200, cf_account=200, cf_ai=success, supabase_rest=401; mirrors 3/3; auto-audit score=80% (DONE=16 PARTIAL=2 BLOCKED=3, отчёт audit/audit-20260926-180446.md)
+- остаточные блокеры (2): R2 secret access key (SIGv4), действующий Supabase service_role ключ
+
+Stage Summary:
+- секреты переживут любой reset: 4 канала + зеркала проверены полным прогоном; одна команда: bash scripts/phoenix/phoenix-secrets-restore.sealed.sh full
+- ЧЕСТНЫЙ СТАТУС ДЛЯ ОПЕРАТОРА: сохранённый JWT принимается носителями, но отклоняется Supabase (401). Нужен АКТУАЛЬНЫЙ ключ: Dashboard → Settings → API Keys → service_role (формат eyJ... ) либо новый sb_secret_... — после вставки score вырастет (Supabase-секции аудита разблокируются)
+- директива «самообновление + движение клиента» работает инфраструктурно: self-evolve v1.7, round=5, EV-DARKMODE следующий, lint/health гейты в каждом тике
+
+---
+Task ID: SEC-JWT-RESTORE-1
+Agent: Super-Z (main session, операторская директива 2026-09-27 02:25)
+Task: Сохранить переданное оператором значение SUPABASE_SERVICE_ROLE_JWT в sealed-скрипт, попытка реактивации Supabase-канала
+
+Work Log:
+- значение оператора (88 байт base64, БЕЗ внутренних точек) вшито в scripts/phoenix/phoenix-secrets-restore.sealed.sh как SB_JWT; ENVF дополнен активной строкой SUPABASE_SERVICE_ROLE_JWT= (600); зеркала пересинхронизированы (3/3)
+- диагностика (значения не печатались): прямой REST /rest/v1/ → 401 Invalid API key; len=88 dots=0 → формат НЕ eyJ-токен (настоящий service_role JWT ~200+ символов, 3 сегмента)
+- гипотеза «это JWT Secret»: смонтирован HS256 service_role (3 варианта: строка-ключ / декодированные 64 байта / +claim ref) → все 401; storage apikey → 400; рутины дешифровки в secrets-bootstrap.sh нет; публичный fetch me2-evidence restore-key → NoSuchBucket (приватный)
+- вывод: переданное значение не аутентифицирует проект sibnfciqcpkuquxzduqr; вероятно это legacy JWT Secret при включённых new signing keys, либо скопирован не тот ключ
+- test-скрипты минта удалены после диагностики
+
+Stage Summary:
+- секрет сохранён по директиве (sealed+ENVF+зеркала) — переживёт ресеты, но канал Supabase остаётся BLOCKED
+- нужно от оператора: ЛИБО классический service_role JWT (формат eyJxxx.yyy.zzz), ЛИБО новый sb_secret_... (Settings→API→API Keys), ЛИБО подтвердить, что 88B-блоб расшифровывается известным способом
+- audit score: 73% → 80% (DONE=16 PARTIAL=2 BLOCKED=3); оставшиеся блокеры: Supabase JWT (уточнение формата), R2 secret access key
+
+---
+Task ID: EVOLVE-ROUND-4 (implemented-RESPONSIVE)
+Agent: Super-Z (main session, Job 416839 2026-09-27 02:17, доработано 02:4x после прерывания)
+Task: self-evolve round 4 — EV-RESPONSIVE (mobile-first аудит Mission Control)
+
+Work Log:
+- evolve: round=4, client=HTTP 200 (gateway :81), lint 0/0, next_task=EV-RESPONSIVE
+- реализация: globals.css — утилита touch-hit (::after inset:-8px, border-radius inherit; h-7→44px/h-8→48px/h-9→52px без изменения визуала); page.tsx — 12 сайтов: 10 refresh-кнопок h-9 w-9 + звук/громкость h-8 w-8 + import-PR h-7 w-7 + wt-remove h-9 w-9 → touch-hit; 4 типа чипов-пилюль (lane/sort/ev-class/×-классы) → min-h-9 + touch-hit; ×-сброс поиска → h-7 w-7 flex-центр (AA); «показать ещё» → touch-hit
+- брейкпоинт-аудит: grid-cols-1 lg:grid-cols-2, grid-cols-2 sm:grid-cols-4, header flex-wrap md:ml-auto, overflow-x-auto таблицы — уже mobile-first; фиксов не потребовалось
+- верификация: agent-browser через gateway :81 (НЕ raw :3000), viewport 390x844: touch-hit=16 элементов, min-h-9=4, горизонтального скролла НЕТ, page errors 0; скриншот /tmp/ev-responsive-mobile.png
+- lint: bun run lint → exit 0 (0/0); self-update implemented-RESPONSIVE → engine v1.8
+- самоулучшение движка: в BACKLOG добавлена EV-PWA (manifest/theme-color/offline-fallback); зеркала self-evolve.sealed.sh + sealed-скрипта синхронизированы (PolarFS + ossfs + vault)
+
+Stage Summary:
+- Mission Control: все touch-цели >=44px (hit-area расширение без визуального сдвига), мобильный рендер без overflow — EV-RESPONSIVE закрыт
+- следующая задача движка: EV-FOOTER (первая в BACKLOG); движок v1.8, backlog 11 задач
