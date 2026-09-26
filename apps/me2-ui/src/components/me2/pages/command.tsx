@@ -129,35 +129,37 @@ function AgentSidebar() {
         {filtered.map((s) => (
           <div
             key={s.id}
-            role="button"
-            tabIndex={0}
-            aria-current={chatId === s.id}
-            onClick={() => { setChatId(s.id); void openAgentTab(s); }}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setChatId(s.id); void openAgentTab(s); } }}
-            title={`${s.title} · ${s.role} · ${s.model}${s.objective ? `\n🎯 ${s.objective}` : ""}${s.summary ? `\n${s.summary}` : ""}${s.last_error ? `\n⚠ ${s.last_error}` : ""}`}
-            className={`group mb-0.5 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition ${
+            className={`group mb-0.5 flex items-center rounded-md transition ${
               chatId === s.id ? "bg-zinc-800/70" : "hover:bg-zinc-900/70"
             }`}
           >
-            <span
-              aria-hidden
-              className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-                s.state === "THINKING" ? "animate-pulse bg-violet-400" : "bg-emerald-400"
-              }`}
-            />
-            {s.role === "SUPERVISOR" && <Shield className="h-3 w-3 shrink-0 text-violet-300" aria-hidden />}
-            <span className="min-w-0 flex-1 truncate text-[12px] leading-5 text-zinc-300">{s.title}</span>
-            {(s.outcome_status === "blocked" || s.fail_streak >= 3) && (
-              <span aria-hidden className="shrink-0 font-mono text-[8px] text-rose-400" title={s.outcome_status === "blocked" ? "агент честно заблокирован" : `${s.fail_streak} провалов подряд`}>
-                {s.outcome_status === "blocked" ? "!" : `deg${s.fail_streak}`}
-              </span>
-            )}
+            <button
+              type="button"
+              aria-current={chatId === s.id}
+              onClick={() => { setChatId(s.id); void openAgentTab(s); }}
+              title={`${s.title} · ${s.role} · ${s.model}${s.objective ? `\n🎯 ${s.objective}` : ""}${s.summary ? `\n${s.summary}` : ""}${s.last_error ? `\n⚠ ${s.last_error}` : ""}`}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md px-2 py-1.5 text-left focus-visible:outline-none"
+            >
+              <span
+                aria-hidden
+                className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+                  s.state === "THINKING" ? "animate-pulse bg-violet-400" : "bg-emerald-400"
+                }`}
+              />
+              {s.role === "SUPERVISOR" && <Shield className="h-3 w-3 shrink-0 text-violet-300" aria-hidden />}
+              <span className="min-w-0 flex-1 truncate text-[12px] leading-5 text-zinc-300">{s.title}</span>
+              {(s.outcome_status === "blocked" || s.fail_streak >= 3) && (
+                <span aria-hidden className="shrink-0 font-mono text-[8px] text-rose-400" title={s.outcome_status === "blocked" ? "агент честно заблокирован" : `${s.fail_streak} провалов подряд`}>
+                  {s.outcome_status === "blocked" ? "!" : `deg${s.fail_streak}`}
+                </span>
+              )}
+            </button>
             <button
               type="button"
               aria-label={`Открыть вкладку z.ai агента ${s.title}`}
               title="Показать вкладку chat.z.ai этого агента в браузере"
-              onClick={(e) => { e.stopPropagation(); setChatId(s.id); void openAgentTab(s); }}
-              className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-zinc-800 hover:text-emerald-300 focus:opacity-100 group-hover:opacity-100"
+              onClick={() => { setChatId(s.id); void openAgentTab(s); }}
+              className="mr-1 shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-zinc-800 hover:text-emerald-300 focus:opacity-100 group-hover:opacity-100"
             >
               <ExternalLink className="h-3.5 w-3.5" aria-hidden />
             </button>
