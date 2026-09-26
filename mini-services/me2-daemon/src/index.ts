@@ -19,7 +19,7 @@ import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus, startReadbackWatch } from "./readback";
 import { r82Report } from "./report";
 import { qualificationMatrix } from "./qualify";
-import { mirrorStatus, mirrorHealth, mirrorVerify, startAutoMirror, syncMirror } from "./mirror";
+import { mirrorStatus, mirrorHealth, mirrorVerify, startAutoMirror, syncMirror, adoptContinuation } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 import { planesStatus, envResetState } from "./planes";
@@ -194,6 +194,15 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     // rows + 4 checks) — POST because it is a bounded network-heavy operator
     // action, not a status read; the run lands in the hash-chain as evidence.
     handler: () => mirrorVerify(),
+  },
+  {
+    method: "POST",
+    path: "/mirror/adopt",
+    // R88-ADOPT: operator generation-continuation procedure — chain-verifies
+    // prior-generation rows beyond the cursor (env-reset scenario), records
+    // the adopted range, advances the cursor and flushes pending. Refuses
+    // (mirror_adopt_refused) on any chain/marker failure — never repairs.
+    handler: () => adoptContinuation(),
   },
   {
     method: "GET",

@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts'
 import {
-  Activity, AlertTriangle, BadgeCheck, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitPullRequest, HeartPulse,
+  Activity, AlertTriangle, BadgeCheck, Bell, BellOff, Boxes, Camera, Check, ChevronDown, Cloud, Database, Download, ExternalLink, GitBranch, GitMerge, GitPullRequest, HeartPulse,
   Layers, ListChecks, Loader2, Radio, RefreshCw, Rocket, ShieldAlert, Stethoscope, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -286,6 +286,19 @@ interface MirrorState {
   total_rows_synced: number
   sync_count: number
 }
+// R88-ADOPT: a prior local-chain generation whose mirror rows were adopted
+// (chain-verified: seq + prev_hash + row-hash + marker) after the local chain
+// was reset by env-reset — binding checks are scoped to the current generation
+interface MirrorGeneration {
+  from_seq: number
+  to_seq: number
+  local_from: number
+  local_to: number
+  daemon_versions: string[]
+  adopted_at: string
+  reason: string
+}
+
 interface MirrorStatus {
   ok: boolean
   daemon_version: string
@@ -295,6 +308,10 @@ interface MirrorStatus {
   state: MirrorState
   local_last_seq: number
   pending: number
+  // R88-ADOPT: live tail beyond cursor AND carries our marker — the
+  // generation-gap scenario the adopt-continuation procedure closes
+  adoptable: boolean
+  generations: MirrorGeneration[]
   auto_sync: { interval_ms: number; boot_delay_ms: number; running: boolean; next_in_ms: number | null }
   live: {
     checked_at: string | null
@@ -331,9 +348,27 @@ interface MirrorVerifyResult {
   first_broken_seq: number | null
   checks: { seq_continuity: boolean; prev_hash_chain: boolean; row_hashes: boolean; bindings: boolean }
   samples: string[]
+  // R88-ADOPT: rows inside adopted prior-generation ranges (chain-proven,
+  // local binding unprovable by construction) vs current-generation rows
+  generation_rows?: number
+  current_rows?: number
   // R88-RESILIENCE: "secrets_missing" = проверка не выполнилась (env-degraded) —
   // это НЕ нарушение контракта; консоль рендерит amber вместо rose
   error_class?: 'secrets_missing' | 'unknown'
+}
+
+// R88-ADOPT: generation-continuation result (POST /mirror/adopt)
+interface MirrorAdoptResult {
+  ok: boolean
+  adopted: number
+  from_seq: number | null
+  to_seq: number | null
+  daemon_versions: string[]
+  old_local_seq: { from: number; to: number } | null
+  synced_after: number
+  mirror_head_after: number | null
+  already_current: boolean
+  duration_ms: number
 }
 
 // R83-AUTONOMY: R82 before/after diff report (GET /r82/report) — poisoned
@@ -760,6 +795,8 @@ export default function MissionControl() {
   // R83-VERIFY: in-process contract verification (POST /mirror/verify) —
   // result state here; the handler is defined after loadMirror (deps order)
   const [mirrorVerifyRes, setMirrorVerifyRes] = useState<MirrorVerifyResult | null>(null)
+  // R88-ADOPT: last adopt-continuation result (POST /mirror/adopt)
+  const [mirrorAdoptRes, setMirrorAdoptRes] = useState<MirrorAdoptResult | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const backoffRef = useRef(1000)
   const filterRef = useRef<HTMLInputElement | null>(null)
@@ -891,6 +928,35 @@ export default function MissionControl() {
     } finally { setBusy(null) }
   }
 
+  // R88-ADOPT: close the generation gap (env-reset scenario) — chain-verify
+  // prior-generation rows beyond the cursor, record the adopted range,
+  // advance the cursor, flush pending. The daemon REFUSES on any chain or
+  // marker failure; the button only appears when adoptable=true (tail beyond
+  // cursor AND ours) — a truly-foreign tail keeps the manual-reconcile path.
+  const adoptMirrorContinuation = async () => {
+    if (!window.confirm('Закрыть generation-разрыв зеркала adopt-continuation?\n\nDaemon цепочно проверит ВСЕ строки за курсором (seq + prev_hash + row-hash + marker), запишет принятый диапазон как поколение, продвинет курсор к живому хвосту и сразу дочистит pending. Любой сбой цепи — отказ без изменений состояния.')) return
+    setBusy('mirror-adopt')
+    try {
+      const r = await jfetch<MirrorAdoptResult>('/mirror/adopt', { method: 'POST' })
+      setMirrorAdoptRes(r)
+      if (r.already_current) {
+        toast({ title: 'Adopt: нечего принимать', description: `живой хвост #${r.to_seq} уже на курсоре — разрыва нет` })
+      } else {
+        toast({
+          title: `✓ Generation-разрыв закрыт: принято ${r.adopted} строк`,
+          description: `#${r.from_seq}..#${r.to_seq} · ${r.daemon_versions.length} версий демона · старая цепь #${r.old_local_seq?.from}..#${r.old_local_seq?.to} · дочистка ${r.synced_after} событий → mirror #${r.mirror_head_after} · ${r.duration_ms}ms`,
+        })
+      }
+      loadMirror(true)
+    } catch (e) {
+      toast({
+        title: '✗ Adopt отклонён (fail-closed)',
+        description: `${(e as Error).message} — состояние НЕ тронуто; при настоящей foreign-строке нужен ручной reconcile`,
+        variant: 'destructive',
+      })
+    } finally { setBusy(null) }
+  }
+
   useEffect(() => {
     loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence(); loadR82(); loadEdge(); loadReadback(); loadQual()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
@@ -979,6 +1045,7 @@ export default function MissionControl() {
     MIRROR_ANCHOR: 'Operator anchor записан',
     MIRROR_SYNC: 'Evidence зеркалирован в Supabase',
     MIRROR_VERIFY: 'Контракт зеркала проверен',
+    MIRROR_ADOPT: 'Generation-разрыв зеркала закрыт (adopt)',
   }
   useEffect(() => {
     // R83-AUTONOMY: timer-triggered MIRROR_VERIFY runs are the SILENT 6h
@@ -1208,7 +1275,7 @@ export default function MissionControl() {
   // filter) — classes combine with the text query (AND). Counts are live.
   const EV_CLASSES: { id: string; label: string; title: string; match: (t: string) => boolean }[] = [
     { id: 'milestone', label: 'milestone', title: 'milestone-события exit-gate: R82_* и якорь зеркала', match: (t) => t.startsWith('R82_') || t === 'MIRROR_ANCHOR' },
-    { id: 'evidence', label: 'evidence', title: 'доказательные операции: MIRROR_SYNC · MIRROR_VERIFY · EDGE_SNAPSHOT', match: (t) => t === 'MIRROR_SYNC' || t === 'MIRROR_VERIFY' || t === 'EDGE_SNAPSHOT' },
+    { id: 'evidence', label: 'evidence', title: 'доказательные операции: MIRROR_SYNC · MIRROR_VERIFY · MIRROR_ADOPT · EDGE_SNAPSHOT', match: (t) => t === 'MIRROR_SYNC' || t === 'MIRROR_VERIFY' || t === 'MIRROR_ADOPT' || t === 'EDGE_SNAPSHOT' },
     { id: 'lifecycle', label: 'lifecycle', title: 'жизненный цикл демона: DAEMON_BOOT · BUS_CLIENT_*', match: (t) => t === 'DAEMON_BOOT' || t.startsWith('BUS_CLIENT_') },
     { id: 'ops', label: 'ops', title: 'операторские операции: SANDBOX_EXEC · ACTION_INVOKED · WORKTREE_* · RECOVERY_*', match: (t) => t === 'SANDBOX_EXEC' || t === 'ACTION_INVOKED' || t.startsWith('WORKTREE_') || t.startsWith('RECOVERY_') },
   ]
@@ -2496,10 +2563,61 @@ export default function MissionControl() {
                   <span title={mirror.state.last_sync_at}>последний синк {humanS(Math.round((now - Date.parse(mirror.state.last_sync_at)) / 1000))} назад</span>
                 )}
               </div>
-              {mirror.state.last_error && (
+              {mirror.state.last_error && !mirror.adoptable && (
                 <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300" title={`${mirror.state.last_error.code}: ${mirror.state.last_error.message}`}>
                   <span className="font-mono">{mirror.state.last_error.code}</span>: {mirror.state.last_error.message}
                   <div className="mt-1 text-[10px] text-rose-400/70">fail-closed: sync отказался писать — ручной reconcile оператора</div>
+                </div>
+              )}
+              {/* R88-ADOPT: generation-gap panel — live tail beyond cursor AND
+                  ours (env-reset scenario the backlog predicted). Amber, not
+                  rose: the rows are OURS (marker), the local chain simply
+                  restarted. One click chain-verifies + adopts + flushes. */}
+              {mirror.adoptable && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3" role="alert">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-amber-300">⚠ Generation-разрыв: хвост #{mirror.live.last_row?.seq} за курсором #{mirror.state.last_mirror_seq}</span>
+                    <Chip tone="ok" title="живой хвост несёт me2-mirror-v1 маркер — это строки наших прошлых поколений (env-reset), не чужие">наш маркер ✓</Chip>
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-amber-200/80">
+                    Локальная цепь перезапущена env-reset'ом, а Supabase хранит все строки прошлых поколений. Sync честно отказывается (fail-closed) — закрытие разрыва: цепочная верификация каждой строки (seq + prev_hash + row-hash + маркер), запись диапазона как принятого поколения, курсор к хвосту, дочистка pending.
+                  </p>
+                  <Button
+                    size="sm"
+                    className="mt-2 h-9 border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 hover:text-amber-100"
+                    onClick={adoptMirrorContinuation}
+                    disabled={busy === 'mirror-adopt'}
+                  >
+                    {busy === 'mirror-adopt' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <GitMerge className="mr-1.5 h-3.5 w-3.5" />}
+                    Adopt continuation (цепочная проверка + принятие)
+                  </Button>
+                </div>
+              )}
+              {/* R88-ADOPT: adopted generations — durable record of prior local
+                  chains whose mirror rows live on in Supabase */}
+              {mirror.generations.length > 0 && (
+                <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 p-3">
+                  <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-violet-300/80">Принятые поколения (generation-разрывы закрыты)</div>
+                  {mirror.generations.map((g, i) => (
+                    <div key={i} className="mb-1.5 last:mb-0">
+                      <div className="flex flex-wrap items-baseline gap-2 font-mono text-[11px]">
+                        <span className="text-violet-300">поколение {mirror.generations.length - i}</span>
+                        <span className="text-cyan-300/80">#{g.from_seq}..#{g.to_seq}</span>
+                        <span className="text-zinc-400">{(g.to_seq - g.from_seq + 1).toLocaleString('ru')} строк</span>
+                        <span className="text-zinc-500">старая цепь #{g.local_from}..#{g.local_to}</span>
+                        <span className="text-zinc-600" title={g.adopted_at}>{hhmmss(g.adopted_at)}</span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-zinc-600" title={g.reason}>
+                        {g.daemon_versions.length} версий: {g.daemon_versions.slice(0, 4).join(' → ')}{g.daemon_versions.length > 4 ? ` → … → ${g.daemon_versions[g.daemon_versions.length - 1]}` : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* R88-ADOPT: last adopt result (operator feedback loop) */}
+              {mirrorAdoptRes && !mirrorAdoptRes.already_current && (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs text-emerald-300">
+                  ✓ Adopt: {mirrorAdoptRes.adopted} строк #{mirrorAdoptRes.from_seq}..#{mirrorAdoptRes.to_seq} · дочистка {mirrorAdoptRes.synced_after} событий → mirror #{mirrorAdoptRes.mirror_head_after} · {mirrorAdoptRes.duration_ms}ms
                 </div>
               )}
               <div>
@@ -2578,6 +2696,11 @@ export default function MissionControl() {
                     {mirrorVerifyRes.error_class !== 'secrets_missing' && <>
                       <Chip tone="neutral" title="строк прочитано из Supabase (paged, ascending) и проверено">{mirrorVerifyRes.rows_checked} строк</Chip>
                       <Chip tone="neutral" title="последний seq непрерывной цепи от якоря">хвост #{mirrorVerifyRes.head_seq ?? '?'}</Chip>
+                      {typeof mirrorVerifyRes.generation_rows === 'number' && mirrorVerifyRes.generation_rows > 0 && (
+                        <Chip tone="info" title="строки принятых прошлых поколений: цепно доказаны (seq + prev_hash + row-hash + маркер), локальный биндинг непроверяем по построению (та цепь утрачена env-reset'ом)">
+                          {mirrorVerifyRes.generation_rows} поколенч. + {mirrorVerifyRes.current_rows ?? 0} текущ.
+                        </Chip>
+                      )}
                     </>}
                     <Chip tone="neutral">{mirrorVerifyRes.duration_ms}ms</Chip>
                     <span className="text-[10px] text-zinc-500" title={mirrorVerifyRes.started_at}>{hhmmss(mirrorVerifyRes.started_at)}</span>
@@ -2593,7 +2716,7 @@ export default function MissionControl() {
                           ['seq-непрерывность', mirrorVerifyRes.checks.seq_continuity, 'каждая строка = prev+1 от якоря #90013992'],
                           ['prev_hash-цепь', mirrorVerifyRes.checks.prev_hash_chain, 'первая строка биндится к hash якоря, каждая — к предыдущей'],
                           ['hash-пересчёт', mirrorVerifyRes.checks.row_hashes, 'sha256(seq·ts·type·actor·subject·payload·prev_hash·daemon_version) пересчитан для каждой строки'],
-                          ['кросс-биндинги', mirrorVerifyRes.checks.bindings, 'payload.local_seq/local_hash ↔ локальная цепь: hash + тип/актор/subject + payload + ts'],
+                          ['кросс-биндинги', mirrorVerifyRes.checks.bindings, 'payload.local_seq/local_hash ↔ локальная цепь (текущее поколение): hash + тип/актор/subject + payload + ts; строки принятых поколений доказаны цепью и маркером'],
                         ] as const).map(([label, ok, hint]) => (
                           <div key={label} className={`flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] ${ok ? 'border-emerald-500/25 text-emerald-300/90' : 'border-rose-500/30 text-rose-300'}`} title={hint}>
                             {ok ? <Check className="h-3 w-3 shrink-0" /> : <AlertTriangle className="h-3 w-3 shrink-0" />}

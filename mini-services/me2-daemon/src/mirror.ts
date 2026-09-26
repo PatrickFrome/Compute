@@ -89,8 +89,23 @@ async function supa(path: string, init?: RequestInit): Promise<unknown> {
 
 // ------------------------------------------------------------------ state --
 
+// R88-ADOPT: a local-chain generation that no longer exists locally (env-reset
+// wipes data/events.jsonl) but whose mirror rows ARE durably present. The
+// generation records the adopted seq range so verify can scope local-binding
+// checks to the CURRENT generation only (prior-generation rows are proven by
+// the chain itself: seq continuity + prev_hash + row-hash recomputation).
+export interface MirrorGeneration {
+  from_seq: number; // first mirror row of the prior generation
+  to_seq: number; // last mirror row adopted (cursor advanced here)
+  local_from: number; // that generation's local seq range (evidence of extent)
+  local_to: number;
+  daemon_versions: string[]; // daemon versions that wrote rows in the range
+  adopted_at: string;
+  reason: string;
+}
+
 interface MirrorState {
-  schema: "metaengine.mirror.state.v1";
+  schema: "metaengine.mirror.state.v1" | "metaengine.mirror.state.v2";
   anchor: { seq: number; hash: string };
   last_mirror_seq: number; // last mirror row written by this engine (anchor if none)
   last_mirror_hash: string;
@@ -99,6 +114,7 @@ interface MirrorState {
   last_error: { code: string; message: string; at: string } | null;
   total_rows_synced: number;
   sync_count: number;
+  generations?: MirrorGeneration[]; // v2: adopted prior-generation ranges
 }
 
 function sha256(s: string): string {
@@ -143,7 +159,7 @@ let state: MirrorState | null = null;
 
 function initialState(): MirrorState {
   return {
-    schema: "metaengine.mirror.state.v1",
+    schema: "metaengine.mirror.state.v2",
     anchor: { seq: MIRROR_ANCHOR.seq, hash: MIRROR_ANCHOR.hash },
     last_mirror_seq: MIRROR_ANCHOR.seq,
     last_mirror_hash: MIRROR_ANCHOR.hash,
@@ -152,6 +168,7 @@ function initialState(): MirrorState {
     last_error: null,
     total_rows_synced: 0,
     sync_count: 0,
+    generations: [],
   };
 }
 
@@ -164,10 +181,13 @@ function loadState(): MirrorState {
   }
   try {
     const parsed = JSON.parse(readFileSync(STATE_FILE, "utf8")) as MirrorState;
-    if (parsed.schema !== "metaengine.mirror.state.v1" || typeof parsed.last_mirror_seq !== "number") {
+    if (
+      (parsed.schema !== "metaengine.mirror.state.v1" && parsed.schema !== "metaengine.mirror.state.v2") ||
+      typeof parsed.last_mirror_seq !== "number"
+    ) {
       throw new Error("bad schema");
     }
-    state = parsed;
+    state = { ...parsed, generations: parsed.generations ?? [] }; // v1 → v2 read-compat
   } catch {
     // torn/corrupt state is recoverable: the sync RECONCILES against the
     // live tail before writing, so a fresh state can never double-write.
@@ -480,6 +500,149 @@ async function runSync(reason: string): Promise<MirrorSyncResult> {
   }
 }
 
+// ------------------------------------------------------ adopt (R88-ADOPT) --
+
+// Operator procedure for the generation-gap scenario predicted in R88 backlog
+// ("если живой хвост ушёл — sync честно откажется до reconcile — заложить
+// операторскую процедуру adopt-continuation"). Scenario: env-reset wipes the
+// LOCAL chain (data/events.jsonl) but Supabase keeps every row the prior
+// generations mirrored. The new generation's state starts at the anchor, so
+// reconcile sees 100%-ours rows beyond the cursor whose local bindings point
+// at a chain that no longer exists → mirror_diverged_foreign → sync refuses
+// (correct). THIS procedure closes the gap explicitly:
+//   1. chain-verify every row [cursor+1 .. live head]: seq contiguity,
+//      prev_hash linkage from our cursor hash, row-hash recomputation,
+//      me2-mirror-v1 marker presence (a truly foreign row REFUSES adoption);
+//   2. record the range as an adopted generation (extent + versions + reason);
+//   3. advance the cursor to the live head, reset mirrored_local_seq to 0
+//      (the CURRENT generation's events are all unmirrored by definition);
+//   4. MIRROR_ADOPT lands in the local chain (the adoption is itself evidence
+//      and gets mirrored as the first row of the new generation's tail);
+//   5. immediately flush pending via syncMirror("operator").
+// FAIL-CLOSED: any verification failure refuses with mirror_adopt_refused and
+// leaves state untouched — adoption never repairs a broken chain.
+export interface MirrorAdoptResult {
+  ok: boolean;
+  schema: "metaengine.mirror.adopt.v1";
+  adopted: number;
+  from_seq: number | null;
+  to_seq: number | null;
+  daemon_versions: string[];
+  old_local_seq: { from: number; to: number } | null;
+  synced_after: number;
+  mirror_head_after: number | null;
+  already_current: boolean;
+  duration_ms: number;
+}
+
+const ADOPT_PAGE = 200;
+
+function refuse(seq: number, why: string): never {
+  throw new OpError("mirror_adopt_refused", `row #${seq}: ${why} — adoption aborted, state untouched (manual reconcile required)`, 409);
+}
+
+export async function adoptContinuation(): Promise<MirrorAdoptResult> {
+  const t0 = Date.now();
+  const s = loadState();
+  const [head] = await liveTail(1, true);
+  if (!head) throw new OpError("mirror_empty", `${MIRROR_TABLE} returned no rows`, 502);
+  if (head.seq <= s.last_mirror_seq) {
+    return {
+      ok: true, schema: "metaengine.mirror.adopt.v1", adopted: 0,
+      from_seq: null, to_seq: head.seq, daemon_versions: [head.daemon_version],
+      old_local_seq: null, synced_after: 0, mirror_head_after: head.seq,
+      already_current: true, duration_ms: Date.now() - t0,
+    };
+  }
+
+  // ---- 1. chain-verify the orphaned range (fail-closed, no partial state)
+  let cursor = s.last_mirror_seq;
+  let prevHash = s.last_mirror_hash;
+  const versions = new Set<string>();
+  let localFrom: number | null = null;
+  let localTo: number | null = null;
+  let count = 0;
+  while (cursor < head.seq) {
+    const rows = (await supa(
+      `/rest/v1/${MIRROR_TABLE}?select=seq,ts,type,actor,subject,payload,prev_hash,hash,daemon_version&seq=gt.${cursor}&order=seq.asc&limit=${ADOPT_PAGE}`
+    )) as {
+      seq: number; ts: string; type: string | null; actor: string | null; subject: string | null;
+      payload: unknown; prev_hash: string; hash: string; daemon_version: string;
+    }[];
+    if (!Array.isArray(rows) || rows.length === 0 || rows[0].seq !== cursor + 1) {
+      refuse(cursor + 1, `seq-gap: expected #${cursor + 1} as the first row beyond the cursor, got ${Array.isArray(rows) && rows[0] ? `#${rows[0].seq}` : "nothing"}`);
+    }
+    for (const r of rows) {
+      if (r.seq !== cursor + 1) refuse(r.seq, `seq-gap: expected #${cursor + 1}`);
+      if (r.prev_hash !== prevHash) refuse(r.seq, `prev_hash mismatch (chain break from #${cursor})`);
+      const recomputed = rowHash({
+        seq: r.seq, ts: canonTs(r.ts), type: r.type ?? "", actor: r.actor ?? "",
+        subject: r.subject ?? null, payload: typeof r.payload === "string" ? r.payload : JSON.stringify(r.payload),
+        prev_hash: r.prev_hash, daemon_version: r.daemon_version,
+      });
+      if (recomputed !== r.hash) refuse(r.seq, `row-hash mismatch (stored ${r.hash.slice(0, 12)}… ≠ recomputed ${recomputed.slice(0, 12)}…)`);
+      const b = parseBinding({ payload: r.payload } as never);
+      if (!b) refuse(r.seq, "no me2-mirror-v1 marker — truly foreign row (not a prior generation of this engine)");
+      versions.add(r.daemon_version);
+      const ls = b.local_seq ?? 0;
+      localFrom = localFrom == null ? ls : Math.min(localFrom, ls);
+      localTo = localTo == null ? ls : Math.max(localTo, ls);
+      prevHash = r.hash;
+      cursor = r.seq;
+      count += 1;
+      if (cursor >= head.seq) break;
+    }
+  }
+
+  // ---- 2. record the generation + advance the cursor
+  const gen: MirrorGeneration = {
+    from_seq: s.last_mirror_seq + 1,
+    to_seq: head.seq,
+    local_from: localFrom ?? 0,
+    local_to: localTo ?? 0,
+    daemon_versions: [...versions].sort(),
+    adopted_at: new Date().toISOString(),
+    reason: `generation continuation: prior local chain (events #${localFrom ?? "?"}..#${localTo ?? "?"}) lost to env-reset; ${count} rows chain-verified (seq + prev_hash + row-hash) and adopted as durable prior-generation evidence`,
+  };
+  saveState({
+    ...s,
+    schema: "metaengine.mirror.state.v2",
+    last_mirror_seq: head.seq,
+    last_mirror_hash: head.hash,
+    mirrored_local_seq: 0, // current generation: nothing mirrored yet by definition
+    last_error: null,
+    generations: [...(s.generations ?? []), gen],
+  });
+  appendEvent("MIRROR_ADOPT", "operator", `mirror_${head.seq}`, {
+    adopted: count,
+    from_seq: gen.from_seq,
+    to_seq: gen.to_seq,
+    daemon_versions: gen.daemon_versions,
+    old_local_seq: gen.local_from === gen.local_to ? `#${gen.local_from}` : `#${gen.local_from}..#${gen.local_to}`,
+    reason: "env-reset generation gap: prior chain's mirror rows adopted after chain-level verification (bindings of that generation are unprovable locally by construction)",
+  });
+
+  // ---- 3. flush the current generation immediately (operator context)
+  let syncedAfter = 0;
+  let headAfter: number | null = head.seq;
+  try {
+    const r = await syncMirror("operator");
+    syncedAfter = r.synced;
+    headAfter = r.mirror_to_seq;
+  } catch {
+    /* sync failures surface via last_error; the adoption itself succeeded */
+  }
+
+  return {
+    ok: true, schema: "metaengine.mirror.adopt.v1", adopted: count,
+    from_seq: gen.from_seq, to_seq: gen.to_seq,
+    daemon_versions: gen.daemon_versions,
+    old_local_seq: { from: gen.local_from, to: gen.local_to },
+    synced_after: syncedAfter, mirror_head_after: headAfter,
+    already_current: false, duration_ms: Date.now() - t0,
+  };
+}
+
 // ------------------------------------------------------------ verify ----
 
 // R83-VERIFY: the independent contract verifier, IN-PROCESS and callable from
@@ -504,6 +667,12 @@ export interface MirrorVerifyResult {
   first_broken_seq: number | null;
   checks: { seq_continuity: boolean; prev_hash_chain: boolean; row_hashes: boolean; bindings: boolean };
   samples: string[]; // first N violation descriptions (bounded)
+  // R88-ADOPT: rows inside adopted prior-generation ranges are proven by the
+  // chain itself (seq + prev_hash + row-hash + marker); their local bindings
+  // reference a chain generation that no longer exists locally — those rows
+  // are counted here instead of being false-flagged as binding violations.
+  generation_rows?: number;
+  current_rows?: number;
   // R88-RESILIENCE: "secrets_missing" = проверка НЕ ВЫПОЛНИЛАСЬ (env-degraded,
   // amber) — нарушения НЕ найдены, потому что читать было нечего; любое другое
   // значение/отсутствие = обычная семантика ok/violations.
@@ -592,6 +761,15 @@ export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promis
 
       let prevHash = MIRROR_ANCHOR.hash;
       let prevSeq = MIRROR_ANCHOR.seq;
+      // R88-ADOPT: prior-generation ranges adopted via adoptContinuation() —
+      // binding checks are scoped to rows OUTSIDE these ranges (the current
+      // generation). Rows inside are still chain-verified (seq/prev_hash/
+      // row-hash above) and must carry our marker; only their LOCAL binding
+      // is unprovable by construction (that generation's chain is gone).
+      const gens = loadState().generations ?? [];
+      const inAdoptedGeneration = (seq: number): boolean => gens.some((g) => seq >= g.from_seq && seq <= g.to_seq);
+      let generationRows = 0;
+      let currentRows = 0;
       for (const r of rows) {
         if (r.seq !== prevSeq + 1) { flags.seq = false; note(r.seq, `seq-gap: expected ${prevSeq + 1}`); }
         if (r.prev_hash !== prevHash) { flags.prev = false; note(r.seq, "prev_hash mismatch"); }
@@ -600,6 +778,8 @@ export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promis
           flags.hash = false;
           note(r.seq, `row-hash mismatch (stored ${String(r.hash).slice(0, 12)}… ≠ recomputed ${recomputed.slice(0, 12)}…)`);
         }
+        const generationScoped = inAdoptedGeneration(r.seq);
+        if (generationScoped) generationRows += 1; else currentRows += 1;
         // cross-binding via the payload string scalar
         let binding: { mirror?: string; local_seq?: number; local_hash?: string; event?: unknown } | null = null;
         if (typeof r.payload === "string") {
@@ -611,6 +791,10 @@ export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promis
         if (!binding) {
           flags.bind = false;
           note(r.seq, "no me2-mirror-v1 marker in payload");
+        } else if (generationScoped) {
+          // prior-generation row: chain + marker proven above; the local
+          // binding refers to an extinct chain — skipped BY DESIGN, the
+          // adoption event (MIRROR_ADOPT) documents the boundary durably
         } else {
           const le = localMap.get(binding.local_seq ?? -1);
           if (!le) {
@@ -649,6 +833,8 @@ export function mirrorVerify(trigger: "operator" | "timer" = "operator"): Promis
           bindings: flags.bind,
         },
         samples: violations,
+        generation_rows: generationRows,
+        current_rows: currentRows,
       };
       // evidence: the verification run itself is an auditable fact. Operator
       // clicks and timer ticks both land in the chain (payload.trigger tells
@@ -717,6 +903,12 @@ export interface MirrorStatus {
   state: MirrorState;
   local_last_seq: number;
   pending: number;
+  // R88-ADOPT: true when the live tail is BEYOND our cursor and carries our
+  // marker — the generation-gap scenario adoptContinuation() closes. False
+  // when the tail matches the cursor (nothing to adopt) or the tail is truly
+  // foreign (manual reconcile, adoption would refuse anyway).
+  adoptable: boolean;
+  generations: MirrorGeneration[];
   auto_sync: { interval_ms: number; boot_delay_ms: number; running: boolean; next_in_ms: number | null };
   live: {
     checked_at: string | null;
@@ -823,6 +1015,8 @@ export async function mirrorStatus(fresh = false): Promise<MirrorStatus> {
     daemon_version: VERSION,
     round: ROUND,
     fetched_at: new Date().toISOString(),
+    adoptable: !!(live.last_row && live.last_row.seq > s.last_mirror_seq && live.last_row.ours),
+    generations: s.generations ?? [],
     contract: {
       marker: MIRROR_MARKER,
       table: MIRROR_TABLE,

@@ -19,7 +19,7 @@ import { edgeStatus, edgeImportPlan, edgeImportStatus } from "./edge";
 import { readbackStatus } from "./readback";
 import { r82Report } from "./report";
 import { qualificationMatrix } from "./qualify";
-import { mirrorStatus, mirrorVerify, syncMirror } from "./mirror";
+import { mirrorStatus, mirrorVerify, syncMirror, adoptContinuation } from "./mirror";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -59,6 +59,7 @@ export const ACTIONS: ActionDef[] = [
   { name: "mirror.status", family: "controlplane", description: "R83 evidence auto-mirror status: chain cursor, live tail match, pending lag, sync history" },
   { name: "mirror.sync", family: "controlplane", description: "Operator-triggered evidence sync: batch-replicate pending local events into me2_event_mirror (fail-closed on divergence)" },
   { name: "mirror.verify", family: "controlplane", description: "Independent mirror-contract check (in-process port of verify-mirror.mjs): reads ALL rows paged, verifies seq continuity + prev_hash chain + row-hash recompute + local cross-bindings; the run lands in the hash-chain as MIRROR_VERIFY evidence" },
+  { name: "mirror.adopt", family: "controlplane", description: "R88-ADOPT generation-continuation procedure: chain-verify prior-generation rows beyond the cursor (env-reset scenario), record the adopted range, advance the cursor, flush pending; refuses on any chain/marker failure — never repairs a broken chain" },
   { name: "qual.matrix", family: "controlplane", description: "R89 live release-qualification matrix: R86→R90 requirements joined with exact-head workflow runs + confirmed Windows candidate artifact; honest NOT_GATED rows keep coverage gaps visible" },
 ];
 
@@ -141,6 +142,8 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return syncMirror("operator");
     case "mirror.verify":
       return mirrorVerify();
+    case "mirror.adopt":
+      return adoptContinuation();
     case "qual.matrix":
       return qualificationMatrix(args.fresh === true);
     default:

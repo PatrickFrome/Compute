@@ -543,3 +543,37 @@ Backlog следующего раунда (приоритеты):
 3. ОПЕРАТОР: PR #968 — после merge становится R89/R90-фазой: seal-манифест (installer hash/SBOM/provenance) на артефакте 10908498280 + post-install smoke; карточка Qualification автоматически покажет r90.tested-binding → covered.
 4. R86-seam (оператор в работе): durable-миграции принятия результатов задач — когда появится CI-гейт, строка r86.accepted-result-durability станет CI_GATED автоматически (матчинг по подстроке уже готов).
 5. Консоль: авто-тост/звук при переходе r89_exit_gate.pass true→false (гейт упал на живом head) — сейчас переход виден только глазами; per-round фильтр «только пробелы» в карточке квалификации.
+
+---
+Task ID: R88-ADOPT-20260926
+Agent: Z.ai Code (main agent)
+Task: Восстановление 3 credential-плоскостей из сообщения оператора (supabase/cloudflare/supervisor) → live-исполнение предсказанной процедуры adopt-continuation для закрытия generation-разрыва зеркала → фиксация R82-里程碑 (self-update landed + canary confirmed live)
+
+Work Log:
+- Оператор передал в чате недостающие плоскости (cfat_/cfut_/access-key/service-role/supervisor-token): восстановлены /home/z/.a2/{supabase-cloud,cloudflare,supervisor}.env (perms 600, имена ключей совпадают с контрактами loader'ов; значения НЕ в коде/логах/коммитах). planes 4/4 → env_reset.suspected=false → консольный banner исчез сам (ровно как проектировал R88-RESILIENCE).
+- ОБНАРУЖЕН предсказанный сценарий (R88 backlog #2): mirror sync отказался с mirror_diverged_foreign — 505 строк за курсором #90013992. Полный аудит диапазона через PostgREST: ВСЕ 505 строк #90013993..#90014497 наши (me2-mirror-v1 маркер в каждой, 12 версий демона 0.58.0-r81-recovery → 0.69.0-r83autonomy, local_seq 1..505 старой цепи, континуитет без пропусков) — это не foreign-загрязнение, а поколения прошлой локальной цепи, утраченной env-reset #2.
+- РЕАЛИЗОВАНО (daemon 0.72.0-r88adopt): операторская процедура POST /mirror/adopt + action mirror.adopt (31 действие):
+  - adoptContinuation(): цепочная верификация КАЖДОЙ строки за курсором (seq-континуитет + prev_hash от курсорного hash + пересчёт row-hash по документированной формуле + обязательный me2-mirror-v1 маркер; отсутствие маркера или разрыв цепи = mirror_adopt_refused с указанием строки, состояние НЕ тронуто);
+  - запись диапазона как MirrorGeneration (from/to_seq + local_from/to + версии демона + причина) в state schema v2 (metaengine.mirror.state.v2, generations[]; v1 читается обратно-совместимо);
+  - курсор к живому хвосту, mirrored_local_seq=0 (текущее поколение по определению ничего не отзеркалило), MIRROR_ADOPT в локальную цепь, немедленная дочистка pending через syncMirror("operator").
+  - mirrorVerify() стал generation-aware: строки принятых поколений доказываются цепью+маркером, локальный биндинг пропускается ПО КОНСТРУКЦИИ (та цепь утрачена) — иначе каждый 6h-авто-прогон после env-reset ложносигналил бы «local event #N missing»; результат несёт generation_rows/current_rows.
+  - mirrorStatus(): adoptable-флаг (хвост за курсором И наш маркер) + generations в ответе.
+- ИСПОЛНЕНО LIVE: adopt принял 505 строк за 3.5s → generation записан → 86 pending-событий дочищены → mirror head #90014583. Первый пост-adopt verify: 592 строки, 0 нарушений, все 4 проверки OK (505 поколенч. + 87 текущ.). Durable-evidence конвейер снова жив: cursor #90014590, pending ≤3 (таймер доезжает).
+- ЗАФИКСИРОВАНО R82 live (readback watch сам записал в цепь): R82_SELF_UPDATE_LANDED #81 (переход 0.7.0-dev.36089462649.1 → 0.7.0-dev.36228915117.1 @ 15:24:45Z, dev_plane_head=e7fccd08 = merge PR #981) + R82_CANARY_CONFIRMED #82 (live_reason=ROOT_DRAFT_OVERSIZED — канарейка нового кода срабатывает в продакшене, драфт больше НЕ растёт от активности supervisor). Cycle_seq пока 2109 (canary корректно abort-ит из-за отравленного драфта ~29k) — осталась ручная очистка драфта оператором, после которой rollover сходится сам.
+- Внешний статус (GitHub, прямая верификация): PR #982 (R83 edge import) open/ready/mergeable clean @ ad5e01c6c1 — ждёт ревью оператора; PR #968 draft/mergeable clean @ 7740270 — exact-head НЕ двигался; release head e7fccd08 (PR #981 merged) с 42/42 зелёными чеками + publish_manifest SUCCESS.
+- Консоль: amber adopt-панель при adoptable (кнопка + объяснение сценария), violet панель «Принятые поколения» (диапазон + строки + старая цепь + версии демона), emerald результат adopt, чип «505 поколенч. + 93 текущ.» в верификации, MIRROR_ADOPT в milestone-лейблах и evidence-классе фильтра, tooltip кросс-биндингов обновлён.
+- Roadmap evidence: r88_resilience_live.adopt_continuation (полная запись процедуры и live-результата) + credentials_restored_3; header/footer консоли динамически показывают R88-ADOPT.
+- QA (agent-browser через gateway :81): 15 карточек, 0 JS-ошибок, banner отсутствует (planes 4/4), generations-панель рендерится, клик «проверить контракт» → «✓ Контракт держит» + generation-чип, overflowX=false @1920 (bodyH 7757) и @390 (bodyH 16269, footer видим), скриншоты download/r88adopt-{desktop,mobile,mirror-card}.png; lint 0/0; dev.log чист; ОДИН процесс демона.
+
+Stage Summary:
+- Статус: durable-evidence конвейер полностью восстановлен после env-reset #2 — с сохранением доказательной ценности ВСЕХ прошлых поколений (505 строк не потеряны и не слепо приняты: цепочно доказаны и записаны как поколение). Процедура adopt-continuation теперь часть системы (одна кнопка), а не разовый ручной SQL.
+- Ключевой принцип: (1) «sync отказался» — это не баг, а контракт; закрытие разрыва обязано быть отдельной ЯВНОЙ процедурой с собственной верификацией и evidence-событием; (2) generation-aware verify: утраченный локальный биндинг ≠ нарушение — иначе честный verifier после env-reset становится генератором ложных аварий; (3) adoptable-флаг в статусе превращает «ручной reconcile оператора» из инструкции в один клик с точным объяснением, что будет сделано.
+- R82 близок к закрытию: release CI 42/42 ✓ → self-update landed ✓ (live-факт в цепи) → canary подтверждён live ✓ → осталось: оператор чистит драфт (Ctrl+A+Delete, 10 сек) → cycle_seq рост → R82_CYCLE_RESUMED milestone запишется сам.
+- Живое состояние на конец раунда: planes 4/4; daemon 0.72.0-r88adopt (31 действие, 15 карточек); mirror cursor #90014590+, lag ≈ 0; exact-head 7740270 стабилен (PR #968 draft/clean); release e7fccd08 зелёный; supervisor heartbeat жив (ROLLOVER_PENDING, cycle 2109 stale — ждёт очистки драфта).
+
+Backlog следующего раунда (приоритеты):
+1. ОПЕРАТОР (10 секунд, разблокирует R82 полностью): очистить account-draft — new-chat композер chat.z.ai → Ctrl+A → Delete. После этого следить cycle_seq через /r82 + readback (R82_CYCLE_RESUMED milestone + Before/After отчёт дозаполнится сам).
+2. ОПЕРАТОР: ревью+merge PR #982 (R83 edge import, ready/clean) → затем controlled promotion v14 с re-verify digest (cloudflare.env восстановлен — edge-карточка и импорт-статусы снова live).
+3. ОПЕРАТОР: PR #968 (R81 convergence, draft/clean @ 7740270, CI 20/20) → после merge карточка Qualification покажет r90.tested-binding → covered; seal-манифест на артефакте 10908498280.
+4. R86-seam (у оператора): durable-миграции принятия результатов — когда появится CI-гейт, строка r86.accepted-result-durability станет CI_GATED автоматически.
+5. Консоль (мелочи): авто-тост при r89_exit_gate.pass true→false; график draft-size истории в R82-карточке; per-round фильтр «только пробелы» в Qualification.
