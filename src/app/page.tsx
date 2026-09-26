@@ -1071,7 +1071,7 @@ export default function MissionControl() {
         payload: e.payload ?? e.data ?? null,
         hash: e.hash ?? '',
         daemon_version: e.daemon_version ?? '—',
-      }))))).catch(() => {})
+      })))).catch(() => {})
     load()
     const t = setInterval(load, 5000)
     return () => clearInterval(t)
