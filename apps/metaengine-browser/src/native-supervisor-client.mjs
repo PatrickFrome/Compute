@@ -624,6 +624,14 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     return this.#workspaceObservationPromise;
   }
 
+  runtimeBinding(tabId, options = {}) {
+    // R84: read through the already-running BrowserRealtimeProcessPlane/Brain
+    // binding index. No snapshot scan, no second registry, no command authority.
+    const plane = this.#processPlaneRef?.();
+    if (!plane || typeof plane.runtimeBinding !== 'function') return null;
+    return plane.runtimeBinding(tabId, options);
+  }
+
   snapshot() {
     const base = super.snapshot();
     const target = this.#commandTargetProjection?.() || null;
