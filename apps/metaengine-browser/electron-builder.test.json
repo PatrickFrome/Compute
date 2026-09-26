@@ -59,6 +59,13 @@
       ]
     },
     {
+      "from": "me2-daemon-dist",
+      "to": "me2-daemon",
+      "filter": [
+        "**/*"
+      ]
+    },
+    {
       "from": "me2-ui-dist",
       "to": "me2-ui",
       "filter": [
