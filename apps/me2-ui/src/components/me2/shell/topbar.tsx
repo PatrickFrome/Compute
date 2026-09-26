@@ -3,8 +3,8 @@
 // Identity + current context + one global command surface. Runtime telemetry is
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
-import { PAGES, WORKSPACES, useMe2, useKpis } from "@/components/me2/store";
-import { Search, Command, Boxes, Play, AlertTriangle, Radio, BellRing, X } from "lucide-react";
+import { PAGES, WORKSPACES, useMe2 } from "@/components/me2/store";
+import { Search, Command, Boxes, Radio, BellRing, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useEffect, useState } from "react";
 
@@ -17,7 +17,6 @@ export function TopBar() {
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
-  const kpi = useKpis();
   const [attentionOpen, setAttentionOpen] = useState(false);
 
   const setAttention = (open: boolean) => {
@@ -101,21 +100,6 @@ export function TopBar() {
       </button>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[9px]">
-        <span
-          className={`hidden h-7 items-center gap-1.5 border px-2 lg:flex ${
-            kpi.fail > 0
-              ? "border-rose-900/70 bg-rose-950/20 text-rose-300"
-              : "border-zinc-800 bg-zinc-950 text-zinc-400"
-          }`}
-          title={`${kpi.ready} ready · ${kpi.running} running · ${kpi.fail} failed`}
-        >
-          {kpi.fail > 0 ? <AlertTriangle className="h-3 w-3" aria-hidden /> : <Play className="h-3 w-3 text-emerald-500" aria-hidden />}
-          <span>{kpi.running} run</span>
-          <span className="text-zinc-700">·</span>
-          <span>{kpi.ready} ready</span>
-          {kpi.fail > 0 ? <><span className="text-zinc-700">·</span><span>{kpi.fail} fail</span></> : null}
-        </span>
-
         <div className="relative">
           <button
             type="button"
