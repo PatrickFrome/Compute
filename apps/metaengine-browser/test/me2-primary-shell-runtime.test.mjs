@@ -380,6 +380,18 @@ test('R85 page history uses a real cursor for Alt back and forward', () => {
   assert.doesNotMatch(store, /rp\.length - 2/);
 });
 
+test('R85 workspace switch restores workspace-scoped layout preferences', () => {
+  assert.match(store, /me2\.workspace-layouts\.v1/);
+  assert.match(store, /readWorkspaceLayout\(workspace: WorkspaceKey\)/);
+  assert.match(store, /writeWorkspaceLayout\(get\(\)\.workspace, \{ drawerOpen: open \}\)/);
+  assert.match(store, /const layoutPreference = readWorkspaceLayout\(w\)/);
+  assert.match(store, /contextDrawerPreferredOpen: layoutPreference\.drawerOpen/);
+  assert.match(store, /contextDrawerTab: layoutPreference\.drawerTab/);
+  assert.match(me2Command, /me2\.command\.agent-rail\.v2/);
+  assert.match(me2Command, /commandRailStorageKey\(workspace\)/);
+  assert.match(me2Command, /COMMAND_RAIL_LEGACY_LS/);
+});
+
 test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
   assert.match(preload, /const setPrimaryContextDrawer = \(open\) => ipcRenderer\.invoke\('metaengine:shell:primary-context-drawer'/);
   const primaryBranch = preload.slice(
