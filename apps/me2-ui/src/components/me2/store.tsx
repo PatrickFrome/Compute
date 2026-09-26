@@ -41,6 +41,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
 
 export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
+export type ContextDrawerTab = "events" | "commands" | "runtime";
 
 interface Me2State {
   // связь
@@ -60,6 +61,10 @@ interface Me2State {
   dialog: DialogKind;
   detail: Task | null;
   stream: Event[];
+  // contextual drawer (read-only presentation plane)
+  contextDrawerPreferredOpen: boolean;
+  contextDrawerOpen: boolean;
+  contextDrawerTab: ContextDrawerTab;
   // selection (agent-first)
   chatId: string | null;
   // служебное
@@ -72,6 +77,9 @@ interface Me2State {
   setWorkspace: (w: WorkspaceKey) => void;
   setPalette: (open: boolean) => void;
   setDialog: (d: DialogKind) => void;
+  setContextDrawer: (open: boolean) => void;
+  setContextDrawerTab: (tab: ContextDrawerTab) => void;
+  syncContextDrawer: (preferred?: boolean) => void;
   openTask: (id: string) => void;
   closeTask: () => void;
   setChatId: (id: string | null) => void;
@@ -82,6 +90,8 @@ interface Me2State {
 let initGuard = false;
 const PAGE_LS = "me2.page.v1";
 const WS_LS = "me2.workspace.v1";
+const CONTEXT_DRAWER_LS = "me2.context-drawer.open.v1";
+const CONTEXT_DRAWER_TAB_LS = "me2.context-drawer.tab.v1";
 
 function syncPagePresentation(p: PageKey) {
   try {
@@ -115,6 +125,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
   dialog: null,
   detail: null,
   stream: [],
+  contextDrawerPreferredOpen: false,
+  contextDrawerOpen: false,
+  contextDrawerTab: "events",
   chatId: null,
   busyAction: false,
   chromeOverlaySources: [],
@@ -130,6 +143,42 @@ export const useMe2 = create<Me2State>((set, get) => ({
         : st.chromeOverlaySources.filter((item) => item !== key);
       return { chromeOverlaySources: next };
     });
+  },
+
+  syncContextDrawer: (preferred) => {
+    const want = typeof preferred === "boolean" ? preferred : get().contextDrawerPreferredOpen;
+    if (get().page !== "command") {
+      set({ contextDrawerPreferredOpen: want, contextDrawerOpen: want });
+      return;
+    }
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryContextDrawer?: (open: boolean) => Promise<{ effective_open?: boolean } | null>;
+      };
+    }).metaengineShell;
+    if (!shell?.setPrimaryContextDrawer) {
+      set({ contextDrawerPreferredOpen: want, contextDrawerOpen: want });
+      return;
+    }
+    void shell.setPrimaryContextDrawer(want).then((result) => {
+      set({
+        contextDrawerPreferredOpen: want,
+        contextDrawerOpen: typeof result?.effective_open === "boolean" ? result.effective_open : want,
+      });
+    }).catch(() => {
+      set({ contextDrawerPreferredOpen: want, contextDrawerOpen: false });
+    });
+  },
+
+  setContextDrawer: (open) => {
+    set({ contextDrawerPreferredOpen: open });
+    try { localStorage.setItem(CONTEXT_DRAWER_LS, open ? "1" : "0"); } catch { /* private mode */ }
+    get().syncContextDrawer(open);
+  },
+
+  setContextDrawerTab: (tab) => {
+    set({ contextDrawerTab: tab });
+    try { localStorage.setItem(CONTEXT_DRAWER_TAB_LS, tab); } catch { /* private mode */ }
   },
 
   init: () => {
@@ -157,6 +206,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
         }
         const ws = localStorage.getItem(WS_LS) as WorkspaceKey | null;
         if (ws) set({ workspace: ws });
+        const drawerStored = localStorage.getItem(CONTEXT_DRAWER_LS);
+        const drawerPreferred = drawerStored === "1";
+        const drawerTab = localStorage.getItem(CONTEXT_DRAWER_TAB_LS) as ContextDrawerTab | null;
+        if (drawerTab && ["events", "commands", "runtime"].includes(drawerTab)) set({ contextDrawerTab: drawerTab });
+        set({ contextDrawerPreferredOpen: drawerPreferred });
+        get().syncContextDrawer(drawerPreferred);
       } catch { /* приватный режим */ }
     }, 0);
 
@@ -222,6 +277,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable;
       if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
         e.preventDefault(); set({ paletteOpen: !get().paletteOpen });
+      } else if ((e.key === "j" || e.key === "J") && (e.metaKey || e.ctrlKey) && !e.altKey && !typing) {
+        e.preventDefault(); get().setContextDrawer(!get().contextDrawerPreferredOpen);
       } else if ((e.key === "n" || e.key === "n") && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
         e.preventDefault(); set({ dialog: "newTask" });
       } else if (e.altKey && !e.metaKey && !e.ctrlKey) {
@@ -267,8 +324,22 @@ export const useMe2 = create<Me2State>((set, get) => ({
       } catch { /* браузерный рантайм */ }
     })();
 
+    // Native Browser geometry can force the drawer closed on short windows.
+    // Reconcile presentation after resize without changing the saved preference.
+    let drawerResizeFrame = 0;
+    const onDrawerResize = () => {
+      window.cancelAnimationFrame(drawerResizeFrame);
+      drawerResizeFrame = window.requestAnimationFrame(() => get().syncContextDrawer());
+    };
+    window.addEventListener("resize", onDrawerResize);
+
     // cleanup при выгрузке страницы
-    window.addEventListener("beforeunload", () => { clearInterval(ev); clearInterval(tick); });
+    window.addEventListener("beforeunload", () => {
+      clearInterval(ev);
+      clearInterval(tick);
+      window.cancelAnimationFrame(drawerResizeFrame);
+      window.removeEventListener("resize", onDrawerResize);
+    });
   },
 
   setPage: (p) => {
@@ -283,6 +354,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
       };
     });
     syncPagePresentation(p);
+    if (p === "command") get().syncContextDrawer();
+    else set({ contextDrawerOpen: get().contextDrawerPreferredOpen });
   },
 
   setWorkspace: (w) => {
