@@ -63,6 +63,7 @@ interface Me2State {
   chatId: string | null;
   // служебное
   busyAction: boolean;
+  chromeOverlaySources: string[];
   booted: boolean;
 
   init: () => void;
@@ -74,6 +75,7 @@ interface Me2State {
   closeTask: () => void;
   setChatId: (id: string | null) => void;
   setBusy: (b: boolean) => void;
+  setChromeOverlay: (source: string, open: boolean) => void;
 }
 
 let initGuard = false;
@@ -96,9 +98,20 @@ export const useMe2 = create<Me2State>((set, get) => ({
   stream: [],
   chatId: null,
   busyAction: false,
+  chromeOverlaySources: [],
   booted: false,
 
   setBusy: (b) => set({ busyAction: b }),
+  setChromeOverlay: (source, open) => {
+    const key = String(source || "").trim().slice(0, 64);
+    if (!key) return;
+    set((st) => {
+      const next = open
+        ? Array.from(new Set([...st.chromeOverlaySources, key]))
+        : st.chromeOverlaySources.filter((item) => item !== key);
+      return { chromeOverlaySources: next };
+    });
+  },
 
   init: () => {
     if (initGuard) return;
@@ -114,12 +127,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
         if (raw && PAGES.some((p) => p.key === raw)) {
           set({ page: raw as PageKey, recentPages: [raw as PageKey] });
           try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown } }).metaengineShell;
+            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
             void shell?.setPrimaryPage?.(raw);
           } catch { /* Browser preload bridge absent in web-only mode */ }
         } else {
           try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown } }).metaengineShell;
+            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
             void shell?.setPrimaryPage?.("command");
           } catch { /* Browser preload bridge absent in web-only mode */ }
         }
@@ -247,7 +260,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       history.replaceState(null, "", `#${p}`);
     } catch { /* приватный режим */ }
     try {
-      const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown } }).metaengineShell;
+      const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
       void shell?.setPrimaryPage?.(p);
     } catch { /* Browser preload bridge absent in web-only mode */ }
     // Electron TabRegistry
