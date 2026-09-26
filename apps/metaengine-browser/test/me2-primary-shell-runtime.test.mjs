@@ -525,7 +525,8 @@ test('R85 command rail bridge is presentation-only and reconciles effective geom
   assert.match(railHandler, /update_authority:\s*false/);
   assert.match(railHandler, /release_authority:\s*false/);
   assert.match(railHandler, /authority_effect:\s*false/);
-  assert.match(me2Command, /me2\.command\.agent-rail\.v1/);
+  assert.match(me2Command, /commandRailPreferredOpen/);
+  assert.match(me2Command, /storeCommandRailPreference/);
   assert.match(me2Command, /setPrimaryCommandRail/);
   assert.match(me2Command, /effective_open/);
   assert.match(me2Command, /window\.addEventListener\("resize", onResize\)/);
