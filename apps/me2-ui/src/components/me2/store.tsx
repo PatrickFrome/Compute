@@ -65,6 +65,7 @@ interface Me2State {
   contextDrawerPreferredOpen: boolean;
   contextDrawerOpen: boolean;
   contextDrawerTab: ContextDrawerTab;
+  commandRailPreferredOpen: boolean;
   // selection (agent-first)
   chatId: string | null;
   // служебное
@@ -80,6 +81,8 @@ interface Me2State {
   setContextDrawer: (open: boolean) => void;
   setContextDrawerTab: (tab: ContextDrawerTab) => void;
   syncContextDrawer: (preferred?: boolean) => void;
+  setCommandRailPreference: (open: boolean) => void;
+  resetWorkspaceLayout: () => void;
   openTask: (id: string) => void;
   closeTask: () => void;
   setChatId: (id: string | null) => void;
@@ -97,6 +100,7 @@ const WORKSPACE_LAYOUTS_LS = "me2.workspace-layouts.v1";
 type WorkspaceLayoutPreference = {
   drawerOpen: boolean;
   drawerTab: ContextDrawerTab;
+  commandRailOpen: boolean;
 };
 
 function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference {
@@ -107,16 +111,22 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
       const row = parsed?.[workspace];
       const tab = row?.drawerTab;
       if (row && typeof row.drawerOpen === "boolean" && (tab === "events" || tab === "commands" || tab === "runtime")) {
-        return { drawerOpen: row.drawerOpen, drawerTab: tab };
+        const rail = typeof row.commandRailOpen === "boolean"
+          ? row.commandRailOpen
+          : localStorage.getItem(`me2.command.agent-rail.v2:${workspace}`) !== "0";
+        return { drawerOpen: row.drawerOpen, drawerTab: tab, commandRailOpen: rail };
       }
     }
     const legacyTab = localStorage.getItem(CONTEXT_DRAWER_TAB_LS);
+    const legacyRail = localStorage.getItem(`me2.command.agent-rail.v2:${workspace}`)
+      ?? localStorage.getItem("me2.command.agent-rail.v1");
     return {
       drawerOpen: localStorage.getItem(CONTEXT_DRAWER_LS) === "1",
       drawerTab: legacyTab === "commands" || legacyTab === "runtime" ? legacyTab : "events",
+      commandRailOpen: legacyRail !== "0",
     };
   } catch {
-    return { drawerOpen: false, drawerTab: "events" };
+    return { drawerOpen: false, drawerTab: "events", commandRailOpen: true };
   }
 }
 
@@ -165,6 +175,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
   contextDrawerTab: "events",
+  commandRailPreferredOpen: true,
   chatId: null,
   busyAction: false,
   chromeOverlaySources: [],
@@ -218,6 +229,25 @@ export const useMe2 = create<Me2State>((set, get) => ({
     writeWorkspaceLayout(get().workspace, { drawerTab: tab });
   },
 
+  setCommandRailPreference: (open) => {
+    set({ commandRailPreferredOpen: open });
+    writeWorkspaceLayout(get().workspace, { commandRailOpen: open });
+  },
+
+  resetWorkspaceLayout: () => {
+    const defaults: WorkspaceLayoutPreference = { drawerOpen: false, drawerTab: "events", commandRailOpen: true };
+    writeWorkspaceLayout(get().workspace, defaults);
+    set({
+      contextDrawerPreferredOpen: defaults.drawerOpen,
+      contextDrawerTab: defaults.drawerTab,
+      commandRailPreferredOpen: defaults.commandRailOpen,
+    });
+    get().syncContextDrawer(defaults.drawerOpen);
+    try {
+      window.dispatchEvent(new CustomEvent("me2:workspace-layout-reset", { detail: get().workspace }));
+    } catch { /* browser unavailable */ }
+  },
+
   init: () => {
     if (initGuard) return;
     initGuard = true;
@@ -248,6 +278,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         set({
           contextDrawerPreferredOpen: workspaceLayout.drawerOpen,
           contextDrawerTab: workspaceLayout.drawerTab,
+          commandRailPreferredOpen: workspaceLayout.commandRailOpen,
         });
         writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
         get().syncContextDrawer(workspaceLayout.drawerOpen);
@@ -403,6 +434,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       workspace: w,
       contextDrawerPreferredOpen: layoutPreference.drawerOpen,
       contextDrawerTab: layoutPreference.drawerTab,
+      commandRailPreferredOpen: layoutPreference.commandRailOpen,
     });
     try { localStorage.setItem(WS_LS, w); } catch { /* приватный режим */ }
     const ws = WORKSPACES.find((x) => x.key === w);
