@@ -1506,7 +1506,7 @@ export default function MissionControl() {
             <button
               key={s.id}
               onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+              className="whitespace-nowrap rounded-md px-2 py-1 min-h-9 touch-hit text-[11px] font-medium text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
             >
               {s.label}
             </button>
@@ -1671,10 +1671,10 @@ export default function MissionControl() {
                     onChange={(e) => setDonorQuery(e.target.value)}
                     placeholder="поиск действия… (Alt+D)"
                     aria-label="Поиск по донор-реестру"
-                    className="h-8 border-zinc-700 bg-zinc-950/60 pr-7 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/40"
+                    className="h-9 border-zinc-700 bg-zinc-950/60 pr-7 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/40"
                   />
                   {donorQuery && (
-                    <button onClick={() => setDonorQuery('')} aria-label="Сбросить поиск" className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center text-zinc-500 hover:text-zinc-300">×</button>
+                    <button onClick={() => setDonorQuery('')} aria-label="Сбросить поиск" className="absolute right-1 top-1/2 flex h-7 w-7 touch-hit -translate-y-1/2 items-center justify-center text-zinc-500 hover:text-zinc-300">×</button>
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Сортировка донор-реестра">
@@ -3127,12 +3127,12 @@ export default function MissionControl() {
         {/* EV-FOOTER: навигационный ряд — единственный для <md (top-nav скрыт),
             дублирует jump-чипы + «наверх» (паттерн Grafana «back to top») */}
         <div className="relative mx-auto w-full max-w-7xl px-4 pt-2.5">
-          <div className="flex flex-wrap items-center gap-0.5">
+          <div className="flex flex-wrap items-center gap-1">
             {NAV_SECTIONS.map((s) => (
               <button
                 key={s.id}
                 onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                className="rounded-md px-1.5 py-1 text-[10px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+                className="rounded-md px-2 py-1.5 min-h-9 touch-hit text-[10px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
               >
                 {s.label}
               </button>
@@ -3141,7 +3141,7 @@ export default function MissionControl() {
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               aria-label="Прокрутить наверх"
               title="наверх к header'у (клавиша Home тоже работает для нативного скролла)"
-              className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
+              className="ml-auto inline-flex min-h-9 touch-hit items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50"
             >
               <ArrowUp className="h-3 w-3" /> наверх
             </button>
