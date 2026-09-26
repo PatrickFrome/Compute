@@ -93,8 +93,12 @@ export async function startMe2Integration({ app } = {}) {
   if (started || stoppedFlag) return me2IntegrationStatus();
   started = true;
   emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_START', version: ME2_INTEGRATION_VERSION });
+  let userData = null;
   try {
-    await startMe2DaemonHost();
+    userData = app && typeof app.getPath === 'function' ? app.getPath('userData') : null;
+  } catch { /* до ready пути могут быть недоступны — адаптеры честно DEGRADED */ }
+  try {
+    await startMe2DaemonHost({ dataDir: userData ? `${userData}/me2-daemon` : null });
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_HOST_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
@@ -128,10 +132,6 @@ export async function startMe2Integration({ app } = {}) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'MISSION_CONTROL_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
   // R42a: память brain ⇄ mem-economy (чтение checkpoint'а мозга, sidecar блока памяти ME2)
-  let userData = null;
-  try {
-    userData = app && typeof app.getPath === 'function' ? app.getPath('userData') : null;
-  } catch { /* до ready пути могут быть недоступны — адаптеры честно DEGRADED */ }
   try {
     startMe2BrainAdapter({ userData });
   } catch (e) {
@@ -145,15 +145,16 @@ export async function startMe2Integration({ app } = {}) {
   }
   if (app && typeof app.once === 'function') {
     app.once('will-quit', () => {
-      // деликатное завершение: хост НЕ убивает daemon по умолчанию (daemon переживает
-      // перезапуск браузера — его данные в SQLite, наследие постоянных сессий)
+      // R85 single-runtime ownership: Browser-owned daemon process terminates with
+      // the Browser so an upgrade cannot adopt an older executable. Durable state
+      // lives under userData/me2-daemon and therefore survives process restart.
       stopMe2SupervisorMeshBridge();
       stopMe2BrainAdapter();
       stopMe2MissionControl();
       stopMe2FleetBridge();
       stopMe2UiGateway();
-      stopMe2UiHost({ killChild: false }); // UI переживает закрытие окна — как daemon (наследие R46)
-      stopMe2DaemonHost({ killChild: false });
+      stopMe2UiHost({ killChild: false });
+      stopMe2DaemonHost({ killChild: true });
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_STOP' });
     });
   }
