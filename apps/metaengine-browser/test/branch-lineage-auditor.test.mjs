@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { auditBranchLineage } from '../../../coordination/devos/branch-lineage-auditor.mjs';
 
@@ -55,4 +56,16 @@ test('branch lineage audit covers every namespace and preserves unrelated histor
   assert.equal(unrelated.semantic_converged_to_base, false);
   assert.deepEqual(unrelated.unique_files, ['history.txt']);
   assert.equal(report.classification_counts.UNRELATED_HISTORY, 1);
+
+  const cli = JSON.parse(execFileSync(process.execPath, [
+    fileURLToPath(new URL('../../../coordination/devos/branch-lineage-auditor.mjs', import.meta.url)),
+    '--cwd', cwd,
+    '--base', 'release/current',
+    '--namespace', 'refs/heads/',
+    '--format', 'json',
+  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  assert.equal(cli.branch_count, report.branch_count, 'CLI default must audit the same complete namespace as the library API');
+  for (const branch of ['main', 'me2/donor', 'repair/runtime', 'fix/packaging', 'scratch/probe', 'perf/soak', 'sandbox/history']) {
+    assert.ok(cli.branches.some((row) => row.branch === branch), `CLI omitted branch ${branch}`);
+  }
 });
