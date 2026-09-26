@@ -36,8 +36,6 @@ const DEFAULT_REQUEST_DEADLINE_MS = 8000;
 // still resolves through lease TTL exactly as before — only now in bounded time.
 const DEFAULT_RESULT_DELIVERY_DEADLINE_MS = 120000;
 const DEFAULT_BOOTSTRAP_HEARTBEAT_MS = 2000;
-const IDLE_MAINTENANCE_POLL_MS = 10;
-const IDLE_MAINTENANCE_WAIT_MAX_MS = 15000;
 export const DEFAULT_SUPERVISOR_WATCHDOG_STALE_MS = 5000;
 
 function isCommandResultUrl(value) {
@@ -509,25 +507,23 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     this.#bootstrapTimer = null;
   }
 
-  async #waitForBaseMaintenanceIdle() {
-    const deadline = Date.now() + IDLE_MAINTENANCE_WAIT_MAX_MS;
-    while (super.snapshot()?.control_fast_lane?.maintenance_in_flight === true) {
-      if (Date.now() >= deadline) throw new Error('native_supervisor_idle_maintenance_wait_timeout');
-      await delay(IDLE_MAINTENANCE_POLL_MS);
-    }
-  }
-
   #kickIdleWork() {
     if (this.#idleWorkPromise) return this.#idleWorkPromise;
     this.#idleWorkPromise = (async () => {
       // Observation is read-only and may overlap the next command wait.
       await this.#observeWorkers();
-      await this.#waitForBaseMaintenanceIdle();
-      // A completed barrier clears a historical wait failure. DevOS execution
-      // errors are tracked separately in devos_last_error.
+
+      // Maintenance may start while the read-only worker observation is running.
+      // Never hold an idle promise (and therefore a future mutating command)
+      // behind an arbitrary timeout. Yield this DevOS turn; the next empty
+      // command cycle can re-admit it after maintenance settles.
+      if (super.snapshot()?.control_fast_lane?.maintenance_in_flight === true) {
+        this.#idleWorkLastError = null;
+        return;
+      }
       this.#idleWorkLastError = null;
 
-      // If a remote command became active while maintenance drained, yield DevOS.
+      // If a remote command became active while observation ran, yield DevOS.
       // The hot command lane wins admission over background work.
       let supervisor = super.snapshot();
       if (Array.isArray(supervisor?.current_commands) && supervisor.current_commands.length > 0) return;
