@@ -6,11 +6,13 @@
  * exit 0 — the honest machine-checkable probe for CI/operator.
  */
 import { app, BrowserWindow } from 'electron';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { LifecycleJournal } from './core/journal.mjs';
 import { Me2Plane } from './me2/plane.mjs';
 import { createWindowShell } from './core/window-shell.mjs';
 import { StagedUpdater } from './update/staged-updater.mjs';
+import { ActivationManager } from './update/activator.mjs';
 import { resolveInstanceAction, UPDATE } from './shared/me2-constants.mjs';
 import { createNonce, verifyResurrectionData, resolveSecondaryHandoff } from './me2/instance-nonce.mjs';
 
@@ -21,6 +23,7 @@ let plane = null;
 let shell = null;
 let journal = null;
 let updater = null;
+let activation = null;
 
 async function boot() {
   const userDataDir = app.getPath('userData');
@@ -35,6 +38,16 @@ async function boot() {
     app.exit(0);
     return;
   }
+
+  // R80 GAP #1a: activation verdict BEFORE the plane — the honest boot answer first.
+  activation = new ActivationManager({
+    userDataDir,
+    currentVersion: app.getVersion(),
+    argv: process.argv,
+    journal: (r) => journal.record('activation', r),
+    spawnImpl: spawn,
+  });
+  journal.record('activation_boot', activation.resolveBoot());
 
   const rootDir = app.getAppPath();
   plane = new Me2Plane({
@@ -55,6 +68,12 @@ async function boot() {
   journal.record('plane_up', { status });
   plane.startKeepalive(); // R79: epoch-fenced keepalive (no-ops in tests — not called there)
 
+  // R80 GAP #1a: a fresh staged update arms the handoff (spawn installer on quit).
+  if (status.update.last?.staged && plane.updater) {
+    const stagedRec = [...plane.updater.journalHistory().records].reverse().find((r) => r.stage === 'staged');
+    if (stagedRec) journal.record('activation_arm', activation.requestFromStaged(stagedRec));
+  }
+
   if (!SMOKE) {
     shell = createWindowShell({ BrowserWindow, journal, log: (r) => journal.record('shell', r) });
     const uiUrl = status.ui.ok ? `http://127.0.0.1:3000/` : null;
@@ -65,7 +84,9 @@ async function boot() {
 
   journal.record('ready', { smoke: SMOKE });
   if (SMOKE) {
-    console.log(JSON.stringify({ smoke: 'plane', status: plane.snapshot() }, null, 2));
+    const snap = plane.snapshot();
+    snap.activation = activation.snapshot(); // R80: machine-readable activation verdict
+    console.log(JSON.stringify({ smoke: 'plane', status: snap }, null, 2));
     app.exit(0);
   }
 }
@@ -78,6 +99,15 @@ ipcMain.handle('me2:open-agent', (_e, session) => {
   journal?.record('open_agent', { session: session?.id ?? null });
   return { ok: true, role: 'FLEET' };
 });
+
+// R80 GAP #1a: operator-visible activation surface (no silent execution).
+ipcMain.handle('me2:update-apply', () => {
+  if (!activation) return { ok: false, reason: 'activation_absent' };
+  const stagedRec = [...(plane?.updater?.journalHistory().records ?? [])].reverse().find((r) => r.stage === 'staged');
+  if (!stagedRec) return { ok: false, reason: 'nothing_staged' };
+  return activation.requestFromStaged(stagedRec);
+});
+ipcMain.handle('me2:activation-status', () => activation?.snapshot() ?? { error: 'activation_absent' });
 
 app.whenReady().then(boot).catch((err) => {
   journal?.record('boot_failed', { error: String(err?.stack ?? err).slice(0, 600) });
@@ -92,6 +122,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   journal?.record('exit', {});
   plane?.shutdown();
+  activation?.spawnHandoff(); // R80 GAP #1a: armed → detached installer, survives exit
 });
 app.on('second-instance', (_event, argv, additionalData) => {
   const ack = verifyResurrectionData(additionalData, { now: Date.now() });

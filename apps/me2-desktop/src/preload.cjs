@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('me2Desktop', {
   version: 'me2-desktop-bridge.v1',
   status: () => ipcRenderer.invoke('me2:status'),
   openAgent: (session) => ipcRenderer.invoke('me2:open-agent', session),
+  applyUpdate: () => ipcRenderer.invoke('me2:update-apply'), // R80 GAP #1a: operator-visible activation
+  activationStatus: () => ipcRenderer.invoke('me2:activation-status'),
   onPlaneEvent: (cb) => {
     const listener = (_e, payload) => cb(payload);
     ipcRenderer.on('me2:plane-event', listener);

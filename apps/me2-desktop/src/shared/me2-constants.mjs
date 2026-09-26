@@ -54,6 +54,19 @@ export const UPDATE = {
   MAX_STAGED_RETENTION: 3,
 };
 
+/**
+ * Self-update activation (GAP #1a, R80): installer handoff on quit +
+ * qualification on the next boot. The release rail is NSIS, hence /S and .exe.
+ */
+export const ACTIVATION = {
+  ARG_FLAG: '--me2-activation',
+  PENDING_NAME: 'pending-activation.json',
+  PENDING_TTL_MS: 10 * 60 * 1000, // pending record older than this = stale
+  QUALIFY_WINDOW_MS: 30 * 1000, // boot-alive window before qualification confirms
+  SILENT_ARG: '/S', // NSIS silent install
+  INSTALLER_PATTERN: /\.exe$/i,
+};
+
 /** FLEET tab policy (chat agents live on chat.z.ai). */
 export const FLEET = {
   ORIGIN: 'https://chat.z.ai',
