@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { resolveMe2DaemonLaunch } from '../src/me2/me2-daemon-host.mjs';
+import { resolveMe2DaemonLaunch, waitForMe2DaemonReady } from '../src/me2/me2-daemon-host.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
@@ -65,4 +65,30 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   const integration = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-integration-entry.mjs'), 'utf8');
   assert.match(integration, /startMe2DaemonHost\(\{ dataDir:/);
   assert.match(integration, /stopMe2DaemonHost\(\{ killChild: true \}\)/);
+});
+
+test('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
+  let attempts = 0;
+  const ready = await waitForMe2DaemonReady({
+    attempts: 4,
+    intervalMs: 25,
+    probe: async () => {
+      attempts += 1;
+      return attempts === 3 ? { ok: true, last_seq: 17 } : { ok: false, reason: 'not_ready' };
+    },
+  });
+  assert.deepEqual(ready, { ok: true, reason: 'READY', attempt: 3, last_seq: 17 });
+  assert.equal(attempts, 3);
+
+  attempts = 0;
+  const failed = await waitForMe2DaemonReady({
+    attempts: 2,
+    intervalMs: 25,
+    probe: async () => {
+      attempts += 1;
+      return { ok: false, reason: 'still_starting' };
+    },
+  });
+  assert.deepEqual(failed, { ok: false, reason: 'still_starting', attempt: 2 });
+  assert.equal(attempts, 2);
 });
