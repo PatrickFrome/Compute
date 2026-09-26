@@ -56,7 +56,7 @@ test('R75 primary shell releases rail reservation before starving the Browser ce
     surface_profile: 'ME2_R75_COMMAND',
   });
   assert.equal(plan.effective_sidebar, 'HIDDEN');
-  assert.equal(plan.remote_bounds.x, 8);
+  assert.equal(plan.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING);
   assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
   assert.ok(plan.adaptations.includes('ME2_AGENT_RAIL_RESERVED_SPACE_RELEASED_FOR_ACTIVE_SURFACE'));
   assert.equal(plan.authority_effect, false);
