@@ -8,6 +8,7 @@ import {
   me2FleetTabsResolveIdentity,
   me2FleetTabsSetHost,
 } from '../src/me2/me2-fleet-tabs-host.mjs';
+import { me2NativeConversationUrl } from '../src/me2/me2-mission-control.mjs';
 
 function registry() {
   const tabId = 'tab_11111111-1111-4111-8111-111111111111';
@@ -105,6 +106,9 @@ test('R84 Browser root wires Mission Control to existing exact WebContents/CDP i
   assert.match(mission, /me2FleetTabsResolveIdentity/);
   assert.match(mission, /runtime_identity:\s*nativeIdentity/);
   assert.match(mission, /await host\.closeTab\(known\.tab_id\)/);
+  assert.match(mission, /conversation_url_required/);
+  assert.doesNotMatch(mission, /#chat=\$\{encodeURIComponent\(session\.id\)\}/);
+  assert.match(mission, /AGENT_TAB_ADOPTED/);
 });
 
 test('R84 identity projection never fabricates BrowserCell or CDP target when Brain binding is absent', () => {
@@ -160,4 +164,21 @@ test('R84 desktop gateway semantic port closes upgraded sockets under Browser li
   assert.match(gateway, /socket\.destroy\(\)/);
   assert.match(gateway, /upgraded_socket_shutdown_bounded:\s*true/);
   assert.match(gateway, /authority_effect:\s*false/);
+});
+
+
+test('R84 native conversation binding requires exact provider conversation_url, never daemon session id', () => {
+  assert.equal(me2NativeConversationUrl({ id: 'api-session-123' }), null);
+  assert.equal(me2NativeConversationUrl({
+    id: 'api-session-123',
+    conversation_url: 'http://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  }), null);
+  assert.equal(me2NativeConversationUrl({
+    id: 'api-session-123',
+    conversation_url: 'https://example.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+  }), null);
+  assert.equal(me2NativeConversationUrl({
+    id: 'api-session-123',
+    conversation_url: 'https://chat.z.ai/c/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/',
+  }), 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
 });
