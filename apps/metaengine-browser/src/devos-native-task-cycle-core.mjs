@@ -9,6 +9,7 @@ import {
 } from './browser-agent-platform.mjs';
 import { renderAgentContextBriefing } from './agent-context-token.mjs';
 import { parseAgentToolRequests, renderAgentToolProtocol, renderAgentToolResults } from './agent-tool-protocol.mjs';
+import { parseAgentResultClaim, renderAgentResultProtocol } from './agent-result-protocol.mjs';
 import { AgentToolbelt } from './agent-toolbelt-core.mjs';
 import { markFleetTransportProvenFromNativeFrame } from './fleet-runtime-bridge.mjs';
 import { planElasticFleetCapacity } from './fleet-elastic-governor.mjs';
@@ -159,6 +160,15 @@ export function renderDevosTaskPrompt(lease = {}, { telemetry_digest = null, con
   // ride the task prompt — both clipped hard so the task body stays dominant.
   const toolProtocolBlock = clip(String(tool_protocol || ''), 1200).trim();
   if (toolProtocolBlock) lines.push('', toolProtocolBlock);
+  if (taskSpec.meta_orchestrator && typeof taskSpec.meta_orchestrator === 'object' && !Array.isArray(taskSpec.meta_orchestrator)) {
+    const resultProtocolBlock = renderAgentResultProtocol({
+      task_id: lease.task_id,
+      lease_generation: lease.lease_generation,
+      role: lease.role,
+      verification_subject: taskSpec.verification_subject || null,
+    });
+    lines.push('', clip(resultProtocolBlock, 2600));
+  }
   const toolResultsBlock = clip(renderAgentToolResults(tool_results), 2400).trim();
   if (toolResultsBlock) lines.push('', toolResultsBlock);
   // Closed-loop audit fix (memory): bounded block of the team's recent VERIFIED
@@ -834,15 +844,28 @@ export class DevOsNativeTaskCycle {
         const tail = tailOffset > 0
           ? await this.#executeCommand({ action: 'READ_TRANSCRIPT', platform: AGENT_PLATFORM_ID, payload: { tab_id: lease.tab_id, offset: tailOffset, max_chars: 20000 } })
           : head;
-        harvest = parseAgentToolRequests(tail?.text || '');
+        const transcriptText = tail?.text || '';
+        const subject = lease?.task_spec?.verification_subject && typeof lease.task_spec.verification_subject === 'object' && !Array.isArray(lease.task_spec.verification_subject)
+          ? lease.task_spec.verification_subject
+          : null;
+        harvest = {
+          tools: parseAgentToolRequests(transcriptText),
+          result_claim: parseAgentResultClaim(transcriptText, {
+            task_id: lease.task_id,
+            lease_generation: lease.lease_generation,
+            role: lease.role,
+            expected_subject_task_id: subject?.task_id || null,
+            expected_subject_result_sha256: subject?.result_sha256 || null,
+          }),
+        };
         if (this.#toolHarvest.size > 128) this.#toolHarvest.clear();
         this.#toolHarvest.set(key, harvest);
-        if (harvest.requests.length > 0) {
-          await this.#toolbelt.serveToolRequests({ lease, requests: harvest.requests });
+        if (harvest.tools.requests.length > 0) {
+          await this.#toolbelt.serveToolRequests({ lease, requests: harvest.tools.requests });
         }
       }
       const results = await this.#toolbelt.harvestResults({ lease });
-      return { pending: this.#toolbelt.pendingCount(lease), results };
+      return { pending: this.#toolbelt.pendingCount(lease), results, result_claim: harvest.result_claim || null };
     } catch {
       return { pending: 0, results: [] };
     }
@@ -1304,14 +1327,53 @@ export class DevOsNativeTaskCycle {
     if (toolState.pending > 0) {
       return { state: 'TOOL_EXECUTION_PENDING', task_id: lease.task_id, pending_tool_commands: toolState.pending, authority_effect: false };
     }
-    return this.#postCompletionWithReadback(lease, 'RESULT_READY', {
+
+    const metaTask = lease?.task_spec?.meta_orchestrator && typeof lease.task_spec.meta_orchestrator === 'object' && !Array.isArray(lease.task_spec.meta_orchestrator);
+    let completionState = 'RESULT_READY';
+    let resultClaimSummary = {};
+    if (metaTask) {
+      const parsed = toolState.result_claim;
+      if (parsed?.state === 'AMBIGUOUS') {
+        return this.#reportAmbiguous(lease, 'RESULT_CLAIM_AMBIGUOUS');
+      }
+      if (parsed?.state !== 'CLAIM_BOUND' || !parsed?.claim) {
+        return this.#postCompletionWithReadback(lease, 'BLOCKED', {
+          transport_state: 'RESULT_CLAIM_MISSING_OR_INVALID',
+          conversation_url_sha256: expectedUrlHash,
+          result_claim_state: String(parsed?.state || 'MISSING'),
+          result_claim_invalid_count: Array.isArray(parsed?.invalid) ? parsed.invalid.length : 0,
+          raw_model_claim_included: false,
+          page_content_included: false,
+          page_data_authority: false,
+        }, 'RESULT_CLAIM_MISSING_OR_INVALID');
+      }
+      const claim = parsed.claim;
+      const verifier = ['CRITIC','FALSIFIER'].includes(String(lease.role || '').toUpperCase());
+      completionState = verifier
+        ? (claim.disposition === 'ACCEPT' ? 'RESULT_READY' : 'BLOCKED')
+        : (claim.disposition === 'READY' ? 'RESULT_READY' : claim.disposition);
+      resultClaimSummary = {
+        result_claim_schema: claim.schema,
+        result_claim_sha256: claim.claim_sha256,
+        result_claim_disposition: claim.disposition,
+        result_claim_deliverable_ref_count: claim.deliverable_refs.length,
+        result_claim_evidence_ref_count: claim.evidence_refs.length,
+        result_claim_subject_task_id: claim.subject_task_id,
+        result_claim_subject_result_sha256: claim.subject_result_sha256,
+        raw_model_claim_included: false,
+        model_claim_authority: false,
+      };
+    }
+
+    return this.#postCompletionWithReadback(lease, completionState, {
       transport_state: 'GENERATION_STOPPED_ON_PROVEN_CONVERSATION',
       conversation_url_sha256: expectedUrlHash,
       page_content_included: false,
       page_data_authority: false,
+      ...resultClaimSummary,
       tool_results: toolState.results.slice(0, 8),
       tool_results_count: toolState.results.length,
-    });
+    }, completionState === 'BLOCKED' ? 'VERIFIER_OR_RESULT_CLAIM_BLOCKED' : null);
   }
 
   async #reportAmbiguous(lease, reason) {
