@@ -38,6 +38,7 @@ test('R85 packaged ME2 UI prefers installed resources and embedded Electron node
   const sourceCwd = path.join(path.sep, 'repo', 'apps', 'metaengine-browser');
   const sourceDir = path.join(path.sep, 'repo', 'apps', 'me2-ui');
   const existing = new Set([
+    path.join(resourcesPath, 'app.asar'),
     path.join(packagedDir, 'package.json'),
     path.join(packagedDir, 'server.js'),
     path.join(sourceDir, 'package.json'),
@@ -58,6 +59,15 @@ test('R85 packaged ME2 UI prefers installed resources and embedded Electron node
     launch_mode: 'EMBEDDED_NODE_STANDALONE',
     env_patch: { ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production' },
   });
+
+  const missingPackagedLaunch = resolveMe2UiLaunch({
+    resourcesPath,
+    execPath,
+    cwd: sourceCwd,
+    env: { PATH: 'C:\\Windows\\System32' },
+    exists: (candidate) => candidate === path.join(resourcesPath, 'app.asar') || candidate === path.join(sourceDir, 'package.json'),
+  });
+  assert.equal(missingPackagedLaunch, null, 'packaged runtime must not escape to a source-tree UI');
 });
 
 test('source checkout remains an explicit Bun fallback only', () => {
