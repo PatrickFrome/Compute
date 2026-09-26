@@ -80,10 +80,13 @@ async function smoke(exe, manifest) {
       throw new Error(`me2_daemon_smoke_not_ready:${String(lastError?.message || lastError || 'unknown')}`);
     }
     assert.equal(String(health.version), String(manifest.daemon_version), 'daemon health version must match package manifest');
-    assert.equal(String(state.version), String(manifest.daemon_version), 'daemon state version must match package manifest');
+    const stateVersion = state?.capabilities?.version ?? state?.meta?.version ?? null;
+    assert.equal(String(stateVersion), String(manifest.daemon_version), 'daemon state version must match package manifest');
+    assert.equal(String(state?.meta?.version), String(manifest.daemon_version), 'daemon state meta version must match package manifest');
     return {
       runtime_smoke: 'PASS',
       health_version: String(health.version),
+      state_version: String(stateVersion),
       state_contract: String(state.contract),
       boot_mode: 'probe',
       external_bun_used: false,
