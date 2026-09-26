@@ -3,7 +3,7 @@
 // TopBar (global) · PageOutlet (условный монтаж страниц — перф-паттерн legacy)
 // · PageBar (Resolve-навигация) · StatusBar · GlobalDialogs + Palette + toast-мост.
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
 import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
@@ -45,6 +45,20 @@ export function Me2Shell() {
 
   // инициализация стора (WS, REST-fallback, hotkeys, desktop-мост) — один раз
   useEffect(() => { init(); }, [init]);
+
+  // Installed Desktop qualification must attest the actual mounted R75
+  // composition from the renderer world, not by probing DOM from Electron's
+  // isolated preload world. This is a one-shot structural readback only.
+  useLayoutEffect(() => {
+    const required = ["me2-shell", "topbar", "page-command", "agent-sidebar", "pagebar", "statusbar"] as const;
+    const present = Object.fromEntries(required.map((id) => [id, Boolean(document.querySelector(`[data-testid="${id}"]`))]));
+    try {
+      const shell = (window as Window & {
+        metaengineShell?: { reportUiContract?: (value: Record<string, boolean>) => unknown }
+      }).metaengineShell;
+      shell?.reportUiContract?.(present);
+    } catch { /* web-only mode or unavailable trusted desktop bridge */ }
+  }, []);
 
   // toast-мост: модули без хуков диспатчат me2:toast → Sonner
   useEffect(() => {
