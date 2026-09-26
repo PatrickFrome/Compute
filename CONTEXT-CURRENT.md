@@ -1,11 +1,29 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-26T23:45:43Z | worklog: 1846976B / 10067L | sha12=ef9890bdb2a9
+gen: 2026-09-26T23:52:07Z | worklog: 1846976B / 10067L | sha12=ef9890bdb2a9
 
-## ВОССТАНОВЛЕНИЕ: 1) bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check (кворум 8; --merge при усечении) 2) CONTEXT.md + PHOENIX-PROTOCOL.md 3) хвост worklog.md 4) диагностика Supabase: хвост /home/z/context-vault/journal/phoenix.log
-КАНАЛЫ worklog (1846976B, sha12=ef9890bdb2a9): Supabase me2-evidence/context-vault/latest/ · ossfs /home/sync/me2-context-backups/latest/ · vault /home/z/context-vault/{latest,repo} · cron-KV CTX-SHARD-A/B
-CRON: 413338 PAT(15m) · 416526 Guard(15m) · PHX-HEARTBEAT(30m) · COMPACTOR(1h)
+## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
+1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
+2. Прочитай: /home/z/my-project/CONTEXT.md (handoff-документ) + /home/z/my-project/PHOENIX-PROTOCOL.md
+3. Прочитай хвост /home/z/my-project/worklog.md (последние 150+ строк) — канонический журнал ВСЕХ чатов
+4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
+5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1846976B)
+| Канал | Путь | Переживает env-reset |
+|-------|------|---------------------|
+| Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
+| OSS (ossfs) | /home/sync/me2-context-backups/latest/worklog.md | ДА (сетевой) |
+| Vault | /home/z/context-vault/{latest,snapshots,repo}/ | частично |
+| cron-KV | шарды CTX-SHARD-A/B (payload cron-задач) | ДА (серверный) |
+
+## ПОСТОЯННЫЕ CRON-ЗАДАЧИ КОНТЕКСТА
+- 413338: PAT watcher (15m) — при появлении GITHUB_TOKEN_ADMIN в /home/z/.a2/.github.env делает push-pending
+- 416526: Context Guard (15m) — снапшоты/детект усечения/авторестор/феникс (скрипт в payload задачи)
+- PHX-HEARTBEAT: (30m) — этот digest + Supabase/ossfs пульс (скрипт в payload задачи)
+- CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
+
+## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
 - EV-RESPONSIVE (implemented, round 9, engine v1.19→v1.20) → EV-RESPONSIVE — mobile-first аудит Mission Control: брейкпоинты sm/md/lg, touch-цели >=44px
 - EVOLVE-ROUND-10 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-TOASTS] toast-фидбек на все мутирующие действия клиента (use-toast)
 - R80-DESKTOP-1A-20260927 → ME2-раунд: self-evolve тик + аудит + desktop-клиент (me2/r78-desktop-from-scratch): GAP #1a activation/handoff/qualification
@@ -22,6 +40,8 @@ CRON: 413338 PAT(15m) · 416526 Guard(15m) · PHX-HEARTBEAT(30m) · COMPACTOR(1h
 - AUD-20260926-233328 → авто-аудит полноты контекста; фиксация смены статусов
 - R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 
+## ХВОСТ worklog (последние 40 строк, вербатим)
+```
 Task ID: R80
 Agent: Super-Z (cron Job 413338, 2026-09-27 07:22)
 Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
@@ -62,3 +82,4 @@ Work Log:
 
 Stage Summary:
 - DONE: all local state published; следующий цикл стартует с d6798495
+```
