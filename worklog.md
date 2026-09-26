@@ -1815,3 +1815,20 @@ Stage Summary:
 - Для convergence-плана: паритетные вердикты и честные PARTIAL — готовая база для R81+ приоритизации (P0-1 classifier, P0-2 egress-modes).
 - [cron 413338 2026-09-26T11:22+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
 - [cron 413338 2026-09-26T11:37+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
+
+---
+Task ID: R80-PAT-RECOVERY-PUBLISH
+Agent: Super Z (main agent)
+Task: «найди токены…» — восстановление канала публикации после env-reset (78 тиков cron 413338).
+
+Work Log:
+- Поиск токенов: /home/z/.a2/ ОТСУТСТВУЕТ целиком (не только .github.env); задокументированный fallback найден: /tmp/my-project/.ghtoken (ghp_…, 40 симв., значение не печаталось).
+- Верификация маскированно: GET /user → HTTP 200; login=PatrickFrome; scopes: repo, workflow, admin:org, delete_repo, audit_log и др. (полный админ); GET /repos/PatrickFrome/Compute → 200, admin:true, push:true. Это канал GITHUB_TOKEN_ADMIN.
+- Vault восстановлен на документированном месте: /home/z/.a2/.github.env (chmod 600, dir 700), значение из .ghtoken перенесено без печати в логи.
+- ВЫПОЛНЕН bash scripts/push-pending-r80.sh: (1) main→sandbox/me2-os: b39db2e0..979fa59e ff — опубликованы ВСЕ локальные записи R78–R80 (внешний аудит, анализ+глубокий разбор капсулы, сопоставление веток, 78 cron-тиков); (2) создана me2/archive-r21-sandbox-snapshot (73486dd); (3) создана me2/archive-v040-main-archive (c95de21); (4) ls-remote подтвердил все три ref. DONE: all local state published.
+- Supabase: креды жили в /home/z/.a2/supabase-cloud.env (SUPABASE_URL, SUPABASE_SERVICE_ROLE_JWT и др. — paths из daemon tokens.ts:96) — файл утрачен вместе с vault; продолжаю поиск альтернативных источников (daemon env, /tmp копия, sb-env.ts).
+
+Stage Summary:
+- Каноническая директива «весь ворклог и все ветки в github» ВЫПОЛНЕНА: remote sandbox/me2-os = 979fa59e (85 коммитов опубликовано), 2 архив-ветки созданы.
+- Cron 413338 при следующем тике увидит токен на месте — пометка-режим больше не нужен.
+- GitHub API полностью доступен (админ) — полный аудит продолжается; Supabase-креды пока не найдены.
