@@ -182,6 +182,7 @@ let devosSurfaceGridPlan = null;
 // surface only when the packaged ME2 plane cannot prove itself healthy.
 let primaryShellMode = 'LEGACY_RECOVERY';
 let primaryShellPage = 'command';
+let primaryShellOverlayActive = false;
 let primaryShellUrl = null;
 const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
 let devosSourceSnapshot = null;
@@ -575,7 +576,8 @@ function fallbackSelectedSurface() {
 }
 
 function nativeBrowserSurfaceAllowed() {
-  return primaryShellMode !== 'ME2_PRIMARY' || primaryShellPage === 'command';
+  return primaryShellMode !== 'ME2_PRIMARY'
+    || (primaryShellPage === 'command' && primaryShellOverlayActive !== true);
 }
 
 async function preparePrimaryShellTarget() {
@@ -597,6 +599,7 @@ async function preparePrimaryShellTarget() {
     if (ready) {
       primaryShellMode = 'ME2_PRIMARY';
       primaryShellPage = 'command';
+      primaryShellOverlayActive = false;
       primaryShellUrl = `${gateway.url}/#command`;
       return { mode: primaryShellMode, url: primaryShellUrl, reason: 'PACKAGED_ME2_UI_PROVEN' };
     }
@@ -1912,6 +1915,7 @@ async function createWindow() {
     recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL_LOAD', error);
     primaryShellMode = 'LEGACY_RECOVERY';
     primaryShellPage = 'command';
+    primaryShellOverlayActive = false;
     primaryShellUrl = null;
     await shellView.webContents.loadURL('metaengine://shell/');
   }
@@ -1952,6 +1956,23 @@ ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
     presentation_only: true,
     scheduler_authority: false,
     browser_command_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:primary-overlay', async (event, rawActive) => {
+  assertShellSender(event);
+  if (typeof rawActive !== 'boolean') throw new Error('primary_shell_overlay_state_invalid');
+  primaryShellOverlayActive = rawActive;
+  layout();
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-overlay.v1',
+    active: primaryShellOverlayActive,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
     release_authority: false,
     authority_effect: false,
   });
