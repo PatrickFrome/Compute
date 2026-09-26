@@ -36,7 +36,8 @@
 - Откат /home/z/my-project к R21-снапшоту: main @ 73486dd; worklog усечён ~1951→130 строк.
 - Удалены: scripts/push-pending-r80.sh, Chrome-расширение zai-chat-export, zip, public/zai-chat-export/, /home/z/.a2/ (токен), /home/z/me2-workspace, /home/z/me2-sandboxes.
 - Невосстановимо без remote (не были запушены): расширение v1.0.1, push-pending скрипт, worklog-хвост Sep 23–26 (R78–R80).
-- Восстановлено из локального git: **worklog до-reset @ коммит 954e1b2 (Sep 22 14:10 UTC) — 1003995B / 6442 строки** → /home/z/my-project/worklog-archive-pre-reset.md (+ копии в vault/snapshots, vault/repo, /tmp-mirror). Reflog цел (112 записей); reflog-дыра Sep 22 14:42 → Sep 26 12:08 UTC = граница снапшота платформы.
+- Восстановлено из локального git: **worklog до-reset @ коммит 954e1b2 (Sep 22 14:10 UTC) — 1003995B / 6442 строки** → слит в канонический worklog.md (итог ~6700+ строк: глубокая история GLM/ME2-чатов + наш хвост R15→CTX-1).
+- ⚠️ РАЗЪЯСНЕНИЕ ОПЕРАТОРА (обязательно для всех будущих агентов): worklog — ЕДИНЫЙ МНОГОЧАТОВЫЙ журнал одного проекта. Записи из разных чатов (GLM-IM, cron-агенты, R-сессии) с незнакомыми Task ID — ВАЛИДНАЯ история. Ничего не считать «подменой», ничего не удалять/перезаписывать. Работа разных чатов над одним проектом — норма платформы.
 - Вывод: ЛЮБОЙ важный артефакт должен попадать в context-vault (или remote, или cron-шард) в течение 15 минут.
 
 ## 5. Состояние R-линии (по аудиту оператора, доставлен 22:22–22:37 +08)
@@ -47,11 +48,13 @@
 
 ## 6. Ключевые пути
 
-- /home/z/my-project/worklog.md — главный журнал (append-only, шаблон ---/Task ID/Agent/Task/Work Log/Stage Summary)
-- /home/z/my-project/worklog-archive-pre-reset.md — восстановленный до-reset worklog (1MB, R-эпоха до Sep 22 14:10 UTC; источник: git 954e1b2)
+- /home/z/my-project/worklog.md — канонический МНОГОЧАТОВЫЙ журнал (~1MB, append-only)
+- /home/z/my-project/worklog-archive-pre-reset.md — копия глубокого архива (954e1b2)
 - /home/z/my-project/CONTEXT.md — этот файл
-- /home/z/context-vault/ — snapshots/, latest/, journal/, repo/ (git), context-guard.sh
-- /tmp/context-vault-mirror/ — зеркало (переживает project-reset, переживает не всё)
+- /home/z/context-vault/ — snapshots/, latest/, journal/, repo/ (git), context-guard.sh, supabase-persist.sh
+- **/home/sync/** (OSS, rw) — сетевое хранилище ВНЕ overlay: me2-context-backups/vault-*.tar.gz + repo.tar (платформенный, не трогать)
+- **/tmp/my-project/** (PolarFS) — staging платформы: .a2-backup/me2.env.20260922 (креды Supabase/GitHub), context-vault-mirror/
+- Supabase Storage: бакет me2-evidence, префикс context-vault/ (6 объектов: worklog, CONTEXT, guard, journals, creds-restore-key)
 - /home/z/.a2/.github.env — токен (создаётся оператором; никогда не печатать)
 
 ## 7. Механизм защиты контекста (Phoenix Context Vault)
@@ -59,7 +62,18 @@
 1. context-guard.sh (каждые 15 мин): снапшот worklog/CONTEXT при изменении; если worklog удалён/усечён >40% при эталоне >1000B — автокопия «truncated-*» и РЕСТОР из последнего снапшота; журнал; git-коммит в vault/repo; зеркало в /tmp; push ветки context-vault при PAT.
 2. Феникс-свойство: полный текст guard-скрипта встроен в cron-задачу Context Guard → даже при полном wipe vault пересоздаётся автоматически.
 3. Протокол агентов: (a) в начале работы читать CONTEXT.md + хвост worklog; (b) значимые события — append в worklog; (c) изменения состояния — обновлять CONTEXT.md; (d) секреты не печатать/не логировать; (e) новые важные скрипты дублировать в /home/z/context-vault/snapshots/.
-4. Cron-шард-хранилище (уровень 8): CTX-SHARD-A/B (Job 416554/416555) хранят CONTEXT.md + guard-скрипт + протокол восстановления ВНУТРИ payload задач cron — это серверное хранилище вне песочницы, переживает даже полный VM-reset. COMPACTOR (Job 416558) ежедневно в 04:20 пересоздаёт шарды с генерацией gen<дата>. Roundtrip >13KB верифицирован (get возвращает payload бит-в-бит).
+4. Cron-шард-хранилище (уровень 8): CTX-SHARD-A/B (Job 416554/416555) хранят CONTEXT.md + guard-скрипт + протокол восстановления ВНУТРИ payload задач cron — серверное хранилище вне песочницы. COMPACTOR (Job 416558) ежедневно 04:20 пересоздаёт шарды (генерация gen<дата>). Roundtrip >13KB верифицирован.
+5. Supabase (уровень 9, ВНЕ платформы): supabase-persist.sh грузит worklog/CONTEXT/guard/journals в бакет me2-evidence/context-vault/ (sha-дедуп, HTTP 200 контроль). Жив, верифицирован (6 объектов).
+6. OSS/PolarFS (уровень 10): /home/sync/me2-context-backups/vault-*.tar.gz + /tmp/my-project/context-vault-mirror/. repo.tar в /home/sync — МЕХАНИЗМ RESET (extract при рестарте VM), не трогать.
+
+## 8b. Runbook восстановления v2 (после ЛЮБОГО wipe)
+
+1. Проверить /tmp/my-project/context-vault-mirror/ и /home/sync/me2-context-backups/ (сетевые ФС, наиболее вероятное выживание) → восстановить vault + worklog.
+2. Проверить /home/z/my-project/.git (глубокие блобы, reflog) — история в git-объектах могла пережить reset.
+3. Supabase: bash /home/z/context-vault/supabase-persist.sh (creds в /tmp/my-project/.a2-backup/) — скачать context-vault/* обратно: GET $SU/storage/v1/object/me2-evidence/context-vault/worklog.md.
+4. Cron-шарды: cron get 416554/416555 (или list по префиксу CTX-SHARD) — CONTEXT.md + guard-скрипт + протокол.
+5. Проверить probe-файлы (reset-probe-*.md в 5 локациях) → определить актуальную границу reset.
+6. Выполнить bash /home/z/context-vault/context-guard.sh; дальше — §8.
 
 ## 8. Если ты — новая сессия после потери контекста
 

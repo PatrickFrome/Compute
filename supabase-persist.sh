@@ -3,15 +3,16 @@
 # supabase-persist.sh — внешнее долговечное хранилище контекста (v1.1)
 # ----------------------------------------------------------------------------
 # Канал: Supabase Storage, бакет me2-evidence, префикс context-vault/.
-# Креды из /tmp/my-project/.a2-backup/me2.env.20260922 (PolarFS, пережил
-# env-reset 15:18). v1.1: проверка HTTP-кода каждой загрузки; верификация
-# списка через POST (документированный метод); секреты не печатаются.
+# Креды из /tmp/my-project/.a2-backup/me2.env.20260922 (PolarFS, пережил reset).
+# v1.1: контроль HTTP-кодов (200 обязательен), POST-листинг для верификации.
+# Секреты не печатаются и не логируются.
 # ============================================================================
 set -u
 
 ENVF="/tmp/my-project/.a2-backup/me2.env.20260922"
 VAULT="/home/z/context-vault"
 DEDUP="/tmp/.sbx-dedup"
+LOG="$VAULT/journal/supabase-persist.log"
 [ -s "$ENVF" ] || { echo "supabase-persist: creds file missing"; exit 1; }
 mkdir -p "$DEDUP"
 
@@ -31,9 +32,9 @@ upload() { # $1=local file $2=object name
       "$SU/storage/v1/object/me2-evidence/context-vault/$obj" 2>/dev/null)"
   if [ "$code" = "200" ]; then
     echo "$sum" > "$DEDUP/$obj.sha"
-    echo "[$(date +%Y%m%d-%H%M%S)] UP $obj ($(stat -c%s "$f")B) HTTP=$code" >> "$VAULT/journal/supabase-persist.log"
+    echo "[$(date +%Y%m%d-%H%M%S)] UP $obj ($(stat -c%s "$f")B)" >> "$LOG"
   else
-    echo "[$(date +%Y%m%d-%H%M%S)] UP-FAIL $obj HTTP=$code" >> "$VAULT/journal/supabase-persist.log"
+    echo "[$(date +%Y%m%d-%H%M%S)] UP-FAIL $obj HTTP=$code" >> "$LOG"
   fi
 }
 
@@ -45,9 +46,8 @@ upload "$VAULT/journal/context-journal.log"     "journal-context.log"
 upload "$VAULT/journal/incidents.log"           "journal-incidents.log"
 upload "$ENVF" "me2.env.20260922.restore-key"
 
-N=$(curl -s -X POST -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
-    -H "Content-Type: application/json" \
-    -d '{"prefix":"context-vault/","limit":50}' \
-    "$SU/storage/v1/object/list/me2-evidence" 2>/dev/null \
-    | grep -o '"name"' | wc -l | tr -d ' ')
-echo "supabase-persist ok: $N objects in context-vault/"
+N="$(curl -s -X POST -H "Authorization: Bearer $SJ" -H "apikey: $SJ" \
+  -H "Content-Type: application/json" \
+  -d '{"prefix":"context-vault","limit":50}' \
+  "$SU/storage/v1/object/list/me2-evidence" 2>/dev/null | grep -o '"name"' | wc -l | tr -d ' ')"
+echo "supabase-persist ok: $N objects verified in context-vault/"
