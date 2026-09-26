@@ -348,6 +348,10 @@ test('R85 command rail bridge is presentation-only and reconciles effective geom
   assert.match(me2Command, /setPrimaryCommandRail/);
   assert.match(me2Command, /effective_open/);
   assert.match(me2Command, /window\.addEventListener\("resize", onResize\)/);
+  assert.match(me2Command, /COMMAND_RAIL_WEB_MIN_WIDTH = 984/);
+  assert.match(me2Command, /aria-disabled=\{railConstrained\}/);
+  assert.match(me2Command, /ME2_AGENT_RAIL_HIDDEN_BY_PRESENTATION/);
+  assert.doesNotMatch(me2Command, /window\.innerWidth < 768/);
 });
 
 test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
