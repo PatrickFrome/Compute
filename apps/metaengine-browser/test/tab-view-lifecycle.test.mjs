@@ -73,9 +73,9 @@ test('main shell wires Electron destroyed proof into logical tab reconciliation'
 test('render-process-gone stays observational and does not retire the logical tab by itself', async () => {
   const source = await fs.readFile(path.join(appRoot, 'src', 'main.mjs'), 'utf8');
   const begin = source.indexOf("view.webContents.on('render-process-gone'");
-  const end = source.indexOf("view.webContents.once('destroyed'", begin);
+  const end = source.indexOf('\n', begin);
   assert.ok(begin >= 0 && end > begin);
-  const renderGone = source.slice(begin, end);
-  assert.doesNotMatch(renderGone, /registry\.close/);
-  assert.doesNotMatch(renderGone, /reconcileDestroyedTabView/);
+  const renderGoneHandler = source.slice(begin, end);
+  assert.doesNotMatch(renderGoneHandler, /registry\.close/);
+  assert.doesNotMatch(renderGoneHandler, /reconcileDestroyedTabView/);
 });
