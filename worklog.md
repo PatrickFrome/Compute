@@ -9627,3 +9627,21 @@ Work Log:
 Stage Summary:
 - rail sandbox/me2-os = 74115b53 = local main — публикация завершена, DONE: all local state published
 - origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
+
+---
+Task ID: R84-LIVE-AUDIT-1
+Agent: Super-Z (main session, 2026-09-27 04:25 MSK+8, директива оператора)
+Task: живой аудит R84 — daemon surfaces (fleet/commands/brain/memory) + подтверждение командного канала установленного браузера
+
+Work Log:
+- milestone командного канала (подтверждено оператором): chat → control plane → installed Browser (0.7.0-dev.3.1, native-electron-supervisor-v1) → physical readback → receipt; CAPTURE 28bc2d5c-b63c-476d-801a-e0388c97917b арендован и COMPLETED за 171ms; fleet: 1 ACTIVE + 3 BOUND_UNVERIFIED, LOST=0; semantic perception живой (state_revision_id + semantic targets); 7 вкладок, активна Z.ai
+- sandbox daemon :3041 (v0.21.0, boot 2026-09-26T07:18Z, last_seq=226, actions=47): /fleet — 1 узел node_daemon ACTIVE verified age_s=7 beats=5821, capacity 1/64, backlog пуст; /commands — 52/52 COMPLETED, все BROWSER_TABS lane=READ_ONLY (sandbox-плоскость без присоединённого браузера → count:0; реальный браузер — в плоскости оператора)
+- /brain: probe eventloop 0ms, db_probe 0ms, llm=ready; memory 3 rows (все episodic), db_bytes=299008, db=data/me2.db; /memory: 2 FAILED-памяти ранних smoke-задач (401 missing X-Token — исторические, до запрета токена)
+- клиент Mission Control (/ route): живые панели ДЕМОН (UP, VERSION 0.21.0) и state-чипы рендерят daemon-данные через /api?XTransformPort=3041 — интеграция клиент↔daemon подтверждена
+- SECURITY-СИГНАЛ (от оператора, live-аудит Supabase): 24 таблицы с отключённым RLS; вслепую не включать — нужны policies на каждую таблицу, иначе сломаются рабочие контуры; зафиксировано как ОТДЕЛЬНЫЙ security-fix (pending: список таблиц + policies; полный аудит возможен когда оператор выдаст service JWT — сейчас Supabase REST 401)
+
+Stage Summary:
+- командный канал физического браузера подтверждён end-to-end (не только heartbeat, но двусторонний read-only вызов) — R84 живой
+- sandbox-плоскость здорова: fleet 1/64 ACTIVE, 52 команды COMPLETED без ошибок, brain/llm ready
+- pending security-fix: Supabase RLS на 24 таблицах (требуются policies; не блокирует локальный контур)
+- JWT pending operator (Supabase) + R2 secret access key — прежние блокеры审计 остаются
