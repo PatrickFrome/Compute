@@ -178,25 +178,75 @@ function AgentSidebar() {
 }
 
 // ── Page: COMMAND CENTER ────────────────────────────────────────────────────────
+const COMMAND_RAIL_LS = "me2.command.agent-rail.v1";
+const COMMAND_RAIL_WEB_MIN_WIDTH = 984; // mirrors native 6 + 252 + 720 + 6 geometry gate
+
 export function CommandPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const preferredRailOpen = useRef(true);
   const chatId = useMe2((s) => s.chatId);
   const connected = useMe2((s) => s.connected);
 
-  // ⌘B / Ctrl+B (и RU-раскладка «ы») — свернуть/развернуть список агентов;
-  // на узких экранах список стартует свёрнутым (ChatGPT-паттерн мобильных)
+  const syncPrimaryRail = useCallback(async (preferred: boolean) => {
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryCommandRail?: (open: boolean) => Promise<{ effective_open?: boolean } | null>;
+      };
+    }).metaengineShell;
+    if (!shell?.setPrimaryCommandRail) {
+      setSidebarOpen(preferred && window.innerWidth >= COMMAND_RAIL_WEB_MIN_WIDTH);
+      return;
+    }
+    try {
+      const result = await shell.setPrimaryCommandRail(preferred);
+      setSidebarOpen(typeof result?.effective_open === "boolean" ? result.effective_open : preferred);
+    } catch {
+      // Presentation bridge failure must not create command authority or leave a
+      // phantom rail over native pixels. Fail closed to the no-rail layout.
+      setSidebarOpen(false);
+    }
+  }, []);
+
+  const setRailPreference = useCallback((open: boolean) => {
+    preferredRailOpen.current = open;
+    try { localStorage.setItem(COMMAND_RAIL_LS, open ? "1" : "0"); } catch { /* private mode */ }
+    void syncPrimaryRail(open);
+  }, [syncPrimaryRail]);
+
+  // One preference, two projections: React rail + main-process native viewport.
+  // The main process remains geometry authority and may force the rail closed
+  // when the protected Browser minimum width would otherwise be violated.
   useEffect(() => {
-    // отложенно (после гидрации): на узких экранах список стартует свёрнутым
-    const t0 = window.setTimeout(() => { if (window.innerWidth < 768) setSidebarOpen(false); }, 0);
+    let preferred = true;
+    try {
+      const stored = localStorage.getItem(COMMAND_RAIL_LS);
+      if (stored === "0") preferred = false;
+      else if (stored === "1") preferred = true;
+    } catch { /* private mode */ }
+    preferredRailOpen.current = preferred;
+    void syncPrimaryRail(preferred);
+
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B" || e.key === "ы" || e.key === "Ы")) {
         e.preventDefault();
-        setSidebarOpen((v) => !v);
+        setRailPreference(!preferredRailOpen.current);
       }
     };
+    let resizeFrame = 0;
+    const onResize = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        void syncPrimaryRail(preferredRailOpen.current);
+      });
+    };
     window.addEventListener("keydown", h);
-    return () => { window.clearTimeout(t0); window.removeEventListener("keydown", h); };
-  }, []);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.cancelAnimationFrame(resizeFrame);
+      window.removeEventListener("keydown", h);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [setRailPreference, syncPrimaryRail]);
 
   return (
     <div className="flex h-full min-h-0 bg-[#0b0b0d]" data-testid="page-command" data-panel-command>
@@ -206,7 +256,7 @@ export function CommandPage() {
         <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2">
           <button
             type="button"
-            onClick={() => setSidebarOpen((v) => !v)}
+            onClick={() => setRailPreference(!preferredRailOpen.current)}
             aria-label={sidebarOpen ? "Скрыть список агентов" : "Показать список агентов"}
             aria-pressed={sidebarOpen}
             data-testid="cc-sidebar-toggle"
