@@ -47,7 +47,7 @@ export function CommandPalette() {
   const snap = useMe2((s) => s.snap);
   const openTask = useMe2((s) => s.openTask);
   const setChatId = useMe2((s) => s.setChatId);
-  const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks">("all");
+  const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks" | "actions">("all");
 
   const confirmBudgetFlush = () => {
     setOpen(false);
@@ -109,12 +109,35 @@ export function CommandPalette() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="ME2: страница (@) · агент · задача · команда… · реестр {реестр}/47" />
+      <CommandInput placeholder="ME2: найти страницу · агента · задачу · команду…" />
+      <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5" aria-label="Режим Command Palette">
+        {([
+          ["all", "всё"],
+          ["pages", "pages"],
+          ["agents", "agents"],
+          ["tasks", "tasks"],
+          ["actions", "actions"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setMode(key)}
+            aria-pressed={mode === key}
+            className={`border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+              mode === key
+                ? "border-emerald-800/70 bg-emerald-950/25 text-emerald-300"
+                : "border-transparent text-zinc-500 hover:border-zinc-800 hover:text-zinc-300"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <CommandList>
         <CommandEmpty>не найдено</CommandEmpty>
 
         {/* PAGES */}
-        <CommandGroup heading="Pages · Alt+1..0">
+        {(mode === "all" || mode === "pages") && <CommandGroup heading="Pages · Alt+1..0">
           {PAGES.map((p) => {
             const m = PAGE_META[p.key];
             const Icon = m?.icon ?? LayoutDashboard;
@@ -129,11 +152,11 @@ export function CommandPalette() {
               </CommandItem>
             );
           })}
-        </CommandGroup>
-        <CommandSeparator />
+        </CommandGroup>}
+        {mode === "all" ? <CommandSeparator /> : null}
 
         {/* AGENTS (чаты) */}
-        {(mode === "all") && (
+        {(mode === "all" || mode === "agents") && (
           <CommandGroup heading={`Агенты · ${chats.length}`}>
             {chats.slice(0, 8).map((a) => (
               <CommandItem key={a.id} value={`agent ${a.id} ${a.role}`} onSelect={() => { setChatId(a.id); setPage("command"); setOpen(false); }}>
@@ -154,7 +177,7 @@ export function CommandPalette() {
         )}
 
         {/* TASKS */}
-        {(mode === "all") && (
+        {(mode === "all" || mode === "tasks") && (
           <CommandGroup heading={`Задачи · ${tasks.length}`}>
             <CommandItem value="new новая задача" onSelect={() => { setDialog("newTask"); setOpen(false); }}>
               <Rocket className="mr-2 h-4 w-4 text-emerald-400" /> Новая задача… <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
@@ -171,6 +194,7 @@ export function CommandPalette() {
         )}
 
         {/* ДИАГНОСТИКА */}
+        {(mode === "all" || mode === "actions") && <>
         <CommandSeparator />
         <CommandGroup heading="Диагностика и действия">
           <CommandItem value="ping" onSelect={() => { void sendCommand("PING", {}, { quiet: true, successMsg: "pong" }); setOpen(false); }}>
@@ -200,9 +224,10 @@ export function CommandPalette() {
             <Trash2 className="mr-2 h-4 w-4" /> Сброс среды (EMERGENCY)…
           </CommandItem>
         </CommandGroup>
+        </>}
 
         {/* РЕЕСТР-47 */}
-        {catalog.length > 0 && (
+        {catalog.length > 0 && (mode === "all" || mode === "actions") && (
           <>
             <CommandSeparator />
             <CommandGroup heading={`Реестр действий шины · ${catalog.length}/47`}>
