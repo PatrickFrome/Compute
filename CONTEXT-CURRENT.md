@@ -1,27 +1,11 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-26T23:37:34Z | worklog: 1846031B / 10053L | sha12=e5dfedd3e13a
+gen: 2026-09-26T23:45:43Z | worklog: 1846976B / 10067L | sha12=ef9890bdb2a9
 
-## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
-1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
-2. Прочитай: /home/z/my-project/CONTEXT.md (handoff) + /home/z/my-project/PHOENIX-PROTOCOL.md
-3. Хвост /home/z/my-project/worklog.md (150+ строк) — канонический журнал ВСЕХ чатов
-4. worklog усечён/пуст → `phoenix-restore.sh --merge`; диагностика Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
+## ВОССТАНОВЛЕНИЕ: 1) bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check (кворум 8; --merge при усечении) 2) CONTEXT.md + PHOENIX-PROTOCOL.md 3) хвост worklog.md 4) диагностика Supabase: хвост /home/z/context-vault/journal/phoenix.log
+КАНАЛЫ worklog (1846976B, sha12=ef9890bdb2a9): Supabase me2-evidence/context-vault/latest/ · ossfs /home/sync/me2-context-backups/latest/ · vault /home/z/context-vault/{latest,repo} · cron-KV CTX-SHARD-A/B
+CRON: 413338 PAT(15m) · 416526 Guard(15m) · PHX-HEARTBEAT(30m) · COMPACTOR(1h)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1846031B)
-| Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
-| OSS (ossfs) | /home/sync/me2-context-backups/latest/worklog.md | ДА (сетевой) |
-| Vault | /home/z/context-vault/{latest,snapshots,repo}/ | частично |
-| cron-KV | шарды CTX-SHARD-A/B (payload cron-задач) | ДА (серверный) |
-
-## CRON-ЗАДАЧИ КОНТЕКСТА
-- 413338: PAT watcher (15m) — push-pending при валидном GITHUB_TOKEN_ADMIN
-- 416526: Context Guard (15m) — снапшоты/детект усечения/авторестор/феникс
-- PHX-HEARTBEAT: (30m) — этот digest + Supabase/ossfs пульс
-- CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
-
-## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- EVOLVE-ROUND-9 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-RESPONSIVE] mobile-first аудит: брейкпоинты sm/md/lg, touch-цели >=44px в Mission Control
 - EV-RESPONSIVE (implemented, round 9, engine v1.19→v1.20) → EV-RESPONSIVE — mobile-first аудит Mission Control: брейкпоинты sm/md/lg, touch-цели >=44px
 - EVOLVE-ROUND-10 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-TOASTS] toast-фидбек на все мутирующие действия клиента (use-toast)
 - R80-DESKTOP-1A-20260927 → ME2-раунд: self-evolve тик + аудит + desktop-клиент (me2/r78-desktop-from-scratch): GAP #1a activation/handoff/qualification
@@ -36,23 +20,8 @@ gen: 2026-09-26T23:37:34Z | worklog: 1846031B / 10053L | sha12=e5dfedd3e13a
 - R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 - R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 - AUD-20260926-233328 → авто-аудит полноты контекста; фиксация смены статусов
+- R80 → push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
 
-## ХВОСТ worklog (последние 40 строк, вербатим)
-```
-Task ID: R80
-Agent: Super-Z (cron Job 413338, 2026-09-27 07:07)
-Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
-
-Work Log:
-- .github.env валиден → scripts/push-pending-r80.sh исполнен
-- main → sandbox/me2-os: 591b11a4..5c592367, ff-push ok
-- архивы: me2/archive-r21-sandbox-snapshot (73486ddf) up-to-date, me2/archive-v040-main-archive (c95de219) up-to-date
-- ls-remote верификация: sandbox/me2-os = 5c592367 ≡ local HEAD; дерево чистое
-- секреты не печатались и не логировались
-
-Stage Summary:
-- DONE: all local state published; следующий цикл стартует с 5c592367
----
 Task ID: R80
 Agent: Super-Z (cron Job 413338, 2026-09-27 07:22)
 Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
@@ -79,4 +48,17 @@ Work Log:
 
 Stage Summary:
 - Полнота контекста выросла до 88%; до 100% остаётся R2 secret access key (опционально — прямой SIGv4-доступ); дублирующих запросов оператору не создаётся
-```
+---
+Task ID: R80
+Agent: Super-Z (cron Job 413338, 2026-09-27 07:37)
+Task: push-pending main→sandbox/me2-os + 2 архив-ветки, ls-remote верификация
+
+Work Log:
+- .github.env валиден → scripts/push-pending-r80.sh исполнен
+- main → sandbox/me2-os: d276754b..d6798495, ff-push ok (4 cron-коммита: автокоммиты heartbeat/guard/audit, включая worklog-секцию AUD-20260926-233328 и отчёт audit-20260926-233328.md)
+- архивы: me2/archive-r21-sandbox-snapshot (73486ddf) up-to-date, me2/archive-v040-main-archive (c95de219) up-to-date
+- ls-remote верификация: sandbox/me2-os = d6798495 ≡ local HEAD; дерево чистое
+- секреты не печатались и не логировались; write-ahead snapshot перед правкой ok
+
+Stage Summary:
+- DONE: all local state published; следующий цикл стартует с d6798495
