@@ -125,7 +125,8 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(uiHost, /event: 'UI_UNOWNED_PORT'/);
   assert.match(uiHost, /state = 'WAITING_FOR_PORT_RELEASE'/);
   assert.match(uiHost, /ME2_UI_ALLOW_EXTERNAL_ADOPT/);
-  assert.match(uiHost, /routing_authorized:\s*childOwned \|\| externalAdoptAuthorized/);
+  assert.match(uiHost, /routing_authorized:\s*\(childOwned && state === 'HEALTHY'\) \|\| externalAdoptAuthorized/);
+  assert.match(uiHost, /initial_readiness_confirmed:\s*state === 'HEALTHY' \|\| externalAdoptAuthorized/);
   assert.match(uiHost, /export async function stopMe2UiHostAndWait/);
   assert.match(uiHost, /event: 'UI_FORCE_KILL'/);
   assert.match(uiHost, /event: 'UI_STOP_CONFIRMED'/);
