@@ -6,7 +6,7 @@
 import { PAGES, WORKSPACES, useMe2, type PageKey } from "@/components/me2/store";
 import {
   LayoutDashboard, Bot, Globe, Code2, ListChecks, ShieldCheck, Cpu, BrainCircuit,
-  Activity, Settings2, ChevronDown, Check,
+  Activity, Settings2, ChevronDown, Check, RotateCcw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -22,6 +22,7 @@ export function PageBar() {
   const setPage = useMe2((s) => s.setPage);
   const workspace = useMe2((s) => s.workspace);
   const setWorkspace = useMe2((s) => s.setWorkspace);
+  const resetWorkspaceLayout = useMe2((s) => s.resetWorkspaceLayout);
   const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
   const [wsOpen, setWsOpen] = useState(false);
   const activeWs = WORKSPACES.find((w) => w.key === workspace) ?? WORKSPACES[0];
@@ -80,6 +81,19 @@ export function PageBar() {
                   <span className="ml-auto truncate text-[9px] text-zinc-600">{w.hint}</span>
                 </button>
               ))}
+              <div className="border-t border-zinc-800 p-1.5">
+                <button
+                  role="menuitem"
+                  type="button"
+                  data-testid="workspace-reset-layout"
+                  onClick={() => { resetWorkspaceLayout(); setWorkspaceMenu(false); }}
+                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                  title="Вернуть layout текущего Workspace к безопасным значениям по умолчанию"
+                >
+                  <RotateCcw className="h-3 w-3" aria-hidden />
+                  Reset layout · {activeWs.label}
+                </button>
+              </div>
             </div>
           </>
         ) : null}
