@@ -26,6 +26,14 @@ let server = null;
 let state = 'IDLE';
 let lastError = null;
 let stats = { http_ok: 0, http_fail: 0, ws_upgrades: 0 };
+const sockets = new Set();
+
+function trackSocket(socket) {
+  if (!socket || typeof socket.once !== 'function') return socket;
+  sockets.add(socket);
+  socket.once('close', () => sockets.delete(socket));
+  return socket;
+}
 
 function emitRow(row, { error = false } = {}) {
   const text = JSON.stringify(row);
@@ -59,9 +67,13 @@ function proxyHttp(req, res) {
     res.writeHead(ur.statusCode ?? 502, ur.headers);
     ur.pipe(res);
   });
+  upstream.on('socket', trackSocket);
+  res.on('close', () => upstream.destroy());
   upstream.on('error', (e) => {
     stats.http_fail += 1;
-    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
+    if (res.destroyed) return;
+    if (res.headersSent) { res.destroy(); return; }
+    res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: `gateway: upstream :${port} недоступен (${String(e).slice(0, 80)})` }));
   });
   req.pipe(upstream);
@@ -72,7 +84,7 @@ function proxyUpgrade(req, socket, head) {
   const port = targetPort(req.url ?? '/');
   const path = stripTransform(req.url ?? '/');
   stats.ws_upgrades += 1;
-  const upstream = tcpConnect({ host: '127.0.0.1', port }, () => {
+  const upstream = trackSocket(tcpConnect({ host: '127.0.0.1', port }, () => {
     const lines = [`GET ${path} HTTP/1.1`, `Host: 127.0.0.1:${port}`];
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const k = req.rawHeaders[i];
@@ -84,7 +96,8 @@ function proxyUpgrade(req, socket, head) {
     if (head.length) upstream.write(head);
     socket.pipe(upstream);
     upstream.pipe(socket);
-  });
+  }));
+  trackSocket(socket);
   const kill = () => { try { socket.destroy(); } catch { /* уже мёртв */ } try { upstream.destroy(); } catch { /* уже мёртв */ } };
   upstream.on('error', kill);
   socket.on('error', kill);
@@ -104,6 +117,7 @@ export async function startMe2UiGateway() {
         } catch { /* сокет уже закрыт */ }
       }
     });
+    server.on('connection', trackSocket);
     server.on('upgrade', (req, socket, head) => {
       try { proxyUpgrade(req, socket, head); } catch { try { socket.destroy(); } catch { /* noop */ } }
     });
@@ -123,9 +137,18 @@ export async function startMe2UiGateway() {
 }
 
 export function stopMe2UiGateway() {
-  if (server) {
-    try { server.close(); } catch { /* уже закрыт */ }
-    server = null;
+  const current = server;
+  server = null;
+  // R84 desktop semantic port: server.close() does not terminate upgraded
+  // WebSockets. Destroy every tracked browser↔gateway/upstream socket so ME2
+  // shutdown cannot retain process handles after the Browser lifecycle owner
+  // exits. This is cleanup only and grants no browser or scheduler authority.
+  for (const socket of [...sockets]) {
+    try { socket.destroy(); } catch { /* already closed */ }
+  }
+  sockets.clear();
+  if (current) {
+    try { current.close(); } catch { /* уже закрыт */ }
   }
   state = 'STOPPED';
   return me2UiGatewayStatus();
@@ -140,5 +163,8 @@ export function me2UiGatewayStatus() {
     url: state === 'LIVE' ? `http://127.0.0.1:${GATEWAY_PORT}` : null,
     last_error: lastError,
     stats: { ...stats },
+    active_sockets: sockets.size,
+    upgraded_socket_shutdown_bounded: true,
+    authority_effect: false,
   };
 }
