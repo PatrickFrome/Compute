@@ -23,6 +23,7 @@ function placeholder(value) {
   return !v
     || /^\$\{?[A-Z0-9_]+\}?$/i.test(v)
     || /^<[^>]+>$/.test(v)
+    || /^(?:process\.env\.[A-Z0-9_]+|Deno\.env\.get\([^)]*\))$/i.test(v)
     || /^(?:redacted|masked|placeholder|example|changeme|dummy|test[_-]?only|your[_-])/i.test(v)
     || /^\*+$/.test(v);
 }
