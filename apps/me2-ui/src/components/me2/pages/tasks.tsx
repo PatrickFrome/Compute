@@ -32,6 +32,7 @@ type RetryMetrics = {
   without_lesson: { n: number; completed: number; rate: number | null };
   ab?: { treatment: { n: number; completed: number; rate: number | null }; control: { n: number; completed: number; rate: number | null }; control_crossover: number };
 };
+const TASKS_BRANCH_VIEW_LS = "me2.tasks.branch-view.v1";
 const CAUSE_RU: Record<string, string> = {
   budget_exhausted: "бюджет шагов",
   provider_unavailable: "провайдер недоступен",
@@ -355,8 +356,20 @@ export function TasksPage() {
   const setChatId = useMe2((s) => s.setChatId);
   const setDialog = useMe2((s) => s.setDialog);
 
-  // вкладка-фильтр ветвей
+  // вкладка-фильтр ветвей; Linear/Blender-style view preference survives page switches.
   const [branchTab, setBranchTab] = useState<BranchTabKey>("ALL");
+  const [branchViewReady, setBranchViewReady] = useState(false);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(TASKS_BRANCH_VIEW_LS) as BranchTabKey | null;
+      if (stored && BRANCH_TABS.some((tab) => tab.key === stored)) setBranchTab(stored);
+    } catch { /* private mode */ }
+    setBranchViewReady(true);
+  }, []);
+  useEffect(() => {
+    if (!branchViewReady) return;
+    try { localStorage.setItem(TASKS_BRANCH_VIEW_LS, branchTab); } catch { /* private mode */ }
+  }, [branchTab, branchViewReady]);
 
   // R11 legacy: pass-rate ретраев с LLM-уроком vs без — /metrics, поллинг 20s
   const [retryMetrics, setRetryMetrics] = useState<RetryMetrics | null>(null);
