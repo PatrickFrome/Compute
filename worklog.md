@@ -1940,3 +1940,4 @@ Stage Summary:
 - Ссылка для оператора: открыть Preview Panel → зелёная кнопка «Chrome-расширение (.zip)» в левом нижнем углу; либо Open in New Tab + путь /zai-chat-export/zai-chat-export-chrome-extension.zip.
 - Публикация в GitHub — после возврата PAT (page.tsx + public/* в локальном main).
 cron 413338 tick 81 (13:07 +08): PAT ожидается, push-pending готов (ba623a59)
+cron 413338 tick 82 (13:22 +08): PAT ожидается, push-pending готов (ba623a59)
