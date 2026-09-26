@@ -396,7 +396,7 @@ test('R85 workspace switch restores workspace-scoped layout preferences', () => 
 
 test('R85 workspace layout has an explicit reset path', () => {
   assert.match(store, /resetWorkspaceLayout/);
-  assert.match(store, /drawerOpen: false, drawerTab: "events", commandRailOpen: true/);
+  assert.match(store, /drawerOpen: false, drawerTab: "events", drawerFollowSelection: true, commandRailOpen: true/);
   assert.match(store, /me2:workspace-layout-reset/);
   assert.match(me2Pagebar, /data-testid="workspace-reset-layout"/);
   assert.match(me2Pagebar, /Reset layout · \{activeWs\.label\}/);
@@ -405,12 +405,23 @@ test('R85 workspace layout has an explicit reset path', () => {
 test('R85 Context Drawer exposes selection-driven inspection without a second data plane', () => {
   assert.match(store, /ContextDrawerTab = "selection" \| "events" \| "commands" \| "runtime"/);
   assert.match(store, /inspectedTaskId:\s*string \| null/);
-  assert.match(store, /detail: task, inspectedTaskId: task\?\.id \?\? id/);
+  assert.match(store, /inspectedTaskId: task\?\.id \?\? id/);
   assert.match(me2ContextDrawer, /data-testid="context-drawer-selection"/);
   assert.match(me2ContextDrawer, /useAgentChatSessions\(\)/);
   assert.match(me2ContextDrawer, /Selected agent/);
   assert.match(me2ContextDrawer, /Last inspected task/);
   assert.doesNotMatch(me2ContextDrawer, /me2Fetch\(|sendCommand\(|agentChatOp\(/);
+});
+
+test('R85 Context Drawer follows selection only when explicitly enabled and already open', () => {
+  assert.match(store, /drawerFollowSelection:\s*boolean/);
+  assert.match(store, /contextDrawerFollowSelection:\s*boolean/);
+  assert.match(store, /setContextDrawerFollowSelection/);
+  assert.match(store, /contextDrawerPreferredOpen && state\.contextDrawerFollowSelection \? "selection"/);
+  assert.match(store, /writeWorkspaceLayout\(get\(\)\.workspace, \{ drawerTab: "selection" \}\)/);
+  assert.doesNotMatch(store, /setContextDrawer\(true\)[\s\S]{0,120}drawerTab: "selection"/);
+  assert.match(me2ContextDrawer, /data-testid="context-drawer-follow-selection"/);
+  assert.match(me2ContextDrawer, /Drawer никогда не открывается автоматически/);
 });
 
 test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
