@@ -127,3 +127,20 @@ Stage Summary:
 - Честные ограничения раунда: квоты z-ai (web_search/vision 429) → VLM-ревью и свежие свайпы официальных доков Cursor перенесены в R22; git-push заблокирован потерей токена.
 - Бэклог R22 (P1 Core Cursor Parity): ① свайпы docs.cursor.com → конвертировать UNKNOWN→{PARITY/PARTIAL/MISSING}; ② composer/chat-агент поверх шины ME1 в Electron-клиенте; ③ ME9 tree-sitter+embeddings (@codebase parity); ④ VLM-верификация r21/r21-mobile; ⑤ electron-updater (P8) + восстановление секретов оператором.
 - Скриншоты: download/r21-mechanics-parity.png, download/r21-mobile-390.png; ресёрч: research/2026/R21-ELECTRON-CLIENT-RESEARCH.md, R21-CURSOR-PARITY-MATRIX.md.
+
+cron 413338 tick 90 (15:22 +08): PAT ожидается, push-pending готов (ba623a59) — НЕАКТУАЛЬНО: env-reset ~15:18 +08 откатил проект к снапшоту R21, скрипт и worklog-хвост R22–R80 удалены (см. инцидент ниже).
+
+---
+Task ID: R80-ENVRESET-TRUNCATION-DETECTED
+Agent: Super Z (main agent, cron 413338 session)
+Task: плановый тик 413338 (15:22 +08) — проверка worklog-хвоста R80 и блокера публикации, ветка «токена нет».
+
+Work Log:
+- ОБНАРУЖЕН ENV-RESET ~15:18 +08: дерево /home/z/my-project откатлено к снапшоту эпохи R21 (worklog.md mtime 2026-09-24 07:47 UTC, 130 строк, последняя запись R21-P0-ELECTRON-CLIENT-PARITY). На диске утрачивено: записи worklog R22–R80 (~1800 строк, включая cron-тики и все R80-раунды), scripts/push-pending-r80.sh, scripts/zai-chat-export/ (Chrome-расширение v1.0.1), download/zai-chat-export-chrome-extension.zip, public/zai-chat-export/ (Preview-раздача), каталог /home/z/.a2/ (целиком), /home/z/me2-workspace, /home/z/me2-sandboxes.
+- Git: main = 73486dd (R21), ветки main/main-archive, remote-tracking refs отсутствуют, reflog не содержит коммитов новее R21. По контексту сессии (тики 81–89 читались до отката): последний успешный пуш на GitHub — b39db2e0..56ba1b87 в sandbox/me2-os (25.09, до отзыва PAT) — там сохранена бо́льшая часть R80-истории worklog.
+- Невосстановимо с remote (не пушилось): Chrome-расширение v1.0.1 (26.09), push-pending-r80.sh, worklog-записи после последнего пуша; восстановление — из контекста сессий/капсулы после возврата PAT.
+- Секреты не печатались и не логировались; проверка токена — только exit-коды (файл .github.env отсутствует вместе с каталогом /home/z/.a2).
+
+Stage Summary:
+- Пометка «push-pending готов» более не соответствует действительности: скрипт удалён env-reset'ом. План восстановления после возврата PAT: (1) git fetch PatrickFrome/Compute → восстановить worklog/скрипты из sandbox/me2-os (эпоха 56ba1b87); (2) восстановить секреты по процедуре R18-0; (3) пересоздать непушенное (расширение — по README и контексту).
+- Cron 413338 продолжает мониторинг; следующим тикам достаточно однострочной пометки с отметкой об env-reset.
