@@ -60,7 +60,14 @@ test('normal Browser startup prefers packaged ME2 and retains legacy shell only 
 });
 
 test('ME2 page navigation controls presentation only through the trusted preload bridge', () => {
-  assert.match(preload, /setPrimaryPage:\s*\(page\) => ipcRenderer\.invoke\('metaengine:shell:primary-page'/);
+  assert.match(preload, /const setPrimaryPage = \(page\) => ipcRenderer\.invoke\('metaengine:shell:primary-page'/);
+  assert.match(preload, /if \(isPrimaryMe2PresentationDocument\(\)\)/);
+  assert.match(preload, /contextBridge\.exposeInMainWorld\('metaengineShell', Object\.freeze\(\{[\s\S]*setPrimaryPage,[\s\S]*presentation_only:\s*true,[\s\S]*browser_command_authority:\s*false,[\s\S]*scheduler_authority:\s*false,[\s\S]*update_authority:\s*false,[\s\S]*release_authority:\s*false,[\s\S]*authority_effect:\s*false/);
+  const primaryBranch = preload.slice(
+    preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
+    preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
+  );
+  assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(|presentationFocus|onBrainDelta|brainStreamStatus/);
   assert.match(store, /metaengineShell\?: \{ setPrimaryPage\?:/);
   assert.match(store, /shell\?\.setPrimaryPage\?\.\(p\)/);
   assert.match(main, /presentation_only:\s*true/);
