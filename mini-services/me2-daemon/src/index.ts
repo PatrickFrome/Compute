@@ -9,15 +9,19 @@ import { ACTIONS, dispatch } from "./actions";
 import { listWorktrees, createWorktree, removeWorktree } from "./worktrees";
 import { execWhitelisted, probe, whitelist } from "./sandbox";
 import { evaluateVerdicts } from "./verdicts";
-import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS } from "./roadmap";
+import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS, CONVERGENCE_EVIDENCE } from "./roadmap";
 import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor } from "./controlplane";
 import { monitorHistory, monitorStatus, startMonitor } from "./monitor";
+import { donorRegistry } from "./donor-registry";
+import { convergenceStatus } from "./github";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
 loadEventLog();
 
 type Handler = (req: Request, url: URL, body: Record<string, unknown>) => Promise<unknown> | unknown;
+
+const DONOR = donorRegistry(ACTIONS.map((a) => ({ name: a.name, family: a.family })));
 
 const routes: { method: string; path: string; handler: Handler }[] = [
   {
@@ -29,7 +33,10 @@ const routes: { method: string; path: string; handler: Handler }[] = [
       round: ROUND,
       uptime_s: Math.round((Date.now() - STARTED_VERSION.started_at_ms) / 1000),
       started_at: STARTED_AT,
-      actions: { implemented: ACTIONS.length, donor_registry: "47 (pending GitHub recovery, not claimed)" },
+      actions: {
+        implemented: ACTIONS.length,
+        donor_registry: `${DONOR.total} recovered (sandbox/me2-os @ ${DONOR.provenance.source_sha.slice(0, 8)}) · local counterparts ${DONOR.reconciliation.counterparts_count}/${DONOR.total}`,
+      },
       last_seq: lastSeq(),
       head_hash: headHash(),
       ws_port: WS_PORT,
@@ -42,7 +49,7 @@ const routes: { method: string; path: string; handler: Handler }[] = [
     path: "/capabilities",
     handler: () => ({
       count: ACTIONS.length,
-      note: "R81 recovery build: honest implemented registry; donor 47-action registry pending sandbox/me2-os recovery",
+      note: `R81-PHASE1: local implemented registry; donor ${DONOR.total}-action manifest recovered from sandbox/me2-os @ ${DONOR.provenance.source_sha.slice(0, 8)} (see /donor-registry)`,
       actions: ACTIONS,
     }),
   },
@@ -92,9 +99,15 @@ const routes: { method: string; path: string; handler: Handler }[] = [
   {
     method: "GET",
     path: "/roadmap",
-    handler: () => ({ roadmap: ROADMAP, release_authority: RELEASE_AUTHORITY, donors: DONOR_AUTHORITIES }),
+    handler: () => ({ roadmap: ROADMAP, release_authority: RELEASE_AUTHORITY, donors: DONOR_AUTHORITIES, convergence_evidence: CONVERGENCE_EVIDENCE }),
   },
   { method: "GET", path: "/recovery", handler: () => RECOVERY_STATUS },
+  { method: "GET", path: "/donor-registry", handler: () => donorRegistry(ACTIONS.map((a) => ({ name: a.name, family: a.family }))) },
+  {
+    method: "GET",
+    path: "/convergence",
+    handler: (_r, url) => convergenceStatus(url.searchParams.get("fresh") === "1"),
+  },
   {
     method: "GET",
     path: "/control-plane/supervisor",

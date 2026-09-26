@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { useToast } from '@/hooks/use-toast'
 import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
 import {
-  Activity, AlertTriangle, Boxes, ChevronDown, Database, Download, GitBranch, HeartPulse,
+  Activity, AlertTriangle, Boxes, ChevronDown, Database, Download, GitBranch, GitPullRequest, HeartPulse,
   ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Terminal, Trash2, TrendingUp, Zap,
 } from 'lucide-react'
 
@@ -73,7 +73,7 @@ interface Supervisor {
   p0_flags: string[]
 }
 interface RoadmapItem {
-  round: string; title: string; goal: string; exit_gate: string; status: string
+  round: string; title: string; goal: string; exit_gate: string; status: string; evidence?: string
 }
 interface RoadmapData {
   roadmap: RoadmapItem[]
@@ -105,20 +105,35 @@ interface ExecResult {
   cmd: string[]; ok: boolean; exit_code: number | null
   stdout: string; stderr: string; elapsed_ms: number
 }
+interface ConvCheck { name: string; status: string; conclusion: string | null }
+interface Convergence {
+  fetched_at: string; repository: string; branch: string
+  head: { sha: string; short: string; message: string; committed_at: string } | null
+  pr: { number: number; state: string; draft: boolean; mergeable: boolean | null; mergeable_state: string; title: string; updated_at: string } | null
+  checks: { total: number; success: number; failed: number; cancelled: number; skipped: number; pending: number; in_progress: number; items: ConvCheck[] }
+  rollup_state: 'GREEN' | 'RED' | 'PENDING' | 'UNKNOWN'
+  api: { token_present: boolean; rate_remaining: number | null }
+}
+interface DonorRegistry {
+  provenance: { source_ref: string; source_sha: string; donor_daemon_version: string }
+  lanes: { EMERGENCY: number; READ_ONLY: number; TAB_MUTATION: number; GLOBAL_MUTATION: number }
+  total: number
+  reconciliation: { counterparts_count: number; full: number; partial: number; pending_count: number; local_only_count: number }
+}
 
 // ---------------------------------------------------------- gap matrix ----
-const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive' }[] = [
-  { pri: 'P0', title: 'Supervisor useful cycle', status: 'ROLLOVER_AMBIGUOUS · composer_not_unique · cycle 2109 застыл', live: 'keepalive' },
-  { pri: 'P0', title: 'DevOS maintenance liveness', status: 'live native_supervisor_idle_maintenance_wait_timeout' },
-  { pri: 'P0', title: 'Edge convergence', status: 'production v13 ≠ release source cf747… (v14 canary активен)' },
+const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive'; closed?: boolean }[] = [
+  { pri: 'P0', title: 'Supervisor useful cycle', status: 'ROLLOVER_AMBIGUOUS · cycle 2109 >32h; fix в source @ 5a1c6178 — ждёт exact-head installer', live: 'keepalive' },
+  { pri: 'P0', title: 'DevOS maintenance liveness', status: 'idle-gate fix в source; live timeout сохраняется до installer' },
+  { pri: 'P0', title: 'Edge convergence', status: 'production v13 ≠ release source cf747… (v14 canary активен, pinned ef04d60…)' },
   { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
-  { pri: 'P0', title: 'Full installer', status: 'apps/me2-daemon не бандлится в extraResources' },
+  { pri: 'P0', title: 'Full installer', status: 'R85 in-flight: standalone daemon payload + version unify (18 commits, CI re-qualifying @ 2c28aa85)' },
   { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION · fresh E2E не доказан' },
   { pri: 'P0', title: 'Source authority', status: 'DB roadmap baseline b69f… ≠ release cf747…' },
   { pri: 'P0', title: 'Credentials (security)', status: 'raw credentials в chat export → ротация у оператора' },
-  { pri: 'P0', title: 'Cognitive convergence', status: 'cloud cursor стоит против живого локального bus', live: 'cognitive' },
-  { pri: 'P1', title: 'Branch audit', status: '80/618 веток выпадают из аудита; unrelated history ломает merge-base' },
-  { pri: 'P1', title: 'Version identity', status: 'daemon runtime 0.57.1 vs package 0.43.0' },
+  { pri: 'P0', title: 'Cognitive convergence', status: 'улучшилось: SUPPORTED · ack 64525 (застой 157 снят); hard gate до R87', live: 'cognitive' },
+  { pri: 'P1', title: 'Branch audit', status: 'ЗАКРЫТО: 621/621 heads классифицированы, UNRELATED_HISTORY поддержан (SUCCESS @ 5a1c6178)', closed: true },
+  { pri: 'P1', title: 'Version identity', status: 'закрывается R85-волной: unify versions @ 7ca55f7e (CI pending)' },
   { pri: 'P1', title: 'Durable backlog hygiene', status: '578 AMBIGUOUS / 572 FENCED требуют terminal reconciliation' },
   { pri: 'P1', title: 'Startup', status: 'executable_will_launch_at_login=false требует physical verification' },
   { pri: 'P1', title: 'Worklog', status: 'human log → structured append-only evidence ledger' },
@@ -231,6 +246,10 @@ export default function MissionControl() {
   const [recovery, setRecovery] = useState<Recovery | null>(null)
   const [execResult, setExecResult] = useState<ExecResult | null>(null)
   const [monitor, setMonitor] = useState<MonitorHistory | null>(null)
+  const [conv, setConv] = useState<Convergence | null>(null)
+  const [convErr, setConvErr] = useState<string | null>(null)
+  const [convLoading, setConvLoading] = useState(false)
+  const [donorReg, setDonorReg] = useState<DonorRegistry | null>(null)
   const [wtName, setWtName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
@@ -262,19 +281,28 @@ export default function MissionControl() {
     catch { /* non-fatal */ }
   }, [])
 
+  const loadConvergence = useCallback(async (fresh = false) => {
+    setConvLoading(true)
+    try { setConv(await jfetch<Convergence>(`/convergence${fresh ? '?fresh=1' : ''}`)); setConvErr(null) }
+    catch (e) { setConvErr((e as Error).message) }
+    finally { setConvLoading(false) }
+  }, [])
+
   useEffect(() => {
-    loadHealth(); loadSupervisor(); loadWorktrees()
+    loadHealth(); loadSupervisor(); loadWorktrees(); loadConvergence()
     jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
     jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
     jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
+    jfetch<DonorRegistry>('/donor-registry').then(setDonorReg).catch(() => {})
     const a = setInterval(loadHealth, 5000)
     const b = setInterval(() => loadSupervisor(false), 10000)
     const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
     const e = setInterval(() => { jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {}) }, 15000)
+    const f = setInterval(() => { loadConvergence(false) }, 30000)
     jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
     const d = setInterval(loadWorktrees, 30000)
-    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e) }
-  }, [loadHealth, loadSupervisor, loadWorktrees])
+    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e); clearInterval(f) }
+  }, [loadHealth, loadSupervisor, loadWorktrees, loadConvergence])
 
   // ---- REST events poll (fallback) + WS live stream (primary)
   useEffect(() => {
@@ -404,7 +432,7 @@ export default function MissionControl() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:ml-auto">
-            <Chip tone="warn">{health?.round ?? 'R81-PHASE0'} · RECOVERY</Chip>
+            <Chip tone="warn">{health?.round ?? 'R81-PHASE1'} · CONVERGENCE</Chip>
             <Chip tone={daemonUp ? 'ok' : 'p0'}>
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
               {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
@@ -454,8 +482,20 @@ export default function MissionControl() {
                   {!verdicts && <span className="text-xs text-zinc-600">загрузка…</span>}
                 </div>
               </div>
+              <div className="flex flex-wrap gap-1.5">
+                {donorReg ? (
+                  <>
+                    <Chip tone="ok">donor {donorReg.total} @ {donorReg.provenance.source_sha.slice(0, 8)}</Chip>
+                    <Chip tone="info">counterparts {donorReg.reconciliation.counterparts_count} ({donorReg.reconciliation.full} full / {donorReg.reconciliation.partial} partial)</Chip>
+                    <Chip tone="warn">pending {donorReg.reconciliation.pending_count} → R84–R86</Chip>
+                    <Chip tone="neutral">{donorReg.lanes.READ_ONLY} RO · {donorReg.lanes.TAB_MUTATION} TAB · {donorReg.lanes.GLOBAL_MUTATION} GM · {donorReg.lanes.EMERGENCY} EMG</Chip>
+                  </>
+                ) : (
+                  <Chip tone="neutral">donor-registry загрузка…</Chip>
+                )}
+              </div>
               <p className="text-[11px] leading-relaxed text-zinc-500">
-                Реестр: <span className="font-mono text-cyan-300">{health.actions.implemented} действий</span> реализовано. Donor-реестр 47 действий (v0.57.1, sandbox/me2-os) не заявлен — ждёт восстановления через GitHub.
+                Реестр: <span className="font-mono text-cyan-300">{health.actions.implemented} действий</span> реализовано локально. Donor-манифест восстановлен дословно из {donorReg?.provenance.source_ref ?? 'sandbox/me2-os'} (v{donorReg?.provenance.donor_daemon_version ?? '0.57.1'}): 4-lane scheduler, budget 24/60s; полная реализация bus — вместе с Browser control plane.
               </p>
             </div>
           ) : (
@@ -530,6 +570,72 @@ export default function MissionControl() {
           )}
         </Panel>
 
+        {/* ------------------------------------------ R81 CONVERGENCE (GitHub) */}
+        <Panel
+          icon={<GitPullRequest className="h-4 w-4" />}
+          title="R81 Convergence · GitHub live"
+          chip={
+            convErr ? <Chip tone="p0">ERR</Chip>
+              : conv ? (
+                <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : conv.rollup_state === 'PENDING' ? 'warn' : 'neutral'}>
+                  CI {conv.rollup_state}
+                </Chip>
+              ) : <Chip tone="neutral">…</Chip>
+          }
+          actions={
+            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={convLoading} onClick={() => loadConvergence(true)} aria-label="Свежий GitHub-статус">
+              <RefreshCw className={`h-4 w-4 ${convLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          }
+        >
+          {convErr && !conv ? (
+            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">GitHub: {convErr}</div>
+          ) : conv ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="PR #968" value={conv.pr ? `${conv.pr.state}${conv.pr.draft ? ' · draft' : ''}` : '—'} tone="text-teal-400" span="col-span-2" />
+                <Stat label="mergeable" value={conv.pr ? (conv.pr.mergeable == null ? '—' : conv.pr.mergeable ? 'yes' : 'no') : '—'} tone={conv.pr?.mergeable ? 'text-emerald-400' : 'text-amber-400'} span="col-span-2" />
+                <Stat label="head" value={conv.head?.short ?? '—'} tone="text-cyan-300" />
+                <Stat label="committed" value={conv.head?.committed_at ? hhmmss(conv.head.committed_at) : '—'} />
+                <Stat label="checks" value={`${conv.checks.success}/${conv.checks.total}`} tone={conv.rollup_state === 'GREEN' ? 'text-emerald-400' : 'text-amber-400'} span="col-span-2" />
+              </div>
+              {conv.head && (
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 font-mono text-[11px] leading-snug text-zinc-400">
+                  <span className="text-teal-400">{conv.head.short}</span> {conv.head.message}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                <Chip tone={conv.rollup_state === 'GREEN' ? 'ok' : conv.rollup_state === 'RED' ? 'p0' : 'warn'}>CI {conv.rollup_state}</Chip>
+                <Chip tone="ok">success {conv.checks.success}</Chip>
+                {conv.checks.pending > 0 && <Chip tone="warn">pending {conv.checks.pending} · in_progress {conv.checks.in_progress}</Chip>}
+                {conv.checks.failed > 0 && <Chip tone="p0">failed {conv.checks.failed}</Chip>}
+                {conv.checks.cancelled > 0 && <Chip tone="neutral">cancelled {conv.checks.cancelled}</Chip>}
+                <Chip tone="neutral">total {conv.checks.total}</Chip>
+                {conv.api.rate_remaining != null && <Chip tone="neutral">rate {conv.api.rate_remaining}</Chip>}
+              </div>
+              <div className={`space-y-1 ${scrollCls} pr-1`}>
+                {conv.checks.items.map((c) => {
+                  const tone: 'ok' | 'warn' | 'p0' | 'neutral' = c.status !== 'completed'
+                    ? 'warn'
+                    : c.conclusion === 'success' ? 'ok' : (c.conclusion === 'failure' || c.conclusion === 'timed_out' || c.conclusion === 'action_required') ? 'p0' : 'neutral'
+                  return (
+                    <div key={c.name} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 hover:border-zinc-700">
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300" title={c.name}>{c.name}</span>
+                      <Chip tone={tone}>{c.status === 'completed' ? (c.conclusion ?? '—') : c.status}</Chip>
+                    </div>
+                  )
+                })}
+                {conv.checks.items.length === 0 && <div className="py-4 text-center text-xs text-zinc-600">check-runs пусты — CI ещё не стартовал</div>}
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                Read-only GitHub-клиент демона (PAT только серверно в /home/z/.a2). Rollup честный: cancelled ≠ green — терминальный повтор обязателен.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка GitHub-статуса…</div>
+          )}
+        </Panel>
+
         {/* -------------------------------------------- CONVERGENCE MONITOR */}
         <Panel
           icon={<TrendingUp className="h-4 w-4" />}
@@ -575,14 +681,14 @@ export default function MissionControl() {
             {GAP_MATRIX.map((g) => {
               const liveTone = g.live === 'keepalive' ? (ka?.state === 'ACTIVE' ? 'ok' : 'p0') : g.live === 'cognitive' ? (supervisor?.cognitive.state === 'CONVERGED' ? 'ok' : 'warn') : undefined
               return (
-                <div key={g.title} className="flex items-start gap-2.5 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
-                  <Chip tone={g.pri === 'P0' ? 'p0' : 'warn'} className="mt-0.5 shrink-0">{g.pri}</Chip>
+                <div key={g.title} className={`flex items-start gap-2.5 rounded-lg border p-2.5 ${g.closed ? 'border-emerald-500/25 bg-emerald-500/5' : 'border-zinc-800 bg-zinc-950/60'}`}>
+                  <Chip tone={g.closed ? 'ok' : g.pri === 'P0' ? 'p0' : 'warn'} className="mt-0.5 shrink-0">{g.closed ? '✓' : g.pri}</Chip>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-semibold text-zinc-200">{g.title}</span>
                       {liveTone && <Chip tone={liveTone}>LIVE</Chip>}
                     </div>
-                    <div className="mt-0.5 break-words font-mono text-[11px] leading-snug text-zinc-500">{g.status}</div>
+                    <div className={`mt-0.5 break-words font-mono text-[11px] leading-snug ${g.closed ? 'text-emerald-300/70' : 'text-zinc-500'}`}>{g.status}</div>
                   </div>
                 </div>
               )
@@ -627,6 +733,7 @@ export default function MissionControl() {
                     </div>
                     <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-400">{r.goal}</p>
                     <p className="mt-1 text-[10px] leading-relaxed text-zinc-600"><span className="text-zinc-500">exit gate:</span> {r.exit_gate}</p>
+                    {r.evidence && <p className="mt-1.5 rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] leading-relaxed text-amber-200/80">{r.evidence}</p>}
                   </div>
                 ))}
               </div>
@@ -802,7 +909,7 @@ export default function MissionControl() {
           <span>bus {wsLive ? 'ws' : 'poll'}</span>
           <span>·</span>
           <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
-          <span className="ml-auto font-mono text-zinc-600">R81-PHASE0 · release readiness: BLOCKED (см. gap matrix)</span>
+          <span className="ml-auto font-mono text-zinc-600">{health?.round ?? 'R81-PHASE1'} · release readiness: BLOCKED (см. gap matrix)</span>
         </div>
       </footer>
     </div>

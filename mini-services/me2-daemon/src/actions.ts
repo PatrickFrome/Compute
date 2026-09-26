@@ -11,6 +11,8 @@ import { evaluateVerdicts } from "./verdicts";
 import { ROADMAP, RELEASE_AUTHORITY, DONOR_AUTHORITIES, RECOVERY_STATUS } from "./roadmap";
 import { supervisorSnapshot, mirrorTail, runtimeCapabilities, writeMirrorAnchor } from "./controlplane";
 import { monitorHistory } from "./monitor";
+import { donorRegistry } from "./donor-registry";
+import { convergenceStatus } from "./github";
 import { VERSION, ROUND, REST_PORT, WS_PORT, STARTED_AT } from "./version";
 import { STARTED_VERSION } from "./boot";
 
@@ -39,6 +41,8 @@ export const ACTIONS: ActionDef[] = [
   { name: "controlplane.capabilities", family: "controlplane", description: "DevOS runtime capabilities RPC (read-only)" },
   { name: "controlplane.history", family: "controlplane", description: "Supervisor convergence monitor ring buffer (chart data)" },
   { name: "controlplane.mirror-anchor", family: "controlplane", description: "Operator-triggered single anchor write to the evidence mirror" },
+  { name: "donor.registry", family: "recovery", description: "Recovered donor 57-action manifest (sandbox/me2-os @ 56ba1b87) + local reconciliation" },
+  { name: "convergence.status", family: "controlplane", description: "R81 convergence branch live status from GitHub (PR #968, head, CI rollup)" },
 ];
 
 export async function dispatch(action: string, args: Record<string, unknown>): Promise<unknown> {
@@ -98,6 +102,10 @@ export async function dispatch(action: string, args: Record<string, unknown>): P
       return monitorHistory();
     case "controlplane.mirror-anchor":
       return writeMirrorAnchor();
+    case "donor.registry":
+      return donorRegistry(ACTIONS.map((a) => ({ name: a.name, family: a.family })));
+    case "convergence.status":
+      return convergenceStatus(args.fresh === true);
     default:
       throw new OpError("action_not_implemented", `${action} registered but not implemented`, 500);
   }

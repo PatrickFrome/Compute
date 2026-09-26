@@ -1,0 +1,811 @@
+     1→'use client'
+     2→
+     3→// ============================================================================
+     4→// ME2 OS · MISSION CONTROL — R81-PHASE0 recovery console
+     5→// Восстановлено после env-reset (2026-09-26): демон REST :3041 + WS :3040
+     6→// через gateway (?XTransformPort). Секреты не покидают backend.
+     7→// ============================================================================
+     8→
+     9→import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+    10→import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import { Button } from '@/components/ui/button'
+    13→import { Input } from '@/components/ui/input'
+    14→import { useToast } from '@/hooks/use-toast'
+    15→import { Line, LineChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts'
+    16→import {
+    17→  Activity, AlertTriangle, Boxes, ChevronDown, Database, Download, GitBranch, HeartPulse,
+    18→  ListChecks, Loader2, Radio, RefreshCw, ShieldAlert, Terminal, Trash2, TrendingUp, Zap,
+    19→} from 'lucide-react'
+    20→
+    21→// ---------------------------------------------------------------- utils ----
+    22→const dpath = (p: string) => (p.includes('?') ? `${p}&XTransformPort=3041` : `${p}?XTransformPort=3041`)
+    23→
+    24→async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
+    25→  const res = await fetch(dpath(path), { cache: 'no-store', ...init })
+    26→  const data: unknown = await res.json().catch(() => null)
+    27→  if (!res.ok) {
+    28→    const err = data as { error?: { message?: string; code?: string } } | null
+    29→    throw new Error(err?.error?.message ? `${err.error.message} [${err.error.code}]` : `HTTP ${res.status}`)
+    30→  }
+    31→  return data as T
+    32→}
+    33→
+    34→function humanS(s: number | null | undefined): string {
+    35→  if (s == null || s < 0) return '—'
+    36→  if (s < 60) return `${s}s`
+    37→  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+    38→  if (s < 86400) return `${(s / 3600).toFixed(1)}h`
+    39→  return `${(s / 86400).toFixed(1)}d`
+    40→}
+    41→
+    42→function hhmmss(iso: string): string {
+    43→  const d = new Date(iso)
+    44→  return isNaN(d.getTime()) ? iso : d.toLocaleTimeString('ru-RU', { hour12: false })
+    45→}
+    46→
+    47→// ---------------------------------------------------------------- types ----
+    48→interface Me2Event {
+    49→  seq: number; ts: string; type: string; actor: string
+    50→  subject: string | null; payload: unknown; hash: string; daemon_version: string
+    51→}
+    52→interface Health {
+    53→  ok: boolean; version: string; round: string; uptime_s: number; started_at: string
+    54→  actions: { implemented: number; donor_registry: string }
+    55→  last_seq: number; head_hash: string; ws_port: number
+    56→  mirror_anchor: { seq: number; hash: string; daemon_version: string; mirrored_at: string }
+    57→}
+    58→interface Supervisor {
+    59→  client_id: string; last_seen_at: string; heartbeat_age_s: number
+    60→  extension_version: string; operator_runtime: string; supervisor_mode: string
+    61→  operator_mode: string; armed: boolean; compute_state: string
+    62→  sentinel: { lifecycle: string; worker_health: string; worker_heartbeat_age_ms: number }
+    63→  dev_plane: { state: string; ref: string; head: string }
+    64→  keepalive: {
+    65→    state: string; cycle_seq: number; last_completed_cycle_at: string | null
+    66→    stale_completed_s: number | null; rollover_reason: string | null
+    67→    ambiguous_history_count: number; queued_wake_count: number; updated_at: string
+    68→  }
+    69→  cognitive: {
+    70→    state: string; stream_id: string | null; sent_events: number
+    71→    acknowledged_through_sequence: number; resync_count: number; last_success_at: string | null
+    72→  }
+    73→  p0_flags: string[]
+    74→}
+    75→interface RoadmapItem {
+    76→  round: string; title: string; goal: string; exit_gate: string; status: string
+    77→}
+    78→interface RoadmapData {
+    79→  roadmap: RoadmapItem[]
+    80→  release_authority: { repository: string; release_ref: string; release_sha: string; verified_via: string }
+    81→  donors: Record<string, { ref: string; sha: string }>
+    82→}
+    83→interface Worktree { path: string; head: string; branch: string | null }
+    84→interface Verdicts {
+    85→  boot_span_ms: number; uptime_ms: number; in_boot_span: boolean
+    86→  verdicts: { id: string; state: string; detail: string }[]
+    87→}
+    88→interface Recovery {
+    89→  env_reset_detected: boolean
+    90→  restored: { item: string; state: string }[]
+    91→  blocked: { item: string; reason: string }[]
+    92→  pending_next: string[]
+    93→}
+    94→interface MonitorSample {
+    95→  ts: string; uptime_ms: number; hb_age_s: number; cycle_seq: number
+    96→  stale_completed_s: number | null; resync_count: number
+    97→  ambiguous_history_count: number; keepalive_state: string
+    98→  cognitive_state: string; compute_state: string; p0_count: number
+    99→}
+   100→interface MonitorHistory {
+   101→  status: { running: boolean; started_at: string | null; interval_ms: number; capacity: number; sample_count: number; last_error: string | null }
+   102→  samples: MonitorSample[]
+   103→}
+   104→interface ExecResult {
+   105→  cmd: string[]; ok: boolean; exit_code: number | null
+   106→  stdout: string; stderr: string; elapsed_ms: number
+   107→}
+   108→
+   109→// ---------------------------------------------------------- gap matrix ----
+   110→const GAP_MATRIX: { pri: 'P0' | 'P1'; title: string; status: string; live?: 'keepalive' | 'cognitive' }[] = [
+   111→  { pri: 'P0', title: 'Supervisor useful cycle', status: 'ROLLOVER_AMBIGUOUS · composer_not_unique · cycle 2109 застыл', live: 'keepalive' },
+   112→  { pri: 'P0', title: 'DevOS maintenance liveness', status: 'live native_supervisor_idle_maintenance_wait_timeout' },
+   113→  { pri: 'P0', title: 'Edge convergence', status: 'production v13 ≠ release source cf747… (v14 canary активен)' },
+   114→  { pri: 'P0', title: 'Desktop convergence', status: 'PR #967: 7 commits, behind release 21 — donor, не trunk' },
+   115→  { pri: 'P0', title: 'Full installer', status: 'apps/me2-daemon не бандлится в extraResources' },
+   116→  { pri: 'P0', title: 'Closed task loop', status: 'seed_proven=0 · NO_ELIGIBLE_CONVERSATION · fresh E2E не доказан' },
+   117→  { pri: 'P0', title: 'Source authority', status: 'DB roadmap baseline b69f… ≠ release cf747…' },
+   118→  { pri: 'P0', title: 'Credentials (security)', status: 'raw credentials в chat export → ротация у оператора' },
+   119→  { pri: 'P0', title: 'Cognitive convergence', status: 'cloud cursor стоит против живого локального bus', live: 'cognitive' },
+   120→  { pri: 'P1', title: 'Branch audit', status: '80/618 веток выпадают из аудита; unrelated history ломает merge-base' },
+   121→  { pri: 'P1', title: 'Version identity', status: 'daemon runtime 0.57.1 vs package 0.43.0' },
+   122→  { pri: 'P1', title: 'Durable backlog hygiene', status: '578 AMBIGUOUS / 572 FENCED требуют terminal reconciliation' },
+   123→  { pri: 'P1', title: 'Startup', status: 'executable_will_launch_at_login=false требует physical verification' },
+   124→  { pri: 'P1', title: 'Worklog', status: 'human log → structured append-only evidence ledger' },
+   125→]
+   126→
+   127→// ------------------------------------------------------------- chips ------
+   128→function Chip({ tone, children, className }: { tone: 'ok' | 'warn' | 'p0' | 'info' | 'neutral'; children: React.ReactNode; className?: string }) {
+   129→  const tones = {
+   130→    ok: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+   131→    warn: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+   132→    p0: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
+   133→    info: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30',
+   134→    neutral: 'bg-zinc-500/10 text-zinc-400 border-zinc-600/40',
+   135→  } as const
+   136→  return (
+   137→    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight ${tones[tone]} ${className ?? ''}`}>
+   138→      {children}
+   139→    </span>
+   140→  )
+   141→}
+   142→
+   143→function eventTypeTone(t: string): string {
+   144→  if (t.startsWith('DAEMON_') || t.startsWith('RECOVERY_')) return 'text-teal-400'
+   145→  if (t.startsWith('WORKTREE_')) return 'text-emerald-400'
+   146→  if (t.startsWith('SANDBOX_')) return 'text-amber-400'
+   147→  if (t.startsWith('ACTION_')) return 'text-cyan-300'
+   148→  if (t.startsWith('MIRROR_')) return 'text-rose-400'
+   149→  return 'text-zinc-400'
+   150→}
+   151→
+   152→// -------------------------------------------------------------- card ------
+   153→function Panel({
+   154→  icon, title, chip, children, defaultOpen = true, actions,
+   155→}: {
+   156→  icon: React.ReactNode; title: string; chip?: React.ReactNode
+   157→  children: React.ReactNode; defaultOpen?: boolean; actions?: React.ReactNode
+   158→}) {
+   159→  const [open, setOpen] = useState(defaultOpen)
+   160→  return (
+   161→    <Collapsible open={open} onOpenChange={setOpen}>
+   162→      <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 shadow-lg shadow-black/20 transition-colors hover:border-zinc-700/80">
+   163→        <div className="flex items-center gap-1 pr-2">
+   164→          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-zinc-800/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/50 rounded-t-xl">
+   165→            <span className="text-teal-400">{icon}</span>
+   166→            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold uppercase tracking-wider text-zinc-200">{title}</h2>
+   167→            {chip}
+   168→            <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${open ? '' : '-rotate-90'}`} />
+   169→          </CollapsibleTrigger>
+   170→          {actions}
+   171→        </div>
+   172→        <CollapsibleContent>
+   173→          <div className="border-t border-zinc-800 p-4">{children}</div>
+   174→        </CollapsibleContent>
+   175→      </section>
+   176→    </Collapsible>
+   177→  )
+   178→}
+   179→
+   180→function Stat({ label, value, tone, span }: { label: string; value: React.ReactNode; tone?: string; span?: string }) {
+   181→  const title = typeof value === 'string' ? value : undefined
+   182→  return (
+   183→    <div className={`min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 ${span ?? ''}`}>
+   184→      <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</div>
+   185→      <div className={`truncate font-mono text-xs ${tone ?? 'text-zinc-200'}`} title={title}>{value}</div>
+   186→    </div>
+   187→  )
+   188→}
+   189→
+   190→const scrollCls = 'max-h-96 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent'
+   191→
+   192→// ------------------------------------------------------- sparkline -------
+   193→const TOOLTIP_STYLE = { background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11, color: '#e4e4e7', padding: '4px 8px' } as const
+   194→
+   195→function Spark({ data, color, label, value }: { data: { t: string; v: number }[]; color: string; label: string; value: string }) {
+   196→  return (
+   197→    <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5 transition-colors hover:border-zinc-700">
+   198→      <div className="flex items-baseline justify-between gap-2">
+   199→        <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{label}</span>
+   200→        <span className="shrink-0 font-mono text-xs" style={{ color }}>{value}</span>
+   201→      </div>
+   202→      <div className="mt-1.5 h-14">
+   203→        {data.length >= 2 ? (
+   204→          <ResponsiveContainer width="100%" height="100%">
+   205→            <LineChart data={data} margin={{ top: 2, right: 2, left: 2, bottom: 0 }}>
+   206→              <RTooltip contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#a1a1aa' }} itemStyle={{ color }} cursor={{ stroke: '#3f3f46' }} />
+   207→              <Line type="monotone" dataKey="v" stroke={color} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+   208→            </LineChart>
+   209→          </ResponsiveContainer>
+   210→        ) : (
+   211→          <div className="flex h-full items-center justify-center text-[10px] text-zinc-600">накапливаем сэмплы…</div>
+   212→        )}
+   213→      </div>
+   214→    </div>
+   215→  )
+   216→}
+   217→
+   218→// ================================================================ page =====
+   219→export default function MissionControl() {
+   220→  const { toast } = useToast()
+   221→  const [now, setNow] = useState(() => Date.now())
+   222→  const [health, setHealth] = useState<Health | null>(null)
+   223→  const [healthErr, setHealthErr] = useState<string | null>(null)
+   224→  const [events, setEvents] = useState<Me2Event[]>([])
+   225→  const [supervisor, setSupervisor] = useState<Supervisor | null>(null)
+   226→  const [supErr, setSupErr] = useState<string | null>(null)
+   227→  const [supLoading, setSupLoading] = useState(false)
+   228→  const [roadmap, setRoadmap] = useState<RoadmapData | null>(null)
+   229→  const [worktrees, setWorktrees] = useState<Worktree[]>([])
+   230→  const [verdicts, setVerdicts] = useState<Verdicts | null>(null)
+   231→  const [recovery, setRecovery] = useState<Recovery | null>(null)
+   232→  const [execResult, setExecResult] = useState<ExecResult | null>(null)
+   233→  const [monitor, setMonitor] = useState<MonitorHistory | null>(null)
+   234→  const [wtName, setWtName] = useState('')
+   235→  const [busy, setBusy] = useState<string | null>(null)
+   236→  const [filter, setFilter] = useState('')
+   237→  const [wsLive, setWsLive] = useState(false)
+   238→  const wsRef = useRef<WebSocket | null>(null)
+   239→  const backoffRef = useRef(1000)
+   240→
+   241→  // ---- 1s live clock for relative ages
+   242→  useEffect(() => {
+   243→    const t = setInterval(() => setNow(Date.now()), 1000)
+   244→    return () => clearInterval(t)
+   245→  }, [])
+   246→
+   247→  // ---- pollers
+   248→  const loadHealth = useCallback(async () => {
+   249→    try { setHealth(await jfetch<Health>('/health')); setHealthErr(null) }
+   250→    catch (e) { setHealthErr((e as Error).message) }
+   251→  }, [])
+   252→
+   253→  const loadSupervisor = useCallback(async (fresh = false) => {
+   254→    setSupLoading(true)
+   255→    try { setSupervisor(await jfetch<Supervisor>(`/control-plane/supervisor${fresh ? '?fresh=1' : ''}`)); setSupErr(null) }
+   256→    catch (e) { setSupErr((e as Error).message) }
+   257→    finally { setSupLoading(false) }
+   258→  }, [])
+   259→
+   260→  const loadWorktrees = useCallback(async () => {
+   261→    try { const d = await jfetch<{ worktrees: Worktree[] }>('/worktrees'); setWorktrees(d.worktrees) }
+   262→    catch { /* non-fatal */ }
+   263→  }, [])
+   264→
+   265→  useEffect(() => {
+   266→    loadHealth(); loadSupervisor(); loadWorktrees()
+   267→    jfetch<RoadmapData>('/roadmap').then(setRoadmap).catch(() => {})
+   268→    jfetch<Recovery>('/recovery').then(setRecovery).catch(() => {})
+   269→    jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {})
+   270→    const a = setInterval(loadHealth, 5000)
+   271→    const b = setInterval(() => loadSupervisor(false), 10000)
+   272→    const c = setInterval(() => { jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {}) }, 10000)
+   273→    const e = setInterval(() => { jfetch<MonitorHistory>('/control-plane/history').then(setMonitor).catch(() => {}) }, 15000)
+   274→    jfetch<Verdicts>('/verdicts').then(setVerdicts).catch(() => {})
+   275→    const d = setInterval(loadWorktrees, 30000)
+   276→    return () => { clearInterval(a); clearInterval(b); clearInterval(c); clearInterval(d); clearInterval(e) }
+   277→  }, [loadHealth, loadSupervisor, loadWorktrees])
+   278→
+   279→  // ---- REST events poll (fallback) + WS live stream (primary)
+   280→  useEffect(() => {
+   281→    const load = () => jfetch<{ events: Me2Event[] }>('/events?limit=60')
+   282→      .then((d) => setEvents(d.events)).catch(() => {})
+   283→    load()
+   284→    const t = setInterval(load, 5000)
+   285→    return () => clearInterval(t)
+   286→  }, [])
+   287→
+   288→  useEffect(() => {
+   289→    let closed = false
+   290→    let pingT: ReturnType<typeof setInterval> | undefined
+   291→    const connect = () => {
+   292→      if (closed) return
+   293→      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+   294→      const ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3040`)
+   295→      wsRef.current = ws
+   296→      ws.onopen = () => { setWsLive(true); backoffRef.current = 1000; pingT = setInterval(() => ws.send(JSON.stringify({ kind: 'ping' })), 25000) }
+   297→      ws.onmessage = (m) => {
+   298→        try {
+   299→          const f = JSON.parse(String(m.data)) as { kind: string; event?: Me2Event }
+   300→          if (f.kind === 'event' && f.event) {
+   301→            setEvents((prev) => [f.event as Me2Event, ...prev.filter((p) => p.seq !== f.event!.seq)].slice(0, 200))
+   302→          }
+   303→        } catch { /* ignore malformed frame */ }
+   304→      }
+   305→      ws.onclose = () => {
+   306→        setWsLive(false)
+   307→        if (pingT) clearInterval(pingT)
+   308→        if (!closed) { setTimeout(connect, backoffRef.current); backoffRef.current = Math.min(backoffRef.current * 2, 15000) }
+   309→      }
+   310→      ws.onerror = () => ws.close()
+   311→    }
+   312→    connect()
+   313→    return () => { closed = true; if (pingT) clearInterval(pingT); wsRef.current?.close() }
+   314→  }, [])
+   315→
+   316→  // ---- actions
+   317→  const doExec = async (cmd: string[]) => {
+   318→    setBusy(`exec:${cmd.join(' ')}`)
+   319→    try {
+   320→      const r = await jfetch<ExecResult>('/sandbox/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd }) })
+   321→      setExecResult(r)
+   322→      toast({ title: r.ok ? 'Sandbox exec OK' : 'Sandbox exec FAILED', description: `${cmd.join(' ')} · ${r.elapsed_ms}ms` })
+   323→    } catch (e) { toast({ title: 'Sandbox error', description: (e as Error).message, variant: 'destructive' }) }
+   324→    finally { setBusy(null) }
+   325→  }
+   326→
+   327→  const createWt = async () => {
+   328→    setBusy('wt-create')
+   329→    try {
+   330→      await jfetch('/worktrees', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: wtName }) })
+   331→      toast({ title: 'Worktree создан', description: `${wtName} → branch work/${wtName}` })
+   332→      setWtName(''); loadWorktrees()
+   333→    } catch (e) { toast({ title: 'Ошибка worktree', description: (e as Error).message, variant: 'destructive' }) }
+   334→    finally { setBusy(null) }
+   335→  }
+   336→
+   337→  const removeWt = async (name: string) => {
+   338→    if (!window.confirm(`Удалить worktree ${name}?`)) return
+   339→    setBusy(`wt-rm:${name}`)
+   340→    try {
+   341→      await jfetch('/worktrees', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+   342→      toast({ title: 'Worktree удалён', description: name })
+   343→      loadWorktrees()
+   344→    } catch (e) { toast({ title: 'Ошибка удаления', description: (e as Error).message, variant: 'destructive' }) }
+   345→    finally { setBusy(null) }
+   346→  }
+   347→
+   348→  const writeAnchor = async () => {
+   349→    if (!window.confirm('Записать recovery-anchor в Supabase evidence mirror (seq 90013993)?')) return
+   350→    setBusy('anchor')
+   351→    try {
+   352→      const r = await jfetch<{ written: boolean }>('/control-plane/mirror-anchor', { method: 'POST' })
+   353→      toast({ title: r.written ? 'Anchor записан в mirror' : 'Mirror ответ без подтверждения', description: 'me2_event_mirror_h205f22 · seq 90013993' })
+   354→    } catch (e) { toast({ title: 'Mirror write отклонён', description: (e as Error).message, variant: 'destructive' }) }
+   355→    finally { setBusy(null) }
+   356→  }
+   357→
+   358→  const exportEvents = async () => {
+   359→    setBusy('export')
+   360→    try {
+   361→      const d = await jfetch<{ events: Me2Event[]; last_seq: number }>('/events?limit=500')
+   362→      const blob = new Blob([d.events.map((e) => JSON.stringify(e)).join('\n')], { type: 'application/x-ndjson' })
+   363→      const url = URL.createObjectURL(blob)
+   364→      const a = document.createElement('a')
+   365→      a.href = url
+   366→      a.download = `me2-events-seq${d.last_seq}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '')}.jsonl`
+   367→      document.body.appendChild(a)
+   368→      a.click()
+   369→      a.remove()
+   370→      URL.revokeObjectURL(url)
+   371→      toast({ title: 'Журнал экспортирован', description: `${d.events.length} событий (до seq #${d.last_seq}) · .jsonl` })
+   372→    } catch (e) { toast({ title: 'Экспорт не удался', description: (e as Error).message, variant: 'destructive' }) }
+   373→    finally { setBusy(null) }
+   374→  }
+   375→
+   376→  // ---- derived
+   377→  const daemonUp = !!health && !healthErr
+   378→  const supLive = !!supervisor
+   379→  const hbAge = supervisor ? Math.max(0, supervisor.heartbeat_age_s - Math.floor((now - Date.parse(supervisor.last_seen_at)) / 1000) * 0) : null
+   380→  // recompute heartbeat age locally against last_seen_at for a live tick
+   381→  const hbAgeLive = supervisor ? Math.round((now - Date.parse(supervisor.last_seen_at)) / 1000) : null
+   382→  const ka = supervisor?.keepalive
+   383→  const staleLive = ka?.last_completed_cycle_at ? Math.round((now - Date.parse(ka.last_completed_cycle_at)) / 1000) : null
+   384→  const filtered = useMemo(
+   385→    () => events.filter((e) => !filter || e.type.toLowerCase().includes(filter.toLowerCase())),
+   386→    [events, filter]
+   387→  )
+   388→  const mSamples = monitor?.samples ?? []
+   389→  const mLast = mSamples.length ? mSamples[mSamples.length - 1] : null
+   390→  const mkSeries = (get: (s: MonitorSample) => number | null) =>
+   391→    mSamples.filter((s) => get(s) != null).map((s) => ({ t: hhmmss(s.ts), v: get(s) as number }))
+   392→
+   393→  return (
+   394→    <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100 selection:bg-teal-500/30">
+   395→      {/* ---------------------------------------------------------- header */}
+   396→      <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/80">
+   397→        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-teal-500/60 via-cyan-500/30 to-transparent" />
+   398→        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+   399→          <div className="flex items-center gap-3">
+   400→            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-teal-500/40 bg-teal-500/10 font-mono text-sm font-bold text-teal-400">M2</div>
+   401→            <div className="leading-tight">
+   402→              <div className="text-sm font-bold tracking-wide">ME2 OS · MISSION CONTROL</div>
+   403→              <div className="text-[11px] text-zinc-500">METAENGINE development swarm · control plane</div>
+   404→            </div>
+   405→          </div>
+   406→          <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+   407→            <Chip tone="warn">{health?.round ?? 'R81-PHASE0'} · RECOVERY</Chip>
+   408→            <Chip tone={daemonUp ? 'ok' : 'p0'}>
+   409→              <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+   410→              {daemonUp ? `daemon ${health?.version ?? ''}` : 'daemon OFFLINE'}
+   411→            </Chip>
+   412→            <Chip tone={wsLive ? 'info' : 'neutral'}>
+   413→              <Radio className="h-3 w-3" /> bus {wsLive ? 'live' : 'rest-only'}
+   414→            </Chip>
+   415→          </div>
+   416→        </div>
+   417→      </header>
+   418→
+   419→      {/* ------------------------------------------------------------ main */}
+   420→      <main className="mx-auto grid w-full max-w-7xl flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-2">
+   421→        {/* ------------------------------------------------- DAEMON card */}
+   422→        <Panel
+   423→          icon={<HeartPulse className="h-4 w-4" />}
+   424→          title="Демон · ME2 daemon"
+   425→          chip={<Chip tone={daemonUp ? 'ok' : 'p0'}>{daemonUp ? 'UP' : 'DOWN'}</Chip>}
+   426→          actions={
+   427→            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={loadHealth} aria-label="Обновить health">
+   428→              <RefreshCw className="h-4 w-4" />
+   429→            </Button>
+   430→          }
+   431→        >
+   432→          {healthErr && !health ? (
+   433→            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">daemon недоступен: {healthErr}</div>
+   434→          ) : health ? (
+   435→            <div className="space-y-3">
+   436→              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+   437→                <Stat label="version" value={health.version} tone="text-teal-400" span="col-span-2" />
+   438→                <Stat label="uptime" value={humanS(health.uptime_s)} />
+   439→                <Stat label="last_seq" value={health.last_seq} tone="text-cyan-300" />
+   440→              </div>
+   441→              <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+   442→                <span className="font-mono">head {health.head_hash.slice(0, 16)}…</span>
+   443→                <Chip tone="neutral">anchor mirror #{health.mirror_anchor.seq} · v{health.mirror_anchor.daemon_version}</Chip>
+   444→                <Chip tone="neutral">WS :{health.ws_port}</Chip>
+   445→              </div>
+   446→              <div>
+   447→                <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Verdicts (cold-start safe)</div>
+   448→                <div className="flex flex-wrap gap-1.5">
+   449→                  {(verdicts?.verdicts ?? []).map((v) => (
+   450→                    <Chip key={v.id} tone={v.state === 'PASS' ? 'ok' : v.state === 'BOOT' ? 'warn' : 'p0'} title={v.detail}>
+   451→                      {v.id}:{v.state}
+   452→                    </Chip>
+   453→                  ))}
+   454→                  {!verdicts && <span className="text-xs text-zinc-600">загрузка…</span>}
+   455→                </div>
+   456→              </div>
+   457→              <p className="text-[11px] leading-relaxed text-zinc-500">
+   458→                Реестр: <span className="font-mono text-cyan-300">{health.actions.implemented} действий</span> реализовано. Donor-реестр 47 действий (v0.57.1, sandbox/me2-os) не заявлен — ждёт восстановления через GitHub.
+   459→              </p>
+   460→            </div>
+   461→          ) : (
+   462→            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+   463→          )}
+   464→        </Panel>
+   465→
+   466→        {/* ------------------------------------------ CONTROL PLANE card */}
+   467→        <Panel
+   468→          icon={<Database className="h-4 w-4" />}
+   469→          title="Control Plane · Supabase live"
+   470→          chip={supErr ? <Chip tone="p0">ERR</Chip> : supLive ? <Chip tone={supervisor!.p0_flags.length ? 'p0' : 'ok'}>{supervisor!.p0_flags.length ? `${supervisor!.p0_flags.length} P0` : 'CLEAN'}</Chip> : <Chip tone="neutral">…</Chip>}
+   471→          actions={
+   472→            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" disabled={supLoading} onClick={() => loadSupervisor(true)} aria-label="Свежий снапшот">
+   473→              <RefreshCw className={`h-4 w-4 ${supLoading ? 'animate-spin' : ''}`} />
+   474→            </Button>
+   475→          }
+   476→        >
+   477→          {supErr && !supervisor ? (
+   478→            <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">control plane: {supErr}</div>
+   479→          ) : supervisor ? (
+   480→            <div className="space-y-3">
+   481→              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+   482→                <Stat label="browser" value={supervisor.extension_version} tone="text-teal-400" span="col-span-2" />
+   483→                <Stat label="runtime" value={supervisor.operator_runtime} span="col-span-2" />
+   484→                <Stat label="client" value={supervisor.client_id.slice(0, 13) + '…'} />
+   485→                <Stat label="heartbeat" value={`${hbAgeLive ?? hbAge ?? '—'}s ago`} tone={(hbAgeLive ?? 99) < 30 ? 'text-emerald-400' : 'text-rose-400'} />
+   486→              </div>
+   487→              <div className="flex flex-wrap gap-1.5">
+   488→                <Chip tone={supervisor.compute_state === 'HEALTHY' ? 'ok' : 'p0'}>compute {supervisor.compute_state}</Chip>
+   489→                <Chip tone={supervisor.sentinel.worker_health === 'HEALTHY' ? 'ok' : 'p0'}>sentinel {supervisor.sentinel.lifecycle}/{supervisor.sentinel.worker_health}</Chip>
+   490→                <Chip tone={supervisor.dev_plane.state === 'READY' ? 'ok' : 'warn'}>dev-plane {supervisor.dev_plane.state}</Chip>
+   491→                <Chip tone="neutral">{supervisor.operator_mode} · armed={String(supervisor.armed)}</Chip>
+   492→              </div>
+   493→              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+   494→                <div className="mb-2 flex flex-wrap items-center gap-2">
+   495→                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Supervisor keepalive</span>
+   496→                  <Chip tone={ka!.state === 'ACTIVE' ? 'ok' : 'p0'}>{ka!.state}</Chip>
+   497→                  <Chip tone="neutral">cycle_seq {ka!.cycle_seq}</Chip>
+   498→                </div>
+   499→                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+   500→                  <Stat label="last useful cycle" value={staleLive != null ? `${humanS(staleLive)} назад` : '—'} tone={(staleLive ?? 0) > 3600 ? 'text-rose-400' : 'text-emerald-400'} />
+   501→                  <Stat label="ambiguous_hist" value={ka!.ambiguous_history_count} tone="text-amber-400" />
+   502→                  <Stat label="queued_wakes" value={ka!.queued_wake_count} />
+   503→                  <Stat label="rollover_reason" value={ka!.rollover_reason ?? '—'} tone="text-rose-400" span="col-span-2 sm:col-span-3" />
+   504→                </div>
+   505→              </div>
+   506→              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+   507→                <div className="mb-2 flex flex-wrap items-center gap-2">
+   508→                  <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Cognitive transport</span>
+   509→                  <Chip tone={supervisor.cognitive.state === 'CONVERGED' ? 'ok' : 'warn'}>{supervisor.cognitive.state}</Chip>
+   510→                  <Chip tone="neutral">resync #{supervisor.cognitive.resync_count}</Chip>
+   511→                </div>
+   512→                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+   513→                  <Stat label="stream" value={(supervisor.cognitive.stream_id ?? '—').slice(0, 13) + '…'} />
+   514→                  <Stat label="sent_events" value={supervisor.cognitive.sent_events} />
+   515→                  <Stat label="ack_through_seq" value={supervisor.cognitive.acknowledged_through_sequence} />
+   516→                  <Stat label="last_success" value={supervisor.cognitive.last_success_at ? hhmmss(supervisor.cognitive.last_success_at) : '—'} />
+   517→                </div>
+   518→              </div>
+   519→              {supervisor.p0_flags.length > 0 && (
+   520→                <div className="flex flex-wrap gap-1.5">
+   521→                  {supervisor.p0_flags.map((f) => <Chip key={f} tone="p0"><ShieldAlert className="h-3 w-3" />{f}</Chip>)}
+   522→                </div>
+   523→              )}
+   524→              <p className="text-[11px] text-zinc-500">
+   525→                Source authority (live read model): <span className="font-mono text-zinc-400">{supervisor.dev_plane.head.slice(0, 12)}</span> @ {supervisor.dev_plane.ref.replace('refs/heads/', '')}
+   526→              </p>
+   527→            </div>
+   528→          ) : (
+   529→            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+   530→          )}
+   531→        </Panel>
+   532→
+   533→        {/* -------------------------------------------- CONVERGENCE MONITOR */}
+   534→        <Panel
+   535→          icon={<TrendingUp className="h-4 w-4" />}
+   536→          title="Монитор конвергенции · R82"
+   537→          chip={
+   538→            monitor ? (
+   539→              <Chip tone={mLast && mLast.keepalive_state === 'ACTIVE' ? 'ok' : 'p0'}>
+   540→                {mLast ? mLast.keepalive_state : '…'}
+   541→              </Chip>
+   542→            ) : (
+   543→              <Chip tone="neutral">…</Chip>
+   544→            )
+   545→          }
+   546→          defaultOpen
+   547→        >
+   548→          {monitor ? (
+   549→            <div className="space-y-3">
+   550→              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+   551→                <Spark label="heartbeat, s" color="#34d399" value={mLast ? `${mLast.hb_age_s}s` : '—'} data={mkSeries((s) => s.hb_age_s)} />
+   552→                <Spark label="cycle_seq" color="#fbbf24" value={mLast ? String(mLast.cycle_seq) : '—'} data={mkSeries((s) => s.cycle_seq)} />
+   553→                <Spark label="resync_count" color="#22d3ee" value={mLast ? String(mLast.resync_count) : '—'} data={mkSeries((s) => s.resync_count)} />
+   554→                <Spark label="stale cycle, h" color="#fb7185" value={mLast && mLast.stale_completed_s != null ? `${(mLast.stale_completed_s / 3600).toFixed(1)}h` : '—'} data={mkSeries((s) => (s.stale_completed_s != null ? +(s.stale_completed_s / 3600).toFixed(2) : null))} />
+   555→              </div>
+   556→              <div className="flex flex-wrap items-center gap-1.5">
+   557→                <Chip tone="neutral">интервал {Math.round(monitor.status.interval_ms / 1000)}с</Chip>
+   558→                <Chip tone="neutral">сэмплов {monitor.status.sample_count}/{monitor.status.capacity}</Chip>
+   559→                <Chip tone={monitor.status.last_error ? 'p0' : 'ok'}>{monitor.status.last_error ? 'sampler error' : 'sampler ok'}</Chip>
+   560→                {mLast && <Chip tone="neutral">cognitive {mLast.cognitive_state}</Chip>}
+   561→                {mLast && <Chip tone="neutral">compute {mLast.compute_state}</Chip>}
+   562→              </div>
+   563→              <p className="text-[11px] leading-relaxed text-zinc-500">
+   564→                Критерий успеха R82: <span className="text-amber-300">cycle_seq</span> начинает расти монотонно, а <span className="text-rose-300">stale cycle</span> сбрасывается в секунды. Графики накапливаются в ring-buffer демона (1 час, silent-сэмплинг без записи в evidence log).
+   565→              </p>
+   566→            </div>
+   567→          ) : (
+   568→            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка монитора…</div>
+   569→          )}
+   570→        </Panel>
+   571→
+   572→        {/* ------------------------------------------------- GAP MATRIX */}
+   573→        <Panel icon={<ShieldAlert className="h-4 w-4" />} title="P0/P1 разрывы · release gap matrix" chip={<Chip tone="p0">BLOCKED</Chip>}>
+   574→          <div className={`space-y-1.5 ${scrollCls} pr-1`}>
+   575→            {GAP_MATRIX.map((g) => {
+   576→              const liveTone = g.live === 'keepalive' ? (ka?.state === 'ACTIVE' ? 'ok' : 'p0') : g.live === 'cognitive' ? (supervisor?.cognitive.state === 'CONVERGED' ? 'ok' : 'warn') : undefined
+   577→              return (
+   578→                <div key={g.title} className="flex items-start gap-2.5 rounded-lg border border-zinc-800 bg-zinc-950/60 p-2.5">
+   579→                  <Chip tone={g.pri === 'P0' ? 'p0' : 'warn'} className="mt-0.5 shrink-0">{g.pri}</Chip>
+   580→                  <div className="min-w-0 flex-1">
+   581→                    <div className="flex flex-wrap items-center gap-2">
+   582→                      <span className="text-xs font-semibold text-zinc-200">{g.title}</span>
+   583→                      {liveTone && <Chip tone={liveTone}>LIVE</Chip>}
+   584→                    </div>
+   585→                    <div className="mt-0.5 break-words font-mono text-[11px] leading-snug text-zinc-500">{g.status}</div>
+   586→                  </div>
+   587→                </div>
+   588→              )
+   589→            })}
+   590→          </div>
+   591→        </Panel>
+   592→
+   593→        {/* ---------------------------------------------------- ROADMAP */}
+   594→        <Panel icon={<ListChecks className="h-4 w-4" />} title="Роадмап R81 → R90 · convergence" chip={<Chip tone="info">{roadmap ? `${roadmap.roadmap.filter((r) => r.status === 'IN_PROGRESS').length}/10 active` : '…'}</Chip>}>
+   595→          {roadmap ? (
+   596→            <div className="space-y-3">
+   597→              {/* progress rail */}
+   598→              <div className="relative pt-1 pb-2">
+   599→                <div className="absolute left-0 right-0 top-[11px] h-0.5 bg-zinc-800" />
+   600→                <div className="absolute left-0 top-[11px] h-0.5 bg-gradient-to-r from-amber-500/70 to-amber-500/20" style={{ width: `${(roadmap.roadmap.findIndex((r) => r.status === 'IN_PROGRESS') + 1) * 10}%` }} />
+   601→                <div className="relative flex justify-between">
+   602→                  {roadmap.roadmap.map((r) => {
+   603→                    const active = r.status === 'IN_PROGRESS'
+   604→                    return (
+   605→                      <div key={r.round} className="flex flex-col items-center gap-1" title={`${r.round} · ${r.title}`}>
+   606→                        <span className={`h-2.5 w-2.5 rounded-full border ${active ? 'border-amber-400 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)] animate-pulse' : 'border-zinc-600 bg-zinc-800'}`} />
+   607→                        <span className={`font-mono text-[9px] ${active ? 'text-amber-300' : 'text-zinc-600'}`}>{r.round.slice(1)}</span>
+   608→                      </div>
+   609→                    )
+   610→                  })}
+   611→                </div>
+   612→              </div>
+   613→              <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-3">
+   614→                <div className="text-[10px] font-medium uppercase tracking-wider text-cyan-300">Release authority (verified live)</div>
+   615→                <div className="mt-1 break-all font-mono text-[11px] text-zinc-300">
+   616→                  {roadmap.release_authority.release_sha.slice(0, 12)} @ {roadmap.release_authority.release_ref}
+   617→                </div>
+   618→                <div className="mt-1 font-mono text-[10px] text-zinc-500">{roadmap.release_authority.repository}</div>
+   619→              </div>
+   620→              <div className={`space-y-2 ${scrollCls} pr-1`}>
+   621→                {roadmap.roadmap.map((r) => (
+   622→                  <div key={r.round} className={`rounded-lg border p-3 ${r.status === 'IN_PROGRESS' ? 'border-amber-500/40 bg-amber-500/5' : 'border-zinc-800 bg-zinc-950/60'}`}>
+   623→                    <div className="flex flex-wrap items-center gap-2">
+   624→                      <span className={`font-mono text-sm font-bold ${r.status === 'IN_PROGRESS' ? 'text-amber-400' : 'text-zinc-400'}`}>{r.round}</span>
+   625→                      <span className="text-xs font-semibold text-zinc-200">{r.title}</span>
+   626→                      <Chip tone={r.status === 'IN_PROGRESS' ? 'warn' : 'neutral'} className="ml-auto">{r.status === 'IN_PROGRESS' ? 'IN PROGRESS' : 'PENDING'}</Chip>
+   627→                    </div>
+   628→                    <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-400">{r.goal}</p>
+   629→                    <p className="mt-1 text-[10px] leading-relaxed text-zinc-600"><span className="text-zinc-500">exit gate:</span> {r.exit_gate}</p>
+   630→                  </div>
+   631→                ))}
+   632→              </div>
+   633→            </div>
+   634→          ) : (
+   635→            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+   636→          )}
+   637→        </Panel>
+   638→
+   639→        {/* -------------------------------------------------- EVENT LOG */}
+   640→        <Panel
+   641→          icon={<Activity className="h-4 w-4" />}
+   642→          title={`Журнал событий · hash-chain${events.length ? ` · #${events[0].seq}` : ''}`}
+   643→          chip={<Chip tone={wsLive ? 'ok' : 'neutral'}>{wsLive ? 'ws live' : 'poll 5s'}</Chip>}
+   644→          actions={
+   645→            <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-teal-400" onClick={exportEvents} disabled={busy === 'export'} aria-label="Экспорт журнала в .jsonl">
+   646→              {busy === 'export' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+   647→            </Button>
+   648→          }
+   649→          defaultOpen
+   650→        >
+   651→          <div className="space-y-2">
+   652→            <div className="flex items-center gap-2">
+   653→              <Input
+   654→                value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="фильтр по типу…"
+   655→                className="h-11 border-zinc-700 bg-zinc-950 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/50"
+   656→                aria-label="Фильтр событий по типу"
+   657→              />
+   658→              <span className="shrink-0 text-[11px] text-zinc-500">{filtered.length}/{events.length}</span>
+   659→            </div>
+   660→            <div className={`space-y-1 ${scrollCls} pr-1`}>
+   661→              {filtered.map((e) => (
+   662→                <div key={e.seq} className="flex items-baseline gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-1.5 font-mono text-[11px] hover:border-zinc-700">
+   663→                  <span className="w-10 shrink-0 text-right text-cyan-300/80">#{e.seq}</span>
+   664→                  <span className={`w-44 shrink-0 truncate font-semibold ${eventTypeTone(e.type)}`} title={e.type}>{e.type}</span>
+   665→                  <span className="hidden w-16 shrink-0 text-zinc-600 sm:inline">{e.actor}</span>
+   666→                  <span className="min-w-0 flex-1 truncate text-zinc-500" title={JSON.stringify(e.payload)}>
+   667→                    {e.subject ?? JSON.stringify(e.payload).slice(0, 80)}
+   668→                  </span>
+   669→                  <span className="shrink-0 text-zinc-600">{hhmmss(e.ts)}</span>
+   670→                </div>
+   671→              ))}
+   672→              {filtered.length === 0 && <div className="py-6 text-center text-xs text-zinc-600">событий нет — daemon молчит или фильтр пуст</div>}
+   673→            </div>
+   674→          </div>
+   675→        </Panel>
+   676→
+   677→        {/* ------------------------------------------- WORKTREES/SANDBOX */}
+   678→        <Panel icon={<GitBranch className="h-4 w-4" />} title="Worktrees · Песочница" chip={<Chip tone="neutral">{worktrees.length} wt</Chip>}>
+   679→          <div className="space-y-3">
+   680→            <div className="flex gap-2">
+   681→              <Input
+   682→                value={wtName} onChange={(e) => setWtName(e.target.value)} placeholder="wt-<имя> (напр. wt-r82-supervisor)"
+   683→                className="h-11 border-zinc-700 bg-zinc-950 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus-visible:ring-teal-500/50"
+   684→                aria-label="Имя нового worktree"
+   685→              />
+   686→              <Button
+   687→                onClick={createWt} disabled={busy === 'wt-create' || !wtName}
+   688→                className="h-11 shrink-0 border-teal-500/40 bg-teal-600/90 text-xs font-semibold text-white hover:bg-teal-500"
+   689→              >
+   690→                {busy === 'wt-create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitBranch className="h-4 w-4" />}
+   691→                <span className="ml-1.5 hidden sm:inline">создать</span>
+   692→              </Button>
+   693→            </div>
+   694→            <div className="space-y-1">
+   695→              {worktrees.map((w) => {
+   696→                const name = w.path.split('/').pop() ?? w.path
+   697→                const isMain = w.path === '/home/z/my-project'
+   698→                return (
+   699→                  <div key={w.path} className="flex items-center gap-2 rounded-md border border-zinc-800/70 bg-zinc-950/60 px-2.5 py-2">
+   700→                    <Boxes className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+   701→                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">{name}</span>
+   702→                    <span className="hidden shrink-0 font-mono text-[10px] text-zinc-600 sm:inline">{w.branch?.replace('refs/heads/', '') ?? 'detached'}</span>
+   703→                    {!isMain && (
+   704→                      <Button variant="ghost" size="sm" className="h-9 w-9 shrink-0 p-0 text-zinc-500 hover:text-rose-400" onClick={() => removeWt(name)} aria-label={`Удалить ${name}`} disabled={busy === `wt-rm:${name}`}>
+   705→                        <Trash2 className="h-3.5 w-3.5" />
+   706→                      </Button>
+   707→                    )}
+   708→                  </div>
+   709→                )
+   710→              })}
+   711→            </div>
+   712→            <div className="border-t border-zinc-800 pt-3">
+   713→              <div className="mb-2 flex flex-wrap items-center gap-2">
+   714→                <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Sandbox (prlimit-isolated, whitelist)</span>
+   715→                <Terminal className="h-3.5 w-3.5 text-zinc-500" />
+   716→              </div>
+   717→              <div className="flex flex-wrap gap-2">
+   718→                {[['bun', '--version'], ['git', 'status', '--short'], ['git', 'log', '--oneline', '-5']].map((cmd) => (
+   719→                  <Button
+   720→                    key={cmd.join(' ')} onClick={() => doExec(cmd)} disabled={busy !== null}
+   721→                    variant="outline" className="h-11 border-zinc-700 bg-zinc-950 font-mono text-[11px] text-zinc-300 hover:border-teal-500/40 hover:text-teal-300"
+   722→                  >
+   723→                    {busy === `exec:${cmd.join(' ')}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+   724→                    <span className="ml-1.5">{cmd.join(' ')}</span>
+   725→                  </Button>
+   726→                ))}
+   727→              </div>
+   728→              {execResult && (
+   729→                <pre className={`mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border p-2.5 font-mono text-[11px] ${execResult.ok ? 'border-zinc-800 bg-zinc-950/80 text-zinc-300' : 'border-rose-500/30 bg-rose-500/5 text-rose-300'}`}>
+   730→                  {`$ ${execResult.cmd.join(' ')}  (${execResult.elapsed_ms}ms, exit ${execResult.exit_code})\n${execResult.stdout || execResult.stderr || '(no output)'}`}
+   731→                </pre>
+   732→              )}
+   733→            </div>
+   734→          </div>
+   735→        </Panel>
+   736→
+   737→        {/* -------------------------------------------------- RECOVERY */}
+   738→        <Panel icon={<AlertTriangle className="h-4 w-4" />} title="Восстановление после env-reset" chip={<Chip tone="warn">R81-PHASE0</Chip>} defaultOpen>
+   739→          {recovery ? (
+   740→            <div className="space-y-3">
+   741→              <div className="grid gap-2 sm:grid-cols-2">
+   742→                <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3">
+   743→                  <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-emerald-400">Restored</div>
+   744→                  <ul className="space-y-1">
+   745→                    {recovery.restored.map((r) => (
+   746→                      <li key={r.item} className="flex items-start gap-1.5 text-[11px] text-zinc-300">
+   747→                        <span className="mt-0.5 text-emerald-500">✓</span><span className="break-words">{r.item}</span>
+   748→                      </li>
+   749→                    ))}
+   750→                  </ul>
+   751→                </div>
+   752→                <div className="rounded-lg border border-rose-500/25 bg-rose-500/5 p-3">
+   753→                  <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-rose-400">Blocked</div>
+   754→                  <ul className="space-y-1.5">
+   755→                    {recovery.blocked.map((b) => (
+   756→                      <li key={b.item} className="text-[11px] text-zinc-300">
+   757→                        <div className="flex items-start gap-1.5"><span className="mt-0.5 text-rose-500">✗</span><span className="break-words">{b.item}</span></div>
+   758→                        <div className="ml-3 break-words text-[10px] text-zinc-600">{b.reason}</div>
+   759→                      </li>
+   760→                    ))}
+   761→                  </ul>
+   762→                </div>
+   763→              </div>
+   764→              <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-3">
+   765→                <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-cyan-300">Pending next</div>
+   766→                <ul className="space-y-1">
+   767→                  {recovery.pending_next.map((p) => (
+   768→                    <li key={p} className="flex items-start gap-1.5 text-[11px] text-zinc-300">
+   769→                      <span className="mt-0.5 text-cyan-400">→</span><span className="break-words">{p}</span>
+   770→                    </li>
+   771→                  ))}
+   772→                </ul>
+   773→              </div>
+   774→              <div className="flex flex-wrap items-center gap-2">
+   775→                <Button
+   776→                  onClick={writeAnchor} disabled={busy === 'anchor'}
+   777→                  variant="outline" className="h-11 border-amber-500/40 bg-amber-500/10 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+   778→                >
+   779→                  {busy === 'anchor' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
+   780→                  <span className="ml-1.5">записать mirror-anchor (#90013993)</span>
+   781→                </Button>
+   782→                <span className="text-[10px] leading-snug text-zinc-600">одна якорная запись в me2_event_mirror — продолжение ledger старого daemon v0.57.1</span>
+   783→              </div>
+   784→            </div>
+   785→          ) : (
+   786→            <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> загрузка…</div>
+   787→          )}
+   788→        </Panel>
+   789→      </main>
+   790→
+   791→      {/* ---------------------------------------------------------- footer */}
+   792→      <footer className="mt-auto border-t border-zinc-800 bg-zinc-950 pb-[env(safe-area-inset-bottom)]">
+   793→        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-500/30 to-teal-500/50" />
+   794→        <div className="relative mx-auto flex w-full max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-[11px] text-zinc-500">
+   795→          <span className="flex items-center gap-1.5">
+   796→            <span className={`inline-block h-1.5 w-1.5 rounded-full ${daemonUp ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+   797→            daemon {daemonUp ? 'online' : 'offline'}
+   798→          </span>
+   799→          <span>·</span>
+   800→          <span>supabase {supLive ? 'live' : supErr ? 'error' : '…'}</span>
+   801→          <span>·</span>
+   802→          <span>bus {wsLive ? 'ws' : 'poll'}</span>
+   803→          <span>·</span>
+   804→          <span className="font-mono">seq #{events[0]?.seq ?? health?.last_seq ?? 0}</span>
+   805→          <span className="ml-auto font-mono text-zinc-600">R81-PHASE0 · release readiness: BLOCKED (см. gap matrix)</span>
+   806→        </div>
+   807→      </footer>
+   808→    </div>
+   809→  )
+   810→}
+   811→
