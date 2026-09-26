@@ -218,6 +218,7 @@ jobs:
             $nativeSupervisorIndex = -1
             $initialTabIndex = -1
             $remoteLoadIndex = -1
+            $r75UiConfirmed = $false
             $cleanControl = $false
             $controlState = $null
             $readySince = $null
@@ -236,6 +237,7 @@ jobs:
                 $nativeSupervisorIndex = -1
                 $initialTabIndex = -1
                 $remoteLoadIndex = -1
+                $r75UiConfirmed = $false
                 for ($i = 0; $i -lt $normalLines.Count; $i++) {
                   $line = [string]$normalLines[$i]
                   if (-not $line.Trim().StartsWith('{')) { continue }
@@ -277,6 +279,17 @@ jobs:
                   if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' -and $runtimeEvent.subsystem -eq 'INITIAL_REMOTE_LOAD') {
                     $remoteLoadIndex = $i
                   }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' `
+                      -and $runtimeEvent.state -eq 'ME2_R75_UI_CONTRACT_CONFIRMED' `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $r75UiConfirmed = $true
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' `
+                      -and $runtimeEvent.state -eq 'ME2_R75_UI_CONTRACT_INCOMPLETE') {
+                    Get-Content $normalOut -ErrorAction SilentlyContinue
+                    Get-Content $normalErr -ErrorAction SilentlyContinue
+                    throw 'installed_me2_r75_dom_contract_incomplete'
+                  }
                 }
               }
               $cleanControl = $false
@@ -291,7 +304,7 @@ jobs:
                   $cleanControl = $true
                 }
               }
-              if ($primaryShellIndex -ge 0 -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
+              if ($primaryShellIndex -ge 0 -and $r75UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
                 if (-not $readySince) { $readySince = [DateTime]::UtcNow }
                 if (([DateTime]::UtcNow - $readySince).TotalSeconds -ge 2) { break }
               } else {
@@ -300,14 +313,10 @@ jobs:
               Start-Sleep -Milliseconds 250
             }
 
-            $normalText = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
-            if ($normalText -notmatch '"state":"ME2_R75_UI_CONTRACT_CONFIRMED"') {
+            if (-not $r75UiConfirmed) {
               Get-Content $normalOut -ErrorAction SilentlyContinue
               Get-Content $normalErr -ErrorAction SilentlyContinue
               throw 'installed_me2_r75_dom_contract_not_confirmed'
-            }
-            if ($normalText -match '"state":"ME2_R75_UI_CONTRACT_INCOMPLETE"') {
-              throw 'installed_me2_r75_dom_contract_incomplete'
             }
 
             if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
