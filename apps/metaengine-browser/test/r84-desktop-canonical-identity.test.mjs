@@ -107,6 +107,7 @@ test('R84 Browser root wires Mission Control to existing exact WebContents/CDP i
   assert.match(mission, /runtime_identity:\s*nativeIdentity/);
   assert.match(mission, /await host\.closeTab\(known\.tab_id\)/);
   assert.match(mission, /conversation_url_required/);
+  assert.match(mission, /g\.ui_route_authorized === true/);
   assert.doesNotMatch(mission, /#chat=\$\{encodeURIComponent\(session\.id\)\}/);
   assert.match(mission, /AGENT_TAB_ADOPTED/);
 });
@@ -162,6 +163,10 @@ test('R84 desktop gateway semantic port closes upgraded sockets under Browser li
   assert.match(gateway, /trackSocket\(tcpConnect/);
   assert.match(gateway, /for \(const socket of \[\.\.\.sockets\]\)/);
   assert.match(gateway, /socket\.destroy\(\)/);
+  assert.match(gateway, /me2UiHostStatus/);
+  assert.match(gateway, /uiRouteAuthorized/);
+  assert.match(gateway, /ui_upstream_unowned/);
+  assert.match(gateway, /ui_route_authorized:\s*me2UiHostStatus\(\)\?\.routing_authorized === true/);
   assert.match(gateway, /upgraded_socket_shutdown_bounded:\s*true/);
   assert.match(gateway, /authority_effect:\s*false/);
 });
