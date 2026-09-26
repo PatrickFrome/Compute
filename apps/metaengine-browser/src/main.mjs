@@ -29,7 +29,7 @@ import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
 // Плоскость не переписывает createTab — она вызывает его штатно, политика навигации браузера авторитетна.
 import { me2FleetTabsSetHost } from './me2/me2-fleet-tabs-host.mjs';
 import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
-import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
+import { ExactBrowserTabViewMap, resolveExactWebContentsTabBinding } from './browser-webcontents-tab-index.mjs';
 import {
   assertExactNativeSupervisorMutationTargetCurrent,
   resolveExactNativeSupervisorMutationTarget,
@@ -69,12 +69,6 @@ nativeTheme.themeSource = 'dark';
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
-// R41: регистрация хоста вкладок для ME2 Mission Control (браузер сам открывает чат-агентов
-// прямо в сайте). Guarded: ME2_INTEGRATION=0 → ровно прежнее поведение. createTab — hoisted
-// function declaration, ссылка валидна до её текстового определения.
-if (process.env.ME2_INTEGRATION !== '0') {
-  try { me2FleetTabsSetHost({ registry, createTab: (input, opts) => createTab(input, opts) }); } catch { /* ME2-плоскость опциональна */ }
-}
 const views = new ExactBrowserTabViewMap();
 const bridge = new ComputeBridgeClient();
 let windowRef = null;
@@ -88,6 +82,62 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+
+function canonicalTabRuntimeIdentity(tabId, supervisorSnapshot = null) {
+  const id = String(tabId || '');
+  const tab = registry.get(id);
+  const view = views.get(id);
+  const exact = resolveExactWebContentsTabBinding(id);
+  if (!tab || !view || view.webContents.isDestroyed() || !exact) return null;
+
+  const supervisor = supervisorSnapshot || nativeSupervisor?.snapshot?.() || null;
+  const runtimeRows = supervisor?.realtime_process_plane?.browser_brain?.observation?.runtime_binding_index?.bindings || [];
+  const runtime = runtimeRows.find((row) => row?.valid === true
+    && String(row?.tab_id || '') === id
+    && Number(row?.web_contents_id || 0) === Number(exact.web_contents_id)) || null;
+  const semanticRows = supervisor?.realtime_process_plane?.semantic_plane?.targets || [];
+  const semantic = semanticRows.find((row) => String(row?.tab_id || '') === id) || null;
+
+  return Object.freeze({
+    schema: 'metaengine.browser.canonical-tab-runtime-identity.v1',
+    tab_id: id,
+    browsercell_identity: id,
+    browsercell_identity_source: 'CANONICAL_TAB_ID',
+    web_contents_id: Number(exact.web_contents_id),
+    webcontents_binding_generation: Number(exact.binding_generation),
+    runtime_binding_generation: runtime?.binding_generation ?? null,
+    cell_id: runtime?.cell_id ?? null,
+    cell_generation: runtime?.cell_generation ?? null,
+    renderer_process_key: runtime?.renderer_process_key ?? null,
+    target_id: runtime?.target_id || semantic?.target_id || `webcontents:${exact.web_contents_id}`,
+    document_generation: Number(runtime?.document_generation ?? semantic?.document_generation ?? 0),
+    semantic_revision: Number(runtime?.semantic_revision ?? semantic?.semantic_revision ?? 0),
+    runtime_binding_live: runtime?.valid === true,
+    exact_identity: true,
+    selected_tab_fallback: false,
+    url_identity_fallback: false,
+    title_identity_fallback: false,
+    execution_authority: false,
+    command_leasing: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+// R84 Desktop convergence: Mission Control and native conversations use the
+// existing TabRegistry + ExactBrowserTabViewMap. No parallel tab/target registry.
+if (process.env.ME2_INTEGRATION !== '0') {
+  try {
+    me2FleetTabsSetHost({
+      registry,
+      createTab: (input, opts) => createTab(input, opts),
+      closeTab: (tabId) => closeTab(tabId),
+      selectTab: (tabId) => selectBrowserTabForPresentation(tabId),
+      resolveIdentity: (tabId) => canonicalTabRuntimeIdentity(tabId),
+    });
+  } catch { /* optional ME2 plane never becomes Browser authority */ }
+}
+
 let fallbackConsole = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -351,13 +401,20 @@ function applyPresentationFocusIntent(request) {
 }
 
 async function shellSnapshot() {
-  const tabs = registry.snapshot();
+  const rawTabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
   const ownerSafetyGatesSnapshot = ownerSafetyGates?.snapshot() || null;
   const developmentPlaneSnapshot = normalizeDevelopmentPlaneProjection(
     developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null,
   );
   const supervisor = nativeSupervisor?.snapshot() || null;
+  const tabs = Object.freeze({
+    ...rawTabs,
+    tabs: Object.freeze((rawTabs?.tabs || []).map((tab) => Object.freeze({
+      ...tab,
+      runtime_identity: canonicalTabRuntimeIdentity(tab.tab_id, supervisor),
+    }))),
+  });
   const compute = await currentComputeHealth();
   const presentationFocus = devosPresentationFocus.snapshot();
   const sessionLayouts = devosSessionLayouts.snapshot();
