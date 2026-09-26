@@ -46,6 +46,7 @@
 - Trunk/authority: `release/self-update-ambiguity-live-v2` @ **cf747798** (Browser source authority). R77 НЕ финал; #967 — desktop donor (7 commits, behind 21); sandbox/me2-os @ 56ba1b87 = unrelated history (merge ЗАПРЕЩЁН, только semantic extraction).
 - P0-блокеры: Supervisor ROLLOVER_AMBIGUOUS / composer_not_unique (cycle 2109 застыл с 24.09); live native_supervisor_idle_maintenance_wait_timeout; Edge production v13 ≠ release source (v14 canary активен); daemon не бандлится в installer; closed loop не доказан (seed_proven=0); Supabase roadmap baseline b69f… ≠ Browser cf747…; raw credentials в chat export → ротация обязательна.
 - Roadmap R81–R90: AUTHORITY FREEZE → SUPERVISOR LIVENESS → EDGE CONVERGENCE → DESKTOP CONVERGENCE → SINGLE RUNTIME → CLOSED LOOP → BRAIN/MEMORY → RESILIENCE → QUALIFICATION → RELEASE SEAL. Старт R81 заблокирован PAT (нужен fetch release-ветки).
+- Обновление R85 (2026-09-27): exact head 35cacda4 НЕ qualified — единственный красный CI = stale contract-test (3 assertions в me2-primary-shell-runtime.test.mjs, test drift, не product defect); Node suite 3436 PASS/1 FAIL/2 SKIP; PR #987 OPEN/DRAFT/mergeable. Package Smoke #2422 СОХРАНЁН (cancel-in-progress) — ждём физический R85 visual capture (r85-command-1440x960.png + drawer + JSON), затем test-contract-only commit → exact-head qualification. Следующий архитектурный срез: build once → immutable installer SHA/provenance (4 воркфлоу дублируют NSIS). Детали: worklog R85-LIVE-AUDIT.
 
 ## 6. Ключевые пути
 

@@ -10104,3 +10104,22 @@ Stage Summary:
 - Инцидент 2026-09-26 17:11 закрыт полностью; цикличность restore-key разорвана (обл. копия скачана, сверена и пересеяна)
 - PHX-HEARTBEAT теперь Job 417373 (v2.2 в payload); 416629 больше не существует
 - Открытые пункты: R2 S3 secret access key от оператора (последний блокер аудита); EV-A11Y в бэклоге self-evolve
+---
+Task ID: R85-LIVE-AUDIT
+Agent: Super-Z (live-аудит R85, доставлен оператором 2026-09-27 08:xx +08)
+Task: фиксация состояния R85 qualification: exact head 35cacda4, PR #987, test-drift, Package Smoke #2422
+
+Work Log:
+- exact head 35cacda4d75f86c1e93832e628661e866c1a4e67 — НЕ qualified; PR #987 по-прежнему OPEN / DRAFT / mergeable=true
+- Найден test drift (НЕ product defect): Critical Audit / Shell / Self Update E2E падают на одном устаревшем regression assertion в me2-primary-shell-runtime.test.mjs — тест требует старую схему `const syncSeq = ++contextDrawerSyncSeq; if (syncSeq !== contextDrawerSyncSeq) return`, тогда как R85-код уже сильнее: request фиксирует causal identity {seq, workspace, page}, setPage()/setWorkspace() инвалидируют generation, async resolve/reject сверяются с текущей тройкой + presentationSyncStillCurrent(...)
+- Node suite: 3436 PASS / 1 FAIL / 2 SKIP — единственный failure = «R85 Context Drawer splitter is keyboard-accessible and native-sync fenced» на stale regex
+- Live-матрица: Desktop Convergence, Typed Workspaces, Meta Orchestrator, Dirty Profile — SUCCESS; focused authority/causal/wake в Critical Audit — SUCCESS; Brain/scale в Autonomous Soak зелёные (1M/128 cells/128 agents, continuous 100k, 2000 tasks/2048 peers, chaos seeds); Installed UI 72-activation — в процессе; Installed Chat — свой NSIS собран, идёт installed clean-genesis/preconnect proof; Final Runtime — на сборке NSIS
+- Package Smoke #2422 СОХРАНЁН (не отменялся): workflow имеет cancel-in-progress:true → новый commit сейчас отменил бы физический visual capture «Capture R85 primary ME2 visual evidence» — поэтому даже test-only fix намеренно НЕ закоммичен
+- Локализованный patch: 3 stale assertions в me2-primary-shell-runtime.test.mjs → заменить на проверки `seq: ++contextDrawerSyncSeq` и `presentationSyncStillCurrent(request, { seq, workspace, page })`; product-код не трогать, gate не ослаблять
+- Порядок после terminal outcome #2422: (1) забрать и проверить r85-command-1440x960.png + r85-command-drawer-1440x960.png + JSON; (2) минимальный test-contract-only commit; (3) новый exact-head qualification; если visual step красный — приоритет: конкретный physical visual defect
+- Подтверждена проблема 4× дублирования NSIS-сборки (Installed Chat, Final Runtime, Soak, Package Smoke): следующий архитектурный срез = build once → immutable installer SHA/provenance → downstream gates тестируют одни и те же bytes
+- Два product-fix (2 новых фикса до exact head) считаются корректными; красный CI — только stale contract-test
+- write-ahead snapshot перед правкой ok
+
+Stage Summary:
+- 35cacda4 = potential-green кроме одного stale contract-test; главный незакрытый сигнал — физический R85 visual capture #2422 (Windows run сохранён); план: visual capture → test-contract-only fix → exact-head qualification → build-once installer provenance
