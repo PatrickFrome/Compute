@@ -107,7 +107,7 @@ function AgentSidebar() {
 
   return (
     <aside
-      className="flex h-full w-[264px] shrink-0 flex-col overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/60"
+      className="flex h-full w-[252px] shrink-0 flex-col overflow-hidden border-r border-zinc-800/90 bg-[#0b0b0d]"
       data-testid="agent-sidebar"
       aria-label="Чат-агенты"
     >
@@ -218,11 +218,11 @@ export function CommandPage() {
   }, []);
 
   return (
-    <div className="flex h-full min-h-0 gap-2" data-testid="page-command" data-panel-command>
+    <div className="flex h-full min-h-0 border border-zinc-800/90 bg-[#0b0b0d]" data-testid="page-command" data-panel-command>
       {sidebarOpen && <AgentSidebar />}
       {/* центр: тонкая строка выбранного агента + НАСТОЯЩИЙ браузер (всё остальное пространство) */}
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <div className="flex h-8 shrink-0 items-center gap-2 px-0.5">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2">
           <button
             type="button"
             onClick={() => setSidebarOpen((v) => !v)}
