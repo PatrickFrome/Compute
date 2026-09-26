@@ -4,8 +4,10 @@
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
 import { PAGES, WORKSPACES, useMe2, useKpis } from "@/components/me2/store";
-import { Search, Command, Boxes, Play, AlertTriangle, Radio, Layers3 } from "lucide-react";
+import { Search, Command, Boxes, Play, AlertTriangle, Radio, Layers3, BellRing, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
+import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
+import { useState } from "react";
 
 export function TopBar() {
   const snap = useMe2((s) => s.snap);
@@ -16,10 +18,26 @@ export function TopBar() {
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const kpi = useKpis();
+  const { status: chatStatus } = useAgentChatSessions();
+  const [attentionOpen, setAttentionOpen] = useState(false);
 
   const pageMeta = PAGES.find((p) => p.key === page);
   const workspaceMeta = WORKSPACES.find((w) => w.key === workspace);
   const mirrorAttention = Boolean(mirror && (mirror.mode !== "LIVE" || mirror.pending > 0));
+  const failedCommands = (snap?.commands ?? []).filter((command) => command.status === "FAILED").length;
+  const offlineWorkers = (snap?.workers ?? []).filter((worker) => worker.state === "OFFLINE").length;
+  const budgetUsed = snap?.budget.used ?? 0;
+  const budgetLimit = snap?.budget.limit ?? 24;
+  const budgetPct = Math.round((budgetUsed / Math.max(1, budgetLimit)) * 100);
+  const attentionItems = [
+    !connected ? { id: "transport", label: "Transport offline", detail: "Socket :3040 unavailable; REST fallback may be active.", page: "observability" as const, tone: "rose" } : null,
+    kpi.fail > 0 ? { id: "tasks", label: String(kpi.fail) + " failed task" + (kpi.fail === 1 ? "" : "s"), detail: "Review failure evidence and retry policy before any new effect.", page: "tasks" as const, tone: "rose" } : null,
+    failedCommands > 0 ? { id: "commands", label: String(failedCommands) + " failed command" + (failedCommands === 1 ? "" : "s"), detail: "Inspect command receipts; do not blind-retry ambiguous effects.", page: "observability" as const, tone: "rose" } : null,
+    mirrorAttention ? { id: "mirror", label: "Mirror " + (mirror?.mode ?? "unknown"), detail: "Outbox " + String(mirror?.pending ?? 0) + (mirror?.last_error ? " · " + mirror.last_error.slice(0, 90) : ""), page: "observability" as const, tone: "amber" } : null,
+    (chatStatus?.degraded ?? 0) > 0 ? { id: "agents", label: String(chatStatus?.degraded ?? 0) + " degraded agent chat" + (chatStatus?.degraded === 1 ? "" : "s"), detail: "Agent chat health is degraded.", page: "agents" as const, tone: "amber" } : null,
+    offlineWorkers > 0 ? { id: "workers", label: String(offlineWorkers) + " offline worker" + (offlineWorkers === 1 ? "" : "s"), detail: "Worker registry reports offline capacity.", page: "compute" as const, tone: "amber" } : null,
+    budgetPct >= 75 ? { id: "budget", label: "Command budget " + String(budgetPct) + "%", detail: String(budgetUsed) + "/" + String(budgetLimit) + " cost units used in the current window.", page: "system" as const, tone: "amber" } : null,
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   return (
     <header
@@ -89,6 +107,52 @@ export function TopBar() {
             mirror {mirror?.mode ?? "…"}
           </button>
         ) : null}
+
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setAttentionOpen((open) => !open)}
+            aria-expanded={attentionOpen}
+            aria-haspopup="dialog"
+            aria-label={attentionItems.length > 0 ? "Attention Center: " + attentionItems.length + " items" : "Attention Center: clear"}
+            data-testid="attention-button"
+            className={"flex h-7 min-w-7 items-center justify-center gap-1 border px-2 transition-colors " + (attentionItems.length > 0 ? "border-amber-900/70 bg-amber-950/20 text-amber-300 hover:border-amber-800" : "border-zinc-800 bg-zinc-950 text-zinc-600 hover:text-zinc-300")}
+            title={attentionItems.length > 0 ? String(attentionItems.length) + " состояния требуют внимания" : "Нет состояний, требующих внимания"}
+          >
+            <BellRing className="h-3 w-3" aria-hidden />
+            {attentionItems.length > 0 ? <span>{attentionItems.length}</span> : null}
+          </button>
+          {attentionOpen ? (
+            <>
+              <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setAttentionOpen(false)} />
+              <section role="dialog" aria-label="Attention Center" data-testid="attention-center" className="absolute right-0 top-8 z-50 w-[360px] max-w-[80vw] border border-zinc-800 bg-[#0b0b0d] shadow-2xl">
+                <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
+                  <BellRing className="h-3.5 w-3.5 text-amber-400" aria-hidden />
+                  <strong className="text-[10px] uppercase tracking-[0.14em] text-zinc-300">Attention</strong>
+                  <span className="font-mono text-[9px] text-zinc-600">{attentionItems.length}</span>
+                  <button type="button" onClick={() => setAttentionOpen(false)} aria-label="Закрыть Attention Center" className="ml-auto p-1 text-zinc-600 hover:text-zinc-300">
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                </div>
+                {attentionItems.length === 0 ? (
+                  <p className="px-3 py-4 text-[11px] text-zinc-500">Критичных или деградированных состояний не обнаружено.</p>
+                ) : (
+                  <div className="max-h-[55vh] overflow-y-auto py-1 mc-scroll">
+                    {attentionItems.map((item) => (
+                      <button key={item.id} type="button" onClick={() => { setPage(item.page); setAttentionOpen(false); }} className="flex w-full items-start gap-2 border-b border-zinc-900 px-3 py-2 text-left hover:bg-zinc-900/70">
+                        <span className={"mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full " + (item.tone === "rose" ? "bg-rose-400" : "bg-amber-400")} aria-hidden />
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-medium text-zinc-200">{item.label}</span>
+                          <span className="mt-0.5 block text-[9px] leading-4 text-zinc-500">{item.detail}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          ) : null}
+        </div>
 
         <span
           data-testid="ws-badge"
