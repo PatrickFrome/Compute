@@ -49,6 +49,13 @@ export function CommandPalette() {
   const setChatId = useMe2((s) => s.setChatId);
   const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks">("all");
 
+  const confirmBudgetFlush = () => {
+    setOpen(false);
+    const approved = window.confirm("Сбросить очередь command bus? Это EMERGENCY-операция и не может быть действием из постоянного chrome.");
+    if (!approved) return;
+    void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" });
+  };
+
   const chats = snap?.agents ?? [];
   const tasks = useMemo(() => {
     const all = [...(snap?.tasks ?? []), ...(snap?.archived ?? [])];
@@ -63,7 +70,7 @@ export function CommandPalette() {
       WORKERS_LIST: () => { void sendCommand("WORKERS_LIST", {}, { quiet: true, successMsg: "список workers в шине" }); },
       ACTIONS_LIST: () => { void sendCommand("ACTIONS_LIST", {}, { quiet: true, successMsg: "реестр действий в шине" }); },
       FLEET_RECONCILE: () => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); },
-      BUDGET_FLUSH: () => { void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" }); },
+      BUDGET_FLUSH: confirmBudgetFlush,
       ENVIRONMENT_RESET: () => setDialog("reset"),
       TASK_ENQUEUE: () => setDialog("newTask"),
       TASK_SCHEDULE: () => setDialog("newTask"),
@@ -186,7 +193,7 @@ export function CommandPalette() {
         {/* ОПАСНАЯ ЗОНА */}
         <CommandSeparator />
         <CommandGroup heading="Опасная зона">
-          <CommandItem value="flush сброс очередь" onSelect={() => { void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" }); setOpen(false); }} className="text-rose-400">
+          <CommandItem value="flush сброс очередь" onSelect={confirmBudgetFlush} className="text-rose-400">
             <Gauge className="mr-2 h-4 w-4" /> Сбросить очередь шины (FLUSH)… <span className="ml-auto text-xs text-rose-500/70">EMERGENCY</span>
           </CommandItem>
           <CommandItem value="reset среда" onSelect={() => { setDialog("reset"); setOpen(false); }} className="text-rose-400">
