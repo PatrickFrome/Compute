@@ -172,3 +172,18 @@ cron 413338 tick 115 (21:37 +08): PAT ожидается; после env-reset 1
 cron 413338 tick 116 (21:52 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
 cron 413338 tick 117 (22:07 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
 cron 413338 tick 118 (22:22 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
+cron 413338 tick 119 (22:37 +08): PAT ожидается; после env-reset 15:18 — push-pending-скрипта нет на диске, восстановление после возврата PAT (см. R80-ENVRESET-TRUNCATION-DETECTED).
+
+---
+Task ID: R80-EXTERNAL-AUDIT-RECEIVED
+Agent: Super Z (main agent, cron 413338 session)
+Task: фиксация поступления внешнего перекрёстного аудита оператора (доставлен в сессию ~22:22–22:37 +08, между тиками cron); исполнения не требуется — только запись для continuity.
+
+Work Log:
+- Оператор доставил развёрнутый аудит (внешний LLM-канал): R-линия восстановлена по remote GitHub + живым Supabase/Browser; вердикты — R77 НЕ финал, #967 desktop donor (7 commits, behind 21), trunk = release/self-update-ambiguity-live-v2 @ cf747798; sandbox/me2-os @ 56ba1b87 = unrelated history (merge запрещён, только semantic extraction).
+- Ключевые P0: Supervisor ROLLOVER_AMBIGUOUS/composer_not_unique (cycle 2109 застыл с 24.09), live native_supervisor_idle_maintenance_wait_timeout, Edge production v13 ≠ release source (v14 canary активен), daemon не бандлится в installer, closed loop не доказан (seed_proven=0), Supabase roadmap baseline b69f... ≠ Browser cf747..., raw credentials в chat export (ротация обязательна).
+- Предложен roadmap R81–R90 (convergence: AUTHORITY FREEZE → SUPERVISOR LIVENESS → EDGE → DESKTOP → SINGLE RUNTIME → CLOSED LOOP → BRAIN → RESILIENCE → QUALIFICATION → SEAL).
+- Статус: вход зафиксирован, старт R81 заблокирован отсутствием PAT (нужен fetch release-ветки и создание work/r81-* на remote); исполнение — после явной команды оператора/возврата токена.
+
+Stage Summary:
+- Ориентация линии изменена: приоритет — не довыяснение старых веток, а R81–R90 convergence/release closure от exact release authority. Запись служит мостом для следующей сессии (локальный worklog после env-reset не содержал этого аудита).
