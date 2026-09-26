@@ -178,10 +178,7 @@ function AgentSidebar() {
 }
 
 // ── Page: COMMAND CENTER ────────────────────────────────────────────────────────
-const COMMAND_RAIL_LS = "me2.command.agent-rail.v2";
-const COMMAND_RAIL_LEGACY_LS = "me2.command.agent-rail.v1";
-const COMMAND_RAIL_WEB_MIN_WIDTH = 984;
-const commandRailStorageKey = (workspace: string) => `${COMMAND_RAIL_LS}:${workspace}`; // mirrors native 6 + 252 + 720 + 6 geometry gate
+const COMMAND_RAIL_WEB_MIN_WIDTH = 984; // mirrors native 6 + 252 + 720 + 6 geometry gate
 
 export function CommandPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -190,7 +187,8 @@ export function CommandPage() {
   const railConstrainedRef = useRef(false);
   const chatId = useMe2((s) => s.chatId);
   const connected = useMe2((s) => s.connected);
-  const workspace = useMe2((s) => s.workspace);
+  const commandRailPreferredOpen = useMe2((s) => s.commandRailPreferredOpen);
+  const storeCommandRailPreference = useMe2((s) => s.setCommandRailPreference);
 
   const syncPrimaryRail = useCallback(async (preferred: boolean) => {
     const shell = (window as Window & {
@@ -224,9 +222,9 @@ export function CommandPage() {
 
   const setRailPreference = useCallback((open: boolean) => {
     preferredRailOpen.current = open;
-    try { localStorage.setItem(commandRailStorageKey(workspace), open ? "1" : "0"); } catch { /* private mode */ }
+    storeCommandRailPreference(open);
     void syncPrimaryRail(open);
-  }, [syncPrimaryRail, workspace]);
+  }, [storeCommandRailPreference, syncPrimaryRail]);
 
   const toggleRailPreference = useCallback(() => {
     // If main-process geometry forced an otherwise preferred rail closed, a
@@ -240,15 +238,7 @@ export function CommandPage() {
   // The main process remains geometry authority and may force the rail closed
   // when the protected Browser minimum width would otherwise be violated.
   useEffect(() => {
-    let preferred = true;
-    try {
-      const stored = localStorage.getItem(commandRailStorageKey(workspace)) ?? localStorage.getItem(COMMAND_RAIL_LEGACY_LS);
-      if (stored === "0") preferred = false;
-      else if (stored === "1") preferred = true;
-      if (localStorage.getItem(commandRailStorageKey(workspace)) == null) {
-        localStorage.setItem(commandRailStorageKey(workspace), preferred ? "1" : "0");
-      }
-    } catch { /* private mode */ }
+    const preferred = commandRailPreferredOpen;
     preferredRailOpen.current = preferred;
     void syncPrimaryRail(preferred);
 
@@ -272,7 +262,7 @@ export function CommandPage() {
       window.removeEventListener("keydown", h);
       window.removeEventListener("resize", onResize);
     };
-  }, [syncPrimaryRail, toggleRailPreference, workspace]);
+  }, [commandRailPreferredOpen, syncPrimaryRail, toggleRailPreference]);
 
   return (
     <div className="flex h-full min-h-0 bg-[#0b0b0d]" data-testid="page-command" data-panel-command>
