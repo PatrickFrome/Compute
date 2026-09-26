@@ -302,7 +302,7 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
     >
       {/* таб-полоса: живые вкладки agent-browser */}
       <div
-        className="flex shrink-0 items-end gap-1 overflow-x-auto border-b border-zinc-800 bg-black/30 px-2 pt-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={`flex shrink-0 items-end gap-1 overflow-x-auto border-b border-zinc-800 bg-black/30 px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${compact ? "h-7 pt-1" : "pt-1.5"}`}
         role="tablist"
         aria-label="Вкладки браузера"
         data-testid="browser-tabstrip"
@@ -387,7 +387,7 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
       </div>
 
       {/* адресная строка + профиль полосы */}
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
+      <div className={`flex shrink-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 ${compact ? "h-9 py-0" : "py-1.5"}`}>
         <button
           type="button"
           onClick={reloadCast}
@@ -503,7 +503,7 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
 
       {/* статус-строка браузера */}
       <div
-        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800 bg-black/30 px-2 py-1 font-mono text-[9px] text-zinc-500"
+        className={`flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800 bg-black/30 px-2 font-mono text-[9px] text-zinc-500 ${compact ? "h-6 py-0" : "py-1"}`}
         data-testid="browser-status"
       >
         {!compact && (
