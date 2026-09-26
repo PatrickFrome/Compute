@@ -523,6 +523,9 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
       // Observation is read-only and may overlap the next command wait.
       await this.#observeWorkers();
       await this.#waitForBaseMaintenanceIdle();
+      // A completed barrier clears a historical wait failure. DevOS execution
+      // errors are tracked separately in devos_last_error.
+      this.#idleWorkLastError = null;
 
       // If a remote command became active while maintenance drained, yield DevOS.
       // The hot command lane wins admission over background work.
@@ -619,7 +622,18 @@ export class NativeSupervisorClient extends BaseNativeSupervisorClient {
     // allowing the next long-poll lease to be active while background work proceeds.
     await super.cycle();
     const supervisor = super.snapshot();
-    if (Number(supervisor?.control_fast_lane?.last_batch_count || 0) === 0) this.#kickIdleWork();
+    // R82 liveness: an empty command batch may have started the base
+    // maintenance pass moments before super.cycle() returned. Starting DevOS
+    // immediately in that same turn only creates a waiter behind potentially
+    // long lifecycle/mesh work; live GLM hydration can consume nearly the
+    // entire historical 15s barrier by itself. Defer DevOS until the next
+    // empty command turn after maintenance settles. Completion-relative
+    // cooldown in the base client guarantees that next turn is a real idle
+    // window. No second timer/scheduler and no physical effect retry is added.
+    if (Number(supervisor?.control_fast_lane?.last_batch_count || 0) === 0
+      && supervisor?.control_fast_lane?.maintenance_in_flight !== true) {
+      this.#kickIdleWork();
+    }
     return this.snapshot();
   }
 }
