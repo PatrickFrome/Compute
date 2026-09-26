@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { PageBar } from "@/components/me2/shell/pagebar";
 import { StatusBar } from "@/components/me2/shell/statusbar";
+import { ContextDrawer } from "@/components/me2/shell/context-drawer";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
 import { CommandPage } from "@/components/me2/pages/command";
@@ -87,6 +88,7 @@ export function Me2Shell() {
       >
         <PageOutlet page={page} />
       </main>
+      <ContextDrawer />
       <PageBar />
       <StatusBar />
       {paletteOpen ? <CommandPalette /> : null}
