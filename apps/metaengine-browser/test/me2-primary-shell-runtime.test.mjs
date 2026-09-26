@@ -81,6 +81,14 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
 });
 
 
+test('installed ME2 renderer waits for hydration with bounded event-driven DOM observation', () => {
+  assert.match(preload, /new MutationObserver\(inspect\)/);
+  assert.match(preload, /observer\.observe\(document\.documentElement, \{ childList: true, subtree: true \}\)/);
+  assert.match(preload, /setTimeout\(\(\) => \{[\s\S]*finish\(snapshot\(\)\)[\s\S]*\}, 8000\)/);
+  assert.doesNotMatch(preload, /setInterval\(/);
+  assert.match(preload, /observer\?\.disconnect\(\)/);
+});
+
 test('installed ME2 renderer attests the concrete R75 DOM composition through trusted preload only', () => {
   for (const id of ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']) {
     assert.match(preload, new RegExp(id));
