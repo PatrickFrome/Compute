@@ -6,7 +6,6 @@
 import { PAGES, WORKSPACES, useMe2, useKpis } from "@/components/me2/store";
 import { Search, Command, Boxes, Play, AlertTriangle, Radio, BellRing, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
-import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 import { useState } from "react";
 
 export function TopBar() {
@@ -18,7 +17,6 @@ export function TopBar() {
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const kpi = useKpis();
-  const { status: chatStatus } = useAgentChatSessions();
   const [attentionOpen, setAttentionOpen] = useState(false);
 
   const pageMeta = PAGES.find((p) => p.key === page);
@@ -34,7 +32,6 @@ export function TopBar() {
     kpi.fail > 0 ? { id: "tasks", label: String(kpi.fail) + " failed task" + (kpi.fail === 1 ? "" : "s"), detail: "Review failure evidence and retry policy before any new effect.", page: "tasks" as const, tone: "rose" } : null,
     failedCommands > 0 ? { id: "commands", label: String(failedCommands) + " failed command" + (failedCommands === 1 ? "" : "s"), detail: "Inspect command receipts; do not blind-retry ambiguous effects.", page: "observability" as const, tone: "rose" } : null,
     mirrorAttention ? { id: "mirror", label: "Mirror " + (mirror?.mode ?? "unknown"), detail: "Outbox " + String(mirror?.pending ?? 0) + (mirror?.last_error ? " · " + mirror.last_error.slice(0, 90) : ""), page: "observability" as const, tone: "amber" } : null,
-    (chatStatus?.degraded ?? 0) > 0 ? { id: "agents", label: String(chatStatus?.degraded ?? 0) + " degraded agent chat" + (chatStatus?.degraded === 1 ? "" : "s"), detail: "Agent chat health is degraded.", page: "agents" as const, tone: "amber" } : null,
     offlineWorkers > 0 ? { id: "workers", label: String(offlineWorkers) + " offline worker" + (offlineWorkers === 1 ? "" : "s"), detail: "Worker registry reports offline capacity.", page: "compute" as const, tone: "amber" } : null,
     budgetPct >= 75 ? { id: "budget", label: "Command budget " + String(budgetPct) + "%", detail: String(budgetUsed) + "/" + String(budgetLimit) + " cost units used in the current window.", page: "system" as const, tone: "amber" } : null,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
