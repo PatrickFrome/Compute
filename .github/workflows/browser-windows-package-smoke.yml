@@ -459,10 +459,19 @@ jobs:
             $progressAgeSeconds = ([DateTime]::UtcNow - ([DateTime]::Parse([string]$progressAfter.progress_at)).ToUniversalTime()).TotalSeconds
             if ($progressAgeSeconds -lt 0 -or $progressAgeSeconds -gt 30) { throw "normal_ui_parent_progress_stale:$progressAgeSeconds" }
 
+            $me2Output = ((Get-Content $normalOut -Raw -ErrorAction SilentlyContinue) + [Environment]::NewLine + (Get-Content $normalErr -Raw -ErrorAction SilentlyContinue))
+            if ($me2Output -notmatch '"event":"DAEMON_HEALTHY"') { throw 'normal_ui_me2_daemon_health_readback_missing' }
+            if ($me2Output -notmatch '"event":"ME2_CONTRACT_OK"') { throw 'normal_ui_me2_contract_readback_missing' }
+            if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
+              throw 'normal_ui_me2_integration_degraded'
+            }
+
             Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-v1.json" -Force
             Copy-Item $sentinelPath "$env:RUNNER_TEMP\browser-sentinel-v1.json" -Force
             Copy-Item $progressPath "$env:RUNNER_TEMP\browser-parent-progress-v1.json" -Force
             Copy-Item $workerHeartbeatPath "$env:RUNNER_TEMP\browser-sentinel-worker-heartbeat-v1.json" -Force
+            $proof | Add-Member -NotePropertyName me2_browser_integration_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'probe' -Force
             $proof.normal_ui_boot_verified = $true
             $proof.runtime_import_observability_verified = $true
             $proof.second_instance_activation_verified = $true
