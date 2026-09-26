@@ -154,7 +154,7 @@ export async function startMe2Integration({ app } = {}) {
       stopMe2MissionControl();
       stopMe2FleetBridge();
       stopMe2UiGateway();
-      stopMe2UiHost({ killChild: false });
+      stopMe2UiHost({ killChild: true });
       stopMe2DaemonHost({ killChild: true });
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_STOP' });
     });
