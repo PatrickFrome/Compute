@@ -10,6 +10,7 @@ import {
   getSocket, setBusHandlers, startHeartbeat, me2Fetch, toastBus, sendCommand,
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
+import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -228,12 +229,16 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   syncContextDrawer: (preferred, height) => {
-    const syncSeq = ++contextDrawerSyncSeq;
+    const request = {
+      seq: ++contextDrawerSyncSeq,
+      workspace: get().workspace,
+      page: get().page,
+    };
     const want = typeof preferred === "boolean" ? preferred : get().contextDrawerPreferredOpen;
     const wantedHeight = clampContextDrawerHeight(
       typeof height === "number" ? height : get().contextDrawerPreferredHeight,
     );
-    if (get().page !== "command") {
+    if (request.page !== "command") {
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: want,
@@ -260,7 +265,11 @@ export const useMe2 = create<Me2State>((set, get) => ({
       return;
     }
     void shell.setPrimaryContextDrawer(want, wantedHeight).then((result) => {
-      if (syncSeq !== contextDrawerSyncSeq) return;
+      if (!presentationSyncStillCurrent(request, {
+        seq: contextDrawerSyncSeq,
+        workspace: get().workspace,
+        page: get().page,
+      })) return;
       const effectiveOpen = typeof result?.effective_open === "boolean" ? result.effective_open : want;
       const effectiveHeight = effectiveOpen
         ? clampContextDrawerHeight(Number(result?.drawer_height ?? wantedHeight))
@@ -272,7 +281,11 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerHeight: effectiveHeight,
       });
     }).catch(() => {
-      if (syncSeq !== contextDrawerSyncSeq) return;
+      if (!presentationSyncStillCurrent(request, {
+        seq: contextDrawerSyncSeq,
+        workspace: get().workspace,
+        page: get().page,
+      })) return;
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: false,
@@ -501,6 +514,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   setPage: (p) => {
+    // Any page transition invalidates in-flight drawer geometry replies.
+    // A new COMMAND sync below gets a fresh sequence/context token.
+    contextDrawerSyncSeq += 1;
     set((st) => {
       if (st.page === p) return st;
       const prefix = st.recentPages.slice(0, st.pageHistoryIndex + 1);
@@ -520,6 +536,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   setWorkspace: (w) => {
+    // Workspace is part of the causal identity of a layout request.
+    contextDrawerSyncSeq += 1;
     const layoutPreference = readWorkspaceLayout(w);
     set({
       workspace: w,
