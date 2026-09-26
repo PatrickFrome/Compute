@@ -16,6 +16,7 @@ const UI_DIR = path.resolve(
 
 process.env.ME2_UI_DIR = UI_DIR;
 process.env.ME2_UI_PORT = process.env.ME2_UI_PORT || '39100';
+process.env.ME2_UI_HEALTH_URL = process.env.ME2_UI_HEALTH_URL || `http://127.0.0.1:${process.env.ME2_UI_PORT}/`;
 process.env.ME2_UI_GATEWAY_PORT = process.env.ME2_UI_GATEWAY_PORT || '39101';
 process.env.ME2_ALLOW_EXTERNAL_UI_ADOPT = '0';
 
