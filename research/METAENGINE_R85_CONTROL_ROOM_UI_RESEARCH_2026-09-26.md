@@ -273,6 +273,20 @@ Task-specific Workspaces/Pages validate the current METAENGINE model: Page = fun
 **Ray / Grafana**
 Operational views are separated by question (jobs, logs, cluster, metrics) and dashboards are parameterized rather than cloned. METAENGINE should keep TASKS / COMPUTE / OBSERVABILITY distinct and add Saved View variables instead of duplicating panels.
 
+### Native composition finding: renderer overlays vs WebContentsView
+
+The repeat pass found a cross-process UI composition defect that source-only CSS review would miss. On COMMAND, the actual Browser is a native Electron `WebContentsView` placed above the ME2 renderer. A renderer-only modal, palette, attention popover or workspace menu can therefore be physically occluded by the native Browser even when its CSS z-index is higher.
+
+R85 now treats global overlays as a presentation-composition state:
+- the presentation-only preload bridge exposes only `setPrimaryOverlay(boolean)`;
+- main-process `nativeBrowserSurfaceAllowed()` removes the native Browser surface while any ME2 global overlay is open;
+- Palette / dialogs are derived centrally by `Me2Shell`;
+- Attention Center and Workspace menu register their own overlay sources;
+- closing the last overlay restores the native Browser surface;
+- this bridge grants no Browser command, scheduler, update, release or execution authority.
+
+This is intentionally not implemented with CSS. A renderer cannot z-index above a sibling native `WebContentsView`; the owner of native view composition must resolve the occlusion.
+
 ## 7. Acceptance gates
 
 R85 is not qualified by screenshots alone.
