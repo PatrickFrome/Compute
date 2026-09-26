@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# context-guard.sh — Phoenix Context Vault Guard (v1.0)
+# context-guard.sh — Phoenix Context Vault Guard (v1.1)
 # ----------------------------------------------------------------------------
-# Назначение: защита контекста работы от потери (env-reset, усечение, откат git).
-# Слои защиты:
-#   1. Детект усечения/удаления worklog.md + авторестор из последнего снапшота
-#   2. Контентные снапшоты worklog.md (ротация, хранить 200)
-#   3. latest/ — всегда актуальные копии (worklog, CONTEXT, sha256)
-#   4. Журнал событий (journal/context-journal.log, incidents.log)
-#   5. Локальная git-история в $VAULT/repo (коммит при каждом изменении)
-#   6. Зеркало в /tmp/context-vault-mirror (переживает project-level reset)
-#   7. Опциональный push ветки context-vault на GitHub при наличии PAT
-#      (только если /home/z/.a2/.github.env существует; секреты НЕ печатаются
-#       и НЕ пишутся в логи — токен используется только в argv процесса push)
-# Самобэкап: копия самого скрипта кладётся в snapshots/, /tmp-зеркало и git.
-# Тестируемость: CONTEXT_WL/CONTEXT_CTX позволяют подменить пути в тестах.
+# v1.1: + SWAP-DETECT: если worklog.md не содержит ожидаемых маркеров
+#       (R/CTX-записи) — файл считается подменённым чужим контентом
+#       (инцидент 26.09 ~15:44: worklog перезаписан 1MB чужого архива).
+#       Подмена -> quarantine swap-* + restore из последнего снапшота.
+# Остальное как v1.0: усечение/удаление -> рестор; снапшоты по sha256;
+# журнал; git-история; /tmp-зеркало; push context-vault при PAT.
+# Секреты не печатаются и не логируются.
 # ============================================================================
 set -u
 
@@ -27,18 +21,29 @@ LATEST="$VAULT/latest"
 JOUR="$VAULT/journal"
 ts="$(date +%Y%m%d-%H%M%S)"
 log="$JOUR/context-journal.log"
+# Маркеры легитимного worklog: R-записи или CTX-записи или R15-поправка
+MARKER_RE="Task ID: R|Task ID: CTX|Task ID: SH|ПОПРАВКА \(гит-синк\)"
 
 mkdir -p "$SNAP" "$LATEST" "$JOUR" "$PROJ" /tmp/context-vault-mirror 2>/dev/null
 
 sha_of()  { sha256sum "$1" 2>/dev/null | cut -d" " -f1; }
 size_of() { stat -c%s "$1" 2>/dev/null || echo 0; }
 
-# --- 1) Phoenix: восстановление worklog при потере/усечении -----------------
 last_snap="$(ls -1t "$SNAP"/worklog-*.md 2>/dev/null | head -n1 || true)"
+
+# --- 1) SWAP-DETECT: чужой контент вместо нашего worklog ---------------------
+if [ -s "$WL" ] && ! grep -qE "$MARKER_RE" "$WL" 2>/dev/null; then
+  if [ -n "$last_snap" ] && [ "$(size_of "$last_snap")" -gt 1000 ]; then
+    cp "$WL" "$SNAP/swap-$ts.md"
+    cp "$last_snap" "$WL"
+    echo "[$ts] SWAP-EVENT: worklog не содержит маркеров -> quarantine swap-$ts.md, рестор из $(basename "$last_snap")" >> "$JOUR/incidents.log"
+  fi
+fi
+
+# --- 2) Phoenix: восстановление при потере/усечении --------------------------
 if [ -n "$last_snap" ]; then
   psize="$(size_of "$last_snap")"
   csize="$(size_of "$WL")"
-  # эталон крупный, а текущий файл отсутствует или усечён более чем на 40%
   if [ "$psize" -gt 1000 ] && [ "$csize" -lt $((psize * 60 / 100)) ]; then
     if [ -f "$WL" ]; then
       cp "$WL" "$SNAP/truncated-$ts.md"
@@ -48,7 +53,7 @@ if [ -n "$last_snap" ]; then
   fi
 fi
 
-# --- 2) Контентный снапшот при изменении ------------------------------------
+# --- 3) Контентный снапшот при изменении -------------------------------------
 if [ -s "$WL" ]; then
   cur="$(sha_of "$WL")"
   prev="$(cat "$LATEST/worklog.sha256" 2>/dev/null || echo "")"
@@ -61,21 +66,22 @@ if [ -s "$WL" ]; then
   cp "$WL" /tmp/context-vault-mirror/worklog.md 2>/dev/null
 fi
 
-# --- 3) CONTEXT.md -> latest + зеркало ---------------------------------------
+# --- 4) CONTEXT.md -> latest + зеркало ---------------------------------------
 if [ -s "$CTX" ]; then
   cp "$CTX" "$LATEST/CONTEXT.md" 2>/dev/null
   cp "$CTX" /tmp/context-vault-mirror/CONTEXT.md 2>/dev/null
 fi
 
-# --- 4) Самобэкап скрипта -----------------------------------------------------
+# --- 5) Самобэкап скрипта -----------------------------------------------------
 cp "$0" "$SNAP/context-guard.sh" 2>/dev/null || true
 cp "$0" /tmp/context-vault-mirror/context-guard.sh 2>/dev/null || true
 
-# --- 5) Ротация ---------------------------------------------------------------
+# --- 6) Ротация ---------------------------------------------------------------
 ls -1t "$SNAP"/worklog-*.md 2>/dev/null | tail -n +201 | xargs -r rm -f
 ls -1t "$SNAP"/truncated-*.md 2>/dev/null | tail -n +31 | xargs -r rm -f
+ls -1t "$SNAP"/swap-*.md 2>/dev/null | tail -n +11 | xargs -r rm -f
 
-# --- 6) Локальная git-история в хранилище ------------------------------------
+# --- 7) Локальная git-история -------------------------------------------------
 if [ ! -d "$VAULT/repo/.git" ]; then
   git init -q "$VAULT/repo" 2>/dev/null || true
 fi
@@ -83,13 +89,13 @@ if [ -d "$VAULT/repo/.git" ]; then
   cp "$WL" "$VAULT/repo/worklog.md" 2>/dev/null || true
   [ -s "$CTX" ] && cp "$CTX" "$VAULT/repo/CONTEXT.md" 2>/dev/null
   cp "$0" "$VAULT/repo/context-guard.sh" 2>/dev/null || true
+  cp "$VAULT/supabase-persist.sh" "$VAULT/repo/" 2>/dev/null || true
   git -C "$VAULT/repo" add -A >/dev/null 2>&1 || true
   git -C "$VAULT/repo" -c user.email=guard@context-vault.local -c user.name=context-guard \
       commit -qm "vault snap $ts" >/dev/null 2>&1 || true
 fi
 
-# --- 7) Опциональный push на GitHub (только при наличии PAT) ------------------
-# Секреты не печатаются и не логируются. Токен живёт только в argv процесса push.
+# --- 8) Опциональный push на GitHub (только при наличии PAT) ------------------
 if [ -s /home/z/.a2/.github.env ]; then
   # shellcheck disable=SC1091
   . /home/z/.a2/.github.env
@@ -108,5 +114,4 @@ if [ -s /home/z/.a2/.github.env ]; then
   fi
 fi
 
-n_snaps="$(ls -1 "$SNAP"/worklog-*.md 2>/dev/null | wc -l | tr -d ' ')"
-echo "guard ok: snaps=$n_snaps latest_sha=$(cat "$LATEST/worklog.sha256" 2>/dev/null || echo none)"
+echo "guard ok: snaps=$(ls -1 "$SNAP"/worklog-*.md 2>/dev/null | wc -l | tr -d ' ') latest_sha=$(cat "$LATEST/worklog.sha256" 2>/dev/null || echo none)"
