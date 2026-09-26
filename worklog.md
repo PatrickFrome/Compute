@@ -9330,3 +9330,25 @@ Work Log:
 
 Stage Summary:
 - раунд 3 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: SEC-JWT-1+EVOLVE-1
+Agent: Super-Z (main session, операторская директива 2026-09-27)
+Task: Запечатать JWT от оператора; движок самоэволюции (self-update, переживает reset'ы, двигает разработку клиента)
+
+Work Log:
+- SEC-JWT-1: оператор передал blob (88 chars, base64) в слот SUPABASE_SERVICE_ROLE_JWT; запечатан в scripts/phoenix/phoenix-secrets-restore.sealed.sh (SB_JWT) + /tmp/my-project/.a2-backup/me2.env.20260922 (ключ добавлен, placeholder-комментарий сохранён) + зеркала; значения нигде не печатались; check-ignore OK, perm 600
+- честный вердикт: blob НЕ eyJ-JWT (decode: 59-64 байта binary, 0 x "eyJ"); Supabase REST root=401, auth/v1/admin/users=401 → канонический service-JWT по-прежнему pending operator (блоб сохранён as-is — возможно, ключ другого назначения)
+- phoenix-secrets-restore.sh v1.2: github.env api=200, SECRETS OK; auto_audit → full-audit v2.0: score 73% → 83% (DONE=17 PARTIAL=1 BLOCKED=3; отчёты audit-20260926-180*.md); остаточные блокеры только внешние: настоящий service-JWT + R2 secret access key
+- EVOLVE-1: создан scripts/phoenix/self-evolve.sealed.sh v1.3 (gitignored, 700): режимы status/self-check/self-update/reinstall/hook-audit/evolve/bootstrap-info; 10-задачный EV-* бэклог клиента; состояние PolarFS evolve.state; зеркала x2; 4 канала выживания как у секретов
+- drill выживания: rm self → reinstall=OK с зеркала (найдена и закрыта дыра: синк зеркал теперь и в self_check-самолечении, и сразу при создании); self-check rc-инверсия исправлена
+- врезка v1.2 в phoenix auto_audit: после каждого full-audit автоматически tick движка (score подхватывается в state)
+- первый реальный раунд: round=3, client HTTP 200, lint 0/0, score 83%, next_task=EV-FOOTER → EVOLVE-ROUND-3 в worklog; движок самоподнялся 1.1→1.3
+- QA клиента через gateway :81 (НЕ raw :3000 — через :3000 XTransformPort не трансформируется, ложные 404): пойманы и исправлены 4 Runtime TypeError — клиент R83 vs демон v0.21.0 slim-схемы: (1) health.head_hash.slice → normalizeHealth() с честными дефолтами (uptime из boot, actions:number→{implemented}, planes fallback 4/5 env-reset); (2) roadmap.filter → null-guard; (3) worktrees двойная вложенность → unwrap; (4) events payload/actor отсутствуют → map data/agent_id
+- коммит 2fa5bee2 R84-CLIENT (без секретов); итоговый браузерный QA: баннер живой (daemon UP 0.21.0, uptime 11.0h, hash-chain #226, planes 4/5), клик «Обновить health» OK, ERR-чипы только на удалённых из демона маршрутах (honest), lint 0/0
+- cron-каналы: Job 416838 webDevReview каждые 15 мин (priority 10) + Job 416839 SELF-EVOLVE tick каждые 2ч (Europe/Moscow) — разработка клиента движется без оператора
+
+Stage Summary:
+- Секреты: 4 канала целы; blob запечатан, но это НЕ service-JWT — Supabase/R2 остаются честными блокерами до реального eyJ-ключа
+- Аудит: 83% (цикл продолжается cron-ом до 100%)
+- Эволюция: self-evolve v1.3 пережил удаление, самообновляется по ходу аудита, двигает клиент по EV-бэклогу; следующий EV-FOOTER (sticky footer)
