@@ -53,7 +53,7 @@ function emitRow(row, { error = false } = {}) {
 function resolveUiUrl() {
   if (UI_URL_ENV) return { url: UI_URL_ENV, mode: 'env' };
   const g = me2UiGatewayStatus();
-  if (g?.state === 'LIVE' && g.url) return { url: g.url, mode: 'live_gateway' };
+  if (g?.state === 'LIVE' && g.url && g.ui_route_authorized === true) return { url: g.url, mode: 'live_gateway' };
   return { url: DAEMON_UI_URL, mode: 'daemon_fallback' };
 }
 
