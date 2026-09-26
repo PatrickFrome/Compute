@@ -41,7 +41,7 @@ export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint
 
 export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
-export type ContextDrawerTab = "events" | "commands" | "runtime";
+export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
 
 interface Me2State {
   // связь
@@ -60,6 +60,7 @@ interface Me2State {
   paletteOpen: boolean;
   dialog: DialogKind;
   detail: Task | null;
+  inspectedTaskId: string | null;
   stream: Event[];
   // contextual drawer (read-only presentation plane)
   contextDrawerPreferredOpen: boolean;
@@ -110,7 +111,7 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
       const parsed = JSON.parse(raw) as Partial<Record<WorkspaceKey, Partial<WorkspaceLayoutPreference>>>;
       const row = parsed?.[workspace];
       const tab = row?.drawerTab;
-      if (row && typeof row.drawerOpen === "boolean" && (tab === "events" || tab === "commands" || tab === "runtime")) {
+      if (row && typeof row.drawerOpen === "boolean" && (tab === "selection" || tab === "events" || tab === "commands" || tab === "runtime")) {
         const rail = typeof row.commandRailOpen === "boolean"
           ? row.commandRailOpen
           : localStorage.getItem(`me2.command.agent-rail.v2:${workspace}`) !== "0";
@@ -122,7 +123,7 @@ function readWorkspaceLayout(workspace: WorkspaceKey): WorkspaceLayoutPreference
       ?? localStorage.getItem("me2.command.agent-rail.v1");
     return {
       drawerOpen: localStorage.getItem(CONTEXT_DRAWER_LS) === "1",
-      drawerTab: legacyTab === "commands" || legacyTab === "runtime" ? legacyTab : "events",
+      drawerTab: legacyTab === "selection" || legacyTab === "commands" || legacyTab === "runtime" ? legacyTab : "events",
       commandRailOpen: legacyRail !== "0",
     };
   } catch {
@@ -171,6 +172,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   paletteOpen: false,
   dialog: null,
   detail: null,
+  inspectedTaskId: null,
   stream: [],
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
@@ -448,7 +450,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   openTask: (id) => {
     const st = get();
     const task = st.snap?.tasks.find((t) => t.id === id) ?? (st.snap?.archived ?? []).find((t) => t.id === id) ?? null;
-    set({ detail: task, stream: [] });
+    set({ detail: task, inspectedTaskId: task?.id ?? id, stream: [] });
     void me2Fetch<{ events: Event[] }>(`/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`).then((d) => {
       if (d?.events) set({ stream: d.events });
     });
