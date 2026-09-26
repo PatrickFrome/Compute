@@ -213,6 +213,37 @@ test('R85 unavailable legacy sandbox plane is fail-close and collapsed by defaul
   assert.match(me2CodePage, /legacy capability unavailable/);
 });
 
+test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
+  assert.match(preload, /const setPrimaryOverlay = \(active\) => ipcRenderer\.invoke\('metaengine:shell:primary-overlay'/);
+  const primaryBranch = preload.slice(
+    preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
+    preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
+  );
+  assert.match(primaryBranch, /setPrimaryOverlay/);
+  assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
+
+  assert.match(main, /let primaryShellOverlayActive = false/);
+  assert.match(main, /primaryShellPage === 'command'\s*&& primaryShellOverlayActive !== true/);
+  assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-overlay'/);
+  assert.match(main, /typeof rawActive !== 'boolean'/);
+
+  const overlayHandler = main.slice(
+    main.indexOf("ipcMain.handle('metaengine:shell:primary-overlay'"),
+    main.indexOf("ipcMain.handle('metaengine:shell:system-deltas'", main.indexOf("ipcMain.handle('metaengine:shell:primary-overlay'")),
+  );
+  assert.match(overlayHandler, /presentation_only:\s*true/);
+  assert.match(overlayHandler, /scheduler_authority:\s*false/);
+  assert.match(overlayHandler, /browser_command_authority:\s*false/);
+  assert.match(overlayHandler, /update_authority:\s*false/);
+  assert.match(overlayHandler, /release_authority:\s*false/);
+  assert.match(overlayHandler, /authority_effect:\s*false/);
+
+  assert.match(store, /setChromeOverlay/);
+  assert.match(me2Shell, /setPrimaryOverlay\(nativeOverlayOpen\)/);
+  assert.match(me2Topbar, /setChromeOverlay\("attention"/);
+  assert.match(me2Pagebar, /setChromeOverlay\("workspace-menu"/);
+});
+
 test('ME2 UI routing authority is revoked on stop, degradation, or owned-process loss', () => {
   const liveChild = { pid: 4242, exitCode: null, signalCode: null };
   const healthy = projectMe2UiRoutingAuthority({
