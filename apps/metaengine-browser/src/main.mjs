@@ -611,6 +611,85 @@ async function preparePrimaryShellTarget() {
   return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
 }
 
+const ME2_R75_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar']);
+
+function cdpBoxVisible(model) {
+  const points = Array.isArray(model?.content) && model.content.length >= 8
+    ? model.content
+    : (Array.isArray(model?.border) ? model.border : []);
+  if (points.length < 8) return false;
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    xs.push(Number(points[i]));
+    ys.push(Number(points[i + 1]));
+  }
+  if (xs.some((value) => !Number.isFinite(value)) || ys.some((value) => !Number.isFinite(value))) return false;
+  return Math.max(...xs) - Math.min(...xs) >= 2 && Math.max(...ys) - Math.min(...ys) >= 2;
+}
+
+async function probeMe2R75InstalledDom(webContents) {
+  const present = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+  const visible = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+  const dbg = webContents?.debugger;
+  let attachedHere = false;
+  let error = null;
+  try {
+    if (!dbg || typeof dbg.sendCommand !== 'function' || typeof dbg.attach !== 'function') {
+      throw new Error('me2_r75_cdp_debugger_unavailable');
+    }
+    if (!dbg.isAttached()) {
+      dbg.attach('1.3');
+      attachedHere = true;
+    }
+    await dbg.sendCommand('DOM.enable');
+    const documentResult = await dbg.sendCommand('DOM.getDocument', { depth: 2, pierce: true });
+    const rootNodeId = Number(documentResult?.root?.nodeId || 0);
+    if (!Number.isSafeInteger(rootNodeId) || rootNodeId <= 0) throw new Error('me2_r75_dom_root_missing');
+    for (const id of ME2_R75_DOM_IDS) {
+      const found = await dbg.sendCommand('DOM.querySelector', {
+        nodeId: rootNodeId,
+        selector: `[data-testid="${id}"]`,
+      });
+      const nodeId = Number(found?.nodeId || 0);
+      present[id] = Number.isSafeInteger(nodeId) && nodeId > 0;
+      if (!present[id]) continue;
+      try {
+        const box = await dbg.sendCommand('DOM.getBoxModel', { nodeId });
+        visible[id] = cdpBoxVisible(box?.model);
+      } catch {
+        visible[id] = false;
+      }
+    }
+  } catch (probeError) {
+    error = String(probeError?.message || probeError).slice(0, 240);
+  } finally {
+    try { if (attachedHere && dbg?.isAttached()) dbg.detach(); } catch {}
+  }
+
+  const complete = error == null
+    && ME2_R75_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
+  const row = Object.freeze({
+    schema: 'metaengine.browser.me2-r75-installed-ui.v1',
+    state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
+    page: primaryShellPage,
+    required: ME2_R75_DOM_IDS,
+    present,
+    visible,
+    evidence_source: 'MAIN_PROCESS_CDP_DOM_BOX_MODEL',
+    error,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    legacy_shell_is_normal_path: false,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+  console[complete ? 'log' : 'error'](JSON.stringify(row));
+  return Object.freeze({ complete, present: Object.freeze({ ...present }), visible: Object.freeze({ ...visible }), error });
+}
+
 function computeDevOSSurfaceGrid() {
   if (!shellLayoutPlan) return null;
   const shell = currentDevOSPresentationShellView();
@@ -1781,6 +1860,12 @@ async function createWindow() {
   const shellTarget = await preparePrimaryShellTarget();
   try {
     await shellView.webContents.loadURL(shellTarget.url);
+    if (shellTarget.mode === 'ME2_PRIMARY') {
+      const r75 = await probeMe2R75InstalledDom(shellView.webContents);
+      if (r75.complete !== true) {
+        throw new Error(`me2_r75_primary_shell_contract_incomplete:${r75.error || 'dom_or_geometry_missing'}`);
+      }
+    }
   } catch (error) {
     if (shellTarget.mode !== 'ME2_PRIMARY') throw error;
     recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL_LOAD', error);
@@ -1812,35 +1897,6 @@ async function createWindow() {
   });
 }
 
-ipcMain.on('metaengine:shell:ui-contract-readback', (event, payload) => {
-  assertShellSender(event);
-  if (primaryShellMode !== 'ME2_PRIMARY') return;
-  const required = ['me2-shell', 'topbar', 'page-command', 'agent-sidebar', 'pagebar', 'statusbar'];
-  const present = payload?.present && typeof payload.present === 'object' ? payload.present : {};
-  const complete = payload?.schema === 'metaengine.browser.me2-ui-contract-readback.v1'
-    && payload?.location_class === 'PACKAGED_ME2_LOOPBACK'
-    && payload?.complete === true
-    && required.every((id) => present[id] === true)
-    && payload?.scheduler_authority === false
-    && payload?.browser_command_authority === false
-    && payload?.update_authority === false
-    && payload?.release_authority === false
-    && payload?.authority_effect === false;
-  console.log(JSON.stringify({
-    schema: 'metaengine.browser.me2-r75-installed-ui.v1',
-    state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
-    page: primaryShellPage,
-    required,
-    present: Object.fromEntries(required.map((id) => [id, present[id] === true])),
-    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
-    legacy_shell_is_normal_path: false,
-    scheduler_authority: false,
-    browser_command_authority: false,
-    update_authority: false,
-    release_authority: false,
-    authority_effect: false,
-  }));
-});
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
 ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
   assertShellSender(event);
