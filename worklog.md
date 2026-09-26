@@ -9599,3 +9599,17 @@ Work Log:
 Stage Summary:
 - rail sandbox/me2-os = 65e294ea = local main — публикация завершена, DONE: all local state published
 - origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
+
+---
+Task ID: R80-PUSH-M
+Agent: Super-Z (cron Job 413338 2026-09-27 04:07)
+Task: push-pending R80 — публикация main→sandbox/me2-os ff + 2 архив-ветки (при наличии GITHUB_TOKEN_ADMIN)
+
+Work Log:
+- precondition: /home/z/.a2/.github.env present (non-empty), секреты не печатались и не логировались
+- push-pending-r80.sh: main→sandbox/me2-os = c1535193 (cron-коммиты параллельных сессий опубликованы, deltas up-to-date); me2/archive-r21-sandbox-snapshot=73486dd up-to-date; me2/archive-v040-main-archive=c95de21 up-to-date
+- ls-remote verify: sandbox/me2-os=c1535193 ≡ local main HEAD (rail current); обе архив-ветки подтверждены
+
+Stage Summary:
+- rail sandbox/me2-os = c1535193 = local main — публикация завершена, DONE: all local state published
+- origin/main=85767548 divergence без изменений: force запрещён, слияние только контент-уровнем
