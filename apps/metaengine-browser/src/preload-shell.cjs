@@ -229,7 +229,11 @@ function isPrimaryMe2PresentationDocument(locationLike = globalThis.location) {
 const setPrimaryPage = (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? ''));
 const setPrimaryOverlay = (active) => ipcRenderer.invoke('metaengine:shell:primary-overlay', active === true);
 const setPrimaryCommandRail = (open) => ipcRenderer.invoke('metaengine:shell:primary-command-rail', open === true);
-const setPrimaryContextDrawer = (open) => ipcRenderer.invoke('metaengine:shell:primary-context-drawer', open === true);
+const setPrimaryContextDrawer = (open, height) => ipcRenderer.invoke(
+  'metaengine:shell:primary-context-drawer',
+  open === true,
+  Number.isFinite(Number(height)) ? Number(height) : null,
+);
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is a
