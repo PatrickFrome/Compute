@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Z.ai Chat Export",
+  "version": "1.0.0",
+  "description": "Экспорт всего текста чата Z.ai в Markdown / JSON / TXT. Кнопка на странице, popup с выбором формата, хоткей. Авто-прокрутка истории, дедупликация, код-блоки.",
+  "permissions": ["downloads"],
+  "host_permissions": [
+    "https://chat.z.ai/*",
+    "https://*.z.ai/*",
+    "https://z.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.z.ai/*", "https://*.z.ai/*", "https://z.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Z.ai Chat Export",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "commands": {
+    "export-md": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Экспортировать чат в Markdown"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

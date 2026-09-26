@@ -1,33 +1,14 @@
-// ==UserScript==
-// @name         Z.ai Chat Export
-// @namespace    zai-chat-export
-// @version      1.0.0
-// @description  Экспорт всего текста чата Z.ai в Markdown / JSON / TXT. Кнопка внизу справа: клик = Markdown, Shift+клик = JSON, Alt+клик = TXT. Скрипт сам прокручивает историю вверх (дружит с lazy-load и виртуализацией).
-// @author       ME2 operator tooling
-// @match        https://chat.z.ai/*
-// @match        https://z.ai/*
-// @match        https://*.z.ai/*
-// @run-at       document-idle
-// @grant        none
-// ==/UserScript==
-
 /* ============================================================================
- * Установка:
- *   1. Поставьте расширение Tampermonkey (Chrome/Edge/Firefox).
- *   2. Tampermonkey -> Dashboard -> "+" (создать скрипт).
- *   3. Вставьте ВЕСЬ этот файл вместо шаблона, Ctrl+S.
- *   4. Откройте чат Z.ai — справа внизу появится кнопка "Export chat".
- *
- * Форматы: клик = .md, Shift+клик = .json, Alt+клик = .txt.
- * Результат дублируется в window.__ZAI_CHAT_EXPORT (для отладки).
- * Если нашлось 0 сообщений — см. CONFIG.MESSAGE_SELECTORS ниже (как в README).
+ * Z.ai Chat Export — content script (MV3)
+ * Ядро экспорта + плавающая кнопка + приём команд от popup / background.
+ * Работает и без chrome.* API (fallback на <a download>) — поэтому тестируется
+ * на обычной странице (см. ../test/mock.html).
  * ============================================================================ */
 (function () {
   'use strict';
-  if (window.__ZAI_CHAT_EXPORT_PLUGIN__) return;
-  window.__ZAI_CHAT_EXPORT_PLUGIN__ = true;
+  if (window.__ZAI_CHAT_EXPORT_CS__) return;
+  window.__ZAI_CHAT_EXPORT_CS__ = true;
 
-  /* ----------------------------- CONFIG ---------------------------------- */
   const CONFIG = {
     MAX_SCROLL_STEPS: 300,
     SCROLL_SETTLE_MS: 450,
@@ -43,7 +24,6 @@
     USER_HINT: /(user|human|self|mine|from-me)/i,
     ASSISTANT_HINT: /(assistant|bot|\bai\b|model|gpt|markdown|prose|answer|reply)/i
   };
-  /* ----------------------------------------------------------------------- */
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -56,7 +36,7 @@
   function stableId(el, text) {
     return el.getAttribute('data-message-id')
       || el.getAttribute('data-id')
-      || (hash((el.className || '') + '|' + text.slice(0, 160)));
+      || hash((el.className || '') + '|' + text.slice(0, 160));
   }
 
   function collectMessageNodes() {
@@ -163,49 +143,11 @@
     }
   }
 
-  /* Выравнивание порядка сообщений к хронологии (от начала чата к концу).
-   * Слой 1: если после загрузки истории все сообщения ещё в DOM — порядок документа.
-   * Слой 2: если >=80% сообщений имеют парсимый timestamp — сортировка по времени. */
-  function reorderChronologically(acc) {
-    let ids = Array.from(acc.keys());
-    let mode = 'discovery';
-    const domNodes = collectMessageNodes();
-    if (domNodes.length >= acc.size) {
-      const domIds = [];
-      const seen = new Set();
-      for (const el of domNodes) {
-        const { text } = extractContent(el);
-        if (!text) continue;
-        const id = stableId(el, text);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        domIds.push(id);
-      }
-      const missing = ids.filter((id) => !seen.has(id));
-      if (missing.length === 0 && domIds.length >= acc.size) {
-        const domOrdered = domIds.filter((id) => acc.has(id));
-        if (domOrdered.length === acc.size) { ids = domOrdered; mode = 'dom'; }
-      }
+  async function loadFullHistory(acc, autoScroll) {
+    if (!autoScroll) {
+      absorb(collectMessageNodes(), acc);
+      return 'skipped';
     }
-    const parseT = (s) => { if (!s) return null; const d = Date.parse(s); return Number.isFinite(d) ? d : null; };
-    const withT = ids.map((id, idx) => ({ id, idx, t: parseT(acc.get(id).time) }));
-    const parsedCount = withT.filter((x) => x.t !== null).length;
-    if (parsedCount >= Math.max(2, Math.floor(ids.length * 0.8))) {
-      withT.sort((a, b) => {
-        if (a.t !== null && b.t !== null) return a.t - b.t || a.idx - b.idx;
-        if (a.t !== null) return -1;
-        if (b.t !== null) return 1;
-        return a.idx - b.idx;
-      });
-      ids = withT.map((x) => x.id);
-      mode += '+time';
-    }
-    const ordered = new Map();
-    ids.forEach((id) => ordered.set(id, acc.get(id)));
-    return { ordered, mode };
-  }
-
-  async function loadFullHistory(acc) {
     const before = collectMessageNodes();
     const sample = before[before.length - 1] || null;
     const container = findScrollContainer(sample);
@@ -258,77 +200,106 @@
     return lines.join('\n');
   }
 
-  function download(name, content, mime) {
-    const blob = new Blob([content], { type: mime + ';charset=utf-8' });
+  function buildPayload(format, meta, messages) {
+    if (format === 'json') return { payload: JSON.stringify({ meta, messages }, null, 2), ext: 'json', mime: 'application/json' };
+    if (format === 'txt') return { payload: toTxt(meta, messages), ext: 'txt', mime: 'text/plain' };
+    return { payload: toMarkdown(meta, messages), ext: 'md', mime: 'text/markdown' };
+  }
+
+  function anchorDownload(filename, payload, mime) {
+    const blob = new Blob([payload], { type: mime + ';charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = name;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
   }
 
-  async function exportChat(format) {
-    const btn = document.getElementById('zai-export-btn');
-    if (btn) { btn.textContent = 'Exporting...'; btn.disabled = true; }
-    try {
-      const acc = new Map();
-      absorb(collectMessageNodes(), acc);
-      const scrolledVia = await loadFullHistory(acc);
-      const { ordered, mode } = reorderChronologically(acc);
-      const messages = Array.from(ordered.values());
-      const meta = {
-        url: location.href,
-        chatId: chatIdFromUrl(),
-        title: document.title,
-        exportedAt: new Date().toISOString(),
-        scrollContainer: scrolledVia,
-        order: mode
-      };
-      let payload, ext, mime;
-      if (format === 'json') { payload = JSON.stringify({ meta, messages }, null, 2); ext = 'json'; mime = 'application/json'; }
-      else if (format === 'txt') { payload = toTxt(meta, messages); ext = 'txt'; mime = 'text/plain'; }
-      else { payload = toMarkdown(meta, messages); ext = 'md'; mime = 'text/markdown'; }
-      const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})(\d{4})$/, '$1-$2');
-      const filename = 'zai-chat-' + (meta.chatId ? meta.chatId.slice(0, 12) + '-' : '') + stamp + '.' + ext;
-      download(filename, payload, mime);
-      const result = { ok: true, filename, messageCount: messages.length, meta, messages, payload };
-      window.__ZAI_CHAT_EXPORT = result;
-      if (btn) btn.textContent = 'Done: ' + messages.length + ' msgs';
-      setTimeout(() => { if (btn) btn.textContent = 'Export chat'; }, 4000);
-      console.log('[zai-export] ' + messages.length + ' сообщений -> ' + filename);
-    } catch (e) {
-      console.error('[zai-export] Ошибка:', e);
-      if (btn) btn.textContent = 'Error (см. консоль)';
-      setTimeout(() => { if (btn) btn.textContent = 'Export chat'; }, 4000);
-    } finally {
-      if (btn) btn.disabled = false;
+  async function downloadFile(filename, payload, mime) {
+    // Основной путь: chrome.downloads через service worker; fallback: <a download>.
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: 'zai-download', filename, payload, mime });
+        if (resp && resp.ok) return 'downloads-api';
+      } catch { /* extension context invalidated и т.п. — fallback */ }
     }
+    anchorDownload(filename, payload, mime);
+    return 'anchor';
   }
 
+  async function exportChat(format, autoScroll) {
+    format = format || 'md';
+    autoScroll = autoScroll !== false;
+    const acc = new Map();
+    const scrolledVia = await loadFullHistory(acc, autoScroll);
+    const messages = Array.from(acc.values());
+    const meta = {
+      url: location.href,
+      chatId: chatIdFromUrl(),
+      title: document.title,
+      exportedAt: new Date().toISOString(),
+      scrollContainer: scrolledVia
+    };
+    const { payload, ext, mime } = buildPayload(format, meta, messages);
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '').replace(/^(\d{8})(\d{4})$/, '$1-$2');
+    const safeId = (meta.chatId || '').replace(/[^\w-]/g, '').slice(0, 12);
+    const filename = 'zai-chat-' + (safeId ? safeId + '-' : '') + stamp + '.' + ext;
+    const via = await downloadFile(filename, payload, mime);
+    const summary = {
+      ok: true,
+      filename,
+      messageCount: messages.length,
+      user: messages.filter((m) => m.role === 'user').length,
+      assistant: messages.filter((m) => m.role === 'assistant').length,
+      unknown: messages.filter((m) => m.role === 'unknown').length,
+      chars: payload.length,
+      via
+    };
+    window.__ZAI_CHAT_EXPORT = { ...summary, meta, messages, payload };
+    console.log('[zai-export]', summary);
+    return summary;
+  }
+
+  window.__zaiExportChat = exportChat;
+
+  /* ---------------- канал от popup / background (hotkey) ----------------- */
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg && msg.type === 'ZAI_EXPORT') {
+        exportChat(msg.format, msg.autoScroll).then(sendResponse).catch((e) => sendResponse({ ok: false, error: String(e) }));
+        return true; // асинхронный ответ
+      }
+      return undefined;
+    });
+  }
+
+  /* --------------------------- кнопка на странице ------------------------ */
   function mountButton() {
     if (document.getElementById('zai-export-btn')) return;
     const btn = document.createElement('button');
     btn.id = 'zai-export-btn';
     btn.textContent = 'Export chat';
-    btn.title = 'Клик = Markdown | Shift+клик = JSON | Alt+клик = TXT';
+    btn.title = 'Z.ai Chat Export: клик = Markdown, Shift = JSON, Alt = TXT';
     Object.assign(btn.style, {
       position: 'fixed', right: '18px', bottom: '18px', zIndex: '2147483647',
-      padding: '10px 16px', borderRadius: '10px', border: '1px solid rgba(0,0,0,.15)',
+      padding: '10px 16px', borderRadius: '10px', border: '1px solid rgba(255,255,255,.15)',
       background: '#111827', color: '#fff', font: '600 13px/1 system-ui, sans-serif',
       cursor: 'pointer', boxShadow: '0 6px 20px rgba(0,0,0,.25)', opacity: '0.85'
     });
     btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
     btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.85'; });
     btn.addEventListener('click', (e) => {
-      if (e.shiftKey) exportChat('json');
-      else if (e.altKey) exportChat('txt');
-      else exportChat('md');
+      const fmt = e.shiftKey ? 'json' : e.altKey ? 'txt' : 'md';
+      btn.textContent = 'Exporting...'; btn.disabled = true;
+      exportChat(fmt, true)
+        .then((r) => { btn.textContent = 'Done: ' + r.messageCount + ' msgs'; })
+        .catch((err) => { console.error('[zai-export]', err); btn.textContent = 'Error (см. консоль)'; })
+        .finally(() => { btn.disabled = false; setTimeout(() => { btn.textContent = 'Export chat'; }, 4000); });
     });
     document.body.appendChild(btn);
   }
 
-  // SPA-навигация: следим, чтобы кнопка всегда была на месте.
   const observer = new MutationObserver(() => mountButton());
   observer.observe(document.documentElement, { childList: true, subtree: true });
   mountButton();

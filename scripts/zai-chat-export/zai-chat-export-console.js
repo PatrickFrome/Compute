@@ -201,6 +201,48 @@
     }
   }
 
+  /* Выравнивание порядка сообщений к хронологии (от начала чата к концу).
+   * Слой 1: если после загрузки истории все сообщения ещё в DOM — порядок документа.
+   * Слой 2: если >=80% сообщений имеют парсимый timestamp — сортировка по времени. */
+  function reorderChronologically(acc) {
+    let ids = Array.from(acc.keys());
+    let mode = 'discovery';
+    const domNodes = collectMessageNodes();
+    if (domNodes.length >= acc.size) {
+      const domIds = [];
+      const seen = new Set();
+      for (const el of domNodes) {
+        const { text } = extractContent(el);
+        if (!text) continue;
+        const id = stableId(el, text);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        domIds.push(id);
+      }
+      const missing = ids.filter((id) => !seen.has(id));
+      if (missing.length === 0 && domIds.length >= acc.size) {
+        const domOrdered = domIds.filter((id) => acc.has(id));
+        if (domOrdered.length === acc.size) { ids = domOrdered; mode = 'dom'; }
+      }
+    }
+    const parseT = (s) => { if (!s) return null; const d = Date.parse(s); return Number.isFinite(d) ? d : null; };
+    const withT = ids.map((id, idx) => ({ id, idx, t: parseT(acc.get(id).time) }));
+    const parsedCount = withT.filter((x) => x.t !== null).length;
+    if (parsedCount >= Math.max(2, Math.floor(ids.length * 0.8))) {
+      withT.sort((a, b) => {
+        if (a.t !== null && b.t !== null) return a.t - b.t || a.idx - b.idx;
+        if (a.t !== null) return -1;
+        if (b.t !== null) return 1;
+        return a.idx - b.idx;
+      });
+      ids = withT.map((x) => x.id);
+      mode += '+time';
+    }
+    const ordered = new Map();
+    ids.forEach((id) => ordered.set(id, acc.get(id)));
+    return { ordered, mode };
+  }
+
   /* -------------------------- сериализация ------------------------------- */
   function toMarkdown(meta, messages) {
     const lines = [
@@ -255,13 +297,15 @@
     let scrolledVia = 'skipped';
     if (CONFIG.AUTO_SCROLL) scrolledVia = await loadFullHistory(acc);
 
-    const messages = Array.from(acc.values());
+    const { ordered, mode } = reorderChronologically(acc);
+    const messages = Array.from(ordered.values());
     const meta = {
       url: location.href,
       chatId: chatIdFromUrl(),
       title: document.title,
       exportedAt: new Date().toISOString(),
-      scrollContainer: scrolledVia
+      scrollContainer: scrolledVia,
+      order: mode
     };
 
     let payload, ext, mime;

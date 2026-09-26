@@ -10,6 +10,7 @@
 |---|---|---|
 | `zai-chat-export-console.js` | Скрипт для вставки в консоль DevTools | Разовый экспорт, самый быстрый способ |
 | `zai-chat-export.user.js` | Tampermonkey-плагин (userscript) с кнопкой «Export chat» | Регулярные экспорты, всегда под рукой |
+| `chrome-extension/` | **Chrome-расширение (MV3)**: кнопка + popup + хоткей Ctrl+Shift+Y, скачивание через Downloads API | Самый удобный способ для Chrome (см. `chrome-extension/README.md`); zip-пакет: `download/zai-chat-export-chrome-extension.zip` |
 | `test/mock.html` | Мок чата с lazy-load для тестов | Проверка скрипта без реального чата |
 
 ## Способ 1 — консоль (без установки чего-либо)

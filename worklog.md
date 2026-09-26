@@ -1871,3 +1871,21 @@ Stage Summary:
 - Публикация в GitHub — после возврата PAT (файлы в локальном main, попадут в очередной ff-push через push-pending-r80.sh).
 - Если селекторы не подойдут к реальному DOM Z.ai (проверить нечем — нет сессии), пользовательская подстройка описана в README; структура кода делает это правкой одного блока CONFIG.
 - [cron 413338 2026-09-26T12:37+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
+- [cron 413338 2026-09-26T12:52+08] PAT ожидается, push-pending готов (ba623a59): /home/z/.a2/.github.env отсутствует, публикация отложена.
+
+---
+Task ID: R80-ZAI-CHAT-EXPORT-CHROME-EXT
+Agent: Super Z (main agent)
+Task: «сделай плагин для chrome» (экспорт чата Z.ai; продолжение R80-ZAI-CHAT-EXPORT-TOOL).
+
+Work Log:
+- Cron tick 81 (12:52): TOKEN_FILE_MISSING → однотипный маркер записан; порядок тиков 12:37/12:52 выправлен.
+- Создано Chrome-расширение MV3 в scripts/zai-chat-export/chrome-extension/: manifest.json (permissions: downloads; host_permissions chat.z.ai/*.z.ai/z.ai; content_scripts document_idle; commands export-md Ctrl+Shift+Y/Cmd+Shift+Y; popup + иконки 16/48/128), content.js (то же протестированное ядро экспорта: каскад селекторов, роли, авто-скролл с накоплением в Map по стабильному id, код-блоки, MD/JSON/TXT; плавающая кнопка Export chat — клик=md/Shift=json/Alt=txt; приём ZAI_EXPORT от popup/hotkey; chrome.downloads через SW с fallback на <a download>), background.js (downloads API + onCommand), popup.html/popup.js (выбор формата, статус, toggle автопрокрутки), build-icons.py (PIL-генерация иконок), README.md (установка через Load unpacked, таблица способов экспорта, troubleshooting, приватность — 0 внешних запросов).
+- Валидация: node --check — 3/3 JS без ошибок; manifest.json — валидный JSON; иконки сгенерированы (тёмный скруглённый квадрат + белая стрелка в лоток, зелёный контур #10b981).
+- Функциональный тест content.js на mock.html (agent-browser, base64-инъекция): кнопка смонтирована; экспорт 20/20 уникальных сообщений, роли 10/10/0 Unknown, chars=3462 (бит-в-бит с консольной версией), via=anchor — fallback-скачивание подтверждено (chrome API в тестовой странице отсутствует → graceful degradation). Браузер закрыт.
+- Пакет: /home/z/my-project/download/zai-chat-export-chrome-extension.zip (10 файлов, 26.8KB, build-icons.py исключён); главный README обновлён строкой о расширении.
+
+Stage Summary:
+- Chrome-плагин готов: scripts/zai-chat-export/chrome-extension/ + zip в download/. Установка: chrome://extensions → Developer mode → Load unpacked.
+- Три способа экспорта теперь: консоль (разово), Tampermonkey (кнопка), Chrome-расширение (кнопка+popup+хоткей+Downloads API).
+- Реальный прогон на z.ai — на стороне пользователя (сессия у оператора); при расхождении селекторов правится один блок CONFIG в content.js (см. README-расширения, Troubleshooting).
