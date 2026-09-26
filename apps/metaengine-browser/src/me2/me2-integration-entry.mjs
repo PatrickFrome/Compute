@@ -19,7 +19,7 @@ import { startMe2MissionControl, stopMe2MissionControl, me2MissionControlStatus 
 import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
 import { startMe2SupervisorMeshBridge, stopMe2SupervisorMeshBridge, me2SupervisorMeshBridgeStatus } from './me2-supervisor-mesh-bridge.mjs';
 import { me2FleetTabsHostStatus } from './me2-fleet-tabs-host.mjs';
-import { startMe2UiHost, stopMe2UiHost, me2UiHostStatus } from './me2-ui-host.mjs';
+import { startMe2UiHost, stopMe2UiHost, stopMe2UiHostAndWait, me2UiHostStatus } from './me2-ui-host.mjs';
 import { startMe2UiGateway, stopMe2UiGateway, me2UiGatewayStatus } from './me2-ui-gateway.mjs';
 import { me2SocketStatus } from './me2-socket-client.mjs';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
@@ -144,18 +144,64 @@ export async function startMe2Integration({ app } = {}) {
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'MESH_BRIDGE_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
-  if (app && typeof app.once === 'function') {
-    app.once('will-quit', () => {
-      // R85 single-runtime ownership: Browser-owned daemon process terminates with
-      // the Browser so an upgrade cannot adopt an older executable. Durable state
-      // lives under userData/me2-daemon and therefore survives process restart.
+  if (app && typeof app.once === 'function' && typeof app.on === 'function') {
+    let quitDrainStarted = false;
+    let quitDrainComplete = false;
+
+    const stopNonUiPlanes = () => {
       stopMe2SupervisorMeshBridge();
       stopMe2BrainAdapter();
       stopMe2MissionControl();
       stopMe2FleetBridge();
       stopMe2UiGateway();
-      stopMe2UiHost({ killChild: true });
       stopMe2DaemonHost({ killChild: true });
+    };
+
+    app.on('before-quit', (event) => {
+      if (quitDrainComplete) return;
+      if (event && typeof event.preventDefault === 'function') event.preventDefault();
+      if (quitDrainStarted) return;
+      quitDrainStarted = true;
+      stopNonUiPlanes();
+
+      void stopMe2UiHostAndWait({ graceMs: 2500, forceMs: 2500 })
+        .then((uiStatus) => {
+          if (uiStatus?.shutdown?.confirmed !== true) {
+            quitDrainStarted = false;
+            emitRow({
+              schema: ME2_INTEGRATION_SCHEMA,
+              event: 'ME2_UI_SHUTDOWN_UNCONFIRMED',
+              pid: uiStatus?.shutdown?.pid ?? null,
+              verdict: 'QUIT_FENCED',
+            }, { error: true });
+            return;
+          }
+          quitDrainComplete = true;
+          emitRow({
+            schema: ME2_INTEGRATION_SCHEMA,
+            event: 'ME2_QUIT_DRAIN_CONFIRMED',
+            ui_pid: uiStatus?.shutdown?.pid ?? null,
+            ui_force_kill: uiStatus?.shutdown?.forced === true,
+          });
+          app.quit();
+        })
+        .catch((error) => {
+          quitDrainStarted = false;
+          emitRow({
+            schema: ME2_INTEGRATION_SCHEMA,
+            event: 'ME2_QUIT_DRAIN_FAILED',
+            error: String(error?.message || error).slice(0, 200),
+            verdict: 'QUIT_FENCED',
+          }, { error: true });
+        });
+    });
+
+    app.once('will-quit', () => {
+      // R85 single-runtime ownership: will-quit is now only an idempotent final
+      // cleanup edge. before-quit already proved the Browser-owned UI exited,
+      // so the next incarnation cannot race a stale Next server on :3000.
+      stopNonUiPlanes();
+      stopMe2UiHost({ killChild: true });
       emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_INTEGRATION_STOP' });
     });
   }
