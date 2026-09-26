@@ -217,6 +217,10 @@ ipcRenderer.on('metaengine:brain:port', (event, transfer = {}) => {
 contextBridge.exposeInMainWorld('metaengineShell', Object.freeze({
   snapshot: () => ipcRenderer.invoke('metaengine:shell:snapshot').then(decorateSnapshot),
   command: (command, payload) => ipcRenderer.invoke('metaengine:shell:command', { command, payload }),
+  // R84 primary ME2 shell presentation hint. This controls only which native
+  // Browser WebContentsView is composed into the ME2 page; it grants no task,
+  // scheduler, browser-command, update, or release authority.
+  setPrimaryPage: (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? '')),
   presentationFocus: Object.freeze({
     snapshot: () => ipcRenderer.invoke('metaengine:shell:presentation-focus:snapshot'),
     selectSession: (sessionId) => ipcRenderer.invoke('metaengine:shell:presentation-focus:select-session', String(sessionId ?? '')),
