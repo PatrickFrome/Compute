@@ -38,9 +38,17 @@ async function smoke(exe, manifest) {
   const wsPort = 43000 + offset;
   let stdout = '';
   let stderr = '';
+  const systemRoot = process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows';
+  const runtimePath = process.platform === 'win32'
+    ? [path.join(systemRoot, 'System32'), systemRoot].join(';')
+    : String(process.env.PATH || '');
   const child = spawn(exe, [], {
     env: {
       ...process.env,
+      PATH: runtimePath,
+      Path: runtimePath,
+      NODE_PATH: '',
+      BUN_INSTALL: '',
       ME2_BOOT_MODE: 'probe',
       ME2_DATA_DIR: dataDir,
       ME2_REST_PORT: String(restPort),
@@ -79,6 +87,7 @@ async function smoke(exe, manifest) {
       state_contract: String(state.contract),
       boot_mode: 'probe',
       external_bun_used: false,
+      external_runtime_path_sanitized: process.platform === 'win32',
     };
   } finally {
     try { child.kill(); } catch {}
@@ -117,6 +126,7 @@ const proof = {
   runtime_embedded: true,
   external_bun_required: false,
   package_manifest_verified: true,
+  smoke_child_external_runtime_path_sanitized: args.smoke && process.platform === 'win32',
   ...(args.smoke ? await smoke(exe, manifest) : { runtime_smoke: 'NOT_REQUESTED' }),
   authority_effect: false,
 };
