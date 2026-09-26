@@ -524,8 +524,9 @@ test('R85 Context Drawer splitter is keyboard-accessible and native-sync fenced'
   assert.match(me2ContextDrawer, /setHeight\(nextHeight, false\)/);
   assert.match(me2ContextDrawer, /setHeight\(nextHeight, true\)/);
   assert.match(store, /let contextDrawerSyncSeq = 0/);
-  assert.match(store, /const syncSeq = \+\+contextDrawerSyncSeq/);
-  assert.match(store, /if \(syncSeq !== contextDrawerSyncSeq\) return/);
+  assert.match(store, /seq:\s*\+\+contextDrawerSyncSeq/);
+  assert.match(store, /presentationSyncStillCurrent\(request,\s*\{[\s\S]{0,180}seq:\s*contextDrawerSyncSeq,[\s\S]{0,180}workspace:\s*get\(\)\.workspace,[\s\S]{0,180}page:\s*get\(\)\.page/);
+  assert.doesNotMatch(store, /if \(syncSeq !== contextDrawerSyncSeq\) return/);
   assert.match(store, /setContextDrawerHeight: \(height: number, persist\?: boolean\)/);
 });
 
