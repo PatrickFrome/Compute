@@ -40,19 +40,20 @@ test('R94 keeps native Browser bottom geometry stable while changing information
   assert.doesNotMatch(pagebar, /className="flex h-10 shrink-0/);
 });
 
-test('R94 top chrome exposes workspace then workflow stage then secondary module', () => {
-  assert.match(topbar, /workflowStageForPage\(page\)/);
-  assert.match(topbar, /workspaceMeta\?\.label/);
-  assert.match(topbar, /stageMeta\.label/);
-  assert.match(topbar, /pageMeta\?\.label && pageMeta\.label !== stageMeta\.label/);
+test('R97 top chrome keeps workflow modules out of the persistent main workspace', () => {
+  assert.doesNotMatch(topbar, /workflowStageForPage\(page\)/);
+  assert.doesNotMatch(topbar, /workspaceMeta\?\.label|stageMeta\.label|pageMeta\?\.label/);
+  assert.match(topbar, /data-testid="global-cmdbar"/);
+  assert.match(topbar, /data-testid="settings-button"/);
 });
 
 
-test('R94 workspace selector lives in global top chrome, not the workflow-stage dock', () => {
-  assert.match(topbar, /data-testid="workspace-switcher"/);
-  assert.match(topbar, /data-testid="workspace-reset-layout"/);
-  assert.doesNotMatch(pagebar, /data-testid="workspace-switcher"/);
-  assert.doesNotMatch(pagebar, /WORKSPACES\.map/);
+test('R97 workspace and workflow selectors are advanced-only instead of persistent chrome', () => {
+  assert.doesNotMatch(topbar, /data-testid="workspace-switcher"/);
+  assert.doesNotMatch(topbar, /data-testid="workspace-reset-layout"/);
+  assert.doesNotMatch(topbar, /WORKSPACES\.map|WORKFLOW_STAGES\.map/);
+  assert.match(topbar, /Search agents, settings, tools or run a command/);
+  assert.match(topbar, /setPage\("system"\)/);
 });
 
 test('R94 separates brand/selection accent from runtime health green', () => {
