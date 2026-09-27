@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T17:52:19Z | worklog: 1943858B / 10641L | sha12=bac01db2a1f6
+gen: 2026-09-27T18:22:30Z | worklog: 1948877B / 10660L | sha12=b7c1d95b4ed1
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -9,7 +9,7 @@ gen: 2026-09-27T17:52:19Z | worklog: 1943858B / 10641L | sha12=bac01db2a1f6
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1943858B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1948877B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -24,7 +24,6 @@ gen: 2026-09-27T17:52:19Z | worklog: 1943858B / 10641L | sha12=bac01db2a1f6
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- EVOLVE-ROUND-14 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-BACKLOG-CYCLE] backlog пройден полностью — повторный цикл полировки с версии +1
 - EVOLVE-ROUND-14-ENGINEFIX-20260927 → Раунд 14 — маркер [EV-BACKLOG-CYCLE]: честный аудит «уже реализовано?» => обнаружен и устранён ложный цикл pick_task (движок v1.28 → v1.30, self-update → v1.31)
 - R93-SESSION-SELECT-CONVERGE-20260927 → Смена фокуса на DESKTOP-клиент metaengine: верифицировать R92-заявки ChatGPT (PR #997 @ 060fa85c), продолжить незавершённую R93-линию (canonical session binding / UI resilience), довести до доказанной зелёной точки
 - R94-ARIA-PANEL-MANAGEMENT-20260927 → Смена фокуса подтверждена (R92 @ 060fa85c / PR #997 как база): восстановить окружение после env-reset, синхронизироваться с доказанной точкой R93 5ecb3ed6 и продолжить линию panel-management (VS Code/APG-паритет для единственного managed-сплиттера)
@@ -39,28 +38,10 @@ gen: 2026-09-27T17:52:19Z | worklog: 1943858B / 10641L | sha12=bac01db2a1f6
 - EVOLVE-ROUND-18-ENGINEFIX-20260927 → Раунд 18 — [EV-EMPTYSTATE-COVERAGE] re-pick при действующем фризе консоли => вместо повторного аудита R17 — архитектурный фикс движка: durable frozen-defer механизм (v1.39 → v1.40); ложное закрытие по-прежнему запрещено
 - EVOLVE-ROUND-19 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
 - EVOLVE-ROUND-19 → Раунд 19 — [EV-DONOR-404] fix daemon-route: GET /donor-registry 404 no-route на :3041 → read-only маршрут (НЕ page.tsx, фризом не блокируется) + археология/реконструкция движка после env-reset ~00:00 +08
+- BROWSER-TEST-20260928-0215 → Подключиться к live METAENGINE 0.7.0-dev.36336130139.1 (Supabase compute_fabric_a2_*), прогнать тесты всех механик браузера; классификация работает/не работает/не проверено относительно цели: создание GLM-чат-агентов, автономный флот, взаимная видимость/координация, вечный супервизор
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-- инцидент-откат: T3/T4 self_update вызвал mirror_sync из подменённой копии (SELF/STATE_DIR=tmpd) — зеркала на 2 минуты содержали tmp-копию; обнаружено сразу, восстановлено cp реального движка в оба зеркала, cmp identical 2/2, grep подменённых путей=0; после seeding self-check mirrors=2/2(synced) OK
-- верификация: state rounds=18 client_tasks_done=9 v=1.40 frozen=EV-EMPTYSTATE-COVERAGE,EV-EMPTYSTATE-APPLY; live pick → EV-DONOR-404; phoenix-snapshot write-ahead ok (snapshots-wa) перед правками; page.tsx в git чист (0 строк, фриз соблюдён); *.sealed.* gitignored (check-ignore ok)
-
-Stage Summary:
-- Round 18 закрыт как ENGINE-FIX: re-pick цикл заблокированных фризом задач устранён durably — frozen=CSV пропускает EV-EMPTYSTATE-COVERAGE/EV-EMPTYSTATE-APPLY в pick без ложного закрытия; возврат в оборот — self-update frozen-clear-<MARKER> после разморозки оператором
-- Backlog порядка pick: EV-DONOR-404 (исполняемая при фризе — daemon-route) → EV-TOPO → EV-TOASTS → EV-WS-RESILIENCE → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE → EV-DESKTOP-KBD
-
----
-Task ID: EVOLVE-ROUND-19
-Agent: self-evolve v1.15 (sealed engine)
-Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
-
-Work Log:
-- client health: GET / = 200, lint = 0/0, audit score = unknown%
-- движок: self-check DEGRADED, зеркала пересинхронизированы, версия движка: 1.15
-- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-FOOTER] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-FOOTER'
-
-Stage Summary:
-- раунд 19 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
 
 ---
 Task ID: EVOLVE-ROUND-19
@@ -82,4 +63,23 @@ Stage Summary:
 - Round 19: EV-DONOR-404 закрыта честно — daemon-route фикс живой (gateway 200), блокер «донор-панель в вечном skeleton» снят на уровне API
 - Движок пережил reset-археологию: v1.16-зомби → v1.41 (реконструкция R13-R18 протокола + 2 новых регресс-фикса T5/T6c) → v1.42 (закрытие DONOR-404); замечено: post-reset рабочий дерево откатилось глубже, чем считалось (консольные панели R16/R17 отсутствуют; подлинная страница :3000 = R74 METAENGINE-приложение) — следующие консольные EV сверять с ЖИВЫМ деревом, не с worklog-описаниями
 - Порядок pick (v1.42): EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE → EV-DESKTOP-KBD; frozen=EV-EMPTYSTATE-COVERAGE,EV-EMPTYSTATE-APPLY (до разморозки оператором)
+
+---
+Task ID: BROWSER-TEST-20260928-0215
+Agent: Super Z (cron browser-test tick, Job 419203) + scripts/browser-test/{sbq,dispatch,typed-seq,battery2}.py
+Task: Подключиться к live METAENGINE 0.7.0-dev.36336130139.1 (Supabase compute_fabric_a2_*), прогнать тесты всех механик браузера; классификация работает/не работает/не проверено относительно цели: создание GLM-чат-агентов, автономный флот, взаимная видимость/координация, вечный супервизор
+
+Work Log:
+- канал: сервис-ключ из ENVF (секреты не печатались); 18 таблиц compute_fabric_a2_*; live-клиент 2a60d6a2...43c9 heartbeat свежий, CONTROL/CONTROL armed; словарь 47 actions в 4 lane (mini-services/me2-daemon/src/actions.ts)
+- инфра-протокол: command_lane генерируемая колонка (вставка без неё); payload в python-repr формате; binding создаётся клиентом на lease; бюджет 24/60s (пачка >24 выбивает supervisor_action_budget_exceeded); failure circuit открывается при серии фейлов и сам сбрасывается ~90s
+- РАБОТАЕТ: command channel insert→lease→receipt (POLL ok, RSI ledger 16341 событий hash-chained); READ-плоскость целиком: CAPTURE (полная перцепция, semantic_targets + interaction_tree), TAB_CENSUS (9-12 вкладок, роли SUPERVISOR/FLEET/USER), SEMANTIC_CENSUS, TAB_TELEMETRY, READ_TRANSCRIPT, PROCESS_CENSUS, SYSTEM_TELEMETRY, GATE_STATUS (owner gates registered), CONTROL_CAPABILITIES, DOWNLOAD_STATUS, SELF_UPDATE_STATUS (CURRENT, host_resilience ACTIVE sentinel ARMED), DEV_PLANE_{STATUS,HEALTH,CAPABILITIES,REPO_HEAD} (READY pid 18460, refs/pull/1024/merge 5aeaaa05)
+- РАБОТАЕТ: NEW_TAB (вкладка создаётся, роль USER, kind GLM_CHAT); FLEET_SET_PROFILE (elastic BALANCED, реестр 4 агентов PLANNER/RESEARCHER/IMPLEMENTER/CRITIC все ACTIVE FLEET_OWNED); флот-снапшот v1.5.0, readiness TRANSPORT_PROOF_REQUIRED
+- НЕ РАБОТАЕТ (корневой блокер): exact-tab binding — ALL typed-команды отказаны: SELECT_TAB (даже на supervisor-таб), SEMANTIC_FOCUS, SEMANTIC_TYPE, NAVIGATE — err native_supervisor_exact_tab_required / native_supervisor_effect_binding_explicit_tab_required, effect_key деградирует в global:selected-tab / global:control-plane, execution_ms=0; следствие: создание GLM-чат-агента через composer НЕДОСТУПНО (цель 1), флот стоит на стартовых страницах (0 dispatch/seed), keepalive супервизора ROLLOVER_AMBIGUOUS (cycle_seq 2109, last_wake 2026-09-23 — цель 4 не работает)
+- НЕ РАБОТАЕТ (сопутствующие): nav deadline 15s → AMBIGUOUS/DEADLINE_EXCEEDED хронически (NEW_TAB пост-URL верный но статус ambiguous); silent retargeting READ-команд (CAPTURE/TAB_TELEMETRY/READ_TRANSCRIPT на таб X возвращают перцепцию чужой вкладки Y без ошибки); webContents identity churn (webcontents:24→28→29 за ~10 мин → semantic_refs мгновенно stale); дубль-textbox в semantic tree (backend 183 + 185, name 'How can I help you today?' и безымянный); SELF_UPDATE_CHECK FAILED postcondition_not_confirmed:NO_EFFECT_PROVEN (state CURRENT но постусловие не доказуемо)
+- НЕ ПРОВЕРЕНО (заблокировано каскадом binding): submit_after_type, end-to-end создание агента, dispatch/seed задач, межагентная координация/самообучение (цель 3), STOP_GENERATION/SCROLL/PRESS_KEY/RELOAD, GATE_ENABLE/DISABLE, DOWNLOAD_FILE, WORKTREE_* (insert-констрейнт с моей стороны), MIRROR_STATUS, CAPTURE_VIEW (LEASED не дозрел)
+
+Stage Summary:
+- Протокол канала отработан и воспроизводим (scripts/browser-test/ — 4 переиспользуемых скрипта, каждый тик может переgetь батарею)
+- Единственный корневой фикс для целей 1-4: резолвер exact-tab binding в native supervisor клиенте (все TAB_MUTATION рефьюзятся до исполнения); после его починки автопроверка: SELECT_TAB→CAPTURE→SEMANTIC_TYPE(replace=False,submit=False)→capture-verify value→submit
+- Вторичные фиксы: nav deadline >20s для chat.z.ai, стабилизация webContents identity, дедуп текстбоксов в semantic tree, доказуемое постусловие SELF_UPDATE_CHECK
 ```
