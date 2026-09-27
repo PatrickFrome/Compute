@@ -280,6 +280,29 @@ test('resolveProducerRun fails closed when producer completed non-success', asyn
   });
 });
 
+test('resolveProducerRun fails immediately on non-retriable GitHub API rejection', async () => {
+  let requests = 0;
+  await withServer((_req, res) => {
+    requests += 1;
+    return json(res, 403, { message: 'forbidden' });
+  }, async (base) => {
+    const started = Date.now();
+    await assert.rejects(
+      resolveProducerRun({
+        repo: 'o/r',
+        head: HEAD,
+        artifactName: 'artifact',
+        apiBase: base,
+        timeoutMs: 5000,
+        pollMs: 1000,
+      }),
+      (error) => error?.code === 'installer_provenance_github_api_rejected' && error?.details?.status === 403,
+    );
+    assert.ok(Date.now() - started < 1000);
+  });
+  assert.equal(requests, 1);
+});
+
 test('resolveProducerRun reports exact-head producer absence after bounded wait', async () => {
   await withServer((req, res) => {
     if (req.url.startsWith('/repos/o/r/actions/runs?')) return json(res, 200, { workflow_runs: [] });
