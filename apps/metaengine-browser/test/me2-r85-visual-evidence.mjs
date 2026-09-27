@@ -23,6 +23,11 @@ process.env.ME2_ALLOW_EXTERNAL_UI_ADOPT = '0';
 app.enableSandbox();
 app.commandLine.appendSwitch('disable-gpu');
 
+// Physical test harness owns its terminal exit code. Electron otherwise quits
+// by default when cleanup destroys the last BaseWindow, which can mask a
+// preceding assertion failure as exit 0 before main().catch() observes it.
+app.on('window-all-closed', () => {});
+
 const digest = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 
 const VISUAL_PHASE_TIMEOUT_MS = 120_000;
@@ -406,12 +411,19 @@ async function main() {
   app.exit(0);
 }
 
-main().catch((error) => {
-  console.error(JSON.stringify({
+main().catch(async (error) => {
+  const failure = Object.freeze({
     schema: 'metaengine.browser.r85-visual-evidence.v1',
     ok: false,
+    phase: visualPhase,
     error: String(error?.stack || error),
+    presentation_only: true,
     authority_effect: false,
-  }));
+  });
+  console.error(JSON.stringify(failure));
+  try {
+    await fs.mkdir(OUTPUT_ROOT, { recursive: true });
+    await fs.writeFile(path.join(OUTPUT_ROOT, 'r85-visual-failure.json'), `${JSON.stringify(failure, null, 2)}\n`);
+  } catch {}
   app.exit(1);
 });

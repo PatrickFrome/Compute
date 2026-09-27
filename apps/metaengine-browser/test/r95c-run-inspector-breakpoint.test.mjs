@@ -132,3 +132,14 @@ test('R95C.2 history navigation advances the geometry generation before an ABA r
   assert.ok(targetAt >= 0 && generationAt > targetAt && pageSetAt > generationAt && pageAckAt > pageSetAt);
   assert.match(historyBlock, /old[\s\S]{0,80}RUN geometry reply pass the page\/workspace ABA fence/);
 });
+
+
+test('R95C.2 physical harness cannot let last-window cleanup mask a failing assertion as exit zero', () => {
+  assert.match(visualHarness, /app\.on\('window-all-closed', \(\) => \{\}\)/);
+  const cleanupAt = visualHarness.indexOf('windowRef.destroy()');
+  const catchAt = visualHarness.indexOf('main().catch(async (error) =>');
+  assert.ok(cleanupAt >= 0 && catchAt > cleanupAt);
+  assert.match(visualHarness, /phase: visualPhase/);
+  assert.match(visualHarness, /r85-visual-failure\.json/);
+  assert.match(visualHarness, /app\.exit\(1\)/);
+});

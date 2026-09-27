@@ -66,3 +66,26 @@ R95C.2 now increments the presentation generation before every history page tran
 Primary sources:
 - https://kubernetes.io/docs/reference/using-api/api-concepts/
 - https://etcd.io/docs/v3.7/learning/api/
+
+
+## Physical harness falsification: default last-window exit masked the real error
+
+The first diagnostic rerun still reported only `r85_visual_evidence_json_missing`.
+The new phase log proved the harness reached `DOCK_RUN_UTILITY_RIGHT` and then entered
+`SHUTDOWN`, so an assertion failed before evidence serialization. However the Electron
+process still returned exit 0 and `main().catch()` never printed the underlying error.
+
+Electron's current `app` contract explains the mechanism: if no
+`window-all-closed` listener is registered, closing the last window quits the app by
+default. The harness cleanup destroyed its last `BaseWindow` inside `finally`, so the
+process could terminate during exception unwinding before the Promise rejection reached
+the outer catch.
+
+The harness now:
+- registers a no-op `window-all-closed` listener so only the harness controls terminal exit;
+- preserves cleanup in `finally`;
+- lets the original assertion reach `main().catch()`;
+- writes `r85-visual-failure.json` with the exact phase/error before `app.exit(1)`;
+- still exits 0 only after successful evidence serialization.
+
+Primary source: https://www.electronjs.org/docs/latest/api/app
