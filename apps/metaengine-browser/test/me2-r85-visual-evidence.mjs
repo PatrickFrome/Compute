@@ -402,8 +402,8 @@ async function main() {
     try { stopMe2UiGateway(); } catch {}
     try { await withTimeout(stopMe2UiHostAndWait({ graceMs: 2500, forceMs: 2500 }), 7000, 'stop_ui_host'); } catch {}
     clearTimeout(watchdog);
-    app.exit(0);
   }
+  app.exit(0);
 }
 
 main().catch((error) => {
