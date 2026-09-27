@@ -138,6 +138,9 @@ jobs:
             package_version=$version
             installer_name=$installer.Name
             installer_sha256=$digest
+            producer_run_id=[int64]$acquire.producer_run_id
+            producer_run_attempt=[int64]$acquire.producer_run_attempt
+            producer_completed_at_acquire=[bool]$acquire.producer_completed_at_acquire
             preconnect_armed=$false
             clean_genesis_control_verified=$false
             automatic_initial_tab_suppressed=$false
