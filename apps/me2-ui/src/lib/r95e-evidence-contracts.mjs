@@ -68,66 +68,52 @@ export function mergeExactTaskEvidenceEvents({
 
 
 /**
- * Resolve one bounded exact-task history response into a presentation patch.
- * The helper is pure so the same race semantics used by Zustand can be tested
- * with real delayed-response ordering rather than source-text assertions.
+ * Reduce one completed exact-task history fetch into presentation state.
+ * Returns null when the response is stale and must have zero state effect.
  *
  * @param {{
  *   request:{seq:number,taskId:string},
- *   current:{seq:number,taskId:string|null,streamTaskId:string|null,stream?:Array<any>},
- *   responseEvents?:Array<any>|null,
- *   limit?:number
+ *   current:{seq:number,taskId:string|null,streamTaskId:string|null},
+ *   fetchedEvents?:Array<any>|null,
+ *   liveStream?:Array<any>
  * }} input
  */
-export function resolveExactTaskStreamResponse({
+export function reduceExactTaskHistoryResponse({
   request,
   current,
-  responseEvents = null,
-  limit = 200,
+  fetchedEvents = null,
+  liveStream = [],
 } = {}) {
-  if (!taskStreamResponseStillCurrent(request, current)) {
-    return Object.freeze({ applied: false, patch: null });
-  }
+  if (!taskStreamResponseStillCurrent(request, current)) return null;
 
-  if (!Array.isArray(responseEvents)) {
+  const stream = Array.isArray(liveStream) ? liveStream : [];
+  if (!Array.isArray(fetchedEvents)) {
     return Object.freeze({
-      applied: true,
-      patch: Object.freeze({ streamState: 'DEGRADED' }),
+      stream,
+      streamState: "DEGRADED",
     });
   }
 
-  const taskId = String(request?.taskId ?? '');
+  const exactTaskId = String(request?.taskId ?? "");
   const bySeq = new Map();
-
-  for (const event of responseEvents) {
-    if (String(event?.task_id ?? '') !== taskId) continue;
+  for (const event of fetchedEvents) {
+    if (String(event?.task_id ?? "") !== exactTaskId) continue;
     const seq = Number(event?.seq);
     if (!Number.isSafeInteger(seq)) continue;
     bySeq.set(seq, event);
   }
-
-  // Live exact events observed after the fetch began win over a fetched row
-  // with the same sequence number.
-  for (const event of Array.isArray(current?.stream) ? current.stream : []) {
-    if (String(event?.task_id ?? '') !== taskId) continue;
+  // Live rows are newer observations and therefore win duplicate sequence ids.
+  for (const event of stream) {
+    if (String(event?.task_id ?? "") !== exactTaskId) continue;
     const seq = Number(event?.seq);
     if (!Number.isSafeInteger(seq)) continue;
     bySeq.set(seq, event);
   }
-
-  const boundedLimit = Math.max(
-    1,
-    Math.min(200, Number.isSafeInteger(Number(limit)) ? Number(limit) : 200),
-  );
-  const stream = [...bySeq.values()]
-    .sort((a, b) => Number(a.seq) - Number(b.seq))
-    .slice(-boundedLimit);
 
   return Object.freeze({
-    applied: true,
-    patch: Object.freeze({
-      stream: Object.freeze(stream),
-      streamState: 'EXACT',
-    }),
+    stream: [...bySeq.values()]
+      .sort((a, b) => Number(a.seq) - Number(b.seq))
+      .slice(-200),
+    streamState: "EXACT",
   });
 }
