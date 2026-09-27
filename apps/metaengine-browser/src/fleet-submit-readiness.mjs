@@ -1,5 +1,11 @@
 import { chatGptControlCount } from './chatgpt-ui-controls.mjs';
-import { AGENT_PLATFORM_ID, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
+import {
+  AGENT_PLATFORM_ID,
+  AGENT_PLATFORM_MODEL,
+  resolveAgentPlatformAgentSurface,
+  resolveAgentPlatformComposer,
+  resolveAgentPlatformSelectedModel,
+} from './browser-agent-platform.mjs';
 
 const COMPOSER_NAMES = new Set(['Чат с ChatGPT', 'Chat with ChatGPT', 'Message ChatGPT']);
 const READINESS_PHASES = new Set(['PRE_TYPE', 'PRE_CLICK']);
@@ -71,20 +77,40 @@ export function evaluateFleetSubmitReadiness({
   // (semantic addressing is geometry-independent by design). The viewport is
   // therefore reported as an observation, never as a GLM submit gate.
   if (glmLane) {
+    const agentSurface = resolveAgentPlatformAgentSurface(frame);
+    if (!agentSurface) {
+      return Object.freeze({ ready: false, reason: 'AGENT_SURFACE_NOT_PROVEN', foreground, authority_effect: false });
+    }
+    const modelProof = resolveAgentPlatformSelectedModel(frame);
+    if (!modelProof) {
+      return Object.freeze({ ready: false, reason: 'AGENT_MODEL_NOT_PROVEN', foreground, authority_effect: false });
+    }
+    if (modelProof.model !== AGENT_PLATFORM_MODEL || modelProof.matches_required_model !== true) {
+      return Object.freeze({
+        ready: false,
+        reason: 'AGENT_MODEL_MISMATCH',
+        observed_model: modelProof.model,
+        required_model: AGENT_PLATFORM_MODEL,
+        foreground,
+        authority_effect: false,
+      });
+    }
     const composer = resolveAgentPlatformComposer(frame);
     if (!composer) {
-      return Object.freeze({ ready: false, reason: 'COMPOSER_NOT_UNIQUE', authority_effect: false });
+      return Object.freeze({ ready: false, reason: 'AGENT_TASK_COMPOSER_NOT_UNIQUE', foreground, authority_effect: false });
     }
     return Object.freeze({
       ready: true,
-      reason: 'READY_FOR_ENTER_SUBMIT',
+      reason: 'READY_FOR_AGENT_TASK_ENTER_SUBMIT',
       phase: readinessPhase,
       platform: AGENT_PLATFORM_ID,
+      agent_surface: agentSurface,
+      model_proof: modelProof,
       composer,
       send_control: null,
       viewport: Object.freeze({ width, height }),
       viewport_rendered: width > 0 && height > 0,
-      submit_strategy: 'TYPE_WITH_ENTER_SUBMIT_READBACK',
+      submit_strategy: 'AGENT_UI_TYPE_WITH_ENTER_SUBMIT_READBACK',
       send_required_before_type: false,
       send_required_before_click: false,
       named_send_control_exists: false,
