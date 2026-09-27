@@ -13,7 +13,8 @@
 //   verify   - re-hash installer bytes against provenance + expected head
 //   resolve  - poll GitHub for the Package Smoke run of an exact head
 //   download - fetch the provenanced artifact zip of a resolved run
-//   acquire  - resolve + download in one step
+//   acquire  - resolve + download in one step (optionally before producer completion)
+//   wait     - require the exact bound producer run to finish successfully
 //
 // Zero runtime dependencies; runs on plain node >= 18 (runner has node 24).
 // All diagnostics go to stderr as one JSON line; machine codes are stable.
@@ -158,9 +159,22 @@ function sleep(ms) {
   });
 }
 
+function permanentApiError(error) {
+  return error instanceof ProvenanceError
+    && error.code === 'api_status_unexpected'
+    && Number(error.details?.status) >= 400
+    && Number(error.details?.status) < 500;
+}
+
+function booleanOption(value) {
+  return value === true || String(value || '').toLowerCase() === 'true';
+}
+
 async function resolveRun(options) {
   const head = requireHeadShape(requireOption(options, 'head'));
   const workflow = requireOption(options, 'workflow');
+  const artifactName = options.artifact && options.artifact !== true ? String(options.artifact) : null;
+  const allowInProgress = booleanOption(options['allow-in-progress']);
   const token = tokenFrom(options);
   const repository = repositoryFrom(options);
   const apiBase = apiBaseFrom(options);
@@ -170,6 +184,10 @@ async function resolveRun(options) {
   if (!Number.isFinite(timeoutMin) || timeoutMin < 0 || !Number.isFinite(intervalSec) || intervalSec < 0 || !Number.isFinite(absentGraceMin) || absentGraceMin < 0) {
     throw new ProvenanceError('option_invalid', { timeoutMin, intervalSec, absentGraceMin });
   }
+  if (allowInProgress && !artifactName) {
+    throw new ProvenanceError('option_missing', { option: 'artifact' });
+  }
+
   const deadline = Date.now() + timeoutMin * 60000;
   const intervalMs = intervalSec * 1000;
   let absentSince = null;
@@ -185,17 +203,17 @@ async function resolveRun(options) {
       );
       newest = pickNewestRun(payload.workflow_runs, head);
       consecutiveApiErrors = 0;
-    } catch (error) {
-      consecutiveApiErrors += 1;
-      if (consecutiveApiErrors > 10) {
-        throw error;
-      }
-      newest = undefined;
-    }
 
-    if (newest !== null && newest !== undefined) {
-      if (newest.status === 'completed') {
-        if (newest.conclusion === 'success') {
+      if (newest) {
+        if (newest.status === 'completed') {
+          if (newest.conclusion !== 'success') {
+            throw new ProvenanceError('installer_provenance_producer_failed', {
+              run_id: String(newest.id),
+              run_number: Number(newest.run_number),
+              run_attempt: Number(newest.run_attempt || 1),
+              conclusion: newest.conclusion,
+            });
+          }
           return {
             schema: RESOLVED_SCHEMA,
             repository,
@@ -203,27 +221,137 @@ async function resolveRun(options) {
             head_sha: head,
             run_id: String(newest.id),
             run_number: Number(newest.run_number),
+            run_attempt: Number(newest.run_attempt || 1),
+            producer_completed: true,
+            producer_conclusion: 'success',
             resolved_at: new Date().toISOString(),
           };
         }
-        throw new ProvenanceError('installer_provenance_producer_failed', {
-          run_id: String(newest.id),
-          run_number: Number(newest.run_number),
-          conclusion: newest.conclusion,
-        });
+
+        absentSince = null;
+        if (allowInProgress) {
+          const listed = await githubJson(
+            `/repos/${repository}/actions/runs/${newest.id}/artifacts?per_page=100`,
+            token,
+            apiBase,
+          );
+          const artifacts = Array.isArray(listed.artifacts) ? listed.artifacts : [];
+          const artifact = artifacts.find((row) => row.name === artifactName && row.expired !== true);
+          if (artifact) {
+            return {
+              schema: RESOLVED_SCHEMA,
+              repository,
+              workflow,
+              head_sha: head,
+              run_id: String(newest.id),
+              run_number: Number(newest.run_number),
+              run_attempt: Number(newest.run_attempt || 1),
+              producer_completed: false,
+              producer_conclusion: null,
+              artifact_id: String(artifact.id),
+              artifact_name: artifactName,
+              resolved_at: new Date().toISOString(),
+            };
+          }
+        }
+      } else {
+        if (absentSince === null) absentSince = Date.now();
+        if (Date.now() - absentSince > absentGraceMin * 60000) {
+          throw new ProvenanceError('installer_provenance_run_absent', { head, workflow });
+        }
       }
-      absentSince = null;
-    } else if (newest === null) {
-      if (absentSince === null) {
-        absentSince = Date.now();
+    } catch (error) {
+      if (error instanceof ProvenanceError && (
+        error.code === 'installer_provenance_producer_failed'
+        || error.code === 'installer_provenance_run_absent'
+        || permanentApiError(error)
+      )) {
+        throw error;
       }
-      if (Date.now() - absentSince > absentGraceMin * 60000) {
-        throw new ProvenanceError('installer_provenance_run_absent', { head, workflow });
-      }
+      consecutiveApiErrors += 1;
+      if (consecutiveApiErrors > 10) throw error;
     }
 
     if (Date.now() >= deadline) {
       throw new ProvenanceError('installer_provenance_timeout', { head, workflow, timeout_min: timeoutMin });
+    }
+    await sleep(intervalMs);
+  }
+}
+
+async function waitRun(options) {
+  const head = requireHeadShape(requireOption(options, 'head'));
+  const workflow = requireOption(options, 'workflow');
+  const runId = requireOption(options, 'run-id');
+  const expectedRunNumber = options['run-number'] !== undefined && options['run-number'] !== true
+    ? Number(options['run-number'])
+    : null;
+  const expectedRunAttempt = options['run-attempt'] !== undefined && options['run-attempt'] !== true
+    ? Number(options['run-attempt'])
+    : null;
+  const token = tokenFrom(options);
+  const repository = repositoryFrom(options);
+  const apiBase = apiBaseFrom(options);
+  const timeoutMin = Number(options['timeout-min'] === undefined ? 45 : options['timeout-min']);
+  const intervalSec = Number(options['interval-sec'] === undefined ? 30 : options['interval-sec']);
+  if (!Number.isFinite(timeoutMin) || timeoutMin < 0 || !Number.isFinite(intervalSec) || intervalSec < 0) {
+    throw new ProvenanceError('option_invalid', { timeoutMin, intervalSec });
+  }
+  const deadline = Date.now() + timeoutMin * 60000;
+  const intervalMs = intervalSec * 1000;
+  let consecutiveApiErrors = 0;
+
+  for (;;) {
+    try {
+      const run = await githubJson(`/repos/${repository}/actions/runs/${runId}`, token, apiBase);
+      consecutiveApiErrors = 0;
+      if (String(run.head_sha || '').toLowerCase() !== head) {
+        throw new ProvenanceError('producer_head_mismatch', { expected_head: head, actual_head: run.head_sha || null });
+      }
+      if (String(run.path || '').split('/').pop() !== workflow && String(run.name || '') !== 'Browser Windows Package Smoke') {
+        throw new ProvenanceError('producer_workflow_mismatch', { workflow, actual_path: run.path || null, actual_name: run.name || null });
+      }
+      if (expectedRunNumber !== null && Number(run.run_number) !== expectedRunNumber) {
+        throw new ProvenanceError('producer_run_number_mismatch', { expected: expectedRunNumber, actual: Number(run.run_number) });
+      }
+      if (expectedRunAttempt !== null && Number(run.run_attempt || 1) !== expectedRunAttempt) {
+        throw new ProvenanceError('producer_run_attempt_mismatch', { expected: expectedRunAttempt, actual: Number(run.run_attempt || 1) });
+      }
+      if (run.status === 'completed') {
+        if (run.conclusion !== 'success') {
+          throw new ProvenanceError('installer_provenance_producer_failed', {
+            run_id: String(run.id),
+            run_number: Number(run.run_number),
+            run_attempt: Number(run.run_attempt || 1),
+            conclusion: run.conclusion,
+          });
+        }
+        return {
+          schema: 'metaengine.browser.installer-producer-qualified.v1',
+          repository,
+          workflow,
+          head_sha: head,
+          run_id: String(run.id),
+          run_number: Number(run.run_number),
+          run_attempt: Number(run.run_attempt || 1),
+          conclusion: 'success',
+          qualified_at: new Date().toISOString(),
+        };
+      }
+    } catch (error) {
+      if (error instanceof ProvenanceError && (
+        error.code.startsWith('producer_')
+        || error.code === 'installer_provenance_producer_failed'
+        || permanentApiError(error)
+      )) {
+        throw error;
+      }
+      consecutiveApiErrors += 1;
+      if (consecutiveApiErrors > 10) throw error;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new ProvenanceError('installer_provenance_timeout', { head, workflow, run_id: runId, timeout_min: timeoutMin });
     }
     await sleep(intervalMs);
   }
@@ -316,6 +444,7 @@ async function writeProvenance(options) {
     workflow: options.workflow || null,
     run_id: options['run-id'] || null,
     run_number: options['run-number'] !== undefined && options['run-number'] !== true ? Number(options['run-number']) : null,
+    run_attempt: options['run-attempt'] !== undefined && options['run-attempt'] !== true ? Number(options['run-attempt']) : null,
     package_version: options['package-version'] || null,
     installer_name: basename(installerPath),
     installer_sha256: installerSha256,
@@ -387,6 +516,20 @@ async function verifyInstaller(options) {
   if (provenance.source_head && String(provenance.source_head).toLowerCase() !== expectHead) {
     throw new ProvenanceError('head_mismatch', { provenance_head: provenance.source_head, expected_head: expectHead });
   }
+  if (options['expect-run-id'] && String(provenance.run_id || '') !== String(options['expect-run-id'])) {
+    throw new ProvenanceError('producer_run_mismatch', { provenance_run_id: provenance.run_id || null, expected_run_id: String(options['expect-run-id']) });
+  }
+  if (options['expect-run-number'] !== undefined && options['expect-run-number'] !== true
+      && Number(provenance.run_number) !== Number(options['expect-run-number'])) {
+    throw new ProvenanceError('producer_run_number_mismatch', { provenance_run_number: provenance.run_number, expected_run_number: Number(options['expect-run-number']) });
+  }
+  if (options['expect-run-attempt'] !== undefined && options['expect-run-attempt'] !== true
+      && Number(provenance.run_attempt || 1) !== Number(options['expect-run-attempt'])) {
+    throw new ProvenanceError('producer_run_attempt_mismatch', { provenance_run_attempt: provenance.run_attempt || 1, expected_run_attempt: Number(options['expect-run-attempt']) });
+  }
+  if (options['expect-workflow'] && String(provenance.workflow || '') !== String(options['expect-workflow'])) {
+    throw new ProvenanceError('producer_workflow_mismatch', { provenance_workflow: provenance.workflow || null, expected_workflow: String(options['expect-workflow']) });
+  }
   const stats = statSync(installerPath);
   if (Number(provenance.installer_bytes) !== stats.size) {
     throw new ProvenanceError('size_mismatch', { provenance_bytes: Number(provenance.installer_bytes), actual_bytes: stats.size });
@@ -394,6 +537,39 @@ async function verifyInstaller(options) {
   const actualSha256 = await sha256File(installerPath);
   if (String(provenance.installer_sha256) !== actualSha256) {
     throw new ProvenanceError('sha_mismatch', { provenance_sha256: provenance.installer_sha256, actual_sha256: actualSha256 });
+  }
+
+  let blockmapVerified = false;
+  if (provenance.blockmap_name || provenance.blockmap_sha256) {
+    const blockmapPath = options.blockmap
+      ? resolve(options.blockmap)
+      : payloadDir
+        ? join(payloadDir, String(provenance.blockmap_name || ''))
+        : null;
+    if (!blockmapPath || !existsSync(blockmapPath) || !statSync(blockmapPath).isFile()) {
+      throw new ProvenanceError('blockmap_missing', { blockmap: blockmapPath });
+    }
+    if (basename(blockmapPath) !== String(provenance.blockmap_name)) {
+      throw new ProvenanceError('blockmap_name_mismatch', { provenance_name: provenance.blockmap_name, actual_name: basename(blockmapPath) });
+    }
+    const blockmapSha256 = await sha256File(blockmapPath);
+    if (blockmapSha256 !== String(provenance.blockmap_sha256)) {
+      throw new ProvenanceError('blockmap_sha_mismatch', { provenance_sha256: provenance.blockmap_sha256, actual_sha256: blockmapSha256 });
+    }
+    blockmapVerified = true;
+  }
+
+  let configVerified = false;
+  if (provenance.config_sha256) {
+    const configPath = options.config ? resolve(options.config) : null;
+    if (!configPath || !existsSync(configPath) || !statSync(configPath).isFile()) {
+      throw new ProvenanceError('config_missing', { config: configPath });
+    }
+    const configSha256 = await sha256File(configPath);
+    if (configSha256 !== String(provenance.config_sha256)) {
+      throw new ProvenanceError('config_sha_mismatch', { provenance_sha256: provenance.config_sha256, actual_sha256: configSha256 });
+    }
+    configVerified = true;
   }
 
   const acquired = {
@@ -404,6 +580,11 @@ async function verifyInstaller(options) {
     installer_bytes: stats.size,
     source_head: provenance.source_head || null,
     provenance_run_id: provenance.run_id || null,
+    provenance_run_number: provenance.run_number || null,
+    provenance_run_attempt: provenance.run_attempt || 1,
+    provenance_workflow: provenance.workflow || null,
+    blockmap_verified: blockmapVerified,
+    config_verified: configVerified,
     provenance_path: resolve(provenancePath),
     verified_at: new Date().toISOString(),
   };
@@ -455,6 +636,16 @@ async function main() {
     process.stdout.write(`${JSON.stringify(downloaded)}\n`);
     return;
   }
+  if (mode === 'wait') {
+    const qualified = await waitRun(options);
+    if (options.state) {
+      const statePath = resolve(options.state);
+      mkdirSync(resolve(statePath, '..'), { recursive: true });
+      writeFileSync(statePath, `${JSON.stringify(qualified, null, 2)}\n`, 'utf8');
+    }
+    process.stdout.write(`${JSON.stringify(qualified)}\n`);
+    return;
+  }
   if (mode === 'acquire') {
     const acquired = await acquireInstaller(options);
     process.stdout.write(`${JSON.stringify(acquired)}\n`);
@@ -476,6 +667,7 @@ export {
   writeProvenance,
   verifyInstaller,
   resolveRun,
+  waitRun,
   downloadArtifact,
   acquireInstaller,
 };
