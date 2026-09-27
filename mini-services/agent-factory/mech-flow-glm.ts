@@ -49,7 +49,7 @@ const step = process.argv[3] || "full";
 let tabId = process.argv[4] || "";
 let frameId = process.argv[5] || "";
 let targetId = process.argv[6] || "";
-let backendNodeId: number | null = null;
+let backendNodeId: number | null = process.argv[7] ? parseInt(process.argv[7]) : null;
 
 if (step === "full" || step === "newtab") {
   const r = await issue("NEW_TAB", { url: "https://chat.z.ai/", select: true });
