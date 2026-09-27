@@ -48,9 +48,7 @@ function clamp(value, min, max, fallback) {
 
 export function normalizeShellLayoutState(input = null) {
   if (input == null) {
-    const isMe2DrawerSurface = surfaceProfile === 'ME2_R75_COMMAND' || surfaceProfile === 'ME2_R95_RUN';
-
-  return Object.freeze({
+    return Object.freeze({
       schema: 'metaengine.browser-shell.layout-state.v1',
       sidebar: 'EXPANDED',
       operations: 'CLOSED',
@@ -336,6 +334,7 @@ export function planShellLayout({
   }
 
   const activeSurfaceWidthTarget = Math.min(SHELL_MIN_REMOTE_WIDTH, windowWidth);
+  const isMe2DrawerSurface = surfaceProfile === 'ME2_R75_COMMAND' || surfaceProfile === 'ME2_R95_RUN';
 
   return Object.freeze({
     schema: 'metaengine.browser-shell.layout-plan.v1',
