@@ -279,8 +279,8 @@ test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy
   assert.equal(r85VisualHarness.includes('\\`'), false);
   assert.equal(r85VisualHarness.includes('\\${'), false);
   assert.match(r85VisualHarness, /withTimeout\(view\.webContents\.capturePage/);
-  assert.match(r85VisualHarness, /r85-command-1440x960/);
-  assert.match(r85VisualHarness, /r85-command-drawer-1440x960/);
+  assert.match(r85VisualHarness, /r95c-command-mission-1440x960/);
+  assert.match(r85VisualHarness, /r95c-run-utility-bottom-1440x960/);
 });
 
 test('R85 control-room chrome keeps closed overlays out of the semantic tree', () => {
@@ -640,7 +640,7 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
 
   assert.match(main, /let primaryShellOverlayActive = false/);
-  assert.match(main, /primaryShellPage === 'command'\s*&& primaryShellOverlayActive !== true/);
+  assert.match(main, /primaryShellPage === 'browser'\s*&& primaryShellOverlayActive !== true/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-overlay'/);
   assert.match(main, /typeof rawActive !== 'boolean'/);
 
