@@ -10756,3 +10756,19 @@ Stage Summary:
 - ПРОТОКОЛ УТОЧНЁН для будущих тиков: (1) статус драфта определять ТОЛЬКО по READ_TRANSCRIPT (ищи "FLEET BOOTSTRAP FLUSH" в хвосте-конкатенации), CAPTURE-вердикт CLEAN недостоверен; (2) typing-пробы вновь заморожены до реальной очистки; (3) критерий очистки: транскрипт-хвост НЕ содержит FLUSH-сид И накопленных текстов прошлых проб.
 - Ремеди оператору прежнее + уточнение верификации: очистить composer + localStorage["chat-input-"] chat.z.ai, затем проверить READ_TRANSCRIPT (не CAPTURE). Дополнительно: при очистке учесть, что оверлей супервизора показывает conversation=unbound — после очистки ожидать transition в bound + появление /c/ в url после сабмита.
 - Позитив тика: census/перепись, бесплатная супервизор-телеметрия через оверлей, подтверждение ретаргет-безопасности READ_TRANSCRIPT (receipt tab_id совпадает).
+
+---
+Task ID: BROWSER-TEST-20260928-0430
+Agent: GLM (Super Z, session web-0e323763, Job 419203 tick 04:30+08)
+Task: Четвёртый тик BROWSER-TEST: read-only мониторинг по протоколу v2 (draft-детектор = READ_TRANSCRIPT, CAPTURE признан слепым; typing заморожены до реальной очистки драфта).
+
+Work Log:
+- Живость: state last_seen 20:30:54Z (=1с от now), CONTROL/CONTROL armed=true, last_command_status=COMPLETED.
+- FLEET_STATUS: 4/4 FLEET_OWNED ACTIVE (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC). TAB_CENSUS: total=19 (GLM_CHAT=18 — +2 с прошлого тика: активность оператора/супервизора), LOCAL_DEV=1.
+- Draft-статус (protocol v2): READ_TRANSCRIPT таба tab_a66fab40 → DIRTY_DRAFT — все 5 маркеров присутствуют (FLUSH-сид + mechanic-test ×2 + пробы 0330/0400), len=6128 БЕЗ роста → нулевое загрязнение за тик; операторская очистка так и не выполнена.
+- Unlock-цепь НЕ запускалась (условие CLEAN не выполнено). Команды тика: T01-T02b read-only, issued_by=zai-live-test-419203, все COMPLETED. Артефакт: scripts/phoenix/tick-probe-0430.py + browser-test-results-t0430.json.
+
+Stage Summary:
+- Статус механик неизменен: 16 работает / 6 не работает (корневой блокер submit→conversation жив, 5-е подтверждение косвенное — draft по-прежнему аккумулятивен и невидим для CAPTURE) / прочее не проверено.
+- Protocol v2 отработал как задуман: детектор READ_TRANSCRIPT корректно вернул DIRTY_DRAFT и предотвратил лишнюю typing-пробу (в отличие от CAPTURE-детектора тика 0400, давшего ложный CLEAN).
+- Ожидание: operator cleanup composer + localStorage["chat-input-"] chat.z.ai → следующие тики при CLEAN автоматически исполняют unlock-цепь (NEW_TAB→SEMANTIC_TYPE+submit→проверка /c/).
