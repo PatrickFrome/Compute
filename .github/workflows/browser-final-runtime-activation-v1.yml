@@ -11,6 +11,7 @@ on:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
       - 'apps/me2-ui/**'
       - 'apps/me2-daemon/**'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'
