@@ -16,7 +16,7 @@ test('R95E Command Palette never treats Agent.id as AgentChat session identity',
 });
 
 test('R95E agent drill binds only one exact ACTIVE chat and fails closed on ambiguity', () => {
-  assert.match(palette, /const exactChatId = chatIds\.length === 1 \? chatIds\[0\] : null/);
+  assert.match(palette, /const exactChatId = chatSnapshotTrusted && chatIds\.length === 1 \? chatIds\[0\] : null/);
   assert.match(palette, /setChatId\(exactChatId\)/);
   assert.match(palette, /setPage\("agents"\)/);
   assert.match(palette, /chatIds\.length > 1/);
