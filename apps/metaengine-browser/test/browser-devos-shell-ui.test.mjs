@@ -10,8 +10,8 @@ test('DevOS migration never renames interactive controls through CSS generated c
   const source = `${css}\n${html}`;
   assert.doesNotMatch(source, /\.operationsToggle[^}]*font-size\s*:\s*0[\s\S]{0,240}::after\s*\{[^}]*content\s*:\s*["']Inspector["']/i);
   assert.doesNotMatch(source, /\.primaryLabel[^}]*font-size\s*:\s*0[\s\S]{0,240}::after\s*\{[^}]*content\s*:\s*["']New Session["']/i);
-  assert.match(html, /id="operationsToggle"[^>]+aria-label="Open Brain"[^>]*>[\s\S]*?<span>Brain<\/span>/);
-  assert.match(html, /id="newChat"[^>]+aria-label="New ChatGPT tab"[^>]*>[\s\S]*?<span class="primaryLabel">New Chat<\/span>/);
+  assert.match(html, /id="operationsToggle"[^>]+aria-label="Open settings and tools"[^>]*>[\s\S]*?<span>Settings<\/span>/);
+  assert.match(html, /id="newChat"[^>]+aria-label="Agent creation is managed by the fleet"[^>]*>[\s\S]*?<span class="primaryLabel">New Agent<\/span>/);
 });
 
 test('DevOS read model is promoted as session-first data without changing the command bridge', () => {
