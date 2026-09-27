@@ -590,54 +590,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
       window.dispatchEvent(new CustomEvent("me2:chat-selected", { detail: id }));
     }) as EventListener);
 
-    // hotkeys: ⌘K палитра · N новая задача · Alt+1..7 workflow stages · Alt+←/→ недавние
+    // R97 single-main-workspace: the only global UI shortcut is Ctrl/Cmd+K.
+    // Advanced pages/drawers are intentionally NOT reachable through legacy
+    // Alt+stage, history, Ctrl+J, or bare-N shortcuts; use Settings or search.
     document.addEventListener("keydown", (e) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable;
       if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault(); set({ paletteOpen: !get().paletteOpen });
-      } else if ((e.key === "j" || e.key === "J") && (e.metaKey || e.ctrlKey) && !e.altKey && !typing) {
-        e.preventDefault(); get().setContextDrawer(!get().contextDrawerPreferredOpen);
-      } else if ((e.key === "n" || e.key === "n") && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
-        e.preventDefault(); set({ dialog: "newTask" });
-      } else if (e.altKey && !e.metaKey && !e.ctrlKey) {
-        if (e.key >= "1" && e.key <= "7") {
-          const stage = WORKFLOW_STAGES[Number(e.key) - 1];
-          if (stage) { e.preventDefault(); get().setPage(stage.primaryPage); }
-        } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          const st = get();
-          const delta = e.key === "ArrowLeft" ? -1 : 1;
-          const nextIndex = st.pageHistoryIndex + delta;
-          if (nextIndex >= 0 && nextIndex < st.recentPages.length) {
-            e.preventDefault();
-            const target = st.recentPages[nextIndex];
-            // History navigation is a new presentation generation too. Without
-            // advancing the sequence, browser→other→browser could let an old
-            // RUN geometry reply pass the page/workspace ABA fence.
-            contextDrawerSyncSeq += 1;
-            set({ page: target, pageHistoryIndex: nextIndex });
-            const primaryPageAck = syncPagePresentation(target);
-            if (target === "browser") {
-              const reconcileRunGeometry = () => {
-                if (get().page === "browser") get().syncContextDrawer();
-              };
-              if (primaryPageAck) {
-                void primaryPageAck.then(reconcileRunGeometry).catch(() => {
-                  if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
-                });
-              } else {
-                reconcileRunGeometry();
-              }
-            } else {
-              set({
-                contextDrawerOpen: get().contextDrawerPreferredOpen,
-                contextDrawerHeight: get().contextDrawerPreferredHeight,
-                contextDrawerWidth: get().contextDrawerPreferredWidth,
-                runTelemetryInspectorVisible: false,
-              });
-            }
-          }
-        }
+        e.preventDefault();
+        set({ paletteOpen: !get().paletteOpen });
       }
     });
 
@@ -647,7 +606,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const { me2Desktop } = await import("@/lib/me2-desktop");
         const d = me2Desktop();
         if (!d) return;
-        d.onTabActivated((p) => { if (p?.kind === "page" && p.key) get().setPage(p.key as PageKey); });
+        d.onTabActivated((p) => {
+          // R97: native/legacy page-tab activation may only return to the
+          // primary Chat Fleet workspace. Hidden advanced pages open through
+          // Settings or the command palette, never through a third nav rail.
+          if (p?.kind === "page" && p.key === "browser") get().setPage("browser");
+        });
         d.onNativeEvent((p) => {
           const type = String(p?.type ?? "");
           if (type === "open-site-prompt") {
