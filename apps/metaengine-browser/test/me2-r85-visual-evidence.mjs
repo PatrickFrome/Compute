@@ -285,11 +285,16 @@ async function main() {
 
   const evidence = {
     schema: 'metaengine.browser.r97-visual-evidence.v1',
+    source_head: String(process.env.ME2_BUILD_SHA || ''),
     ok: false,
     captures: [],
     exact_main_workspace: false,
     advanced_surfaces_settings_only: false,
     command_search_available: false,
+    primary_me2_ui_captured: true,
+    legacy_shell_captured: false,
+    remote_browser_content_captured: false,
+    presentation_only: true,
     authority_effect: false,
   };
 
