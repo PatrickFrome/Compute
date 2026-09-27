@@ -93,7 +93,8 @@ jobs:
           if ($evidence.route_reset.command_mode -ne 'CMD' -or $evidence.route_reset.restored_mode -ne 'CHAT' -or $evidence.route_reset.restored_chat_class -ne $true) { throw 'visual_evidence_route_reset_invalid' }
           if (@($evidence.captures).Count -ne 2) { throw 'visual_evidence_capture_count_invalid' }
           foreach ($capture in @($evidence.captures)) {
-            if ($capture.metrics.systems_visible -ne $true) { throw "visual_evidence_health_hidden:$($capture.name)" }
+            if ($capture.metrics.systems_visible -ne $false) { throw "visual_evidence_legacy_health_strip_visible:$($capture.name)" }
+            if ([string]$capture.metrics.body_operations -ne 'CLOSED') { throw "visual_evidence_advanced_panel_not_closed:$($capture.name)" }
             if ([int64]$capture.bytes -lt 4096 -or -not [string]$capture.sha256) { throw "visual_evidence_png_invalid:$($capture.name)" }
             $pngPath = Join-Path $env:METAENGINE_VISUAL_EVIDENCE_DIR ([string]$capture.file)
             if (-not (Test-Path $pngPath -PathType Leaf)) { throw "visual_evidence_png_missing:$($capture.name)" }
@@ -118,7 +119,7 @@ jobs:
           node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
           if ($LASTEXITCODE -ne 0) { throw 'package_smoke_staged_me2_ui_invalid' }
 
-      - name: Capture R85 primary ME2 visual evidence
+      - name: Capture R97 primary chat-fleet visual evidence
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
@@ -150,34 +151,23 @@ jobs:
           $evidencePath = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
           if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'r85_visual_evidence_json_missing' }
           $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
-          if ($evidence.schema -ne 'metaengine.browser.r85-visual-evidence.v1') { throw 'r85_visual_evidence_schema_invalid' }
+          if ($evidence.schema -ne 'metaengine.browser.r97-visual-evidence.v1') { throw 'r97_visual_evidence_schema_invalid' }
           if ([string]$evidence.source_head -ne [string]$env:ME2_BUILD_SHA) { throw 'r85_visual_evidence_source_head_drift' }
           if ($evidence.primary_me2_ui_captured -ne $true `
               -or $evidence.legacy_shell_captured -ne $false `
               -or $evidence.remote_browser_content_captured -ne $false `
-              -or $evidence.remote_browser_transport_blocked -ne $true `
-              -or @($evidence.blocked_remote_browser_ports).Count -ne 2 `
-              -or -not (@($evidence.blocked_remote_browser_ports) -contains '3042') `
-              -or -not (@($evidence.blocked_remote_browser_ports) -contains '3043') `
-              -or $evidence.closed_overlays_absent_from_dom -ne $true `
-              -or $evidence.r85_geometry_verified -ne $true `
-              -or $evidence.drawer_interaction_verified -ne $true `
-              -or $evidence.mission_control_verified -ne $true `
-              -or $evidence.run_surface_verified -ne $true `
-              -or $evidence.utility_panel_bottom_verified -ne $true `
-              -or $evidence.utility_panel_right_verified -ne $true `
-              -or $evidence.evidence_timeline_verified -ne $true `
-              -or $evidence.evidence_binding_fail_closed -ne $true `
-              -or $evidence.broken_image_fallback_hidden -ne $true `
+              -or $evidence.exact_main_workspace -ne $true `
+              -or $evidence.advanced_surfaces_settings_only -ne $true `
+              -or $evidence.command_search_available -ne $true `
               -or $evidence.presentation_only -ne $true `
               -or $evidence.authority_effect -ne $false) {
-            throw 'r85_visual_evidence_contract_invalid'
+            throw 'r97_visual_evidence_contract_invalid'
           }
-          if (@($evidence.captures).Count -ne 4) { throw 'r95e_visual_evidence_capture_count_invalid' }
-          if (-not (@($evidence.captures).name -contains 'r95c-command-mission-1440x960')) { throw 'r95c_visual_evidence_command_capture_missing' }
-          if (-not (@($evidence.captures).name -contains 'r95c-run-utility-bottom-1440x960')) { throw 'r95c_visual_evidence_run_bottom_capture_missing' }
-          if (-not (@($evidence.captures).name -contains 'r95c-run-utility-right-1440x960')) { throw 'r95c_visual_evidence_run_right_capture_missing' }
-          if (-not (@($evidence.captures).name -contains 'r95e-observe-evidence-1440x960')) { throw 'r95e_visual_evidence_observe_capture_missing' }
+          if (@($evidence.captures).Count -ne 4) { throw 'r97_visual_evidence_capture_count_invalid' }
+          if (-not (@($evidence.captures).name -contains 'r97-chat-fleet-main-1440x960')) { throw 'r97_visual_evidence_main_capture_missing' }
+          if (-not (@($evidence.captures).name -contains 'r97-chat-fleet-agent-selected-1440x960')) { throw 'r97_visual_evidence_agent_selection_capture_missing' }
+          if (-not (@($evidence.captures).name -contains 'r97-settings-advanced-surface-1440x960')) { throw 'r97_visual_evidence_settings_capture_missing' }
+          if (-not (@($evidence.captures).name -contains 'r97-command-search-1440x960')) { throw 'r97_visual_evidence_search_capture_missing' }
           foreach ($capture in @($evidence.captures)) {
             $digest = [string]$capture.sha256
             if ([int64]$capture.bytes -lt 4096 -or $digest.Length -ne 64 -or $digest -notmatch '^[a-f0-9]+') {
@@ -579,13 +569,13 @@ jobs:
             if ($me2Output -notmatch '"legacy_shell_is_normal_path":false') {
               throw 'normal_ui_primary_shell_contract_missing'
             }
-            if ($me2Output -notmatch '"state":"ME2_R75_UI_CONTRACT_CONFIRMED"') {
+            if ($me2Output -notmatch '"state":"ME2_R97_UI_CONTRACT_CONFIRMED"') {
               Get-Content $normalOut -ErrorAction SilentlyContinue
               Get-Content $normalErr -ErrorAction SilentlyContinue
-              throw 'normal_ui_r75_dom_contract_not_confirmed'
+              throw 'normal_ui_r97_dom_contract_not_confirmed'
             }
-            if ($me2Output -match '"state":"ME2_R75_UI_CONTRACT_INCOMPLETE"') {
-              throw 'normal_ui_r75_dom_contract_incomplete'
+            if ($me2Output -match '"state":"ME2_R97_UI_CONTRACT_INCOMPLETE"') {
+              throw 'normal_ui_r97_dom_contract_incomplete'
             }
             if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
               throw 'normal_ui_me2_integration_degraded'
@@ -602,7 +592,7 @@ jobs:
             $proof | Add-Member -NotePropertyName me2_browser_integration_verified -NotePropertyValue $true -Force
             $proof | Add-Member -NotePropertyName me2_browser_integration_boot_mode -NotePropertyValue 'primary_me2_shell' -Force
             $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
-            $proof | Add-Member -NotePropertyName me2_r75_dom_contract_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_r97_dom_contract_verified -NotePropertyValue $true -Force
             $proof | Add-Member -NotePropertyName legacy_shell_used_on_normal_startup -NotePropertyValue $false -Force
             $proof.normal_ui_boot_verified = $true
             $proof.runtime_import_observability_verified = $true
