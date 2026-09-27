@@ -39,6 +39,14 @@ test('packaged browser enters through the final runtime activation hook', () => 
   assert.match(supervisor, /final_runtime_activation_required/);
 });
 
+test('final runtime workflow binds staged ME2 UI to the exact candidate head', () => {
+  const workflow = source('../../.github/workflows/browser-final-runtime-activation-v1.yml');
+  assert.match(workflow, /ME2_BUILD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.doesNotMatch(workflow, /ME2_BUILD_SHA:\s*\$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /verify-me2-ui-bundle\.mjs --root "\$STUB" --expected-sha "\$ME2_BUILD_SHA"/);
+  assert.match(workflow, /exact-head provenance verification failed/);
+});
+
 test('Host activation is primary before enrollment while remote signing remains fail-closed', () => {
   const hostIdentity = source('src/host-agent-supervisor-identity.mjs');
   const connectBody = hostIdentity.match(/async connect\(\) \{([\s\S]*?)\n    \},/)?.[1] || '';
