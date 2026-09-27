@@ -23,28 +23,24 @@ const run=(p,extra={})=>reconcileContinuousMetaOrchestrator({
   ...extra,
 });
 
-test('critical point is never split when only one scheduler slot is available',()=>{
+test('critical point starts with primary only even when one scheduler slot is available',()=>{
   const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:1}});
-  assert.equal(r.state,'CAPACITY_WAIT');
-  assert.equal(r.actions[0].type,'REQUEST_CAPACITY');
-  assert.equal(r.actions[0].required_slots,3);
-  assert.equal(r.actions.some((row)=>row.type==='PROPOSE_TASK'),false);
+  assert.equal(r.state,'PROPOSING');
+  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.core']);
 });
 
-test('critical point is emitted as one complete three-point atomic frontier',()=>{
+test('critical point never races critic or falsifier in the initial frontier',()=>{
   const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:3}});
   assert.equal(r.state,'PROPOSING');
-  assert.equal(r.atomic_frontier_required,true);
-  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.core','meta.core.critic','meta.core.falsifier']);
+  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.core']);
   assert.equal(r.frontier_group_count,1);
-  assert.equal(r.frontier_point_count,3);
+  assert.equal(r.frontier_point_count,1);
 });
 
-test('proposal policy cannot truncate a critical safety group',()=>{
-  const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:3},policy:{max_parallel_proposals:2}});
-  assert.equal(r.state,'CAPACITY_WAIT');
-  assert.equal(r.reason,'SAFETY_GROUP_EXCEEDS_PROPOSAL_BUDGET');
-  assert.equal(r.actions[0].required_parallel_proposals,3);
+test('proposal policy no longer reserves verifier slots before a result exists',()=>{
+  const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:1},policy:{max_parallel_proposals:1}});
+  assert.equal(r.state,'PROPOSING');
+  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.core']);
 });
 
 test('normal independent nodes still fill available frontier slots',()=>{
@@ -71,37 +67,36 @@ test('recovery debt can restrict growth to one normal point',()=>{
   assert.equal(r.scheduler_pressure.new_frontier_slots,1);
 });
 
-test('new critical group waits when soft pressure budget cannot fit the full safety group',()=>{
+test('critical primary may use one soft-pressure frontier slot without preallocating verifiers',()=>{
   const r=run(plan([node('meta.core',{risk:'CRITICAL'})]),{capacity:{available_slots:4,new_frontier_slots:1,pressure_state:'RECOVERY_DEBT_HIGH'}});
-  assert.equal(r.state,'CAPACITY_WAIT');
-  assert.equal(r.reason,'NEW_FRONTIER_PRESSURE_BUDGET_REQUIRED');
-  assert.equal(r.actions[0].required_slots,3);
+  assert.equal(r.state,'PROPOSING');
+  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.core']);
 });
 
-test('legacy partial high-risk admission is repaired before new work',()=>{
+test('running primary does not admit verifier before RESULT_READY',()=>{
   const p=plan([node('meta.risky',{risk:'HIGH',priority:50}),node('meta.new',{priority:100})]);
   const r=run(p,{tasks:[{point_id:'meta.risky',state:'RUNNING',lease_generation:1}],capacity:{available_slots:1}});
-  assert.equal(r.state,'PROPOSING');
-  assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.risky.critic']);
+  assert.equal(r.actions.some((row)=>row.point_id==='meta.risky.critic'),false);
 });
 
-test('ready saturation does not block mandatory safety repair',()=>{
+test('ready saturation does not block mandatory post-result verification',()=>{
   const p=plan([node('meta.risky',{risk:'HIGH',priority:50}),node('meta.new',{priority:100})]);
   const r=run(p,{
-    tasks:[{point_id:'meta.risky',state:'RUNNING',lease_generation:1}],
+    tasks:[{point_id:'meta.risky',state:'RESULT_READY',lease_generation:1}],
     capacity:{available_slots:1,new_frontier_slots:0,pressure_state:'READY_SATURATED'},
   });
-  assert.equal(r.state,'PROPOSING');
+  assert.equal(r.state,'VERIFYING');
   assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.risky.critic']);
 });
 
-test('critical partial group repairs only the missing companion',()=>{
+test('critical RESULT_READY repairs only the missing verifier companion',()=>{
   const p=plan([node('meta.core',{risk:'CRITICAL'})]);
   const tasks=[
-    {point_id:'meta.core',state:'RUNNING',lease_generation:2},
-    {point_id:'meta.core.critic',state:'READY',lease_generation:0},
+    {point_id:'meta.core',state:'RESULT_READY',lease_generation:2},
+    {point_id:'meta.core.critic',state:'READY',lease_generation:1},
   ];
   const r=run(p,{tasks,capacity:{available_slots:1}});
+  assert.equal(r.state,'VERIFYING');
   assert.deepEqual(r.actions.map((row)=>row.point_id),['meta.core.falsifier']);
 });
 
@@ -129,7 +124,7 @@ test('completed parent converges only after required critic completes',()=>{
 test('ambiguous safety companion requests readback and never retry',()=>{
   const p=plan([node('meta.core',{risk:'HIGH'})]);
   const tasks=[
-    {point_id:'meta.core',state:'RUNNING',lease_generation:2},
+    {point_id:'meta.core',state:'RESULT_READY',lease_generation:2},
     {point_id:'meta.core.critic',state:'AMBIGUOUS',lease_generation:1},
   ];
   const r=run(p,{tasks});
