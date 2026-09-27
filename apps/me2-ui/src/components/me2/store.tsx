@@ -11,6 +11,7 @@ import {
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
+import { taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -89,6 +90,7 @@ interface Me2State {
   detail: Task | null;
   inspectedTaskId: string | null;
   stream: Event[];
+  streamTaskId: string | null;
   // contextual drawer (read-only presentation plane)
   contextDrawerPreferredOpen: boolean;
   contextDrawerOpen: boolean;
@@ -130,6 +132,7 @@ interface Me2State {
 
 let initGuard = false;
 let contextDrawerSyncSeq = 0;
+let taskStreamRequestSeq = 0;
 const PAGE_LS = "me2.page.v1";
 const WS_LS = "me2.workspace.v1";
 const CONTEXT_DRAWER_LS = "me2.context-drawer.open.v1"; // legacy migration
@@ -250,6 +253,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   detail: null,
   inspectedTaskId: null,
   stream: [],
+  streamTaskId: null,
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
   contextDrawerTab: "events",
@@ -514,8 +518,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
       onEvent: (e) => {
         set((st) => {
           const events = st.events.some((x) => x.seq === e.seq) ? st.events : [e, ...st.events].slice(0, 300);
-          const stream = st.detail && e.task_id === st.detail.id && !st.stream.some((x) => x.seq === e.seq)
-            ? [...st.stream, e] : st.stream;
+          const stream = st.inspectedTaskId
+            && st.streamTaskId === st.inspectedTaskId
+            && e.task_id === st.inspectedTaskId
+            && !st.stream.some((x) => x.seq === e.seq)
+            ? [...st.stream, e].slice(-200)
+            : st.stream;
           return { events, stream };
         });
       },
@@ -663,23 +671,43 @@ export const useMe2 = create<Me2State>((set, get) => ({
   setDialog: (d) => set({ dialog: d }),
 
   openTask: (id) => {
+    const requestSeq = ++taskStreamRequestSeq;
     const st = get();
     const task = st.snap?.tasks.find((t) => t.id === id) ?? (st.snap?.archived ?? []).find((t) => t.id === id) ?? null;
     set((state) => ({
       detail: task,
       inspectedTaskId: task?.id ?? id,
       stream: [],
+      streamTaskId: id,
       contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
     }));
     if (get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
       writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
     }
     void me2Fetch<{ events: Event[] }>(`/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`).then((d) => {
-      if (d?.events) set({ stream: d.events });
+      if (!d?.events) return;
+      const exactFetched = d.events.filter((event) => event.task_id === id);
+      set((state) => {
+        if (!taskStreamResponseStillCurrent(
+          { seq: requestSeq, taskId: id },
+          { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
+        )) return {};
+        const bySeq = new Map<number, Event>();
+        for (const event of exactFetched) bySeq.set(event.seq, event);
+        for (const event of state.stream) bySeq.set(event.seq, event);
+        return {
+          stream: [...bySeq.values()]
+            .sort((a, b) => a.seq - b.seq)
+            .slice(-200),
+        };
+      });
     });
   },
 
-  closeTask: () => set({ detail: null, stream: [] }),
+  closeTask: () => {
+    taskStreamRequestSeq += 1;
+    set({ detail: null, stream: [], streamTaskId: null });
+  },
 
   setChatId: (id) => {
     // единая точка выбора агента: store + window-события (совместимость компонентов)

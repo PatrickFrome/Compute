@@ -6,6 +6,10 @@ const observe = await readFile(
   new URL('../../me2-ui/src/components/me2/pages/observability.tsx', import.meta.url),
   'utf8',
 );
+const evidenceContracts = await readFile(
+  new URL('../../me2-ui/src/lib/r95e-evidence-contracts.mjs', import.meta.url),
+  'utf8',
+);
 
 const visualHarness = await readFile(
   new URL('./me2-r85-visual-evidence.mjs', import.meta.url),
@@ -19,7 +23,9 @@ const packageSmoke = await readFile(
 test('R95E evidence timeline binds causal rows only by exact task identity', () => {
   assert.match(observe, /data-testid="evidence-timeline"/);
   assert.match(observe, /data-binding-mode=\{inspectedTaskId \? "EXACT_TASK_ID" : "UNBOUND"\}/);
-  assert.match(observe, /events\.filter\(\(row\) => row\.task_id === inspectedTaskId\)/);
+  assert.match(observe, /mergeExactTaskEvidenceEvents\(\{/);
+  assert.match(observe, /taskId: inspectedTaskId/);
+  assert.match(evidenceContracts, /String\(event\?\.task_id \?\? ""\) !== id/);
   assert.match(observe, /verdicts\?\.verdicts \?\? \[\]\)\.filter\(\(row\) => row\.task_id === inspectedTaskId\)/);
   assert.match(observe, /causal rows require exact task_id equality/);
 });
@@ -49,7 +55,8 @@ test('R95E timeline is bounded and merges task snapshot, exact events and exact 
   assert.match(observe, /kind: "TASK"/);
   assert.match(observe, /kind: "EVENT"/);
   assert.match(observe, /kind: "VERDICT"/);
-  assert.match(observe, /\.slice\(0, 40\)/);
+  assert.match(observe, /limit: 40/);
+  assert.match(evidenceContracts, /\.slice\(0, boundedLimit\)/);
   assert.match(observe, /\.slice\(0, 24\)/);
   assert.match(observe, /\.slice\(0, 48\)/);
 });

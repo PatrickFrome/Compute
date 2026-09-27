@@ -20,6 +20,7 @@ import MirrorPanel from "@/components/me2/mirror-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { mergeExactTaskEvidenceEvents } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type Probe = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
@@ -318,6 +319,8 @@ function EvidenceTimelinePanel({
 }) {
   const snap = useMe2((s) => s.snap);
   const events = useMe2((s) => s.events);
+  const stream = useMe2((s) => s.stream);
+  const streamTaskId = useMe2((s) => s.streamTaskId);
   const inspectedTaskId = useMe2((s) => s.inspectedTaskId);
   const openTask = useMe2((s) => s.openTask);
   const setPage = useMe2((s) => s.setPage);
@@ -342,7 +345,14 @@ function EvidenceTimelinePanel({
         bad: task.status === "FAILED" || task.status === "CANCELLED",
       });
     }
-    for (const event of events.filter((row) => row.task_id === inspectedTaskId).slice(0, 40)) {
+    const exactEvents = mergeExactTaskEvidenceEvents({
+      taskId: inspectedTaskId,
+      events,
+      streamTaskId,
+      stream,
+      limit: 40,
+    }) as Event[];
+    for (const event of exactEvents) {
       out.push({
         key: `event:${event.seq}`,
         at: event.ts,
@@ -372,7 +382,7 @@ function EvidenceTimelinePanel({
         return (b.seq ?? 0) - (a.seq ?? 0);
       })
       .slice(0, 48);
-  }, [events, inspectedTaskId, task, verdicts]);
+  }, [events, inspectedTaskId, stream, streamTaskId, task, verdicts]);
 
   const openExactTask = useCallback(() => {
     if (!inspectedTaskId) return;
@@ -468,7 +478,7 @@ function EvidenceTimelinePanel({
         )}
 
         <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
-          causal rows require exact task_id equality; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
+          causal rows require exact task_id equality; fetched task history is admitted only when streamTaskId matches the selected task; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
         </div>
       </div>
     </Sec>
