@@ -2,7 +2,7 @@
 // ── COMMAND PALETTE (⌘K): универсальный переход к любому объекту системы ───────
 // Режимы: Pages / Agents / Tasks / Commands+Реестр-47 (keyboard-first, §8 дизайн-дока).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command";
@@ -43,8 +43,21 @@ function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
   const setOpen = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const setChatId = useMe2((s) => s.setChatId);
-  const { sessions, loading: chatsLoading, error: chatsError } = useAgentChatSessions();
-  const chatSnapshotTrusted = !chatsLoading && !chatsError;
+  const nowMs = useMe2((s) => s.nowMs);
+  const {
+    sessions,
+    loading: chatsLoading,
+    refreshing: chatsRefreshing,
+    error: chatsError,
+    updatedAt: chatsUpdatedAt,
+    refresh: refreshChats,
+  } = useAgentChatSessions();
+  const chatSnapshotFresh = chatsUpdatedAt > 0 && Math.max(0, nowMs - chatsUpdatedAt) <= 7_000;
+  const chatSnapshotTrusted = !chatsLoading && !chatsRefreshing && !chatsError && chatSnapshotFresh;
+
+  useEffect(() => {
+    void refreshChats();
+  }, [refreshChats]);
 
   const activeChatIdsByAgent = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -75,7 +88,7 @@ function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
             <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
             <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
             {!chatSnapshotTrusted ? (
-              <span className="ml-2 rounded border border-zinc-800 bg-zinc-900 px-1 font-mono text-[8px] text-zinc-500">chat unavailable</span>
+              <span className="ml-2 rounded border border-zinc-800 bg-zinc-900 px-1 font-mono text-[8px] text-zinc-500">{chatsRefreshing ? "chat revalidating" : "chat unavailable"}</span>
             ) : chatIds.length === 1 ? (
               <span className="ml-2 rounded border border-violet-900/60 bg-violet-950/30 px-1 font-mono text-[8px] text-violet-300">chat</span>
             ) : chatIds.length > 1 ? (

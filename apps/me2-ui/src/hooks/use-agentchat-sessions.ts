@@ -41,6 +41,7 @@ type AgentChatSnapshot = {
   sessions: AgentChatSession[];
   status: AgentChatStatus | null;
   loading: boolean;
+  refreshing: boolean;
   error: string | null;
   updatedAt: number;
 };
@@ -49,6 +50,7 @@ let snapshot: AgentChatSnapshot = {
   sessions: [],
   status: null,
   loading: false,
+  refreshing: false,
   error: null,
   updatedAt: 0,
 };
@@ -64,7 +66,7 @@ function emit() {
 async function loadAgentChat() {
   if (inFlight) return;
   inFlight = true;
-  snapshot = { ...snapshot, loading: snapshot.updatedAt === 0, error: null };
+  snapshot = { ...snapshot, loading: snapshot.updatedAt === 0, refreshing: true, error: null };
   emit();
   try {
     const data = await me2Fetch<{ sessions?: AgentChatSession[]; status?: AgentChatStatus }>(
@@ -72,18 +74,19 @@ async function loadAgentChat() {
       { signal: AbortSignal.timeout(AGENTCHAT_FETCH_TIMEOUT_MS) },
     );
     if (!data) {
-      snapshot = { ...snapshot, loading: false, error: "daemon unavailable", updatedAt: Date.now() };
+      snapshot = { ...snapshot, loading: false, refreshing: false, error: "daemon unavailable" };
     } else {
       snapshot = {
         sessions: data.sessions ?? [],
         status: data.status ?? null,
         loading: false,
+        refreshing: false,
         error: null,
         updatedAt: Date.now(),
       };
     }
   } catch {
-    snapshot = { ...snapshot, loading: false, error: "daemon unavailable", updatedAt: Date.now() };
+    snapshot = { ...snapshot, loading: false, refreshing: false, error: "daemon unavailable" };
   } finally {
     inFlight = false;
     emit();
@@ -121,6 +124,7 @@ const serverSnapshot: AgentChatSnapshot = {
   sessions: [],
   status: null,
   loading: false,
+  refreshing: false,
   error: null,
   updatedAt: 0,
 };
