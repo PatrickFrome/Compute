@@ -35,7 +35,7 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
   let selected = 'tab_supervisor';
   let captureCount = 0;
   let markRunningObservedCanonicalProof = false;
-  let clickCount = 0;
+  let submitCount = 0;
   const state = {
     tabs: [
       { tab_id: 'tab_supervisor', url: 'https://chat.z.ai/c/supervisor-1234', selected: true },
@@ -64,6 +64,16 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
 
   const fleetRuntime = {
     snapshot: () => structuredClone(state.fleet),
+    beginTransportBootstrapAttempt: async ({ agent_id, tab_id, target_id, generation_epoch }) => {
+      assert.deepEqual({ agent_id, tab_id, target_id, generation_epoch }, {
+        agent_id: AGENT_ID, tab_id: TAB_ID, target_id: TARGET_ID, generation_epoch: 7,
+      });
+      const agent = state.fleet.agents[0];
+      agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
+      agent.ambiguous_reason = 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
+      agent.transport_proof = null;
+      return structuredClone(state.fleet);
+    },
     markTransportPreconversationProven: async ({ agent_id, tab_id, target_id, generation_epoch, transport_url }) => {
       assert.deepEqual({ agent_id, tab_id, target_id, generation_epoch, transport_url }, {
         agent_id: AGENT_ID,
@@ -73,7 +83,7 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
         transport_url: ROOT,
       });
       const agent = state.fleet.agents[0];
-      agent.lifecycle_state = 'ACTIVE';
+      agent.lifecycle_state = 'BOUND_UNVERIFIED';
       agent.transport_proof = proof('PRECONVERSATION_ROOT', ROOT);
       return structuredClone(state.fleet);
     },
@@ -122,14 +132,20 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
     }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount === 1) return frame({ url: ROOT }); // promotion CAPTURE
-      if (captureCount === 2) return frame({ url: ROOT }); // pre-type readiness
-      return frame({ url: CONVERSATION, generating: true }); // post-submit and any revalidation
+      if (captureCount === 1) return frame({ url: ROOT }); // promotion CAPTURE before seed
+      return frame({ url: CONVERSATION, generating: captureCount >= 4 }); // post-seed and task readbacks
     }
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.payload.submit_after_type, true);
-      clickCount += 1;
-      return { effect_state: 'PROVEN_COMPOSER_CLEARED', composer_cleared: true, new_conversation_observed: true, stop_observed: false, automatic_retry_allowed: false, authority_effect: true };
+      submitCount += 1;
+      return {
+        effect_state: submitCount === 1 ? 'PROVEN_NEW_CONVERSATION' : 'PROVEN_COMPOSER_CLEARED',
+        composer_cleared: true,
+        new_conversation_observed: submitCount === 1,
+        stop_observed: false,
+        automatic_retry_allowed: false,
+        authority_effect: true,
+      };
     }
     if (command.action === 'TYPED_CLICK') {
       return { authority_effect: true };
@@ -183,8 +199,9 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
       authority_effect: false,
     });
     if (path === '/v1/devos/cycle') {
-      assert.equal(state.fleet.agents[0].lifecycle_state, 'ACTIVE', 'scheduler must see preconversation ACTIVE overlay');
-      assert.equal(state.fleet.agents[0].transport_proof.transport_stage, 'PRECONVERSATION_ROOT');
+      assert.equal(state.fleet.agents[0].lifecycle_state, 'ACTIVE', 'scheduler must see only canonical conversation ACTIVE');
+      assert.equal(state.fleet.agents[0].transport_proof.transport_stage, undefined);
+      assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
       return response(200, {
         schema: 'metaengine.devos.browser-cycle.v1',
         backlog: { ready: 1, running: 0, by_role: { IMPLEMENTER: 1 } },
@@ -214,17 +231,22 @@ test('root worker is promoted without effect, leased once, then upgraded to cano
   try {
     const snapshot = await cycle.cycle();
     assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE');
-    assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'PRECONVERSATION_ROOT');
+    assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'CONVERSATION');
+    assert.equal(snapshot.fleet_transport_promotion.write_ahead_barrier_persisted, true);
     assert.equal(snapshot.dispatch.state, 'RUNNING');
     assert.equal(snapshot.fleet_transport_proof.state, 'PRECONVERSATION_PROOF_UPGRADED');
     assert.equal(markRunningObservedCanonicalProof, true, 'canonical proof must exist before DB RUNNING receipt');
     assert.equal(state.fleet.agents[0].transport_proof.transport_stage, undefined);
     assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
-    assert.equal(clickCount, 1, 'only one Enter-submit effect is allowed');
-    assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
+    assert.equal(submitCount, 2, 'one bootstrap seed and one task submit are expected');
+    assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 2);
     assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 0);
-    assert.ok(calls.findIndex((row) => row[1] === '/v1/devos/promotion-release') < calls.findIndex((row) => row[1] === '/v1/devos/cycle'));
-    assert.ok(calls.findIndex((row) => row[1] === 'SEMANTIC_TYPE') < calls.findIndex((row) => row[1] === '/v1/devos/mark-running'));
+    const typeIndexes = calls.map((row, index) => row[1] === 'SEMANTIC_TYPE' ? index : -1).filter((index) => index >= 0);
+    const cycleIndex = calls.findIndex((row) => row[1] === '/v1/devos/cycle');
+    const markRunningIndex = calls.findIndex((row) => row[1] === '/v1/devos/mark-running');
+    assert.ok(calls.findIndex((row) => row[1] === '/v1/devos/promotion-release') < cycleIndex);
+    assert.ok(typeIndexes[0] < cycleIndex, 'bootstrap seed must precede scheduler lease');
+    assert.ok(typeIndexes[1] > cycleIndex && typeIndexes[1] < markRunningIndex, 'task submit must follow scheduler lease and precede mark-running');
   } finally {
     clearFleetRuntime(fleetRuntime);
   }
