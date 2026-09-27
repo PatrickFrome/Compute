@@ -80,6 +80,80 @@ function nativeIdentity(tabId) {
   return me2FleetTabsResolveIdentity(tabId);
 }
 
+/**
+ * Canonical read-only session -> native tab binding used by the Browser-owned
+ * ME2 presentation shell. The renderer never derives identity from its daemon
+ * session id, URL text or tab title: only the Mission Control map that created
+ * or adopted the native FLEET tab can resolve the binding.
+ */
+export function me2MissionSessionBinding(sessionId) {
+  const id = String(sessionId || '').trim();
+  const base = {
+    schema: 'metaengine.browser.me2.session-tab-binding.v1',
+    session_id: id || null,
+    renderer_routing_authority: false,
+    browser_command_authority: false,
+    scheduler_authority: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  };
+  if (!id) return Object.freeze({ ...base, state: 'INVALID', tab_id: null, conversation_url: null });
+  const host = me2FleetTabsGetHost();
+  const known = agentTabs.get(id);
+  if (!host || !known) {
+    return Object.freeze({ ...base, state: 'UNBOUND', tab_id: null, conversation_url: null });
+  }
+  let live = null;
+  try { live = host.registry.get(known.tab_id); } catch { live = null; }
+  if (!live || String(live.url || '') !== String(known.conversation_url || '')) {
+    return Object.freeze({
+      ...base,
+      state: 'STALE',
+      tab_id: String(known.tab_id || '') || null,
+      conversation_url: String(known.conversation_url || '') || null,
+    });
+  }
+  return Object.freeze({
+    ...base,
+    state: 'BOUND',
+    tab_id: String(known.tab_id),
+    conversation_url: String(known.conversation_url),
+    runtime_identity: nativeIdentity(known.tab_id),
+    exact_session_binding: true,
+  });
+}
+
+/**
+ * Narrow presentation intent: select only the exact native tab already bound
+ * to this ME2 session. It is intentionally not a generic Browser command and
+ * has no URL/title/session-id fallback.
+ */
+export async function me2MissionSelectSession(sessionId) {
+  const binding = me2MissionSessionBinding(sessionId);
+  if (binding.state !== 'BOUND') {
+    return Object.freeze({ ...binding, selection_applied: false });
+  }
+  const host = me2FleetTabsGetHost();
+  if (!host || typeof host.selectTab !== 'function') {
+    return Object.freeze({ ...binding, state: 'UNAVAILABLE', selection_applied: false });
+  }
+  try {
+    await host.selectTab(binding.tab_id);
+  } catch (error) {
+    return Object.freeze({
+      ...binding,
+      state: 'FAILED',
+      selection_applied: false,
+      error: String(error?.message || error).slice(0, 160),
+    });
+  }
+  const after = me2MissionSessionBinding(sessionId);
+  if (after.state !== 'BOUND' || after.tab_id !== binding.tab_id) {
+    return Object.freeze({ ...after, selection_applied: false });
+  }
+  return Object.freeze({ ...after, selection_applied: true });
+}
+
 export function me2NativeConversationUrl(session) {
   try { return normalizeAgentPlatformConversationUrl(session?.conversation_url); }
   catch { return null; }
