@@ -10834,3 +10834,22 @@ Work Log:
 Stage Summary:
 - Механики: FLEET_STATUS/TAB_CENSUS/READ_TRANSCRIPT + REST-чтение = работают; submit→conversation — корневой блокер (без изменений); unlock-цепочка отложена до очистки draft оператором; pollution=0 (len 6128 стабилен)
 - Следующий tick: probe 0530-шаблон (read-only) → при len<6128 или чистом хвосте немедленно unlock-цепочка (NEW_TAB→CAPTURE→SEMANTIC_TYPE submit_after_type→PRESS_KEY Enter→CAPTURE /c/)
+
+---
+Task ID: UNLOCK-20260928-0536
+Agent: Super Z (cron loop)
+Task: Job 419203 — оператор сообщил «Очистил»; проверка draft + попытка unlock-цепочки (первые ~10 часов кампании)
+
+Work Log:
+- Probe 0535: probe-таб tab_a66fab40 всё ещё DIRTY (len=6128) → вывод: draft per-tab, оператор очистил ДРУГОЙ таб
+- unlock-0536.py: список 11 new-chat табов (no /c/, no /error) из state-blob → скан READ_TRANSCRIPT → tab_bc085d57 CLEAN (len=281, ноль маркеров — это таб, который чистил оператор)
+- Unlock-цепочка на нём: CAPTURE ✓ → SEMANTIC_TYPE (submit_after_type=True, text="METAENGINE unlock probe (GLM diag 0536)") ✓ 24s → PRESS_KEY Enter ✓ → CAPTURE: url=https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f → conversation_created=True
+- Верификация доставки: READ_TRANSCRIPT нового /c/ таба → "METAENGINE unlock probe (GLM diag 0536)" присутствует (delivered=True), модель GLM-5.3-Flash
+- NEW_TAB-тест: tab_22d8857c создан → READ_TRANSCRIPT len=1113 dirty=false → новые табы БОЛЬШЕ НЕ наследуют грязный draft (общий источник localStorage["chat-input-"] очищен оператором)
+
+Stage Summary:
+- КОРНЕВОЙ БЛОКЕР submit→conversation СНЯТ: механика работает на чистом табе. Переклассификация: NEW_TAB ✓ (чистое наследование), SEMANTIC_TYPE+submit_after_type ✓, PRESS_KEY ✓, submit→/c/ ✓, доставка сообщения ✓
+- Причина прежних фейлов: per-tab composer state (11 new-chat табов держали накопленные briefs len≈6128 и глотали submit) — не баг механики
+- Мины: ~10 старых new-chat табов всё ещё несут грязный draft (кандидаты на закрытие/NAVIGATE-reload позже)
+- Разблокированы цели 1–2: следующий tick может бутстрапить чат-агента (NEW_TAB → task-brief → submit) и проверять флот-конвейер end-to-end
+- Артефакты: browser-test-results-t0536.json (T01–T03, U-SCAN/U-TYPE/U-ENTER/U-CAP2/U-RESULT, V-RT, N-NEW/N-RT), скрипты tick-probe-0430.py + unlock-0536.py
