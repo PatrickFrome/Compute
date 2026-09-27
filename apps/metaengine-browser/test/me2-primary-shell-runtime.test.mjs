@@ -274,6 +274,8 @@ test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy
   assert.match(r85VisualHarness, /ME2_UI_HEALTH_URL/);
   assert.match(r85VisualHarness, /VISUAL_PHASE_TIMEOUT_MS = 120_000/);
   assert.match(r85VisualHarness, /r85_visual_phase_watchdog/);
+  assert.equal(r85VisualHarness.includes('\\`'), false);
+  assert.equal(r85VisualHarness.includes('\\${'), false);
   assert.match(r85VisualHarness, /withTimeout\(view\.webContents\.capturePage/);
   assert.match(r85VisualHarness, /r85-command-1440x960/);
   assert.match(r85VisualHarness, /r85-command-drawer-1440x960/);
