@@ -91,6 +91,7 @@ interface Me2State {
   inspectedTaskId: string | null;
   stream: Event[];
   streamTaskId: string | null;
+  streamState: "UNBOUND" | "LOADING" | "EXACT" | "DEGRADED";
   // contextual drawer (read-only presentation plane)
   contextDrawerPreferredOpen: boolean;
   contextDrawerOpen: boolean;
@@ -254,6 +255,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   inspectedTaskId: null,
   stream: [],
   streamTaskId: null,
+  streamState: "UNBOUND",
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
   contextDrawerTab: "events",
@@ -679,19 +681,23 @@ export const useMe2 = create<Me2State>((set, get) => ({
       inspectedTaskId: task?.id ?? id,
       stream: [],
       streamTaskId: id,
+      streamState: "LOADING",
       contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
     }));
     if (get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
       writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
     }
-    void me2Fetch<{ events: Event[] }>(`/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`).then((d) => {
-      if (!d?.events) return;
-      const exactFetched = d.events.filter((event) => event.task_id === id);
+    void me2Fetch<{ events: Event[] }>(
+      `/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`,
+      { signal: AbortSignal.timeout(8_000) },
+    ).then((d) => {
       set((state) => {
         if (!taskStreamResponseStillCurrent(
           { seq: requestSeq, taskId: id },
           { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
         )) return {};
+        if (!d?.events) return { streamState: "DEGRADED" as const };
+        const exactFetched = d.events.filter((event) => event.task_id === id);
         const bySeq = new Map<number, Event>();
         for (const event of exactFetched) bySeq.set(event.seq, event);
         for (const event of state.stream) bySeq.set(event.seq, event);
@@ -699,14 +705,16 @@ export const useMe2 = create<Me2State>((set, get) => ({
           stream: [...bySeq.values()]
             .sort((a, b) => a.seq - b.seq)
             .slice(-200),
+          streamState: "EXACT" as const,
         };
       });
     });
   },
 
   closeTask: () => {
-    taskStreamRequestSeq += 1;
-    set({ detail: null, stream: [], streamTaskId: null });
+    // Closing the Task Sheet is not deselection. Keep the bounded exact stream
+    // alive for OBSERVE; a later openTask() advances generation and replaces it.
+    set({ detail: null });
   },
 
   setChatId: (id) => {

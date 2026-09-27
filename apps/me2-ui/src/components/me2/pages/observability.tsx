@@ -321,6 +321,7 @@ function EvidenceTimelinePanel({
   const events = useMe2((s) => s.events);
   const stream = useMe2((s) => s.stream);
   const streamTaskId = useMe2((s) => s.streamTaskId);
+  const streamState = useMe2((s) => s.streamState);
   const inspectedTaskId = useMe2((s) => s.inspectedTaskId);
   const openTask = useMe2((s) => s.openTask);
   const setPage = useMe2((s) => s.setPage);
@@ -402,7 +403,7 @@ function EvidenceTimelinePanel({
       tone="cyan"
       right={(
         <span className="font-mono text-[9px] text-zinc-500">
-          {inspectedTaskId ? "exact task binding" : "no task selected"}
+          {inspectedTaskId ? `exact task binding · history ${streamState.toLowerCase()}` : "no task selected"}
         </span>
       )}
     >
@@ -410,6 +411,7 @@ function EvidenceTimelinePanel({
         data-testid="evidence-timeline"
         data-bound-task-id={inspectedTaskId ?? ""}
         data-binding-mode={inspectedTaskId ? "EXACT_TASK_ID" : "UNBOUND"}
+        data-history-state={streamState}
         className="space-y-2"
       >
         <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 font-mono text-[9px]">
@@ -478,7 +480,7 @@ function EvidenceTimelinePanel({
         )}
 
         <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
-          causal rows require exact task_id equality; fetched task history is admitted only when streamTaskId matches the selected task; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
+          causal rows require exact task_id equality; fetched task history is admitted only when streamTaskId matches the selected task and the bounded readback is generation-fenced; history state is explicit; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
         </div>
       </div>
     </Sec>

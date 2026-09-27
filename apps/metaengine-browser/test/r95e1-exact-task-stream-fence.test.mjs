@@ -87,7 +87,7 @@ test('R95E.1 event join stays bounded even when exact fetched history is larger 
   assert.equal(exact.at(-1).seq, 211);
 });
 
-test('R95E.1 store advances generation on every open/close and cannot overwrite a newer task stream', () => {
+test('R95E.2 store advances generation on every open and cannot overwrite a newer task stream', () => {
   assert.match(store, /let taskStreamRequestSeq = 0/);
   assert.match(store, /const requestSeq = \+\+taskStreamRequestSeq/);
   assert.match(store, /streamTaskId: id/);
@@ -95,8 +95,8 @@ test('R95E.1 store advances generation on every open/close and cannot overwrite 
   assert.match(store, /taskStreamResponseStillCurrent\(/);
   assert.match(store, /\{ seq: requestSeq, taskId: id \}/);
   assert.match(store, /\{ seq: taskStreamRequestSeq, taskId: state\.inspectedTaskId, streamTaskId: state\.streamTaskId \}/);
-  assert.match(store, /closeTask: \(\) => \{[\s\S]{0,120}taskStreamRequestSeq \+= 1/);
-  assert.match(store, /set\(\{ detail: null, stream: \[\], streamTaskId: null \}\)/);
+  assert.match(store, /closeTask: \(\) => \{[\s\S]{0,180}set\(\{ detail: null \}\)/);
+  assert.doesNotMatch(store, /closeTask: \(\) => \{[\s\S]{0,180}streamTaskId: null/);
 });
 
 test('R95E.1 live exact events survive the bounded fetch merge while wrong-task events fail closed', () => {
@@ -114,4 +114,25 @@ test('R95E.1 OBSERVE consumes only the shared exact-task join contract', () => {
   assert.match(observe, /streamTaskId/);
   assert.match(observe, /limit: 40/);
   assert.match(observe, /fetched task history is admitted only when streamTaskId matches the selected task/);
+});
+
+test('R95E.2 exact history fetch is bounded and surfaces degraded readback honestly', () => {
+  assert.match(store, /streamState: "UNBOUND" \\| "LOADING" \\| "EXACT" \\| "DEGRADED"/);
+  assert.match(store, /streamState: "LOADING"/);
+  assert.match(store, /AbortSignal\\.timeout\\(8_000\\)/);
+  assert.match(store, /if \\(!d\\?\\.events\\) return \\{ streamState: "DEGRADED" as const \\}/);
+  assert.match(store, /streamState: "EXACT" as const/);
+  assert.match(observe, /data-history-state=\\{streamState\\}/);
+  assert.match(observe, /history \\$\\{streamState\\.toLowerCase\\(\\)\\}/);
+});
+
+test('R95E.2 closing Task Sheet preserves exact inspected history for OBSERVE', () => {
+  const closeStart = store.indexOf('closeTask: () => {');
+  const closeEnd = store.indexOf('setChatId:', closeStart);
+  const block = store.slice(closeStart, closeEnd);
+  assert.match(block, /set\\(\\{ detail: null \\}\\)/);
+  assert.doesNotMatch(block, /taskStreamRequestSeq \\+= 1/);
+  assert.doesNotMatch(block, /stream:\\s*\\[\\]/);
+  assert.doesNotMatch(block, /streamTaskId:\\s*null/);
+  assert.doesNotMatch(block, /inspectedTaskId:\\s*null/);
 });
