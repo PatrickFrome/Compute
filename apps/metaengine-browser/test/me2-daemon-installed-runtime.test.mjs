@@ -157,6 +157,10 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(beforePack, /build-me2-daemon-staging\.ps1/);
   assert.match(beforePack, /me2_daemon_staging_build_failed/);
 
+  const daemonEntry = await fs.readFile(path.join(repoRoot, 'apps', 'me2-daemon', 'index.ts'), 'utf8');
+  assert.match(daemonEntry, /from \"node:os\"/);
+  assert.match(daemonEntry, /join\(tmpdir\(\), \"me2-daemon\.lock\"\)/);
+  assert.doesNotMatch(daemonEntry, /[\"']\/tmp\/me2-daemon\.lock[\"']/);
   const host = await fs.readFile(path.join(appRoot, 'src', 'me2', 'me2-daemon-host.mjs'), 'utf8');
   assert.match(host, /ME2_BOOT_MODE:\s*process\.env\.ME2_DAEMON_BOOT_MODE \|\| 'probe'/);
   assert.match(host, /mode:\s*'PACKAGED_STANDALONE'/);
