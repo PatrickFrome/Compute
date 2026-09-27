@@ -237,8 +237,8 @@ async function main() {
     windowRef.show();
 
     markPhase('WAIT_PRIMARY_COMMAND');
-    await waitFor(shellView.webContents, 'document.querySelector(\\'[data-testid="page-command"]\\')');
-    await waitFor(shellView.webContents, 'document.querySelector(\\'[data-testid="context-drawer-toggle"]\\')');
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-command]')");
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer-toggle]')");
     markPhase('CAPTURE_COMMAND_CLOSED');
     const closed = await capture(shellView, 'r85-command-1440x960');
     assertBaseMetrics(closed);
@@ -250,7 +250,7 @@ async function main() {
       5000,
       'open_context_drawer',
     );
-    await waitFor(shellView.webContents, 'document.querySelector(\\'[data-testid="context-drawer"]\\')');
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer]')");
     markPhase('CAPTURE_COMMAND_DRAWER');
     const drawer = await capture(shellView, 'r85-command-drawer-1440x960');
     assertBaseMetrics(drawer);
