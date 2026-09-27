@@ -371,11 +371,17 @@ async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}
   const node = nodes.find((row) => row?.ignored !== true && Number(row?.backendDOMNodeId || 0) === Number(backendNodeId));
   const value = node ? axRawValue(node, 'value') : null;
   const composerCleared = node != null && value === '';
-  const rootToConversation = !isAgentPlatformConversationUrl(preUrl) && isAgentPlatformConversationUrl(url);
-  if (composerCleared || rootToConversation) {
+  const startedAtRoot = !isAgentPlatformConversationUrl(preUrl);
+  const rootToConversation = startedAtRoot && isAgentPlatformConversationUrl(url);
+  // On an existing conversation, composer clear is enough to prove the site
+  // consumed the message. On PRECONVERSATION_ROOT it is only intermediate
+  // evidence: the fleet must not become runnable until a canonical /c/<id>
+  // transport exists.
+  const resolved = startedAtRoot ? rootToConversation : (composerCleared || rootToConversation);
+  if (resolved) {
     return {
       resolved: true,
-      effect_state: composerCleared ? 'PROVEN_COMPOSER_CLEARED' : 'PROVEN_NEW_CONVERSATION',
+      effect_state: rootToConversation ? 'PROVEN_NEW_CONVERSATION' : 'PROVEN_COMPOSER_CLEARED',
       stop_observed: false,
       composer_cleared: composerCleared,
       new_conversation_observed: rootToConversation,
@@ -397,7 +403,7 @@ async function inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId } = {}
   };
 }
 
-function openGlmSubmitOutcomeLatch(dbg, webContents, { preUrl, backendNodeId, timeoutMs = 2000 } = {}) {
+function openGlmSubmitOutcomeLatch(dbg, webContents, { preUrl, backendNodeId, timeoutMs = 8000 } = {}) {
   return openCdpOutcomeLatch({
     subscribe: (listener) => nativeBrowserCdpPool.subscribe(webContents, listener),
     inspect: () => inspectGlmSubmit(dbg, webContents, { preUrl, backendNodeId }),
