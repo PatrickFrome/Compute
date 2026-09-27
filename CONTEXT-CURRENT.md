@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T19:52:24Z | worklog: 1971568B / 10739L | sha12=e77e64e3284c
+gen: 2026-09-27T20:22:21Z | worklog: 1976331B / 10758L | sha12=fbd683c30268
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -9,7 +9,7 @@ gen: 2026-09-27T19:52:24Z | worklog: 1971568B / 10739L | sha12=e77e64e3284c
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1971568B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1976331B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -24,7 +24,6 @@ gen: 2026-09-27T19:52:24Z | worklog: 1971568B / 10739L | sha12=e77e64e3284c
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- EVOLVE-ROUND-15-IMPL-20260927 → Раунд 15 — [EV-KEYBOARD] клавиатурные шорткаты (R=refresh) + aria-labels всех кнопок: честная верификация через gateway :81 (page.tsx заморожена, 0 строк правок) => обнаружен и устранён второй класс ложных закрытий pick_task (движок v1.33 → v1.34)
 - R95-WORKFLOW-IA-20260927 → R95 Information Architecture prototype — 10 Pages → 7 workflow Pages (COMMAND/PLAN/BUILD/RUN/FLEET/OBSERVE/SYSTEM), COMMAND → mission control, native Browser surface → RUN; стековый PR #1002 поверх proven R94 (04ee7239)
 - EVOLVE-ROUND-16 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-EMPTYSTATES] skeleton/empty-state для REST-панелей демона (:3041) при загрузке/ошибке
 - EVOLVE-ROUND-16-IMPL-20260927 → Раунд 16 — [EV-EMPTYSTATES] skeleton/empty-state для REST-панелей демона (:3041) при загрузке/ошибке: честная верификация через gateway :81 (page.tsx заморожена, 0 строк правок) => задача верифицирована как УЖЕ РЕАЛИЗОВАННАЯ, закрыта честно; движок v1.35 → v1.36
@@ -39,28 +38,10 @@ gen: 2026-09-27T19:52:24Z | worklog: 1971568B / 10739L | sha12=e77e64e3284c
 - BROWSER-TEST-20260928-0243 → Повторный прогон всех механик live METAENGINE 0.7.0-dev.36336130139.1 (Supabase compute_fabric_a2_*), классификация работает/не работает/не проверено относительно целей: (1) создание GLM-чат-агентов, (2) автономный флот, (3) взаимная видимость/координация/самообучение, (4) вечный супервизор
 - BROWSER-TEST-20260928-0328 → Подключиться к live браузеру METAENGINE 0.7.0-dev.36336130139.1 (client 2a60d6a2, ws 2de9f84b) через Supabase и протестировать ВСЕ механики командной плоскости; классифицировать работает/не работает/не проверено относительно 5 целей (создание чат-агентов, автономная разработка, взаимная видимость/координация, вечный супервизор, вспомогательные механики).
 - BROWSER-TEST-20260928-0330 → Повторный прицельный тик теста механик (после полного прогона BROWSER-TEST-20260928-0328): проверка живости + re-probe корневого блокера (composer draft / submit→conversation).
+- BROWSER-TEST-20260928-0400 → Третий тик BROWSER-TEST: non-polluting мониторинг (fleet/census/draft-status) с unlock-цепью ТОЛЬКО при чистом драфте; сверка статуса корневого блокера после гипотетической очистки оператором.
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-- Позитив: mesh-инстанс снова ACTIVE; fleet transport_proof заполнен (PRECONVERSATION_ROOT, epoch 28) — флот готов к conversation-стадии, но ввод в composer заблокирован
-- Единственный корневой фикс для целей 1-4 прежний: резолвер exact-tab binding в native supervisor клиенте; после починки автопроверка: SELECT_TAB→CAPTURE-verify(tab_id совпадает)→SEMANTIC_TYPE(replace=False,submit=False)→capture-verify value→submit
-- Вторичные фиксы: fast-fail для SEMANTIC_TYPE без ref (сейчас висит до TTL), FLEET_STATUS хэндлер не отвечает, nav deadline >20s для chat.z.ai, retarget-guard на READ-команды (error при несовпадении tab_id), keepalive rollover ROOT_DRAFT_OVERSIZED, MIRROR_STATUS добавить в словарь
-
----
-Task ID: BROWSER-TEST-20260928-0328
-Agent: GLM (Super Z, session web-0e323763, Job 419203 tick 03:00+08)
-Task: Подключиться к live браузеру METAENGINE 0.7.0-dev.36336130139.1 (client 2a60d6a2, ws 2de9f84b) через Supabase и протестировать ВСЕ механики командной плоскости; классифицировать работает/не работает/не проверено относительно 5 целей (создание чат-агентов, автономная разработка, взаимная видимость/координация, вечный супервизор, вспомогательные механики).
-
-Work Log:
-- Канал: Supabase REST (service_role из /tmp/my-project/.a2-backup/me2.env.20260922, секреты не печатал). Инструменты: scripts/phoenix/sbq.sh, scripts/phoenix/browser-mechanics-test.py (двухканальный dispatch: RPC h205f22_a2_browser_supervisor_enqueue_v3 → при supervisor_action_invalid фолбэк прямой INSERT PENDING-строки; результаты: scripts/phoenix/browser-test-results.json, scripts/phoenix/my-commands-summary.json).
-- Живость браузера подтверждена: state last_seen свежий (19:01:48Z), supervisor_mode=CONTROL/CONTROL, armed=true, device HTTP-signature active, mesh 1 ACTIVE (sup_40a6119e) + sweep-cron 10s статус OK 0 errors.
-- Выполнено 34 команды от issued_by=zai-live-test-419203 (19:09:55–19:25:26Z), все достигли терминального статуса: 22 COMPLETED, 8 FAILED (осмысленные причины), 4 отклонены enqueue/insert-путём. Секреты не печатались, существующие флот-вкладки агентами не трогались (мутации — на собственной новой вкладке tab_c33af52f).
-- МЕТОД-НАХОДКА: (1) cloud-RPC allowlist устарел — часть действий проходит ТОЛЬКО через insert-путь (триггер таблицы шире RPC-функции); (2) для SEMANTIC_* нужен ВЕРБАТИМ inner semantic_ref из свежего CAPTURE.semantic_targets + p_platform=GLM_ZAI; ref живёт ~10–15с (иначе native_semantic_ref_stale); (3) мутации сериализуются, бюджет 24pt/60s (наблюдал supervisor_action_budget_exceeded), circuit по 5 failures/60s.
-- КЛЮЧЕВОЙ ЭКСПЕРИМЕНТ (создание разговора на чистой вкладке): NEW_TAB GLM_CHAT → COMPLETED, вкладка ЧИСТАЯ (старый 4К draft SEED+FLEET TASK больше не появляется — прогресс!) → CAPTURE → SELECT_TAB (COMPLETED — работает после свежего capture; старые FAILED были без capture-биндинга) → SEMANTIC_TYPE (COMPLETED: текст реально введён, подтверждён READ_TRANSCRIPT) → PRESS_KEY Enter COMPLETED → НО conversation НЕ создана (url остаётся chat.z.ai/, /c/ нет). В composer'е сидит КОРОТКИЙ draft "[METAENGINE FLEET BOOTSTRAP FLUSH v1 - prior accumulated briefs are historical; operate on the next verified task block]" (~110 символов) — эволюционировавшая форма старого блокера: typed-текст ДОБАВЛЯЕТСЯ к flush-строке, submit не срабатывает.
-- FLEET_RECONCILE(5): COMPLETED, но receipt содержит 4 агентов и флот остался 4/4 (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC, все FLEET_OWNED ACTIVE) — grow-путь молча не сработал (misleading receipt); при этом RECONCILE(4) при текущем 4 честно FAILED NO_EFFECT_PROVEN — асимметрия postcondition-проверок.
-- Повторные подтверждения деградаций: NAVIGATE → postcondition_not_confirmed:AMBIGUOUS (deadline на медленной hydration); SELF_UPDATE_CHECK → NO_EFFECT_PROVEN (state=CURRENT, stale hint 36315939303.1); SEMANTIC_TYPE replace_existing=true → native_semantic_type_replace_unverified.
-- DB-блок (constraint a2_browser_supervisor_command_action_ck) отклоняет при insert: SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST, FIND_IN_PAGE, SET_ZOOM — схема облака старее релиза 0.7.0-dev.36336130139.1 (нужна SQL-миграция оператора до 47-действий).
-
 Stage Summary:
 - РАБОТАЕТ (проверено): командная плоскость end-to-end (RPC+insert/lease/execute/receipt); heartbeat/state; sweep-cron 10s OK; mesh rollover жив (1 ACTIVE); device-идентичность; read-only перцепция POLL/CAPTURE(семантика+refs)/TAB_CENSUS/SYSTEM_TELEMETRY/PROCESS_CENSUS/READ_TRANSCRIPT/DOWNLOAD_STATUS/SELF_UPDATE_STATUS/DEV_PLANE_STATUS/GATE_STATUS/CONTROL_CAPABILITIES(insert); NEW_TAB (новая вкладка чистая!); SELECT_TAB (после свежего CAPTURE); SEMANTIC_TYPE ввод текста (fresh ref, replace_existing=false); PRESS_KEY; FLEET_STATUS/FLEET_SET_PROFILE; FLEET_RECONCILE no-op-путь (честный NO_EFFECT_PROVEN); бюджет-governor + circuit + сериализация мутаций; GATE все включены.
 - НЕ РАБОТАЕТ: (1) КОРНЕВОЙ БЛОКЕР в новой форме — composer draft "FLEET BOOTSTRAP FLUSH v1" в каждой новой GLM_CHAT-вкладке: Enter-сабмит не создаёт разговор → цепь целей 1–3 разомкнута на последнем шаге (ввод работает, разговор — нет); (2) FLEET_RECONCILE grow-путь (4→5) — COMPLETED без эффекта (5-й агент не провизионится; receipt вводит в заблуждение); (3) cloud-RPC/DB allowlist старее релиза: 10+ действий недоступны через RPC, 5 — даже через insert (нужна миграция оператора); (4) NAVIGATE AMBIGUOUS; (5) SELF_UPDATE_CHECK NO_EFFECT_PROVEN (stale hint); (6) peer-mesh взаимной видимости remote_peer=0 (по параллельному прогону; транспорт не активен).
@@ -82,4 +63,23 @@ Stage Summary:
 - Статус механик не изменился относительно BROWSER-TEST-20260928-0328 (16 работает / 6 не работает / остальное не проверено). Корневой блокер ПОДТВЕРЖДЁН воспроизводимо на двух тиках и УТОЧНЁН: блокирующий draft — аккаунт-скопированный, аккумулятивный, включает FLUSH-сид + все typing-артефакты; видимый композер чист, сабмит подавляется невидимым драфтом.
 - Ремеди для оператора остаётся тем же, но срочность выше: драфт РАСТЁТ с каждым тестовым вводом. Разовая очистка composer + localStorage["chat-input-"] chat.z.ai (Ctrl+A+Delete в чистом поле + DevTools clear) разблокирует цепь целей 1–3 (NEW_TAB/SELECT_TAB/SEMANTIC_TYPE/PRESS_KEY уже работают — не работает только финальный submit).
 - До очистки оператором: typing-пробы НЕ повторять (загрязнение драфта); дальше мониторить только heartbeat/fleet/признаки очистки драфта по CAPTURE.transcript (маркер "FLEET BOOTSTRAP FLUSH" + отсутствие накопленных текстов).
+
+---
+Task ID: BROWSER-TEST-20260928-0400
+Agent: GLM (Super Z, session web-0e323763, Job 419203 tick 04:00+08)
+Task: Третий тик BROWSER-TEST: non-polluting мониторинг (fleet/census/draft-status) с unlock-цепью ТОЛЬКО при чистом драфте; сверка статуса корневого блокера после гипотетической очистки оператором.
+
+Work Log:
+- Живость: state last_seen 20:02:03Z (=3с от now), CONTROL/CONTROL armed=true, last_command_status=COMPLETED. FLEET_STATUS COMPLETED: 4/4 FLEET_OWNED ACTIVE (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC), transport_proof PRECONVERSATION_ROOT.
+- TAB_CENSUS: total=17 (GLM_CHAT=16, LOCAL_DEV=1), роли USER=13/FLEET=4/SUPERVISOR=1 (первая перепись), release_signal=PHYSICAL_TAB_CLOSED (одна вкладка закрыта с прошлого тика), fleet_ceiling 28, headroom 30.
+- ОШИБКА ДЕТЕКТОРА (честно): T03 CAPTURE флот-вкладки показал textbox=placeholder (25 симв, "How can I help you today?") → вердикт CLEAN → запущена unlock-цепь (NEW_TAB tab_a66fab40 → CAPTURE → SEMANTIC_TYPE submit_after_type=True + PRESS_KEY Enter, всё COMPLETED). ПОСТ-ФАКТУМ: READ_TRANSCRIPT выявил, что драфт НЕ очищался оператором — хвост транскрипта содержит полную аккумуляцию (disclaimer + FLUSH-сид + mechanic-test ×2 + 0330-проба + НОВАЯ 0400-проба, len 6091→6128). CAPTURE слеп к невидимому аккаунт-драфту (показывает placeholder); единственный надёжный детектор — READ_TRANSCRIPT (хвост-конкатенация). Загрязнение: +38 симв (текст пробы 0400).
+- РЕЗУЛЬТАТ UNLOCK-ЦЕПИ: conversation НЕ создана (url остаётся https://chat.z.ai/, /c/ нет) при ЧИСТОМ видимом композере → корневой блокер подтверждён 4-й раз и УТОЧНЁН: submit глушится невидимым драфтом, Enter проглатывается, typed-текст уходит в аккумуляцию.
+- НОВАЯ НАХОДКА (диагностический оверлей супервизора в DOM страницы, читается READ_TRANSCRIPT бесплатно): realtime_plane=running seq=4433; fleet desired=4, BOUND_UNVERIFIED=3, ACTIVE=1 (расходится с receipt lifecycle=4×ACTIVE — оверлей показывает provisioning-состояния); admission=? conversation=unbound — супервизор САМ признаёт conversation-биндинг несостоявшимся; per_tab роль-карта: tab_cf8d03cf=RESEARCHER-FLEET и др. Это богатый бесплатный канал телеметрии для будущих тиков.
+- Артефакты: scripts/phoenix/tick-probe-0400.py, browser-test-results-t0400.json (T01-T09, канал insert, все терминальны, issued_by=zai-live-test-419203).
+
+Stage Summary:
+- Статус механик НЕ ИЗМЕНИЛСЯ: 16 работает / 6 не работает / прочее не проверено. Корневой блокер целей 1-3 (submit→conversation) жив: 4-е воспроизведение.
+- ПРОТОКОЛ УТОЧНЁН для будущих тиков: (1) статус драфта определять ТОЛЬКО по READ_TRANSCRIPT (ищи "FLEET BOOTSTRAP FLUSH" в хвосте-конкатенации), CAPTURE-вердикт CLEAN недостоверен; (2) typing-пробы вновь заморожены до реальной очистки; (3) критерий очистки: транскрипт-хвост НЕ содержит FLUSH-сид И накопленных текстов прошлых проб.
+- Ремеди оператору прежнее + уточнение верификации: очистить composer + localStorage["chat-input-"] chat.z.ai, затем проверить READ_TRANSCRIPT (не CAPTURE). Дополнительно: при очистке учесть, что оверлей супервизора показывает conversation=unbound — после очистки ожидать transition в bound + появление /c/ в url после сабмита.
+- Позитив тика: census/перепись, бесплатная супервизор-телеметрия через оверлей, подтверждение ретаргет-безопасности READ_TRANSCRIPT (receipt tab_id совпадает).
 ```
