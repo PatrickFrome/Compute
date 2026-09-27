@@ -10432,3 +10432,23 @@ Stage Summary:
 - R93 (PR #998) доведена до полной зелёной матрицы 11/11 на 5ecb3ed6 — новая доказанная точка; три in-flight фикса ChatGPT завершены и верифицированы (concurrence-инцидент разрешён без force-push и без дублей)
 - Свежий установщик для R93 будет из Package Smoke #2489 (0.7.0-dev.3.x) — при надобности оператору взять артефакт exact-SHA 5ecb3ed6, не пересборку
 - Оставшиеся разрывы: PR #997/#998 не смержены (решение оператора о merge-порядке: R92 → потом R93 поверх); R85-контракты в тестах теперь синхронизированы с R93-архитектурой; watcher параллельных воркеров: при concurrent-push на PR-ветку — fetch + verify, никогда force
+
+---
+Task ID: R94-ARIA-PANEL-MANAGEMENT-20260927
+Agent: Super Z (metaengine desktop development, R92 baseline continuation)
+Task: Смена фокуса подтверждена (R92 @ 060fa85c / PR #997 как база): восстановить окружение после env-reset, синхронизироваться с доказанной точкой R93 5ecb3ed6 и продолжить линию panel-management (VS Code/APG-паритет для единственного managed-сплиттера)
+
+Work Log:
+- env-reset отремонтирован: /home/z/.a2/ потерял supabase-cloud.env (dotfile-ложная тревога снята — .github.env был на месте, ls без -a скрывал); недостающий носитель восстановлен ДОСЛОВНО из запечатанного источника (phoenix-sealed secrets-bootstrap.sh) → SUPABASE REST=200; GitHub API=200; оба me2-носителя (.github.env / me2.env.20260922 @ /tmp/my-project/.a2-backup) живы; R2 S3 SIGv4 по-прежнему BLOCKED (ключ не передан оператором, не блокирует)
+- выверка remote: origin/work/r93-native-session-selection-ui-resilience-v1 стоит на 5ecb3ed6 (конкурсный воркер не двигал), PR #998 open/clean (base = work/r92-... @ 060fa85c); локальные verify-r93/r93-track синхронны
+- R93-триада закрыта конкурсным воркером и проверена ранее: canonical session↔tab binding, agents-list polling lifetime, drawer resize fencing — в раунде не дублировались
+- R94: изучение показало — единственный managed-сплиттер (Context Drawer) уже имеет ARIA separator + клавиатуру (↑/↓ 20px, Home/End); реальные разрывы = APG Escape-отмена, VS Code double-click reset, hit-target/фокус
+- реализация (context-drawer.tsx, commit 04ee7239): (1) общий restore-путь для pointercancel и Escape — частичная геометрия отбрасывается, никогда не персистится; keydown-слушатель живёт внутри drag-транзакции и снимается в cleanup; (2) double-click по разделителю → сброс к preferred height с workspace-фенсингом (useMe2.getState().workspace guard); (3) hit-зона ≥18px через невидимый before-слой (визуальный рельс 6px сохранён) + видимый фокус-кур на grip-линии (group-focus-visible:bg-cyan-500); tooltip документирует новые аффордансы
+- верификация: node --test r93+r94+me2-primary-shell-runtime = 55/55 (4 новых R94 контракта); eslint затронутого файла CLEAN (TSX-транспиляция OK); pre-existing на 5ecb3ed6: 3× react-hooks/set-state-in-effect в command.tsx/observability.tsx (проверено stash-прогоном — не мои) и me2-r85-visual-evidence.mjs electron CJS named-export (env/npm-layout) — ЧЕСТНО зафиксированы как backlog, чужая R93-линия не тронута
+- push work/r94-aria-panel-management-v1 (04ee7239) OK; открыт PR #999 (base = work/r93-... 5ecb3ed6, стек: R92 #997 → R93 #998 → R94 #999); CI-матрица запущена (Package Smoke/Final Runtime/Self Update E2E/Soak/Shell in_progress на момент записи)
+- нетронуто: me2-desktop remote main не упоминался (никогда), git pull не выполнялся (только fetch --prune), секреты в tree = 0, merge-решения не принимались (операторское)
+
+Stage Summary:
+- Окружение полностью восстановлено после env-reset (secrets/зависимости me2-ui+metaengine-browser); базовая точка R93 5ecb3ed6 подтверждена незатронутой на remote
+- R94 = PR #999: managed-сплиттер доведён до WAI-ARIA APG + VS Code паритета (Escape/double-click/hit-target/фокус) с сохранением всех R93 контрактов; 55/55 локальных контрактов
+- Backlog следующего раунда: (1) CI-вердикт PR #999 — при падении скачать job-лог и чинить в этом же цикле; (2) 3× react-hooks/set-state-in-effect (command.tsx:275, observability.tsx:121/129) — требует hydration-safe рефакторa, координировать с владельцем R93-линии; (3) merge-порядок #997 → #998 → #999 — решение оператора; (4) qualified installer SHA для R94 = артефакт Package Smoke с ветки R94 (не пересборка)
