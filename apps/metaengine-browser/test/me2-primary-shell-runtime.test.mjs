@@ -262,6 +262,9 @@ test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy
   assert.match(packageSmokeWorkflow, /test\/me2-r85-visual-evidence\.mjs/);
   assert.match(packageSmokeWorkflow, /r85-primary-visual\/r85-visual-evidence\.json/);
   assert.match(packageSmokeWorkflow, /r85-primary-visual\/\*\.png/);
+  assert.match(packageSmokeWorkflow, /WaitForExit\(135000\)/);
+  assert.match(packageSmokeWorkflow, /r85_visual_evidence_process_timeout/);
+  assert.match(packageSmokeWorkflow, /r85-primary-visual\.stderr\.log/);
   assert.match(r85VisualHarness, /metaengine\.browser\.r85-visual-evidence\.v1/);
   assert.match(r85VisualHarness, /primary_me2_ui_captured:\s*true/);
   assert.match(r85VisualHarness, /legacy_shell_captured:\s*false/);
