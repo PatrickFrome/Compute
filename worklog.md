@@ -10678,3 +10678,25 @@ Stage Summary:
 - ЦЕПЬ ЦЕЛЕЙ 1-3 держится на ОДНОМ корневом блокере: poisoned account-draft localStorage["chat-input-"] (растёт с 2026-09-19, синтетически неочищаем — подтверждено на НОВОМ билде) → разговоры не создаются → агентам некуда писать → provisioning не сходится → координация пуста. РАЗБЛОКИРОВКА: однократная ручная очистка поля чата chat.z.ai оператором (Ctrl+A+Delete), затем seed/provision/rollover оживут по R82-канари
 - Требуется SQL-миграция оператора (SUPABASE_DB_URL) для обновления cloud-RPC allowlist до 47-действий; auto-update цепочка (CHECK→APPLY) деградирована — NO_EFFECT_PROVEN, требуется рестарт или ручной reinstall
 - Следующий тик Job 419203 (каждые 30м): повторить CAPTURE+пробу typing; при признаках чистого draft'а (textboxes<1 child-statictext) — полный provizion-флоу NEW_TAB→TYPED_CLICK чип Agent→SEMANTIC_TYPE bootstrap→READ_TRANSCRIPT verify
+
+---
+Task ID: BROWSER-TEST-20260928-0243
+Agent: Super Z (cron browser-test tick, Job 419203) + scripts/browser-test/{battery3,blocker3,caps3,ttl3,last3,receipts3,tabs3,final3}.py
+Task: Повторный прогон всех механик live METAENGINE 0.7.0-dev.36336130139.1 (Supabase compute_fabric_a2_*), классификация работает/не работает/не проверено относительно целей: (1) создание GLM-чат-агентов, (2) автономный флот, (3) взаимная видимость/координация/самообучение, (4) вечный супервизор
+
+Work Log:
+- клиент живой: heartbeat 18s, CONTROL armed, operator_runtime native-electron-supervisor-v1; 13 вкладок (8 USER / 4 FLEET / 1 SUPERVISOR, 12 GLM_CHAT + 1 LOCAL_DEV); секреты не печатались
+- РАБОТАЕТ (командный канал): insert→lease→receipt воспроизводим; TAB_CENSUS, SYSTEM_TELEMETRY, GATE_STATUS (gates registered v1.1.0), CONTROL_CAPABILITIES (полный словарь: KEY_PRESS/POINTER_CLICK/DRAG/SET_ZOOM/DUPLICATE_TAB/MOVE_TAB...), SELF_UPDATE_STATUS (CURRENT, sentinel ARMED v1.6.1, hint 0.7.0-dev.36315939303.1), DOWNLOAD_STATUS
+- РАБОТАЕТ: NEW_TAB — вкладка создана tab_7dad96fc, role USER kind GLM_CHAT, post_url верный; FLEET_SET_PROFILE — 4 агента PLANNER/RESEARCHER/IMPLEMENTER/CRITIC ACTIVE FLEET_OWNED с transport_proof (stage PRECONVERSATION_ROOT, generation_epoch 28)
+- ИЗМЕНЕНИЕ К 02:15: supervisor_mesh_instance — был все LOST (09-21), теперь 1 ACTIVE sup_40a6119e72aa0723dcaf62fc, last_seen свежий, tab_id tab_e9559b29 (не из census — отдельный mesh-таб)
+- НЕ РАБОТАЕТ (корневой блокер, подтверждён 2/2): exact-tab binding — SELECT_TAB отклонён на SUPERVISOR-таб И на FLEET-таб: native_supervisor_exact_tab_required:SELECT_TAB, effect_key деградирует global:selected-tab / global:control-plane, execution_ms=0; SEMANTIC_TYPE без semantic_ref висит → EXPIRED lease_timeout_no_retry (fast-fail отсутствует); следствие: цели 1-3 недостижимы, composer-ввод недоступен
+- НЕ РАБОТАЕТ: FLEET_STATUS → EXPIRED lease_timeout_no_retry (leased, хэндлер не отвечает в TTL); keepalive супервизора: last_wake_at=2026-09-23T10:10Z (5 суток), rollover ROOT_DRAFT_OVERSIZED, rollover_release_at=2026-09-27T18:39Z, queued_wake_count=1 — цель 4 не работает; nav deadline 15s → AMBIGUOUS/DEADLINE_EXCEEDED хронически (NEW_TAB пост-URL верный, статус ambiguous)
+- НЕ РАБОТАЕТ (подтверждён вживую): silent retargeting READ — CAPTURE(tab_fe50ead8=PLANNER webcontents:4) вернул COMPLETED с перцепцией tab_7dad96fc (url chat.z.ai) без ошибки; MIRROR_STATUS отсутствует в словаре действий (INSERT 23514 check)
+- инфра-наблюдения: бюджет 24/60s реально работает (моя пачка выбила DEV_PLANE_STATUS supervisor_action_budget_exceeded; рабочий пейсинг ≤6 команд/мин с паузами 25-30s); аномалия INSERT-400 23514 на CONTROL_CAPABILITIES воспроизведения не получила (повторные вставки 201 при ttl 150 и 170); CAPTURE дольше 70s не укладывается в ожидание при загрузке канала
+- НЕ ПРОВЕРЕНО (каскад от корневого блокера): SEMANTIC_TYPE с semantic_ref + submit_after_type (end-to-end composer-ввод), создание GLM-агента (цель 1), dispatch/seed задач флотy (цель 2), межагентная видимость/самообучение (цель 3), STOP_GENERATION/SCROLL/KEY_PRESS/POINTER_CLICK/RELOAD/SET_ZOOM/DUPLICATE_TAB/MOVE_TAB, GATE_ENABLE/DISABLE, DOWNLOAD_FILE, WORKTREE_*, SELF_UPDATE_CHECK (в 02:15 FAILED postcondition_not_confirmed)
+
+Stage Summary:
+- Протокол канала стабилен и переиспользуем (8 скриптов в scripts/browser-test/); по сравнению с 02:15 изменений в корневом блокере НЕТ: exact-tab binding по-прежнему отклоняет все TAB_MUTATION до исполнения
+- Позитив: mesh-инстанс снова ACTIVE; fleet transport_proof заполнен (PRECONVERSATION_ROOT, epoch 28) — флот готов к conversation-стадии, но ввод в composer заблокирован
+- Единственный корневой фикс для целей 1-4 прежний: резолвер exact-tab binding в native supervisor клиенте; после починки автопроверка: SELECT_TAB→CAPTURE-verify(tab_id совпадает)→SEMANTIC_TYPE(replace=False,submit=False)→capture-verify value→submit
+- Вторичные фиксы: fast-fail для SEMANTIC_TYPE без ref (сейчас висит до TTL), FLEET_STATUS хэндлер не отвечает, nav deadline >20s для chat.z.ai, retarget-guard на READ-команды (error при несовпадении tab_id), keepalive rollover ROOT_DRAFT_OVERSIZED, MIRROR_STATUS добавить в словарь
