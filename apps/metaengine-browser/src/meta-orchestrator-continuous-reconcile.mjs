@@ -33,9 +33,11 @@ function zeroAction(type, payload = {}) {
 }
 
 function companionRoles(node) {
+  // R86: every RESULT_READY primary receives an independent critic; critical
+  // work additionally receives a falsifier. Companions are sequenced after
+  // the primary result and never race the implementation frontier.
   if (String(node?.risk || '').toUpperCase() === 'CRITICAL') return ['CRITIC', 'FALSIFIER'];
-  if (String(node?.risk || '').toUpperCase() === 'HIGH') return ['CRITIC'];
-  return [];
+  return ['CRITIC'];
 }
 
 function companionPoint(node, role) {
@@ -84,7 +86,7 @@ function proposalFor(node, plan, companionRole = null) {
     alignment_epoch: plan.alignment_epoch,
     plan_generation: plan.plan_generation,
     parent_plan_point: node.point_id,
-    atomic_frontier_required: companionRoles(node).length > 0,
+    atomic_frontier_required: companionRole != null && companionRoles(node).length > 1,
     automatic_retry_allowed: false,
   });
 }
@@ -108,7 +110,7 @@ function safetyState(plan, tasks) {
     if (!roles.length) continue;
     const parentPoint = String(node.point_id).toLowerCase();
     const parentState = taskState(tasks, parentPoint);
-    if (parentState === 'UNSCHEDULED') continue;
+    if (!['RESULT_READY', 'COMPLETED'].includes(parentState)) continue;
 
     const missing = [];
     for (const role of roles) {
@@ -132,10 +134,6 @@ function newFrontierGroups(plan, tasks, byPoint) {
     if (byPoint.get(pointId)?.state !== 'PENDING' || !dependenciesVerified(node, byPoint)) continue;
     if (taskState(tasks, pointId) !== 'UNSCHEDULED') continue;
     const proposals = [proposalFor(node, plan)];
-    for (const role of companionRoles(node)) {
-      const companion = companionPoint(node, role);
-      if (taskState(tasks, companion) === 'UNSCHEDULED') proposals.push(proposalFor(node, plan, role));
-    }
     groups.push({ node, proposals, kind: 'NEW_FRONTIER' });
   }
   return groups;
@@ -241,8 +239,9 @@ export function reconcileContinuousMetaOrchestrator(args = {}) {
   const base = reconcileMetaOrchestrator(args);
   assertZeroAuthorityMetaOutput(base);
 
-  // Authority/generation/evidence/ambiguity fences from the base reconcile always win.
-  if (['FENCED', 'STALE', 'RECONCILING'].includes(base.state)) return base;
+  // Authority/generation/evidence/ambiguity fences and the R86 post-result
+  // verification/acceptance sequencing from the base reconcile always win.
+  if (['FENCED', 'STALE', 'RECONCILING', 'VERIFYING', 'ACCEPTANCE_PENDING'].includes(base.state)) return base;
 
   const plan = args.plan;
   const tasks = Array.isArray(args.tasks) ? args.tasks : [];
