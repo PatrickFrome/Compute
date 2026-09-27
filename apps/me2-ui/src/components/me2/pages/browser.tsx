@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Radar, RefreshCw, ScanEye, ShieldCheck, Zap } from "lucide-react";
-import { PageHeader, Sec, Chip } from "@/components/me2/ui/primitives";
+import { Sec, Chip } from "@/components/me2/ui/primitives";
 import { me2Fetch, toastBus } from "@/lib/me2-bus";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
 
@@ -404,14 +404,23 @@ function CdpLiveSection() {
   );
 }
 
-// ── Page: BROWSER ───────────────────────────────────────────────────────────────
+// ── Page: RUN (legacy module key: browser) ─────────────────────────────────────
 export function BrowserPage() {
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-browser" data-panel-browser>
-      <PageHeader title="BROWSER" sub="браузерная инфраструктура и Browser Agents" />
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2" data-testid="run-page-strip">
+        <h2 className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-300">RUN</h2>
+        <span className="min-w-0 truncate text-[10px] text-zinc-500">
+          браузер и превью приложения · сенсоры справа на широком экране
+        </span>
+      </div>
       <div className="flex min-h-0 flex-1 gap-2">
-        <BrowserStage />
-        <div className="mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto lg:flex" aria-label="Браузерная инфраструктура">
+        <BrowserStage compact defaultCastOn />
+        <div
+          className="mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto xl:flex"
+          aria-label="Браузерная инфраструктура"
+          data-testid="run-telemetry-inspector"
+        >
           <SenseSection />
           <ObsvSection />
           <EffectSection />
