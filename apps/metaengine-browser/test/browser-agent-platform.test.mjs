@@ -15,13 +15,14 @@ import {
   agentPlatformSnapshot,
 } from '../src/browser-agent-platform.mjs';
 
-test('agent platform policy pins GLM 5.3 on chat.z.ai', () => {
+test('agent platform policy pins GLM 5.3 Flash on chat.z.ai', () => {
   const snapshot = agentPlatformSnapshot();
   assert.equal(snapshot.schema, 'metaengine.browser.agent-platform.v1');
   assert.equal(snapshot.platform, AGENT_PLATFORM_ID);
   assert.equal(AGENT_PLATFORM_ID, 'GLM_ZAI');
   assert.equal(AGENT_PLATFORM_HOME_URL, 'https://chat.z.ai/');
-  assert.equal(AGENT_PLATFORM_MODEL, 'GLM-5.3');
+  assert.equal(AGENT_PLATFORM_MODEL, 'GLM-5.3-Flash');
+  assert.equal(snapshot.model_selection, 'EXACT_SESSION_MODEL_REQUIRED');
   assert.equal(snapshot.composer_addressing, 'SEMANTIC_REF_BACKEND_NODE_ID');
   assert.equal(snapshot.named_control_click_authority, false);
   assert.equal(snapshot.authority_effect, false);
