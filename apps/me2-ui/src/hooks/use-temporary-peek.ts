@@ -17,6 +17,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
   ));
 }
 
+function isReservedInteractionTarget(target: EventTarget | null, kind: PeekKind): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(`[data-peek-kind="${kind}"][data-peek-id]`)) return false;
+  return Boolean(target.closest(
+    'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], ' +
+    '[role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], [role="tab"], ' +
+    '[role="switch"], [role="checkbox"], [role="radio"], [role="slider"], [role="spinbutton"]',
+  ));
+}
+
 function focusPeekItem(kind: PeekKind, id: string): void {
   window.requestAnimationFrame(() => {
     const nodes = Array.from(document.querySelectorAll(`[data-peek-kind="${kind}"][data-peek-id]`));
@@ -54,6 +64,16 @@ export function useTemporaryPeekList({
   onSelectRef.current = onSelect;
 
   useEffect(() => {
+    if (!heldRef.current) return;
+    if (!selectedId || !ids.includes(selectedId)) {
+      heldRef.current = false;
+      setPeekTarget(null);
+      return;
+    }
+    setPeekTarget({ kind, id: selectedId });
+  }, [ids, kind, selectedId, setPeekTarget]);
+
+  useEffect(() => {
     const close = () => {
       if (!heldRef.current) return;
       heldRef.current = false;
@@ -76,7 +96,7 @@ export function useTemporaryPeekList({
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) return;
+      if (isEditableTarget(event.target) || isReservedInteractionTarget(event.target, kind)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === " ") {
