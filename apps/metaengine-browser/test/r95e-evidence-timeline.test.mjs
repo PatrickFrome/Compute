@@ -24,9 +24,12 @@ test('R95E evidence timeline binds causal rows only by exact task identity', () 
   assert.match(observe, /causal rows require exact task_id equality/);
 });
 
-test('R95E explicitly refuses heuristic causal attribution for CI and aggregate OTel', () => {
+test('R95E explicitly refuses heuristic causal attribution for global chain, CI and aggregate OTel', () => {
+  assert.match(observe, /Evidence-chain verification is global ambient evidence/);
+  assert.match(observe, /\{chainLabel\} ambient/);
   assert.match(observe, /CI status is ambient evidence and is not joined to the selected task without an explicit identity binding/);
   assert.match(observe, /OTel aggregate is ambient evidence and is not treated as task-causal/);
+  assert.match(observe, /global evidence-chain, CI and aggregate OTel stay ambient/);
   assert.match(observe, /CI .* ambient/);
   assert.match(observe, /spans .* ambient/);
   assert.doesNotMatch(observe, /ci.*task_id\s*===/i);
