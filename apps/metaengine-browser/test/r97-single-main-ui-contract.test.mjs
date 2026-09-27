@@ -81,6 +81,8 @@ test('R97 renderer keeps only chat fleet + native site persistent; advanced surf
   assert.match(shell, /data-testid="chat-fleet-rail"/);
   assert.match(shell, /data-testid=\{actor\.actor_type === "SUPERVISOR" \? "chat-supervisor-row" : "chat-agent-row"\}/);
   assert.match(shell, /data-testid="native-chat-surface-slot"/);
+  assert.match(shell, /data-testid="chat-actor-short-id"/);
+  assert.match(shell, /actor\.actor_id\.split\(":"\)\.at\(-1\)\?\.slice\(0, 18\)/);
   assert.match(shell, /primaryChatFleetRoster/);
   assert.match(shell, /selectPrimaryChatActor/);
   assert.doesNotMatch(shell, /useAgentChatSessions/);
