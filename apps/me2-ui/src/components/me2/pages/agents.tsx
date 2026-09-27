@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
+import { useTemporaryPeekList } from "@/hooks/use-temporary-peek";
 
 // /cron (G7, daemon cron.ts): ChatCron + policyCaps
 type CronRow = {
@@ -122,6 +123,17 @@ export function AgentsPage() {
   }, [loadCrons, toast]);
 
   const agents = snap?.agents ?? [];
+  const [peekAgentId, setPeekAgentId] = useState<string | null>(null);
+  const peekAgentIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
+  const effectivePeekAgentId = peekAgentId && peekAgentIds.includes(peekAgentId)
+    ? peekAgentId
+    : peekAgentIds[0] ?? null;
+  useTemporaryPeekList({
+    kind: "agent",
+    ids: peekAgentIds,
+    selectedId: effectivePeekAgentId,
+    onSelect: setPeekAgentId,
+  });
   const chatsLinked = Object.keys(chatMap).length;
 
   return (
@@ -183,10 +195,19 @@ export function AgentsPage() {
                   key={a.id}
                   role="button"
                   tabIndex={0}
-                  onClick={() => openAgentChat(a)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openAgentChat(a); }}
-                  title={chatMap[a.id] ? `клик — открыть чат агента (${chatMap[a.id]})` : "чат-сессии у агента нет"}
-                  className={`group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-700 ${a.paused === 1 ? "opacity-70 ring-1 ring-amber-900/60" : ""}`}
+                  data-peek-kind="agent"
+                  data-peek-id={a.id}
+                  data-peek-selected={effectivePeekAgentId === a.id ? "true" : "false"}
+                  onFocus={() => setPeekAgentId(a.id)}
+                  onClick={() => { setPeekAgentId(a.id); openAgentChat(a); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") openAgentChat(a);
+                    else if (e.key === " ") e.preventDefault();
+                  }}
+                  title={chatMap[a.id] ? `клик — открыть чат агента (${chatMap[a.id]}) · Space — Peek` : "Space — Peek · чат-сессии у агента нет"}
+                  className={`group flex cursor-pointer items-center gap-2.5 rounded-md border px-2 py-2 transition hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-600 ${
+                    effectivePeekAgentId === a.id ? "border-cyan-900/80" : "border-transparent"
+                  } ${a.paused === 1 ? "opacity-70 ring-1 ring-amber-900/60" : ""}`}
                 >
                   <Dot on={a.status === "IDLE" && a.paused === 0} pulse={a.status === "BUSY"} />
                   <div className="min-w-0 flex-1">
