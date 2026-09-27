@@ -124,6 +124,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           node --check test/me2-r85-visual-evidence.mjs
+          if ($LASTEXITCODE -ne 0) { throw "r85_visual_harness_parse_exit_$LASTEXITCODE" }
           New-Item -ItemType Directory -Force -Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR | Out-Null
           $electron = Join-Path (Resolve-Path '.\node_modules\electron\dist').Path 'electron.exe'
           if (-not (Test-Path $electron -PathType Leaf)) { throw 'r85_visual_electron_binary_missing' }
