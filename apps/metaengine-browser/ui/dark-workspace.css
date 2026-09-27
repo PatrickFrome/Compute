@@ -617,3 +617,34 @@ body[data-final-shell="metaengine-dark-workspace-v2"][data-sidebar="COMPACT"] .t
 .surfaceTimeline{display:grid;gap:6px}
 .surfaceEmpty{font-size:11px;color:var(--muted)}
 .surfaceLayoutCommands{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+
+/* R97 single-main-workspace contract.
+   The persistent surface is intentionally only:
+   left managed chat fleet -> selected native website on the right.
+   Diagnostics remain available through Settings / command search only. */
+body[data-final-shell="metaengine-dark-workspace-v2"] .systems,
+body[data-final-shell="metaengine-dark-workspace-v2"] .activeContext,
+body[data-final-shell="metaengine-dark-workspace-v2"] #newChat{
+  display:none!important;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .contextRail{
+  border-radius:12px;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .railHeader strong::after{
+  content:" · live";
+  color:var(--subtle);
+  font-weight:500;
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.supervisor .tabAvatar{
+  background:rgba(95,214,165,.12);
+  color:var(--good);
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .verticalTab.agent:not(.supervisor) .tabAvatar{
+  background:rgba(110,168,255,.12);
+  color:var(--accent-strong);
+}
+body[data-final-shell="metaengine-dark-workspace-v2"] .operationsToggle{
+  min-width:76px;
+}
+body[data-operations="CLOSED"] .operationsPanel{display:none!important;}
