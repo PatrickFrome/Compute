@@ -28,7 +28,7 @@ export const ME2_PRIMARY_CONTEXT_DRAWER_MAX_WIDTH = 520;
 export const ME2_PRIMARY_MIN_BROWSER_HEIGHT = 320;
 export const ME2_PRIMARY_RUN_INSPECTOR_WIDTH = 384;
 export const ME2_PRIMARY_RUN_INSPECTOR_GAP = 8;
-export const ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH = 1024;
+export const ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH = 1280;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const OPERATIONS_MODES = new Set(['OPEN', 'CLOSED']);
@@ -303,16 +303,10 @@ export function planShellLayout({
         adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
       }
     } else if (drawerRequested && requestedDock === 'RIGHT') {
-      // An explicit Utility Panel is more valuable than the passive RUN
-      // telemetry inspector. Release the inspector before rejecting the panel.
-      if (
-        inspectorVisible
-        && windowWidth - left - right - requestedDrawerWidth < SHELL_MIN_REMOTE_WIDTH
-      ) {
-        inspectorVisible = false;
-        right = ME2_PRIMARY_PAGE_PADDING;
-        adaptations.push('ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL');
-      }
+      // BrowserPage uses the same >=xl threshold for its telemetry column, so
+      // main-process reservation and renderer visibility cannot diverge. If
+      // telemetry + requested Utility Panel cannot both preserve the Browser
+      // minimum, the explicit panel fails closed rather than covering pixels.
       const capacity = Math.max(0, windowWidth - left - right - SHELL_MIN_REMOTE_WIDTH);
       const effectiveWidth = capacity >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH
         ? Math.min(requestedDrawerWidth, capacity)
