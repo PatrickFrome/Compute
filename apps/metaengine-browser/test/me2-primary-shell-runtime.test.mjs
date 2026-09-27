@@ -591,7 +591,8 @@ test('R95 Utility Panel remains a read-only presentation plane with native geome
 
   assert.match(store, /drawerDock: ContextDrawerDock/);
   assert.match(store, /drawerWidth: number/);
-  assert.doesNotMatch(store, /Ctrl\/Cmd\+J|e\.key === "j"/);\n  assert.match(store, /only global UI shortcut is Ctrl\\/Cmd\\+K/);
+  assert.doesNotMatch(store, /Ctrl\/Cmd\+J|e\.key === "j"/);
+  assert.match(store, /only global UI shortcut is Ctrl\/Cmd\+K/);
   assert.match(store, /setPrimaryContextDrawer/);
   assert.doesNotMatch(me2Topbar, /data-testid="context-drawer-toggle"/);
   assert.doesNotMatch(me2Shell, /<ContextDrawer \/>/);
