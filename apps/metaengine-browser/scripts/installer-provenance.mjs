@@ -277,7 +277,10 @@ export async function downloadArtifact({
       redirect: 'follow',
       signal: controller.signal,
       headers: {
-        accept: 'application/octet-stream',
+        // GitHub Actions artifact download is a REST endpoint that returns a
+        // short-lived 302. Unlike release assets, it expects the GitHub JSON
+        // media type; application/octet-stream is rejected with HTTP 415.
+        accept: 'application/vnd.github+json',
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         'x-github-api-version': '2022-11-28',
         'user-agent': 'metaengine-installer-provenance',
