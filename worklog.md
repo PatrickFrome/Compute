@@ -10972,3 +10972,17 @@ Stage Summary:
 - Прорыв: TYPED_CLICK работает (INSERT-путь) → вход на Agent-вкладку освоен без API и без координат; путь создания агента: кнопка Agent → New Task → модалка (textbox) — следующий шаг: автоматизация формы New Task
 - Артефакты: browser-test-results-{e,f,g,h,i,j}0631.json, scripts/phoenix/audit-{e,f,g,h,i,j}-0631.py
 - Флот: 4 агента ACTIVE (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC), ARM CONTROL, max_agents=null; бэклог-брифинг «Fleet Brief: Swarm Audit & Growth Plan» отправлен (/c/cd7efff3)
+
+---
+Task ID: DIRECTIVE-CANON-20260928-0723
+Agent: Super Z
+Task: оператор — «скрипт всегда воспроизводит мастер-промпт Principal Architecture / Convergence»
+
+Work Log:
+- Канонический текст директивы сохранён verbatim: /home/z/my-project/scripts/phoenix/PRINCIPAL-DIRECTIVE.md (24004B, sha256=0aa0957922d0f9d65296e4038b160887eaf85fd517cf8650ca365e75e556f739)
+- Загрузчик: scripts/phoenix/principal-directive.sh (режимы: полный текст / --sha / --check; self-heal из зеркал)
+- Зеркала выживания: /home/z/context-vault/latest/ + /home/sync/me2-context-backups/latest/ (оба файла)
+- Cron Job 419712 «PRINCIPAL-DIRECTIVE (METAENGINE convergence loop, hourly)»: hourly :30 Europe/Moscow, priority=10, verified via cron get; payload указывает файл + sha + правило продолжения с последнего Task ID в worklog
+
+Stage Summary:
+- Мастер-директива конвергенции теперь воспроизводится автоматически каждый час: каждый запуск агента начинает с полного текста директивы и продолжает с последнего Task ID worklog (без повторов завершённых фаз)
