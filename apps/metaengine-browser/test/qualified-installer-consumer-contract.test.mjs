@@ -1,0 +1,72 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '..');
+const workflows = path.resolve(root, '..', '..', '.github', 'workflows');
+
+async function source(file) {
+  return readFile(path.join(root, file), 'utf8');
+}
+
+async function workflow(file) {
+  return readFile(path.join(workflows, file), 'utf8');
+}
+
+test('R91 qualified installer consumer helper centralizes exact acquire and terminal producer fencing', async () => {
+  const script = await source('scripts/qualified-installer-consumer.ps1');
+  assert.match(script, /ValidateSet\('Acquire', 'Wait'\)/);
+  assert.match(script, /installer-provenance\.mjs/);
+  assert.match(script, /'acquire'/);
+  assert.match(script, /'--allow-in-progress', 'true'/);
+  assert.match(script, /'verify'/);
+  assert.match(script, /'--expect-run-id'/);
+  assert.match(script, /'--expect-run-number'/);
+  assert.match(script, /'--expect-run-attempt'/);
+  assert.match(script, /'--expect-workflow'/);
+  assert.match(script, /blockmap_verified -ne \$true/);
+  assert.match(script, /config_verified -ne \$true/);
+  assert.match(script, /'wait'/);
+  assert.match(script, /producer_terminal_success/);
+  assert.match(script, /qualified_installer_terminal_binding_drift/);
+  assert.doesNotMatch(script, /Invoke-Expression|Start-Process|cmd\.exe|powershell\.exe/i);
+});
+
+test('R91 installer consumers use one binding file instead of duplicating low-level provenance plumbing', async () => {
+  const cases = [
+    'browser-windows-installed-chat-qualification.yml',
+    'browser-final-runtime-activation-v1.yml',
+    'browser-windows-autonomous-soak-v1.yml',
+  ];
+
+  for (const file of cases) {
+    const text = await workflow(file);
+    assert.match(text, /qualified-installer-consumer\.ps1 -Mode Acquire/);
+    assert.match(text, /qualified-installer-consumer\.ps1 -Mode Wait/);
+    assert.match(text, /ME2_INSTALLER_BINDING_PATH/);
+    assert.doesNotMatch(text, /installer-provenance\.mjs acquire/);
+    assert.doesNotMatch(text, /installer-provenance\.mjs verify/);
+    assert.doesNotMatch(text, /installer-provenance\.mjs wait/);
+    assert.doesNotMatch(text, /ME2_PACKAGE_PRODUCER_RUN_ID|ME2_PACKAGE_PRODUCER_RUN_NUMBER|ME2_PACKAGE_PRODUCER_RUN_ATTEMPT/);
+  }
+});
+
+test('R91 consumer proof schemas still persist exact producer identity and terminal qualification', async () => {
+  const installed = await workflow('browser-windows-installed-chat-qualification.yml');
+  const finalRuntime = await workflow('browser-final-runtime-activation-v1.yml');
+  const soak = await workflow('browser-windows-autonomous-soak-v1.yml');
+
+  for (const text of [installed, finalRuntime, soak]) {
+    assert.match(text, /producer_run_id/);
+    assert.match(text, /producer_run_number/);
+    assert.match(text, /producer_run_attempt/);
+    assert.match(text, /producer_completed_at_acquire/);
+  }
+
+  assert.match(installed, /installed-chat-proof\.json/);
+  assert.match(finalRuntime, /final-runtime-activation-proof\.json/);
+  assert.match(soak, /windows-autonomous-soak-proof\.json/);
+});
