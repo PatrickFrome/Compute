@@ -121,8 +121,9 @@ test('R95E.2 exact history fetch is bounded and surfaces degraded readback hones
   assert.match(store, /streamState: "UNBOUND" \| "LOADING" \| "EXACT" \| "DEGRADED"/);
   assert.match(store, /streamState: "LOADING"/);
   assert.match(store, /AbortSignal\.timeout\(8_000\)/);
-  assert.match(store, /if \(!d\?\.events\) return \{ streamState: "DEGRADED" as const \}/);
-  assert.match(store, /streamState: "EXACT" as const/);
+  assert.match(store, /resolveExactTaskStreamResponse\(\{/);
+  assert.match(store, /responseEvents: d\?\.events \?\? null/);
+  assert.match(store, /limit: 200/);
   assert.match(observe, /data-history-state=\{streamState\}/);
   assert.match(observe, /history \$\{streamState\.toLowerCase\(\)\}/);
 });
