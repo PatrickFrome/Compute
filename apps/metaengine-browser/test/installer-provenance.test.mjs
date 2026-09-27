@@ -664,6 +664,53 @@ test('acquireArtifact resolves producer and downloads same artifact archive', as
   });
 });
 
+test('acquireArtifact can download the early candidate before producer completion', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'installer-acquire-early-'));
+  const output = path.join(root, 'artifact.zip');
+  await withServer((req, res) => {
+    const port = req.socket.localPort;
+    if (req.url.startsWith('/repos/o/r/actions/runs?')) {
+      return json(res, 200, { workflow_runs: [{
+        id: 177,
+        run_attempt: 2,
+        name: PRODUCER_WORKFLOW,
+        head_sha: HEAD,
+        status: 'in_progress',
+        conclusion: null,
+      }] });
+    }
+    if (req.url.startsWith('/repos/o/r/actions/runs/177/artifacts?')) {
+      return json(res, 200, { artifacts: [{
+        id: 188,
+        name: `metaengine-browser-windows-candidate-${HEAD}`,
+        expired: false,
+        archive_download_url: `http://127.0.0.1:${port}/archive`,
+      }] });
+    }
+    if (req.url === '/archive') {
+      const body = Buffer.from('early-candidate-bytes');
+      res.writeHead(200, { 'content-length': body.length });
+      return res.end(body);
+    }
+    res.writeHead(404); res.end();
+  }, async (base) => {
+    const result = await acquireArtifact({
+      repo: 'o/r',
+      head: HEAD,
+      artifactName: `metaengine-browser-windows-candidate-${HEAD}`,
+      apiBase: base,
+      timeoutMs: 100,
+      pollMs: 10,
+      outputPath: output,
+      allowInProgressArtifact: true,
+    });
+    assert.equal(result.schema, ACQUIRE_SCHEMA);
+    assert.equal(result.producer_run_id, 177);
+    assert.equal(result.producer_run_attempt, 2);
+    assert.equal(await readFile(output, 'utf8'), 'early-candidate-bytes');
+  });
+});
+
 test('CLI write emits machine-readable provenance without secrets', async () => {
   const f = await fixture();
   const result = spawnSync(process.execPath, [
@@ -748,4 +795,34 @@ test('Autonomous Soak consumes immutable producer bytes instead of rebuilding NS
   assert.match(source, /apps\/me2-ui\/\*\*/);
   assert.match(source, /apps\/me2-daemon\/\*\*/);
   assert.match(source, /apps\/metaengine-browser\/scripts\/installer-provenance\.mjs/);
+});
+
+test('R89 Package Smoke publishes immutable candidate before long installed proof and separates final evidence', async () => {
+  const source = await readFile(path.join(workflowRoot, 'browser-windows-package-smoke.yml'), 'utf8');
+  const early = source.indexOf('name: Publish immutable candidate for parallel downstream qualification');
+  const install = source.indexOf('name: Install exact-head package and prove Browser plus inert Guardian payload');
+  const finalEvidence = source.indexOf('name: metaengine-browser-windows-package-evidence-');
+  assert.ok(early >= 0 && install > early && finalEvidence > install);
+  assert.equal((source.match(/name: metaengine-browser-windows-candidate-/g) || []).length, 1);
+  assert.match(source, /compression-level:\s*0/);
+});
+
+test('R89 consumers may start from the early artifact but cannot finish before the exact producer run is green', async () => {
+  const cases = [
+    ['browser-windows-installed-chat-qualification.yml', 'Install exact installer and prove clean-genesis persistent ChatGPT preconnect'],
+    ['browser-final-runtime-activation-v1.yml', 'Install and prove all Final runtime modules READY'],
+    ['browser-windows-autonomous-soak-v1.yml', 'Open normal UI and prove 64 sequential plus 8 concurrent exact activations'],
+  ];
+  for (const [file, physicalProof] of cases) {
+    const source = await readFile(path.join(workflowRoot, file), 'utf8');
+    assert.match(source, /installer-provenance\.mjs acquire[\s\S]{0,500}--allow-in-progress true/);
+    assert.match(source, /--expected-run-id \(\[string\]\$acquire\.producer_run_id\)/);
+    assert.match(source, /--expected-run-attempt \(\[string\]\$acquire\.producer_run_attempt\)/);
+    assert.match(source, /ME2_PACKAGE_PRODUCER_RUN_ID/);
+    assert.match(source, /ME2_PACKAGE_PRODUCER_RUN_ATTEMPT/);
+    const proofIndex = source.indexOf(physicalProof);
+    const gateIndex = source.indexOf('name: Require bound Package Smoke producer terminal success');
+    assert.ok(proofIndex >= 0 && gateIndex > proofIndex, `${file}: terminal producer gate must follow physical proof`);
+    assert.match(source.slice(gateIndex), /installer-provenance\.mjs wait/);
+  }
 });
