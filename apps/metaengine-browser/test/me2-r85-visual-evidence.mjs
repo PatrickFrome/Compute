@@ -159,6 +159,7 @@ async function metrics(contents) {
       agent_sidebar: rect('agent-sidebar'),
       browser_shell: rect('browser-shell'),
       context_drawer: rect('context-drawer'),
+      utility_panel_body: rect('utility-panel-body'),
       context_drawer_dock: document.querySelector('[data-testid="context-drawer"]')?.getAttribute('data-drawer-dock') || null,
       context_drawer_toggle: Boolean(document.querySelector('[data-testid="context-drawer-toggle"]')),
       sidebar_toggle: Boolean(document.querySelector('[data-testid="cc-sidebar-toggle"]')),
@@ -327,6 +328,19 @@ async function main() {
     if (Math.round(rightDrawer.metrics?.context_drawer?.height || 0) <= drawerHeight) {
       throw new Error(`r95_visual_right_drawer_not_vertical:${JSON.stringify(rightDrawer.metrics?.context_drawer)}`);
     }
+    const rightBody = rightDrawer.metrics?.utility_panel_body;
+    if (!rightBody || Math.round(rightBody.width || 0) < drawerWidth - 16 || Math.round(rightBody.height || 0) < 300) {
+      throw new Error(`r95_visual_right_drawer_body_missing:${JSON.stringify(rightBody)}`);
+    }
+    const rightControlsVisible = await shellView.webContents.executeJavaScript(`(() => {
+      const tab = document.querySelector('[data-testid="context-drawer"] [role="tab"]');
+      const dock = document.querySelector('[data-testid="utility-panel-dock-bottom"]');
+      if (!tab || !dock) return false;
+      const a = tab.getBoundingClientRect();
+      const b = dock.getBoundingClientRect();
+      return a.width > 20 && a.height > 10 && b.width > 20 && b.height > 10;
+    })()`);
+    if (rightControlsVisible !== true) throw new Error('r95_visual_right_drawer_controls_not_visible');
 
     const evidence = Object.freeze({
       schema: 'metaengine.browser.r85-visual-evidence.v1',
