@@ -123,15 +123,17 @@ function sanitizeTransportProof(value) {
   const targetId = String(value.target_id || '').toLowerCase();
   const generationEpoch = Number(value.generation_epoch);
   const conversationUrlSha256 = String(value.conversation_url_sha256 || '').toLowerCase();
+  const agentSurfaceSha256 = String(value.agent_surface_sha256 || '').toLowerCase();
   const provenAt = String(value.proven_at || '');
   if (!tabId || !targetId || !Number.isSafeInteger(generationEpoch) || generationEpoch < 1) return null;
-  if (!/^[a-f0-9]{64}$/.test(conversationUrlSha256) || !provenAt) return null;
+  if (!/^[a-f0-9]{64}$/.test(conversationUrlSha256) || !/^[a-f0-9]{64}$/.test(agentSurfaceSha256) || !provenAt) return null;
   return {
     schema: 'metaengine.browser.fleet-transport-proof.v1',
     tab_id: tabId,
     target_id: targetId,
     generation_epoch: generationEpoch,
     conversation_url_sha256: conversationUrlSha256,
+    agent_surface_sha256: agentSurfaceSha256,
     proven_at: provenAt,
     authority_effect: false,
   };
@@ -396,7 +398,7 @@ export class FleetProvisioner {
     });
   }
 
-  async markTransportProven({ agent_id, tab_id, target_id, generation_epoch, conversation_url } = {}) {
+  async markTransportProven({ agent_id, tab_id, target_id, generation_epoch, conversation_url, agent_surface_sha256 } = {}) {
     return this.#serial(async () => {
       this.#assertReady();
       const agent = this.#requireAgent(agent_id);
@@ -412,6 +414,8 @@ export class FleetProvisioner {
       if (!targetId || String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_transport_target_binding_mismatch');
       if (!Number.isSafeInteger(generationEpoch) || generationEpoch !== agent.generation_epoch) throw new Error('fleet_transport_generation_binding_mismatch');
       const conversationUrl = normalizeConversationUrl(conversation_url);
+      const agentSurfaceSha256 = String(agent_surface_sha256 || '').toLowerCase();
+      if (!/^[a-f0-9]{64}$/.test(agentSurfaceSha256)) throw new Error('fleet_transport_agent_surface_proof_required');
       agent.transport_proof = {
         schema: 'metaengine.browser.fleet-transport-proof.v1',
         tab_id: tabId,
@@ -426,6 +430,7 @@ export class FleetProvisioner {
         // account-synced draft accumulates on every failed replace).
         conversation_url: conversationUrl,
         conversation_url_sha256: crypto.createHash('sha256').update(conversationUrl, 'utf8').digest('hex'),
+        agent_surface_sha256: agentSurfaceSha256,
         proven_at: iso(this.#clock),
         authority_effect: false,
       };
