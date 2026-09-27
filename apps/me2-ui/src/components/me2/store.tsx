@@ -99,6 +99,7 @@ interface Me2State {
   contextDrawerPreferredWidth: number;
   contextDrawerWidth: number;
   contextDrawerDock: ContextDrawerDock;
+  runTelemetryInspectorVisible: boolean;
   commandRailPreferredOpen: boolean;
   // selection (agent-first)
   chatId: string | null;
@@ -217,21 +218,33 @@ function writeWorkspaceLayout(workspace: WorkspaceKey, patch: Partial<WorkspaceL
   } catch { /* private mode */ }
 }
 
-function syncPagePresentation(p: PageKey) {
+function syncPagePresentation(p: PageKey): Promise<unknown> | null {
   try {
     localStorage.setItem(PAGE_LS, p);
     history.replaceState(null, "", `#${p}`);
   } catch { /* private mode */ }
+
+  let primaryPageAck: Promise<unknown> | null = null;
   try {
-    const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-    void shell?.setPrimaryPage?.(p);
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryPage?: (page: string) => Promise<unknown> | unknown;
+        setPrimaryOverlay?: (active: boolean) => unknown;
+      };
+    }).metaengineShell;
+    const result = shell?.setPrimaryPage?.(p);
+    if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+      primaryPageAck = Promise.resolve(result);
+    }
   } catch { /* Browser preload bridge absent in web-only mode */ }
+
   void (async () => {
     try {
       const { me2Desktop } = await import("@/lib/me2-desktop");
       me2Desktop()?.tabs.setActive("page", p);
     } catch { /* bridge absent */ }
   })();
+  return primaryPageAck;
 }
 
 export const useMe2 = create<Me2State>((set, get) => ({
@@ -259,6 +272,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   contextDrawerPreferredWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
   contextDrawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
   contextDrawerDock: "bottom",
+  runTelemetryInspectorVisible: false,
   commandRailPreferredOpen: true,
   chatId: null,
   busyAction: false,
@@ -303,6 +317,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: false,
       });
       return;
     }
@@ -319,6 +334,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
           dock?: ContextDrawerDock;
           drawer_height?: number;
           drawer_width?: number;
+          run_inspector_visible?: boolean;
         } | null>;
       };
     }).metaengineShell;
@@ -332,6 +348,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible:
+          typeof window !== "undefined"
+          && window.innerWidth >= 1124
+          && !(want && wantedDock === "right"),
       });
       return;
     }
@@ -357,6 +377,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: effectiveWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: result?.run_inspector_visible === true,
       });
     }).catch(() => {
       if (!presentationSyncStillCurrent(request, {
@@ -372,6 +393,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: false,
       });
     });
   },
@@ -457,18 +479,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const h = window.location.hash.replace("#", "");
         const stored = localStorage.getItem(PAGE_LS);
         const raw = (PAGES.some((p) => p.key === h) && h) || stored;
-        if (raw && PAGES.some((p) => p.key === raw)) {
-          set({ page: raw as PageKey, recentPages: [raw as PageKey], pageHistoryIndex: 0 });
-          try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-            void shell?.setPrimaryPage?.(raw);
-          } catch { /* Browser preload bridge absent in web-only mode */ }
-        } else {
-          try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-            void shell?.setPrimaryPage?.("command");
-          } catch { /* Browser preload bridge absent in web-only mode */ }
+        const restoredPage: PageKey = raw && PAGES.some((p) => p.key === raw)
+          ? raw as PageKey
+          : "command";
+        if (restoredPage !== "command" || raw === "command") {
+          set({ page: restoredPage, recentPages: [restoredPage], pageHistoryIndex: 0 });
         }
+        const primaryPageAck = syncPagePresentation(restoredPage);
         const storedWs = localStorage.getItem(WS_LS) as WorkspaceKey | null;
         const activeWorkspace = storedWs && WORKSPACES.some((item) => item.key === storedWs) ? storedWs : get().workspace;
         if (activeWorkspace !== get().workspace) set({ workspace: activeWorkspace });
@@ -485,7 +502,22 @@ export const useMe2 = create<Me2State>((set, get) => ({
           commandRailPreferredOpen: workspaceLayout.commandRailOpen,
         });
         writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
-        get().syncContextDrawer(workspaceLayout.drawerOpen, workspaceLayout.drawerHeight, workspaceLayout.drawerWidth, workspaceLayout.drawerDock);
+        const reconcileRestoredGeometry = () => {
+          if (get().page !== restoredPage) return;
+          get().syncContextDrawer(
+            workspaceLayout.drawerOpen,
+            workspaceLayout.drawerHeight,
+            workspaceLayout.drawerWidth,
+            workspaceLayout.drawerDock,
+          );
+        };
+        if (restoredPage === "browser" && primaryPageAck) {
+          void primaryPageAck.then(reconcileRestoredGeometry).catch(() => {
+            if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+          });
+        } else {
+          reconcileRestoredGeometry();
+        }
       } catch { /* приватный режим */ }
     }, 0);
 
@@ -566,8 +598,31 @@ export const useMe2 = create<Me2State>((set, get) => ({
           if (nextIndex >= 0 && nextIndex < st.recentPages.length) {
             e.preventDefault();
             const target = st.recentPages[nextIndex];
+            // History navigation is a new presentation generation too. Without
+            // advancing the sequence, browser→other→browser could let an old
+            // RUN geometry reply pass the page/workspace ABA fence.
+            contextDrawerSyncSeq += 1;
             set({ page: target, pageHistoryIndex: nextIndex });
-            syncPagePresentation(target);
+            const primaryPageAck = syncPagePresentation(target);
+            if (target === "browser") {
+              const reconcileRunGeometry = () => {
+                if (get().page === "browser") get().syncContextDrawer();
+              };
+              if (primaryPageAck) {
+                void primaryPageAck.then(reconcileRunGeometry).catch(() => {
+                  if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+                });
+              } else {
+                reconcileRunGeometry();
+              }
+            } else {
+              set({
+                contextDrawerOpen: get().contextDrawerPreferredOpen,
+                contextDrawerHeight: get().contextDrawerPreferredHeight,
+                contextDrawerWidth: get().contextDrawerPreferredWidth,
+                runTelemetryInspectorVisible: false,
+              });
+            }
           }
         }
       }
@@ -629,13 +684,26 @@ export const useMe2 = create<Me2State>((set, get) => ({
         pageHistoryIndex: history.length - 1,
       };
     });
-    syncPagePresentation(p);
-    if (p === "browser") get().syncContextDrawer();
-    else set({
-      contextDrawerOpen: get().contextDrawerPreferredOpen,
-      contextDrawerHeight: get().contextDrawerPreferredHeight,
-      contextDrawerWidth: get().contextDrawerPreferredWidth,
-    });
+    const primaryPageAck = syncPagePresentation(p);
+    if (p === "browser") {
+      const reconcileRunGeometry = () => {
+        if (get().page === "browser") get().syncContextDrawer();
+      };
+      if (primaryPageAck) {
+        void primaryPageAck.then(reconcileRunGeometry).catch(() => {
+          if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+        });
+      } else {
+        reconcileRunGeometry();
+      }
+    } else {
+      set({
+        contextDrawerOpen: get().contextDrawerPreferredOpen,
+        contextDrawerHeight: get().contextDrawerPreferredHeight,
+        contextDrawerWidth: get().contextDrawerPreferredWidth,
+        runTelemetryInspectorVisible: false,
+      });
+    }
   },
 
   setWorkspace: (w) => {

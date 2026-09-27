@@ -182,9 +182,14 @@ test('R95C RUN owns native Browser geometry and releases telemetry before a Righ
   assert.ok(bottom.remote_bounds.height >= 320);
 });
 
-test('R95C native Utility sync runs only on the legacy browser page that backs workflow RUN', () => {
+test('R95C native Utility sync runs only on RUN and waits for the primary-page acknowledgement', () => {
   assert.match(store, /if \(request\.page !== "browser"\)/);
-  assert.match(store, /if \(p === "browser"\) get\(\)\.syncContextDrawer\(\)/);
+  const setPageStart = store.indexOf('setPage: (p) => {');
+  const setPageEnd = store.indexOf('setWorkspace: (w) => {', setPageStart);
+  const setPageBlock = store.slice(setPageStart, setPageEnd);
+  assert.match(setPageBlock, /if \(p === "browser"\)/);
+  assert.match(setPageBlock, /primaryPageAck\.then\(reconcileRunGeometry\)/);
+  assert.match(setPageBlock, /if \(get\(\)\.page === "browser"\) get\(\)\.syncContextDrawer\(\)/);
   assert.doesNotMatch(store, /if \(request\.page !== "command"\)/);
   assert.match(main, /primaryShellPage === 'browser' && primaryShellOverlayActive !== true/);
   assert.match(main, /primaryShellPage === 'browser'[\s\S]{0,120}\? 'ME2_R95_RUN'/);
