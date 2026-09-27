@@ -248,6 +248,13 @@ export async function resolveProducerRun({
       lastReadError = null;
     } catch (error) {
       if (String(error?.code || '').startsWith('installer_provenance_')) throw error;
+      const status = Number(error?.details?.status);
+      if (error?.code === 'github_api_http_error' && status >= 400 && status < 500) {
+        fail('installer_provenance_github_api_rejected', {
+          status,
+          url: error?.details?.url ?? null,
+        });
+      }
       lastReadError = String(error?.code || error?.message || error);
     }
     if (Date.now() - started + boundedPoll > boundedTimeout) break;
