@@ -131,7 +131,7 @@ if ($Mode -eq 'Acquire') {
   }
   $binding | ConvertTo-Json -Depth 6 | Set-Content $BindingPath -Encoding utf8
   Write-Output ($binding | ConvertTo-Json -Compress -Depth 6)
-  exit 0
+  return
 }
 
 if (-not $BindingPath) { throw 'qualified_installer_binding_path_missing' }
