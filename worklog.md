@@ -10199,3 +10199,16 @@ Stage Summary:
 - После пуша: первый acquire-прогон покажет единственность NSIS-builder; следить за installer_provenance_* кодами в installed-chat/final-runtime/soak
 - Backlog R87: подрезка таймаутов по фактической статистике прогонов; перевод 4 легаси-workflow на build-once; прокинуть provenance в release-evidence-gate/fast-autorelease аттестацию; EV-A11Y; watcher CI-гонки
 - Открытое: R2 S3 secret access key (оператор); .a2 partial (не блокер); terminal outcome R85 visual capture (#2436…) — ждём
+---
+Task ID: R80
+Agent: cron-413338
+Task: Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
+
+Work Log:
+- .github.env валиден (token=valid, HTTP 200, без печати)
+- push-pending-r80.sh: main→sandbox/me2-os ff fbb125e9..a728c3aa; архив-ветки me2/archive-r21-sandbox-snapshot и me2/archive-v040-main-archive up-to-date
+- ls-remote ≡ local HEAD = a728c3aa ✅ (запись R80 опубликована отдельным хвост-пушем)
+- Браузерная PR-ветка не тронута (freeze R85 visual capture; R86-коммит 1880a83a остаётся локальным в me2-wt-r86)
+
+Stage Summary:
+- Публикация актуальна: sandbox/me2-os = a728c3aa; дерево чистое; блокеров публикации нет
