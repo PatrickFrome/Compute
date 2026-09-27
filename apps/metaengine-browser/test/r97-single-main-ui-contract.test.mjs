@@ -104,8 +104,9 @@ test('R97 legacy fallback keeps chat-surface rendering callable', () => {
 test('R97 Settings is the explicit directory for every hidden advanced surface', () => {
   assert.match(settings, /data-testid="settings-advanced-surfaces"/);
   for (const page of ['command','agents','code','tasks','supervisor','compute','memory','observability']) {
-    assert.match(settings, new RegExp(`settings-open-${page}`));
+    assert.match(settings, new RegExp(`page: "${page}"`));
   }
+  assert.match(settings, /data-testid=\{\`settings-open-\$\{surface\.page\}\`\}/);
   assert.match(settings, /setPage\(surface\.page\)/);
   assert.match(settings, /Hidden from the main Chat Fleet workspace/);
 });
