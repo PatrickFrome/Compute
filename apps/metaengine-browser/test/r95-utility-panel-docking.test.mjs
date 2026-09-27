@@ -16,6 +16,7 @@ const shell = await readFile(new URL('../../me2-ui/src/components/me2/shell/me2-
 const panel = await readFile(new URL('../../me2-ui/src/components/me2/shell/context-drawer.tsx', import.meta.url), 'utf8');
 const preload = await readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
 const main = await readFile(new URL('../src/main.mjs', import.meta.url), 'utf8');
+const visualHarness = await readFile(new URL('./me2-r85-visual-evidence.mjs', import.meta.url), 'utf8');
 
 test('R95 bottom Utility Panel preserves the proven R85 native height reservation', () => {
   const plan = planShellLayout({
@@ -119,4 +120,13 @@ test('R95 Browser-owned bridge remains narrow presentation-only geometry synchro
   assert.match(main, /browser_command_authority:\s*false/);
   assert.match(main, /scheduler_authority:\s*false/);
   assert.match(main, /authority_effect:\s*false/);
+});
+
+
+test('R95 physical visual harness captures both Bottom and Right Utility Panel states', () => {
+  assert.match(visualHarness, /utility-panel-dock-right/);
+  assert.match(visualHarness, /r95-command-utility-right-1440x960/);
+  assert.match(visualHarness, /utility_panel_bottom_verified:\s*true/);
+  assert.match(visualHarness, /utility_panel_right_verified:\s*true/);
+  assert.match(visualHarness, /context_drawer_dock/);
 });
