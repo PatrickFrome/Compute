@@ -230,8 +230,15 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selected
                   <g
                     className="branch-retry cursor-pointer"
                     onClick={(e) => { e.stopPropagation(); onRetry(t); }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRetry(t);
+                    }}
                     role="button"
-                    tabIndex={-1}
+                    tabIndex={0}
+                    aria-keyshortcuts="Enter Space"
                     aria-label={`Повторить задачу ${t.title}`}
                   >
                     <title>{"Повторить (TASK_RETRY: +2 шага, рефлексия родителя в контексте)"}</title>
@@ -244,8 +251,15 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selected
                     <g
                       className="branch-reflect cursor-pointer"
                       onClick={(e) => { e.stopPropagation(); onReflect(t); }}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onReflect(t);
+                      }}
                       role="button"
-                      tabIndex={-1}
+                      tabIndex={0}
+                      aria-keyshortcuts="Enter Space"
                       aria-label={`Сгенерировать LLM-рефлексию для задачи ${t.title}`}
                     >
                       <title>{"LLM-рефлексия (tier-2): вербальный урок провала — через супервизора флота (R44)"}</title>
