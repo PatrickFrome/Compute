@@ -57,6 +57,16 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
 
   const fleetRuntime = {
     snapshot: () => structuredClone(state.fleet),
+    beginTransportBootstrapAttempt: async ({ agent_id, tab_id, target_id, generation_epoch }) => {
+      assert.deepEqual({ agent_id, tab_id, target_id, generation_epoch }, {
+        agent_id: AGENT_ID, tab_id: TAB_ID, target_id: TARGET_ID, generation_epoch: 7,
+      });
+      const agent = state.fleet.agents[0];
+      agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
+      agent.ambiguous_reason = 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
+      agent.transport_proof = null;
+      return structuredClone(state.fleet);
+    },
     markTransportPreconversationProven: async ({ agent_id, tab_id, target_id, generation_epoch, transport_url }) => {
       assert.equal(agent_id, AGENT_ID);
       assert.equal(tab_id, TAB_ID);
