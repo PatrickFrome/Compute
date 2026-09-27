@@ -793,7 +793,7 @@ test('artifact redirect never forwards GitHub bearer token to the redirected ori
   assert.equal(redirectedAuthorization, null);
 });
 
-test('R90 workflow topology builds NSIS once, overlaps physical consumers, then gates on producer success', () => {
+test('R90/R91 workflow topology builds NSIS once, overlaps physical consumers, then gates on producer success', () => {
   const testDir = dirname(fileURLToPath(import.meta.url));
   const workflowRoot = join(testDir, '..', '..', '..', '.github', 'workflows');
   const packageSmoke = readFileSync(join(workflowRoot, 'browser-windows-package-smoke.yml'), 'utf8');
@@ -818,15 +818,16 @@ test('R90 workflow topology builds NSIS once, overlaps physical consumers, then 
   ]) {
     assert.doesNotMatch(source, /electron-builder@26\.15\.7 --win nsis/);
     assert.doesNotMatch(source, /Build and stage exact-head ME2 UI|Build and pack ME2 UI|bun run build/);
-    assert.match(source, /installer-provenance\.mjs acquire[\s\S]{0,500}--allow-in-progress true/);
-    assert.match(source, /--expect-run-id \$resolved\.run_id/);
-    assert.match(source, /--expect-run-number \$resolved\.run_number/);
-    assert.match(source, /--expect-run-attempt \$resolved\.run_attempt/);
+    assert.match(source, /qualified-installer-consumer\.ps1 -Mode Acquire/);
+    assert.match(source, /ME2_INSTALLER_BINDING_PATH/);
+    assert.match(source, /producer_run_id=\[int64\]\$binding\.producer_run_id/);
+    assert.match(source, /producer_run_number=\[int64\]\$binding\.producer_run_number/);
+    assert.match(source, /producer_run_attempt=\[int64\]\$binding\.producer_run_attempt/);
     assert.match(source, /producer_completed_at_acquire/);
     const physical = source.indexOf(physicalMarker);
     const terminal = source.indexOf('name: Require bound Package Smoke producer terminal success');
     assert.ok(physical >= 0 && terminal > physical, `${name}: producer terminal fence must follow physical proof`);
-    assert.match(source.slice(terminal), /installer-provenance\.mjs wait/);
-    assert.match(source.slice(terminal), /producer_terminal_success/);
+    assert.match(source.slice(terminal), /qualified-installer-consumer\.ps1 -Mode Wait/);
+    assert.doesNotMatch(source, /installer-provenance\.mjs acquire|installer-provenance\.mjs verify|installer-provenance\.mjs wait/);
   }
 });
