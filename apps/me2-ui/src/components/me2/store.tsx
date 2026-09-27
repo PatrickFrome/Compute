@@ -598,6 +598,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
           if (nextIndex >= 0 && nextIndex < st.recentPages.length) {
             e.preventDefault();
             const target = st.recentPages[nextIndex];
+            // History navigation is a new presentation generation too. Without
+            // advancing the sequence, browser→other→browser could let an old
+            // RUN geometry reply pass the page/workspace ABA fence.
+            contextDrawerSyncSeq += 1;
             set({ page: target, pageHistoryIndex: nextIndex });
             const primaryPageAck = syncPagePresentation(target);
             if (target === "browser") {
