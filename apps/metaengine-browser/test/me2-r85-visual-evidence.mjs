@@ -342,6 +342,7 @@ async function main() {
       `document.querySelector('[data-testid="settings-button"]')?.click(); true`,
     );
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-outlet]')?.getAttribute('data-page') === 'system'");
+    await waitFor(shellView.webContents, "document.querySelectorAll('[data-testid^=settings-open-]').length === 8");
     const settingsCapture = await capture(shellView, 'r97-settings-advanced-surface-1440x960');
     if (settingsCapture.metrics.primary != null || settingsCapture.metrics.rail != null) {
       throw new Error('r97_visual_main_rail_persisted_inside_settings');
