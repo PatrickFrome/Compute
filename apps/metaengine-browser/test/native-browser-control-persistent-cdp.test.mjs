@@ -72,7 +72,14 @@ test('native capture and effects reuse one persistent CDP attachment', async () 
     const captures = debuggerApi.commands.filter((row) => row.method === 'Accessibility.getFullAXTree');
     assert.equal(enabled.length, 1);
     assert.equal(captures.length, 2);
-    assert.ok(debuggerApi.commands.some((row) => row.method === 'Input.dispatchMouseEvent' && row.params.type === 'mouseWheel'));
+    assert.equal(effect.mouse_geometry_required, false);
+    assert.equal(effect.viewport_geometry_required, false);
+    assert.ok(debuggerApi.commands.some((row) =>
+      row.method === 'Input.dispatchKeyEvent'
+      && row.params.type === 'rawKeyDown'
+      && row.params.key === 'PageDown'
+    ));
+    assert.equal(debuggerApi.commands.some((row) => row.method === 'Input.dispatchMouseEvent'), false);
   } finally {
     assert.equal(releasePersistentBrowserDebugger(webContents), true);
   }
