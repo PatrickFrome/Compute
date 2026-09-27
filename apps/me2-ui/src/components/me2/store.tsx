@@ -479,18 +479,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const h = window.location.hash.replace("#", "");
         const stored = localStorage.getItem(PAGE_LS);
         const raw = (PAGES.some((p) => p.key === h) && h) || stored;
-        if (raw && PAGES.some((p) => p.key === raw)) {
-          set({ page: raw as PageKey, recentPages: [raw as PageKey], pageHistoryIndex: 0 });
-          try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-            void shell?.setPrimaryPage?.(raw);
-          } catch { /* Browser preload bridge absent in web-only mode */ }
-        } else {
-          try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-            void shell?.setPrimaryPage?.("command");
-          } catch { /* Browser preload bridge absent in web-only mode */ }
+        const restoredPage: PageKey = raw && PAGES.some((p) => p.key === raw)
+          ? raw as PageKey
+          : "command";
+        if (restoredPage !== "command" || raw === "command") {
+          set({ page: restoredPage, recentPages: [restoredPage], pageHistoryIndex: 0 });
         }
+        const primaryPageAck = syncPagePresentation(restoredPage);
         const storedWs = localStorage.getItem(WS_LS) as WorkspaceKey | null;
         const activeWorkspace = storedWs && WORKSPACES.some((item) => item.key === storedWs) ? storedWs : get().workspace;
         if (activeWorkspace !== get().workspace) set({ workspace: activeWorkspace });
@@ -507,7 +502,22 @@ export const useMe2 = create<Me2State>((set, get) => ({
           commandRailPreferredOpen: workspaceLayout.commandRailOpen,
         });
         writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
-        get().syncContextDrawer(workspaceLayout.drawerOpen, workspaceLayout.drawerHeight, workspaceLayout.drawerWidth, workspaceLayout.drawerDock);
+        const reconcileRestoredGeometry = () => {
+          if (get().page !== restoredPage) return;
+          get().syncContextDrawer(
+            workspaceLayout.drawerOpen,
+            workspaceLayout.drawerHeight,
+            workspaceLayout.drawerWidth,
+            workspaceLayout.drawerDock,
+          );
+        };
+        if (restoredPage === "browser" && primaryPageAck) {
+          void primaryPageAck.then(reconcileRestoredGeometry).catch(() => {
+            if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+          });
+        } else {
+          reconcileRestoredGeometry();
+        }
       } catch { /* приватный режим */ }
     }, 0);
 
