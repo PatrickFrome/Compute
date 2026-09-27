@@ -10737,3 +10737,22 @@ Stage Summary:
 - Статус механик не изменился относительно BROWSER-TEST-20260928-0328 (16 работает / 6 не работает / остальное не проверено). Корневой блокер ПОДТВЕРЖДЁН воспроизводимо на двух тиках и УТОЧНЁН: блокирующий draft — аккаунт-скопированный, аккумулятивный, включает FLUSH-сид + все typing-артефакты; видимый композер чист, сабмит подавляется невидимым драфтом.
 - Ремеди для оператора остаётся тем же, но срочность выше: драфт РАСТЁТ с каждым тестовым вводом. Разовая очистка composer + localStorage["chat-input-"] chat.z.ai (Ctrl+A+Delete в чистом поле + DevTools clear) разблокирует цепь целей 1–3 (NEW_TAB/SELECT_TAB/SEMANTIC_TYPE/PRESS_KEY уже работают — не работает только финальный submit).
 - До очистки оператором: typing-пробы НЕ повторять (загрязнение драфта); дальше мониторить только heartbeat/fleet/признаки очистки драфта по CAPTURE.transcript (маркер "FLEET BOOTSTRAP FLUSH" + отсутствие накопленных текстов).
+
+---
+Task ID: BROWSER-TEST-20260928-0400
+Agent: GLM (Super Z, session web-0e323763, Job 419203 tick 04:00+08)
+Task: Третий тик BROWSER-TEST: non-polluting мониторинг (fleet/census/draft-status) с unlock-цепью ТОЛЬКО при чистом драфте; сверка статуса корневого блокера после гипотетической очистки оператором.
+
+Work Log:
+- Живость: state last_seen 20:02:03Z (=3с от now), CONTROL/CONTROL armed=true, last_command_status=COMPLETED. FLEET_STATUS COMPLETED: 4/4 FLEET_OWNED ACTIVE (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC), transport_proof PRECONVERSATION_ROOT.
+- TAB_CENSUS: total=17 (GLM_CHAT=16, LOCAL_DEV=1), роли USER=13/FLEET=4/SUPERVISOR=1 (первая перепись), release_signal=PHYSICAL_TAB_CLOSED (одна вкладка закрыта с прошлого тика), fleet_ceiling 28, headroom 30.
+- ОШИБКА ДЕТЕКТОРА (честно): T03 CAPTURE флот-вкладки показал textbox=placeholder (25 симв, "How can I help you today?") → вердикт CLEAN → запущена unlock-цепь (NEW_TAB tab_a66fab40 → CAPTURE → SEMANTIC_TYPE submit_after_type=True + PRESS_KEY Enter, всё COMPLETED). ПОСТ-ФАКТУМ: READ_TRANSCRIPT выявил, что драфт НЕ очищался оператором — хвост транскрипта содержит полную аккумуляцию (disclaimer + FLUSH-сид + mechanic-test ×2 + 0330-проба + НОВАЯ 0400-проба, len 6091→6128). CAPTURE слеп к невидимому аккаунт-драфту (показывает placeholder); единственный надёжный детектор — READ_TRANSCRIPT (хвост-конкатенация). Загрязнение: +38 симв (текст пробы 0400).
+- РЕЗУЛЬТАТ UNLOCK-ЦЕПИ: conversation НЕ создана (url остаётся https://chat.z.ai/, /c/ нет) при ЧИСТОМ видимом композере → корневой блокер подтверждён 4-й раз и УТОЧНЁН: submit глушится невидимым драфтом, Enter проглатывается, typed-текст уходит в аккумуляцию.
+- НОВАЯ НАХОДКА (диагностический оверлей супервизора в DOM страницы, читается READ_TRANSCRIPT бесплатно): realtime_plane=running seq=4433; fleet desired=4, BOUND_UNVERIFIED=3, ACTIVE=1 (расходится с receipt lifecycle=4×ACTIVE — оверлей показывает provisioning-состояния); admission=? conversation=unbound — супервизор САМ признаёт conversation-биндинг несостоявшимся; per_tab роль-карта: tab_cf8d03cf=RESEARCHER-FLEET и др. Это богатый бесплатный канал телеметрии для будущих тиков.
+- Артефакты: scripts/phoenix/tick-probe-0400.py, browser-test-results-t0400.json (T01-T09, канал insert, все терминальны, issued_by=zai-live-test-419203).
+
+Stage Summary:
+- Статус механик НЕ ИЗМЕНИЛСЯ: 16 работает / 6 не работает / прочее не проверено. Корневой блокер целей 1-3 (submit→conversation) жив: 4-е воспроизведение.
+- ПРОТОКОЛ УТОЧНЁН для будущих тиков: (1) статус драфта определять ТОЛЬКО по READ_TRANSCRIPT (ищи "FLEET BOOTSTRAP FLUSH" в хвосте-конкатенации), CAPTURE-вердикт CLEAN недостоверен; (2) typing-пробы вновь заморожены до реальной очистки; (3) критерий очистки: транскрипт-хвост НЕ содержит FLUSH-сид И накопленных текстов прошлых проб.
+- Ремеди оператору прежнее + уточнение верификации: очистить composer + localStorage["chat-input-"] chat.z.ai, затем проверить READ_TRANSCRIPT (не CAPTURE). Дополнительно: при очистке учесть, что оверлей супервизора показывает conversation=unbound — после очистки ожидать transition в bound + появление /c/ в url после сабмита.
+- Позитив тика: census/перепись, бесплатная супервизор-телеметрия через оверлей, подтверждение ретаргет-безопасности READ_TRANSCRIPT (receipt tab_id совпадает).
