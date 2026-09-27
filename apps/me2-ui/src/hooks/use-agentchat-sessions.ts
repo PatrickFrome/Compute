@@ -55,6 +55,7 @@ let snapshot: AgentChatSnapshot = {
 const listeners = new Set<() => void>();
 let intervalId: number | null = null;
 let inFlight = false;
+const AGENTCHAT_FETCH_TIMEOUT_MS = 8_000;
 
 function emit() {
   for (const listener of listeners) listener();
@@ -68,6 +69,7 @@ async function loadAgentChat() {
   try {
     const data = await me2Fetch<{ sessions?: AgentChatSession[]; status?: AgentChatStatus }>(
       "/agentchat?XTransformPort=3041",
+      { signal: AbortSignal.timeout(AGENTCHAT_FETCH_TIMEOUT_MS) },
     );
     if (!data) {
       snapshot = { ...snapshot, loading: false, error: "daemon unavailable", updatedAt: Date.now() };
