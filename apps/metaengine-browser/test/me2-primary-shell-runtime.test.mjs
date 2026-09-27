@@ -280,8 +280,8 @@ test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy
   assert.equal(r85VisualHarness.includes('\\`'), false);
   assert.equal(r85VisualHarness.includes('\\${'), false);
   assert.match(r85VisualHarness, /withTimeout\(view\.webContents\.capturePage/);
-  assert.match(r85VisualHarness, /r85-command-1440x960/);
-  assert.match(r85VisualHarness, /r85-command-drawer-1440x960/);
+  assert.match(r85VisualHarness, /r95c-command-mission-1440x960/);
+  assert.match(r85VisualHarness, /r95c-run-utility-bottom-1440x960/);
 });
 
 test('R85 control-room chrome keeps closed overlays out of the semantic tree', () => {
