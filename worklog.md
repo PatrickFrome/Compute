@@ -10871,3 +10871,22 @@ Stage Summary:
 - Канонический рецепт создания чат-агента: NEW_TAB(https://chat.z.ai/) → CAPTURE → SEMANTIC_TYPE{role:textbox, submit_after_type:TRUE, text:<brief>} → (опц. Enter) → CAPTURE проверка /c/
 - DB-constraint 23514: RPC-allowlist даёт 400 supervisor_action_invalid → INSERT-fallback отбивается check-констрейнтом — 5 механик недоступны до правки allowlist/констрейнта (вне нашего контроля, нужна операторская миграция)
 - Артефакт: browser-test-results.json (полный), .prev бэкап прежнего
+
+---
+Task ID: BROWSER-TEST-20260928-0546-FULL
+Agent: Super Z (cron loop)
+Task: Job 419203 — полный прогон всех механик (фазы A/B/C/D) после unlock; переклассификация против целей 1–5
+
+Work Log:
+- Фаза A (12 read-only): 9 COMPLETED (CONTROL_CAPABILITIES v2.5.0-dev.1 [48 implemented], TAB_CENSUS 20 табов, SYSTEM_TELEMETRY, PROCESS_CENSUS seq=102402, GATE_STATUS [15 gates], SELF_UPDATE_STATUS CURRENT, DOWNLOAD_STATUS, DEV_PLANE_STATUS READY, FLEET_STATUS 4 ACTIVE); 3 DB-блок 23514: SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST
+- Фаза B: CAPTURE ✓, READ_TRANSCRIPT ✓ (флот-таб читает SUPERVISOR CONVERSATION SEED v1), FIND_IN_PAGE — DB-блок 23514
+- Фаза C (1-й прогон): NEW_TAB+FLEET_RECONCILE FAILED err=supervisor_action_budget_exceeded → НОВОЕ: у супервизора есть бюджет мутаций (rate-limit), паузы 10-19s между мутациями обязательны; после ~130s ожидания бюджет восстановился
+- Фаза C (2-й прогон): NEW_TAB✓(tab_ec2c7b50) SELECT_TAB✓ SEMANTIC_FOCUS✓ SEMANTIC_TYPE✓ PRESS_KEY✓(target=null!) NAVIGATE✓(20s) FLEET_RECONCILE✓(агенты 4); SET_ZOOM×2 — DB-блок 23514; НО submit раздельной цепочкой (type submit_after_type=False + PRESS_KEY Enter) НЕ создал разговор
+- A/B-тест на том же табе: SEMANTIC_TYPE(submit_after_type=True, replace_existing=True) односнимочно → /c/d9902597 создан ✓. ПРИЧИНА ПРЕЖНИХ ФЕЙЛОВ УТОЧНЕНА: PRESS_KEY Enter идёт с target=null и глотается; НАДЁЖНЫЙ ПУТЬ — односнимочный submit_after_type
+- Фаза D: FLEET_STATUS×2 ✓ (ACTIVE=4, rest 0), FLEET_RECONCILE(target 4) FAILED postcondition_not_confirmed:NO_EFFECT_PROVEN (флот уже у цели — no-op по дизайну строгого постусловия), SELF_UPDATE_CHECK ✓ COMPLETED state=CURRENT (hint 36315939303 < current 36336130139 — обновление не требуется)
+
+Stage Summary:
+- ИТОГОВАЯ КЛАССИФИКАЦИЯ 0546: работают=CAPTURE, READ_TRANSCRIPT, READ_STATE, TAB_CENSUS, FLEET_STATUS, SYSTEM_TELEMETRY, PROCESS_CENSUS, GATE_STATUS, SELF_UPDATE_STATUS/CHECK, DOWNLOAD_STATUS, DEV_PLANE_STATUS, NEW_TAB, SELECT_TAB, SEMANTIC_FOCUS, SEMANTIC_TYPE(+submit_after_type=НАДЁЖНЫЙ САБМИТ), PRESS_KEY(частично), NAVIGATE, FLEET_RECONCILE(только при target≠текущему); DB-блок 23514=SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST, FIND_IN_PAGE, SET_ZOOM; особые=supervisor_action_budget (пейсинг мутаций), RECONCILE no-op постусловие
+- Разговоры-агенты, созданные конвейером сегодня: /c/00868e19 (unlock 0536), /c/d9902597 (A/B 0546) — цель 1 (создание чат-агентов) МЕХАНИЧЕСКИ ДОСТИГНУТА
+- Протокол для флота: NEW_TAB → CAPTURE → SEMANTIC_TYPE(submit_after_type=True, replace_existing=True) с task-brief; PRESS_KEY-Enter НЕ использовать для сабмита; мутации с паузой ≥15-20s
+- Результаты: browser-test-results-t0546.json (+зеркало ossfs); шаблон подтверждён
