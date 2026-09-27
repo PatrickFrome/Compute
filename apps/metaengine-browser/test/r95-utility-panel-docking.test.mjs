@@ -129,10 +129,77 @@ test('R95 Browser-owned bridge remains narrow presentation-only geometry synchro
 });
 
 
-test('R95 physical visual harness captures both Bottom and Right Utility Panel states', () => {
-  assert.match(visualHarness, /utility-panel-dock-right/);
-  assert.match(visualHarness, /r95-command-utility-right-1440x960/);
+test('R95C physical visual harness captures COMMAND mission plus RUN Bottom and Right states', () => {
+  assert.match(visualHarness, /r95c-command-mission-1440x960/);
+  assert.match(visualHarness, /r95c-run-utility-bottom-1440x960/);
+  assert.match(visualHarness, /r95c-run-utility-right-1440x960/);
+  assert.match(visualHarness, /mission_control_verified:\s*true/);
+  assert.match(visualHarness, /run_surface_verified:\s*true/);
   assert.match(visualHarness, /utility_panel_bottom_verified:\s*true/);
   assert.match(visualHarness, /utility_panel_right_verified:\s*true/);
-  assert.match(visualHarness, /context_drawer_dock/);
+});
+
+
+test('R95C RUN owns native Browser geometry and releases telemetry before a Right Utility Panel', () => {
+  const closed = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R95_RUN',
+    me2_context_drawer_open: false,
+  });
+  assert.equal(closed.surface_profile, 'ME2_R95_RUN');
+  assert.ok(closed.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
+
+  const right = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R95_RUN',
+    me2_context_drawer_open: true,
+    me2_context_drawer_dock: 'RIGHT',
+    me2_context_drawer_width: 380,
+  });
+  assert.equal(right.me2_context_drawer_effective_open, true);
+  assert.equal(right.me2_context_drawer_effective_dock, 'RIGHT');
+  assert.equal(right.me2_context_drawer_width, 380);
+  assert.ok(right.adaptations.includes('ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL'));
+  assert.ok(right.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
+  assert.equal(right.overlay_remote_content, false);
+
+  const bottom = planShellLayout({
+    width: 1440,
+    height: 960,
+    state: normalizeShellLayoutState(),
+    surface_profile: 'ME2_R95_RUN',
+    me2_context_drawer_open: true,
+    me2_context_drawer_dock: 'BOTTOM',
+    me2_context_drawer_height: 200,
+  });
+  assert.equal(bottom.me2_context_drawer_effective_open, true);
+  assert.equal(bottom.me2_context_drawer_effective_dock, 'BOTTOM');
+  assert.equal(bottom.me2_context_drawer_height, 200);
+  assert.ok(bottom.remote_bounds.height >= 320);
+});
+
+test('R95C native Utility sync runs only on the legacy browser page that backs workflow RUN', () => {
+  assert.match(store, /if \(request\.page !== "browser"\)/);
+  assert.match(store, /if \(p === "browser"\) get\(\)\.syncContextDrawer\(\)/);
+  assert.doesNotMatch(store, /if \(request\.page !== "command"\)/);
+  assert.match(main, /primaryShellPage === 'browser' && primaryShellOverlayActive !== true/);
+  assert.match(main, /primaryShellPage === 'browser'[\s\S]{0,120}\? 'ME2_R95_RUN'/);
+});
+
+test('R95C splitter Escape-cancel and double-click reset are fenced across both dock axes', () => {
+  assert.match(panel, /const restore = \(\) => \{/);
+  assert.match(panel, /const cancel = restore/);
+  assert.match(panel, /window\.addEventListener\("keydown", onKey\)/);
+  assert.match(panel, /if \(keyEvent\.key !== "Escape"\) return/);
+  assert.match(panel, /onDoubleClick=\{resetByDoubleTap\}/);
+  assert.match(panel, /state\.workspace !== workspace \|\| state\.contextDrawerDock !== dock/);
+  assert.match(panel, /setWidth\(preferredWidth, true\)/);
+  assert.match(panel, /setHeight\(preferredHeight, true\)/);
+  assert.match(panel, /before:-inset-x-1\.5/);
+  assert.match(panel, /before:-inset-y-1\.5/);
+  assert.match(panel, /group-focus-visible:bg-cyan-500/);
 });
