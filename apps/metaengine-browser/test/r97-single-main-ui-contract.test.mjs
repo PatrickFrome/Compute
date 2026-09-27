@@ -76,8 +76,7 @@ test('R97 presentation bridge exposes bounded roster and exact actor selection w
 
 test('R97 renderer keeps only chat fleet + native site persistent; advanced surfaces are settings/search only', () => {
   assert.match(shell, /data-testid="chat-fleet-rail"/);
-  assert.match(shell, /data-testid="chat-supervisor-row"/);
-  assert.match(shell, /data-testid="chat-agent-row"/);
+  assert.match(shell, /data-testid=\{actor\.actor_type === "SUPERVISOR" \? "chat-supervisor-row" : "chat-agent-row"\}/);
   assert.match(shell, /data-testid="native-chat-surface-slot"/);
   assert.match(shell, /primaryChatFleetRoster/);
   assert.match(shell, /selectPrimaryChatActor/);
