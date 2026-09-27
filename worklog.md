@@ -10853,3 +10853,58 @@ Stage Summary:
 - Мины: ~10 старых new-chat табов всё ещё несут грязный draft (кандидаты на закрытие/NAVIGATE-reload позже)
 - Разблокированы цели 1–2: следующий tick может бутстрапить чат-агента (NEW_TAB → task-brief → submit) и проверять флот-конвейер end-to-end
 - Артефакты: browser-test-results-t0536.json (T01–T03, U-SCAN/U-TYPE/U-ENTER/U-CAP2/U-RESULT, V-RT, N-NEW/N-RT), скрипты tick-probe-0430.py + unlock-0536.py
+
+---
+Task ID: BROWSER-TEST-20260928-0600
+Agent: Super Z (cron loop)
+Task: Job 419203 — ПОЛНЫЙ прогон всех механик (фазы A/B/C/C3/D) после снятия блокера 05:36
+
+Work Log:
+- Phase A (12): 7 COMPLETED (CONTROL_CAPABILITIES, TAB_CENSUS, SYSTEM_TELEMETRY, GATE_STATUS, SELF_UPDATE_STATUS, DOWNLOAD_STATUS, FLEET_STATUS); 2 budget-throttled (PROCESS_CENSUS, DEV_PLANE_STATUS — supervisor_action_budget_exceeded, транзиторно); 3 DB-блок (SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST — check-constraint 23514 на INSERT-fallback)
+- Phase B (3): CAPTURE ✓, READ_TRANSCRIPT ✓; FIND_IN_PAGE ✗ (23514)
+- Phase C: NEW_TAB ✓ (tab_5134aa96, draft_state=CLEAN — впервые в C-фазе), SELECT_TAB ✓, SEMANTIC_FOCUS ✓, SEMANTIC_TYPE(replace_existing, submit_after_type=False) ✓, PRESS_KEY ✓, NAVIGATE ✓ (20s), FLEET_RECONCILE ✓; НО post-submit url=https://chat.z.ai/ → conversation_created=False (тип-без-submit + отдельный Enter = ненадёжно); SET_ZOOM ✗ (23514, ×2)
+- Phase C3 (ретрай на .ctx-табе tab_ec2c7b50): SEMANTIC_TYPE(submit_after_type=True) → PRESS_KEY → url=https://chat.z.ai/c/d9902597 → conversation_created=True (2-е подтверждение рецепта; 05:36 + 05:56)
+- Phase D: FLEET_RECONCILE(target=4) ✓, флот 4→4 (no-op подтверждён; C11 target=5 тоже не вырос), SELF_UPDATE_CHECK state=CURRENT (hint 36315939303.1, resolved_tag=null)
+
+Stage Summary:
+- ИТОГ: 17 механик работают (включая submit→conversation через submit_after_type=True — цели 1–2 разблокированы), 6 не работают (FIND_IN_PAGE, SET_ZOOM, SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST — все DB-constraint 23514; submit-путь с отдельным Enter), 2 budget-throttled (ретрай позже), mesh по-прежнему невидим
+- Канонический рецепт создания чат-агента: NEW_TAB(https://chat.z.ai/) → CAPTURE → SEMANTIC_TYPE{role:textbox, submit_after_type:TRUE, text:<brief>} → (опц. Enter) → CAPTURE проверка /c/
+- DB-constraint 23514: RPC-allowlist даёт 400 supervisor_action_invalid → INSERT-fallback отбивается check-констрейнтом — 5 механик недоступны до правки allowlist/констрейнта (вне нашего контроля, нужна операторская миграция)
+- Артефакт: browser-test-results.json (полный), .prev бэкап прежнего
+
+---
+Task ID: BROWSER-TEST-20260928-0546-FULL
+Agent: Super Z (cron loop)
+Task: Job 419203 — полный прогон всех механик (фазы A/B/C/D) после unlock; переклассификация против целей 1–5
+
+Work Log:
+- Фаза A (12 read-only): 9 COMPLETED (CONTROL_CAPABILITIES v2.5.0-dev.1 [48 implemented], TAB_CENSUS 20 табов, SYSTEM_TELEMETRY, PROCESS_CENSUS seq=102402, GATE_STATUS [15 gates], SELF_UPDATE_STATUS CURRENT, DOWNLOAD_STATUS, DEV_PLANE_STATUS READY, FLEET_STATUS 4 ACTIVE); 3 DB-блок 23514: SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST
+- Фаза B: CAPTURE ✓, READ_TRANSCRIPT ✓ (флот-таб читает SUPERVISOR CONVERSATION SEED v1), FIND_IN_PAGE — DB-блок 23514
+- Фаза C (1-й прогон): NEW_TAB+FLEET_RECONCILE FAILED err=supervisor_action_budget_exceeded → НОВОЕ: у супервизора есть бюджет мутаций (rate-limit), паузы 10-19s между мутациями обязательны; после ~130s ожидания бюджет восстановился
+- Фаза C (2-й прогон): NEW_TAB✓(tab_ec2c7b50) SELECT_TAB✓ SEMANTIC_FOCUS✓ SEMANTIC_TYPE✓ PRESS_KEY✓(target=null!) NAVIGATE✓(20s) FLEET_RECONCILE✓(агенты 4); SET_ZOOM×2 — DB-блок 23514; НО submit раздельной цепочкой (type submit_after_type=False + PRESS_KEY Enter) НЕ создал разговор
+- A/B-тест на том же табе: SEMANTIC_TYPE(submit_after_type=True, replace_existing=True) односнимочно → /c/d9902597 создан ✓. ПРИЧИНА ПРЕЖНИХ ФЕЙЛОВ УТОЧНЕНА: PRESS_KEY Enter идёт с target=null и глотается; НАДЁЖНЫЙ ПУТЬ — односнимочный submit_after_type
+- Фаза D: FLEET_STATUS×2 ✓ (ACTIVE=4, rest 0), FLEET_RECONCILE(target 4) FAILED postcondition_not_confirmed:NO_EFFECT_PROVEN (флот уже у цели — no-op по дизайну строгого постусловия), SELF_UPDATE_CHECK ✓ COMPLETED state=CURRENT (hint 36315939303 < current 36336130139 — обновление не требуется)
+
+Stage Summary:
+- ИТОГОВАЯ КЛАССИФИКАЦИЯ 0546: работают=CAPTURE, READ_TRANSCRIPT, READ_STATE, TAB_CENSUS, FLEET_STATUS, SYSTEM_TELEMETRY, PROCESS_CENSUS, GATE_STATUS, SELF_UPDATE_STATUS/CHECK, DOWNLOAD_STATUS, DEV_PLANE_STATUS, NEW_TAB, SELECT_TAB, SEMANTIC_FOCUS, SEMANTIC_TYPE(+submit_after_type=НАДЁЖНЫЙ САБМИТ), PRESS_KEY(частично), NAVIGATE, FLEET_RECONCILE(только при target≠текущему); DB-блок 23514=SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST, FIND_IN_PAGE, SET_ZOOM; особые=supervisor_action_budget (пейсинг мутаций), RECONCILE no-op постусловие
+- Разговоры-агенты, созданные конвейером сегодня: /c/00868e19 (unlock 0536), /c/d9902597 (A/B 0546) — цель 1 (создание чат-агентов) МЕХАНИЧЕСКИ ДОСТИГНУТА
+- Протокол для флота: NEW_TAB → CAPTURE → SEMANTIC_TYPE(submit_after_type=True, replace_existing=True) с task-brief; PRESS_KEY-Enter НЕ использовать для сабмита; мутации с паузой ≥15-20s
+- Результаты: browser-test-results-t0546.json (+зеркало ossfs); шаблон подтверждён
+
+---
+Task ID: BROWSER-TEST-20260928-0600b
+Agent: Super Z (cron loop)
+Task: Job 419203 — тик 06:00 + ДИРЕКТИВА оператора: «все агенты — ТОЛЬКО чат-агенты, остальное удалить, лимитов никаких»
+
+Work Log:
+- FLEET_STATUS detail: 4×ACTIVE = все чат-агенты (привязаны к GLM_CHAT табам), роли PLANNER(tab_fe50ead8)/RESEARCHER(tab_bc085d57)/IMPLEMENTER(tab_9f8b697d)/CRITIC(tab_6f7ea6e9); в флоте НЕ-чат агентов НЕТ — удалять нечего
+- policy: max_agents=null, hard_agent_cap=null (лимитов размера нет), spawn_burst_limit=8, capacity_model=ELASTIC_BACKLOG_DRIVEN, desired=4; off: direct_peer_messaging, automatic_work_retry, browser_authority, adopt_existing
+- FLEET_RECONCILE target=6: COMPLETED, policy desired_agents→6 ПРИНЯТ (лимитов нет подтверждено), но desired_slots=0 → флот 4→4: рост управляется БЭКЛОГОМ задач, не target'ом. Вывод: чтобы флот рос — скармливать задачи planner-у (FLEET TASK briefs)
+- CLOSE_TAB (первый тест): COMPLETED (12638ms) на мин-табе tab_a66fab40 (draft len=6128) — механика работает, мина снята
+- TAB_CENSUS после: total=21 {GLM_CHAT:20, LOCAL_DEV:1}; capabilities полный список: 48 действий (RELOAD, SCROLL, TYPED_CLICK, FLEET_SET_PROFILE, SET_SUPERVISOR_MODE, ARM/DISARM, GATE_*, SELF_UPDATE_APPLY, STOP_GENERATION, BACK/FORWARD, DEV_PLANE_* — кандидаты на тест в след. тиках)
+
+Stage Summary:
+- Директива оператора отражена: флот уже 100% чат-агенты (4/4, роли дев-команды); числовых лимитов нет (cap=null, burst=8, desired апдейтится); единственный «ограничитель» роста — отсутствие бэклога (backlog-driven модель)
+- Механики: +CLOSE_TAB работает (18 работающих), FLEET_RECONCILE-рост зависит от бэклога (не no-op, а backlog-gated)
+- След. шаги: FLEET_SET_PROFILE (вкл. direct_peer_messaging/automatic_work_retry — цели 2–3), тест RELOAD/SCROLL/TYPED_CLICK, раздача задач planner-у для роста флота
+- Артефакт: browser-test-results-t0600.json
