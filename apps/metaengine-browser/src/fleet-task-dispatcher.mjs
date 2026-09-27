@@ -235,12 +235,19 @@ export async function dispatchFleetTask({
     throw error;
   }
 
+  const agentSurfaceSha256 = String(agent?.transport_proof?.agent_surface_sha256 || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(agentSurfaceSha256)) {
+    const error = new Error('fleet_task_agent_surface_proof_missing');
+    error.receipt = receipt;
+    throw error;
+  }
   await fleet.markTransportProven({
     agent_id: task.agent_id,
     tab_id: tabId,
     target_id: targetId,
     generation_epoch: task.generation_epoch,
     conversation_url: post.url,
+    agent_surface_sha256: agentSurfaceSha256,
   });
   return { ...receipt, fleet: fleet.snapshot() };
 }
