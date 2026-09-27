@@ -43,8 +43,9 @@ GitHub's REST API documents workflow-run artifact listing as a collection and gi
 
 R96 release hardening:
 - when downloading by name from a completed producer, choose the newest same-name artifact by `created_at` with artifact id as a deterministic fallback, then keep the existing provenance verification;
-- when an in-progress producer resolution already observed an exact `artifact_id`, carry that id into download so later same-name artifacts cannot silently replace the resolved object;
-- fail closed if the exact artifact id disappears or the downloaded provenance does not match source head / run id / run number / run attempt;
+- on rerun attempts (>1), do not admit a same-name artifact whose `created_at` predates the current workflow attempt's `run_started_at`; this prevents an in-progress attempt from accidentally binding the previous attempt's still-visible artifact before the new candidate is uploaded;
+- when an in-progress producer resolution observes an exact current-attempt `artifact_id`, carry that id into download so later same-name artifacts cannot silently replace the resolved object;
+- fail closed if the current-attempt timestamp cannot be established, the exact artifact id disappears, or the downloaded provenance does not match source head / run id / run number / run attempt;
 - regression tests cover both duplicate same-name artifacts across attempts and exact artifact-id pinning.
 
 Primary sources:
