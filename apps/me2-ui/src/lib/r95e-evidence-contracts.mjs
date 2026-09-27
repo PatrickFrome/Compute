@@ -65,3 +65,55 @@ export function mergeExactTaskEvidenceEvents({
     .sort((a, b) => Number(b.seq) - Number(a.seq))
     .slice(0, boundedLimit);
 }
+
+
+/**
+ * Reduce one completed exact-task history fetch into presentation state.
+ * Returns null when the response is stale and must have zero state effect.
+ *
+ * @param {{
+ *   request:{seq:number,taskId:string},
+ *   current:{seq:number,taskId:string|null,streamTaskId:string|null},
+ *   fetchedEvents?:Array<any>|null,
+ *   liveStream?:Array<any>
+ * }} input
+ */
+export function reduceExactTaskHistoryResponse({
+  request,
+  current,
+  fetchedEvents = null,
+  liveStream = [],
+} = {}) {
+  if (!taskStreamResponseStillCurrent(request, current)) return null;
+
+  const stream = Array.isArray(liveStream) ? liveStream : [];
+  if (!Array.isArray(fetchedEvents)) {
+    return Object.freeze({
+      stream,
+      streamState: "DEGRADED",
+    });
+  }
+
+  const exactTaskId = String(request?.taskId ?? "");
+  const bySeq = new Map();
+  for (const event of fetchedEvents) {
+    if (String(event?.task_id ?? "") !== exactTaskId) continue;
+    const seq = Number(event?.seq);
+    if (!Number.isSafeInteger(seq)) continue;
+    bySeq.set(seq, event);
+  }
+  // Live rows are newer observations and therefore win duplicate sequence ids.
+  for (const event of stream) {
+    if (String(event?.task_id ?? "") !== exactTaskId) continue;
+    const seq = Number(event?.seq);
+    if (!Number.isSafeInteger(seq)) continue;
+    bySeq.set(seq, event);
+  }
+
+  return Object.freeze({
+    stream: [...bySeq.values()]
+      .sort((a, b) => Number(a.seq) - Number(b.seq))
+      .slice(-200),
+    streamState: "EXACT",
+  });
+}
