@@ -194,7 +194,7 @@ test('Browser-owned ME2 UI cannot start the legacy daemon watchdog', async () =>
   const instrumentation = await fs.readFile(path.join(repoRoot, 'apps', 'me2-ui', 'src', 'instrumentation.ts'), 'utf8');
   assert.match(instrumentation, /ME2_HOSTED_BY_BROWSER/);
   assert.match(instrumentation, /ME2_WATCHDOG/);
-  assert.ok(instrumentation.indexOf('ME2_HOSTED_BY_BROWSER') < instrumentation.indexOf('me2-watchdog'));
+  assert.ok(instrumentation.indexOf('ME2_HOSTED_BY_BROWSER') < instrumentation.indexOf('await import("./me2-watchdog")'));
 });
 
 test('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
