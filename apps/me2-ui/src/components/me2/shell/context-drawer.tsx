@@ -243,8 +243,8 @@ export function ContextDrawer() {
 
   return (
     <section
-      className={`flex shrink-0 flex-col bg-[#09090b] ${
-        dock === "right" ? "border-l border-zinc-800" : "border-t border-zinc-800"
+      className={`flex shrink-0 bg-[#09090b] ${
+        dock === "right" ? "flex-row border-l border-zinc-800" : "flex-col border-t border-zinc-800"
       }`}
       style={dock === "right" ? { width: `${width}px` } : { height: `${height}px` }}
       data-testid="context-drawer"
@@ -278,6 +278,7 @@ export function ContextDrawer() {
         }`} />
       </div>
 
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="utility-panel-body">
       <div className="flex h-8 shrink-0 items-center border-b border-zinc-800/80 px-2">
         <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto mc-scroll" role="tablist" aria-label="Utility Panel tabs">
           {TABS.map(({ key, label, icon: Icon }) => (
@@ -447,6 +448,7 @@ export function ContextDrawer() {
             </div>
           </div>
         ) : null}
+      </div>
       </div>
     </section>
   );
