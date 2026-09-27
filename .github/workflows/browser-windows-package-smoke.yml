@@ -154,6 +154,7 @@ jobs:
               -or $evidence.closed_overlays_absent_from_dom -ne $true `
               -or $evidence.r85_geometry_verified -ne $true `
               -or $evidence.drawer_interaction_verified -ne $true `
+              -or $evidence.broken_image_fallback_hidden -ne $true `
               -or $evidence.presentation_only -ne $true `
               -or $evidence.authority_effect -ne $false) {
             throw 'r85_visual_evidence_contract_invalid'
