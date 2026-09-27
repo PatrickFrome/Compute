@@ -294,6 +294,185 @@ function EventLogPanel() {
   );
 }
 
+
+type EvidenceTimelineRow = {
+  key: string;
+  at: string;
+  kind: "TASK" | "EVENT" | "VERDICT";
+  label: string;
+  detail: string;
+  bad: boolean;
+  seq?: number;
+};
+
+function EvidenceTimelinePanel({
+  verdicts,
+  chain,
+  ci,
+  otel,
+}: {
+  verdicts: VdT | null;
+  chain: ChainVerifyT | null;
+  ci: CiT | null;
+  otel: OtelT | null;
+}) {
+  const snap = useMe2((s) => s.snap);
+  const events = useMe2((s) => s.events);
+  const inspectedTaskId = useMe2((s) => s.inspectedTaskId);
+  const openTask = useMe2((s) => s.openTask);
+  const setPage = useMe2((s) => s.setPage);
+
+  const task = useMemo(() => {
+    if (!inspectedTaskId) return null;
+    return snap?.tasks.find((row) => row.id === inspectedTaskId)
+      ?? (snap?.archived ?? []).find((row) => row.id === inspectedTaskId)
+      ?? null;
+  }, [inspectedTaskId, snap]);
+
+  const rows = useMemo<EvidenceTimelineRow[]>(() => {
+    if (!inspectedTaskId) return [];
+    const out: EvidenceTimelineRow[] = [];
+    if (task) {
+      out.push({
+        key: \`task:\${task.id}\`,
+        at: task.updated_at,
+        kind: "TASK",
+        label: \`\${task.status} · \${task.title}\`,
+        detail: task.error?.trim() || task.result?.trim() || \`step \${task.steps}/\${task.max_steps}\`,
+        bad: task.status === "FAILED" || task.status === "CANCELLED",
+      });
+    }
+    for (const event of events.filter((row) => row.task_id === inspectedTaskId).slice(0, 40)) {
+      out.push({
+        key: \`event:\${event.seq}\`,
+        at: event.ts,
+        kind: "EVENT",
+        label: event.type,
+        detail: event.data || \`event seq \${event.seq}\`,
+        bad: EVENT_ATTENTION_TOKENS.some((token) => \`\${event.type} \${event.data ?? ""}\`.toUpperCase().includes(token)),
+        seq: event.seq,
+      });
+    }
+    for (const verdict of (verdicts?.verdicts ?? []).filter((row) => row.task_id === inspectedTaskId).slice(0, 24)) {
+      out.push({
+        key: \`verdict:\${verdict.seq}\`,
+        at: verdict.at,
+        kind: "VERDICT",
+        label: \`verdict #\${verdict.seq}\`,
+        detail: verdict.reasons?.length ? verdict.reasons.join(" · ") : "verdict recorded",
+        bad: Boolean(verdict.reasons?.length),
+        seq: verdict.seq,
+      });
+    }
+    return out
+      .sort((a, b) => {
+        const atA = Number.isFinite(new Date(a.at).getTime()) ? new Date(a.at).getTime() : 0;
+        const atB = Number.isFinite(new Date(b.at).getTime()) ? new Date(b.at).getTime() : 0;
+        if (atB !== atA) return atB - atA;
+        return (b.seq ?? 0) - (a.seq ?? 0);
+      })
+      .slice(0, 48);
+  }, [events, inspectedTaskId, task, verdicts]);
+
+  const openExactTask = useCallback(() => {
+    if (!inspectedTaskId) return;
+    openTask(inspectedTaskId);
+    setPage("tasks");
+  }, [inspectedTaskId, openTask, setPage]);
+
+  const chainLabel = chain == null ? "chain ?" : chain.ok ? \`chain ✓ \${chain.checked}\` : \`chain ✗ \${chain.broken_at ?? "?"}\`;
+  const ciLabel = ci == null ? "CI ?" : \`CI \${ci.verdict}\`;
+  const otelLabel = otel == null ? "spans ?" : \`spans \${otel.spans} · drop \${otel.dropped}\`;
+
+  return (
+    <Sec
+      id="obs-evidence-timeline"
+      title="RUN·EVIDENCE"
+      icon={Activity}
+      tone="cyan"
+      right={(
+        <span className="font-mono text-[9px] text-zinc-500">
+          {inspectedTaskId ? "exact task binding" : "no task selected"}
+        </span>
+      )}
+    >
+      <div
+        data-testid="evidence-timeline"
+        data-bound-task-id={inspectedTaskId ?? ""}
+        data-binding-mode={inspectedTaskId ? "EXACT_TASK_ID" : "UNBOUND"}
+        className="space-y-2"
+      >
+        <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 font-mono text-[9px]">
+          <span className={chain?.ok === true ? "text-emerald-400" : chain?.ok === false ? "text-rose-400" : "text-zinc-600"}>{chainLabel}</span>
+          <span className="text-zinc-800">·</span>
+          <span className="text-zinc-500" title="CI status is ambient evidence and is not joined to the selected task without an explicit identity binding">{ciLabel} ambient</span>
+          <span className="text-zinc-800">·</span>
+          <span className="text-zinc-500" title="OTel aggregate is ambient evidence and is not treated as task-causal">{otelLabel} ambient</span>
+        </div>
+
+        {!inspectedTaskId ? (
+          <div className="rounded border border-dashed border-zinc-800 px-2 py-3 text-center">
+            <p className="text-[11px] text-zinc-500">Выберите задачу в COMMAND или PLAN, чтобы собрать её exact evidence timeline.</p>
+            <p className="mt-1 font-mono text-[9px] text-zinc-700">no heuristic joins · no inferred CI ownership · read only</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 rounded border border-zinc-800/70 bg-zinc-950/60 px-2 py-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[11px] font-medium text-zinc-200" title={task?.title ?? inspectedTaskId}>
+                  {task?.title ?? inspectedTaskId}
+                </div>
+                <div className="mt-0.5 font-mono text-[9px] text-zinc-600">
+                  task {inspectedTaskId.slice(0, 16)}{task?.agent_id ? \` · agent \${task.agent_id.slice(0, 12)}\` : ""}{task?.status ? \` · \${task.status}\` : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openExactTask}
+                data-testid="evidence-open-plan"
+                className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] uppercase text-cyan-300 transition hover:border-cyan-800 hover:bg-cyan-950/20"
+                title="Open exact task in PLAN"
+              >
+                plan →
+              </button>
+            </div>
+
+            <div className="mc-scroll max-h-40 space-y-0.5 overflow-y-auto pr-1" role="list" aria-label="Exact task evidence timeline">
+              {rows.map((row) => (
+                <div
+                  key={row.key}
+                  role="listitem"
+                  className="grid grid-cols-[42px_64px_minmax(0,1fr)] items-start gap-1.5 rounded px-1.5 py-1 font-mono text-[9px] hover:bg-zinc-900/60"
+                  data-evidence-kind={row.kind}
+                >
+                  <span className="text-zinc-700">{row.at ? hhmmss(row.at) : "—"}</span>
+                  <span className={row.bad ? "text-rose-400" : row.kind === "VERDICT" ? "text-violet-400" : row.kind === "TASK" ? "text-cyan-400" : "text-emerald-400/90"}>
+                    {row.kind}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-zinc-300" title={row.label}>{row.label}</span>
+                    <span className="block truncate text-zinc-600" title={row.detail}>{row.detail}</span>
+                  </span>
+                </div>
+              ))}
+              {rows.length === 0 ? (
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[9px] text-zinc-600">
+                  exact task selected · evidence rows not observed yet
+                </div>
+              ) : null}
+            </div>
+          </>
+        )}
+
+        <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
+          causal rows require exact task_id equality; CI and aggregate OTel stay ambient until a stronger persisted binding exists
+        </div>
+      </div>
+    </Sec>
+  );
+}
+
+
 // ── страница ────────────────────────────────────────────────────────────────────
 export function ObservabilityPage() {
   const snap = useMe2((s) => s.snap);
@@ -415,9 +594,14 @@ export function ObservabilityPage() {
       <PageHeader title="OBSERVABILITY" sub="журнал · шина · ingress · аудит · здоровье" />
       <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
 
-        {/* ── ЛЕВО: EVENT LOG ── */}
-        <div className="flex min-h-0 flex-1 flex-col lg:flex-[2] [&>section]:min-h-0 [&>section]:flex-1" data-testid="panel-log">
-          <EventLogPanel />
+        {/* ── ЛЕВО: EXACT TASK EVIDENCE + EVENT LOG ── */}
+        <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-[2]" data-testid="panel-log">
+          <div className="shrink-0">
+            <EvidenceTimelinePanel verdicts={vd} chain={evChain} ci={ciData} otel={otel} />
+          </div>
+          <div className="min-h-0 flex-1 [&>section]:h-full [&>section]:min-h-0">
+            <EventLogPanel />
+          </div>
         </div>
 
         {/* ── ЦЕНТР: BUS + INGRESS ── */}
