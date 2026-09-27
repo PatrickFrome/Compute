@@ -106,11 +106,11 @@ function registerPresentationIpc() {
 async function waitFor(contents, expression, timeoutMs = 20000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const ok = await contents.executeJavaScript(\`Boolean(\${expression})\`);
+    const ok = await contents.executeJavaScript(`Boolean(${expression})`);
     if (ok) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(\`r85_visual_wait_timeout:\${expression}\`);
+  throw new Error(`r85_visual_wait_timeout:${expression}`);
 }
 
 async function settle(contents) {
@@ -125,7 +125,7 @@ async function settle(contents) {
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
 async function metrics(contents) {
-  return contents.executeJavaScript(\`(() => {
+  return contents.executeJavaScript(`(() => {
     const rect = (id) => {
       const el = document.querySelector('[data-testid="' + id + '"]');
       if (!el) return null;
@@ -147,15 +147,15 @@ async function metrics(contents) {
       page: document.querySelector('[data-testid="page-outlet"]')?.getAttribute('data-page') || null,
       body_background: getComputedStyle(document.body).backgroundColor,
     };
-  })()\`);
+  })()`);
 }
 
 async function capture(view, name) {
   await settle(view.webContents);
   const image = await withTimeout(view.webContents.capturePage(), 10_000, `capture_page:${name}`);
   const png = image.toPNG();
-  if (png.length < 4096) throw new Error(\`r85_visual_png_too_small:\${name}:\${png.length}\`);
-  const file = path.join(OUTPUT_ROOT, \`\${name}.png\`);
+  if (png.length < 4096) throw new Error(`r85_visual_png_too_small:${name}:${png.length}`);
+  const file = path.join(OUTPUT_ROOT, `${name}.png`);
   await fs.writeFile(file, png);
   return Object.freeze({
     name,
@@ -168,11 +168,11 @@ async function capture(view, name) {
 
 function assertBaseMetrics(row) {
   const m = row.metrics;
-  if (Math.round(m?.topbar?.height || 0) !== 42) throw new Error(\`r85_visual_topbar_height:\${m?.topbar?.height}\`);
-  if (Math.round(m?.pagebar?.height || 0) !== 36) throw new Error(\`r85_visual_pagebar_height:\${m?.pagebar?.height}\`);
-  if (Math.round(m?.statusbar?.height || 0) !== 22) throw new Error(\`r85_visual_statusbar_height:\${m?.statusbar?.height}\`);
-  if (Math.round(m?.agent_sidebar?.width || 0) !== 252) throw new Error(\`r85_visual_agent_sidebar_width:\${m?.agent_sidebar?.width}\`);
-  if (m?.page !== 'command') throw new Error(\`r85_visual_page:\${m?.page}\`);
+  if (Math.round(m?.topbar?.height || 0) !== 42) throw new Error(`r85_visual_topbar_height:${m?.topbar?.height}`);
+  if (Math.round(m?.pagebar?.height || 0) !== 36) throw new Error(`r85_visual_pagebar_height:${m?.pagebar?.height}`);
+  if (Math.round(m?.statusbar?.height || 0) !== 22) throw new Error(`r85_visual_statusbar_height:${m?.statusbar?.height}`);
+  if (Math.round(m?.agent_sidebar?.width || 0) !== 252) throw new Error(`r85_visual_agent_sidebar_width:${m?.agent_sidebar?.width}`);
+  if (m?.page !== 'command') throw new Error(`r85_visual_page:${m?.page}`);
   if (!m?.context_drawer_toggle || !m?.sidebar_toggle || !m?.attention_button) throw new Error('r85_visual_global_controls_missing');
   if (m?.palette_mounted) throw new Error('r85_visual_closed_overlay_semantic_pollution');
 }
@@ -203,12 +203,12 @@ async function main() {
 
   const host = await withTimeout(startMe2UiHost(), 25_000, 'start_ui_host');
   if (!['HEALTHY', 'ADOPTED'].includes(host.state)) {
-    throw new Error(\`r85_visual_ui_host_not_ready:\${JSON.stringify(host)}\`);
+    throw new Error(`r85_visual_ui_host_not_ready:${JSON.stringify(host)}`);
   }
   markPhase('START_GATEWAY');
   const gateway = await withTimeout(startMe2UiGateway(), 10_000, 'start_gateway');
   if (gateway.state !== 'LIVE' || !gateway.url) {
-    throw new Error(\`r85_visual_gateway_not_ready:\${JSON.stringify(gateway)}\`);
+    throw new Error(`r85_visual_gateway_not_ready:${JSON.stringify(gateway)}`);
   }
 
   const windowRef = new BaseWindow({
@@ -255,7 +255,7 @@ async function main() {
     const drawer = await capture(shellView, 'r85-command-drawer-1440x960');
     assertBaseMetrics(drawer);
     const drawerHeight = Math.round(drawer.metrics?.context_drawer?.height || 0);
-    if (drawerHeight < 160 || drawerHeight > 360) throw new Error(\`r85_visual_drawer_height:\${drawerHeight}\`);
+    if (drawerHeight < 160 || drawerHeight > 360) throw new Error(`r85_visual_drawer_height:${drawerHeight}`);
 
     const evidence = Object.freeze({
       schema: 'metaengine.browser.r85-visual-evidence.v1',
@@ -274,7 +274,7 @@ async function main() {
       presentation_only: true,
       authority_effect: false,
     });
-    await fs.writeFile(path.join(OUTPUT_ROOT, 'r85-visual-evidence.json'), \`\${JSON.stringify(evidence, null, 2)}\\n\`);
+    await fs.writeFile(path.join(OUTPUT_ROOT, 'r85-visual-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
     console.log(JSON.stringify(evidence));
   } finally {
     markPhase('SHUTDOWN');
