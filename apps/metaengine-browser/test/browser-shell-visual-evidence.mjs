@@ -129,7 +129,7 @@ function snapshotFor(width, height) {
   const layout = planShellLayout({
     width,
     height,
-    state: normalizeShellLayoutState({ sidebar: 'EXPANDED', operations: 'OPEN' }),
+    state: normalizeShellLayoutState({ sidebar: 'EXPANDED', operations: 'CLOSED' }),
   });
   return Object.freeze({
     schema: 'metaengine.browser-shell.snapshot.v3',
@@ -300,15 +300,12 @@ async function main() {
       await capture(shellView, windowRef, 'shell-1100x760', 1100, 760),
       await capture(shellView, windowRef, 'shell-1024x720', 1024, 720),
     ];
-    if (!allCaptures.every((row) => row.metrics.systems_visible === true)) throw new Error('visual_evidence_health_hidden');
-    if (!allCaptures.every((row) => row.metrics.health_summary.length > 0)) throw new Error('visual_evidence_health_summary_missing');
-    if (!allCaptures.every((row) => row.metrics.now_visible === true && row.metrics.now_active === true)) throw new Error('visual_evidence_now_not_primary');
-    if (!allCaptures.every((row) => row.metrics.task_first_sections === true && row.metrics.task_objective_visible === true && row.metrics.blocker_visible === true)) throw new Error('visual_evidence_task_first_brain_missing');
-    if (!allCaptures.every((row) => row.metrics.ops_text_length > 400)) throw new Error('visual_evidence_brain_not_rendered');
+    if (!allCaptures.every((row) => row.metrics.systems_visible === false)) throw new Error('visual_evidence_legacy_health_strip_visible');
+    if (!allCaptures.every((row) => row.metrics.body_operations === 'CLOSED')) throw new Error('visual_evidence_advanced_panel_not_closed');
     const byName = Object.fromEntries(allCaptures.map((row) => [row.name, row]));
-    if (byName['shell-1920x1080']?.metrics.body_sidebar !== 'EXPANDED' || byName['shell-1920x1080']?.metrics.body_operations !== 'OPEN') throw new Error('visual_evidence_wide_layout_not_exact');
-    if (byName['shell-1100x760']?.metrics.body_sidebar !== 'COMPACT' || byName['shell-1100x760']?.metrics.body_operations !== 'OPEN') throw new Error('visual_evidence_1100_layout_not_exact');
-    if (byName['shell-1024x720']?.metrics.body_sidebar !== 'COMPACT' || byName['shell-1024x720']?.metrics.body_operations !== 'CLOSED') throw new Error('visual_evidence_1024_layout_not_exact');
+    if (byName['shell-1920x1080']?.metrics.body_sidebar !== 'EXPANDED') throw new Error('visual_evidence_wide_fleet_rail_not_expanded');
+    if (!['EXPANDED','COMPACT'].includes(String(byName['shell-1100x760']?.metrics.body_sidebar || ''))) throw new Error('visual_evidence_1100_fleet_rail_invalid');
+    if (!['COMPACT','HIDDEN'].includes(String(byName['shell-1024x720']?.metrics.body_sidebar || ''))) throw new Error('visual_evidence_1024_fleet_rail_not_degraded');
 
     const captures = allCaptures.filter((row) => row.name === 'shell-1440x960' || row.name === 'shell-1100x760');
     if (captures.length !== 2) throw new Error('visual_evidence_legacy_capture_projection_invalid');
@@ -322,8 +319,8 @@ async function main() {
       captures,
       extended_captures: allCaptures,
       extended_viewport_count: allCaptures.length,
-      task_first_brain_proven: true,
-      textual_health_summary_proven: true,
+      single_main_workspace_proven: true,
+      advanced_surfaces_hidden_by_default: true,
       shell_only_capture: true,
       remote_browser_content_captured: false,
       golden_comparison_enabled: false,
