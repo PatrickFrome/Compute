@@ -107,6 +107,7 @@ function registerPresentationIpc() {
       dock: drawerDock,
       drawer_height: drawerDock === 'bottom' ? drawerHeight : 0,
       drawer_width: drawerDock === 'right' ? drawerWidth : 0,
+      run_inspector_visible: page === 'browser' && !(drawerOpen && drawerDock === 'right'),
       presentation_only: true,
       authority_effect: false,
     });
@@ -160,6 +161,7 @@ async function metrics(contents) {
       mission_objective: rect('mission-objective-card'),
       mission_active_work: rect('mission-active-work'),
       browser_shell: rect('browser-shell'),
+      run_telemetry_inspector: rect('run-telemetry-inspector'),
       context_drawer: rect('context-drawer'),
       utility_panel_body: rect('utility-panel-body'),
       context_drawer_dock: document.querySelector('[data-testid="context-drawer"]')?.getAttribute('data-drawer-dock') || null,
@@ -222,6 +224,11 @@ function assertBaseMetrics(row) {
   if (m?.page === 'browser') {
     if (!m?.browser_shell || Math.round(m.browser_shell.width || 0) < 500 || Math.round(m.browser_shell.height || 0) < 300) {
       throw new Error(`r95c_visual_run_browser_missing:${JSON.stringify(m?.browser_shell)}`);
+    }
+    if (m?.context_drawer_dock === 'right') {
+      if (m?.run_telemetry_inspector != null) throw new Error('r95c2_visual_right_utility_must_release_telemetry');
+    } else if (!m?.run_telemetry_inspector || Math.round(m.run_telemetry_inspector.width || 0) < 300) {
+      throw new Error(`r95c2_visual_native_readback_telemetry_missing:${JSON.stringify(m?.run_telemetry_inspector)}`);
     }
     return;
   }
