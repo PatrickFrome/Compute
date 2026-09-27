@@ -1,19 +1,14 @@
-// Agent-platform task configuration contract — the New Task provisioning
-// surface model for the GLM agent platform (chat.z.ai).
+import { classifyAgentPlatformSurface } from './browser-agent-platform.mjs';
+
+// Agent-platform task configuration contract — z.ai Agent-surface provisioning.
 //
-// Operator directive (2026-09-19): browser agents are created through the
-// New Task flow with the Full-Stack and Long-running Tasks options enabled
-// (model GLM-5.3 full is selected by the operator and persisted by the
-// site). Live recon (2026-09-19) established:
-//   - the signed-in root surface IS the agent task surface (composer
-//     "What can I build you?"/"How can I help you today?", suggestion
-//     cards, Deep Think / Max chips);
-//   - the agent-task composer IGNORES synthetic editing keys but honors
-//     Enter for submit (see the D-M3 click-select replace gesture);
-//   - the exact accessible names of the Full-Stack / Long-running toggles
-//     and the database attachment section are finalized from a post-deploy
-//     recon of the task creation dialog (the deployed browser build was too
-//     old to explore the dialog reliably).
+// R97 live correction (2026-09-28): the ordinary signed-in root is the Chat
+// surface and MUST NOT be treated as an Agent task surface. The Agent product
+// is SPA state on the same https://chat.z.ai/ URL and direct /agent navigation
+// fails. Therefore URL/title are insufficient authority: Agent readiness is
+// proven from exact semantic controls (Agent + New Task + template/model
+// evidence). New Task configuration remains separately gated until its own
+// post-activation controls are physically observed.
 //
 // Operator note (2026-09-19, live): NEW AGENTS DO NOT SEE ALL DATABASES
 // RIGHT AWAY — the database list of a freshly created task populates
@@ -24,6 +19,70 @@
 // missing set.
 
 export const AGENT_PLATFORM_TASK_CONFIG_SCHEMA = 'metaengine.browser.agent-platform.task-config.v1';
+
+export const AGENT_HOME_CONTROLS = Object.freeze({
+  agent_nav: Object.freeze({ role: 'button', name: 'Agent' }),
+  new_task: Object.freeze({ role: 'button', name: 'New Task' }),
+  model_selector: Object.freeze({ role: 'button', name: 'Select a model' }),
+  full_stack_template: Object.freeze({ role: 'button', name: 'Full-Stack' }),
+});
+
+function exactNamedTarget(frame, { role, name }) {
+  const rows = (Array.isArray(frame?.semantic_targets) ? frame.semantic_targets : [])
+    .filter((row) => String(row?.role || '').toLowerCase() === String(role || '').toLowerCase()
+      && String(row?.name || '') === String(name || ''));
+  return rows.length === 1 ? rows[0] : null;
+}
+
+export function classifyAgentPlatformTaskSurface(frame) {
+  const transport = classifyAgentPlatformSurface(frame?.url);
+  if (!transport) return Object.freeze({ stage: 'NOT_AGENT_PLATFORM', proven: false, authority_effect: false });
+  if (transport.stage === 'CONVERSATION') {
+    return Object.freeze({ stage: 'CONVERSATION', proven: true, authority_effect: false });
+  }
+  if (transport.stage !== 'PRECONVERSATION_ROOT') {
+    return Object.freeze({ stage: 'OTHER', proven: false, authority_effect: false });
+  }
+
+  const agentNav = exactNamedTarget(frame, AGENT_HOME_CONTROLS.agent_nav);
+  const newTask = exactNamedTarget(frame, AGENT_HOME_CONTROLS.new_task);
+  const fullStack = exactNamedTarget(frame, AGENT_HOME_CONTROLS.full_stack_template);
+  const modelSelector = exactNamedTarget(frame, AGENT_HOME_CONTROLS.model_selector);
+  const agentHome = Boolean(agentNav && newTask && fullStack && modelSelector);
+
+  return Object.freeze({
+    stage: agentHome ? 'AGENT_HOME' : 'CHAT_ROOT',
+    proven: agentHome,
+    controls: Object.freeze({
+      agent_nav: agentNav ? structuredClone(agentNav) : null,
+      new_task: newTask ? structuredClone(newTask) : null,
+      model_selector: modelSelector ? structuredClone(modelSelector) : null,
+      full_stack_template: fullStack ? structuredClone(fullStack) : null,
+    }),
+    url_only_authority: false,
+    authority_effect: false,
+  });
+}
+
+export function resolveAgentHomeControls(frame) {
+  const surface = classifyAgentPlatformTaskSurface(frame);
+  if (surface.stage !== 'AGENT_HOME' || surface.proven !== true) {
+    return Object.freeze({
+      schema: 'metaengine.browser.agent-platform.agent-home-controls.v1',
+      ready: false,
+      stage: surface.stage,
+      controls: surface.controls || null,
+      authority_effect: false,
+    });
+  }
+  return Object.freeze({
+    schema: 'metaengine.browser.agent-platform.agent-home-controls.v1',
+    ready: true,
+    stage: 'AGENT_HOME',
+    controls: surface.controls,
+    authority_effect: false,
+  });
+}
 
 // Named-control contract for the New Task configuration surface. Unnamed
 // controls are NOT addressable through this contract — they need a fresh
@@ -171,16 +230,14 @@ export function agentPlatformTaskConfigSnapshot() {
   return Object.freeze({
     schema: AGENT_PLATFORM_TASK_CONFIG_SCHEMA,
     platform: 'GLM_ZAI',
-    task_creation_surface: 'PRECONVERSATION_ROOT',
-    // R-DRAFT-FOCUS (live 2026-09-21): the composer honors CDP key events when
-    // the element is FOCUSED (Ctrl+A+Delete select-all+clear proven live on a
-    // 48286-char draft) — the historical "ignores synthetic keys" observation
-    // was unfocused keys landing on <body>. KEY_ATOMIC (focus → Ctrl+A →
-    // Delete → insertText) is the root replace gesture; triple-click only
-    // selects one line on the current editor.
-    composer_ignores_synthetic_editing_keys: false,
-    composer_enter_submits: true,
-    replace_gesture_root_surface: 'KEY_ATOMIC',
+    task_creation_surface: 'AGENT_HOME_NEW_TASK_FLOW',
+    ordinary_root_is_task_surface: false,
+    agent_home_proof: 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS',
+    agent_home_controls: AGENT_HOME_CONTROLS,
+    task_config_surface_state: 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION',
+    composer_ignores_synthetic_editing_keys: null,
+    composer_enter_submits: null,
+    replace_gesture_root_surface: null,
     database_visibility: 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED',
     controls: TASK_CONFIG_CONTROLS,
     authority_effect: false,
