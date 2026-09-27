@@ -463,103 +463,279 @@ export class DevOsNativeTaskCycle {
       if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_transport_promotion_target_drift');
 
       if (transport.stage === 'CONVERSATION') {
-        const expectedHash = sha256(transport.url);
-        localProof = await markFleetTransportProvenFromNativeFrame({
-          binding,
-          frame,
-          expected_transport_url_sha256: expectedHash,
-        });
-        if (!['PROVEN', 'ALREADY_ACTIVE'].includes(String(localProof?.state || ''))) {
-          throw new Error('devos_transport_promotion_local_proof_invalid');
-        }
+        // A bare /c/<id> proves only a conversation URL. It does NOT prove
+        // that this session originated from z.ai Agent mode. Old Chat workers
+        // and restart-demoted tabs therefore stay fenced until a durable
+        // Agent-origin proof can be reconciled.
         result = {
-          state: 'LOCAL_ACTIVE',
+          state: 'LOCAL_CONVERSATION_AGENT_ORIGIN_UNPROVEN',
           ...binding,
           lease_id: lease.lease_id,
           transport_stage: 'CONVERSATION',
-          transport_url_sha256: expectedHash,
-          conversation_url_sha256: expectedHash,
-          local_proof_state: localProof.state,
+          conversation_url_sha256: sha256(transport.url),
+          reason: 'AGENT_SURFACE_ORIGIN_PROOF_REQUIRED',
           automatic_retry_allowed: false,
           authority_effect: false,
         };
       } else if (transport.stage === 'PRECONVERSATION_ROOT') {
-        const composer = resolveAgentPlatformComposer(frame);
-        if (!composer?.semantic_ref) {
-          result = {
-            state: 'LOCAL_PRECONVERSATION_NOT_READY',
-            ...binding,
-            lease_id: lease.lease_id,
-            transport_stage: 'PRECONVERSATION_ROOT',
-            reason: 'COMPOSER_NOT_EXACTLY_RESOLVED',
-            automatic_retry_allowed: false,
-            authority_effect: false,
-          };
-        } else {
-          // Write-ahead barrier BEFORE the first physical conversation-creation
-          // effect. If Browser dies or the Enter outcome is unknown, this
-          // generation remains durable PROVISIONING_AMBIGUOUS and cannot be
-          // auto-submitted again after restart.
-          await beginFleetTransportBootstrapAttempt(binding);
-          bootstrapBarrier = true;
+        let agentSurface = resolveAgentPlatformAgentSurface(frame);
+        let agentSurfaceSha256 = null;
 
-          const submitted = await this.#executeCommand({
-            action: 'SEMANTIC_TYPE',
-            platform: AGENT_PLATFORM_ID,
-            payload: {
-              tab_id: binding.tab_id,
-              role: composer.role,
-              accessible_name: composer.accessible_name,
-              semantic_ref: composer.semantic_ref,
-              text: GLM_ROOT_CONVERSATION_SEED,
-              replace_existing: true,
-              submit_after_type: true,
-            },
-          });
-          bootstrapEffectState = String(submitted?.effect_state || '');
-          frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
-          transport = transportUrl(frame?.url);
-          if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
-            throw new Error('devos_transport_bootstrap_target_drift');
-          }
-
-          if (transport?.stage !== 'CONVERSATION') {
+        // Step 1: enter z.ai Agent SPA. Agent and Chat share the same URL, so
+        // success is proven only by a fresh semantic CAPTURE, never by the
+        // TYPED_CLICK receipt itself.
+        if (!agentSurface) {
+          const agentControl = resolveAgentPlatformNavControl(frame, 'Agent');
+          if (!agentControl?.semantic_ref) {
             result = {
-              state: 'LOCAL_PRECONVERSATION_BOOTSTRAP_AMBIGUOUS',
+              state: 'LOCAL_AGENT_NAV_NOT_READY',
               ...binding,
               lease_id: lease.lease_id,
-              transport_stage: transport?.stage || 'OTHER',
-              bootstrap_effect_state: bootstrapEffectState || null,
-              bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
-              write_ahead_barrier_persisted: true,
-              reason: 'CANONICAL_CONVERSATION_NOT_PROVEN',
+              transport_stage: 'PRECONVERSATION_ROOT',
+              reason: 'AGENT_SEMANTIC_CONTROL_NOT_FOUND',
               automatic_retry_allowed: false,
               authority_effect: false,
             };
           } else {
-            const expectedHash = sha256(transport.url);
-            localProof = await markFleetTransportProvenFromNativeFrame({
-              binding,
-              frame,
-              expected_transport_url_sha256: expectedHash,
+            await beginFleetTransportBootstrapAttempt(binding);
+            bootstrapBarrier = true;
+            bootstrapEffectState = 'AGENT_NAV_DISPATCHED';
+            await this.#executeCommand({
+              action: 'TYPED_CLICK',
+              platform: AGENT_PLATFORM_ID,
+              payload: semanticActivationPayload(binding.tab_id, agentControl),
             });
-            if (!['PROVEN', 'UPGRADED_CONVERSATION'].includes(String(localProof?.state || ''))) {
-              throw new Error('devos_transport_bootstrap_conversation_proof_invalid');
+            frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
+              throw new Error('devos_agent_nav_target_drift');
             }
-            result = {
-              state: 'LOCAL_ACTIVE',
-              ...binding,
-              lease_id: lease.lease_id,
-              transport_stage: 'CONVERSATION',
-              transport_url_sha256: expectedHash,
-              conversation_url_sha256: expectedHash,
-              local_proof_state: localProof.state,
-              bootstrap_effect_state: bootstrapEffectState || null,
-              bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
-              write_ahead_barrier_persisted: true,
-              automatic_retry_allowed: false,
-              authority_effect: false,
-            };
+            agentSurface = resolveAgentPlatformAgentSurface(frame);
+            if (!agentSurface) {
+              result = {
+                state: 'LOCAL_AGENT_NAV_AMBIGUOUS',
+                ...binding,
+                lease_id: lease.lease_id,
+                transport_stage: 'PRECONVERSATION_ROOT',
+                bootstrap_effect_state: bootstrapEffectState,
+                write_ahead_barrier_persisted: true,
+                reason: 'AGENT_SURFACE_POSTCONDITION_NOT_PROVEN',
+                automatic_retry_allowed: false,
+                authority_effect: false,
+              };
+            }
+          }
+        }
+
+        if (agentSurface) {
+          agentSurfaceSha256 = agentSurfaceDigest(agentSurface);
+          let modelProof = resolveAgentPlatformSelectedModel(frame);
+
+          // Step 2: the selected model is a separate UI fact. Page title
+          // branding is ignored. If the exact required model is not already
+          // selected, open the selector and choose GLM-5.3-Flash semantically.
+          if (!modelProof || modelProof.matches_required_model !== true) {
+            const selector = resolveAgentPlatformNavControl(frame, 'Select a model');
+            if (!selector?.semantic_ref) {
+              result = {
+                state: 'LOCAL_AGENT_MODEL_NOT_READY',
+                ...binding,
+                lease_id: lease.lease_id,
+                transport_stage: 'PRECONVERSATION_ROOT',
+                observed_model: modelProof?.model || null,
+                required_model: AGENT_PLATFORM_MODEL,
+                reason: modelProof ? 'AGENT_MODEL_MISMATCH_SELECTOR_UNAVAILABLE' : 'AGENT_MODEL_UNPROVEN_SELECTOR_UNAVAILABLE',
+                write_ahead_barrier_persisted: bootstrapBarrier,
+                automatic_retry_allowed: false,
+                authority_effect: false,
+              };
+            } else {
+              if (!bootstrapBarrier) {
+                await beginFleetTransportBootstrapAttempt(binding);
+                bootstrapBarrier = true;
+              }
+              bootstrapEffectState = 'MODEL_SELECTOR_DISPATCHED';
+              await this.#executeCommand({
+                action: 'TYPED_CLICK',
+                platform: AGENT_PLATFORM_ID,
+                payload: semanticActivationPayload(binding.tab_id, selector),
+              });
+              const menuFrame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+              if (String(menuFrame?.target_id || '').toLowerCase() !== binding.target_id) {
+                throw new Error('devos_agent_model_menu_target_drift');
+              }
+              const modelOption = resolveAgentPlatformModelOption(menuFrame, AGENT_PLATFORM_MODEL);
+              if (!modelOption?.semantic_ref) {
+                result = {
+                  state: 'LOCAL_AGENT_MODEL_SELECTION_AMBIGUOUS',
+                  ...binding,
+                  lease_id: lease.lease_id,
+                  transport_stage: 'PRECONVERSATION_ROOT',
+                  bootstrap_effect_state: bootstrapEffectState,
+                  required_model: AGENT_PLATFORM_MODEL,
+                  write_ahead_barrier_persisted: true,
+                  reason: 'REQUIRED_MODEL_OPTION_NOT_EXACTLY_RESOLVED',
+                  automatic_retry_allowed: false,
+                  authority_effect: false,
+                };
+              } else {
+                bootstrapEffectState = 'MODEL_OPTION_DISPATCHED';
+                await this.#executeCommand({
+                  action: 'TYPED_CLICK',
+                  platform: AGENT_PLATFORM_ID,
+                  payload: semanticActivationPayload(binding.tab_id, modelOption),
+                });
+                frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+                if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
+                  throw new Error('devos_agent_model_selection_target_drift');
+                }
+                agentSurface = resolveAgentPlatformAgentSurface(frame);
+                modelProof = resolveAgentPlatformSelectedModel(frame);
+                if (!agentSurface || !modelProof || modelProof.matches_required_model !== true) {
+                  result = {
+                    state: 'LOCAL_AGENT_MODEL_SELECTION_AMBIGUOUS',
+                    ...binding,
+                    lease_id: lease.lease_id,
+                    transport_stage: 'PRECONVERSATION_ROOT',
+                    bootstrap_effect_state: bootstrapEffectState,
+                    observed_model: modelProof?.model || null,
+                    required_model: AGENT_PLATFORM_MODEL,
+                    write_ahead_barrier_persisted: true,
+                    reason: 'REQUIRED_MODEL_POSTCONDITION_NOT_PROVEN',
+                    automatic_retry_allowed: false,
+                    authority_effect: false,
+                  };
+                } else {
+                  agentSurfaceSha256 = agentSurfaceDigest(agentSurface);
+                }
+              }
+            }
+          }
+
+          // Continue only when no earlier branch produced a terminal local
+          // result and the exact required model is positively observed.
+          modelProof = resolveAgentPlatformSelectedModel(frame);
+          if ((!result.state || result.state === 'LEASE_NOT_ACQUIRED')
+              && agentSurface
+              && modelProof?.matches_required_model === true) {
+            if (!bootstrapBarrier) {
+              await beginFleetTransportBootstrapAttempt(binding);
+              bootstrapBarrier = true;
+            }
+
+            // Step 3: create/reset a real Agent task session. The click receipt
+            // is not success; the fresh surface/model/composer readback is.
+            bootstrapEffectState = 'NEW_TASK_DISPATCHED';
+            await this.#executeCommand({
+              action: 'TYPED_CLICK',
+              platform: AGENT_PLATFORM_ID,
+              payload: semanticActivationPayload(binding.tab_id, agentSurface.new_task),
+            });
+            frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+            if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
+              throw new Error('devos_agent_new_task_target_drift');
+            }
+            agentSurface = resolveAgentPlatformAgentSurface(frame);
+            modelProof = resolveAgentPlatformSelectedModel(frame);
+            const composer = resolveAgentPlatformComposer(frame);
+
+            if (!agentSurface || !modelProof || modelProof.matches_required_model !== true || !composer?.semantic_ref) {
+              result = {
+                state: 'LOCAL_AGENT_NEW_TASK_AMBIGUOUS',
+                ...binding,
+                lease_id: lease.lease_id,
+                transport_stage: 'PRECONVERSATION_ROOT',
+                bootstrap_effect_state: bootstrapEffectState,
+                observed_model: modelProof?.model || null,
+                required_model: AGENT_PLATFORM_MODEL,
+                write_ahead_barrier_persisted: true,
+                reason: !agentSurface
+                  ? 'AGENT_SURFACE_LOST_AFTER_NEW_TASK'
+                  : (!modelProof || modelProof.matches_required_model !== true
+                    ? 'AGENT_MODEL_NOT_PROVEN_AFTER_NEW_TASK'
+                    : 'AGENT_TASK_COMPOSER_NOT_EXACTLY_RESOLVED'),
+                automatic_retry_allowed: false,
+                authority_effect: false,
+              };
+            } else if (composer.value_length !== 0) {
+              result = {
+                state: 'LOCAL_AGENT_NEW_TASK_AMBIGUOUS',
+                ...binding,
+                lease_id: lease.lease_id,
+                transport_stage: 'PRECONVERSATION_ROOT',
+                bootstrap_effect_state: bootstrapEffectState,
+                composer_value_length: composer.value_length,
+                write_ahead_barrier_persisted: true,
+                reason: 'AGENT_TASK_INPUT_NOT_CLEAN',
+                automatic_retry_allowed: false,
+                authority_effect: false,
+              };
+            } else {
+              agentSurfaceSha256 = agentSurfaceDigest(agentSurface);
+
+              // Step 4: create the durable Agent session with a tiny seed only
+              // after Agent mode + model + clean input have all been proven.
+              const submitted = await this.#executeCommand({
+                action: 'SEMANTIC_TYPE',
+                platform: AGENT_PLATFORM_ID,
+                payload: {
+                  tab_id: binding.tab_id,
+                  role: composer.role,
+                  accessible_name: composer.accessible_name,
+                  semantic_ref: composer.semantic_ref,
+                  text: GLM_ROOT_CONVERSATION_SEED,
+                  replace_existing: true,
+                  submit_after_type: true,
+                },
+              });
+              bootstrapEffectState = String(submitted?.effect_state || 'AGENT_SESSION_SEED_DISPATCHED');
+              frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+              transport = transportUrl(frame?.url);
+              if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
+                throw new Error('devos_agent_session_target_drift');
+              }
+
+              if (transport?.stage !== 'CONVERSATION') {
+                result = {
+                  state: 'LOCAL_AGENT_SESSION_BOOTSTRAP_AMBIGUOUS',
+                  ...binding,
+                  lease_id: lease.lease_id,
+                  transport_stage: transport?.stage || 'OTHER',
+                  bootstrap_effect_state: bootstrapEffectState || null,
+                  bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
+                  agent_surface_sha256: agentSurfaceSha256,
+                  write_ahead_barrier_persisted: true,
+                  reason: 'AGENT_SESSION_CONVERSATION_NOT_PROVEN',
+                  automatic_retry_allowed: false,
+                  authority_effect: false,
+                };
+              } else {
+                const expectedHash = sha256(transport.url);
+                localProof = await markFleetTransportProvenFromNativeFrame({
+                  binding,
+                  frame,
+                  expected_transport_url_sha256: expectedHash,
+                  expected_agent_surface_sha256: agentSurfaceSha256,
+                });
+                if (!['PROVEN', 'UPGRADED_CONVERSATION'].includes(String(localProof?.state || ''))) {
+                  throw new Error('devos_agent_session_transport_proof_invalid');
+                }
+                result = {
+                  state: 'LOCAL_ACTIVE_AGENT_SESSION',
+                  ...binding,
+                  lease_id: lease.lease_id,
+                  transport_stage: 'CONVERSATION',
+                  transport_url_sha256: expectedHash,
+                  conversation_url_sha256: expectedHash,
+                  agent_surface_sha256: agentSurfaceSha256,
+                  local_proof_state: localProof.state,
+                  bootstrap_effect_state: bootstrapEffectState || null,
+                  bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
+                  write_ahead_barrier_persisted: true,
+                  automatic_retry_allowed: false,
+                  authority_effect: false,
+                };
+              }
+            }
           }
         }
       } else {
