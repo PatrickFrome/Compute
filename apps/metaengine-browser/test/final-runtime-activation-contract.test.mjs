@@ -39,12 +39,16 @@ test('packaged browser enters through the final runtime activation hook', () => 
   assert.match(supervisor, /final_runtime_activation_required/);
 });
 
-test('final runtime workflow binds staged ME2 UI to the exact candidate head', () => {
+test('final runtime workflow consumes the exact Package Smoke installer instead of rebuilding it', () => {
   const workflow = source('../../.github/workflows/browser-final-runtime-activation-v1.yml');
-  assert.match(workflow, /ME2_BUILD_SHA:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
-  assert.doesNotMatch(workflow, /ME2_BUILD_SHA:\s*\$\{\{ github\.sha \}\}/);
-  assert.match(workflow, /verify-me2-ui-bundle\.mjs --root "\$STUB" --expected-sha "\$ME2_BUILD_SHA"/);
-  assert.match(workflow, /exact-head provenance verification failed/);
+  assert.match(workflow, /Acquire exact Package Smoke installer bytes/);
+  assert.match(workflow, /installer-provenance\.mjs acquire/);
+  assert.match(workflow, /--source-head \$head/);
+  assert.match(workflow, /installer-provenance\.mjs verify --provenance \$provenancePath --root \$artifactRoot --expected-head \$head/);
+  assert.match(workflow, /immutable_producer_artifact=\$true/);
+  assert.match(workflow, /installer_sha256=\$digest/);
+  assert.doesNotMatch(workflow, /electron-builder@26\.15\.7/);
+  assert.doesNotMatch(workflow, /ME2_BUILD_SHA:/);
 });
 
 test('Host activation is primary before enrollment while remote signing remains fail-closed', () => {
