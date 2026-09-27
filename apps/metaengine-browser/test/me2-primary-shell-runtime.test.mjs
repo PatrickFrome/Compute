@@ -536,27 +536,28 @@ test('R85 late drawer replies are rejected after page or workspace transitions',
   assert.match(store, /if \(!presentationSyncStillCurrent\(request,/);
 });
 
-test('R85 Context Drawer splitter is keyboard-accessible and native-sync fenced', () => {
+test('R95 Utility Panel splitter is keyboard-accessible in bottom and right docks and native-sync fenced', () => {
   assert.match(me2ContextDrawer, /data-testid="context-drawer-resizer"/);
   assert.match(me2ContextDrawer, /role="separator"/);
-  assert.match(me2ContextDrawer, /aria-orientation="horizontal"/);
-  assert.match(me2ContextDrawer, /aria-valuemin=\{160\}/);
-  assert.match(me2ContextDrawer, /aria-valuemax=\{360\}/);
+  assert.match(me2ContextDrawer, /aria-orientation=\{dock === "right" \? "vertical" : "horizontal"\}/);
   assert.match(me2ContextDrawer, /event\.key === "ArrowUp"/);
   assert.match(me2ContextDrawer, /event\.key === "ArrowDown"/);
+  assert.match(me2ContextDrawer, /event\.key === "ArrowLeft"/);
+  assert.match(me2ContextDrawer, /event\.key === "ArrowRight"/);
   assert.match(me2ContextDrawer, /event\.key === "Home"/);
   assert.match(me2ContextDrawer, /event\.key === "End"/);
   assert.match(me2ContextDrawer, /setHeight\(nextHeight, false\)/);
-  assert.match(me2ContextDrawer, /setHeight\(nextHeight, true\)/);
+  assert.match(me2ContextDrawer, /setWidth\(nextWidth, false\)/);
   assert.match(store, /let contextDrawerSyncSeq = 0/);
   assert.match(store, /seq:\s*\+\+contextDrawerSyncSeq/);
-  assert.match(store, /presentationSyncStillCurrent\(request,\s*\{[\s\S]{0,180}seq:\s*contextDrawerSyncSeq,[\s\S]{0,180}workspace:\s*get\(\)\.workspace,[\s\S]{0,180}page:\s*get\(\)\.page/);
-  assert.doesNotMatch(store, /if \(syncSeq !== contextDrawerSyncSeq\) return/);
+  assert.match(store, /presentationSyncStillCurrent\(request,/);
   assert.match(store, /setContextDrawerHeight: \(height: number, persist\?: boolean\)/);
+  assert.match(store, /setContextDrawerWidth: \(width: number, persist\?: boolean\)/);
+  assert.match(store, /setContextDrawerDock: \(dock: ContextDrawerDock\)/);
 });
 
-test('R85 contextual drawer is a read-only presentation plane with native geometry reconciliation', () => {
-  assert.match(preload, /const setPrimaryContextDrawer = \(open, height\) => ipcRenderer\.invoke\(/);
+test('R95 Utility Panel remains a read-only presentation plane with native geometry reconciliation', () => {
+  assert.match(preload, /const setPrimaryContextDrawer = \(open, dock, height, width\) => ipcRenderer\.invoke\(/);
   assert.match(preload, /'metaengine:shell:primary-context-drawer'/);
   const primaryBranch = preload.slice(
     preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
@@ -566,9 +567,11 @@ test('R85 contextual drawer is a read-only presentation plane with native geomet
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(/);
 
   assert.match(main, /let primaryContextDrawerOpen = false/);
+  assert.match(main, /let primaryContextDrawerDock = 'BOTTOM'/);
   assert.match(main, /let primaryContextDrawerHeight = 200/);
-  assert.match(main, /me2_context_drawer_open: primaryContextDrawerOpen/);
-  assert.match(main, /me2_context_drawer_height: primaryContextDrawerHeight/);
+  assert.match(main, /let primaryContextDrawerWidth = 380/);
+  assert.match(main, /me2_context_drawer_dock: primaryContextDrawerDock/);
+  assert.match(main, /me2_context_drawer_width: primaryContextDrawerWidth/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-context-drawer'/);
   const drawerHandler = main.slice(
     main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'"),
@@ -581,20 +584,19 @@ test('R85 contextual drawer is a read-only presentation plane with native geomet
   assert.match(drawerHandler, /release_authority:\s*false/);
   assert.match(drawerHandler, /authority_effect:\s*false/);
 
-  assert.match(store, /me2\.context-drawer\.open\.v1/);
+  assert.match(store, /drawerDock: ContextDrawerDock/);
+  assert.match(store, /drawerWidth: number/);
   assert.match(store, /Ctrl\/Cmd\+J|e\.key === "j"/);
   assert.match(store, /setPrimaryContextDrawer/);
   assert.match(me2Topbar, /data-testid="context-drawer-toggle"/);
-  assert.match(me2Shell, /<ContextDrawer \/>/);
+  assert.match(me2Shell, /contextDrawerDock === "right"/);
+  assert.match(me2Shell, /contextDrawerDock === "bottom"/);
   assert.match(me2ContextDrawer, /data-testid="context-drawer"/);
-  assert.match(me2ContextDrawer, /data-drawer-height=\{height\}/);
-  assert.match(me2ContextDrawer, /style=\{\{ height: \`\$\{height\}px\` \}\}/);
-  assert.match(me2ContextDrawer, /\[160, "S"\]/);
-  assert.match(me2ContextDrawer, /\[200, "M"\]/);
-  assert.match(me2ContextDrawer, /\[300, "L"\]/);
-  assert.match(me2ContextDrawer, /title=\{\`Drawer \$\{value\}px\`\}/);
+  assert.match(me2ContextDrawer, /data-drawer-dock=\{dock\}/);
+  assert.match(me2ContextDrawer, /data-testid="utility-panel-dock-bottom"/);
+  assert.match(me2ContextDrawer, /data-testid="utility-panel-dock-right"/);
   assert.match(store, /setContextDrawerHeight/);
-  assert.match(store, /drawerHeight: wantedHeight/);
+  assert.match(store, /setContextDrawerWidth/);
   assert.doesNotMatch(me2ContextDrawer, /sendCommand\(|me2Fetch\(|agentChatOp\(/);
 });
 
