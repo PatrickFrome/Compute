@@ -76,3 +76,38 @@ test('root transport proof is an in-process admission overlay until a canonical 
     clearFleetRuntime(h.fleet);
   }
 });
+
+
+test('bootstrap write-ahead barrier is durable and restart does not demote ambiguity to retryable root', async () => {
+  let persisted = null;
+  const tabs = new Map([['tab_root', { tab_id: 'tab_root', webcontents_id: 77 }]]);
+  const make = () => new FleetProvisioner({
+    policy: { warm_agents: 1, desired_agents: 1, profile: 'IMPLEMENTATION', spawn_burst_limit: 1 },
+    uuid: () => '33333333-3333-4333-8333-333333333333',
+    loadState: async () => structuredClone(persisted),
+    saveState: async (value) => { persisted = structuredClone(value); },
+    tabExists: (id) => tabs.has(id),
+    createTab: async () => ({ tab_id: 'tab_root', webcontents_id: 77 }),
+    loadTab: async () => {},
+  });
+
+  const first = make();
+  await first.init();
+  await first.reconcile({ active: true, target_agents: 1, spawn_burst_limit: 1 });
+  const bound = first.snapshot().agents[0];
+  const fenced = await first.beginTransportBootstrapAttempt({
+    agent_id: bound.agent_id,
+    tab_id: bound.tab_id,
+    target_id: bound.target_id,
+    generation_epoch: bound.generation_epoch,
+  });
+  assert.equal(fenced.agents[0].lifecycle_state, 'PROVISIONING_AMBIGUOUS');
+  assert.equal(fenced.agents[0].ambiguous_reason, 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING');
+  assert.equal(fenced.agents[0].automatic_retry_allowed, false);
+
+  const restarted = make();
+  const afterRestart = await restarted.init();
+  assert.equal(afterRestart.agents[0].lifecycle_state, 'PROVISIONING_AMBIGUOUS');
+  assert.equal(afterRestart.agents[0].ambiguous_reason, 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING');
+  assert.equal(afterRestart.agents[0].automatic_retry_allowed, false);
+});
