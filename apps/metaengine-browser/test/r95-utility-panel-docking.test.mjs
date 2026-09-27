@@ -92,9 +92,10 @@ test('R95 workspace persistence stores dock and both independent dimensions', ()
   assert.match(store, /drawerDock: row\.drawerDock === "right" \? "right" : "bottom"/);
 });
 
-test('R95 renderer places exactly one Utility Panel in the chosen shell region', () => {
-  assert.match(shell, /contextDrawerDock === "right" \? <ContextDrawer \/> : null/);
-  assert.match(shell, /contextDrawerDock === "bottom" \? <ContextDrawer \/> : null/);
+test('R97 keeps Utility Panel implementation available but unmounted from the persistent Chat Fleet shell', () => {
+  assert.doesNotMatch(shell, /<ContextDrawer \/>/);
+  assert.match(shell, /case "observability": return <ObservabilityPage \/>/);
+  assert.match(shell, /case "system": return <SystemPage \/>/);
   assert.match(panel, /aria-label="Utility Panel"/);
   assert.match(panel, /data-drawer-dock=\{dock\}/);
   assert.match(panel, /data-testid="utility-panel-dock-bottom"/);
@@ -129,57 +130,35 @@ test('R95 Browser-owned bridge remains narrow presentation-only geometry synchro
 });
 
 
-test('R95C physical visual harness captures COMMAND mission plus RUN Bottom and Right states', () => {
-  assert.match(visualHarness, /r95c-command-mission-1440x960/);
-  assert.match(visualHarness, /r95c-run-utility-bottom-1440x960/);
-  assert.match(visualHarness, /r95c-run-utility-right-1440x960/);
-  assert.match(visualHarness, /mission_control_verified:\s*true/);
-  assert.match(visualHarness, /run_surface_verified:\s*true/);
-  assert.match(visualHarness, /utility_panel_bottom_verified:\s*true/);
-  assert.match(visualHarness, /utility_panel_right_verified:\s*true/);
+test('R97 physical visual harness proves advanced surfaces leave the persistent Chat Fleet workspace', () => {
+  assert.match(visualHarness, /r97-chat-fleet-main-1440x960/);
+  assert.match(visualHarness, /r97-settings-advanced-surface-1440x960/);
+  assert.match(visualHarness, /r97-command-search-1440x960/);
+  assert.match(visualHarness, /context_drawer_present/);
+  assert.match(visualHarness, /run_inspector_present/);
+  assert.match(visualHarness, /r97_visual_legacy_persistent_chrome_present/);
 });
 
 
-test('R95C RUN owns native Browser geometry and releases telemetry before a Right Utility Panel', () => {
-  const closed = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R95_RUN',
-    me2_context_drawer_open: false,
-  });
-  assert.equal(closed.surface_profile, 'ME2_R95_RUN');
-  assert.ok(closed.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
-
-  const right = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R95_RUN',
-    me2_context_drawer_open: true,
-    me2_context_drawer_dock: 'RIGHT',
-    me2_context_drawer_width: 380,
-  });
-  assert.equal(right.me2_context_drawer_effective_open, true);
-  assert.equal(right.me2_context_drawer_effective_dock, 'RIGHT');
-  assert.equal(right.me2_context_drawer_width, 380);
-  assert.ok(right.adaptations.includes('ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL'));
-  assert.ok(right.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
-  assert.equal(right.overlay_remote_content, false);
-
-  const bottom = planShellLayout({
-    width: 1440,
-    height: 960,
-    state: normalizeShellLayoutState(),
-    surface_profile: 'ME2_R95_RUN',
-    me2_context_drawer_open: true,
-    me2_context_drawer_dock: 'BOTTOM',
-    me2_context_drawer_height: 200,
-  });
-  assert.equal(bottom.me2_context_drawer_effective_open, true);
-  assert.equal(bottom.me2_context_drawer_effective_dock, 'BOTTOM');
-  assert.equal(bottom.me2_context_drawer_height, 200);
-  assert.ok(bottom.remote_bounds.height >= 320);
+test('R97 main Chat Fleet geometry suppresses Utility Panel requests instead of shrinking the native site', () => {
+  for (const dock of ['RIGHT', 'BOTTOM']) {
+    const plan = planShellLayout({
+      width: 1440,
+      height: 960,
+      state: normalizeShellLayoutState(),
+      surface_profile: 'ME2_R95_RUN',
+      me2_context_drawer_open: true,
+      me2_context_drawer_dock: dock,
+      me2_context_drawer_width: 380,
+      me2_context_drawer_height: 200,
+    });
+    assert.equal(plan.surface_profile, 'ME2_R95_RUN');
+    assert.equal(plan.me2_context_drawer_effective_open, false);
+    assert.equal(plan.me2_run_inspector_effective_visible, false);
+    assert.ok(plan.adaptations.includes('ME2_ADVANCED_DRAWER_HIDDEN_ON_CHAT_FLEET_MAIN'));
+    assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
+    assert.equal(plan.overlay_remote_content, false);
+  }
 });
 
 test('R95C native Utility sync runs only on RUN and waits for the primary-page acknowledgement', () => {
