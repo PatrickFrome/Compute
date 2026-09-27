@@ -225,20 +225,20 @@ export class FleetProvisioner extends CoreFleetProvisioner {
 
   snapshot() {
     const out = structuredClone(super.snapshot());
-    let promoted = 0;
+    // R97 live qualification: a proven https://chat.z.ai/ root is transport
+    // reachability only. It MUST NOT promote BOUND_UNVERIFIED to ACTIVE.
+    // ACTIVE is reserved for a canonical conversation URL proven by
+    // markTransportProven(). Keeping the root proof in-process still lets the
+    // bootstrap/recovery plane observe exact tab/target/generation identity
+    // without allowing task admission on a composer-only surface.
     for (const agent of out.agents || []) {
       const proof = this.#preconversationProofs.get(String(agent?.agent_id || '').toLowerCase()) || null;
       if (!exactOverlayProof(agent, proof)) {
         if (proof) this.#preconversationProofs.delete(String(agent?.agent_id || '').toLowerCase());
         continue;
       }
-      agent.lifecycle_state = 'ACTIVE';
       agent.transport_proof = structuredClone(proof);
-      promoted += 1;
-    }
-    if (promoted > 0 && out.counts) {
-      out.counts.BOUND_UNVERIFIED = Math.max(0, Number(out.counts.BOUND_UNVERIFIED || 0) - promoted);
-      out.counts.ACTIVE = Number(out.counts.ACTIVE || 0) + promoted;
+      agent.transport_admission = 'PRECONVERSATION_ONLY';
     }
     return Object.freeze(out);
   }
