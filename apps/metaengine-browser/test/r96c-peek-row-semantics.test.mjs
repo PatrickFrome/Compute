@@ -20,8 +20,10 @@ test('R96C primary activation remains Enter while Space remains presentation-onl
   assert.match(tasks, /else if \(e\.key === " "\) e\.preventDefault\(\)/);
   assert.match(agents, /if \(e\.key === "Enter"\) openAgentChat\(a\)/);
   assert.match(agents, /else if \(e\.key === " "\) e\.preventDefault\(\)/);
-  assert.match(tasks, /aria-keyshortcuts="Enter Space ArrowUp ArrowDown"/);
-  assert.match(agents, /aria-keyshortcuts="Enter Space ArrowUp ArrowDown"/);
+  assert.match(tasks, /aria-keyshortcuts="Enter Space"/);
+  assert.match(agents, /aria-keyshortcuts="Enter Space"/);
+  assert.doesNotMatch(tasks, /aria-keyshortcuts="[^"]*Arrow(?:Up|Down)/);
+  assert.doesNotMatch(agents, /aria-keyshortcuts="[^"]*Arrow(?:Up|Down)/);
 });
 
 test('R96C nested real controls remain reserved from Peek capture', () => {
