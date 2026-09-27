@@ -372,6 +372,43 @@ test('downloadArtifact writes exact bytes and digest', async () => {
   });
 });
 
+test('downloadArtifact follows signed-style redirect without forwarding bearer credentials cross-origin', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'installer-download-redirect-'));
+  const output = path.join(root, 'artifact.zip');
+  let redirectedAuthorization = 'not-observed';
+
+  const target = createServer((req, res) => {
+    redirectedAuthorization = req.headers.authorization ?? null;
+    const body = Buffer.from('redirected-zip-bytes');
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-length': body.length });
+    res.end(body);
+  });
+  await new Promise((resolve) => target.listen(0, '127.0.0.1', resolve));
+  const targetAddress = target.address();
+  const targetUrl = `http://127.0.0.1:${targetAddress.port}/signed-artifact`;
+
+  try {
+    await withServer((req, res) => {
+      assert.equal(req.headers.authorization, 'Bearer test-token');
+      assert.equal(req.headers.accept, 'application/vnd.github+json');
+      res.writeHead(302, { location: targetUrl });
+      res.end();
+    }, async (base) => {
+      const result = await downloadArtifact({
+        url: `${base}/actions-artifact`,
+        token: 'test-token',
+        outputPath: output,
+      });
+      assert.equal(result.schema, DOWNLOAD_SCHEMA);
+      assert.equal(await readFile(output, 'utf8'), 'redirected-zip-bytes');
+    });
+  } finally {
+    await new Promise((resolve) => target.close(resolve));
+  }
+
+  assert.equal(redirectedAuthorization, null);
+});
+
 test('downloadArtifact rejects empty archive', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'installer-download-'));
   await withServer((_req, res) => {
