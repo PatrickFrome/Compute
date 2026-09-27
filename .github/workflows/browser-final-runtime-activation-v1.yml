@@ -10,6 +10,7 @@ on:
       - 'apps/metaengine-browser/test/final-runtime-activation-contract.test.mjs'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
+      - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'
 
 concurrency:
@@ -18,11 +19,12 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-final-runtime-activation:
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 80
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -56,66 +58,37 @@ jobs:
         working-directory: apps/metaengine-browser
         run: node --test test/final-runtime-activation-contract.test.mjs
 
-      # R52 (фаза C7): соберём и упакуем панели Mission Control в me2-ui-dist —
-      # electron-builder заберёт их в resources/me2-ui (контракт me2-ui-host, R50).
-      # Fail-open: сбой UI-сборки НЕ валит релиз (фолбэк GET /ui остаётся честным) —
-      # но при успехе единая система едет в установке одной сборкой (один SHA → один релиз).
-      - name: Setup Bun (for ME2 UI build)
-        if: ${{ success() }}
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - name: Build and pack ME2 UI (C7, fail-open)
-        if: ${{ success() }}
-        working-directory: apps/me2-ui
-        shell: bash
-        env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set +e
-          STUB=../metaengine-browser/me2-ui-dist
-          bun install --frozen-lockfile > ui-build.log 2>&1
-          BUN=$?
-          if [ $BUN -ne 0 ]; then echo "me2-ui skipped (bun install failed) — honest stub for extraResources"; mkdir -p "$STUB" && printf 'ME2 UI bundle absent (build failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"; exit 0; fi
-          bun run build >> ui-build.log 2>&1
-          BUILD=$?
-          if [ $BUILD -ne 0 ]; then echo "me2-ui skipped (next build failed) — honest stub"; tail -20 ui-build.log; mkdir -p "$STUB" && printf 'ME2 UI bundle absent (build failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"; exit 0; fi
-          bun run pack >> ui-build.log 2>&1
-          PACK=$?
-          if [ $PACK -ne 0 ]; then echo "me2-ui skipped (pack failed) — honest stub"; tail -20 ui-build.log; mkdir -p "$STUB" && printf 'ME2 UI bundle absent (pack failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"; exit 0; fi
-          # electron-builder берёт extraResources from app-root браузера
-          rm -rf "$STUB"
-          cp -r me2-ui-dist "$STUB"
-          node ../metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root "$STUB" --expected-sha "$ME2_BUILD_SHA" >> ui-build.log 2>&1
-          VERIFY=$?
-          if [ $VERIFY -ne 0 ]; then
-            echo "me2-ui skipped (exact-head provenance verification failed) — honest stub"
-            tail -20 ui-build.log
-            rm -rf "$STUB"
-            mkdir -p "$STUB"
-            printf 'ME2 UI bundle absent (exact-head provenance verification failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"
-            exit 0
-          fi
-          tail -2 ui-build.log
-          echo "me2-ui-dist staged and exact-head verified: $(du -sh "$STUB" | cut -f1)"
-          exit 0
-
-      - name: Build exact-head unsigned NSIS installer
+      - name: Acquire exact Package Smoke installer bytes
         working-directory: apps/metaengine-browser
-        shell: powershell
+        shell: pwsh
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $head = '${{ github.event.pull_request.head.sha || github.sha }}'
           $version = [string](node -p "require('./package.json').version")
-          if (-not $version) { throw 'package_version_missing' }
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
-          if (-not $installer) { throw 'final_runtime_installer_missing' }
-          Copy-Item $installer.FullName "$env:RUNNER_TEMP\$($installer.Name)"
-          Copy-Item $installer.FullName "$env:RUNNER_TEMP\final-runtime-candidate.exe"
+          $artifactZip = "$env:RUNNER_TEMP\package-smoke-artifact.zip"
+          $artifactRoot = "$env:RUNNER_TEMP\package-smoke-artifact"
+          Remove-Item $artifactZip -Force -ErrorAction SilentlyContinue
+          Remove-Item $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue
+          node scripts/installer-provenance.mjs acquire `
+            --repository '${{ github.repository }}' `
+            --source-head $head `
+            --output $artifactZip `
+            --timeout-seconds 2700 `
+            --poll-ms 15000
+          if ($LASTEXITCODE -ne 0) { throw 'final_runtime_installer_acquire_failed' }
+          Expand-Archive -LiteralPath $artifactZip -DestinationPath $artifactRoot -Force
+          $provenancePath = Join-Path $artifactRoot 'installer-provenance.json'
+          node scripts/installer-provenance.mjs verify --provenance $provenancePath --root $artifactRoot --expected-head $head
+          if ($LASTEXITCODE -ne 0) { throw 'final_runtime_installer_provenance_invalid' }
+          $provenance = Get-Content $provenancePath -Raw | ConvertFrom-Json
+          if ([string]$provenance.package_version -ne $version) { throw 'final_runtime_installer_version_drift' }
+          $installer = Join-Path $artifactRoot ([string]$provenance.files.installer.name)
+          if (-not (Test-Path $installer -PathType Leaf)) { throw 'final_runtime_installer_missing' }
+          Copy-Item $installer (Join-Path $env:RUNNER_TEMP ([string]$provenance.files.installer.name)) -Force
+          Copy-Item $installer "$env:RUNNER_TEMP\final-runtime-candidate.exe" -Force
+          Copy-Item $provenancePath "$env:RUNNER_TEMP\installer-provenance.json" -Force
 
       - name: Install and prove all Final runtime modules READY
         working-directory: apps/metaengine-browser
@@ -180,11 +153,16 @@ jobs:
 
             $installerFile = Get-Item $installer
             $digest = (Get-FileHash $installerFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $provenance = Get-Content "$env:RUNNER_TEMP\installer-provenance.json" -Raw | ConvertFrom-Json
+            if ($digest -ne [string]$provenance.files.installer.sha256) { throw 'final_runtime_installer_digest_drift' }
+            if ([string]$provenance.source_head -ne $head -or [string]$provenance.package_version -ne $version) { throw 'final_runtime_installer_identity_drift' }
             @{
               schema='metaengine.browser.final-runtime-activation-proof.v1'
               source_head=$head
               package_version=$version
               installer_sha256=$digest
+              producer_run_id=[int64]$provenance.producer_run_id
+              immutable_producer_artifact=$true
               activation=$activation
               exact_head_verified=$true
               installed_runtime_verified=$true
@@ -216,6 +194,7 @@ jobs:
           name: metaengine-browser-final-runtime-activated-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/final-runtime-activation-proof.json
             ${{ runner.temp }}/final-runtime-normal.out
             ${{ runner.temp }}/final-runtime-normal.err
