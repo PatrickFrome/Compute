@@ -14,6 +14,7 @@ const main = await fs.readFile(new URL('../src/main.mjs', import.meta.url), 'utf
 const preload = await fs.readFile(new URL('../src/preload-shell.cjs', import.meta.url), 'utf8');
 const shell = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url), 'utf8');
 const topbar = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url), 'utf8');
+const palette = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/command-palette.tsx', import.meta.url), 'utf8');
 const store = await fs.readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
 const settings = await fs.readFile(new URL('../../me2-ui/src/components/me2/pages/system.tsx', import.meta.url), 'utf8');
 const legacyApp = await fs.readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
@@ -109,4 +110,12 @@ test('R97 Settings is the explicit directory for every hidden advanced surface',
   assert.match(settings, /data-testid=\{\`settings-open-\$\{surface\.page\}\`\}/);
   assert.match(settings, /setPage\(surface\.page\)/);
   assert.match(settings, /Hidden from the main Chat Fleet workspace/);
+});
+
+
+test('R97 command palette advertises search-only advanced navigation, never retired Alt routes', () => {
+  assert.match(palette, /Advanced surfaces · search/);
+  assert.doesNotMatch(palette, /Pages · Alt\+1\.\.0/);
+  assert.doesNotMatch(palette, />Alt\+\{p\.num\}</);
+  assert.match(palette, /onSelect=\{\(\) => \{ setPage\(p\.key\); setOpen\(false\); \}\}/);
 });
