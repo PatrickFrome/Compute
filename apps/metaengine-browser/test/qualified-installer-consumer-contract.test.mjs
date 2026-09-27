@@ -70,3 +70,11 @@ test('R91 consumer proof schemas still persist exact producer identity and termi
   assert.match(finalRuntime, /final-runtime-activation-proof\.json/);
   assert.match(soak, /windows-autonomous-soak-proof\.json/);
 });
+
+test('R91 Package Smoke trigger closure guarantees an exact-head producer whenever consumers are scheduled', async () => {
+  const source = await workflow('browser-windows-package-smoke.yml');
+  assert.match(source, /apps\/metaengine-browser\/\*\*/);
+  assert.match(source, /browser-windows-installed-chat-qualification\.yml/);
+  assert.match(source, /browser-final-runtime-activation-v1\.yml/);
+  assert.match(source, /browser-windows-autonomous-soak-v1\.yml/);
+});
