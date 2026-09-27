@@ -11,6 +11,7 @@ import {
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
+import { taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -91,6 +92,8 @@ interface Me2State {
   detail: Task | null;
   inspectedTaskId: string | null;
   stream: Event[];
+  streamTaskId: string | null;
+  streamState: "UNBOUND" | "LOADING" | "EXACT" | "DEGRADED";
   // R96 temporary Peek is ephemeral presentation state only: no persistence/data authority.
   peekTarget: PeekTarget | null;
   // contextual drawer (read-only presentation plane)
@@ -103,6 +106,7 @@ interface Me2State {
   contextDrawerPreferredWidth: number;
   contextDrawerWidth: number;
   contextDrawerDock: ContextDrawerDock;
+  runTelemetryInspectorVisible: boolean;
   commandRailPreferredOpen: boolean;
   // selection (agent-first)
   chatId: string | null;
@@ -135,6 +139,7 @@ interface Me2State {
 
 let initGuard = false;
 let contextDrawerSyncSeq = 0;
+let taskStreamRequestSeq = 0;
 const PAGE_LS = "me2.page.v1";
 const WS_LS = "me2.workspace.v1";
 const CONTEXT_DRAWER_LS = "me2.context-drawer.open.v1"; // legacy migration
@@ -222,21 +227,33 @@ function writeWorkspaceLayout(workspace: WorkspaceKey, patch: Partial<WorkspaceL
   } catch { /* private mode */ }
 }
 
-function syncPagePresentation(p: PageKey) {
+function syncPagePresentation(p: PageKey): Promise<unknown> | null {
   try {
     localStorage.setItem(PAGE_LS, p);
     history.replaceState(null, "", `#${p}`);
   } catch { /* private mode */ }
+
+  let primaryPageAck: Promise<unknown> | null = null;
   try {
-    const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-    void shell?.setPrimaryPage?.(p);
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryPage?: (page: string) => Promise<unknown> | unknown;
+        setPrimaryOverlay?: (active: boolean) => unknown;
+      };
+    }).metaengineShell;
+    const result = shell?.setPrimaryPage?.(p);
+    if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+      primaryPageAck = Promise.resolve(result);
+    }
   } catch { /* Browser preload bridge absent in web-only mode */ }
+
   void (async () => {
     try {
       const { me2Desktop } = await import("@/lib/me2-desktop");
       me2Desktop()?.tabs.setActive("page", p);
     } catch { /* bridge absent */ }
   })();
+  return primaryPageAck;
 }
 
 export const useMe2 = create<Me2State>((set, get) => ({
@@ -255,6 +272,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
   detail: null,
   inspectedTaskId: null,
   stream: [],
+  streamTaskId: null,
+  streamState: "UNBOUND",
   peekTarget: null,
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
@@ -265,6 +284,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   contextDrawerPreferredWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
   contextDrawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
   contextDrawerDock: "bottom",
+  runTelemetryInspectorVisible: false,
   commandRailPreferredOpen: true,
   chatId: null,
   busyAction: false,
@@ -310,6 +330,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: false,
       });
       return;
     }
@@ -326,6 +347,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
           dock?: ContextDrawerDock;
           drawer_height?: number;
           drawer_width?: number;
+          run_inspector_visible?: boolean;
         } | null>;
       };
     }).metaengineShell;
@@ -339,6 +361,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible:
+          typeof window !== "undefined"
+          && window.innerWidth >= 1124
+          && !(want && wantedDock === "right"),
       });
       return;
     }
@@ -364,6 +390,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: effectiveWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: result?.run_inspector_visible === true,
       });
     }).catch(() => {
       if (!presentationSyncStillCurrent(request, {
@@ -379,6 +406,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: false,
       });
     });
   },
@@ -464,18 +492,13 @@ export const useMe2 = create<Me2State>((set, get) => ({
         const h = window.location.hash.replace("#", "");
         const stored = localStorage.getItem(PAGE_LS);
         const raw = (PAGES.some((p) => p.key === h) && h) || stored;
-        if (raw && PAGES.some((p) => p.key === raw)) {
-          set({ page: raw as PageKey, recentPages: [raw as PageKey], pageHistoryIndex: 0 });
-          try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-            void shell?.setPrimaryPage?.(raw);
-          } catch { /* Browser preload bridge absent in web-only mode */ }
-        } else {
-          try {
-            const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-            void shell?.setPrimaryPage?.("command");
-          } catch { /* Browser preload bridge absent in web-only mode */ }
+        const restoredPage: PageKey = raw && PAGES.some((p) => p.key === raw)
+          ? raw as PageKey
+          : "command";
+        if (restoredPage !== "command" || raw === "command") {
+          set({ page: restoredPage, recentPages: [restoredPage], pageHistoryIndex: 0 });
         }
+        const primaryPageAck = syncPagePresentation(restoredPage);
         const storedWs = localStorage.getItem(WS_LS) as WorkspaceKey | null;
         const activeWorkspace = storedWs && WORKSPACES.some((item) => item.key === storedWs) ? storedWs : get().workspace;
         if (activeWorkspace !== get().workspace) set({ workspace: activeWorkspace });
@@ -492,7 +515,22 @@ export const useMe2 = create<Me2State>((set, get) => ({
           commandRailPreferredOpen: workspaceLayout.commandRailOpen,
         });
         writeWorkspaceLayout(activeWorkspace, workspaceLayout); // materialize legacy preference once
-        get().syncContextDrawer(workspaceLayout.drawerOpen, workspaceLayout.drawerHeight, workspaceLayout.drawerWidth, workspaceLayout.drawerDock);
+        const reconcileRestoredGeometry = () => {
+          if (get().page !== restoredPage) return;
+          get().syncContextDrawer(
+            workspaceLayout.drawerOpen,
+            workspaceLayout.drawerHeight,
+            workspaceLayout.drawerWidth,
+            workspaceLayout.drawerDock,
+          );
+        };
+        if (restoredPage === "browser" && primaryPageAck) {
+          void primaryPageAck.then(reconcileRestoredGeometry).catch(() => {
+            if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+          });
+        } else {
+          reconcileRestoredGeometry();
+        }
       } catch { /* приватный режим */ }
     }, 0);
 
@@ -521,8 +559,12 @@ export const useMe2 = create<Me2State>((set, get) => ({
       onEvent: (e) => {
         set((st) => {
           const events = st.events.some((x) => x.seq === e.seq) ? st.events : [e, ...st.events].slice(0, 300);
-          const stream = st.detail && e.task_id === st.detail.id && !st.stream.some((x) => x.seq === e.seq)
-            ? [...st.stream, e] : st.stream;
+          const stream = st.inspectedTaskId
+            && st.streamTaskId === st.inspectedTaskId
+            && e.task_id === st.inspectedTaskId
+            && !st.stream.some((x) => x.seq === e.seq)
+            ? [...st.stream, e].slice(-200)
+            : st.stream;
           return { events, stream };
         });
       },
@@ -573,8 +615,31 @@ export const useMe2 = create<Me2State>((set, get) => ({
           if (nextIndex >= 0 && nextIndex < st.recentPages.length) {
             e.preventDefault();
             const target = st.recentPages[nextIndex];
+            // History navigation is a new presentation generation too. Without
+            // advancing the sequence, browser→other→browser could let an old
+            // RUN geometry reply pass the page/workspace ABA fence.
+            contextDrawerSyncSeq += 1;
             set({ page: target, pageHistoryIndex: nextIndex });
-            syncPagePresentation(target);
+            const primaryPageAck = syncPagePresentation(target);
+            if (target === "browser") {
+              const reconcileRunGeometry = () => {
+                if (get().page === "browser") get().syncContextDrawer();
+              };
+              if (primaryPageAck) {
+                void primaryPageAck.then(reconcileRunGeometry).catch(() => {
+                  if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+                });
+              } else {
+                reconcileRunGeometry();
+              }
+            } else {
+              set({
+                contextDrawerOpen: get().contextDrawerPreferredOpen,
+                contextDrawerHeight: get().contextDrawerPreferredHeight,
+                contextDrawerWidth: get().contextDrawerPreferredWidth,
+                runTelemetryInspectorVisible: false,
+              });
+            }
           }
         }
       }
@@ -637,13 +702,26 @@ export const useMe2 = create<Me2State>((set, get) => ({
         pageHistoryIndex: history.length - 1,
       };
     });
-    syncPagePresentation(p);
-    if (p === "browser") get().syncContextDrawer();
-    else set({
-      contextDrawerOpen: get().contextDrawerPreferredOpen,
-      contextDrawerHeight: get().contextDrawerPreferredHeight,
-      contextDrawerWidth: get().contextDrawerPreferredWidth,
-    });
+    const primaryPageAck = syncPagePresentation(p);
+    if (p === "browser") {
+      const reconcileRunGeometry = () => {
+        if (get().page === "browser") get().syncContextDrawer();
+      };
+      if (primaryPageAck) {
+        void primaryPageAck.then(reconcileRunGeometry).catch(() => {
+          if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+        });
+      } else {
+        reconcileRunGeometry();
+      }
+    } else {
+      set({
+        contextDrawerOpen: get().contextDrawerPreferredOpen,
+        contextDrawerHeight: get().contextDrawerPreferredHeight,
+        contextDrawerWidth: get().contextDrawerPreferredWidth,
+        runTelemetryInspectorVisible: false,
+      });
+    }
   },
 
   setWorkspace: (w) => {
@@ -672,23 +750,49 @@ export const useMe2 = create<Me2State>((set, get) => ({
   setDialog: (d) => set({ dialog: d }),
 
   openTask: (id) => {
+    const requestSeq = ++taskStreamRequestSeq;
     const st = get();
     const task = st.snap?.tasks.find((t) => t.id === id) ?? (st.snap?.archived ?? []).find((t) => t.id === id) ?? null;
     set((state) => ({
       detail: task,
       inspectedTaskId: task?.id ?? id,
       stream: [],
+      streamTaskId: id,
+      streamState: "LOADING",
       contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
     }));
     if (get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
       writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
     }
-    void me2Fetch<{ events: Event[] }>(`/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`).then((d) => {
-      if (d?.events) set({ stream: d.events });
+    void me2Fetch<{ events: Event[] }>(
+      `/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`,
+      { signal: AbortSignal.timeout(8_000) },
+    ).then((d) => {
+      set((state) => {
+        if (!taskStreamResponseStillCurrent(
+          { seq: requestSeq, taskId: id },
+          { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
+        )) return {};
+        if (!d?.events) return { streamState: "DEGRADED" as const };
+        const exactFetched = d.events.filter((event) => event.task_id === id);
+        const bySeq = new Map<number, Event>();
+        for (const event of exactFetched) bySeq.set(event.seq, event);
+        for (const event of state.stream) bySeq.set(event.seq, event);
+        return {
+          stream: [...bySeq.values()]
+            .sort((a, b) => a.seq - b.seq)
+            .slice(-200),
+          streamState: "EXACT" as const,
+        };
+      });
     });
   },
 
-  closeTask: () => set({ detail: null, stream: [] }),
+  closeTask: () => {
+    // Closing the Task Sheet is not deselection. Keep the bounded exact stream
+    // alive for OBSERVE; a later openTask() advances generation and replaces it.
+    set({ detail: null });
+  },
 
   setChatId: (id) => {
     // единая точка выбора агента: store + window-события (совместимость компонентов)
