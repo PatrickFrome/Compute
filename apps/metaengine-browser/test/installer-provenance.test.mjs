@@ -804,7 +804,12 @@ test('R89 Package Smoke publishes immutable candidate before long installed proo
   const finalEvidence = source.indexOf('name: metaengine-browser-windows-package-evidence-');
   assert.ok(early >= 0 && install > early && finalEvidence > install);
   assert.equal((source.match(/name: metaengine-browser-windows-candidate-/g) || []).length, 1);
+  assert.equal((source.match(/name: metaengine-browser-windows-package-evidence-/g) || []).length, 1);
   assert.match(source, /compression-level:\s*0/);
+  const earlySlice = source.slice(early, install);
+  assert.match(earlySlice, /METAENGINE-Browser-Test-Setup-\*-x64\.exe/);
+  assert.match(earlySlice, /METAENGINE-Browser-Test-Setup-\*-x64\.exe\.blockmap/);
+  assert.match(earlySlice, /installer-provenance\.json/);
 });
 
 test('R89 consumers may start from the early artifact but cannot finish before the exact producer run is green', async () => {
@@ -820,6 +825,8 @@ test('R89 consumers may start from the early artifact but cannot finish before t
     assert.match(source, /--expected-run-attempt \(\[string\]\$acquire\.producer_run_attempt\)/);
     assert.match(source, /ME2_PACKAGE_PRODUCER_RUN_ID/);
     assert.match(source, /ME2_PACKAGE_PRODUCER_RUN_ATTEMPT/);
+    assert.match(source, /producer_completed_at_acquire/);
+    assert.match(source, /producer_terminal_success/);
     const proofIndex = source.indexOf(physicalProof);
     const gateIndex = source.indexOf('name: Require bound Package Smoke producer terminal success');
     assert.ok(proofIndex >= 0 && gateIndex > proofIndex, `${file}: terminal producer gate must follow physical proof`);
