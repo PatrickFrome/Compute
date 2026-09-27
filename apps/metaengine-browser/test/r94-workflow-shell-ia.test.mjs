@@ -27,12 +27,12 @@ test('R94 stages preserve every legacy module page through explicit grouped owne
   assert.match(pagebar, /stage\.pages\.map\(\(modulePage\)/);
 });
 
-test('R94 Alt+1..7 selects workflow stage primary pages while history stays independent', () => {
-  assert.match(store, /hotkeys:[^\n]*Alt\+1\.\.7 workflow stages/);
-  assert.match(store, /e\.key >= "1" && e\.key <= "7"/);
-  assert.match(store, /WORKFLOW_STAGES\[Number\(e\.key\) - 1\]/);
-  assert.match(store, /get\(\)\.setPage\(stage\.primaryPage\)/);
-  assert.match(store, /e\.key === "ArrowLeft" \|\| e\.key === "ArrowRight"/);
+test('R97 retires R94 direct stage/history shortcuts from the single main workspace', () => {
+  assert.match(store, /only global UI shortcut is Ctrl\/Cmd\+K/);
+  assert.doesNotMatch(store, /e\.key >= "1" && e\.key <= "7"/);
+  assert.doesNotMatch(store, /get\(\)\.setPage\(stage\.primaryPage\)/);
+  assert.doesNotMatch(store, /e\.key === "ArrowLeft" \|\| e\.key === "ArrowRight"/);
+  assert.doesNotMatch(store, /setContextDrawer\(!get\(\)\.contextDrawerPreferredOpen\)/);
 });
 
 test('R94 keeps native Browser bottom geometry stable while changing information architecture', () => {
