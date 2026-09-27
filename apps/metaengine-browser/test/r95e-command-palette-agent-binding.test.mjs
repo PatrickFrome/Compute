@@ -28,3 +28,11 @@ test('R95E AgentChat polling exists only in the conditionally-mounted agent pale
   assert.match(palette, /\(mode === "all" \|\| mode === "agents"\) && <AgentPaletteGroup agents=\{agents\} \/>/);
   assert.doesNotMatch(palette, /const \{ sessions \} = useAgentChatSessions\(\);[\s\S]{0,200}export function CommandPalette/);
 });
+
+
+test('R95E stale or failed AgentChat snapshots cannot grant an exact chat binding', () => {
+  assert.match(palette, /loading: chatsLoading, error: chatsError/);
+  assert.match(palette, /const chatSnapshotTrusted = !chatsLoading && !chatsError/);
+  assert.match(palette, /const exactChatId = chatSnapshotTrusted && chatIds\.length === 1 \? chatIds\[0\] : null/);
+  assert.match(palette, /chat unavailable/);
+});
