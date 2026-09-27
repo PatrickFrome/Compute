@@ -12,34 +12,27 @@ import {
   planShellLayout,
 } from '../src/shell-layout.mjs';
 
-const browserPage = await readFile(
-  new URL('../../me2-ui/src/components/me2/pages/browser.tsx', import.meta.url),
-  'utf8',
-);
+const read = (url) => readFile(new URL(url, import.meta.url), 'utf8');
+const browserPage = await read('../../me2-ui/src/components/me2/pages/browser.tsx');
+const store = await read('../../me2-ui/src/components/me2/store.tsx');
+const main = await read('../src/main.mjs');
 
-test('R95C renderer and main process share one exact RUN telemetry breakpoint', () => {
+test('R95C.2 native layout is the single authority for RUN telemetry visibility', () => {
   assert.equal(ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH, 1124);
-  assert.match(browserPage, /overflow-y-auto min-\[1124px\]:flex/);
-  assert.doesNotMatch(browserPage, /overflow-y-auto (?:lg|xl):flex/);
-});
 
-test('R95C 1100px RUN never releases a renderer-visible inspector over native Browser pixels', () => {
-  const plan = planShellLayout({
+  const narrow = planShellLayout({
     width: 1100,
     height: 900,
     state: normalizeShellLayoutState(),
     surface_profile: 'ME2_R95_RUN',
     me2_context_drawer_open: false,
   });
-  assert.equal(1100 < ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH, true);
-  assert.equal(plan.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING);
-  assert.equal(plan.remote_bounds.width, 1100 - (ME2_PRIMARY_PAGE_PADDING * 2));
-  assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
-  assert.equal(plan.overlay_remote_content, false);
-});
+  assert.equal(narrow.me2_run_inspector_effective_visible, false);
+  assert.equal(narrow.remote_bounds.x, ME2_PRIMARY_PAGE_PADDING);
+  assert.equal(narrow.remote_bounds.width, 1100 - (ME2_PRIMARY_PAGE_PADDING * 2));
+  assert.ok(narrow.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
 
-test('R95C exact 1124px RUN threshold reserves renderer telemetry width plus gap', () => {
-  const plan = planShellLayout({
+  const exact = planShellLayout({
     width: 1124,
     height: 900,
     state: normalizeShellLayoutState(),
@@ -49,14 +42,15 @@ test('R95C exact 1124px RUN threshold reserves renderer telemetry width plus gap
   const reservedRight = ME2_PRIMARY_PAGE_PADDING
     + ME2_PRIMARY_RUN_INSPECTOR_WIDTH
     + ME2_PRIMARY_RUN_INSPECTOR_GAP;
-  assert.equal(plan.remote_bounds.width, 1124 - ME2_PRIMARY_PAGE_PADDING - reservedRight);
-  assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
-  assert.equal(plan.overlay_remote_content, false);
+  assert.equal(exact.me2_run_inspector_effective_visible, true);
+  assert.equal(exact.remote_bounds.width, 1124 - ME2_PRIMARY_PAGE_PADDING - reservedRight);
+  assert.ok(exact.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
+  assert.equal(exact.overlay_remote_content, false);
 });
 
-test('R95C Right Utility Panel can use sub-threshold width only because renderer telemetry is also absent', () => {
+test('R95C.2 requested Right Utility Panel suppresses telemetry before native Browser width', () => {
   const plan = planShellLayout({
-    width: 1100,
+    width: 1400,
     height: 900,
     state: normalizeShellLayoutState(),
     surface_profile: 'ME2_R95_RUN',
@@ -65,7 +59,30 @@ test('R95C Right Utility Panel can use sub-threshold width only because renderer
     me2_context_drawer_width: 380,
   });
   assert.equal(plan.me2_context_drawer_effective_open, true);
-  assert.ok(plan.me2_context_drawer_width >= 320);
+  assert.equal(plan.me2_run_inspector_effective_visible, false);
   assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
-  assert.match(browserPage, /utilityRightOpen \? "hidden"/);
+  assert.ok(plan.adaptations.includes('ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL'));
+});
+
+test('R95C.2 IPC readback carries native telemetry decision without authority widening', () => {
+  assert.match(main, /run_inspector_visible: shellLayoutPlan\?\.me2_run_inspector_effective_visible === true/);
+  const handlerStart = main.indexOf("ipcMain.handle('metaengine:shell:primary-context-drawer'");
+  const handlerEnd = main.indexOf("ipcMain.handle('metaengine:shell:primary-agent-session-select'", handlerStart);
+  const handler = main.slice(handlerStart, handlerEnd);
+  assert.match(handler, /presentation_only:\s*true/);
+  assert.match(handler, /browser_command_authority:\s*false/);
+  assert.match(handler, /update_authority:\s*false/);
+  assert.match(handler, /release_authority:\s*false/);
+  assert.match(handler, /authority_effect:\s*false/);
+});
+
+test('R95C.2 renderer consumes native visibility readback instead of owning a media breakpoint', () => {
+  assert.match(store, /runTelemetryInspectorVisible: boolean/);
+  assert.match(store, /run_inspector_visible\?: boolean/);
+  assert.match(store, /runTelemetryInspectorVisible: result\?\.run_inspector_visible === true/);
+  assert.match(store, /runTelemetryInspectorVisible: false/);
+  assert.match(browserPage, /const telemetryInspectorVisible = useMe2/);
+  assert.match(browserPage, /data-inspector-visible=\{telemetryInspectorVisible \? "true" : "false"\}/);
+  assert.doesNotMatch(browserPage, /min-\[1124px\]:flex|\blg:flex\b|\bxl:flex\b/);
+  assert.doesNotMatch(browserPage, /utilityRightOpen/);
 });
