@@ -17,42 +17,62 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, MessageSquarePlus, PanelLeft, Search, Shield } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useMe2 } from "@/components/me2/store";
-import { toastBus, sendCommand, loadBrowserTabs, type BrowserTab } from "@/lib/me2-bus";
+import { toastBus } from "@/lib/me2-bus";
 import { agentChatOp } from "@/lib/me2-socket";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
 import { useAgentChatSessions, type AgentChatSession } from "@/hooks/use-agentchat-sessions";
-import { resolveExactAgentTab } from "@/lib/r85-ui-contracts.mjs";
 
-// ── выбор вкладки chat.z.ai под сессию: только exact session identity ─────────
-// Title similarity и "единственная z.ai вкладка" запрещены как identity fallback:
-// они могут перевести оператора на чужую сессию при одинаковых/похожих названиях.
+// ── выбор native-вкладки под ME2 session: только Browser canonical binding ────
+// Renderer больше не сканирует daemon BROWSER_TABS и не выводит identity из URL:
+// Mission Control уже хранит session -> native tab binding после create/adopt.
+type NativeSessionSelectResult = {
+  state?: "BOUND" | "UNBOUND" | "STALE" | "UNAVAILABLE" | "FAILED" | "INVALID";
+  selection_applied?: boolean;
+  tab_id?: string | null;
+  conversation_url?: string | null;
+  error?: string | null;
+};
+
 async function openAgentTab(s: AgentChatSession): Promise<void> {
-  const tabs: BrowserTab[] = await loadBrowserTabs();
-  if (tabs.length === 0) {
-    toastBus({ title: "браузер daemon пуст", description: `вкладка для «${s.title}» не найдена — «+» в адресной строке откроет z.ai` });
-    return;
-  }
-
-  const binding = resolveExactAgentTab(tabs, s.id);
-  if (binding.kind === "exact") {
-    await sendCommand("BROWSER_SELECT_TAB", { tab: binding.tab.id }, { lane: "CONTROL", quiet: true });
-    return;
-  }
-  if (binding.kind === "ambiguous") {
+  const shell = (window as Window & {
+    metaengineShell?: {
+      selectPrimaryAgentSession?: (sessionId: string) => Promise<NativeSessionSelectResult | null>;
+    };
+  }).metaengineShell;
+  if (!shell?.selectPrimaryAgentSession) {
     toastBus({
-      title: "identity неоднозначна",
-      description: `«${s.title}»: session ${s.id.slice(0, 16)} встречается в ${binding.matches.length} z.ai-вкладках; выберите вкладку вручную`,
+      title: "native binding недоступен",
+      description: `«${s.title}»: COMMAND не использует daemon/tab/URL fallback; откройте Browser-owned shell`,
       variant: "destructive",
     });
     return;
   }
-  if (binding.zai.length === 0) {
-    toastBus({ title: "z.ai-вкладка не найдена", description: `«${s.title}»: откройте chat.z.ai кнопкой «+» над скринкастом` });
+
+  let result: NativeSessionSelectResult | null = null;
+  try {
+    result = await shell.selectPrimaryAgentSession(s.id);
+  } catch (error) {
+    toastBus({
+      title: "native selection не выполнен",
+      description: String(error instanceof Error ? error.message : error).slice(0, 160),
+      variant: "destructive",
+    });
     return;
   }
+  if (result?.selection_applied === true && result.state === "BOUND") return;
+
+  const state = String(result?.state || "UNAVAILABLE");
+  const detail = state === "UNBOUND"
+    ? "Browser ещё не создал/не усыновил native-вкладку для этой ME2 session"
+    : state === "STALE"
+      ? "каноническая привязка устарела; дождитесь Mission Control reconcile"
+      : state === "FAILED"
+        ? String(result?.error || "native select failed")
+        : "каноническая Browser-привязка недоступна";
   toastBus({
-    title: "нет exact session binding",
-    description: `«${s.title}»: ни одна из ${binding.zai.length} z.ai-вкладок не содержит точный session id; title-fallback запрещён`,
+    title: `session binding: ${state.toLowerCase()}`,
+    description: `«${s.title}»: ${detail}`,
+    variant: state === "FAILED" || state === "STALE" ? "destructive" : "default",
   });
 }
 
