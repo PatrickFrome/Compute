@@ -162,6 +162,8 @@ jobs:
               -or $evidence.closed_overlays_absent_from_dom -ne $true `
               -or $evidence.r85_geometry_verified -ne $true `
               -or $evidence.drawer_interaction_verified -ne $true `
+              -or $evidence.mission_control_verified -ne $true `
+              -or $evidence.run_surface_verified -ne $true `
               -or $evidence.utility_panel_bottom_verified -ne $true `
               -or $evidence.utility_panel_right_verified -ne $true `
               -or $evidence.broken_image_fallback_hidden -ne $true `
@@ -170,9 +172,9 @@ jobs:
             throw 'r85_visual_evidence_contract_invalid'
           }
           if (@($evidence.captures).Count -ne 3) { throw 'r95_visual_evidence_capture_count_invalid' }
-          if (-not (@($evidence.captures).name -contains 'r95-command-utility-right-1440x960')) {
-            throw 'r95_visual_evidence_right_capture_missing'
-          }
+          if (-not (@($evidence.captures).name -contains 'r95c-command-mission-1440x960')) { throw 'r95c_visual_evidence_command_capture_missing' }
+          if (-not (@($evidence.captures).name -contains 'r95c-run-utility-bottom-1440x960')) { throw 'r95c_visual_evidence_run_bottom_capture_missing' }
+          if (-not (@($evidence.captures).name -contains 'r95c-run-utility-right-1440x960')) { throw 'r95c_visual_evidence_run_right_capture_missing' }
           foreach ($capture in @($evidence.captures)) {
             $digest = [string]$capture.sha256
             if ([int64]$capture.bytes -lt 4096 -or $digest.Length -ne 64 -or $digest -notmatch '^[a-f0-9]+') {
