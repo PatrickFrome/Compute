@@ -127,8 +127,9 @@ test('preconversation overlay proof is also invalidated when the canonical gener
     transport_url: 'https://chat.z.ai/',
   });
   agent = h.provisioner.snapshot().agents[0];
-  assert.equal(agent.lifecycle_state, 'ACTIVE');
+  assert.equal(agent.lifecycle_state, 'BOUND_UNVERIFIED');
   assert.equal(agent.transport_proof.transport_stage, 'PRECONVERSATION_ROOT');
+  assert.equal(agent.transport_admission, 'PRECONVERSATION_ONLY');
 
   await h.provisioner.adoptGenerationFloor(28);
   agent = h.provisioner.snapshot().agents[0];
