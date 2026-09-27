@@ -244,13 +244,15 @@ export async function resolveProducerArtifact({
   if (candidates.length === 0) {
     return Object.freeze({ schema: RESOLUTION_SCHEMA, state: 'ABSENT', source_head: head, authority_effect: false });
   }
-  const run = candidates[0];
+  const successful = candidates.find((run) => run?.status === 'completed' && run?.conclusion === 'success');
+  const active = candidates.find((run) => run?.status !== 'completed');
+  const run = successful || active || candidates[0];
   const runId = boundedInteger(run.id, {
     min: 1,
     max: Number.MAX_SAFE_INTEGER,
     code: 'installer_provenance_run_id_invalid',
   });
-  if (run.status !== 'completed') {
+  if (!successful && active) {
     return Object.freeze({
       schema: RESOLUTION_SCHEMA,
       state: 'PENDING',
@@ -260,7 +262,7 @@ export async function resolveProducerArtifact({
       authority_effect: false,
     });
   }
-  if (run.conclusion !== 'success') {
+  if (!successful) {
     fail('installer_provenance_producer_failed', { run_id: runId, conclusion: run.conclusion ?? null });
   }
   const artifacts = await fetchJson(
