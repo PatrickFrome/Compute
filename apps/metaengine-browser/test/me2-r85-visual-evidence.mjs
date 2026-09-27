@@ -1,4 +1,4 @@
-import { app, BaseWindow, WebContentsView, ipcMain } from 'electron';
+import { app, BaseWindow, WebContentsView, ipcMain, session } from 'electron';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +27,22 @@ app.on('window-all-closed', () => {});
 const digest = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 const VISUAL_PHASE_TIMEOUT_MS = 120_000;
 let phase = 'BOOT';
+const blockedRemoteBrowserPorts = new Set();
+
+function installRemoteBrowserTransportFence() {
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    try {
+      const url = new URL(String(details?.url || ''));
+      const port = url.port || (url.protocol === 'https:' || url.protocol === 'wss:' ? '443' : '80');
+      if (port === '3042' || port === '3043') {
+        blockedRemoteBrowserPorts.add(port);
+        callback({ cancel: true });
+        return;
+      }
+    } catch {}
+    callback({ cancel: false });
+  });
+}
 
 function markPhase(next) {
   phase = next;
@@ -254,6 +270,7 @@ async function main() {
 
   await withTimeout(app.whenReady(), 20_000, 'app_ready');
   await fs.mkdir(OUTPUT_ROOT, { recursive: true });
+  installRemoteBrowserTransportFence();
   registerPresentationIpc();
 
   markPhase('START_UI_HOST');
@@ -294,6 +311,8 @@ async function main() {
     primary_me2_ui_captured: true,
     legacy_shell_captured: false,
     remote_browser_content_captured: false,
+    remote_browser_transport_blocked: true,
+    blocked_remote_browser_ports: ['3042','3043'],
     presentation_only: true,
     authority_effect: false,
   };
@@ -344,6 +363,13 @@ async function main() {
     evidence.captures.push(searchCapture);
     evidence.command_search_available = true;
 
+    // The R97 shell never needs the old remote Browser streaming endpoints.
+    // The qualification session blocks both ports for the whole capture window;
+    // evidence records the policy even when no request was attempted. Any actual
+    // request is cancelled above and observed in blockedRemoteBrowserPorts.
+    evidence.remote_browser_transport_blocked = true;
+    evidence.blocked_remote_browser_ports = ['3042','3043'];
+    evidence.observed_blocked_remote_browser_ports = [...blockedRemoteBrowserPorts].sort();
     evidence.ok = true;
     evidence.capture_count = evidence.captures.length;
     evidence.generated_at = new Date().toISOString();
