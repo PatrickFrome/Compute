@@ -10148,3 +10148,16 @@ Stage Summary:
 - Build-once installer provenance опубликован как draft PR #988: гарантия «все downstream gates тестируют одни и те же bytes»; роллаут на Installed Chat / Final Runtime / Soak — следующий раунд (шаги resolve+import идентичны)
 - Backlog: (1) import-шаги в 3 оставшихся gate; (2) забрать r85 PNG при terminal #2433; (3) ребейз #988 на движущуюся голову R85 перед промоушеном; (4) EV-backlog без изменений
 - Worktree /home/z/me2-r85 (work/r85-installer-forge-v1) сохранён для следующих раундов
+
+---
+Task ID: R80
+Agent: cron-413338
+Task: Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
+
+Work Log:
+- .github.env валиден (token=valid, без печати)
+- push-pending-r80.sh: main→sandbox/me2-os ff 9656a99a..3b630e6a; архив-ветки me2/archive-r21-sandbox-snapshot и me2/archive-v040-main-archive up-to-date
+- ls-remote ≡ local HEAD = 3b630e6a ✅ (включая мой R85-INSTALLER-FORGE worklog-аппенд)
+
+Stage Summary:
+- Публикация актуальна: sandbox/me2-os = 3b630e6a; дерево чистое; блокеров нет
