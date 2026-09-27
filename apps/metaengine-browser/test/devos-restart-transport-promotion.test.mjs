@@ -13,7 +13,7 @@ function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => structuredClone(body) };
 }
 
-function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
+function harness({ tabUrl = CONVERSATION, releaseThrows = false, bootstrapSucceeds = true } = {}) {
   const calls = [];
   let currentTabUrl = tabUrl;
   const state = {
@@ -119,12 +119,14 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
       assert.equal(currentTabUrl, 'https://chat.z.ai/');
       assert.equal(command.payload.submit_after_type, true);
       assert.equal(command.payload.replace_existing, true);
-      currentTabUrl = CONVERSATION;
-      state.tabs[0].url = CONVERSATION;
+      if (bootstrapSucceeds) {
+        currentTabUrl = CONVERSATION;
+        state.tabs[0].url = CONVERSATION;
+      }
       return {
-        effect_state: 'PROVEN_NEW_CONVERSATION',
-        composer_cleared: true,
-        new_conversation_observed: true,
+        effect_state: bootstrapSucceeds ? 'PROVEN_NEW_CONVERSATION' : 'AMBIGUOUS_AFTER_ENTER',
+        composer_cleared: bootstrapSucceeds,
+        new_conversation_observed: bootstrapSucceeds,
         automatic_retry_allowed: false,
         authority_effect: true,
       };
@@ -236,6 +238,25 @@ test('lost promotion-release ACK never repeats local Browser transport proof', a
     await h.cycle.cycle();
     assert.equal(h.calls.filter((row) => row[1] === '/v1/devos/promotion-lease').length, 1);
     assert.equal(h.calls.filter((row) => row[1] === 'CAPTURE').length, 1);
+  } finally {
+    h.cleanup();
+  }
+});
+
+
+test('ambiguous root bootstrap is write-ahead fenced and never auto-submitted again', async () => {
+  const h = harness({ tabUrl: 'https://chat.z.ai/', bootstrapSucceeds: false });
+  try {
+    const first = await h.cycle.cycle();
+    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'PROVISIONING_AMBIGUOUS');
+    assert.equal(h.state.fleet.agents[0].ambiguous_reason, 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING');
+    assert.equal(first.fleet_transport_promotion.state, 'LOCAL_PRECONVERSATION_BOOTSTRAP_AMBIGUOUS');
+    assert.equal(first.fleet_transport_promotion.write_ahead_barrier_persisted, true);
+    assert.equal(h.calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
+
+    await h.cycle.cycle();
+    assert.equal(h.calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1, 'ambiguous bootstrap must not be replayed');
+    assert.equal(h.calls.filter((row) => row[0] === 'http' && row[1] === '/v1/devos/promotion-lease').length, 1);
   } finally {
     h.cleanup();
   }
