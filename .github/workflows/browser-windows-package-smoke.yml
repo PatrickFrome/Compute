@@ -580,6 +580,10 @@ jobs:
             if ($me2Output -match 'DAEMON_INITIAL_READINESS_FAILED|ME2_CONTRACT_UNREACHABLE|ME2_CONTRACT_MISMATCH') {
               throw 'normal_ui_me2_integration_degraded'
             }
+            if ($me2Output -match '\[guard\] lock failed:') {
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'normal_ui_me2_daemon_incarnation_lock_failed'
+            }
 
             Copy-Item $journal "$env:RUNNER_TEMP\browser-startup-journal-v1.json" -Force
             Copy-Item $sentinelPath "$env:RUNNER_TEMP\browser-sentinel-v1.json" -Force
