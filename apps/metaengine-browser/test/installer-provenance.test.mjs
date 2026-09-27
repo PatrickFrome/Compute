@@ -80,6 +80,10 @@ test('R86 workflow topology has one NSIS producer and three immutable-byte consu
     assert.match(consumer, /actions: read/);
     assert.match(consumer, /installer-provenance\.mjs acquire/);
     assert.match(consumer, /installer-provenance\.mjs verify/);
+    assert.match(consumer, /metaengine\.browser\.installer-provenance-acquire\.v1/);
+    assert.match(consumer, /provenance\.producer_run_id -ne \[int64\]\$acquire\.producer_run_id/);
+    assert.match(consumer, /provenance\.artifact_name -ne \[string\]\$acquire\.artifact_name/);
+    assert.match(consumer, /provenance\.repository -ne '\$\{\{ github\.repository \}\}'/);
     assert.doesNotMatch(consumer, /electron-builder@26\.15\.7 --win nsis --x64/);
   }
 });
