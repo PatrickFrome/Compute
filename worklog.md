@@ -10413,3 +10413,22 @@ Work Log:
 Stage Summary:
 - Round 14 закрыт как ENGINE-FIX: ложный EV-BACKLOG-CYCLE устранён durably — закрытие задач теперь только по durable-источникам (state CSV / implemented-токен), упоминания в хендовер-строках безопасны; следующий pick = EV-EMPTYSTATES (первая реально открытая задача)
 - Backlog порядка pick: EV-EMPTYSTATES → EV-KEYBOARD → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE
+
+---
+Task ID: R93-SESSION-SELECT-CONVERGE-20260927
+Agent: Super Z (operator handoff: metaengine desktop development, rounds-mode off)
+Task: Смена фокуса на DESKTOP-клиент metaengine: верифицировать R92-заявки ChatGPT (PR #997 @ 060fa85c), продолжить незавершённую R93-линию (canonical session binding / UI resilience), довести до доказанной зелёной точки
+
+Work Log:
+- верификация remote: R92 @ 060fa85c существует (origin/work/r92-result-verification-installer-convergence-v1), PR #997 open (base work/r90-build-once-overlap-convergence-v1); локальный me2-desktop HEAD b8ed647e (R81) не тронут, fetch-only
+- обнаружена ветка R93 work/r93-native-session-selection-ui-resilience-v1 (7 коммитов: canonical tab binding ×4, agents-list polling lifetime, drawer resize fencing, + r93-primary-ui-resilience.test.mjs 118L) — незавершённая работа ChatGPT
+- аудит CI на b2a58729: Shell #2906 FAIL, Self Update E2E #2950 FAIL, Critical Audit #1956 CANCELLED, Installed Chat #1778 CANCELLED; локально воспроизведены 4 падения: 3×R93 (ENOENT: тест резолвил <root>/me2-ui вместо apps/me2-ui) + 1×R85 (stale assertion resolveExactAgentTab(tabs, s.id) на command.tsx после перехода на canonical binding)
+- подготовлен фикс c584f92d (пути appsRoot, шапка command.tsx без BROWSER_SELECT_TAB, R85-assertions → selectPrimaryAgentSession + запрет title-fallback, семантика exact-session-only сохранена); push отклонён non-FF: конкурентный воркер уже запушил эквивалентные фиксы 383f2c13/3f4b18c8/5ecb3ed6 → дубликат честно снят (branch удалён, remote не тронут)
+- верификация их head 5ecb3ed6 локально: npm test = 3491 тестов / 3489 pass / 0 fail / 2 skipped; npm run check OK; ci-race-check RACE=0
+- CI матрица 5ecb3ed6: 11/11 SUCCESS (Shell #2909, Critical Audit #1959, Package Smoke #2489, Installed Chat #1781, Final Runtime #1390, Autonomous Soak #2034, Shell-First Dirty #741, R84 Convergence #195, Meta Orchestrator #1095, Typed Workspaces #751, Self Update E2E #2953)
+
+Stage Summary:
+- R92 подтверждена как база (PR #997 open, 8/8 workflow на 060fa85c по отчёту + артефакт-цепочка установщика CI-attested; байтовую верификацию EXE локально не делал — нет Windows-раннера, это честная граница)
+- R93 (PR #998) доведена до полной зелёной матрицы 11/11 на 5ecb3ed6 — новая доказанная точка; три in-flight фикса ChatGPT завершены и верифицированы (concurrence-инцидент разрешён без force-push и без дублей)
+- Свежий установщик для R93 будет из Package Smoke #2489 (0.7.0-dev.3.x) — при надобности оператору взять артефакт exact-SHA 5ecb3ed6, не пересборку
+- Оставшиеся разрывы: PR #997/#998 не смержены (решение оператора о merge-порядке: R92 → потом R93 поверх); R85-контракты в тестах теперь синхронизированы с R93-архитектурой; watcher параллельных воркеров: при concurrent-push на PR-ветку — fetch + verify, никогда force
