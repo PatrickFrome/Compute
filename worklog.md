@@ -10255,3 +10255,18 @@ Work Log:
 
 Stage Summary:
 - Публикация актуальна: sandbox/me2-os = 17822b85; дерево чистое; блокеров нет
+---
+Task ID: R80-DEVLOOP-MIGRATION-20260927
+Agent: Z.ai Code (main)
+Task: Директива оператора: преобразовать Job 413338 (R80 push watcher) в полноценный комплексный dev-цикл (аудит веток → desktop-разработка механизмы/контракты/UI → DB-sync → самоулучшение скрипта → повтор)
+
+Work Log:
+- cron list: 9 задач; цель миграции = Job 413338 «ME2 R80 push watcher» (fixed_rate 900s, Europe/Moscow)
+- Проверены фактические пути перед написанием payload: /home/z/me2-desktop (branch me2/r78-desktop-from-scratch; apps/metaengine-browser, me2-desktop, me2-ui, me2-daemon), worktree /home/z/me2-wt-r86 (work/r85-control-room-ui-v1 @ 1880a83a unpushed), scripts/git-sync.sh, mini-services/me2-daemon — все на месте
+- Создан Job 417497 «ME2 DEV-LOOP v1» (fixed_rate 900, Europe/Moscow, priority 10): 8 шагов — (0) публикация рельсы push-pending-r80.sh [обязанность R80 сохранена], (1) аудит актуальных веток + CI-гонка/cancel-in-progress правило, (2) выбор 1-3 малых задач (worklog backlog + EV-* + аудит кода: механизмы/контракты/UI), (3) разработка по me2-round, (4) верификация (REST-тесты, lint 0/0, agent-browser :81, мобильный 390, dev.log), (5) синхронизация БД phoenix-heartbeat (Supabase evidence-mirror), (6) worklog-запись + git-sync пуш рельсы, (7) самоулучшение через DEVLOOP-EVOLVE маркеры в worklog + протокол пересоздания payload, (8) однострочный отчёт
+- cron get 417497: payload цел (все шаги/инварианты), next=04:53 UTC+3
+- cron delete 413338: удалён после верификации наследника; прямой смены payload у cron-гейта нет — миграция = create+verify+delete
+- Известный косметический дрейф: payload-ы PHX-HEARTBEAT/COMPACTOR/CTX-SHARD упоминают «413338 PAT-watcher» информационно — фактический исполнитель теперь 417497 (исправится при следующем рефреше шардов/heartbeat-эталона)
+
+Stage Summary:
+- Job 413338 → Job 417497 (ME2 DEV-LOOP v1): каждые 15 мин теперь полный цикл разработки desktop-клиента с самоулучшением; публикация рельсы и работа с PAT сохранены как шаг 0; DEVLOOP-EVOLVE замыкает петлю эволюции скрипта без участия оператора
