@@ -61,6 +61,29 @@ function fakeFetchFactory({ runStatus = 'completed', conclusion = 'success', inc
   };
 }
 
+test('R86 workflow topology has one NSIS producer and three immutable-byte consumers', async () => {
+  const workflowPaths = {
+    producer: '../../../.github/workflows/browser-windows-package-smoke.yml',
+    installedChat: '../../../.github/workflows/browser-windows-installed-chat-qualification.yml',
+    finalRuntime: '../../../.github/workflows/browser-final-runtime-activation-v1.yml',
+    soak: '../../../.github/workflows/browser-windows-autonomous-soak-v1.yml',
+  };
+  const rows = Object.fromEntries(await Promise.all(Object.entries(workflowPaths).map(async ([key, rel]) => [
+    key,
+    await readFile(new URL(rel, import.meta.url), 'utf8'),
+  ])));
+  const combined = Object.values(rows).join('\n');
+  assert.equal((combined.match(/electron-builder@26\.15\.7 --win nsis --x64/g) ?? []).length, 1);
+  assert.match(rows.producer, /installer-provenance\.mjs write/);
+  assert.match(rows.producer, /installer-provenance\.json/);
+  for (const consumer of [rows.installedChat, rows.finalRuntime, rows.soak]) {
+    assert.match(consumer, /actions: read/);
+    assert.match(consumer, /installer-provenance\.mjs acquire/);
+    assert.match(consumer, /installer-provenance\.mjs verify/);
+    assert.doesNotMatch(consumer, /electron-builder@26\.15\.7 --win nsis --x64/);
+  }
+});
+
 test('write + verify binds installer, blockmap and config to exact source head', async () => {
   const f = await fixture();
   const row = await writeProvenance({
