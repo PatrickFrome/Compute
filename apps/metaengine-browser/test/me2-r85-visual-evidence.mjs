@@ -25,6 +25,32 @@ app.commandLine.appendSwitch('disable-gpu');
 
 const digest = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 
+const VISUAL_PHASE_TIMEOUT_MS = 120_000;
+let visualPhase = 'BOOT';
+
+function markPhase(phase) {
+  visualPhase = phase;
+  console.error(JSON.stringify({
+    schema: 'metaengine.browser.r85-visual-phase.v1',
+    phase,
+    authority_effect: false,
+  }));
+}
+
+async function withTimeout(promise, timeoutMs, label) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`r85_visual_timeout:${label}`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function registerPresentationIpc() {
   let page = 'command';
   let overlay = false;
@@ -88,11 +114,16 @@ async function waitFor(contents, expression, timeoutMs = 20000) {
 }
 
 async function settle(contents) {
-  await contents.executeJavaScript('document.fonts?.ready ? document.fonts.ready.then(() => true) : true');
-  await contents.executeJavaScript('new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+  await withTimeout(contents.executeJavaScript(`Promise.race([
+    document.fonts?.ready ? document.fonts.ready.then(() => 'fonts-ready') : Promise.resolve('fonts-unavailable'),
+    new Promise((resolve) => setTimeout(() => resolve('fonts-timeout'), 3000))
+  ])`), 5000, 'fonts_settle');
+  await withTimeout(contents.executeJavaScript(`Promise.race([
+    new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve('frames-ready')))),
+    new Promise((resolve) => setTimeout(() => resolve('frames-timeout'), 1500))
+  ])`), 3000, 'frame_settle');
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
-
 async function metrics(contents) {
   return contents.executeJavaScript(\`(() => {
     const rect = (id) => {
@@ -121,7 +152,7 @@ async function metrics(contents) {
 
 async function capture(view, name) {
   await settle(view.webContents);
-  const image = await view.webContents.capturePage();
+  const image = await withTimeout(view.webContents.capturePage(), 10_000, `capture_page:${name}`);
   const png = image.toPNG();
   if (png.length < 4096) throw new Error(\`r85_visual_png_too_small:\${name}:\${png.length}\`);
   const file = path.join(OUTPUT_ROOT, \`\${name}.png\`);
@@ -148,8 +179,19 @@ function assertBaseMetrics(row) {
 
 async function main() {
   await app.whenReady();
+  const watchdog = setTimeout(() => {
+    console.error(JSON.stringify({
+      schema: 'metaengine.browser.r85-visual-evidence.v1',
+      ok: false,
+      error: `r85_visual_phase_watchdog:${visualPhase}`,
+      authority_effect: false,
+    }));
+    app.exit(2);
+  }, VISUAL_PHASE_TIMEOUT_MS);
+  watchdog.unref?.();
   await fs.mkdir(OUTPUT_ROOT, { recursive: true });
   registerPresentationIpc();
+  markPhase('START_UI_HOST');
 
   const {
     startMe2UiHost,
@@ -160,11 +202,12 @@ async function main() {
     stopMe2UiGateway,
   } = await import('../src/me2/me2-ui-gateway.mjs');
 
-  const host = await startMe2UiHost();
+  const host = await withTimeout(startMe2UiHost(), 25_000, 'start_ui_host');
   if (!['HEALTHY', 'ADOPTED'].includes(host.state)) {
     throw new Error(\`r85_visual_ui_host_not_ready:\${JSON.stringify(host)}\`);
   }
-  const gateway = await startMe2UiGateway();
+  markPhase('START_GATEWAY');
+  const gateway = await withTimeout(startMe2UiGateway(), 10_000, 'start_gateway');
   if (gateway.state !== 'LIVE' || !gateway.url) {
     throw new Error(\`r85_visual_gateway_not_ready:\${JSON.stringify(gateway)}\`);
   }
@@ -189,18 +232,27 @@ async function main() {
   shellView.setBounds({ x: 0, y: 0, width: 1440, height: 960 });
 
   try {
-    await shellView.webContents.loadURL(\`\${gateway.url}/#command\`);
+    markPhase('LOAD_PRIMARY_ME2');
+    await withTimeout(shellView.webContents.loadURL(`${gateway.url}/#command`), 25_000, 'load_primary_me2');
     shellView.webContents.setZoomFactor(1);
     windowRef.show();
 
+    markPhase('WAIT_PRIMARY_COMMAND');
     await waitFor(shellView.webContents, 'document.querySelector(\\'[data-testid="page-command"]\\')');
     await waitFor(shellView.webContents, 'document.querySelector(\\'[data-testid="context-drawer-toggle"]\\')');
+    markPhase('CAPTURE_COMMAND_CLOSED');
     const closed = await capture(shellView, 'r85-command-1440x960');
     assertBaseMetrics(closed);
     if (closed.metrics.context_drawer != null) throw new Error('r85_visual_drawer_should_start_closed');
 
-    await shellView.webContents.executeJavaScript(\`document.querySelector('[data-testid="context-drawer-toggle"]')?.click(); true\`);
+    markPhase('OPEN_CONTEXT_DRAWER');
+    await withTimeout(
+      shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="context-drawer-toggle"]')?.click(); true`),
+      5000,
+      'open_context_drawer',
+    );
     await waitFor(shellView.webContents, 'document.querySelector(\\'[data-testid="context-drawer"]\\')');
+    markPhase('CAPTURE_COMMAND_DRAWER');
     const drawer = await capture(shellView, 'r85-command-drawer-1440x960');
     assertBaseMetrics(drawer);
     const drawerHeight = Math.round(drawer.metrics?.context_drawer?.height || 0);
@@ -226,10 +278,12 @@ async function main() {
     await fs.writeFile(path.join(OUTPUT_ROOT, 'r85-visual-evidence.json'), \`\${JSON.stringify(evidence, null, 2)}\\n\`);
     console.log(JSON.stringify(evidence));
   } finally {
+    markPhase('SHUTDOWN');
     try { shellView.webContents.close(); } catch {}
     try { windowRef.destroy(); } catch {}
     try { stopMe2UiGateway(); } catch {}
-    try { await stopMe2UiHostAndWait({ graceMs: 2500, forceMs: 2500 }); } catch {}
+    try { await withTimeout(stopMe2UiHostAndWait({ graceMs: 2500, forceMs: 2500 }), 7000, 'stop_ui_host'); } catch {}
+    clearTimeout(watchdog);
     app.exit(0);
   }
 }
