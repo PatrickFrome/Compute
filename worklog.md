@@ -10853,3 +10853,21 @@ Stage Summary:
 - Мины: ~10 старых new-chat табов всё ещё несут грязный draft (кандидаты на закрытие/NAVIGATE-reload позже)
 - Разблокированы цели 1–2: следующий tick может бутстрапить чат-агента (NEW_TAB → task-brief → submit) и проверять флот-конвейер end-to-end
 - Артефакты: browser-test-results-t0536.json (T01–T03, U-SCAN/U-TYPE/U-ENTER/U-CAP2/U-RESULT, V-RT, N-NEW/N-RT), скрипты tick-probe-0430.py + unlock-0536.py
+
+---
+Task ID: BROWSER-TEST-20260928-0600
+Agent: Super Z (cron loop)
+Task: Job 419203 — ПОЛНЫЙ прогон всех механик (фазы A/B/C/C3/D) после снятия блокера 05:36
+
+Work Log:
+- Phase A (12): 7 COMPLETED (CONTROL_CAPABILITIES, TAB_CENSUS, SYSTEM_TELEMETRY, GATE_STATUS, SELF_UPDATE_STATUS, DOWNLOAD_STATUS, FLEET_STATUS); 2 budget-throttled (PROCESS_CENSUS, DEV_PLANE_STATUS — supervisor_action_budget_exceeded, транзиторно); 3 DB-блок (SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST — check-constraint 23514 на INSERT-fallback)
+- Phase B (3): CAPTURE ✓, READ_TRANSCRIPT ✓; FIND_IN_PAGE ✗ (23514)
+- Phase C: NEW_TAB ✓ (tab_5134aa96, draft_state=CLEAN — впервые в C-фазе), SELECT_TAB ✓, SEMANTIC_FOCUS ✓, SEMANTIC_TYPE(replace_existing, submit_after_type=False) ✓, PRESS_KEY ✓, NAVIGATE ✓ (20s), FLEET_RECONCILE ✓; НО post-submit url=https://chat.z.ai/ → conversation_created=False (тип-без-submit + отдельный Enter = ненадёжно); SET_ZOOM ✗ (23514, ×2)
+- Phase C3 (ретрай на .ctx-табе tab_ec2c7b50): SEMANTIC_TYPE(submit_after_type=True) → PRESS_KEY → url=https://chat.z.ai/c/d9902597 → conversation_created=True (2-е подтверждение рецепта; 05:36 + 05:56)
+- Phase D: FLEET_RECONCILE(target=4) ✓, флот 4→4 (no-op подтверждён; C11 target=5 тоже не вырос), SELF_UPDATE_CHECK state=CURRENT (hint 36315939303.1, resolved_tag=null)
+
+Stage Summary:
+- ИТОГ: 17 механик работают (включая submit→conversation через submit_after_type=True — цели 1–2 разблокированы), 6 не работают (FIND_IN_PAGE, SET_ZOOM, SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST — все DB-constraint 23514; submit-путь с отдельным Enter), 2 budget-throttled (ретрай позже), mesh по-прежнему невидим
+- Канонический рецепт создания чат-агента: NEW_TAB(https://chat.z.ai/) → CAPTURE → SEMANTIC_TYPE{role:textbox, submit_after_type:TRUE, text:<brief>} → (опц. Enter) → CAPTURE проверка /c/
+- DB-constraint 23514: RPC-allowlist даёт 400 supervisor_action_invalid → INSERT-fallback отбивается check-констрейнтом — 5 механик недоступны до правки allowlist/констрейнта (вне нашего контроля, нужна операторская миграция)
+- Артефакт: browser-test-results.json (полный), .prev бэкап прежнего
