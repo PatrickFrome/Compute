@@ -194,6 +194,19 @@ export function resolveAgentPlatformNavControl(frame, name) {
   return targetProjection(exactSemanticTarget(frame, 'button', String(name)));
 }
 
+export function resolveAgentPlatformModelOption(frame, model = AGENT_PLATFORM_MODEL) {
+  const requested = String(model || '');
+  if (!AGENT_PLATFORM_KNOWN_MODELS.includes(requested)) return null;
+  const allowedRoles = new Set(['button','menuitem','radio']);
+  const rows = Array.isArray(frame?.semantic_targets)
+    ? frame.semantic_targets.filter((row) =>
+        allowedRoles.has(String(row?.role || '').toLowerCase())
+        && String(row?.name || '') === requested
+        && row?.semantic_ref)
+    : [];
+  return rows.length === 1 ? targetProjection(rows[0]) : null;
+}
+
 // Composer resolution for semantic typing. The GLM composer is a textarea
 // whose accessible name is a localized placeholder, so the ONLY stable
 // addressing key is the semantic_ref captured from a fresh perception.
