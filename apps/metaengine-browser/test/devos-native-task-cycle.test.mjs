@@ -21,6 +21,7 @@ const fleetTransportProof = {
   target_id: lease.target_id,
   generation_epoch: lease.agent_generation_epoch,
   conversation_url_sha256: 'a'.repeat(64),
+  agent_surface_sha256: 'd'.repeat(64),
   agent_surface_sha256: 'b'.repeat(64),
   proven_at: '2026-08-31T18:00:00.000Z',
   authority_effect: false,
