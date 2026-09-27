@@ -10383,3 +10383,33 @@ Work Log:
 Stage Summary:
 - Round 13 закрыт как RECHECK+ENGINE-FIX: EV-FOOTER подтверждена (0 строк изменено), re-pick баг устранён durably (маркеры в state переживают reset и tail-вытеснение — re-pick цикл R12/R13 невозможен), phoenix-snapshot write-ahead перед правкой worklog
 - Backlog порядка pick: EV-EMPTYSTATES → EV-KEYBOARD → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY
+
+---
+Task ID: EVOLVE-ROUND-14
+Agent: self-evolve v1.28 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-BACKLOG-CYCLE] backlog пройден полностью — повторный цикл полировки с версии +1
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = 88%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.28
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-BACKLOG-CYCLE] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-BACKLOG-CYCLE' (маркер теперь durable в evolve.state)
+
+Stage Summary:
+- раунд 14 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-14-ENGINEFIX-20260927
+Agent: Super Z (cron SELF-EVOLVE tick, Job 416839)
+Task: Раунд 14 — маркер [EV-BACKLOG-CYCLE]: честный аудит «уже реализовано?» => обнаружен и устранён ложный цикл pick_task (движок v1.28 → v1.30, self-update → v1.31)
+
+Work Log:
+- аудит: implemented=CSV (durable) = 7 честных задач, но pick_task v1.28 вернул EV-BACKLOG-CYCLE — противоречие => root cause: v1.28-фолбэк «12KB-tail worklog» матчил ЛЮБОЕ упоминание маркера; строка хендовера R13 «Backlog порядка pick: EV-EMPTYSTATES → … → EV-ERRORBOUNDARY» ложно закрыла все 9 открытых задач (обратная сторона tail-вытеснения R12/R13)
+- fix v1.30 (scripts/phoenix/self-evolve.sealed.sh): (1) источник истины — implemented=CSV с ТОЧНЫМ comma-совпадением (case ",$list," в духе self_update); (2) worklog-фолбэк — только durable-токен «implemented-<MARKER>» целым словом (grep -qw), bare-упоминания более не закрывают задачи; (3) BACKLOG +EV-DESKTOP-SMOKE (приоритет оператора: DESKTOP apps/me2-desktop, gateway :81, аудит-only)
+- регресс-тесты (субшелл): PICK1 live-tail с bare-упоминаниями всех 9 => EV-EMPTYSTATES (ложный цикл устранён); PICK2 fake-tail с токеном implemented-EV-EMPTYSTATES => EV-KEYBOARD (фолбэк работает); bash -n OK
+- закрытие раунда ЧЕСТНО: self-update reason=round14-enginefix (routine), маркер implemented-EV-BACKLOG-CYCLE НЕ добавлялся (не реальная задача бэклога — client_tasks_done остался 7, без инфляции)
+- write-ahead: phoenix-snapshot ok (snapshots-wa) перед правками; движок без секретов (grep ghp_/cfat_/cfut_ = 0); page.tsx не тронут (0 строк, фриз соблюдён)
+- верификация: self-check mirrors=2/2(synced) OK; gateway :81 HTTP 200; lint=0/0 (движком, раунд); state: rounds=14 tasks_done=7 score=88 v=1.31
+
+Stage Summary:
+- Round 14 закрыт как ENGINE-FIX: ложный EV-BACKLOG-CYCLE устранён durably — закрытие задач теперь только по durable-источникам (state CSV / implemented-токен), упоминания в хендовер-строках безопасны; следующий pick = EV-EMPTYSTATES (первая реально открытая задача)
+- Backlog порядка pick: EV-EMPTYSTATES → EV-KEYBOARD → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE
