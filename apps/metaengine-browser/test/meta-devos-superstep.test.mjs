@@ -45,38 +45,42 @@ test('follower performs only controller lease read and no plan/frontier work',as
   assert.deepEqual(calls.map((row)=>row.name),['meta_orchestrator_controller_lease_v1']);
 });
 
-test('leader with insufficient capacity never materializes a partial critical group',async()=>{
+test('leader admits only the critical primary when one scheduler slot is available',async()=>{
   const {calls,run}=runner({slots:1});
   const result=await run({clientId});
-  assert.equal(result.state,'CAPACITY_WAIT');
-  assert.equal(result.frontier_point_count,0);
-  assert.equal(calls.some((row)=>row.name==='meta_orchestrator_frontier_admit_v2'),false);
+  assert.equal(result.state,'ADMITTED');
+  assert.equal(result.frontier_point_count,1);
+  const writes=calls.filter((row)=>row.name==='meta_orchestrator_frontier_admit_v2');
+  assert.equal(writes.length,1);
+  assert.deepEqual(writes[0].args.p_point_ids,['meta.critical']);
 });
 
-test('leader materializes one complete critical frontier in one RPC',async()=>{
+test('leader does not preallocate critic or falsifier before the critical primary has a result',async()=>{
   const {calls,run}=runner({slots:3});
   const result=await run({clientId});
   assert.equal(result.state,'ADMITTED');
   assert.equal(result.atomic_frontier,true);
-  assert.equal(result.frontier_point_count,3);
+  assert.equal(result.frontier_point_count,1);
   assert.equal(result.pressure_state,'NORMAL');
   assert.equal(result.new_frontier_slots,3);
   const writes=calls.filter((row)=>row.name==='meta_orchestrator_frontier_admit_v2');
   assert.equal(writes.length,1);
-  assert.deepEqual(writes[0].args.p_point_ids,['meta.critical','meta.critical.critic','meta.critical.falsifier']);
+  assert.deepEqual(writes[0].args.p_point_ids,['meta.critical']);
   assert.equal(writes[0].args.p_holder_client_id,clientId);
   assert.equal(writes[0].args.p_leader_epoch,9);
 });
 
-test('recovery debt soft budget prevents partial critical growth even with physical capacity',async()=>{
+test('recovery debt soft budget may admit one critical primary without reserving verifier capacity',async()=>{
   const capacityRow=capacity(3,{new_frontier_slots:1,ambiguous_backlog:8,pressure_state:'RECOVERY_DEBT_HIGH'});
   const {calls,run}=runner({capacityRow});
   const result=await run({clientId});
-  assert.equal(result.state,'CAPACITY_WAIT');
-  assert.equal(result.reason,'NEW_FRONTIER_PRESSURE_BUDGET_REQUIRED');
+  assert.equal(result.state,'ADMITTED');
+  assert.equal(result.frontier_point_count,1);
   assert.equal(result.available_slots,3);
   assert.equal(result.new_frontier_slots,1);
-  assert.equal(calls.some((row)=>row.name==='meta_orchestrator_frontier_admit_v2'),false);
+  const writes=calls.filter((row)=>row.name==='meta_orchestrator_frontier_admit_v2');
+  assert.equal(writes.length,1);
+  assert.deepEqual(writes[0].args.p_point_ids,['meta.critical']);
 });
 
 test('ready saturation blocks new frontier without pretending physical capacity disappeared',async()=>{
