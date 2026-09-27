@@ -371,6 +371,31 @@ export class FleetProvisioner {
     });
   }
 
+  async beginTransportBootstrapAttempt({ agent_id, tab_id, target_id, generation_epoch } = {}) {
+    return this.#serial(async () => {
+      this.#assertReady();
+      const agent = this.#requireAgent(agent_id);
+      const tabId = String(tab_id || '');
+      const targetId = String(target_id || '').toLowerCase();
+      const generationEpoch = Number(generation_epoch);
+      if (agent.lifecycle_state !== 'BOUND_UNVERIFIED') throw new Error(`fleet_transport_bootstrap_state_invalid:${agent.lifecycle_state}`);
+      if (!tabId || agent.tab_id !== tabId) throw new Error('fleet_transport_bootstrap_tab_binding_mismatch');
+      if (!targetId || String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_transport_bootstrap_target_binding_mismatch');
+      if (!Number.isSafeInteger(generationEpoch) || generationEpoch !== agent.generation_epoch) throw new Error('fleet_transport_bootstrap_generation_binding_mismatch');
+      // Write-ahead barrier for the first conversation-creation effect. If the
+      // process dies after this persist and before positive conversation
+      // readback, restart preserves PROVISIONING_AMBIGUOUS and the same
+      // (agent,generation) is never automatically submitted again.
+      agent.lifecycle_state = 'PROVISIONING_AMBIGUOUS';
+      agent.ambiguous_reason = 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
+      agent.lost_reason = null;
+      agent.transport_proof = null;
+      agent.updated_at = iso(this.#clock);
+      await this.#persist();
+      return this.snapshot();
+    });
+  }
+
   async markTransportProven({ agent_id, tab_id, target_id, generation_epoch, conversation_url } = {}) {
     return this.#serial(async () => {
       this.#assertReady();
@@ -378,7 +403,11 @@ export class FleetProvisioner {
       const tabId = String(tab_id || '');
       const targetId = String(target_id || '').toLowerCase();
       const generationEpoch = Number(generation_epoch);
-      if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(agent.lifecycle_state)) throw new Error(`fleet_transport_state_invalid:${agent.lifecycle_state}`);
+      const bootstrapPending = agent.lifecycle_state === 'PROVISIONING_AMBIGUOUS'
+        && agent.ambiguous_reason === 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
+      if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(agent.lifecycle_state) && !bootstrapPending) {
+        throw new Error(`fleet_transport_state_invalid:${agent.lifecycle_state}`);
+      }
       if (!tabId || agent.tab_id !== tabId) throw new Error('fleet_transport_tab_binding_mismatch');
       if (!targetId || String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_transport_target_binding_mismatch');
       if (!Number.isSafeInteger(generationEpoch) || generationEpoch !== agent.generation_epoch) throw new Error('fleet_transport_generation_binding_mismatch');
