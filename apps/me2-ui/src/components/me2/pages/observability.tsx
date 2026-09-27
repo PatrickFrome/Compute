@@ -334,31 +334,31 @@ function EvidenceTimelinePanel({
     const out: EvidenceTimelineRow[] = [];
     if (task) {
       out.push({
-        key: \`task:\${task.id}\`,
+        key: `task:${task.id}`,
         at: task.updated_at,
         kind: "TASK",
-        label: \`\${task.status} · \${task.title}\`,
-        detail: task.error?.trim() || task.result?.trim() || \`step \${task.steps}/\${task.max_steps}\`,
+        label: `${task.status} · ${task.title}`,
+        detail: task.error?.trim() || task.result?.trim() || `step ${task.steps}/${task.max_steps}`,
         bad: task.status === "FAILED" || task.status === "CANCELLED",
       });
     }
     for (const event of events.filter((row) => row.task_id === inspectedTaskId).slice(0, 40)) {
       out.push({
-        key: \`event:\${event.seq}\`,
+        key: `event:${event.seq}`,
         at: event.ts,
         kind: "EVENT",
         label: event.type,
-        detail: event.data || \`event seq \${event.seq}\`,
-        bad: EVENT_ATTENTION_TOKENS.some((token) => \`\${event.type} \${event.data ?? ""}\`.toUpperCase().includes(token)),
+        detail: event.data || `event seq ${event.seq}`,
+        bad: EVENT_ATTENTION_TOKENS.some((token) => `${event.type} ${event.data ?? ""}`.toUpperCase().includes(token)),
         seq: event.seq,
       });
     }
     for (const verdict of (verdicts?.verdicts ?? []).filter((row) => row.task_id === inspectedTaskId).slice(0, 24)) {
       out.push({
-        key: \`verdict:\${verdict.seq}\`,
+        key: `verdict:${verdict.seq}`,
         at: verdict.at,
         kind: "VERDICT",
-        label: \`verdict #\${verdict.seq}\`,
+        label: `verdict #${verdict.seq}`,
         detail: verdict.reasons?.length ? verdict.reasons.join(" · ") : "verdict recorded",
         bad: Boolean(verdict.reasons?.length),
         seq: verdict.seq,
@@ -380,9 +380,9 @@ function EvidenceTimelinePanel({
     setPage("tasks");
   }, [inspectedTaskId, openTask, setPage]);
 
-  const chainLabel = chain == null ? "chain ?" : chain.ok ? \`chain ✓ \${chain.checked}\` : \`chain ✗ \${chain.broken_at ?? "?"}\`;
-  const ciLabel = ci == null ? "CI ?" : \`CI \${ci.verdict}\`;
-  const otelLabel = otel == null ? "spans ?" : \`spans \${otel.spans} · drop \${otel.dropped}\`;
+  const chainLabel = chain == null ? "chain ?" : chain.ok ? `chain ✓ ${chain.checked}` : `chain ✗ ${chain.broken_at ?? "?"}`;
+  const ciLabel = ci == null ? "CI ?" : `CI ${ci.verdict}`;
+  const otelLabel = otel == null ? "spans ?" : `spans ${otel.spans} · drop ${otel.dropped}`;
 
   return (
     <Sec
@@ -426,7 +426,7 @@ function EvidenceTimelinePanel({
                   {task?.title ?? inspectedTaskId}
                 </div>
                 <div className="mt-0.5 font-mono text-[9px] text-zinc-600">
-                  task {inspectedTaskId.slice(0, 16)}{task?.agent_id ? \` · agent \${task.agent_id.slice(0, 12)}\` : ""}{task?.status ? \` · \${task.status}\` : ""}
+                  task {inspectedTaskId.slice(0, 16)}{task?.agent_id ? ` · agent ${task.agent_id.slice(0, 12)}` : ""}{task?.status ? ` · ${task.status}` : ""}
                 </div>
               </div>
               <button
