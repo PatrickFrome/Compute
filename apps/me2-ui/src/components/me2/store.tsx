@@ -11,7 +11,7 @@ import {
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
-import { taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
+import { reduceExactTaskHistoryResponse } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -691,23 +691,16 @@ export const useMe2 = create<Me2State>((set, get) => ({
       `/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`,
       { signal: AbortSignal.timeout(8_000) },
     ).then((d) => {
-      set((state) => {
-        if (!taskStreamResponseStillCurrent(
-          { seq: requestSeq, taskId: id },
-          { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
-        )) return {};
-        if (!d?.events) return { streamState: "DEGRADED" as const };
-        const exactFetched = d.events.filter((event) => event.task_id === id);
-        const bySeq = new Map<number, Event>();
-        for (const event of exactFetched) bySeq.set(event.seq, event);
-        for (const event of state.stream) bySeq.set(event.seq, event);
-        return {
-          stream: [...bySeq.values()]
-            .sort((a, b) => a.seq - b.seq)
-            .slice(-200),
-          streamState: "EXACT" as const,
-        };
-      });
+      set((state) => reduceExactTaskHistoryResponse({
+        request: { seq: requestSeq, taskId: id },
+        current: {
+          seq: taskStreamRequestSeq,
+          taskId: state.inspectedTaskId,
+          streamTaskId: state.streamTaskId,
+        },
+        fetchedEvents: d?.events ?? null,
+        liveStream: state.stream,
+      }) ?? {});
     });
   },
 
