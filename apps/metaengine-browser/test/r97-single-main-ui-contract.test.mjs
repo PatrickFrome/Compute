@@ -15,6 +15,7 @@ const preload = await fs.readFile(new URL('../src/preload-shell.cjs', import.met
 const shell = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url), 'utf8');
 const topbar = await fs.readFile(new URL('../../me2-ui/src/components/me2/shell/topbar.tsx', import.meta.url), 'utf8');
 const store = await fs.readFile(new URL('../../me2-ui/src/components/me2/store.tsx', import.meta.url), 'utf8');
+const legacyApp = await fs.readFile(new URL('../ui/app.js', import.meta.url), 'utf8');
 
 test('R97 primary geometry reserves only top bar plus chat fleet rail for one native site', () => {
   const plan = planShellLayout({
@@ -90,4 +91,10 @@ test('R97 renderer keeps only chat fleet + native site persistent; advanced surf
   assert.match(topbar, /setPage\("system"\)/);
   assert.match(store, /page: "browser"/);
   assert.match(store, /const restoredPage: PageKey = "browser"/);
+});
+
+
+test('R97 legacy fallback keeps chat-surface rendering callable', () => {
+  assert.match(legacyApp, /isChatSurfaceTab\(row\.tab\)/);
+  assert.doesNotMatch(legacyApp, /row\.isChatSurfaceTab\(tab\)/);
 });
