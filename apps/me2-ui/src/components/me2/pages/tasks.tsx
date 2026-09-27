@@ -196,10 +196,11 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selected
               onMouseLeave={clearThis}
               onFocus={(e) => { set(e); onSelect?.(t.id); }}
               onBlur={clearThis}
-              role="button"
+              role="group"
               tabIndex={0}
               aria-current={selectedId === t.id ? "true" : undefined}
-              aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов`}
+              aria-keyshortcuts="Enter Space"
+              aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов · Enter открыть · Space Peek`}
               onKeyDown={(e) => {
                 if (e.key === "Enter") { e.preventDefault(); onOpen(t); }
                 else if (e.key === " ") e.preventDefault();
@@ -566,18 +567,24 @@ export function TasksPage() {
               {queueTasks.map((t) => {
                 const eta = etaOf(t);
                 return (
-                  <button
+                  <div
                     key={t.id}
+                    role="link"
+                    tabIndex={0}
                     data-peek-kind="task"
                     data-peek-id={t.id}
                     data-peek-selected={effectivePeekTaskId === t.id ? "true" : "false"}
-                    className={`w-full rounded-md border bg-zinc-900/60 p-2.5 text-left transition hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-600 ${
+                    className={`w-full cursor-pointer rounded-md border bg-zinc-900/60 p-2.5 text-left transition hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-600 ${
                       effectivePeekTaskId === t.id ? "border-cyan-900/80" : "border-zinc-800/80 hover:border-zinc-600"
                     }`}
                     onFocus={() => setPeekTaskId(t.id)}
                     onClick={() => { setPeekTaskId(t.id); openTask(t.id); }}
-                    onKeyDown={(e) => { if (e.key === " ") e.preventDefault(); }}
-                    aria-label={`Открыть задачу ${t.title}`}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); openTask(t.id); }
+                      else if (e.key === " ") e.preventDefault();
+                    }}
+                    aria-keyshortcuts="Enter Space"
+                    aria-label={`Задача ${t.title} · Enter открыть · Space Peek`}
                   >
                     <div className="flex items-center gap-2">
                       <StatusBadge status={t.status} />
@@ -593,7 +600,7 @@ export function TasksPage() {
                       {t.role && <span className="shrink-0 rounded border border-zinc-700 px-1 text-[9px] text-zinc-500">{t.role}</span>}
                       {eta && <span className="ml-auto shrink-0 text-amber-400/90" title="park-and-resume (R72): задача не убита — ждёт окна квоты">{eta}</span>}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

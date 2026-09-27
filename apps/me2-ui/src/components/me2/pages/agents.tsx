@@ -193,8 +193,10 @@ export function AgentsPage() {
               {agents.map((a) => (
                 <div
                   key={a.id}
-                  role="button"
+                  role="group"
                   tabIndex={0}
+                  aria-keyshortcuts="Enter Space"
+                  aria-label={`Агент ${a.role} · Enter открыть чат · Space Peek`}
                   data-peek-kind="agent"
                   data-peek-id={a.id}
                   data-peek-selected={effectivePeekAgentId === a.id ? "true" : "false"}
