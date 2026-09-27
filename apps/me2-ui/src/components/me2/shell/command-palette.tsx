@@ -8,13 +8,14 @@ import {
 } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
-import { sendCommand, spawnAgent, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
+import { sendCommand, spawnAgent, STATUS_BADGE, type ActionMeta, type Agent } from "@/lib/me2-bus";
 import {
   Plus, Bot, RefreshCw, Zap, Boxes, Download, Gauge, Trash2, Search, Rocket,
   LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, Cpu, BrainCircuit,
   Activity, Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 
 const PAGE_META: Record<string, { icon: LucideIcon; hint: string }> = {
   command: { icon: LayoutDashboard, hint: "агенты + браузер + супервизор" },
@@ -36,6 +37,61 @@ function laneChip(lane: string): string {
     case "MUTATION": return "border-fuchsia-800 text-fuchsia-300";
     default: return "border-zinc-700 text-zinc-400";
   }
+}
+
+function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
+  const setOpen = useMe2((s) => s.setPalette);
+  const setPage = useMe2((s) => s.setPage);
+  const setChatId = useMe2((s) => s.setChatId);
+  const { sessions } = useAgentChatSessions();
+
+  const activeChatIdsByAgent = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const session of sessions) {
+      if (session.status !== "ACTIVE") continue;
+      const ids = map.get(session.agent_id) ?? [];
+      ids.push(session.id);
+      map.set(session.agent_id, ids);
+    }
+    return map;
+  }, [sessions]);
+
+  return (
+    <CommandGroup heading={`Агенты · ${agents.length}`}>
+      {agents.slice(0, 8).map((a) => {
+        const chatIds = activeChatIdsByAgent.get(a.id) ?? [];
+        const exactChatId = chatIds.length === 1 ? chatIds[0] : null;
+        return (
+          <CommandItem
+            key={a.id}
+            value={`agent ${a.id} ${a.role}`}
+            onSelect={() => {
+              setChatId(exactChatId);
+              setPage("agents");
+              setOpen(false);
+            }}
+          >
+            <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
+            <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
+            {chatIds.length === 1 ? (
+              <span className="ml-2 rounded border border-violet-900/60 bg-violet-950/30 px-1 font-mono text-[8px] text-violet-300">chat</span>
+            ) : chatIds.length > 1 ? (
+              <span className="ml-2 rounded border border-amber-900/60 bg-amber-950/30 px-1 font-mono text-[8px] text-amber-300">ambiguous chat</span>
+            ) : null}
+            <span className="ml-auto font-mono text-[9px] text-zinc-600">{a.model}</span>
+          </CommandItem>
+        );
+      })}
+      {["IMPLEMENTER", "RESEARCHER", "OPERATOR"].map((r) => (
+        <CommandItem key={`spawn-${r}`} value={`spawn создать агента ${r}`} onSelect={() => { void spawnAgent(r); setOpen(false); }}>
+          <Plus className="mr-2 h-4 w-4 text-amber-400" /> Создать агента {r} <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
+        </CommandItem>
+      ))}
+      <CommandItem value="fleet reconcile сверка" onSelect={() => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); setOpen(false); }}>
+        <RefreshCw className="mr-2 h-4 w-4 text-amber-400" /> Сверка флота (reconcile) <span className="ml-auto text-xs text-zinc-500">CONTROL</span>
+      </CommandItem>
+    </CommandGroup>
+  );
 }
 
 export function CommandPalette() {
@@ -62,7 +118,7 @@ export function CommandPalette() {
     setOpen(false);
   };
 
-  const chats = snap?.agents ?? [];
+  const agents = snap?.agents ?? [];
   const tasks = useMemo(() => {
     const all = [...(snap?.tasks ?? []), ...(snap?.archived ?? [])];
     return all.slice(0, 40);
@@ -221,26 +277,8 @@ export function CommandPalette() {
         </CommandGroup>}
         {mode === "all" ? <CommandSeparator /> : null}
 
-        {/* AGENTS (чаты) */}
-        {(mode === "all" || mode === "agents") && (
-          <CommandGroup heading={`Агенты · ${chats.length}`}>
-            {chats.slice(0, 8).map((a) => (
-              <CommandItem key={a.id} value={`agent ${a.id} ${a.role}`} onSelect={() => { setChatId(a.id); setPage("command"); setOpen(false); }}>
-                <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
-                <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
-                <span className="ml-auto font-mono text-[9px] text-zinc-600">{a.model}</span>
-              </CommandItem>
-            ))}
-            {["IMPLEMENTER", "RESEARCHER", "OPERATOR"].map((r) => (
-              <CommandItem key={`spawn-${r}`} value={`spawn создать агента ${r}`} onSelect={() => { void spawnAgent(r); setOpen(false); }}>
-                <Plus className="mr-2 h-4 w-4 text-amber-400" /> Создать агента {r} <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
-              </CommandItem>
-            ))}
-            <CommandItem value="fleet reconcile сверка" onSelect={() => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); setOpen(false); }}>
-              <RefreshCw className="mr-2 h-4 w-4 text-amber-400" /> Сверка флота (reconcile) <span className="ml-auto text-xs text-zinc-500">CONTROL</span>
-            </CommandItem>
-          </CommandGroup>
-        )}
+        {/* AGENTS — bind only an exact ACTIVE chat session; ambiguous/missing chat stays fail-closed. */}
+        {(mode === "all" || mode === "agents") && <AgentPaletteGroup agents={agents} />}
 
         {/* TASKS */}
         {(mode === "all" || mode === "tasks") && (
