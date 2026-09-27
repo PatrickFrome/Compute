@@ -229,10 +229,12 @@ function isPrimaryMe2PresentationDocument(locationLike = globalThis.location) {
 const setPrimaryPage = (page) => ipcRenderer.invoke('metaengine:shell:primary-page', String(page ?? ''));
 const setPrimaryOverlay = (active) => ipcRenderer.invoke('metaengine:shell:primary-overlay', active === true);
 const setPrimaryCommandRail = (open) => ipcRenderer.invoke('metaengine:shell:primary-command-rail', open === true);
-const setPrimaryContextDrawer = (open, height) => ipcRenderer.invoke(
+const setPrimaryContextDrawer = (open, dock, height, width) => ipcRenderer.invoke(
   'metaengine:shell:primary-context-drawer',
   open === true,
+  String(dock || 'bottom'),
   Number.isFinite(Number(height)) ? Number(height) : null,
+  Number.isFinite(Number(width)) ? Number(width) : null,
 );
 const selectPrimaryAgentSession = (sessionId) => ipcRenderer.invoke(
   'metaengine:shell:primary-agent-session-select',
