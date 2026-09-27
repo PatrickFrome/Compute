@@ -1,8 +1,9 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { AGENT_PLATFORM_ID, classifyAgentPlatformSurface } from './browser-agent-platform.mjs';
+import { AGENT_PLATFORM_ID, classifyAgentPlatformSurface, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
+  GLM_ROOT_CONVERSATION_SEED,
   assertLiveLeaseBinding as assertCoreLiveLeaseBinding,
   normalizeLease,
   planBacklogCapacity,
@@ -14,6 +15,7 @@ import {
 } from './devos-effect-delivery-journal.mjs';
 import {
   adoptFleetGenerationFloor,
+  beginFleetTransportBootstrapAttempt,
   markFleetTransportProvenFromNativeFrame,
 } from './fleet-runtime-bridge.mjs';
 import { normalizeDevosRuntimeControl } from './devos-runtime-control.mjs';
@@ -393,6 +395,8 @@ export class DevOsNativeTaskCycle {
     const binding = promotionBinding(candidate);
     let lease = null;
     let localProof = null;
+    let bootstrapBarrier = false;
+    let bootstrapEffectState = null;
     let result = {
       state: 'LEASE_NOT_ACQUIRED',
       ...binding,
@@ -415,36 +419,130 @@ export class DevOsNativeTaskCycle {
       lease = exactPromotionLease(body, binding);
       if (!lease) throw new Error('devos_transport_promotion_lease_readback_invalid');
 
-      const frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
-      const transport = transportUrl(frame?.url);
+      let frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+      let transport = transportUrl(frame?.url);
       if (!transport) throw new Error('devos_transport_promotion_transport_not_ready');
       if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) throw new Error('devos_transport_promotion_target_drift');
 
-      const expectedHash = sha256(transport.url);
-      localProof = await markFleetTransportProvenFromNativeFrame({
-        binding,
-        frame,
-        expected_transport_url_sha256: expectedHash,
-      });
-      if (!['PROVEN', 'PROVEN_PRECONVERSATION', 'ALREADY_ACTIVE', 'ALREADY_ACTIVE_PRECONVERSATION'].includes(String(localProof?.state || ''))) {
-        throw new Error('devos_transport_promotion_local_proof_invalid');
+      if (transport.stage === 'CONVERSATION') {
+        const expectedHash = sha256(transport.url);
+        localProof = await markFleetTransportProvenFromNativeFrame({
+          binding,
+          frame,
+          expected_transport_url_sha256: expectedHash,
+        });
+        if (!['PROVEN', 'ALREADY_ACTIVE'].includes(String(localProof?.state || ''))) {
+          throw new Error('devos_transport_promotion_local_proof_invalid');
+        }
+        result = {
+          state: 'LOCAL_ACTIVE',
+          ...binding,
+          lease_id: lease.lease_id,
+          transport_stage: 'CONVERSATION',
+          transport_url_sha256: expectedHash,
+          conversation_url_sha256: expectedHash,
+          local_proof_state: localProof.state,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        };
+      } else if (transport.stage === 'PRECONVERSATION_ROOT') {
+        const composer = resolveAgentPlatformComposer(frame);
+        if (!composer?.semantic_ref) {
+          result = {
+            state: 'LOCAL_PRECONVERSATION_NOT_READY',
+            ...binding,
+            lease_id: lease.lease_id,
+            transport_stage: 'PRECONVERSATION_ROOT',
+            reason: 'COMPOSER_NOT_EXACTLY_RESOLVED',
+            automatic_retry_allowed: false,
+            authority_effect: false,
+          };
+        } else {
+          // Write-ahead barrier BEFORE the first physical conversation-creation
+          // effect. If Browser dies or the Enter outcome is unknown, this
+          // generation remains durable PROVISIONING_AMBIGUOUS and cannot be
+          // auto-submitted again after restart.
+          await beginFleetTransportBootstrapAttempt(binding);
+          bootstrapBarrier = true;
+
+          const submitted = await this.#executeCommand({
+            action: 'SEMANTIC_TYPE',
+            platform: AGENT_PLATFORM_ID,
+            payload: {
+              tab_id: binding.tab_id,
+              role: composer.role,
+              accessible_name: composer.accessible_name,
+              semantic_ref: composer.semantic_ref,
+              text: GLM_ROOT_CONVERSATION_SEED,
+              replace_existing: true,
+              submit_after_type: true,
+            },
+          });
+          bootstrapEffectState = String(submitted?.effect_state || '');
+          frame = await this.#executeCommand({ action: 'CAPTURE', platform: AGENT_PLATFORM_ID, payload: { tab_id: binding.tab_id } });
+          transport = transportUrl(frame?.url);
+          if (String(frame?.target_id || '').toLowerCase() !== binding.target_id) {
+            throw new Error('devos_transport_bootstrap_target_drift');
+          }
+
+          if (transport?.stage !== 'CONVERSATION') {
+            result = {
+              state: 'LOCAL_PRECONVERSATION_BOOTSTRAP_AMBIGUOUS',
+              ...binding,
+              lease_id: lease.lease_id,
+              transport_stage: transport?.stage || 'OTHER',
+              bootstrap_effect_state: bootstrapEffectState || null,
+              bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
+              write_ahead_barrier_persisted: true,
+              reason: 'CANONICAL_CONVERSATION_NOT_PROVEN',
+              automatic_retry_allowed: false,
+              authority_effect: false,
+            };
+          } else {
+            const expectedHash = sha256(transport.url);
+            localProof = await markFleetTransportProvenFromNativeFrame({
+              binding,
+              frame,
+              expected_transport_url_sha256: expectedHash,
+            });
+            if (!['PROVEN', 'UPGRADED_CONVERSATION'].includes(String(localProof?.state || ''))) {
+              throw new Error('devos_transport_bootstrap_conversation_proof_invalid');
+            }
+            result = {
+              state: 'LOCAL_ACTIVE',
+              ...binding,
+              lease_id: lease.lease_id,
+              transport_stage: 'CONVERSATION',
+              transport_url_sha256: expectedHash,
+              conversation_url_sha256: expectedHash,
+              local_proof_state: localProof.state,
+              bootstrap_effect_state: bootstrapEffectState || null,
+              bootstrap_prompt_sha256: sha256(GLM_ROOT_CONVERSATION_SEED),
+              write_ahead_barrier_persisted: true,
+              automatic_retry_allowed: false,
+              authority_effect: false,
+            };
+          }
+        }
+      } else {
+        result = {
+          state: 'LOCAL_TRANSPORT_UNSUPPORTED',
+          ...binding,
+          lease_id: lease.lease_id,
+          transport_stage: transport.stage,
+          automatic_retry_allowed: false,
+          authority_effect: false,
+        };
       }
-      result = {
-        state: transport.stage === 'CONVERSATION' ? 'LOCAL_ACTIVE' : 'LOCAL_PRECONVERSATION',
-        ...binding,
-        lease_id: lease.lease_id,
-        transport_stage: transport.stage,
-        transport_url_sha256: expectedHash,
-        conversation_url_sha256: transport.stage === 'CONVERSATION' ? expectedHash : null,
-        local_proof_state: localProof.state,
-        automatic_retry_allowed: false,
-        authority_effect: false,
-      };
     } catch (error) {
       result = {
         ...result,
-        state: localProof ? 'LOCAL_ACTIVE_RELEASE_PENDING' : (lease ? 'LOCAL_PROOF_FAILED' : 'LEASE_OUTCOME_AMBIGUOUS'),
+        state: bootstrapBarrier
+          ? 'LOCAL_PRECONVERSATION_BOOTSTRAP_AMBIGUOUS'
+          : (localProof ? 'LOCAL_ACTIVE_RELEASE_PENDING' : (lease ? 'LOCAL_PROOF_FAILED' : 'LEASE_OUTCOME_AMBIGUOUS')),
         lease_id: lease?.lease_id || null,
+        bootstrap_effect_state: bootstrapEffectState || null,
+        write_ahead_barrier_persisted: bootstrapBarrier,
         reason: clip(error?.message || error),
         automatic_retry_allowed: false,
         authority_effect: false,
