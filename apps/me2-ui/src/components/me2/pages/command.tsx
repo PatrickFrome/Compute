@@ -4,13 +4,13 @@
  * десктопного ChatGPT (архитектурный референс оператора, trace 1a0d57bcd7272d81):
  *  - слева ТОЛЬКО чат-агенты: список как список переписок (точка статуса + имя),
  *    поиск, «+ чат»; никаких информационных блоков — детали в title-tooltip;
- *  - в центре НАСТОЯЩИЙ браузер (BrowserStage: live-скринкаст daemon-браузера),
- *    который открывает НАСТОЯЩЕГО чат-агента в z.ai — клик по агенту в списке
- *    выбирает его вкладку chat.z.ai (BROWSER_SELECT_TAB) и скринкаст следует за ней;
+ *  - в центре НАСТОЯЩИЙ браузер (BrowserStage: live-скринкаст daemon-браузера);
+ *    клик по агенту отправляет только narrow presentation intent, а Browser выбирает
+ *    уже существующую native-вкладку из своей canonical session→tab binding;
  *  - ничего больше: супервизор/чаты/цели живут на своих Pages (Alt+6/Alt+2),
  *    global-инфо — в статус-баре снизу (Global vs Local, дизайн-контракт §9).
- * Контракты: GET /agentchat :3041 (5s); tab-match: url∋session.id → title ⊇ title
- * → единственная z.ai-вкладка; иначе честный тост-подсказка. ⌘B — свернуть список.
+ * Контракты: GET /agentchat :3041 (5s, bounded request); renderer не сканирует
+ * native tabs и не выводит tab identity из session id, URL или title. ⌘B — свернуть список.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
