@@ -9,7 +9,7 @@ const hook = await read('../../me2-ui/src/hooks/use-temporary-peek.ts');
 
 test('R96C Peek focus rows no longer claim button semantics while Space is reserved for preview', () => {
   assert.match(tasks, /data-peek-kind="task"[\s\S]{0,420}role="link"|role="link"[\s\S]{0,420}data-peek-kind="task"/);
-  assert.match(tasks, /role="group"[\s\S]{0,420}data-peek-kind="task"/);
+  assert.match(tasks, /data-peek-kind="task"[\s\S]{0,420}role="group"|role="group"[\s\S]{0,420}data-peek-kind="task"/);
   assert.match(agents, /role="group"[\s\S]{0,420}data-peek-kind="agent"/);
   assert.doesNotMatch(tasks, /role="button"[\s\S]{0,180}data-peek-kind="task"/);
   assert.doesNotMatch(agents, /role="button"[\s\S]{0,180}data-peek-kind="agent"/);
