@@ -10315,3 +10315,22 @@ Work Log:
 
 Stage Summary:
 - Инцидент закрыт как false positive; рельса 2116bb22 чиста (проверка git show: только литерал паттерна); скан-гейт тика захарденен — правило попадает в DEVLOOP-EVOLVE следующего тика
+---
+Task ID: R87-WAVE-VALIDATION-RECONCILE-20260927
+Agent: devloop-417497
+Task: Тик 2. DEVLOOP-EVOLVE применён: старт с ci-race-check.sh → проверка outcomes первой build-once-волны 4ed9ae49 → сверка с параллельной r86-installer-provenance-v1 (приоритет (a) прошлого тика)
+
+Work Log:
+- Шаг 0: PAT=200; push-pending-r80.sh ok; рельса поглотила cron-дрейф (deef1127) → sandbox/me2-os=44f614b0, ls-remote ok
+- Шаг 1: ci-race-check.sh → RACE=1 (единственный in-flight Self Update E2E 36285508848; Package Smoke/consumers завершились) → пуш в PR-ветку заморожен по физике cancel-in-progress
+- ВАЛИДАЦИЯ R86 (первая build-once волна 4ed9ae49): 10/11 гейтов SUCCESS — Package Smoke (продюсер, 9.4м) + Installed Chat 11.2м + Final Runtime 10.8м + Soak 11.7м (все consumer-acquire) + Shell/DirtyProfile/CriticalAudit/Orchestrator/TypedWorkspaces/R84Convergence; в работе Self Update E2E; installer_provenance_*-ошибок нет
+- Acquire-шаги на уровне jobs: «Acquire provenanced exact-head installer from Package Smoke» → success в installed-chat (36285508707) и final-runtime (36285508743); soak — run-level success (job-list >10, обрезано per_page)
+- Сверка provenance-подходов: r86-installer-provenance-v1 — НЕЗАВИСИМАЯ реализация (4ed9ae49 не предок; workflows diff 174+/167- по 4 файлам; их installer-provenance.mjs ≈918 diff-строк, тест ≈839); их база 04da6b19 (до нашего приземления); идеи: bind consumers to producer receipt (PowerShell-гейт provenance.producer_run_id ≠ acquire.producer_run_id → fail), pin single-producer topology, freeze canonical producer run + artifact cardinality
+- Вердикт: НЕ мержить параллельную ветку целиком (затрёт нашу валидированную схему); ПОРТИРОВАТЬ 3 идеи отдельными малыми коммитами на PR-head в окне тишины: (1) тест consumer-fail при producer_run_id mismatch, (2) pin single-producer workflow topology, (3) pin artifact cardinality
+- dev.log чист; секрет-скан по захардененному регэкспу (порог длины) = 0; page.tsx/daemon не тронуты
+
+Stage Summary:
+- R86 ПОДТВЕРЖДЁН ПРОДАКШЕНОМ: первая build-once волна зелёная, single NSIS-builder + acquire fail-closed работают;consumer длительности ~11м (poll+работа) против таймаутов 75/80/90
+- Сверка подходов закрыта вердиктом «port, не merge»; рецепт порта в backlog
+- DEVLOOP-EVOLVE: следующий тик: (ш.1) ci-race-check.sh; (ш.2) если RACE=0 — подготовить и запушить 3 порта-харденнинга (тест producer_run_id mismatch / topology pin / cardinality pin) одним малым коммитом на PR-head ПОСЛЕ того как Self Update E2E завершится, секрет-скан до коммита по регэкспу с порогом {20,}/{40,} в if-гейте; (ш.3) если RACE=1 — EV-A11Y в apps/metaengine-browser локально (подготовить коммит без пуша); CSV-статистику обновлять раз в 2-3 тика, не каждый
+- Backlog: 3 порта-харденнинга; EV-A11Y; таймауты 75/80/90 → рекомендация 2×p95+producer-grace (~40/45/55) по факту 3-5 стабильных волн; watcher параллельных веток r87/r88/r89
