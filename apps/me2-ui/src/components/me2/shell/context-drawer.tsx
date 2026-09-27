@@ -4,7 +4,7 @@
 // controls cannot be covered by the Browser WebContentsView.
 
 import { useCallback, useEffect, useRef } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Activity, Bot, Crosshair, Database, ListChecks, ScanSearch, Server, X } from "lucide-react";
 import { useMe2, type ContextDrawerTab } from "@/components/me2/store";
 import { EVENT_STYLE, hhmmss } from "@/lib/me2-bus";
@@ -145,7 +145,15 @@ export function ContextDrawer() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", onKey);
       resizeCleanup.current = null;
+    };
+    // R94: one restore path for pointercancel and Escape (WAI-ARIA APG
+    // window-splitter pattern) — both drop partial geometry without persist.
+    const restore = () => {
+      const current = sameWorkspace();
+      cleanup();
+      if (current) setHeight(startHeight, false);
     };
     const move = (pointerEvent: PointerEvent) => {
       if (!sameWorkspace()) {
@@ -168,17 +176,28 @@ export function ContextDrawer() {
       cleanup();
       if (current) setHeight(nextHeight, true);
     };
-    const cancel = () => {
-      const current = sameWorkspace();
-      cleanup();
-      if (current) setHeight(startHeight, false);
+    const cancel = restore;
+    const onKey = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      keyEvent.preventDefault();
+      restore();
     };
 
     resizeCleanup.current = cleanup;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
     window.addEventListener("pointercancel", cancel, { once: true });
+    window.addEventListener("keydown", onKey);
   }, [height, setHeight, workspace]);
+
+  // R94: VS Code parity — double tap on a splitter resets the panel to the
+  // preferred height, fenced to the workspace that owns the layout.
+  const resetByDoubleTap = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (useMe2.getState().workspace !== workspace) return;
+    if (height === preferredHeight) return;
+    setHeight(preferredHeight, true);
+  }, [height, preferredHeight, setHeight, workspace]);
 
   const resizeByKeyboard = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     let next: number | null = null;
@@ -213,11 +232,12 @@ export function ContextDrawer() {
         aria-controls="context-drawer-content"
         data-testid="context-drawer-resizer"
         onPointerDown={beginResize}
+        onDoubleClick={resetByDoubleTap}
         onKeyDown={resizeByKeyboard}
-        className="group relative h-1.5 shrink-0 cursor-row-resize bg-zinc-900 outline-none focus-visible:bg-cyan-950"
-        title="Drag to resize · ↑/↓ 20px · Home/End"
+        className="group relative h-1.5 shrink-0 cursor-row-resize bg-zinc-900 outline-none focus-visible:bg-cyan-950 before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"
+        title="Drag to resize · ↑/↓ 20px · Home/End · Esc cancel · double-click reset"
       >
-        <span className="pointer-events-none absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 bg-zinc-700 group-hover:bg-cyan-700" />
+        <span className="pointer-events-none absolute left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2 bg-zinc-700 group-hover:bg-cyan-700 group-focus-visible:bg-cyan-500" />
       </div>
       <div className="flex h-8 shrink-0 items-center border-b border-zinc-800/80 px-2">
         <div className="flex h-full items-stretch" role="tablist" aria-label="Context Drawer tabs">
