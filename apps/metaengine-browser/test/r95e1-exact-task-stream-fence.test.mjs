@@ -102,7 +102,8 @@ test('R95E.1 store advances generation on every open/close and cannot overwrite 
 test('R95E.1 live exact events survive the bounded fetch merge while wrong-task events fail closed', () => {
   assert.match(store, /st\.streamTaskId === st\.inspectedTaskId/);
   assert.match(store, /e\.task_id === st\.inspectedTaskId/);
-  assert.match(store, /const bySeq = new Map\(exactFetched\.map/);
+  assert.match(store, /const bySeq = new Map<number, Event>\(\)/);
+  assert.match(store, /for \(const event of exactFetched\) bySeq\.set\(event\.seq, event\)/);
   assert.match(store, /for \(const event of state\.stream\) bySeq\.set\(event\.seq, event\)/);
   assert.match(store, /\.sort\(\(a, b\) => a\.seq - b\.seq\)[\s\S]{0,80}\.slice\(-200\)/);
 });
