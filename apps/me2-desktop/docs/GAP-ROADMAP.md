@@ -36,7 +36,7 @@
 2. **R80**: ✅ #1a activation/handoff/qualification — закрыто (activator.mjs, 86/86, курсор 5.5/8).
 3. **R81 (текущий)**: ✅ #2 Guardian-parity лайт — внешний watchdog (scripts/guardian.mjs) + beacon-контракт (guardian-contract.mjs) с тем же journal-контрактом; native SCM — за кадром до решения оператора.
 4. **R82**: #8 brain-адаптер + #4 native-supervisor client — только после стабилизации #2 (живой прогон guardian на dev-стенде ≥ 1 недели).
-5. **Решение оператора**: PR `me2/r78-desktop-from-scratch` в `release/self-update-ambiguity-live-v2` или параллельная линия — после зелёного gate на 3+ прогонах (сейчас: 2/3 зелёных, R79 + R80).
+5. **Решение оператора**: PR `me2/r78-desktop-from-scratch` в `release/self-update-ambiguity-live-v2` или параллельная линия — после зелёного gate на 3+ прогонах (сейчас: 3/3 зелёных, R79 + R80 + R81 — условие выполнено).
 
 ## Инварианты roadmap
 
