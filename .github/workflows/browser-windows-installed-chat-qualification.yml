@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-windows-installed-chat-qualification.yml'
   workflow_dispatch:
 
@@ -80,24 +82,6 @@ jobs:
               -or $proof.authority_effect -ne $false) {
             throw 'detached_capture_view_physical_proof_invalid'
           }
-
-      - name: Build and stage exact-head ME2 UI
-        shell: pwsh
-        env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          npm install --no-audit --no-fund --global bun
-          Push-Location apps/me2-ui
-          try {
-            bun install --frozen-lockfile
-            bun run build
-            node scripts/pack-me2-ui.mjs
-          } finally { Pop-Location }
-          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
-          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_staged_me2_ui_invalid' }
 
       - name: Acquire exact-head immutable NSIS installer from Package Smoke
         working-directory: apps/metaengine-browser
