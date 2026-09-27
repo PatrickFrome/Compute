@@ -240,6 +240,11 @@ const selectPrimaryAgentSession = (sessionId) => ipcRenderer.invoke(
   'metaengine:shell:primary-agent-session-select',
   String(sessionId ?? ''),
 );
+const primaryChatFleetRoster = () => ipcRenderer.invoke('metaengine:shell:primary-chat-fleet-roster');
+const selectPrimaryChatActor = (actorId) => ipcRenderer.invoke(
+  'metaengine:shell:primary-chat-actor-select',
+  String(actorId ?? ''),
+);
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is a
@@ -253,6 +258,8 @@ if (isPrimaryMe2PresentationDocument()) {
     setPrimaryCommandRail,
     setPrimaryContextDrawer,
     selectPrimaryAgentSession,
+    primaryChatFleetRoster,
+    selectPrimaryChatActor,
     presentation_only: true,
     browser_command_authority: false,
     scheduler_authority: false,
