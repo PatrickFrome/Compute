@@ -171,6 +171,16 @@ function pickNewestArtifact(artifacts, artifactName) {
   });
 }
 
+function artifactBelongsToCurrentRunAttempt(artifact, run) {
+  const attempt = Number(run?.run_attempt || 1);
+  if (!Number.isSafeInteger(attempt) || attempt < 1) return false;
+  if (attempt === 1) return true;
+  const runStartedAt = Date.parse(String(run?.run_started_at || ''));
+  const artifactCreatedAt = Date.parse(String(artifact?.created_at || ''));
+  if (!Number.isFinite(runStartedAt) || !Number.isFinite(artifactCreatedAt)) return false;
+  return artifactCreatedAt >= runStartedAt;
+}
+
 function sleep(ms) {
   return new Promise((resolveSleep) => {
     setTimeout(resolveSleep, Math.max(0, ms));
@@ -255,7 +265,11 @@ async function resolveRun(options) {
           );
           const artifacts = Array.isArray(listed.artifacts) ? listed.artifacts : [];
           const artifact = pickNewestArtifact(artifacts, artifactName);
-          if (artifact && artifact.expired !== true) {
+          if (
+            artifact
+            && artifact.expired !== true
+            && artifactBelongsToCurrentRunAttempt(artifact, newest)
+          ) {
             return {
               schema: RESOLVED_SCHEMA,
               repository,
