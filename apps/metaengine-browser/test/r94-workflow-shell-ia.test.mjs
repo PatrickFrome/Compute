@@ -47,6 +47,14 @@ test('R94 top chrome exposes workspace then workflow stage then secondary module
   assert.match(topbar, /pageMeta\?\.label && pageMeta\.label !== stageMeta\.label/);
 });
 
+
+test('R94 workspace selector lives in global top chrome, not the workflow-stage dock', () => {
+  assert.match(topbar, /data-testid="workspace-switcher"/);
+  assert.match(topbar, /data-testid="workspace-reset-layout"/);
+  assert.doesNotMatch(pagebar, /data-testid="workspace-switcher"/);
+  assert.doesNotMatch(pagebar, /WORKSPACES\.map/);
+});
+
 test('R94 separates brand/selection accent from runtime health green', () => {
   assert.match(topbar, /border-cyan-800/);
   assert.match(topbar, /text-cyan-300/);
