@@ -359,7 +359,8 @@ test('resolveProducerRun rejects success without exact artifact', async () => {
 test('downloadArtifact writes exact bytes and digest', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'installer-download-'));
   const output = path.join(root, 'artifact.zip');
-  await withServer((_req, res) => {
+  await withServer((req, res) => {
+    assert.equal(req.headers.accept, 'application/vnd.github+json');
     const body = Buffer.from('zip-bytes');
     res.writeHead(200, { 'content-type': 'application/zip', 'content-length': body.length });
     res.end(body);
