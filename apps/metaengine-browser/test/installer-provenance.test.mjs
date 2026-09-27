@@ -430,6 +430,98 @@ test('download stores artifact zip bytes and validates size', async (t) => {
   });
 });
 
+test('download selects the newest same-name artifact after a workflow rerun', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  const dir = makeWorkspace();
+  const oldZip = Buffer.from('attempt-1');
+  const newZip = Buffer.from('attempt-2');
+  const artifactName = `metaengine-browser-windows-candidate-${HEAD}`;
+  await withServer((request, response) => {
+    if (request.url.startsWith('/repos/me2/local/actions/runs/5007/artifacts')) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        total_count: 2,
+        artifacts: [
+          { id: 9101, name: artifactName, size_in_bytes: oldZip.length, expired: false, created_at: '2026-09-27T10:00:00Z' },
+          { id: 9102, name: artifactName, size_in_bytes: newZip.length, expired: false, created_at: '2026-09-27T11:00:00Z' },
+        ],
+      }));
+      return;
+    }
+    if (request.url.startsWith('/repos/me2/local/actions/artifacts/9101/zip')) {
+      response.writeHead(200, { 'content-type': 'application/zip' });
+      response.end(oldZip);
+      return;
+    }
+    if (request.url.startsWith('/repos/me2/local/actions/artifacts/9102/zip')) {
+      response.writeHead(200, { 'content-type': 'application/zip' });
+      response.end(newZip);
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase }) => {
+    try {
+      const downloaded = await downloadArtifact({
+        repository: 'me2/local', token: TOKEN, 'api-base': apiBase,
+        'run-id': '5007', artifact: artifactName, out: join(dir, 'latest'),
+      });
+      assert.equal(downloaded.artifact_id, '9102');
+      assert.deepEqual(readFileSync(downloaded.zip_path), newZip);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('download honors an exact resolved artifact id while a producer attempt is still in progress', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  const dir = makeWorkspace();
+  const resolvedZip = Buffer.from('resolved-current-attempt');
+  const laterZip = Buffer.from('later-same-name');
+  const artifactName = `metaengine-browser-windows-candidate-${HEAD}`;
+  await withServer((request, response) => {
+    if (request.url.startsWith('/repos/me2/local/actions/runs/5031/artifacts')) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        total_count: 2,
+        artifacts: [
+          { id: 9201, name: artifactName, size_in_bytes: resolvedZip.length, expired: false, created_at: '2026-09-27T11:00:00Z' },
+          { id: 9202, name: artifactName, size_in_bytes: laterZip.length, expired: false, created_at: '2026-09-27T11:01:00Z' },
+        ],
+      }));
+      return;
+    }
+    if (request.url.startsWith('/repos/me2/local/actions/artifacts/9201/zip')) {
+      response.writeHead(200, { 'content-type': 'application/zip' });
+      response.end(resolvedZip);
+      return;
+    }
+    if (request.url.startsWith('/repos/me2/local/actions/artifacts/9202/zip')) {
+      response.writeHead(200, { 'content-type': 'application/zip' });
+      response.end(laterZip);
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase }) => {
+    try {
+      const downloaded = await downloadArtifact({
+        repository: 'me2/local', token: TOKEN, 'api-base': apiBase,
+        'run-id': '5031', artifact: artifactName, 'artifact-id': '9201', out: join(dir, 'resolved'),
+      });
+      assert.equal(downloaded.artifact_id, '9201');
+      assert.deepEqual(readFileSync(downloaded.zip_path), resolvedZip);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 test('download fails with artifact_not_found for foreign artifact name', async (t) => {
   if (!(await loopbackAvailable())) {
     t.skip('loopback fetch unavailable in this environment');
