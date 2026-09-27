@@ -153,7 +153,7 @@ test('R95C physical visual harness proves COMMAND mission plus RUN Bottom/Right 
   assert.match(harness, /r95c-command-mission-1440x960/);
   assert.match(harness, /r95c-run-1440x960/);
   assert.match(harness, /r95c-run-utility-bottom-1440x960/);
-  assert.match(harness, /r95c-run-utility-right-1440x960/);
+  assert.match(harness, /r95c-run-utility-right-1680x960/);
   assert.match(harness, /command_mission_control_verified:\s*true/);
   assert.match(harness, /run_native_surface_host_verified:\s*true/);
 });
