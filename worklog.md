@@ -10282,3 +10282,24 @@ Work Log:
 
 Stage Summary:
 - Финальный прогон R80 под 413338: рельса опубликована ec1694e3, блокеров нет; дальнейшая публикация рельсы (шаг 0) и полный dev-цикл — в Job 417497 (ME2 DEV-LOOP v1)
+---
+Task ID: R87-CI-PIPELINE-WATCHERS-20260927
+Agent: devloop-417497
+Task: ME2 DEV-LOOP v1, тик 1. Приоритет оператора: desktop-клиент (не консоль). Аудит веток /home/z/me2-desktop → разработка механизмов конвейера: (1) ci-race-check.sh, (2) ci-run-stats.sh; PR-ветка заморожена CI-гонкой.
+
+Work Log:
+- Шаг 0: PAT валиден (200, без печати); push-pending-r80.sh: main→sandbox/me2-os ff ec1694e3..88549037; архив-ветки up-to-date; ls-remote ok
+- Шаг 1 (аудит): PR #987 OPEN/DRAFT mergeable, head=4ed9ae49 = base work/r84; наш локальный 1880a83a ПЕРЕБАЗИРОВАН → 4ed9ae49 (тот же message «ci(r86): build-once installer provenance…») и УЖЕ ЗАПУШЕН — R86 приземлился в origin
+- CI-гонка: scripts/ci-race-check.sh → RACE=1 на work/r85-control-room-ui-v1: 5 in-flight (Package Smoke 36285508755, Installed Chat 36285508707, Final Runtime 36285508743, Soak 36285508760, Self Update E2E 36285508848) на 4ed9ae49 → ПУШ В PR-ВЕТКУ ЗАПРЕЩЁН; это первая живая волна build-once acquire — следующему тику проверить их conclusions и отсутствие installer_provenance_*-ошибок
+- Параллельные циклы (информация): новые origin-ветки r86-build-once-provenance-v1 (sync/adopt R85 visual hardening), r86-installer-provenance-v1 (bind consumers to producer receipt — альтернативный подход к нашей R86-цели, сверить позже), r87-visual-isolation, r88-consumer-ci-dedup, r89-early-artifact-overlap, context-vault
+- Разработка (1/2): scripts/ci-race-check.sh — детерминированный watcher CI-гонки (GET /actions/runs?branch=..., любые in_progress/queued/waiting → RACE=1, иначе RACE=0/UNKNOWN rc=2); токен не печатается; верифицирован позитив (RACE=1, 5 in-flight) и негатив (archive-ветка → RACE=0)
+- Разработка (2/2): scripts/ci-run-stats.sh — статистика длительностей consumer-гейтов для R87 «подрезка таймаутов»; BUGFIX в тике: pipe+heredoc перехватывал stdin (bad_json) → переведён на mktemp-файл+http-код-гейт (как в race-check); верифицирован: 11 workflow, 49 completed runs
+- Данные stats (минуты, p95/max): Package Smoke 10.7/10.7, Installed Chat 6.3/6.3, Final Runtime 6.9/6.9, Soak 13.6/13.6, Self Update E2E 17.3/17.3, Critical Audit 6.5/6.5, Shell 3.8, Dirty Profile 5.7, Orchestrator 3.8, Typed Workspaces 0.9, R84 Convergence 1.3 → текущие consumer-таймауты 75/80/90 мин имеют запас ×5-11 против p95; рекомендация R87: при стабильной статистике после build-once-волны срезать до ~2×p95+producer(11м) с грейсом
+- Шаг 5: heartbeat ok (wb=1877193, sb=2ok/0fail, cp=11, stale=0); dev.log runtime-ошибок нет (изменения — только новые scripts/, daemon/page.tsx не тронуты)
+- Секрет-скан новых файлов (ci-race-check.sh, ci-run-stats.sh, worklog-дифф): ghp_|vck_|eyJhbGciOi = 0
+
+Stage Summary:
+- Тик закрыт: 2 механизма конвейера в рельсе — ci-race-check.sh (пуш-гейт PR-ветки: RACE=1|0|UNKNOWN) и ci-run-stats.sh (p50/p95/max длительности → download/ci-run-stats.csv); R86 подтверждён приземлившимся (4ed9ae49); UI-работы тик не открывал (freeze)
+- UX-урок №10: «python3 - <<PY» + pipe одновременно — heredoc побеждает, данные теряются молча (bad_json без причины); паттерн-лекарство: curl → mktemp-файл → путь как argv (применён в обоих скриптах)
+- DEVLOOP-EVOLVE: следующий тик ОБЯЗАН начать с `bash scripts/ci-race-check.sh work/r85-control-room-ui-v1` вместо ручного curl-аудита (экономия 1-2 мин/тик, детерминизм); если RACE=0 И Package Smoke предыдущей волны (4ed9ae49) completed — первым делом проверить её conclusions (первая build-once-волна!) и только потом выбирать новую задачу; приоритет задач следующего тика: (a) резолв параллельной r86-installer-provenance-v1 «bind consumer to producer receipt» vs наша acquire-схема, (b) EV-A11Y в apps/metaengine-browser при открытом окне, (c) таймауты по CSV-статистике
+- Backlog следующего тика: проверка outcomes волны 4ed9ae49; сверка подходов provenance; EV-A11Y; подрезка таймаутов; watcher параллельных веток (r87/r88/r89)
