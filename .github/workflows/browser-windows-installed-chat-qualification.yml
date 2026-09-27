@@ -16,11 +16,12 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-installed-chat-qualification:
     runs-on: windows-2025
-    timeout-minutes: 28
+    timeout-minutes: 75
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -80,47 +81,61 @@ jobs:
             throw 'detached_capture_view_physical_proof_invalid'
           }
 
-      - name: Build and stage exact-head ME2 UI
+      - name: Acquire exact Package Smoke installer bytes
+        working-directory: apps/metaengine-browser
         shell: pwsh
         env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          npm install --no-audit --no-fund --global bun
-          Push-Location apps/me2-ui
-          try {
-            bun install --frozen-lockfile
-            bun run build
-            node scripts/pack-me2-ui.mjs
-          } finally { Pop-Location }
-          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
-          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_staged_me2_ui_invalid' }
-
-      - name: Build exact-head unsigned NSIS installer
-        working-directory: apps/metaengine-browser
-        shell: powershell
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          $head = '${{ github.event.pull_request.head.sha || github.sha }}'
           $version = [string](node -p "require('./package.json').version")
-          if (-not $version) { throw 'package_version_missing' }
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
-          if (-not $installer) { throw 'installed_chat_qualification_installer_missing' }
-          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
+          $artifactZip = "$env:RUNNER_TEMP\package-smoke-artifact.zip"
+          $artifactRoot = "$env:RUNNER_TEMP\package-smoke-artifact"
+          Remove-Item $artifactZip -Force -ErrorAction SilentlyContinue
+          Remove-Item $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue
+          $acquireJson = & node scripts/installer-provenance.mjs acquire `
+            --repository '${{ github.repository }}' `
+            --source-head $head `
+            --output $artifactZip `
+            --timeout-seconds 2700 `
+            --poll-ms 15000
+          $acquireExit = $LASTEXITCODE
+          if ($acquireExit -ne 0) { throw 'installed_chat_installer_acquire_failed' }
+          $acquireLine = @($acquireJson | Where-Object { ([string]$_).Trim() }) | Select-Object -Last 1
+          if (-not $acquireLine) { throw 'installed_chat_installer_acquire_receipt_missing' }
+          $acquire = ([string]$acquireLine) | ConvertFrom-Json
+          if ($acquire.schema -ne 'metaengine.browser.installer-provenance-acquire.v1' `
+              -or [string]$acquire.source_head -ne $head `
+              -or [string]$acquire.artifact_name -ne "metaengine-browser-windows-candidate-$head" `
+              -or [int64]$acquire.producer_run_id -le 0 `
+              -or $acquire.exact_head_bound -ne $true `
+              -or $acquire.authority_effect -ne $false) {
+            throw 'installed_chat_installer_acquire_receipt_invalid'
+          }
+          Expand-Archive -LiteralPath $artifactZip -DestinationPath $artifactRoot -Force
+          $provenancePath = Join-Path $artifactRoot 'installer-provenance.json'
+          node scripts/installer-provenance.mjs verify --provenance $provenancePath --root $artifactRoot --expected-head $head
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_installer_provenance_invalid' }
+          $provenance = Get-Content $provenancePath -Raw | ConvertFrom-Json
+          if ([string]$provenance.package_version -ne $version) { throw 'installed_chat_installer_version_drift' }
+          if ([string]$provenance.repository -ne '${{ github.repository }}' `
+              -or [string]$provenance.artifact_name -ne [string]$acquire.artifact_name `
+              -or [int64]$provenance.producer_run_id -ne [int64]$acquire.producer_run_id) {
+            throw 'installed_chat_installer_producer_binding_drift'
+          }
+          $installer = Join-Path $artifactRoot ([string]$provenance.files.installer.name)
+          if (-not (Test-Path $installer -PathType Leaf)) { throw 'installed_chat_qualified_installer_missing' }
+          Copy-Item $installer (Join-Path $env:RUNNER_TEMP ([string]$provenance.files.installer.name)) -Force
+          Copy-Item $provenancePath "$env:RUNNER_TEMP\installer-provenance.json" -Force
           @{
             schema='metaengine.browser.windows-installed-chat-qualification.v2'
-            source_head=$sourceHead
+            source_head=$head
             package_version=$version
-            installer_name=$installer.Name
-            installer_sha256=$digest
+            installer_name=[string]$provenance.files.installer.name
+            installer_sha256=[string]$provenance.files.installer.sha256
+            producer_run_id=[int64]$provenance.producer_run_id
+            immutable_producer_artifact=$true
             preconnect_armed=$false
             clean_genesis_control_verified=$false
             automatic_initial_tab_suppressed=$false
@@ -370,6 +385,7 @@ jobs:
           name: metaengine-browser-installed-chat-qualified-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/installed-chat-proof.json
             ${{ runner.temp }}/installed-chat-me2-ui-proof.json
             ${{ runner.temp }}/installed-chat-me2-daemon-proof.json
@@ -385,6 +401,7 @@ jobs:
         with:
           name: metaengine-browser-installed-chat-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
+            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/installed-chat-proof.json
             ${{ runner.temp }}/installed-chat-normal.out
             ${{ runner.temp }}/installed-chat-normal.err
