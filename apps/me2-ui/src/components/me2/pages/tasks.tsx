@@ -199,7 +199,7 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selected
               role="group"
               tabIndex={0}
               aria-current={selectedId === t.id ? "true" : undefined}
-              aria-keyshortcuts="Enter Space ArrowUp ArrowDown"
+              aria-keyshortcuts="Enter Space"
               aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов · Enter открыть · Space Peek`}
               onKeyDown={(e) => {
                 if (e.key === "Enter") { e.preventDefault(); onOpen(t); }
@@ -583,7 +583,7 @@ export function TasksPage() {
                       if (e.key === "Enter") { e.preventDefault(); openTask(t.id); }
                       else if (e.key === " ") e.preventDefault();
                     }}
-                    aria-keyshortcuts="Enter Space ArrowUp ArrowDown"
+                    aria-keyshortcuts="Enter Space"
                     aria-label={`Задача ${t.title} · Enter открыть · Space Peek`}
                   >
                     <div className="flex items-center gap-2">
