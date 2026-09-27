@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AGENT_HOME_CONTROLS,
   TASK_CONFIG_CONTROLS,
   agentPlatformTaskConfigSnapshot,
+  classifyAgentPlatformTaskSurface,
+  resolveAgentHomeControls,
   resolveTaskConfigControls,
   waitForAgentPlatformDatabaseVisibility,
 } from '../src/agent-platform-task-config.mjs';
@@ -24,6 +27,50 @@ function frameWithTargets(rows) {
     })),
   };
 }
+
+
+test('R97: ordinary z.ai Chat root is not an Agent task surface', () => {
+  const frame = frameWithTargets([
+    ['button', 'ZCode'],
+    ['button', 'Landing Page'],
+    ['button', 'Select a model'],
+    ['textbox', 'How can I help you today?'],
+  ]);
+  const surface = classifyAgentPlatformTaskSurface(frame);
+  assert.equal(surface.stage, 'CHAT_ROOT');
+  assert.equal(surface.proven, false);
+  assert.equal(resolveAgentHomeControls(frame).ready, false);
+});
+
+test('R97: Agent home requires exact Agent + New Task + model + Full-Stack evidence', () => {
+  const frame = frameWithTargets([
+    ['button', 'Agent'],
+    ['button', 'New Task'],
+    ['button', 'Select a model'],
+    ['button', 'Full-Stack'],
+    ['button', 'Writing'],
+    ['button', 'Data Insight'],
+  ]);
+  const surface = classifyAgentPlatformTaskSurface(frame);
+  assert.equal(surface.stage, 'AGENT_HOME');
+  assert.equal(surface.proven, true);
+  const controls = resolveAgentHomeControls(frame);
+  assert.equal(controls.ready, true);
+  assert.equal(controls.controls.new_task.name, 'New Task');
+  assert.equal(controls.controls.full_stack_template.name, 'Full-Stack');
+  assert.equal(controls.authority_effect, false);
+});
+
+test('R97: partial Agent-looking surface is not admitted', () => {
+  const frame = frameWithTargets([
+    ['button', 'Agent'],
+    ['button', 'New Task'],
+    ['button', 'Full-Stack'],
+  ]);
+  const surface = classifyAgentPlatformTaskSurface(frame);
+  assert.equal(surface.stage, 'CHAT_ROOT');
+  assert.equal(surface.proven, false);
+});
 
 test('task-config control contract is frozen and names are stable', () => {
   assert.equal(Object.isFrozen(TASK_CONFIG_CONTROLS), true);
@@ -178,13 +225,16 @@ test('database visibility: empty required set completes on the first readable sn
   assert.equal(calls, 1);
 });
 
-test('task-config snapshot documents the async DB visibility requirement', () => {
+test('task-config snapshot requires the Agent New Task flow and never aliases Chat root', () => {
   const snap = agentPlatformTaskConfigSnapshot();
   assert.equal(snap.database_visibility, 'ASYNC_POPULATED_BOUNDED_WAIT_REQUIRED');
-  // R-DRAFT-FOCUS (2026-09-21): keys are honored when the composer is focused;
-  // the root replace gesture is the focused KEY_ATOMIC path.
-  assert.equal(snap.composer_ignores_synthetic_editing_keys, false);
-  assert.equal(snap.composer_enter_submits, true);
-  assert.equal(snap.replace_gesture_root_surface, 'KEY_ATOMIC');
+  assert.equal(snap.task_creation_surface, 'AGENT_HOME_NEW_TASK_FLOW');
+  assert.equal(snap.ordinary_root_is_task_surface, false);
+  assert.equal(snap.agent_home_proof, 'EXACT_AGENT_NEW_TASK_MODEL_FULL_STACK_CONTROLS');
+  assert.equal(snap.task_config_surface_state, 'NOT_VERIFIED_UNTIL_NEW_TASK_POSTCONDITION');
+  assert.equal(snap.composer_ignores_synthetic_editing_keys, null);
+  assert.equal(snap.composer_enter_submits, null);
+  assert.equal(snap.replace_gesture_root_surface, null);
+  assert.equal(snap.agent_home_controls.new_task.name, AGENT_HOME_CONTROLS.new_task.name);
   assert.equal(snap.authority_effect, false);
 });
