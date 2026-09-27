@@ -318,6 +318,8 @@ function EvidenceTimelinePanel({
 }) {
   const snap = useMe2((s) => s.snap);
   const events = useMe2((s) => s.events);
+  const stream = useMe2((s) => s.stream);
+  const streamTaskId = useMe2((s) => s.streamTaskId);
   const inspectedTaskId = useMe2((s) => s.inspectedTaskId);
   const openTask = useMe2((s) => s.openTask);
   const setPage = useMe2((s) => s.setPage);
@@ -342,7 +344,19 @@ function EvidenceTimelinePanel({
         bad: task.status === "FAILED" || task.status === "CANCELLED",
       });
     }
-    for (const event of events.filter((row) => row.task_id === inspectedTaskId).slice(0, 40)) {
+    const exactEventsBySeq = new Map<number, Event>();
+    for (const event of events) {
+      if (event.task_id === inspectedTaskId) exactEventsBySeq.set(event.seq, event);
+    }
+    if (streamTaskId === inspectedTaskId) {
+      for (const event of stream) {
+        if (event.task_id === inspectedTaskId) exactEventsBySeq.set(event.seq, event);
+      }
+    }
+    const exactEvents = [...exactEventsBySeq.values()]
+      .sort((a, b) => b.seq - a.seq)
+      .slice(0, 40);
+    for (const event of exactEvents) {
       out.push({
         key: `event:${event.seq}`,
         at: event.ts,
@@ -372,7 +386,7 @@ function EvidenceTimelinePanel({
         return (b.seq ?? 0) - (a.seq ?? 0);
       })
       .slice(0, 48);
-  }, [events, inspectedTaskId, task, verdicts]);
+  }, [events, inspectedTaskId, stream, streamTaskId, task, verdicts]);
 
   const openExactTask = useCallback(() => {
     if (!inspectedTaskId) return;
@@ -468,7 +482,7 @@ function EvidenceTimelinePanel({
         )}
 
         <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
-          causal rows require exact task_id equality; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
+          causal rows require exact task_id equality; fetched task history is admitted only when streamTaskId matches the selected task; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
         </div>
       </div>
     </Sec>
