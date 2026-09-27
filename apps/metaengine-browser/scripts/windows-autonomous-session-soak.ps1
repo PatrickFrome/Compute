@@ -261,6 +261,12 @@ try {
       throw "soak_secondary_timeout:${i}"
     }
     if ($second.ExitCode -ne 0) { throw "soak_secondary_exit:${i}:$($second.ExitCode)" }
+    # The latency SLO ends when the losing secondary exits successfully. At that
+    # point it has already observed the exact durable activation ACK. Journal
+    # parsing below is independent verification and must not inflate user-visible
+    # activation latency with test-harness bookkeeping.
+    $activationStarted.Stop()
+    $activationElapsedMs = [double]$activationStarted.Elapsed.TotalMilliseconds
     $line = Get-Content $secondOut | Where-Object { $_.Trim() } | Select-Object -Last 1
     if (-not $line) { throw "soak_secondary_ack_missing:${i}" }
     $ack = $line | ConvertFrom-Json
@@ -285,12 +291,11 @@ try {
       if ($activation) { break }
       Start-Sleep -Milliseconds 25
     }
-    $activationStarted.Stop()
     if (-not $activation -or $activation.details.visible -ne $true) { throw "soak_primary_activation_missing:${i}" }
     if ([int64]$activation.sequence -le $lastActivationSequence) { throw "soak_activation_sequence_not_monotonic:${i}" }
     if ([int64]$activation.sequence -ne [int64]$ack.event_sequence) { throw "soak_activation_ack_sequence_drift:${i}" }
     if (-not $activationSequences.Add([int64]$activation.sequence)) { throw "soak_activation_sequence_duplicate:${i}" }
-    $activationLatencies.Add($activationStarted.Elapsed.TotalMilliseconds)
+    $activationLatencies.Add($activationElapsedMs)
     $lastActivationSequence = [int64]$activation.sequence
     $normal.Refresh()
     if ($normal.HasExited) { throw "soak_primary_died_after_activation:${i}" }
@@ -406,6 +411,7 @@ try {
   $proof | Add-Member -NotePropertyName final_activation_sequence -NotePropertyValue $lastActivationSequence -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_ms -NotePropertyValue ([Math]::Round($p95Ms, 2)) -Force
   $proof | Add-Member -NotePropertyName activation_latency_p95_budget_ms -NotePropertyValue $ActivationP95BudgetMs -Force
+  $proof | Add-Member -NotePropertyName activation_latency_measurement_boundary -NotePropertyValue 'SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT' -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_size -NotePropertyValue $ConcurrentBurstSize -Force
   $proof | Add-Member -NotePropertyName concurrent_activation_burst_elapsed_ms -NotePropertyValue ([Math]::Round($burstElapsedMs, 2)) -Force
   $proof | Add-Member -NotePropertyName post_activation_hold_seconds -NotePropertyValue $PostActivationHoldSeconds -Force
