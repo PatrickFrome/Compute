@@ -119,3 +119,16 @@ test('R95C.2 physical visual harness exercises the Main-to-renderer telemetry de
   assert.match(visualHarness, /r95c2_visual_native_readback_telemetry_missing/);
   assert.match(visualHarness, /r95c2_visual_right_utility_must_release_telemetry/);
 });
+
+
+test('R95C.2 history navigation advances the geometry generation before an ABA return to RUN', () => {
+  const historyStart = store.indexOf('const target = st.recentPages[nextIndex]');
+  const historyEnd = store.indexOf('// Electron-мост', historyStart);
+  const historyBlock = store.slice(historyStart, historyEnd);
+  const targetAt = historyBlock.indexOf('const target = st.recentPages[nextIndex]');
+  const generationAt = historyBlock.indexOf('contextDrawerSyncSeq += 1');
+  const pageSetAt = historyBlock.indexOf('set({ page: target, pageHistoryIndex: nextIndex })');
+  const pageAckAt = historyBlock.indexOf('syncPagePresentation(target)');
+  assert.ok(targetAt >= 0 && generationAt > targetAt && pageSetAt > generationAt && pageAckAt > pageSetAt);
+  assert.match(historyBlock, /old[\s\S]{0,80}RUN geometry reply pass the page\/workspace ABA fence/);
+});
