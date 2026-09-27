@@ -801,19 +801,23 @@ export async function executeSemanticCommand(webContents, command) {
       const vp = metrics?.cssVisualViewport || metrics?.visualViewport || {};
       const layout = metrics?.layoutViewport || {};
       const content = metrics?.cssContentSize || metrics?.contentSize || {};
-      const x = Math.max(1, Number(vp.clientWidth || vp.width || 800) / 2);
-      const y = Math.max(1, Number(vp.clientHeight || vp.height || 600) / 2);
       const deltaY = Math.max(-4000, Math.min(4000, Number(command?.payload?.delta_y || 0)));
       if (!deltaY) throw new Error('native_scroll_delta_invalid');
+      const keyName = deltaY < 0 ? 'PageUp' : 'PageDown';
+      const mapped = SAFE_PRESS_KEYS.get(keyName);
       assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       const beforePageY = Number(vp.pageY ?? layout.pageY ?? 0);
       const viewportHeight = Number(vp.clientHeight || vp.height || 0);
       const contentHeight = Number(content.height || 0);
       const maxScrollY = Math.max(0, contentHeight - viewportHeight);
-      await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseWheel', x, y, deltaX:0, deltaY });
-      // Postcondition readback: distinguish "moved" from "already at the scroll
-      // boundary" so a legitimate boundary no-op can be proven instead of being
-      // quarantined as AMBIGUOUS (observed live as FAILED postcondition_not_confirmed).
+      // R97: scrolling is keyboard-native. No viewport point, DPI, zoom or
+      // screen coordinate participates in dispatch.
+      await dbg.sendCommand('Input.dispatchKeyEvent', {
+        type: 'rawKeyDown', key: keyName, code: mapped.code, windowsVirtualKeyCode: mapped.keyCode,
+      });
+      await dbg.sendCommand('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: keyName, code: mapped.code, windowsVirtualKeyCode: mapped.keyCode,
+      });
       let scroll = null;
       try {
         const after = await dbg.sendCommand('Page.getLayoutMetrics');
@@ -831,11 +835,19 @@ export async function executeSemanticCommand(webContents, command) {
           moved,
           at_boundary: !moved && atBoundary,
           proof: moved ? 'VIEWPORT_PAGE_Y_CHANGED' : (atBoundary ? 'SCROLL_BOUNDARY_REACHED' : null),
+          input_method: keyName,
         };
       } catch {
         scroll = null;
       }
-      return { action, delta_y: deltaY, scroll, authority_effect: true };
+      return {
+        action,
+        delta_y: deltaY,
+        scroll,
+        mouse_geometry_required: false,
+        viewport_geometry_required: false,
+        authority_effect: true,
+      };
     }
 
     if (action === 'STOP_GENERATION') {
