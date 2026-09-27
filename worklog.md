@@ -11005,3 +11005,26 @@ Stage Summary:
 - ФИЗИЧЕСКИ ДОКАЗАНО: agent-создание через Agent-surface (PROVEN_NEW_CONVERSATION), TYPED_CLICK INSERT-путь координатно-независим, lane-параллелизм, fast-lane p50=1.0s
 - Канонизация: agent-creation path = sidebar→Agent→Send a Message(submit); chat-рецепт → fallback worker-surface; task/lesson authority = worklog+LESSONS.md+command-plane (RPC-плоскости мертвы)
 - Гэпы (честно): readback agent-тредов, GLM-5.3-Flash select, lease-watchdog, budget owner-fix, rebuild/CI/installer = operator-pipeline (вне песочницы)
+
+---
+Task ID: BROWSER-TEST-20260928-0730
+Agent: Super Z (Principal directive cycle, Job 419203/419718)
+Task: подключиться к live браузеру (0.7.0-dev.36336130139.1), протестировать все механики, классифицировать; master-directive: полная инвентаризация и конвергенция; z.ai Agent (не Chat)
+
+Work Log:
+- Phase R (read-only 13): CONTROL_CAPABILITIES (48 impl + 21 next), TAB_CENSUS (15 tabs: 10 USER/4 FLEET/1 SUPERVISOR), FLEET_STATUS (4 ACTIVE, ELASTIC_BACKLOG_DRIVEN, max_agents=null), GATE/SYS/PROC/UPD/DEVPLANE/LAT ✅; SESSION_STATUS/WEBMCP_LIST/CHATGPT_STATUS = 23514; DOWNLOAD_STATUS LEASED-hang 55s
+- Phase M (mutation basics): NEW_TAB ✅ (но клетка рождается 0×0 unpainted), RELOAD/SELECT_TAB/READ_TRANSCRIPT ✅, TYPED_CLICK-INSERT ✅ (Toggle Sidebar), NAVIGATE AMBIGUOUS (эффект при этом состоялся — readback), BACK/FORWARD NO_EFFECT (пустая история), SCROLL CDP-deadline 30s, SEMANTIC_TYPE replace=True → native_semantic_type_replace_unverified (новая ошибка), replace=False+submit → COMPLETED но effect=AMBIGUOUS_AFTER_ENTER (диалог НЕ создан)
+- ОТКРЫТИЕ №1 (viewport↔a11y): CAPTURE 0×0-табов = 18 els (свёрнутое дерево, нет sidebar), CAPTURE 950×577 таба = 96 els (полное дерево с button:Agent); флот-таб имеет реальный viewport (окно рисуется, CAPTURE_VIEW sha256 8a2404b8), NEW_TAB-клетки — 0×0 (фоновые)
+- ОТКРЫТИЕ №2 (Agent-space E2E): NAVIGATE флот-таба PLANNER на chat.z.ai (AMBIGUOUS, но эффект доказан) → полное дерево → TYPED_CLICK button:Agent → **AGENT-SPACE REACHED: True** (Chat/Agent sidebar, AI PPT/ZCode/AutoClaw, шаблоны Landing Page/3D Modeling/Mini Game/Blog, история)
+- БЛОКЕР P0 (submit): 5 попыток создания задачи в Agent-space — SEMANTIC_TYPE submit_after_type=True → AMBIGUOUS_AFTER_ENTER (текст в draft 536 chars, отправки нет); SEMANTIC_FOCUS+TYPE → тот же; PRESS_KEY Enter → COMPLETED без эффекта; NumpadEnter → native_press_key_invalid; unnamed textbox → not focusable; send-кнопка НЕ адресуемая (0 unnamed buttons с ref); клик шаблона Landing Page → эффекта нет. Вчера тот же рецепт создал 3 диалога → z.ai изменил composer за ночь
+- PRESS_KEY: только "Enter" валиден; TYPED_CLICK на 0×0-табах = COMPLETED с нулевым эффектом (geometry dead zone) — нужен paint-or-reject fence
+- Реестр: scripts/phoenix/MECHANISM-REGISTRY-20260928.md (48+21 классифицированы KEEP/FIX/QUARANTINE, анти-паттерны, карта архитектуры)
+- Cron: директивный цикл Job 419718 = каждые 15 мин ✅ (hourly 419712 — дубль, удалить оператору или следующему тику)
+- CTX-SHARD A/B gen20260928 refresh: offline-route ossfs, verified (29277B/16657B)
+
+Stage Summary:
+- РАБОТАЮТ (физ. доказательства сегодня): CAPTURE, CAPTURE_VIEW, TYPED_CLICK(INSERT), SEMANTIC_FOCUS, RELOAD, SELECT_TAB, NEW_TAB, READ_TRANSCRIPT, TAB_CENSUS, FLEET_STATUS, SYSTEM_TELEMETRY, TAB_TELEMETRY, PROCESS_CENSUS, GATE_STATUS, SELF_UPDATE_STATUS, DEV_PLANE_STATUS, CONTROL_LATENCY_STATUS, CONTROL_CAPABILITIES, FLEET_RECONCILE(0631), CLOSE_TAB(0631), BACK/FORWARD(0631)
+- НЕ РАБОТАЮТ: SEMANTIC_TYPE-submit (P0 — блокер создания агентов), PRESS_KEY-Enter (без эффекта), SCROLL (CDP deadline), DOWNLOAD_STATUS (LEASED-hang), DOWNLOAD_FILE, SESSION/CHATGPT/WEBMCP/FIND/ZOOM (23514), GATE_DISABLE (owner-only), DISARM (конституция), TYPED_CLICK-RPC (валидатор)
+- НЕ ПРОВЕРЕНО сегодня: STOP_GENERATION с активной генерацией, SELF_UPDATE_CHECK/APPLY, DEV_PLANE_HEALTH/CAPS/REPO_HEAD, SEMANTIC_CENSUS/EVENTS, FLEET_SET_PROFILE, GATE_ENABLE
+- Путь к агенту: sidebar Agent достигнут ✅; финальный шаг (отправка задачи) заблокирован изменением z.ai composer — след. тик: (a) CAPTURE после клика шаблона с паузой (prefill?), (b) поиск New Task в полном дереве, (c) ENTER через CDP Input домен KEY_PRESS из next-списка (needs capability revision), (d) operator: вернуть окну ширину >1024px не требуется (96 els при 950 — sidebar виден)
+- Артефакты: browser-test-results-t0700.json, MECHANISM-REGISTRY-20260928.md, a2s{1..5}-0700.py, mt-0700{,b,c}.py
