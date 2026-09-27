@@ -228,6 +228,18 @@ jobs:
           Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name)
           Copy-Item $blockmap.FullName (Join-Path $env:RUNNER_TEMP $blockmap.Name)
 
+      - name: Publish immutable candidate for parallel downstream qualification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: metaengine-browser-windows-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe.blockmap
+            ${{ runner.temp }}/installer-provenance.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
       - name: Install exact-head package and prove Browser plus inert Guardian payload
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -613,11 +625,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: metaengine-browser-windows-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          name: metaengine-browser-windows-package-evidence-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
-            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
-            ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe.blockmap
-            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/windows-package-proof.json
             ${{ runner.temp }}/installed-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json
