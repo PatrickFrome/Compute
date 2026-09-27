@@ -9,6 +9,7 @@ export const VERIFY_SCHEMA = 'metaengine.browser.installer-provenance-verificati
 export const RESOLUTION_SCHEMA = 'metaengine.browser.installer-provenance-resolution.v1';
 export const DOWNLOAD_SCHEMA = 'metaengine.browser.installer-provenance-download.v1';
 export const ACQUIRE_SCHEMA = 'metaengine.browser.installer-provenance-acquire.v1';
+export const PRODUCER_WAIT_SCHEMA = 'metaengine.browser.installer-provenance-producer-wait.v1';
 export const PRODUCER_WORKFLOW = 'Browser Windows Package Smoke';
 
 function fail(code, details = {}) {
@@ -132,6 +133,8 @@ export async function verifyProvenance({
   installerPath,
   blockmapPath,
   configPath,
+  expectedRunId = null,
+  expectedRunAttempt = null,
 } = {}) {
   const head = normalizeHead(expectedHead);
   const provenance = await readJson(requireString(provenancePath, 'provenance_path_missing'), 'provenance_invalid_json');
@@ -140,6 +143,12 @@ export async function verifyProvenance({
     fail('head_mismatch', { expected: head, actual: provenance.source_head });
   }
   if (provenance?.producer?.workflow !== PRODUCER_WORKFLOW) fail('producer_workflow_mismatch');
+  if (expectedRunId != null && Number(provenance?.producer?.run_id) !== normalizePositiveInt(expectedRunId, 'expected_run_id_invalid')) {
+    fail('producer_run_mismatch', { expected: Number(expectedRunId), actual: provenance?.producer?.run_id ?? null });
+  }
+  if (expectedRunAttempt != null && Number(provenance?.producer?.run_attempt) !== normalizePositiveInt(expectedRunAttempt, 'expected_run_attempt_invalid')) {
+    fail('producer_run_attempt_mismatch', { expected: Number(expectedRunAttempt), actual: provenance?.producer?.run_attempt ?? null });
+  }
   if (provenance?.authority_effect !== false || provenance?.promotion_authorized !== false) {
     fail('provenance_authority_invalid');
   }
@@ -196,6 +205,7 @@ export async function resolveProducerRun({
   timeoutMs = 45 * 60 * 1000,
   pollMs = 5000,
   fetchImpl = fetch,
+  allowInProgressArtifact = false,
 } = {}) {
   const repository = requireString(repo, 'repo_missing');
   if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) fail('repo_invalid');
@@ -220,29 +230,35 @@ export async function resolveProducerRun({
       if (matches.length) {
         sawMatchingRun = true;
         const run = matches[0];
-        if (run.status === 'completed') {
-          if (run.conclusion !== 'success') {
-            fail('installer_provenance_producer_failed', {
-              run_id: run.id,
-              conclusion: run.conclusion ?? null,
-            });
-          }
+        if (run.status === 'completed' && run.conclusion !== 'success') {
+          fail('installer_provenance_producer_failed', {
+            run_id: run.id,
+            conclusion: run.conclusion ?? null,
+          });
+        }
+        if (run.status === 'completed' || allowInProgressArtifact === true) {
           const artifactsUrl = new URL(`/repos/${repository}/actions/runs/${run.id}/artifacts`, apiBase);
           artifactsUrl.searchParams.set('per_page', '100');
           const artifactsPayload = await fetchJson(artifactsUrl, { token, fetchImpl });
           const found = (Array.isArray(artifactsPayload?.artifacts) ? artifactsPayload.artifacts : [])
             .find((row) => row?.name === artifact && row?.expired !== true);
-          if (!found) fail('installer_provenance_artifact_absent', { run_id: run.id, artifact_name: artifact });
-          return Object.freeze({
-            schema: RESOLUTION_SCHEMA,
-            source_head: exactHead,
-            producer_run_id: Number(run.id),
-            producer_run_attempt: Number(run.run_attempt || 1),
-            artifact_id: Number(found.id),
-            artifact_name: artifact,
-            archive_download_url: String(found.archive_download_url),
-            authority_effect: false,
-          });
+          if (found) {
+            return Object.freeze({
+              schema: RESOLUTION_SCHEMA,
+              source_head: exactHead,
+              producer_run_id: Number(run.id),
+              producer_run_attempt: Number(run.run_attempt || 1),
+              producer_completed: run.status === 'completed',
+              producer_conclusion: run.conclusion ?? null,
+              artifact_id: Number(found.id),
+              artifact_name: artifact,
+              archive_download_url: String(found.archive_download_url),
+              authority_effect: false,
+            });
+          }
+          if (run.status === 'completed') {
+            fail('installer_provenance_artifact_absent', { run_id: run.id, artifact_name: artifact });
+          }
         }
       }
       lastReadError = null;
@@ -265,6 +281,81 @@ export async function resolveProducerRun({
     fail('installer_provenance_producer_run_absent', { source_head: exactHead, last_read_error: lastReadError });
   }
   fail('installer_provenance_producer_timeout', { source_head: exactHead, last_read_error: lastReadError });
+}
+
+export async function waitProducerSuccess({
+  repo,
+  head,
+  runId,
+  runAttempt = null,
+  token,
+  apiBase = 'https://api.github.com',
+  timeoutMs = 45 * 60 * 1000,
+  pollMs = 5000,
+  fetchImpl = fetch,
+} = {}) {
+  const repository = requireString(repo, 'repo_missing');
+  if (!/^[^/\\s]+\\/[^/\\s]+$/.test(repository)) fail('repo_invalid');
+  const exactHead = normalizeHead(head);
+  const exactRunId = normalizePositiveInt(runId, 'run_id_invalid');
+  const exactAttempt = runAttempt == null ? null : normalizePositiveInt(runAttempt, 'run_attempt_invalid');
+  const boundedTimeout = normalizeTimeout(timeoutMs, 45 * 60 * 1000);
+  const boundedPoll = Math.max(10, normalizeTimeout(pollMs, 5000));
+  const started = Date.now();
+
+  while (Date.now() - started <= boundedTimeout) {
+    let run;
+    try {
+      const runUrl = new URL(`/repos/${repository}/actions/runs/${exactRunId}`, apiBase);
+      run = await fetchJson(runUrl, { token, fetchImpl });
+    } catch (error) {
+      const status = Number(error?.details?.status);
+      if (error?.code === 'github_api_http_error' && status >= 400 && status < 500) {
+        fail('installer_provenance_github_api_rejected', {
+          status,
+          url: error?.details?.url ?? null,
+        });
+      }
+      if (Date.now() - started + boundedPoll > boundedTimeout) break;
+      await sleep(boundedPoll);
+      continue;
+    }
+
+    if (String(run?.head_sha || '').toLowerCase() !== exactHead) {
+      fail('producer_head_mismatch', { expected: exactHead, actual: run?.head_sha ?? null });
+    }
+    if (run?.name !== PRODUCER_WORKFLOW) {
+      fail('producer_workflow_mismatch', { expected: PRODUCER_WORKFLOW, actual: run?.name ?? null });
+    }
+    if (exactAttempt != null && Number(run?.run_attempt || 1) !== exactAttempt) {
+      fail('producer_run_attempt_mismatch', { expected: exactAttempt, actual: Number(run?.run_attempt || 1) });
+    }
+    if (run?.status === 'completed') {
+      if (run?.conclusion !== 'success') {
+        fail('installer_provenance_producer_failed', {
+          run_id: exactRunId,
+          conclusion: run?.conclusion ?? null,
+        });
+      }
+      return Object.freeze({
+        schema: PRODUCER_WAIT_SCHEMA,
+        source_head: exactHead,
+        producer_run_id: exactRunId,
+        producer_run_attempt: Number(run?.run_attempt || 1),
+        producer_conclusion: 'success',
+        verified: true,
+        authority_effect: false,
+      });
+    }
+
+    if (Date.now() - started + boundedPoll > boundedTimeout) break;
+    await sleep(boundedPoll);
+  }
+
+  fail('installer_provenance_producer_timeout', {
+    source_head: exactHead,
+    run_id: exactRunId,
+  });
 }
 
 export async function downloadArtifact({
@@ -374,6 +465,8 @@ export async function main(argv = process.argv.slice(2)) {
       installerPath: args.installer,
       blockmapPath: args.blockmap,
       configPath: args.config,
+      expectedRunId: args.expected_run_id ?? null,
+      expectedRunAttempt: args.expected_run_attempt ?? null,
     }));
     return;
   }
@@ -386,6 +479,7 @@ export async function main(argv = process.argv.slice(2)) {
       apiBase: args.api_base || process.env.GITHUB_API_URL || 'https://api.github.com',
       timeoutMs: args.timeout_ms,
       pollMs: args.poll_ms,
+      allowInProgressArtifact: args.allow_in_progress === 'true',
     }));
     return;
   }
@@ -394,6 +488,19 @@ export async function main(argv = process.argv.slice(2)) {
       url: args.url,
       token: args.token || process.env.GITHUB_TOKEN,
       outputPath: args.output,
+    }));
+    return;
+  }
+  if (command === 'wait') {
+    print(await waitProducerSuccess({
+      repo: args.repo || process.env.GITHUB_REPOSITORY,
+      head: args.head,
+      runId: args.run_id,
+      runAttempt: args.run_attempt ?? null,
+      token: args.token || process.env.GITHUB_TOKEN,
+      apiBase: args.api_base || process.env.GITHUB_API_URL || 'https://api.github.com',
+      timeoutMs: args.timeout_ms,
+      pollMs: args.poll_ms,
     }));
     return;
   }
@@ -407,6 +514,7 @@ export async function main(argv = process.argv.slice(2)) {
       timeoutMs: args.timeout_ms,
       pollMs: args.poll_ms,
       outputPath: args.output,
+      allowInProgressArtifact: args.allow_in_progress === 'true',
     }));
     return;
   }
