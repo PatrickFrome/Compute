@@ -37,10 +37,14 @@ test('workbench renderer exposes layout and navigation but no authority actuatio
   for (const command of authorityCommands) assert.doesNotMatch(js, new RegExp(`['\"]${command}['\"]`));
 });
 
-test('tab selection and close are independent interactive controls', () => {
-  assert.match(js, /const\s+row\s*=\s*document\.createElement\('div'\)/);
+test('single main workspace rail exposes managed chat actors and native tab selection only', () => {
+  assert.match(js, /function supervisorForTab/);
+  assert.match(js, /railHeader\('Supervisors'/);
+  assert.match(js, /railHeader\('Agents'/);
   assert.match(js, /select\.className\s*=\s*'verticalTabSelect'/);
-  assert.match(js, /close\.className\s*=\s*'tabClose'/);
+  assert.match(js, /api\.command\('SELECT_TAB'/);
+  assert.match(js, /GLM-5\.3-Flash/);
+  assert.doesNotMatch(js.slice(js.indexOf('function makeTabRow'), js.indexOf('function railHeader')), /CLOSE_TAB/);
   assert.match(css, /\.verticalTabSelect\{/);
 });
 
@@ -56,4 +60,17 @@ test('source-only mechanisms remain explicitly unexposed in the UI', () => {
   assert.match(js, /Host resilience','NOT EXPOSED'/);
   assert.match(js, /Parent progress lease','NOT EXPOSED'/);
   assert.match(js, /source presence is not runtime proof/);
+});
+
+
+test('single main workspace hides auxiliary surfaces by default and keeps them command/settings reachable', () => {
+  assert.match(html, /data-operations="CLOSED"/);
+  assert.match(html, /Settings & Tools/);
+  assert.match(html, /Search agents and supervisors/);
+  assert.match(js, /requestedLayout = \{ sidebar: 'EXPANDED', operations: 'CLOSED' \}/);
+  assert.match(js, /setLayout\(\{ sidebar: 'EXPANDED', operations: 'CLOSED' \}\)/);
+  assert.match(js, /WORKBENCH_COMMAND_HINTS/);
+  assert.match(css, /R97 single-main-workspace contract/);
+  assert.match(css, /#newChat/);
+  assert.match(css, /\.systems/);
 });
