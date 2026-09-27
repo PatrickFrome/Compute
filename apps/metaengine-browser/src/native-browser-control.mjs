@@ -725,27 +725,37 @@ async function exactTarget(webContents, dbg, roleRaw, nameRaw, semanticRef) {
   return matches[0];
 }
 
-async function clickBackendNode(dbg, backendNodeId, beforeDispatch = null, { clickCount = 1 } = {}) {
-  const model = await dbg.sendCommand('DOM.getBoxModel', { backendNodeId });
-  const quad = model?.model?.content || model?.model?.border;
-  if (!Array.isArray(quad) || quad.length < 8) throw new Error('native_semantic_box_unavailable');
-  const xs = [quad[0],quad[2],quad[4],quad[6]].map(Number);
-  const ys = [quad[1],quad[3],quad[5],quad[7]].map(Number);
-  const x = xs.reduce((a,b)=>a+b,0) / xs.length;
-  const y = ys.reduce((a,b)=>a+b,0) / ys.length;
-  // D-M2 guard: a zero-area or collapsed box can never receive a viewport
-  // click — hidden carousel slides and clipped strips fail closed here
-  // instead of dispatching an effect into empty space.
-  const width = Math.max(...xs) - Math.min(...xs);
-  const height = Math.max(...ys) - Math.min(...ys);
-  if (!(width > 0 && height > 0)) throw new Error('native_semantic_target_not_visible');
-  // D-M1: the pre-dispatch currency gate may re-anchor asynchronously.
+async function activateBackendNode(dbg, backendNodeId, beforeDispatch = null) {
+  if (!Number.isSafeInteger(Number(backendNodeId)) || Number(backendNodeId) < 1) {
+    throw new Error('native_semantic_backend_node_invalid');
+  }
+  // R97 convergence: semantic actuation must not depend on viewport geometry.
+  // The backend node is already exact/fenced by semantic_ref. Resolve only that
+  // node to a CDP RemoteObject and invoke the browser's fixed DOM activation
+  // primitive. No selector, model-provided script, coordinate, DPI, zoom or
+  // scroll offset participates in identity or dispatch.
   await beforeDispatch?.();
-  const count = Number.isSafeInteger(clickCount) && clickCount >= 1 && clickCount <= 3 ? Math.trunc(clickCount) : 1;
-  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseMoved', x, y, button:'none' });
-  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mousePressed', x, y, button:'left', clickCount: count });
-  await dbg.sendCommand('Input.dispatchMouseEvent', { type:'mouseReleased', x, y, button:'left', clickCount: count });
-  return { x, y, click_count: count };
+  const resolved = await dbg.sendCommand('DOM.resolveNode', { backendNodeId: Number(backendNodeId) });
+  const objectId = String(resolved?.object?.objectId || '');
+  if (!objectId) throw new Error('native_semantic_dom_object_unavailable');
+  try {
+    const result = await dbg.sendCommand('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function(){if(!this||typeof this.click!=="function")return false;this.click();return true;}',
+      returnByValue: true,
+      silent: true,
+    });
+    if (result?.exceptionDetails) throw new Error('native_semantic_dom_activation_exception');
+    if (result?.result?.value !== true) throw new Error('native_semantic_dom_activation_unavailable');
+    return {
+      method: 'DOM_CLICK',
+      backend_node_id: Number(backendNodeId),
+      mouse_geometry_required: false,
+      viewport_geometry_required: false,
+    };
+  } finally {
+    await dbg.sendCommand('Runtime.releaseObject', { objectId }).catch(() => {});
+  }
 }
 
 function assertCurrentEffectRuntime(webContents, dbg, binding) {
@@ -838,14 +848,14 @@ export async function executeSemanticCommand(webContents, command) {
         if (!stopRef) throw new Error('native_glm_stop_requires_semantic_ref_button');
         const stopTarget = await exactTarget(webContents, dbg, command?.payload?.role || 'button', command?.payload?.accessible_name, stopRef);
         if (stopTarget.role !== 'button') throw new Error('native_glm_stop_requires_button_target');
-        const stopPoint = await clickBackendNode(dbg, stopTarget.backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
-        return { action, target: stopTarget, point: stopPoint, platform: 'GLM_ZAI', authority_effect: true };
+        const activation = await activateBackendNode(dbg, stopTarget.backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
+        return { action, target: stopTarget, activation, platform: 'GLM_ZAI', mouse_geometry_required: false, viewport_geometry_required: false, authority_effect: true };
       }
       const tree = await dbg.sendCommand('Accessibility.getFullAXTree');
       const targets = exactChatGptControls(tree?.nodes || [], 'STOP');
       if (targets.length !== 1) throw new Error(targets.length ? `native_stop_target_ambiguous:${targets.length}` : 'native_stop_target_not_found');
-      const point = await clickBackendNode(dbg, targets[0].backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
-      return { action, target: targets[0], point, authority_effect: true };
+      const activation = await activateBackendNode(dbg, targets[0].backend_node_id, () => assertCurrentEffectRuntime(webContents, dbg, effectBinding));
+      return { action, target: targets[0], activation, mouse_geometry_required: false, viewport_geometry_required: false, authority_effect: true };
     }
 
     const role = command?.payload?.role;
@@ -893,11 +903,11 @@ export async function executeSemanticCommand(webContents, command) {
     }
 
     if (action === 'TYPED_CLICK') {
-      const point = await clickBackendNode(dbg, target.backend_node_id, async () => {
+      const activation = await activateBackendNode(dbg, target.backend_node_id, async () => {
         liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
         assertCurrentEffectRuntime(webContents, dbg, effectBinding);
       });
-      return { action, target, point, authority_effect: true };
+      return { action, target, activation, mouse_geometry_required: false, viewport_geometry_required: false, authority_effect: true };
     }
 
     if (action === 'SEMANTIC_TYPE') {
@@ -1161,7 +1171,7 @@ export async function executeSemanticCommand(webContents, command) {
           try {
             liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
             assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-            await clickBackendNode(dbg, fallbackSends[0].backend_node_id, async () => {
+            await activateBackendNode(dbg, fallbackSends[0].backend_node_id, async () => {
               liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
               assertCurrentEffectRuntime(webContents, dbg, effectBinding);
             });
