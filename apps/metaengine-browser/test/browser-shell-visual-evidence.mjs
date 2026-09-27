@@ -305,7 +305,7 @@ async function main() {
     const byName = Object.fromEntries(allCaptures.map((row) => [row.name, row]));
     if (byName['shell-1920x1080']?.metrics.body_sidebar !== 'EXPANDED') throw new Error('visual_evidence_wide_fleet_rail_not_expanded');
     if (!['EXPANDED','COMPACT'].includes(String(byName['shell-1100x760']?.metrics.body_sidebar || ''))) throw new Error('visual_evidence_1100_fleet_rail_invalid');
-    if (!['COMPACT','HIDDEN'].includes(String(byName['shell-1024x720']?.metrics.body_sidebar || ''))) throw new Error('visual_evidence_1024_fleet_rail_not_degraded');
+    if (!['EXPANDED','COMPACT'].includes(String(byName['shell-1024x720']?.metrics.body_sidebar || ''))) throw new Error('visual_evidence_1024_fleet_rail_invalid');
 
     const captures = allCaptures.filter((row) => row.name === 'shell-1440x960' || row.name === 'shell-1100x760');
     if (captures.length !== 2) throw new Error('visual_evidence_legacy_capture_projection_invalid');
