@@ -244,7 +244,12 @@ export async function resolveProducerArtifact({
   if (candidates.length === 0) {
     return Object.freeze({ schema: RESOLUTION_SCHEMA, state: 'ABSENT', source_head: head, authority_effect: false });
   }
-  const successful = candidates.find((run) => run?.status === 'completed' && run?.conclusion === 'success');
+  // The first successful exact-head producer is canonical. Choosing the
+  // newest success would allow late reruns to make different consumers qualify
+  // different installer bytes for the same source head.
+  const successful = candidates
+    .filter((run) => run?.status === 'completed' && run?.conclusion === 'success')
+    .sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0))[0] ?? null;
   const active = candidates.find((run) => run?.status !== 'completed');
   const run = successful || active || candidates[0];
   const runId = boundedInteger(run.id, {
@@ -271,7 +276,14 @@ export async function resolveProducerArtifact({
   );
   const matches = (Array.isArray(artifacts?.artifacts) ? artifacts.artifacts : [])
     .filter((artifact) => artifact?.name === expectedArtifact && artifact?.expired !== true);
-  if (matches.length !== 1) {
+  if (matches.length > 1) {
+    fail('installer_provenance_artifact_ambiguous', {
+      run_id: runId,
+      artifact_name: expectedArtifact,
+      matches: matches.length,
+    });
+  }
+  if (matches.length === 0) {
     return Object.freeze({
       schema: RESOLUTION_SCHEMA,
       state: 'ARTIFACT_PENDING',
