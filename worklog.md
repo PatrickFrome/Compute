@@ -10817,3 +10817,20 @@ Work Log:
 
 Stage Summary:
 - EV-CHARTS реализован и верифицирован: легенда графа ветвей, тултипы eval-истории, подписи времени Europe/Moscow в observability/browser. Клиент стабилен (:81 HTTP 200, lint 0/0, page errors нет). Движок v1.44, round=20, BACKLOG=23 entries. Секреты не печатались, force-push нет, hot-tree правки (aside) сохранены.
+
+---
+Task ID: BROWSER-TEST-20260928-0530
+Agent: Super Z (cron loop)
+Task: Job 419203 — live browser mechanics test (METAENGINE 0.7.0-dev.36336130139.1), protocol v2 read-only pass
+
+Work Log:
+- tick-probe-0430.py 0530: FLEET_STATUS n=4 lifecycle=[ACTIVE×4] (8233ms); TAB_CENSUS total=19 by_kind={GLM_CHAT:18, LOCAL_DEV:1} (4166ms)
+- READ_TRANSCRIPT tab_a66fab40: len=6128 UNCHANGED (baseline), markers: FLEET BOOTSTRAP FLUSH + SUPERVISOR CONVERSATION SEED + diag 0330/0400; draft_state=DIRTY_DRAFT → unlock-chain NOT fired, zero pollution (protocol v2 holds, 3rd clean tick in a row)
+- REST state table 200: client 2a60d6a2 last_seen=2s ago (supervisor plane живой); 305021db/ac5b514d — мёртвые (~30 дней)
+- Command-queue table: 404 по всем известным именам (ограничение DB-allowlist, известно с 0330)
+- Замечено: 2 GLM_CHAT-таба висят на https://chat.z.ai/error (state-blob tabs[]) — кандидаты на закрытие/RECOVER после снятия блокировки
+- Изменений в состоянии блокера нет: оператор ещё не очистил composer + localStorage["chat-input-"]
+
+Stage Summary:
+- Механики: FLEET_STATUS/TAB_CENSUS/READ_TRANSCRIPT + REST-чтение = работают; submit→conversation — корневой блокер (без изменений); unlock-цепочка отложена до очистки draft оператором; pollution=0 (len 6128 стабилен)
+- Следующий tick: probe 0530-шаблон (read-only) → при len<6128 или чистом хвосте немедленно unlock-цепочка (NEW_TAB→CAPTURE→SEMANTIC_TYPE submit_after_type→PRESS_KEY Enter→CAPTURE /c/)
