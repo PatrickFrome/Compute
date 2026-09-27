@@ -953,53 +953,83 @@ export async function executeSemanticCommand(webContents, command) {
           // composer first — keys without focus landed on <body> and were the
           // real D-M3 "ignored keys" mechanism; (2) KEY_ATOMIC runs FIRST on
           // every surface, CLICK_SELECT is the fallback.
-          const gestureOrder = ['KEY_ATOMIC', 'CLICK_SELECT'];
+          // R97 live qualification (2026-09-27): the installed candidate
+          // proved KEY_ATOMIC could still append to an account-synced root
+          // draft (5921 -> 5999 chars) while the replace gate correctly
+          // refused Enter. Do not insert replacement text until clearing the
+          // old value has an independent positive readback.
+          //
+          // Chromium exposes editor commands on Input.dispatchKeyEvent. Use
+          // SelectAll + DeleteBackward after DOM.focus, then require the AX
+          // value to be exactly empty BEFORE Input.insertText. If the clear is
+          // a no-op or partial, fail closed without adding the new prompt.
           let valueAfter = valueBefore;
+          let valueAfterClear = valueBefore;
           if (valueBefore === text) {
             replaceVerified = true;
             replaceGesture = 'PREEXISTING_MATCH';
           } else {
-            for (const gesture of gestureOrder) {
+            if (valueBefore !== '') {
               liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
               assertCurrentEffectRuntime(webContents, dbg, effectBinding);
-              if (gesture === 'CLICK_SELECT') {
-                // A provably empty composer needs no selection: the insert
-                // alone produces the exact text and the zero-geometry
-                // contract of the fresh-dispatch path is preserved. The
-                // triple-click (and its box geometry) is reserved for
-                // clearing a non-empty or unreadable draft.
-                if (valueBefore !== '') {
-                  await clickBackendNode(dbg, target.backend_node_id, null, { clickCount: 3 });
-                }
-              } else {
-                // R-DRAFT-FOCUS: focus the exact composer backend node before
-                // dispatching editing keys. Without focus the Ctrl+A/Delete
-                // sequence selected nothing (keys reached <body>), insertText
-                // appended at the site-restored cursor, and the whole gesture
-                // degenerated into draft growth. DOM.focus is geometry-free.
-                await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
-                // D-U1 fix (2026-09-19): the Ctrl+A dispatch carried no
-                // windowsVirtualKeyCode — Chromium synthesizes keyCode 0 for
-                // it, and editors keying on keyCode treat the select-all as a
-                // non-event. Enter/Delete already carry theirs; Ctrl+A now
-                // does too so every editing key in the gesture is consistent.
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'a', code:'KeyA', modifiers:2, windowsVirtualKeyCode:65, nativeVirtualKeyCode:65 });
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'a', code:'KeyA', modifiers:2, windowsVirtualKeyCode:65, nativeVirtualKeyCode:65 });
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'rawKeyDown', key:'Delete', code:'Delete', windowsVirtualKeyCode:46, nativeVirtualKeyCode:46 });
-                await dbg.sendCommand('Input.dispatchKeyEvent', { type:'keyUp', key:'Delete', code:'Delete', windowsVirtualKeyCode:46 });
+              await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
+              await dbg.sendCommand('Input.dispatchKeyEvent', {
+                type:'rawKeyDown',
+                key:'a',
+                code:'KeyA',
+                modifiers:2,
+                windowsVirtualKeyCode:65,
+                nativeVirtualKeyCode:65,
+                commands:['SelectAll'],
+              });
+              await dbg.sendCommand('Input.dispatchKeyEvent', {
+                type:'keyUp',
+                key:'a',
+                code:'KeyA',
+                modifiers:2,
+                windowsVirtualKeyCode:65,
+                nativeVirtualKeyCode:65,
+              });
+              await dbg.sendCommand('Input.dispatchKeyEvent', {
+                type:'rawKeyDown',
+                key:'Backspace',
+                code:'Backspace',
+                windowsVirtualKeyCode:8,
+                nativeVirtualKeyCode:8,
+                commands:['DeleteBackward'],
+              });
+              await dbg.sendCommand('Input.dispatchKeyEvent', {
+                type:'keyUp',
+                key:'Backspace',
+                code:'Backspace',
+                windowsVirtualKeyCode:8,
+                nativeVirtualKeyCode:8,
+              });
+              valueAfterClear = await readBackendNodeValue(dbg, target.backend_node_id);
+              replaceGesture = 'CDP_EDIT_COMMAND_CLEAR';
+              if (valueAfterClear !== '') {
+                valueAfter = valueAfterClear;
               }
+            } else {
+              valueAfterClear = '';
+              replaceGesture = 'EMPTY_COMPOSER_INSERT';
+            }
+
+            if (valueAfterClear === '') {
+              // The clear itself advances semantic_generation. Re-anchor the
+              // exact backend node before the first character of the new
+              // prompt, preserving document/runtime fences.
+              liveRef = await requireCurrentSemanticRef(webContents, dbg, liveRef);
+              assertCurrentEffectRuntime(webContents, dbg, effectBinding);
+              await dbg.sendCommand('DOM.focus', { backendNodeId: target.backend_node_id });
               await dbg.sendCommand('Input.insertText', { text });
               valueAfter = await readBackendNodeValue(dbg, target.backend_node_id);
-              replaceGesture = gesture;
-              if (valueAfter === text) {
-                replaceVerified = true;
-                break;
-              }
-              if (valueAfter !== valueBefore) break; // mutated (append/partial) - fail fast, no second gesture
+              replaceVerified = valueAfter === text;
             }
           }
           typeReadback = {
             value_length_before: valueBefore == null ? null : valueBefore.length,
+            value_length_after_clear: valueAfterClear == null ? null : valueAfterClear.length,
             value_length_after: valueAfter == null ? null : valueAfter.length,
             value_sha256_after: valueAfter == null || valueAfter === '' ? null : sha256(valueAfter),
           };
