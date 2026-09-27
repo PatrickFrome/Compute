@@ -21,17 +21,15 @@ test('R96D nested action buttons honor both standard button activation keys', ()
   assert.match(tasks, /aria-keyshortcuts="Enter Space"/);
 });
 
-test('R96D nested button activation cannot bubble into row-open or Peek behavior', () => {
-  const retryStart = tasks.indexOf('className="branch-retry cursor-pointer"');
-  const reflectStart = tasks.indexOf('className="branch-reflect cursor-pointer"');
-  assert.ok(retryStart >= 0);
-  assert.ok(reflectStart > retryStart);
-
-  const retry = tasks.slice(retryStart, reflectStart);
-  const reflect = tasks.slice(reflectStart, tasks.indexOf('</>', reflectStart) >= 0 ? tasks.indexOf('</>', reflectStart) : reflectStart + 1800);
-
-  assert.match(retry, /e\.stopPropagation\(\)/);
-  assert.match(reflect, /e\.stopPropagation\(\)/);
-  assert.doesNotMatch(retry, /onOpen\(t\)/);
-  assert.doesNotMatch(reflect, /onOpen\(t\)/);
+test('R96D nested button activation stops bubbling before the existing callbacks', () => {
+  assert.match(
+    tasks,
+    /className="branch-retry cursor-pointer"[\s\S]{0,420}onKeyDown=\{\(e\) => \{[\s\S]{0,240}e\.preventDefault\(\);[\s\S]{0,120}e\.stopPropagation\(\);[\s\S]{0,120}onRetry\(t\);/,
+  );
+  assert.match(
+    tasks,
+    /className="branch-reflect cursor-pointer"[\s\S]{0,420}onKeyDown=\{\(e\) => \{[\s\S]{0,240}e\.preventDefault\(\);[\s\S]{0,120}e\.stopPropagation\(\);[\s\S]{0,120}onReflect\(t\);/,
+  );
+  assert.match(tasks, /className="branch-retry cursor-pointer"[\s\S]{0,160}onClick=\{\(e\) => \{ e\.stopPropagation\(\); onRetry\(t\); \}\}/);
+  assert.match(tasks, /className="branch-reflect cursor-pointer"[\s\S]{0,160}onClick=\{\(e\) => \{ e\.stopPropagation\(\); onReflect\(t\); \}\}/);
 });
