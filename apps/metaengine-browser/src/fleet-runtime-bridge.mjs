@@ -29,7 +29,11 @@ function exactAgent(snapshot, binding) {
   const rows = (snapshot?.agents || []).filter((row) => String(row?.agent_id || '').toLowerCase() === agentId);
   if (rows.length !== 1) throw new Error(rows.length ? 'fleet_runtime_agent_identity_ambiguous' : 'fleet_runtime_agent_not_found');
   const agent = rows[0];
-  if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(String(agent.lifecycle_state || ''))) throw new Error(`fleet_runtime_agent_state_invalid:${agent.lifecycle_state}`);
+  const bootstrapPending = String(agent.lifecycle_state || '') === 'PROVISIONING_AMBIGUOUS'
+    && String(agent.ambiguous_reason || '') === 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING';
+  if (!['BOUND_UNVERIFIED', 'ACTIVE'].includes(String(agent.lifecycle_state || '')) && !bootstrapPending) {
+    throw new Error(`fleet_runtime_agent_state_invalid:${agent.lifecycle_state}`);
+  }
   if (String(agent.tab_id || '') !== tabId) throw new Error('fleet_runtime_tab_binding_mismatch');
   if (String(agent.target_id || '').toLowerCase() !== targetId) throw new Error('fleet_runtime_target_binding_mismatch');
   if (!Number.isSafeInteger(generation) || Number(agent.generation_epoch) !== generation) throw new Error('fleet_runtime_generation_binding_mismatch');
@@ -87,6 +91,40 @@ export async function adoptFleetGenerationFloor(value) {
 export function assertFleetRuntimeBinding(binding) {
   if (!fleetRuntime) throw new Error('fleet_runtime_unavailable');
   return structuredClone(exactAgent(fleetRuntime.snapshot(), binding));
+}
+
+export async function beginFleetTransportBootstrapAttempt(binding) {
+  if (!fleetRuntime) throw new Error('fleet_runtime_unavailable');
+  if (typeof fleetRuntime.beginTransportBootstrapAttempt !== 'function') {
+    throw new Error('fleet_runtime_bootstrap_barrier_unsupported');
+  }
+  // Resolve against the pre-effect state first; the runtime method repeats
+  // exact tab/target/generation checks while persisting the write-ahead fence.
+  const agent = exactAgent(fleetRuntime.snapshot(), binding);
+  if (String(agent.lifecycle_state || '') !== 'BOUND_UNVERIFIED') {
+    throw new Error(`fleet_runtime_bootstrap_state_invalid:${agent.lifecycle_state}`);
+  }
+  const next = await fleetRuntime.beginTransportBootstrapAttempt({
+    agent_id: agent.agent_id,
+    tab_id: agent.tab_id,
+    target_id: agent.target_id,
+    generation_epoch: agent.generation_epoch,
+  });
+  const fenced = exactAgent(next, binding);
+  if (String(fenced.lifecycle_state || '') !== 'PROVISIONING_AMBIGUOUS'
+      || String(fenced.ambiguous_reason || '') !== 'TRANSPORT_BOOTSTRAP_EFFECT_PENDING') {
+    throw new Error('fleet_runtime_bootstrap_barrier_not_persisted');
+  }
+  return Object.freeze({
+    schema: 'metaengine.browser.fleet-bootstrap-barrier.v1',
+    state: 'EFFECT_PENDING',
+    agent_id: fenced.agent_id,
+    tab_id: fenced.tab_id,
+    target_id: fenced.target_id,
+    generation_epoch: fenced.generation_epoch,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
 }
 
 export async function markFleetTransportProvenFromNativeFrame({
