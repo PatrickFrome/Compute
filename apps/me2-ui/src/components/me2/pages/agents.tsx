@@ -127,7 +127,7 @@ export function AgentsPage() {
   const peekAgentIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const effectivePeekAgentId = peekAgentId && peekAgentIds.includes(peekAgentId)
     ? peekAgentId
-    : peekAgentIds[0] ?? null;
+    : null;
   useTemporaryPeekList({
     kind: "agent",
     ids: peekAgentIds,

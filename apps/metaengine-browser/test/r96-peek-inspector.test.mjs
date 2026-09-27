@@ -39,6 +39,13 @@ test('R96 hold-Space controller closes on release and keeps Arrow navigation ins
   assert.doesNotMatch(hook, /sendCommand|me2Fetch|fetch\(|WebSocket|agentChatOp/);
 });
 
+test('R96 Peek requires explicit row focus before Space can capture page navigation', () => {
+  assert.match(tasks, /const effectivePeekTaskId = peekTaskId && peekTaskIds\.includes\(peekTaskId\)[\s\S]{0,80}\? peekTaskId[\s\S]{0,40}: null;/);
+  assert.doesNotMatch(tasks, /effectivePeekTaskId[\s\S]{0,120}peekTaskIds\[0\]/);
+  assert.match(agents, /const effectivePeekAgentId = peekAgentId && peekAgentIds\.includes\(peekAgentId\)[\s\S]{0,80}\? peekAgentId[\s\S]{0,40}: null;/);
+  assert.doesNotMatch(agents, /effectivePeekAgentId[\s\S]{0,120}peekAgentIds\[0\]/);
+});
+
 test('R96 Peek never steals native Space activation from unrelated controls', () => {
   assert.match(hook, /function isReservedInteractionTarget/);
   assert.match(hook, /\[role="button"\]/);
