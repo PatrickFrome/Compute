@@ -79,6 +79,7 @@ function stableTransportProof(proof) {
     target_id: proof.target_id ? String(proof.target_id).toLowerCase() : null,
     generation_epoch: Number(proof.generation_epoch) || 0,
     conversation_url_sha256: proof.conversation_url_sha256 ? String(proof.conversation_url_sha256).toLowerCase() : null,
+    agent_surface_sha256: proof.agent_surface_sha256 ? String(proof.agent_surface_sha256).toLowerCase() : null,
   };
 }
 
