@@ -39,8 +39,9 @@ test('root transport proof is an in-process admission overlay until a canonical 
       transport_url: 'https://chat.z.ai/',
     });
     const overlay = promoted.agents[0];
-    assert.equal(overlay.lifecycle_state, 'ACTIVE');
+    assert.equal(overlay.lifecycle_state, 'BOUND_UNVERIFIED');
     assert.equal(overlay.transport_proof.transport_stage, 'PRECONVERSATION_ROOT');
+    assert.equal(overlay.transport_admission, 'PRECONVERSATION_ONLY');
     assert.match(overlay.transport_proof.conversation_url_sha256, /^[a-f0-9]{64}$/);
     assert.equal(overlay.authority_effect, false);
     assert.equal(overlay.automatic_retry_allowed, false);
