@@ -14,10 +14,8 @@
  */
 import { join } from 'node:path';
 import { startMe2DaemonHost, stopMe2DaemonHost, me2DaemonStatus } from './me2-daemon-host.mjs';
-import { startMe2FleetBridge, stopMe2FleetBridge, me2FleetBridgeStatus } from './me2-fleet-bridge.mjs';
 import { startMe2MissionControl, stopMe2MissionControl, me2MissionControlStatus } from './me2-mission-control.mjs';
 import { startMe2BrainAdapter, stopMe2BrainAdapter, me2BrainAdapterStatus } from './me2-brain-adapter.mjs';
-import { startMe2SupervisorMeshBridge, stopMe2SupervisorMeshBridge, me2SupervisorMeshBridgeStatus } from './me2-supervisor-mesh-bridge.mjs';
 import { me2FleetTabsHostStatus } from './me2-fleet-tabs-host.mjs';
 import { startMe2UiHost, stopMe2UiHost, stopMe2UiHostAndWait, me2UiHostStatus } from './me2-ui-host.mjs';
 import { startMe2UiGateway, stopMe2UiGateway, me2UiGatewayStatus } from './me2-ui-gateway.mjs';
@@ -25,7 +23,7 @@ import { me2SocketStatus } from './me2-socket-client.mjs';
 import { ME2_REST_BASE } from './me2-daemon-host.mjs';
 
 export const ME2_INTEGRATION_SCHEMA = 'metaengine.browser.me2.integration.v1';
-export const ME2_INTEGRATION_VERSION = 'r50-unified-shell-1';
+export const ME2_INTEGRATION_VERSION = 'r97-native-browser-authority-1';
 
 /** Ожидаемый контракт daemon'а (docs/electron-rebuild-plan.md, фаза A; аналогия — LSP initialize). */
 export const ME2_EXPECTED_CONTRACT = 'me2-daemon-contract.v1';
@@ -60,13 +58,12 @@ export async function me2ContractHandshake() {
     contractState.contract = j?.contract ?? null;
     contractState.capabilities = j?.capabilities ?? null;
     const ops = Array.isArray(j?.capabilities?.ops) ? j.capabilities.ops : [];
-    const meshOk = ops.includes('mesh_heartbeat');
     const uiOk = j?.capabilities?.ui === '/ui';
-    contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && meshOk && uiOk;
+    contractState.ok = contractState.contract === ME2_EXPECTED_CONTRACT && uiOk;
     if (contractState.ok) {
-      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.capabilities?.version ?? j?.meta?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null });
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_OK', contract: contractState.contract, daemon_version: j?.capabilities?.version ?? j?.meta?.version ?? null, ops: ops.length, ui: j?.capabilities?.ui ?? null, agentchat_authority: false });
     } else {
-      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, mesh_heartbeat: meshOk, ui: uiOk, verdict: 'DEGRADED — операции честно падают до починки контракта' }, { error: true });
+      emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'ME2_CONTRACT_MISMATCH', expected: ME2_EXPECTED_CONTRACT, actual: contractState.contract, ui: uiOk, verdict: 'DEGRADED — local DevOS/UI contract unavailable' }, { error: true });
     }
   } catch (e) {
     contractState.error = String(e?.message || e).slice(0, 140);
@@ -86,11 +83,11 @@ export function me2IntegrationStatus() {
     ui_host: me2UiHostStatus(),
     ui_gateway: me2UiGatewayStatus(),
     daemon: me2DaemonStatus(),
-    fleet_bridge: me2FleetBridgeStatus(),
+    fleet_bridge: { state: 'REMOVED_NATIVE_BROWSER_AUTHORITY', authority_effect: false },
     tabs_host: me2FleetTabsHostStatus(),
     mission_control: me2MissionControlStatus(),
     brain_adapter: me2BrainAdapterStatus(),
-    supervisor_mesh_bridge: me2SupervisorMeshBridgeStatus(),
+    supervisor_mesh_bridge: { state: 'REMOVED_NATIVE_BROWSER_AUTHORITY', authority_effect: false },
   };
 }
 
@@ -125,11 +122,7 @@ async function startMe2IntegrationOnce({ app } = {}) {
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'UI_GATEWAY_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
-  try {
-    startMe2FleetBridge();
-  } catch (e) {
-    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'FLEET_BRIDGE_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
-  }
+  emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_AGENTCHAT_FLEET_BRIDGE_REMOVED', replacement: 'NATIVE_BROWSER_FLEET', authority_effect: false });
   // R41: браузер сам открывает Mission Control (role='SUPERVISOR') и вкладки чат-агентов (role='FLEET')
   try {
     startMe2MissionControl();
@@ -142,21 +135,14 @@ async function startMe2IntegrationOnce({ app } = {}) {
   } catch (e) {
     emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'BRAIN_ADAPTER_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
   }
-  // R42b: двусторонний supervisor-mesh ⇄ agentChatSupervisorTick (epoch-фенсы штатные)
-  try {
-    startMe2SupervisorMeshBridge({ userData });
-  } catch (e) {
-    emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'MESH_BRIDGE_START_FAILED', error: String(e?.message || e).slice(0, 200) }, { error: true });
-  }
+  emitRow({ schema: ME2_INTEGRATION_SCHEMA, event: 'DAEMON_AGENTCHAT_SUPERVISOR_BRIDGE_REMOVED', replacement: 'NATIVE_BROWSER_SUPERVISOR_MESH', authority_effect: false });
   if (app && typeof app.once === 'function' && typeof app.on === 'function') {
     let quitDrainStarted = false;
     let quitDrainComplete = false;
 
     const stopNonUiPlanes = () => {
-      stopMe2SupervisorMeshBridge();
       stopMe2BrainAdapter();
       stopMe2MissionControl();
-      stopMe2FleetBridge();
       stopMe2UiGateway();
       stopMe2DaemonHost({ killChild: true });
     };
