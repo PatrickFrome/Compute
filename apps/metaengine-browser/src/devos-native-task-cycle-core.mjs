@@ -57,13 +57,12 @@ function fleetLeaseDispatchConcurrency(liveAgents) {
 // prompt to a dead draft.
 const GLM_ROOT_DRAFT_FLUSH_MAX_CHARS = 32000;
 const GLM_ROOT_DRAFT_FLUSH_MARKER = '[METAENGINE FLEET BOOTSTRAP FLUSH v1 - prior accumulated briefs are historical; operate on the next verified task block]';
-// LIVE 2026-09-21 (B0/A1/C10 triple-AMBIGUOUS): the GLM root composer
-// silently refuses Enter on oversized drafts, so a capsule-sized FIRST
-// dispatch can never create the conversation. The root surface is now
-// bootstrapped with a tiny deterministic seed (far below any site-side
-// refusal threshold) that proves the conversation before the real dispatch
-// runs against the conversation surface, where replace+Enter are proven.
-export const GLM_ROOT_CONVERSATION_SEED = 'METAENGINE FLEET CONVERSATION SEED v1 — bootstrap message: a verified fleet task block arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READY';
+// R97 convergence: the bootstrap message is permitted only AFTER z.ai Agent
+// mode, the exact target model and a clean New Task composer are proven. It
+// creates the durable Agent session transport; ordinary Chat-root bootstrap is
+// forbidden. The legacy export name is retained temporarily for stacked tests
+// while the value/contract is Agent-specific.
+export const GLM_ROOT_CONVERSATION_SEED = 'METAENGINE AGENT SESSION SEED v1 — this is a Browser-managed z.ai Agent worker session; a verified development task arrives in the NEXT message; reply with exactly READY.';
 // D-C1: context tokens are re-issued at most this often per agent+epoch so the
 // rendered prompt (and its journal hash) stays deterministic within a lease.
 // Closed-loop audit fix (fleet scale): raised 64 -> 128 for larger fleets.
