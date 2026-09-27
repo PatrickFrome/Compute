@@ -20430,5 +20430,1349 @@
    "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
    "unnamed_text_inputs_addressable_by_backend_node_id": true
   }
+ },
+ {
+  "id": "C1-CENSUS",
+  "action": "TAB_CENSUS",
+  "command_id": "f4b711a7-e700-4a4f-a3db-bf23514dd663",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 4035,
+  "result_summary": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": "<dict:GLM_CHAT,LOCAL_DEV>",
+   "by_role": "<dict:USER,FLEET,SUPERVISOR>",
+   "max_tabs": 48,
+   "total_tabs": 14,
+   "fleet_tab_ids": "<list:4>",
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 34,
+   "fleet_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": "<list:1>",
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "schema": "metaengine.browser.tab-census.v1",
+   "by_kind": {
+    "GLM_CHAT": 13,
+    "LOCAL_DEV": 1
+   },
+   "by_role": {
+    "USER": 9,
+    "FLEET": 4,
+    "SUPERVISOR": 1
+   },
+   "max_tabs": 48,
+   "total_tabs": 14,
+   "fleet_tab_ids": [
+    "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+    "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+    "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+    "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314"
+   ],
+   "total_at_wall": false,
+   "release_signal": "PHYSICAL_TAB_CLOSED",
+   "authority_effect": false,
+   "fleet_at_ceiling": false,
+   "fleet_tab_ceiling": 28,
+   "user_tab_headroom": 34,
+   "fleet_backpressure": {
+    "reason": null,
+    "blocked": false,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 10,
+     "fleet_tabs": 4,
+     "total_tabs": 14,
+     "total_at_wall": false,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "fleet_tab_headroom": 24,
+   "supervisor_tab_ids": [
+    "tab_d255519c-a0d3-4f51-8b73-c47929de6d28"
+   ],
+   "user_reserved_slots": 20,
+   "create_tab_attempted": false,
+   "supervisor_tab_ceiling": 4,
+   "supervisor_tab_headroom": 3
+  }
+ },
+ {
+  "id": "C2-FLEET",
+  "action": "FLEET_STATUS",
+  "command_id": "e7fb2745-7959-4c14-a5cb-6e6f3a678f2e",
+  "status": "COMPLETED",
+  "channel": "insert",
+  "error": null,
+  "ms": 3674,
+  "result_summary": {
+   "agents": "<list:4>",
+   "counts": "<dict:LOST,ACTIVE,RETIRED,REGISTERED,PROVISIONING>",
+   "policy": "<dict:elastic,profile,max_agents,warm_agents,adopt_existing>",
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": "<dict:reason,blocked,census_probe,release_signal,authority_effect>",
+   "owner_override_ambiguous_compensating_fanout": false
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "agents": [
+    {
+     "role": "PLANNER",
+     "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+     "agent_id": "agent_5a554241-82e3-4d51-9ca6-e0599aca7945",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:4",
+     "created_at": "2026-09-27T17:37:01.787Z",
+     "updated_at": "2026-09-27T20:10:50.774Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_fe50ead8-dc4d-49d0-a8a0-d1060f662c4f",
+      "proven_at": "2026-09-27T20:10:50.774Z",
+      "target_id": "webcontents:4",
+      "authority_effect": false,
+      "conversation_url": "https://chat.z.ai/c/4d04c632-e541-4ee7-87af-4c0e2cd6874d",
+      "generation_epoch": 28,
+      "conversation_url_sha256": "3a3e7e07ab204bbe70cd74a6e4a6ce4b1f5b7d258f18df068d910175da1f7e23"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    },
+    {
+     "role": "RESEARCHER",
+     "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+     "agent_id": "agent_5ecfe721-6a16-42a3-af53-e61ae3843e6d",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:5",
+     "created_at": "2026-09-27T17:37:01.796Z",
+     "updated_at": "2026-09-27T17:37:17.164Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_bc085d57-4e9d-4395-9e63-90afd921bdfa",
+      "proven_at": "2026-09-27T17:38:20.294Z",
+      "target_id": "webcontents:5",
+      "transport_stage": "PRECONVERSATION_ROOT",
+      "authority_effect": false,
+      "generation_epoch": 28,
+      "conversation_url_sha256": "fefdde7be4c033d6078852eb22ec02d9f635f3dd546b16cd1572bee03ad5feda"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    },
+    {
+     "role": "IMPLEMENTER",
+     "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+     "agent_id": "agent_68a08a14-5a33-4daf-a93d-2cf7038d791c",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:6",
+     "created_at": "2026-09-27T17:37:01.803Z",
+     "updated_at": "2026-09-27T17:37:30.702Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_9f8b697d-dbdd-4424-9e43-465512b9fdf9",
+      "proven_at": "2026-09-27T17:38:48.811Z",
+      "target_id": "webcontents:6",
+      "transport_stage": "PRECONVERSATION_ROOT",
+      "authority_effect": false,
+      "generation_epoch": 28,
+      "conversation_url_sha256": "fefdde7be4c033d6078852eb22ec02d9f635f3dd546b16cd1572bee03ad5feda"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    },
+    {
+     "role": "CRITIC",
+     "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+     "agent_id": "agent_d19c53a1-7f93-4a02-90d2-7dfdb08897fc",
+     "ownership": "FLEET_OWNED",
+     "target_id": "webcontents:7",
+     "created_at": "2026-09-27T17:37:56.548Z",
+     "updated_at": "2026-09-27T19:20:20.816Z",
+     "lost_reason": null,
+     "lifecycle_state": "ACTIVE",
+     "transport_proof": {
+      "schema": "metaengine.browser.fleet-transport-proof.v1",
+      "tab_id": "tab_6f7ea6e9-d6ea-4ce6-8616-894fbb4d3314",
+      "proven_at": "2026-09-27T19:20:20.816Z",
+      "target_id": "webcontents:7",
+      "authority_effect": false,
+      "conversation_url": "https://chat.z.ai/c/1c569d09-8f09-4b0b-93be-bde9fe49375c",
+      "generation_epoch": 28,
+      "conversation_url_sha256": "dd1ad311bea2666df0ba43f0e1e40785a086e4b370d5a7b4c50fc3c66440dd49"
+     },
+     "ambiguous_reason": null,
+     "authority_effect": false,
+     "generation_epoch": 28,
+     "conversation_epoch": 0,
+     "automatic_retry_allowed": false
+    }
+   ],
+   "counts": {
+    "LOST": 0,
+    "ACTIVE": 4,
+    "RETIRED": 0,
+    "REGISTERED": 0,
+    "PROVISIONING": 0,
+    "BOUND_UNVERIFIED": 0,
+    "PROVISIONING_AMBIGUOUS": 0
+   },
+   "policy": {
+    "elastic": true,
+    "profile": "BALANCED",
+    "max_agents": null,
+    "warm_agents": 0,
+    "adopt_existing": false,
+    "capacity_model": "ELASTIC_BACKLOG_DRIVEN",
+    "desired_agents": 4,
+    "hard_agent_cap": null,
+    "boot_fleet_target": 16,
+    "browser_authority": false,
+    "spawn_burst_limit": 8,
+    "idle_physical_tabs": false,
+    "automatic_work_retry": false,
+    "direct_peer_messaging": false,
+    "legacy_max_agents_ignored": false
+   },
+   "schema": "metaengine.browser.fleet-snapshot.v1",
+   "version": "1.5.0",
+   "lifecycle_owner": "METAENGINE_BROWSER",
+   "authority_effect": false,
+   "readiness_contract": "TRANSPORT_PROOF_REQUIRED",
+   "capacity_backpressure": {
+    "reason": null,
+    "blocked": false,
+    "census_probe": {
+     "schema": "metaengine.browser.tab-census.v1",
+     "max_tabs": 48,
+     "user_tabs": 10,
+     "fleet_tabs": 4,
+     "total_tabs": 14,
+     "total_at_wall": false,
+     "authority_effect": false,
+     "fleet_at_ceiling": false,
+     "fleet_tab_ceiling": 28
+    },
+    "release_signal": "PHYSICAL_TAB_CLOSED",
+    "authority_effect": false,
+    "automatic_retry_allowed": false,
+    "deterministic_no_effect": true,
+    "retired_no_effect_attempts": 0
+   },
+   "owner_override_ambiguous_compensating_fanout": false
+  }
+ },
+ {
+  "id": "A01-CAPTURE",
+  "action": "CAPTURE",
+  "command_id": "b8f2537e-d099-4cc1-a1cb-e9f548ad2d5c",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3469,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:210",
+   "captured_at": "2026-09-27T23:17:59.336Z",
+   "text_excerpt": "GLM-5.3-Flash\nAPI\nWhat can I build for you?\nDeep Think\nMax\nMT0700 mechanics probe: reply with a single word ACK.METAENGI",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:6>",
+   "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_a0e5459d95a343a09bb3095651dfc5b0",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+   "viewport": {
+    "scale": 1,
+    "width": 0,
+    "height": 0,
+    "page_x": 0,
+    "page_y": 0
+   },
+   "target_id": "webcontents:210",
+   "captured_at": "2026-09-27T23:17:59.336Z",
+   "text_excerpt": "GLM-5.3-Flash\nAPI\nWhat can I build for you?\nDeep Think\nMax\nMT0700 mechanics probe: reply with a single word ACK.METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READYMT0700 mechanics probe: reply with a single word ACK.MT0700 mechanics probe: reply with a single word ACK.",
+   "authority_effect": false,
+   "interaction_tree": {
+    "schema": "metaengine.native-browser.interaction-tree.v1",
+    "elements": [
+     {
+      "path": "rootwebarea>region",
+      "role": "region",
+      "text": "Notifications alt+T",
+      "visible": null,
+      "selector": "backend_node_id:1356"
+     },
+     {
+      "path": "rootwebarea>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:1478"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:1420"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "Toggle Sidebar",
+      "visible": null,
+      "selector": "backend_node_id:1423"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:1428"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1440"
+     },
+     {
+      "path": "button",
+      "role": "button",
+      "text": "Select a model",
+      "visible": null,
+      "selector": "backend_node_id:1433"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1441"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "GLM-5.3-Flash",
+      "visible": null,
+      "selector": "backend_node_id:1654"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1571"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "What can I build for you?",
+      "visible": null,
+      "selector": "backend_node_id:1572"
+     },
+     {
+      "path": "form>button",
+      "role": "button",
+      "text": "Deep Think Max",
+      "visible": null,
+      "selector": "backend_node_id:1644"
+     },
+     {
+      "path": "form>textbox",
+      "role": "textbox",
+      "text": "How can I help you today?",
+      "visible": null,
+      "selector": "backend_node_id:1552"
+     },
+     {
+      "path": "form>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:1528"
+     },
+     {
+      "path": "form>button>statictext",
+      "role": "statictext",
+      "text": "Deep Think",
+      "visible": null,
+      "selector": "backend_node_id:1655"
+     },
+     {
+      "path": "form>button>statictext",
+      "role": "statictext",
+      "text": "Max",
+      "visible": null,
+      "selector": "backend_node_id:1656"
+     },
+     {
+      "path": "form>button>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:1529"
+     },
+     {
+      "path": "form>textbox>statictext",
+      "role": "statictext",
+      "text": "MT0700 mechanics probe: reply with a single word ACK.METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives",
+      "visible": null,
+      "selector": "backend_node_id:1588"
+     }
+    ],
+    "truncated": false,
+    "element_count": 18,
+    "authority_effect": false,
+    "input_values_exposed": false
+   },
+   "semantic_targets": [
+    {
+     "name": "How can I help you today?",
+     "role": "textbox",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "How can I help you today?",
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1552,
+      "semantic_ref_id": "semref_709218f9f67fab8d6cdde15ce178f5080b5255a11deb88bc1eb40b651d86ef62",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "value_length": 361,
+     "value_sha256": "beda9ff1425060b33cfc09711a51eafd8c224e3b047f23effb3258586fa551be",
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "value_exposed": false,
+     "backend_node_id": 1552
+    },
+    {
+     "name": null,
+     "role": "textbox",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": null,
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1554,
+      "semantic_ref_id": "semref_bf4a09ebd152eb92ac230cc9863748f09dfc92627d4eebfd4d44d851aaa4bbb1",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "value_length": 0,
+     "value_sha256": null,
+     "selector_mode": "BACKEND_NODE_ID_REQUIRED",
+     "value_exposed": false,
+     "backend_node_id": 1554
+    },
+    {
+     "name": "Toggle Sidebar",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Toggle Sidebar",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1423,
+      "semantic_ref_id": "semref_bff37a6fbf30814ac3334519f5e3f69371950188da6948ff0addeb54680f4390",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1423
+    },
+    {
+     "name": "New Chat",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "New Chat",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1428,
+      "semantic_ref_id": "semref_9c8383e0ad0b1dadca2b3b283e11a633f7a7720d9f8b6ffb0c5c3ab435768a7b",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1428
+    },
+    {
+     "name": "Select a model",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Select a model",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1433,
+      "semantic_ref_id": "semref_70fe1151a1794721eff2fedb44322e17574f06f8efaf589245b000ee1c53c7fc",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1433
+    },
+    {
+     "name": "Deep Think Max",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Deep Think Max",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1644,
+      "semantic_ref_id": "semref_e3ba8b3d2c47ef5be3a7391143d2bc1a380c2ea6bd38e891cc104851a9f0e3c4",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1644
+    }
+   ],
+   "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_a0e5459d95a343a09bb3095651dfc5b0",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  }
+ },
+ {
+  "id": "A10-CAP",
+  "action": "CAPTURE",
+  "command_id": "86ab3050-d9e8-4751-bf4c-dce9a9a2a795",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 3425,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:210",
+   "captured_at": "2026-09-27T23:18:15.504Z",
+   "text_excerpt": "GLM-5.3-Flash\nAPI\nWhat can I build for you?\nDeep Think\nMax\nMT0700 mechanics probe: reply with a single word ACK.METAENGI",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:6>",
+   "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_0c63d182e5f54010a05b6bafc1e89912",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+   "viewport": {
+    "scale": 1,
+    "width": 0,
+    "height": 0,
+    "page_x": 0,
+    "page_y": 0
+   },
+   "target_id": "webcontents:210",
+   "captured_at": "2026-09-27T23:18:15.504Z",
+   "text_excerpt": "GLM-5.3-Flash\nAPI\nWhat can I build for you?\nDeep Think\nMax\nMT0700 mechanics probe: reply with a single word ACK.METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READYMT0700 mechanics probe: reply with a single word ACK.MT0700 mechanics probe: reply with a single word ACK.",
+   "authority_effect": false,
+   "interaction_tree": {
+    "schema": "metaengine.native-browser.interaction-tree.v1",
+    "elements": [
+     {
+      "path": "rootwebarea>region",
+      "role": "region",
+      "text": "Notifications alt+T",
+      "visible": null,
+      "selector": "backend_node_id:1356"
+     },
+     {
+      "path": "rootwebarea>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:1478"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:1420"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "Toggle Sidebar",
+      "visible": null,
+      "selector": "backend_node_id:1423"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:1428"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1440"
+     },
+     {
+      "path": "button",
+      "role": "button",
+      "text": "Select a model",
+      "visible": null,
+      "selector": "backend_node_id:1433"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1441"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "GLM-5.3-Flash",
+      "visible": null,
+      "selector": "backend_node_id:1654"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1571"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "What can I build for you?",
+      "visible": null,
+      "selector": "backend_node_id:1572"
+     },
+     {
+      "path": "form>button",
+      "role": "button",
+      "text": "Deep Think Max",
+      "visible": null,
+      "selector": "backend_node_id:1644"
+     },
+     {
+      "path": "form>textbox",
+      "role": "textbox",
+      "text": "How can I help you today?",
+      "visible": null,
+      "selector": "backend_node_id:1552"
+     },
+     {
+      "path": "form>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:1528"
+     },
+     {
+      "path": "form>button>statictext",
+      "role": "statictext",
+      "text": "Deep Think",
+      "visible": null,
+      "selector": "backend_node_id:1655"
+     },
+     {
+      "path": "form>button>statictext",
+      "role": "statictext",
+      "text": "Max",
+      "visible": null,
+      "selector": "backend_node_id:1656"
+     },
+     {
+      "path": "form>button>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:1529"
+     },
+     {
+      "path": "form>textbox>statictext",
+      "role": "statictext",
+      "text": "MT0700 mechanics probe: reply with a single word ACK.METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives",
+      "visible": null,
+      "selector": "backend_node_id:1588"
+     }
+    ],
+    "truncated": false,
+    "element_count": 18,
+    "authority_effect": false,
+    "input_values_exposed": false
+   },
+   "semantic_targets": [
+    {
+     "name": "How can I help you today?",
+     "role": "textbox",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "How can I help you today?",
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1552,
+      "semantic_ref_id": "semref_709218f9f67fab8d6cdde15ce178f5080b5255a11deb88bc1eb40b651d86ef62",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "value_length": 361,
+     "value_sha256": "beda9ff1425060b33cfc09711a51eafd8c224e3b047f23effb3258586fa551be",
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "value_exposed": false,
+     "backend_node_id": 1552
+    },
+    {
+     "name": null,
+     "role": "textbox",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": null,
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1554,
+      "semantic_ref_id": "semref_bf4a09ebd152eb92ac230cc9863748f09dfc92627d4eebfd4d44d851aaa4bbb1",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "value_length": 0,
+     "value_sha256": null,
+     "selector_mode": "BACKEND_NODE_ID_REQUIRED",
+     "value_exposed": false,
+     "backend_node_id": 1554
+    },
+    {
+     "name": "Toggle Sidebar",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Toggle Sidebar",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1423,
+      "semantic_ref_id": "semref_bff37a6fbf30814ac3334519f5e3f69371950188da6948ff0addeb54680f4390",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1423
+    },
+    {
+     "name": "New Chat",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "New Chat",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1428,
+      "semantic_ref_id": "semref_9c8383e0ad0b1dadca2b3b283e11a633f7a7720d9f8b6ffb0c5c3ab435768a7b",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1428
+    },
+    {
+     "name": "Select a model",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Select a model",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1433,
+      "semantic_ref_id": "semref_70fe1151a1794721eff2fedb44322e17574f06f8efaf589245b000ee1c53c7fc",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1433
+    },
+    {
+     "name": "Deep Think Max",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Deep Think Max",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1644,
+      "semantic_ref_id": "semref_e3ba8b3d2c47ef5be3a7391143d2bc1a380c2ea6bd38e891cc104851a9f0e3c4",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1644
+    }
+   ],
+   "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_0c63d182e5f54010a05b6bafc1e89912",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  }
+ },
+ {
+  "id": "A11-CAP2",
+  "action": "CAPTURE",
+  "command_id": "36b1130b-b5a0-484b-88e1-ddd17d603ecf",
+  "status": "COMPLETED",
+  "channel": "rpc",
+  "error": null,
+  "ms": 6177,
+  "result_summary": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+   "viewport": "<dict:scale,width,height,page_x,page_y>",
+   "target_id": "webcontents:210",
+   "captured_at": "2026-09-27T23:18:29.400Z",
+   "text_excerpt": "GLM-5.3-Flash\nAPI\nWhat can I build for you?\nDeep Think\nMax\nMT0700 mechanics probe: reply with a single word ACK.METAENGI",
+   "authority_effect": false,
+   "interaction_tree": "<dict:schema,elements,truncated,element_count,authority_effect>",
+   "semantic_targets": "<list:6>",
+   "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_a7cf88d89b6849dc81236b768d3883c7",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  },
+  "receipt_schema": "metaengine.native-supervisor.command-receipt.v2",
+  "_result_full": {
+   "url": "https://chat.z.ai/",
+   "title": "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+   "schema": "metaengine.native-browser.perception.v1",
+   "tab_id": "tab_261d598c-9e46-4ba7-bc86-950ff5d0c099",
+   "viewport": {
+    "scale": 1,
+    "width": 0,
+    "height": 0,
+    "page_x": 0,
+    "page_y": 0
+   },
+   "target_id": "webcontents:210",
+   "captured_at": "2026-09-27T23:18:29.400Z",
+   "text_excerpt": "GLM-5.3-Flash\nAPI\nWhat can I build for you?\nDeep Think\nMax\nMT0700 mechanics probe: reply with a single word ACK.METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives in the NEXT message of this conversation; ignore this seed and reply with a single word: READYMT0700 mechanics probe: reply with a single word ACK.MT0700 mechanics probe: reply with a single word ACK.",
+   "authority_effect": false,
+   "interaction_tree": {
+    "schema": "metaengine.native-browser.interaction-tree.v1",
+    "elements": [
+     {
+      "path": "rootwebarea>region",
+      "role": "region",
+      "text": "Notifications alt+T",
+      "visible": null,
+      "selector": "backend_node_id:1356"
+     },
+     {
+      "path": "rootwebarea>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:1478"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "Open User Menu",
+      "visible": null,
+      "selector": "backend_node_id:1420"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "Toggle Sidebar",
+      "visible": null,
+      "selector": "backend_node_id:1423"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "New Chat",
+      "visible": null,
+      "selector": "backend_node_id:1428"
+     },
+     {
+      "path": "navigation>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1440"
+     },
+     {
+      "path": "button",
+      "role": "button",
+      "text": "Select a model",
+      "visible": null,
+      "selector": "backend_node_id:1433"
+     },
+     {
+      "path": "button>button",
+      "role": "button",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1441"
+     },
+     {
+      "path": "button>statictext",
+      "role": "statictext",
+      "text": "GLM-5.3-Flash",
+      "visible": null,
+      "selector": "backend_node_id:1654"
+     },
+     {
+      "path": "button>button>statictext",
+      "role": "statictext",
+      "text": "API",
+      "visible": null,
+      "selector": "backend_node_id:1571"
+     },
+     {
+      "path": "statictext",
+      "role": "statictext",
+      "text": "What can I build for you?",
+      "visible": null,
+      "selector": "backend_node_id:1572"
+     },
+     {
+      "path": "form>button",
+      "role": "button",
+      "text": "Deep Think Max",
+      "visible": null,
+      "selector": "backend_node_id:1644"
+     },
+     {
+      "path": "form>textbox",
+      "role": "textbox",
+      "text": "How can I help you today?",
+      "visible": null,
+      "selector": "backend_node_id:1552"
+     },
+     {
+      "path": "form>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:1528"
+     },
+     {
+      "path": "form>button>statictext",
+      "role": "statictext",
+      "text": "Deep Think",
+      "visible": null,
+      "selector": "backend_node_id:1655"
+     },
+     {
+      "path": "form>button>statictext",
+      "role": "statictext",
+      "text": "Max",
+      "visible": null,
+      "selector": "backend_node_id:1656"
+     },
+     {
+      "path": "form>button>button",
+      "role": "button",
+      "text": "More",
+      "visible": null,
+      "selector": "backend_node_id:1529"
+     },
+     {
+      "path": "form>textbox>statictext",
+      "role": "statictext",
+      "text": "MT0700 mechanics probe: reply with a single word ACK.METAENGINE SUPERVISOR CONVERSATION SEED v1 — bootstrap message: the supervisor continuation message arrives",
+      "visible": null,
+      "selector": "backend_node_id:1588"
+     }
+    ],
+    "truncated": false,
+    "element_count": 18,
+    "authority_effect": false,
+    "input_values_exposed": false
+   },
+   "semantic_targets": [
+    {
+     "name": "How can I help you today?",
+     "role": "textbox",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "How can I help you today?",
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1552,
+      "semantic_ref_id": "semref_709218f9f67fab8d6cdde15ce178f5080b5255a11deb88bc1eb40b651d86ef62",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "value_length": 361,
+     "value_sha256": "beda9ff1425060b33cfc09711a51eafd8c224e3b047f23effb3258586fa551be",
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "value_exposed": false,
+     "backend_node_id": 1552
+    },
+    {
+     "name": null,
+     "role": "textbox",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": null,
+       "role": "textbox",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1554,
+      "semantic_ref_id": "semref_bf4a09ebd152eb92ac230cc9863748f09dfc92627d4eebfd4d44d851aaa4bbb1",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "value_length": 0,
+     "value_sha256": null,
+     "selector_mode": "BACKEND_NODE_ID_REQUIRED",
+     "value_exposed": false,
+     "backend_node_id": 1554
+    },
+    {
+     "name": "Toggle Sidebar",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Toggle Sidebar",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1423,
+      "semantic_ref_id": "semref_bff37a6fbf30814ac3334519f5e3f69371950188da6948ff0addeb54680f4390",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1423
+    },
+    {
+     "name": "New Chat",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "New Chat",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1428,
+      "semantic_ref_id": "semref_9c8383e0ad0b1dadca2b3b283e11a633f7a7720d9f8b6ffb0c5c3ab435768a7b",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1428
+    },
+    {
+     "name": "Select a model",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Select a model",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1433,
+      "semantic_ref_id": "semref_70fe1151a1794721eff2fedb44322e17574f06f8efaf589245b000ee1c53c7fc",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1433
+    },
+    {
+     "name": "Deep Think Max",
+     "role": "button",
+     "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+     "semantic_ref": {
+      "schema": "metaengine.native-browser.semantic-ref.v1",
+      "evidence": {
+       "name": "Deep Think Max",
+       "role": "button",
+       "identity_authority": false
+      },
+      "frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "target_id": "webcontents:210",
+      "backend_node_id": 1644,
+      "semantic_ref_id": "semref_e3ba8b3d2c47ef5be3a7391143d2bc1a380c2ea6bd38e891cc104851a9f0e3c4",
+      "authority_effect": false,
+      "stale_by_default": true,
+      "runtime_target_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+      "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+      "automatic_retry_allowed": false,
+      "execution_context_unique_id": "-6426127091490491346.2937160385195294895"
+     },
+     "selector_mode": "ROLE_NAME_OR_BACKEND_NODE_ID",
+     "backend_node_id": 1644
+    }
+   ],
+   "state_revision_id": "rev_5957608a6f9c5892d8a3ece4e7abbb84ad8b7e80d5abb64a1582ea408e8276bb",
+   "semantic_refs_issued": 6,
+   "runtime_main_frame_id": "ED9C69025480F9CCD8C953EEAB2E00F2",
+   "process_incarnation_id": "d1fc5af9-de4f-404e-8cc1-92a3e83282e7",
+   "runtime_observation_id": "obs_a7cf88d89b6849dc81236b768d3883c7",
+   "runtime_binding_observed": true,
+   "runtime_binding_generation": 1,
+   "runtime_document_generation": 1,
+   "semantic_input_value_hashes": true,
+   "semantic_input_values_exposed": false,
+   "semantic_ref_context_complete": true,
+   "runtime_execution_context_unique_id": "-6426127091490491346.2937160385195294895",
+   "unnamed_text_inputs_addressable_by_backend_node_id": true
+  }
  }
 ]
