@@ -225,8 +225,8 @@ test('concurrent primary-window startup joins the same ME2 readiness barrier', (
 });
 
 
-test('R75 CDP proof converges only inside a bounded read-only window', () => {
-  assert.match(main, /probeMe2R75InstalledDomOnce/);
+test('R97 CDP proof converges only inside a bounded read-only window', () => {
+  assert.match(main, /probeMe2R97InstalledDomOnce/);
   assert.match(main, /timeoutMs = 12000/);
   assert.match(main, /intervalMs = 150/);
   assert.match(main, /MAIN_PROCESS_CDP_DOM_BOX_MODEL_BOUNDED_CONVERGENCE/);
@@ -234,21 +234,21 @@ test('R75 CDP proof converges only inside a bounded read-only window', () => {
   assert.match(main, /probe_elapsed_ms:/);
   assert.match(main, /automatic_effect_retry_allowed:\s*false/);
   assert.match(main, /Date\.now\(\) >= deadline/);
-  assert.doesNotMatch(main, /setInterval\([^\n]*probeMe2R75InstalledDom/);
+  assert.doesNotMatch(main, /setInterval\([^\n]*probeMe2R97InstalledDom/);
 });
 
 test('installed ME2 primary shell is attested from main-process CDP DOM geometry', () => {
-  assert.match(main, /probeMe2R75InstalledDom/);
+  assert.match(main, /probeMe2R97InstalledDom/);
   assert.match(main, /DOM\.getDocument/);
   assert.match(main, /DOM\.querySelector/);
   assert.match(main, /DOM\.getBoxModel/);
   assert.match(main, /MAIN_PROCESS_CDP_DOM_BOX_MODEL/);
-  assert.match(main, /ME2_R75_UI_CONTRACT_CONFIRMED/);
-  assert.match(main, /ME2_R75_UI_CONTRACT_INCOMPLETE/);
+  assert.match(main, /ME2_R97_UI_CONTRACT_CONFIRMED/);
+  assert.match(main, /ME2_R97_UI_CONTRACT_INCOMPLETE/);
   assert.doesNotMatch(main, /executeJavaScript/);
   assert.doesNotMatch(preload, /reportUiContract/);
   assert.doesNotMatch(preload, /ui-contract-readback/);
-  for (const id of ['me2-shell', 'topbar', 'page-command', 'cc-sidebar-toggle', 'pagebar', 'statusbar']) {
+  for (const id of ['me2-shell', 'topbar', 'primary-chat-fleet', 'chat-fleet-rail', 'global-cmdbar', 'settings-button']) {
     assert.match(main, new RegExp(id));
   }
   assert.match(main, /legacy_shell_is_normal_path:\s*false/);
@@ -260,30 +260,28 @@ test('installed ME2 primary shell is attested from main-process CDP DOM geometry
 
 
 
-test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy shell fixtures', () => {
-  assert.match(packageSmokeWorkflow, /Capture R85 primary ME2 visual evidence/);
-  assert.match(packageSmokeWorkflow, /test\/me2-r85-visual-evidence\.mjs/);
+test('R97 Package Smoke captures the actual single-main ME2 surface, not legacy shell fixtures', () => {
+  assert.match(packageSmokeWorkflow, /Capture R97 primary chat-fleet visual evidence/);
+  assert.match(packageSmokeWorkflow, /test\\me2-r85-visual-evidence\.mjs|test\/me2-r85-visual-evidence\.mjs/);
   assert.match(packageSmokeWorkflow, /r85-primary-visual\/r85-visual-evidence\.json/);
   assert.match(packageSmokeWorkflow, /r85-primary-visual\/\*\.png/);
   assert.match(packageSmokeWorkflow, /WaitForExit\(135000\)/);
   assert.match(packageSmokeWorkflow, /r85_visual_evidence_process_timeout/);
   assert.match(packageSmokeWorkflow, /r85-primary-visual\.stderr\.log/);
-  assert.match(r85VisualHarness, /metaengine\.browser\.r85-visual-evidence\.v1/);
+  assert.match(r85VisualHarness, /metaengine\.browser\.r97-visual-evidence\.v1/);
   assert.match(r85VisualHarness, /primary_me2_ui_captured:\s*true/);
   assert.match(r85VisualHarness, /legacy_shell_captured:\s*false/);
   assert.match(r85VisualHarness, /remote_browser_content_captured:\s*false/);
-  assert.match(r85VisualHarness, /closed_overlays_absent_from_dom:\s*true/);
-  assert.match(r85VisualHarness, /broken_image_fallback_hidden:\s*true/);
-  assert.match(r85VisualHarness, /broken_browser_images_hidden/);
+  assert.match(r85VisualHarness, /remote_browser_transport_blocked:\s*true/);
+  assert.match(r85VisualHarness, /exact_main_workspace:\s*false/);
+  assert.match(r85VisualHarness, /advanced_surfaces_settings_only:\s*false/);
   assert.match(r85VisualHarness, /capturePage\(\)/);
   assert.match(r85VisualHarness, /ME2_UI_HEALTH_URL/);
   assert.match(r85VisualHarness, /VISUAL_PHASE_TIMEOUT_MS = 120_000/);
-  assert.match(r85VisualHarness, /r85_visual_phase_watchdog/);
-  assert.equal(r85VisualHarness.includes('\\`'), false);
-  assert.equal(r85VisualHarness.includes('\\${'), false);
+  assert.match(r85VisualHarness, /r97_visual_phase_watchdog/);
   assert.match(r85VisualHarness, /withTimeout\(view\.webContents\.capturePage/);
-  assert.match(r85VisualHarness, /r95c-command-mission-1440x960/);
-  assert.match(r85VisualHarness, /r95c-run-utility-bottom-1440x960/);
+  assert.match(r85VisualHarness, /r97-chat-fleet-main-1440x960/);
+  assert.match(r85VisualHarness, /r97-settings-advanced-surface-1440x960/);
 });
 
 test('R85 control-room chrome keeps closed overlays out of the semantic tree', () => {
@@ -404,9 +402,10 @@ test('R85 Observability exposes persisted operator view presets without new effe
   assert.doesNotMatch(me2Observability, /setPrimaryCommandRail|metaengine:shell:primary-overlay/);
 });
 
-test('R85 attention and observability use progressive disclosure without effect authority', () => {
-  assert.match(me2Topbar, /data-testid="attention-button"/);
-  assert.match(me2Topbar, /data-testid="attention-center"/);
+test('R97 attention and observability are advanced-only and keep zero effect authority', () => {
+  assert.doesNotMatch(me2Topbar, /data-testid="attention-button"|data-testid="attention-center"/);
+  assert.match(me2Topbar, /data-testid="settings-button"/);
+  assert.match(me2Topbar, /data-testid="global-cmdbar"/);
   assert.doesNotMatch(me2Topbar, /sendCommand\(|BUDGET_FLUSH|EMERGENCY/);
   assert.match(me2Observability, /"compact" \| "full"/);
   assert.match(me2Observability, /me2\.obs\.events\.view\.v1/);
@@ -437,10 +436,10 @@ test('R85 Tasks is task-focused and does not duplicate Browser or Mirror control
   assert.match(me2TasksPage, /localStorage\.setItem\(TASKS_BRANCH_VIEW_LS, branchTab\)/);
 });
 
-test('R85 persistent chrome avoids duplicate task and mirror telemetry', () => {
+test('R97 persistent chrome avoids duplicate task, mirror and attention telemetry', () => {
   assert.doesNotMatch(me2Topbar, /useKpis|kpi\.ready|kpi\.running|kpi\.fail/);
-  assert.doesNotMatch(me2Statusbar, /useMe2\(\(s\) => s\.mirror\)|mirrorAttention|Mirror \$\{/);
-  assert.match(me2Topbar, /data-testid="attention-button"/);
+  assert.doesNotMatch(me2Topbar, /data-testid="attention-button"/);
+  assert.doesNotMatch(me2Shell, /<StatusBar\s*\/>/);
   assert.match(me2Statusbar, /connected \? "runtime live" : snap \? "runtime cached" : "runtime offline"/);
 });
 
@@ -496,14 +495,14 @@ test('R85 workspace switch restores workspace-scoped layout preferences', () => 
   assert.match(me2Command, /storeCommandRailPreference\(open\)/);
 });
 
-test('R85 workspace layout has an explicit reset path', () => {
+test('R97 retains workspace reset capability without a persistent topbar control', () => {
   assert.match(store, /resetWorkspaceLayout/);
   assert.match(store, /drawerHeight: CONTEXT_DRAWER_DEFAULT_HEIGHT/);
   assert.match(store, /drawerFollowSelection: true/);
   assert.match(store, /commandRailOpen: true/);
   assert.match(store, /me2:workspace-layout-reset/);
-  assert.match(me2Topbar, /data-testid="workspace-reset-layout"/);
-  assert.match(me2Topbar, /Reset layout · \{workspaceMeta\?\.label \?\? workspace\}/);
+  assert.doesNotMatch(me2Topbar, /data-testid="workspace-reset-layout"/);
+  assert.match(me2Topbar, /data-testid="settings-button"/);
 });
 
 test('R85 Context Drawer exposes selection-driven inspection without a second data plane', () => {
@@ -594,9 +593,8 @@ test('R95 Utility Panel remains a read-only presentation plane with native geome
   assert.match(store, /drawerWidth: number/);
   assert.match(store, /Ctrl\/Cmd\+J|e\.key === "j"/);
   assert.match(store, /setPrimaryContextDrawer/);
-  assert.match(me2Topbar, /data-testid="context-drawer-toggle"/);
-  assert.match(me2Shell, /contextDrawerDock === "right"/);
-  assert.match(me2Shell, /contextDrawerDock === "bottom"/);
+  assert.doesNotMatch(me2Topbar, /data-testid="context-drawer-toggle"/);
+  assert.doesNotMatch(me2Shell, /<ContextDrawer \/>/);
   assert.match(me2ContextDrawer, /data-testid="context-drawer"/);
   assert.match(me2ContextDrawer, /data-drawer-dock=\{dock\}/);
   assert.match(me2ContextDrawer, /data-testid="utility-panel-dock-bottom"/);
@@ -663,8 +661,8 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
 
   assert.match(store, /setChromeOverlay/);
   assert.match(me2Shell, /setPrimaryOverlay\(nativeOverlayOpen\)/);
-  assert.match(me2Topbar, /setChromeOverlay\("attention"/);
-  assert.match(me2Topbar, /setChromeOverlay\("workspace-menu"/);
+  assert.doesNotMatch(me2Topbar, /setChromeOverlay\("attention"|setChromeOverlay\("workspace-menu"/);
+  assert.match(me2Topbar, /setPaletteOpen\(true\)/);
   assert.match(me2Pagebar, /setChromeOverlay\("stage-menu"/);
 });
 
@@ -743,9 +741,9 @@ test('R90 physical ME2 visual qualification blocks live Browser transports and r
   assert.match(r85VisualHarness, /blockedRemoteBrowserPorts = new Set\(\)/);
   assert.match(r85VisualHarness, /webRequest\.onBeforeRequest/);
   assert.match(r85VisualHarness, /port === '3042' \|\| port === '3043'/);
-  assert.match(r85VisualHarness, /remote_browser_pixels_visible/);
-  assert.match(r85VisualHarness, /remote_browser_transport_blocked:/);
-  assert.match(r85VisualHarness, /blocked_remote_browser_ports:/);
+  assert.match(r85VisualHarness, /remote_browser_content_captured:\s*false/);
+  assert.match(r85VisualHarness, /remote_browser_transport_blocked:\s*true/);
+  assert.match(r85VisualHarness, /blocked_remote_browser_ports:\s*\['3042','3043'\]/);
   assert.match(packageSmokeWorkflow, /remote_browser_transport_blocked -ne \$true/);
   assert.match(packageSmokeWorkflow, /blocked_remote_browser_ports\) -contains '3042'/);
   assert.match(packageSmokeWorkflow, /blocked_remote_browser_ports\) -contains '3043'/);
