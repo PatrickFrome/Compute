@@ -33,7 +33,7 @@ const omniboxHintsEl = document.getElementById('omniboxHints');
 let snapshot = null;
 let tabFilter = '';
 let opsSection = 'mission';
-let requestedLayout = { sidebar: 'EXPANDED', operations: 'OPEN' };
+let requestedLayout = { sidebar: 'EXPANDED', operations: 'CLOSED' };
 
 function text(value, fallback = '—') {
   const out = String(value ?? '').trim();
@@ -168,6 +168,16 @@ function fleetAgentForTab(next, tabId) {
   return rows.find((row) => String(row?.tab_id || '') === String(tabId || '')) || null;
 }
 
+function supervisorForTab(next, tabId) {
+  const rows = Array.isArray(next?.supervisor?.supervisor_mesh?.mesh?.supervisors)
+    ? next.supervisor.supervisor_mesh.mesh.supervisors
+    : [];
+  return rows.find((row) =>
+    String(row?.tab_id || '') === String(tabId || '')
+    && String(row?.status || '').toUpperCase() === 'ACTIVE'
+  ) || null;
+}
+
 function exactActuationForTab(next, tabId) {
   const command = next?.supervisor?.current_command;
   if (!command) return null;
@@ -288,47 +298,46 @@ function renderActive(next) {
   routeKind.classList.toggle('chat', chat);
 }
 
-function makeTabRow(tab, active, agent, actuation, workspace = null) {
+function makeTabRow(tab, active, agent, actuation, workspace = null, supervisor = null) {
+  const managed = Boolean(agent || supervisor);
   const row = document.createElement('div');
-  row.className = `verticalTab ${active ? 'active' : ''} ${agent ? 'agent' : ''}`;
+  row.className = `verticalTab ${active ? 'active' : ''} ${managed ? 'agent' : ''} ${supervisor ? 'supervisor' : ''}`;
   row.setAttribute('role', 'listitem');
   row.dataset.tabId = String(tab.tab_id || '');
 
   const select = document.createElement('button');
   select.type = 'button';
   select.className = 'verticalTabSelect';
-  select.title = tab.url || tab.title || 'Tab';
+  select.title = tab.url || tab.title || 'Chat agent';
   select.setAttribute('aria-current', active ? 'page' : 'false');
-  select.setAttribute('aria-label', `${active ? 'Current tab' : 'Select tab'}: ${text(tab.title, tab.kind === 'CHATGPT' ? 'ChatGPT' : hostFor(tab.url))}`);
+
+  const actorTitle = supervisor
+    ? 'SUPERVISOR'
+    : (agent ? text(agent.role, 'AGENT').toUpperCase() : text(tab.title, hostFor(tab.url)));
+  select.setAttribute('aria-label', `${active ? 'Current' : 'Select'} ${supervisor ? 'supervisor' : 'agent'}: ${actorTitle}`);
   select.onclick = () => api.command('SELECT_TAB', { tab_id: tab.tab_id }).catch(() => {});
 
   const avatar = document.createElement('span');
   avatar.className = 'tabAvatar';
-  avatar.textContent = workspace ? 'P' : (agent ? text(agent.role, 'A').slice(0, 1) : (tab.kind === 'CHATGPT' ? 'C' : 'W'));
+  avatar.textContent = supervisor ? 'S' : (agent ? text(agent.role, 'A').slice(0, 1).toUpperCase() : 'A');
   const dot = document.createElement('i');
-  dot.className = `tabStateDot ${actuation ? 'warn' : (workspace ? stateTone(workspace.state) : (agent ? stateTone(agent.lifecycle_state) : 'neutral'))}`;
+  const actorState = supervisor ? supervisor.status : agent?.lifecycle_state;
+  dot.className = `tabStateDot ${actuation ? 'warn' : stateTone(actorState)}`;
   avatar.append(dot);
 
   const copy = document.createElement('span');
   copy.className = 'tabCopy';
   const title = document.createElement('strong');
-  title.textContent = text(tab.title, tab.kind === 'CHATGPT' ? 'ChatGPT' : hostFor(tab.url));
+  title.textContent = actorTitle;
   const meta = document.createElement('small');
   meta.textContent = actuation
     ? `ACTION · ${actuation.action}`
-    : (workspace ? `${workspace.state} · lease ${workspace.lease_generation}` : (agent ? `${text(agent.role)} · ${text(agent.lifecycle_state)}` : hostFor(tab.url)));
+    : supervisor
+      ? `${text(supervisor.status, 'ACTIVE')} · GLM-5.3-Flash`
+      : `${text(agent?.lifecycle_state, 'UNKNOWN')} · GLM-5.3-Flash`;
   copy.append(title, meta);
   select.append(avatar, copy);
-
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'tabClose';
-  close.textContent = '×';
-  close.title = `Close ${title.textContent}`;
-  close.setAttribute('aria-label', `Close ${title.textContent}`);
-  close.onclick = () => api.command('CLOSE_TAB', { tab_id: tab.tab_id }).catch(() => {});
-
-  row.append(select, close);
+  row.append(select);
   return row;
 }
 
@@ -346,38 +355,50 @@ function railHeader(label, value = '', key = '') {
 
 function renderContextRail(next) {
   const state = next?.tabs || {};
-  const projection = workspaceProjection(next);
+  const tabs = Array.isArray(state.tabs) ? state.tabs : [];
   const filter = tabFilter.trim().toLowerCase();
   const nodes = [];
 
-  for (const group of projection.groups) {
-    const haystack = [group.branch_name, group.point_id, group.repo_id, group.role, group.state, group.tab?.title, group.tab?.url].join(' ').toLowerCase();
-    if (filter && !haystack.includes(filter)) continue;
-    nodes.push(railHeader(compact(group.branch_name || group.point_id || 'Workspace', 28), `${group.state} · l${group.lease_generation}`, `ws:${group.workspace_id || group.tab_id}`));
-    nodes.push(makeTabRow(group.tab, group.tab_id === state.selected_tab_id, group.agent, exactActuationForTab(next, group.tab_id), group));
+  const supervisors = tabs
+    .map((tab) => ({ tab, supervisor: supervisorForTab(next, tab.tab_id) }))
+    .filter((row) => row.supervisor)
+    .filter(({ tab, supervisor }) => !filter || [
+      'supervisor', supervisor.supervisor_id, supervisor.status, tab.title, tab.url,
+    ].some((value) => String(value || '').toLowerCase().includes(filter)));
+
+  const agents = tabs
+    .map((tab) => ({ tab, agent: fleetAgentForTab(next, tab.tab_id) }))
+    .filter((row) => row.agent)
+    .filter(({ tab, agent }) => !filter || [
+      'agent', agent.agent_id, agent.role, agent.lifecycle_state, tab.title, tab.url,
+    ].some((value) => String(value || '').toLowerCase().includes(filter)));
+
+  nodes.push(railHeader('Supervisors', String(supervisors.length), 'hdr:supervisors'));
+  for (const { tab, supervisor } of supervisors) {
+    nodes.push(makeTabRow(
+      tab,
+      tab.tab_id === state.selected_tab_id,
+      null,
+      exactActuationForTab(next, tab.tab_id),
+      null,
+      supervisor,
+    ));
   }
 
-  const sessions = projection.sessions.filter((tab) => {
-    if (!filter) return true;
-    const agent = fleetAgentForTab(next, tab.tab_id);
-    return [tab.title, tab.url, agent?.role, agent?.lifecycle_state].some((value) => String(value || '').toLowerCase().includes(filter));
-  });
-  if (sessions.length || projection.groups.length === 0) {
-    nodes.push(railHeader('Sessions', String(projection.sessions.length), 'hdr:sessions'));
-    for (const tab of sessions) {
-      nodes.push(makeTabRow(tab, tab.tab_id === state.selected_tab_id, fleetAgentForTab(next, tab.tab_id), exactActuationForTab(next, tab.tab_id)));
-    }
+  nodes.push(railHeader('Agents', String(agents.length), 'hdr:agents'));
+  for (const { tab, agent } of agents) {
+    nodes.push(makeTabRow(
+      tab,
+      tab.tab_id === state.selected_tab_id,
+      agent,
+      exactActuationForTab(next, tab.tab_id),
+    ));
   }
 
-  tabCount.textContent = String((state.tabs || []).length);
+  const actorCount = supervisors.length + agents.length;
+  tabCount.textContent = String(actorCount);
   reconcileKeyedChildren(verticalTabs, nodes, (node) => node.dataset.tabId || node.dataset.railKey || '');
-  if (projection.source_state === 'AVAILABLE') {
-    fleetProfile.textContent = `${projection.counts.workspaces} workspace${projection.counts.workspaces === 1 ? '' : 's'} · ${projection.counts.issues} drift`;
-  } else if (projection.source_state === 'RUNTIME_NOT_DEPLOYED') {
-    fleetProfile.textContent = 'Workspaces · runtime not deployed';
-  } else {
-    fleetProfile.textContent = `Workspaces · ${compact(projection.source_state, 22)}`;
-  }
+  fleetProfile.textContent = `${agents.length} agent${agents.length === 1 ? '' : 's'} · ${supervisors.length} supervisor${supervisors.length === 1 ? '' : 's'} · GLM-5.3-Flash`;
 }
 
 function el(tag, className = '', value = null) {
@@ -837,7 +858,16 @@ document.addEventListener('keydown', (event) => {
 });
 
 api.onSnapshot(render);
-api.snapshot().then(render).catch(() => render(snapshot));
+api.snapshot().then(async (next) => {
+  render(next);
+  const requested = next?.layout?.requested || {};
+  if (
+    String(requested.sidebar || '').toUpperCase() !== 'EXPANDED'
+    || String(requested.operations || '').toUpperCase() !== 'CLOSED'
+  ) {
+    await setLayout({ sidebar: 'EXPANDED', operations: 'CLOSED' });
+  }
+}).catch(() => render(snapshot));
 
 // Agentic Workbench V1 is a renderer-only ergonomics layer. It does not add a
 // scheduler, command lease path, page/model authority, arbitrary eval, or retry
