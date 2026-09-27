@@ -415,6 +415,8 @@ export async function acquireArtifact(options = {}) {
     source_head: resolved.source_head,
     producer_run_id: resolved.producer_run_id,
     producer_run_attempt: resolved.producer_run_attempt,
+    producer_completed_at_acquire: resolved.producer_completed === true,
+    producer_conclusion_at_acquire: resolved.producer_conclusion ?? null,
     artifact_id: resolved.artifact_id,
     artifact_name: resolved.artifact_name,
     archive_sha256: downloaded.sha256,
