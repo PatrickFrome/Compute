@@ -403,7 +403,10 @@ function EvidenceTimelinePanel({
         className="space-y-2"
       >
         <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 font-mono text-[9px]">
-          <span className={chain?.ok === true ? "text-emerald-400" : chain?.ok === false ? "text-rose-400" : "text-zinc-600"}>{chainLabel}</span>
+          <span
+            className={chain?.ok === true ? "text-emerald-400" : chain?.ok === false ? "text-rose-400" : "text-zinc-600"}
+            title="Evidence-chain verification is global ambient evidence; it is not task-causal without an explicit task-bound chain receipt"
+          >{chainLabel} ambient</span>
           <span className="text-zinc-800">·</span>
           <span className="text-zinc-500" title="CI status is ambient evidence and is not joined to the selected task without an explicit identity binding">{ciLabel} ambient</span>
           <span className="text-zinc-800">·</span>
@@ -465,7 +468,7 @@ function EvidenceTimelinePanel({
         )}
 
         <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
-          causal rows require exact task_id equality; CI and aggregate OTel stay ambient until a stronger persisted binding exists
+          causal rows require exact task_id equality; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
         </div>
       </div>
     </Sec>
