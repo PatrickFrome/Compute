@@ -30,6 +30,31 @@ export const PAGES: { key: PageKey; label: string; num: string }[] = [
   { key: "system", label: "SYSTEM", num: "0" },
 ];
 
+// R94 shell IA: workflow stages are the primary navigation vocabulary.
+// Existing module pages remain first-class destinations (palette/deep links) but
+// are grouped under the stage that matches the operator's real work.
+export type WorkflowStageKey = "command" | "plan" | "build" | "run" | "fleet" | "observe" | "system";
+export const WORKFLOW_STAGES: Array<{
+  key: WorkflowStageKey;
+  label: string;
+  num: string;
+  primaryPage: PageKey;
+  pages: readonly PageKey[];
+  hint: string;
+}> = [
+  { key: "command", label: "COMMAND", num: "1", primaryPage: "command", pages: ["command"], hint: "objective, active work, attention" },
+  { key: "plan", label: "PLAN", num: "2", primaryPage: "tasks", pages: ["tasks"], hint: "tasks, dependencies, execution plan" },
+  { key: "build", label: "BUILD", num: "3", primaryPage: "code", pages: ["code"], hint: "code, diffs, tests, terminal" },
+  { key: "run", label: "RUN", num: "4", primaryPage: "browser", pages: ["browser"], hint: "browser and application surfaces" },
+  { key: "fleet", label: "FLEET", num: "5", primaryPage: "agents", pages: ["agents", "supervisor"], hint: "agents, delegation, supervisor" },
+  { key: "observe", label: "OBSERVE", num: "6", primaryPage: "observability", pages: ["observability", "memory"], hint: "events, traces, memory, outcomes" },
+  { key: "system", label: "SYSTEM", num: "7", primaryPage: "system", pages: ["system", "compute"], hint: "runtime, compute, releases, settings" },
+];
+
+export function workflowStageForPage(page: PageKey) {
+  return WORKFLOW_STAGES.find((stage) => stage.pages.includes(page)) ?? WORKFLOW_STAGES[0];
+}
+
 // ── Workspaces (пресеты рабочих контекстов) ─────────────────────────────────────
 export type WorkspaceKey = "development" | "browser-ops" | "debugging" | "monitoring" | "supervise";
 export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint: string }[] = [
@@ -442,7 +467,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       window.dispatchEvent(new CustomEvent("me2:chat-selected", { detail: id }));
     }) as EventListener);
 
-    // hotkeys: ⌘K палитра · N новая задача · Alt+1..0 страницы · Alt+←/→ недавние
+    // hotkeys: ⌘K палитра · N новая задача · Alt+1..7 workflow stages · Alt+←/→ недавние
     document.addEventListener("keydown", (e) => {
       const tag = (e.target as HTMLElement)?.tagName;
       const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target as HTMLElement)?.isContentEditable;
@@ -453,10 +478,9 @@ export const useMe2 = create<Me2State>((set, get) => ({
       } else if ((e.key === "n" || e.key === "n") && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
         e.preventDefault(); set({ dialog: "newTask" });
       } else if (e.altKey && !e.metaKey && !e.ctrlKey) {
-        if (e.key >= "1" && e.key <= "9") {
-          const p = PAGES[Number(e.key) - 1]; if (p) { e.preventDefault(); get().setPage(p.key); }
-        } else if (e.key === "0") {
-          e.preventDefault(); get().setPage("system");
+        if (e.key >= "1" && e.key <= "7") {
+          const stage = WORKFLOW_STAGES[Number(e.key) - 1];
+          if (stage) { e.preventDefault(); get().setPage(stage.primaryPage); }
         } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           const st = get();
           const delta = e.key === "ArrowLeft" ? -1 : 1;
