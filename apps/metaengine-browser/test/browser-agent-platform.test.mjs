@@ -15,6 +15,7 @@ import {
   resolveAgentPlatformAgentSurface,
   resolveAgentPlatformSelectedModel,
   resolveAgentPlatformNavControl,
+  resolveAgentPlatformModelOption,
   agentPlatformSnapshot,
 } from '../src/browser-agent-platform.mjs';
 
@@ -252,4 +253,30 @@ test('Agent/Chat/model navigation controls resolve only by exact semantic refs',
   assert.equal(resolveAgentPlatformNavControl(frame,'Select a model').backend_node_id,9469);
   assert.equal(resolveAgentPlatformNavControl(frame,'API'),null);
   assert.equal(resolveAgentPlatformNavControl(liveAgentFrame({ omit:['Agent'] }),'Agent'),null);
+});
+
+
+test('GLM-5.3-Flash model option resolves only as one exact semantic control', () => {
+  const frame = liveAgentFrame();
+  const single = {
+    ...frame,
+    semantic_targets:[
+      ...frame.semantic_targets,
+      { role:'menuitem', name:'GLM-5.3-Flash', backend_node_id:15001, semantic_ref:semref('flash-option') },
+    ],
+  };
+  const option = resolveAgentPlatformModelOption(single);
+  assert.equal(option.role,'menuitem');
+  assert.equal(option.accessible_name,'GLM-5.3-Flash');
+  assert.equal(option.backend_node_id,15001);
+
+  assert.equal(resolveAgentPlatformModelOption({
+    ...single,
+    semantic_targets:[
+      ...single.semantic_targets,
+      { role:'button', name:'GLM-5.3-Flash', backend_node_id:15002, semantic_ref:semref('duplicate-flash') },
+    ],
+  }),null);
+  assert.equal(resolveAgentPlatformModelOption(frame),null);
+  assert.equal(resolveAgentPlatformModelOption(single,'unknown-model'),null);
 });
