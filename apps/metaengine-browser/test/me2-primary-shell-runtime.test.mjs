@@ -600,15 +600,8 @@ test('R95 Utility Panel remains a read-only presentation plane with native geome
   assert.doesNotMatch(me2ContextDrawer, /sendCommand\(|me2Fetch\(|agentChatOp\(/);
 });
 
-test('R85 command rail bridge is presentation-only and reconciles effective geometry', () => {
+test('R95C COMMAND rail is renderer-local while the legacy bridge remains zero-authority compatibility surface', () => {
   assert.match(preload, /const setPrimaryCommandRail = \(open\) => ipcRenderer\.invoke\('metaengine:shell:primary-command-rail'/);
-  const primaryBranch = preload.slice(
-    preload.indexOf('if (isPrimaryMe2PresentationDocument())'),
-    preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
-  );
-  assert.match(primaryBranch, /setPrimaryCommandRail/);
-  assert.match(main, /let primaryCommandRailOpen = true/);
-  assert.match(main, /me2_command_rail_open: primaryCommandRailOpen/);
   assert.match(main, /ipcMain\.handle\('metaengine:shell:primary-command-rail'/);
   const railHandler = main.slice(
     main.indexOf("ipcMain.handle('metaengine:shell:primary-command-rail'"),
@@ -620,14 +613,14 @@ test('R85 command rail bridge is presentation-only and reconciles effective geom
   assert.match(railHandler, /update_authority:\s*false/);
   assert.match(railHandler, /release_authority:\s*false/);
   assert.match(railHandler, /authority_effect:\s*false/);
+
   assert.match(me2Command, /commandRailPreferredOpen/);
   assert.match(me2Command, /storeCommandRailPreference/);
-  assert.match(me2Command, /setPrimaryCommandRail/);
-  assert.match(me2Command, /effective_open/);
+  assert.match(me2Command, /COMMAND_RAIL_WEB_MIN_WIDTH = 900/);
+  assert.match(me2Command, /window\.innerWidth >= COMMAND_RAIL_WEB_MIN_WIDTH/);
   assert.match(me2Command, /window\.addEventListener\("resize", onResize\)/);
-  assert.match(me2Command, /COMMAND_RAIL_WEB_MIN_WIDTH = 984/);
   assert.match(me2Command, /aria-disabled=\{railConstrained\}/);
-  assert.doesNotMatch(me2Command, /window\.innerWidth < 768/);
+  assert.doesNotMatch(me2Command, /setPrimaryCommandRail/);
 });
 
 test('R85 presentation overlays temporarily remove the native Browser surface without gaining authority', () => {
