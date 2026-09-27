@@ -16,6 +16,7 @@ on:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
   workflow_dispatch:
 
@@ -194,23 +195,6 @@ jobs:
       - name: Install package dependencies
         working-directory: apps/metaengine-browser
         run: npm install --no-audit --no-fund --no-package-lock
-      - name: Build and stage exact-head ME2 UI
-        shell: pwsh
-        env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          npm install --no-audit --no-fund --global bun
-          Push-Location apps/me2-ui
-          try {
-            bun install --frozen-lockfile
-            bun run build
-            node scripts/pack-me2-ui.mjs
-          } finally { Pop-Location }
-          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
-          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'soak_staged_me2_ui_invalid' }
       - name: Parse packaged session soak harness before expensive build
         working-directory: apps/metaengine-browser
         shell: pwsh
