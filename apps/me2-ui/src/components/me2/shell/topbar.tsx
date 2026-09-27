@@ -4,7 +4,7 @@
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
 import { PAGES, WORKSPACES, workflowStageForPage, useMe2 } from "@/components/me2/store";
-import { Search, Command, Boxes, Radio, BellRing, PanelBottom, X } from "lucide-react";
+import { Search, Command, Boxes, Radio, BellRing, PanelBottom, X, ChevronDown, Check, RotateCcw } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useEffect, useState } from "react";
 
@@ -16,27 +16,46 @@ export function TopBar() {
   const workspace = useMe2((s) => s.workspace);
   const setPalette = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
+  const setWorkspace = useMe2((s) => s.setWorkspace);
+  const resetWorkspaceLayout = useMe2((s) => s.resetWorkspaceLayout);
   const contextDrawerPreferredOpen = useMe2((s) => s.contextDrawerPreferredOpen);
   const contextDrawerOpen = useMe2((s) => s.contextDrawerOpen);
   const setContextDrawer = useMe2((s) => s.setContextDrawer);
   const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
   const [attentionOpen, setAttentionOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
   const setAttention = (open: boolean) => {
     setAttentionOpen(open);
+    if (open) {
+      setWorkspaceOpen(false);
+      setChromeOverlay("workspace-menu", false);
+    }
     setChromeOverlay("attention", open);
+  };
+
+  const setWorkspaceMenu = (open: boolean) => {
+    setWorkspaceOpen(open);
+    if (open) {
+      setAttentionOpen(false);
+      setChromeOverlay("attention", false);
+    }
+    setChromeOverlay("workspace-menu", open);
   };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && attentionOpen) setAttention(false);
+      if (event.key !== "Escape") return;
+      if (attentionOpen) setAttention(false);
+      if (workspaceOpen) setWorkspaceMenu(false);
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
       setChromeOverlay("attention", false);
+      setChromeOverlay("workspace-menu", false);
     };
-  }, [attentionOpen, setChromeOverlay]);
+  }, [attentionOpen, workspaceOpen, setChromeOverlay]);
 
   const pageMeta = PAGES.find((p) => p.key === page);
   const stageMeta = workflowStageForPage(page);
@@ -82,7 +101,53 @@ export function TopBar() {
       </button>
 
       <div className="hidden min-w-0 items-center gap-1.5 border-l border-zinc-800 pl-2 md:flex" aria-label="Текущий рабочий контекст">
-        <span className="max-w-28 truncate text-[10px] font-medium text-zinc-400">{workspaceMeta?.label ?? workspace}</span>
+        <div className="relative">
+          <button
+            type="button"
+            data-testid="workspace-switcher"
+            onClick={() => setWorkspaceMenu(!workspaceOpen)}
+            aria-expanded={workspaceOpen}
+            aria-haspopup="menu"
+            className="flex h-7 max-w-32 items-center gap-1 px-1.5 text-[10px] font-medium text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            title={`Workspace · ${workspaceMeta?.hint ?? workspace}`}
+          >
+            <span className="truncate">{workspaceMeta?.label ?? workspace}</span>
+            <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${workspaceOpen ? "rotate-180" : ""}`} aria-hidden />
+          </button>
+          {workspaceOpen ? (
+            <>
+              <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setWorkspaceMenu(false)} />
+              <div role="menu" className="absolute left-0 top-8 z-50 w-64 overflow-hidden border border-zinc-800 bg-[#111114] shadow-2xl">
+                <p className="border-b border-zinc-800 px-3 py-2 text-[9px] font-bold uppercase tracking-widest text-zinc-500">Workspaces</p>
+                {WORKSPACES.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => { setWorkspace(item.key); setWorkspaceMenu(false); }}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] hover:bg-zinc-900 ${item.key === workspace ? "text-cyan-300" : "text-zinc-300"}`}
+                  >
+                    {item.key === workspace ? <Check className="h-3 w-3 shrink-0" aria-hidden /> : <span className="w-3" />}
+                    <span className="font-medium">{item.label}</span>
+                    <span className="ml-auto truncate text-[9px] text-zinc-600">{item.hint}</span>
+                  </button>
+                ))}
+                <div className="border-t border-zinc-800 p-1.5">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="workspace-reset-layout"
+                    onClick={() => { resetWorkspaceLayout(); setWorkspaceMenu(false); }}
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] text-zinc-500 hover:bg-zinc-900 hover:text-zinc-200"
+                  >
+                    <RotateCcw className="h-3 w-3" aria-hidden />
+                    Reset layout · {workspaceMeta?.label ?? workspace}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
         <span className="text-zinc-700">/</span>
         <span className="truncate text-[10px] font-semibold tracking-[0.08em] text-zinc-100">{stageMeta.label}</span>
         {pageMeta?.label && pageMeta.label !== stageMeta.label ? (
@@ -100,7 +165,7 @@ export function TopBar() {
         aria-label="Глобальный поиск и команды (Ctrl+K)"
         className="group mx-auto flex h-8 min-w-0 flex-1 max-w-[680px] items-center gap-2 border border-zinc-800 bg-zinc-900/55 px-2.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900"
       >
-        <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-emerald-400" aria-hidden />
+        <Search className="h-3.5 w-3.5 shrink-0 text-zinc-500 group-hover:text-cyan-300" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">
           перейти · найти агента/задачу · выполнить команду
         </span>
