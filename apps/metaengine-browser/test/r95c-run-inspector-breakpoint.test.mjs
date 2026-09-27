@@ -115,7 +115,7 @@ test('R95C.2 RUN geometry readback is causally ordered after the primary-page IP
 
 test('R95C.2 physical visual harness exercises the Main-to-renderer telemetry decision', () => {
   assert.match(visualHarness, /run_inspector_visible: page === 'browser'/);
-  assert.match(visualHarness, /run_telemetry_inspector: rect\('run-telemetry-inspector'\)/);
+  assert.match(visualHarness, /run_telemetry_inspector: visibleRect\('run-telemetry-inspector'\)/);
   assert.match(visualHarness, /r95c2_visual_native_readback_telemetry_missing/);
   assert.match(visualHarness, /r95c2_visual_right_utility_must_release_telemetry/);
 });
