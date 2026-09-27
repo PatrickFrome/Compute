@@ -101,6 +101,12 @@ test('R95 renderer places exactly one Utility Panel in the chosen shell region',
   assert.match(panel, /data-testid="utility-panel-dock-right"/);
 });
 
+test('R95 right dock lays panel body beside the full-height splitter instead of behind it', () => {
+  assert.match(panel, /dock === "right" \? "flex-row border-l border-zinc-800"/);
+  assert.match(panel, /data-testid="utility-panel-body"/);
+  assert.match(panel, /flex min-h-0 min-w-0 flex-1 flex-col/);
+});
+
 test('R95 splitter follows WAI window-splitter direction semantics for both dock orientations', () => {
   assert.match(panel, /role="separator"/);
   assert.match(panel, /aria-orientation=\{dock === "right" \? "vertical" : "horizontal"\}/);
