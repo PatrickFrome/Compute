@@ -20,6 +20,7 @@ import { Radar, RefreshCw, ScanEye, ShieldCheck, Zap } from "lucide-react";
 import { Sec, Chip } from "@/components/me2/ui/primitives";
 import { me2Fetch, toastBus } from "@/lib/me2-bus";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
+import { useMe2 } from "@/components/me2/store";
 
 // ── типы (зеркало daemon: sense.ts / obsv.ts / effect.ts) ───────────────────────
 type SenseTarget = { ref: string; role: string; name: string };
@@ -409,6 +410,8 @@ function CdpLiveSection() {
 
 // ── Page: RUN (host модуля BROWSER) ───────────────────────────────────────
 export function BrowserPage() {
+  const utilityRightOpen = useMe2((s) => s.contextDrawerOpen && s.contextDrawerDock === "right");
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-browser" data-panel-browser>
       {/* R95: фиксированный h-8 strip — native-геометрия ME2_R95_RUN резервирует
@@ -419,7 +422,7 @@ export function BrowserPage() {
       </div>
       <div className="flex min-h-0 flex-1 gap-2">
         <BrowserStage compact defaultCastOn />
-        <div className="mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto lg:flex" aria-label="Браузерная инфраструктура">
+        <div className={`${utilityRightOpen ? "hidden" : "mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto lg:flex"}`} aria-label="Браузерная инфраструктура" data-testid="run-telemetry-inspector" data-inspector-visible={utilityRightOpen ? "false" : "true"}>
           <SenseSection />
           <ObsvSection />
           <EffectSection />
