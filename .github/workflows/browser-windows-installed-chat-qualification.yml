@@ -110,6 +110,7 @@ jobs:
           $installer = Join-Path $artifactRoot ([string]$provenance.files.installer.name)
           if (-not (Test-Path $installer -PathType Leaf)) { throw 'installed_chat_qualified_installer_missing' }
           Copy-Item $installer (Join-Path $env:RUNNER_TEMP ([string]$provenance.files.installer.name)) -Force
+          Copy-Item $provenancePath "$env:RUNNER_TEMP\installer-provenance.json" -Force
           @{
             schema='metaengine.browser.windows-installed-chat-qualification.v2'
             source_head=$head
@@ -367,6 +368,7 @@ jobs:
           name: metaengine-browser-installed-chat-qualified-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
+            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/installed-chat-proof.json
             ${{ runner.temp }}/installed-chat-me2-ui-proof.json
             ${{ runner.temp }}/installed-chat-me2-daemon-proof.json
@@ -382,6 +384,7 @@ jobs:
         with:
           name: metaengine-browser-installed-chat-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
+            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/installed-chat-proof.json
             ${{ runner.temp }}/installed-chat-normal.out
             ${{ runner.temp }}/installed-chat-normal.err
