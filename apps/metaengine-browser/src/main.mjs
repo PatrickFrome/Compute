@@ -28,6 +28,7 @@ import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
 // ME2 smart merge (R41): узкая capability вкладок для ME2-плоскости (fail-open, zero-authority).
 // Плоскость не переписывает createTab — она вызывает его штатно, политика навигации браузера авторитетна.
 import { me2FleetTabsSetHost } from './me2/me2-fleet-tabs-host.mjs';
+import { me2MissionSelectSession } from './me2/me2-mission-control.mjs';
 import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
 import { ExactBrowserTabViewMap, resolveExactWebContentsTabBinding } from './browser-webcontents-tab-index.mjs';
 import {
@@ -2029,6 +2030,23 @@ ipcMain.handle('metaengine:shell:primary-context-drawer', async (event, rawOpen,
     authority_effect: false,
   });
 });
+ipcMain.handle('metaengine:shell:primary-agent-session-select', async (event, rawSessionId) => {
+  assertShellSender(event);
+  const sessionId = String(rawSessionId || '').trim();
+  if (!sessionId || sessionId.length > 256) throw new Error('primary_shell_agent_session_invalid');
+  const result = await me2MissionSelectSession(sessionId);
+  return Object.freeze({
+    ...result,
+    presentation_only: true,
+    renderer_routing_authority: false,
+    browser_command_authority: false,
+    scheduler_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;
