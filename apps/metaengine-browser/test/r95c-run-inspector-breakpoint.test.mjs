@@ -86,3 +86,27 @@ test('R95C.2 renderer consumes native visibility readback instead of owning a me
   assert.doesNotMatch(browserPage, /min-\[1124px\]:flex|\blg:flex\b|\bxl:flex\b/);
   assert.doesNotMatch(browserPage, /utilityRightOpen/);
 });
+
+
+test('R95C.2 RUN geometry readback is causally ordered after the primary-page IPC acknowledgement', () => {
+  assert.match(store, /function syncPagePresentation\(p: PageKey\): Promise<unknown> \| null/);
+  assert.match(store, /primaryPageAck = Promise\.resolve\(result\)/);
+  assert.match(store, /return primaryPageAck/);
+
+  const setPageStart = store.indexOf('setPage: (p) => {');
+  const setPageEnd = store.indexOf('setWorkspace: (w) => {', setPageStart);
+  const setPageBlock = store.slice(setPageStart, setPageEnd);
+  const invokeAt = setPageBlock.indexOf('const primaryPageAck = syncPagePresentation(p)');
+  const awaitAt = setPageBlock.indexOf('primaryPageAck.then(reconcileRunGeometry)');
+  const geometryAt = setPageBlock.indexOf('get().syncContextDrawer()');
+  assert.ok(invokeAt >= 0 && awaitAt > invokeAt && geometryAt > invokeAt);
+  assert.ok(setPageBlock.indexOf('reconcileRunGeometry', invokeAt) >= 0);
+  assert.match(setPageBlock, /if \(get\(\)\.page === "browser"\)/);
+
+  const restoreStart = store.indexOf('const restoredPage: PageKey');
+  const restoreEnd = store.indexOf('// WS-шина', restoreStart);
+  const restoreBlock = store.slice(restoreStart, restoreEnd);
+  assert.match(restoreBlock, /const primaryPageAck = syncPagePresentation\(restoredPage\)/);
+  assert.match(restoreBlock, /restoredPage === "browser" && primaryPageAck/);
+  assert.match(restoreBlock, /primaryPageAck\.then\(reconcileRestoredGeometry\)/);
+});
