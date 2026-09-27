@@ -418,11 +418,11 @@ export function BrowserPage() {
           ровно 32px над tabstrip/urlbar (вместо гибкого PageHeader R74) */}
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2">
         <h2 className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-300">RUN</h2>
-        <span className="min-w-0 truncate text-[10px] text-zinc-500">браузер и превью приложения · сенсоры справа (lg+)</span>
+        <span className="min-w-0 truncate text-[10px] text-zinc-500">браузер и превью приложения · сенсоры справа (xl+)</span>
       </div>
       <div className="flex min-h-0 flex-1 gap-2">
         <BrowserStage compact defaultCastOn />
-        <div className={`${utilityRightOpen ? "hidden" : "mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto lg:flex"}`} aria-label="Браузерная инфраструктура" data-testid="run-telemetry-inspector" data-inspector-visible={utilityRightOpen ? "false" : "true"}>
+        <div className={`${utilityRightOpen ? "hidden" : "mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto xl:flex"}`} aria-label="Браузерная инфраструктура" data-testid="run-telemetry-inspector" data-inspector-visible={utilityRightOpen ? "false" : "true"}>
           <SenseSection />
           <ObsvSection />
           <EffectSection />
