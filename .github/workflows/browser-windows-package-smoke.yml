@@ -188,6 +188,17 @@ jobs:
           $stagedManifest = Join-Path (Get-Location) 'native-dist\guardian\guardian-native-manifest.json'
           if (-not (Test-Path $stagedManifest -PathType Leaf)) { throw 'before_pack_guardian_staging_not_materialized' }
           $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          node scripts/installer-provenance.mjs write `
+            --installer $installer.FullName `
+            --out "$env:RUNNER_TEMP\installer-provenance.json" `
+            --source-head $sourceHead `
+            --run-id $env:GITHUB_RUN_ID `
+            --run-number $env:GITHUB_RUN_NUMBER `
+            --workflow browser-windows-package-smoke.yml `
+            --package-version $version `
+            --config electron-builder.test.json `
+            --blockmap $blockmap.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_write_failed' }
           @{
             schema='metaengine.browser.windows-package-smoke.v3'
             source_head=$sourceHead
@@ -598,6 +609,7 @@ jobs:
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/windows-package-proof.json
+            ${{ runner.temp }}/installer-provenance.json
             ${{ runner.temp }}/installed-me2-daemon-proof.json
             ${{ runner.temp }}/browser-startup-journal-v1.json
             ${{ runner.temp }}/browser-sentinel-v1.json

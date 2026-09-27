@@ -18,11 +18,12 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-final-runtime-activation:
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 80
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -100,19 +101,29 @@ jobs:
           echo "me2-ui-dist staged and exact-head verified: $(du -sh "$STUB" | cut -f1)"
           exit 0
 
-      - name: Build exact-head unsigned NSIS installer
+      - name: Acquire provenanced exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = [string](node -p "require('./package.json').version")
-          if (-not $version) { throw 'package_version_missing' }
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          node scripts/installer-provenance.mjs acquire `
+            --head $expectedHead `
+            --workflow browser-windows-package-smoke.yml `
+            --artifact "metaengine-browser-windows-candidate-$expectedHead" `
+            --out "$env:RUNNER_TEMP\provenanced-installer" `
+            --timeout-min 45 --interval-sec 30 --absent-grace-min 10
+          if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_acquire_failed' }
+          Expand-Archive -Path "$env:RUNNER_TEMP\provenanced-installer\artifact.zip" -DestinationPath "$env:RUNNER_TEMP\provenanced-installer\payload" -Force
+          node scripts/installer-provenance.mjs verify `
+            --dir "$env:RUNNER_TEMP\provenanced-installer\payload" `
+            --expect-head $expectedHead
+          if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_verify_failed' }
+          $acquired = Get-Content "$env:RUNNER_TEMP\provenanced-installer\payload\acquired.json" -Raw | ConvertFrom-Json
+          if ($acquired.schema -ne 'metaengine.browser.installer-provenance-acquired.v1') { throw 'installer_provenance_acquired_schema_invalid' }
+          $installer = Get-Item $acquired.installer_path
           if (-not $installer) { throw 'final_runtime_installer_missing' }
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\$($installer.Name)"
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\final-runtime-candidate.exe"

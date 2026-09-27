@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: browser-windows-autonomous-soak-${{ github.ref }}
@@ -174,7 +175,7 @@ jobs:
     name: installed-ui-72-activation-race-soak
     needs: [continuous-brain, brain-endurance, seeded-fleet-chaos, fleet-scale]
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -217,21 +218,33 @@ jobs:
           $source = Get-Content './scripts/windows-autonomous-session-soak.ps1' -Raw
           $null = [ScriptBlock]::Create($source)
           Write-Host 'windows_autonomous_session_soak_parse_ok'
-      - name: Build exact-head Windows NSIS candidate
+      - name: Acquire provenanced exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $version = [string](node -p "require('./package.json').version")
           if (-not $version) { throw 'package_version_missing' }
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $expectedHead = '${{ github.event.pull_request.head.sha || github.sha }}'
+          node scripts/installer-provenance.mjs acquire `
+            --head $expectedHead `
+            --workflow browser-windows-package-smoke.yml `
+            --artifact "metaengine-browser-windows-candidate-$expectedHead" `
+            --out "$env:RUNNER_TEMP\provenanced-installer" `
+            --timeout-min 45 --interval-sec 30 --absent-grace-min 10
+          if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_acquire_failed' }
+          Expand-Archive -Path "$env:RUNNER_TEMP\provenanced-installer\artifact.zip" -DestinationPath "$env:RUNNER_TEMP\provenanced-installer\payload" -Force
+          node scripts/installer-provenance.mjs verify `
+            --dir "$env:RUNNER_TEMP\provenanced-installer\payload" `
+            --expect-head $expectedHead
+          if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_verify_failed' }
+          $acquired = Get-Content "$env:RUNNER_TEMP\provenanced-installer\payload\acquired.json" -Raw | ConvertFrom-Json
+          if ($acquired.schema -ne 'metaengine.browser.installer-provenance-acquired.v1') { throw 'installer_provenance_acquired_schema_invalid' }
+          $installer = Get-Item $acquired.installer_path
           if (-not $installer) { throw 'soak_installer_missing' }
-          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $digest = $acquired.installer_sha256
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\autonomous-soak-setup.exe" -Force
           Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
           @{
