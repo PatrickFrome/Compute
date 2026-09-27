@@ -53,3 +53,22 @@ Primary sources:
 - GitHub workflow reruns: https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
 
 This changes artifact selection only. It does not grant signing, publishing, update, scheduler, Browser, or production authority.
+
+
+## Activation SLO measurement boundary
+
+A later exact-head soak failed at p95 1004.36 ms against the 1000 ms activation budget while all 64 sequential activations, exact launch-id ACKs, primary-window journal events, compute/endurance lanes and package provenance were otherwise valid. The audit showed that the stopwatch kept running after the secondary process had already exited successfully and therefore after it had already observed the exact durable activation ACK. The measured value also included test-runner stdout parsing and a second read of the startup journal used only to independently verify the ACK.
+
+That boundary mixed product latency with harness bookkeeping. The gate is now stricter semantically, not weaker:
+- stopwatch starts immediately before launching the ordinary second instance;
+- the latency clock stops only after the secondary process exits successfully; in this program that exit is reachable only after `waitForPrimaryActivationAck()` has observed the exact durable nonce-bound ACK;
+- stdout contract validation and independent startup-journal correlation remain mandatory before the sample is admitted;
+- the 1000 ms p95 budget is unchanged;
+- evidence now records `SECONDARY_PROCESS_LAUNCH_TO_VALID_DURABLE_ACK_EXIT` as the metric boundary.
+
+Microsoft documents `Process.WaitForExit` as blocking until the associated process exits, and `Stopwatch` as an elapsed-time interval measurement whose value freezes when stopped. Electron documents the `second-instance` event as the primary-instance callback for a losing `requestSingleInstanceLock()` launch and recommends restoring/focusing the primary window there. Those contracts align the latency SLO with the actual second-launch handoff, while the durable journal remains a separate correctness/readback gate.
+
+Primary sources:
+- https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforexit
+- https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.stopwatch.start
+- https://www.electronjs.org/docs/latest/api/app
