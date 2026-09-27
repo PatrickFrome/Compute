@@ -213,6 +213,14 @@ function riskCompanions(node) {
   if (node.risk === 'HIGH') return ['CRITIC'];
   return [];
 }
+function verificationCompanions(node) {
+  // R86 closed-loop sequencing: every implementation result is independently
+  // verified after RESULT_READY. CRITICAL work keeps the stronger dual review.
+  // These are task proposals only; scheduler/browser identity remains owned by
+  // the existing DevOS scheduler and native Browser runtime.
+  if (node.risk === 'CRITICAL') return ['CRITIC', 'FALSIFIER'];
+  return ['CRITIC'];
+}
 function activePointSet(tasks) {
   return new Set(tasks.filter((task) => !['COMPLETED', 'FAILED', 'CANCELLED', 'FENCED', 'AMBIGUOUS'].includes(String(task?.state || '').toUpperCase()))
     .map((task) => String(task?.point_id || '').toLowerCase()).filter(Boolean));
@@ -306,6 +314,99 @@ export function reconcileMetaOrchestrator({
       schema: 'metaengine.meta-orchestrator.reconcile.v1', state: 'RECONCILING', reason: 'AMBIGUITY_OR_EVIDENCE_GAP',
       progress, actions: Object.freeze(actions),
     });
+  }
+
+  // R86 autonomous closed loop: RESULT_READY is not completion. Before any
+  // successor can advance, create independent verification work only after the
+  // primary result exists. This prevents critics/falsifiers from racing the
+  // implementation they are meant to evaluate.
+  const resultReadyNodes = plan.nodes.filter((node) => progressByPoint.get(node.point_id)?.state === 'RESULT_READY');
+  if (resultReadyNodes.length) {
+    const verifierActions = [];
+    const acceptanceActions = [];
+    const waitPoints = [];
+    for (const node of resultReadyNodes.sort((a, b) => b.priority - a.priority || a.point_id.localeCompare(b.point_id))) {
+      const roles = verificationCompanions(node);
+      let allReady = true;
+      for (const companion of roles) {
+        const companionPoint = `${node.point_id}.${companion.toLowerCase()}`;
+        const observed = taskStateForPoint(companionPoint, tasks);
+        if (observed.state === 'UNSCHEDULED') {
+          allReady = false;
+          if (verifierActions.length < Math.min(availableSlots, maxParallel)) {
+            verifierActions.push(nodeProposal(node, plan, companion));
+          }
+          continue;
+        }
+        if (observed.state === 'AMBIGUOUS') {
+          allReady = false;
+          verifierActions.push(action('REQUEST_RECONCILIATION', {
+            point_id: companionPoint,
+            parent_point_id: node.point_id,
+            reason: 'VERIFIER_AMBIGUOUS_EFFECT_REQUIRES_READBACK',
+            automatic_retry_allowed: false,
+          }));
+          continue;
+        }
+        if (TERMINAL_FAILURE.has(observed.state)) {
+          allReady = false;
+          verifierActions.push(action('REQUEST_REASONING', {
+            point_id: companionPoint,
+            parent_point_id: node.point_id,
+            reason: 'VERIFIER_TERMINAL_FAILURE',
+          }));
+          continue;
+        }
+        if (!['RESULT_READY', 'COMPLETED'].includes(observed.state)) {
+          allReady = false;
+          waitPoints.push(companionPoint);
+        }
+      }
+      if (allReady) {
+        acceptanceActions.push(action('REQUEST_ACCEPTANCE', {
+          point_id: node.point_id,
+          verifier_points: roles.map((roleName) => `${node.point_id}.${roleName.toLowerCase()}`),
+          reason: 'PRIMARY_RESULT_AND_VERIFIERS_READY',
+          automatic_retry_allowed: false,
+        }));
+      }
+    }
+    if (verifierActions.length) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'VERIFYING',
+        reason: 'RESULT_READY_REQUIRES_INDEPENDENT_VERIFICATION',
+        progress,
+        actions: Object.freeze(verifierActions.slice(0, maxParallel)),
+      });
+    }
+    if (acceptanceActions.length) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'ACCEPTANCE_PENDING',
+        reason: 'VERIFIERS_RESULT_READY',
+        progress,
+        actions: Object.freeze(acceptanceActions.slice(0, maxParallel)),
+      });
+    }
+    if (waitPoints.length) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'VERIFYING',
+        reason: 'VERIFIER_TASKS_ACTIVE',
+        progress,
+        actions: Object.freeze([action('NOOP', { reason: 'VERIFIER_TASKS_ACTIVE', verifier_points: waitPoints.slice(0, 32) })]),
+      });
+    }
+    if (availableSlots === 0) {
+      return authorityEnvelope({
+        schema: 'metaengine.meta-orchestrator.reconcile.v1',
+        state: 'CAPACITY_WAIT',
+        reason: 'NO_VERIFIER_CAPACITY',
+        progress,
+        actions: Object.freeze([action('REQUEST_CAPACITY', { required_slots: Math.min(maxParallel, resultReadyNodes.length), reason: 'RESULT_VERIFICATION' })]),
+      });
+    }
   }
 
   const pending = plan.nodes.filter((node) => progressByPoint.get(node.point_id)?.state === 'PENDING');
