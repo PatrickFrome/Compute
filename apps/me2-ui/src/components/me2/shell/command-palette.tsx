@@ -2,29 +2,25 @@
 // ── COMMAND PALETTE (⌘K): универсальный переход к любому объекту системы ───────
 // Режимы: Pages / Agents / Tasks / Commands+Реестр-47 (keyboard-first, §8 дизайн-дока).
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
-import { sendCommand, spawnAgent, STATUS_BADGE, type ActionMeta, type Agent } from "@/lib/me2-bus";
+import { sendCommand, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
 import {
-  Plus, Bot, RefreshCw, Zap, Boxes, Download, Gauge, Trash2, Search, Rocket,
-  LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, Cpu, BrainCircuit,
+  Zap, Boxes, Download, Gauge, Trash2, Search, Rocket,
+  LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, BrainCircuit,
   Activity, Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 
 const PAGE_META: Record<string, { icon: LucideIcon; hint: string }> = {
-  command: { icon: LayoutDashboard, hint: "агенты + браузер + супервизор" },
-  agents: { icon: Bot, hint: "флот агентов" },
   browser: { icon: Globe, hint: "браузерная инфраструктура" },
   code: { icon: Terminal, hint: "код, exec, песочницы" },
   tasks: { icon: ListChecks, hint: "задачи и граф" },
   supervisor: { icon: ShieldCheck, hint: "control-plane оркестрации" },
-  compute: { icon: Cpu, hint: "пул, workers, квоты" },
   memory: { icon: BrainCircuit, hint: "память и знание" },
   observability: { icon: Activity, hint: "журналы и здоровье" },
   system: { icon: Settings2, hint: "конфигурация" },
@@ -39,77 +35,6 @@ function laneChip(lane: string): string {
   }
 }
 
-function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
-  const setOpen = useMe2((s) => s.setPalette);
-  const setPage = useMe2((s) => s.setPage);
-  const setChatId = useMe2((s) => s.setChatId);
-  const nowMs = useMe2((s) => s.nowMs);
-  const {
-    sessions,
-    loading: chatsLoading,
-    refreshing: chatsRefreshing,
-    error: chatsError,
-    updatedAt: chatsUpdatedAt,
-    refresh: refreshChats,
-  } = useAgentChatSessions();
-  const chatSnapshotFresh = chatsUpdatedAt > 0 && Math.max(0, nowMs - chatsUpdatedAt) <= 7_000;
-  const chatSnapshotTrusted = !chatsLoading && !chatsRefreshing && !chatsError && chatSnapshotFresh;
-
-  useEffect(() => {
-    void refreshChats();
-  }, [refreshChats]);
-
-  const activeChatIdsByAgent = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const session of sessions) {
-      if (session.status !== "ACTIVE") continue;
-      const ids = map.get(session.agent_id) ?? [];
-      ids.push(session.id);
-      map.set(session.agent_id, ids);
-    }
-    return map;
-  }, [sessions]);
-
-  return (
-    <CommandGroup heading={`Агенты · ${agents.length}`}>
-      {agents.slice(0, 8).map((a) => {
-        const chatIds = activeChatIdsByAgent.get(a.id) ?? [];
-        const exactChatId = chatSnapshotTrusted && chatIds.length === 1 ? chatIds[0] : null;
-        return (
-          <CommandItem
-            key={a.id}
-            value={`agent ${a.id} ${a.role}`}
-            onSelect={() => {
-              setChatId(exactChatId);
-              setPage("agents");
-              setOpen(false);
-            }}
-          >
-            <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
-            <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
-            {!chatSnapshotTrusted ? (
-              <span className="ml-2 rounded border border-zinc-800 bg-zinc-900 px-1 font-mono text-[8px] text-zinc-500">{chatsRefreshing ? "chat revalidating" : "chat unavailable"}</span>
-            ) : chatIds.length === 1 ? (
-              <span className="ml-2 rounded border border-violet-900/60 bg-violet-950/30 px-1 font-mono text-[8px] text-violet-300">chat</span>
-            ) : chatIds.length > 1 ? (
-              <span className="ml-2 rounded border border-amber-900/60 bg-amber-950/30 px-1 font-mono text-[8px] text-amber-300">ambiguous chat</span>
-            ) : null}
-            <span className="ml-auto font-mono text-[9px] text-zinc-600">{a.model}</span>
-          </CommandItem>
-        );
-      })}
-      {["IMPLEMENTER", "RESEARCHER", "OPERATOR"].map((r) => (
-        <CommandItem key={`spawn-${r}`} value={`spawn создать агента ${r}`} onSelect={() => { void spawnAgent(r); setOpen(false); }}>
-          <Plus className="mr-2 h-4 w-4 text-amber-400" /> Создать агента {r} <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
-        </CommandItem>
-      ))}
-      <CommandItem value="fleet reconcile сверка" onSelect={() => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); setOpen(false); }}>
-        <RefreshCw className="mr-2 h-4 w-4 text-amber-400" /> Сверка флота (reconcile) <span className="ml-auto text-xs text-zinc-500">CONTROL</span>
-      </CommandItem>
-    </CommandGroup>
-  );
-}
-
 export function CommandPalette() {
   const open = useMe2((s) => s.paletteOpen);
   const setOpen = useMe2((s) => s.setPalette);
@@ -118,8 +43,7 @@ export function CommandPalette() {
   const catalog = useMe2((s) => s.catalog);
   const snap = useMe2((s) => s.snap);
   const openTask = useMe2((s) => s.openTask);
-  const setChatId = useMe2((s) => s.setChatId);
-  const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks" | "actions">("all");
+  const [mode, setMode] = useState<"all" | "pages" | "tasks" | "actions">("all");
   const [pendingAction, setPendingAction] = useState<ActionMeta | null>(null);
   const [pendingArgs, setPendingArgs] = useState("{}");
   const [confirmFlush, setConfirmFlush] = useState(false);
@@ -134,7 +58,6 @@ export function CommandPalette() {
     setOpen(false);
   };
 
-  const agents = snap?.agents ?? [];
   const tasks = useMemo(() => {
     const all = [...(snap?.tasks ?? []), ...(snap?.archived ?? [])];
     return all.slice(0, 40);
@@ -201,7 +124,6 @@ export function CommandPalette() {
         {([
           ["all", "всё"],
           ["pages", "pages"],
-          ["agents", "agents"],
           ["tasks", "tasks"],
           ["actions", "actions"],
         ] as const).map(([key, label]) => (
@@ -293,8 +215,16 @@ export function CommandPalette() {
         </CommandGroup>}
         {mode === "all" ? <CommandSeparator /> : null}
 
-        {/* AGENTS — bind only an exact ACTIVE chat session; ambiguous/missing chat stays fail-closed. */}
-        {(mode === "all" || mode === "agents") && <AgentPaletteGroup agents={agents} />}
+        {/* Native agents live in the Browser workspace rail. The palette does
+            not spawn daemon/API agents or invent a second fleet projection. */}
+        {mode === "all" ? (
+          <CommandGroup heading="Native Agent fleet">
+            <CommandItem value="fleet agents native browser" onSelect={() => { setPage("browser"); setOpen(false); }}>
+              <Globe className="mr-2 h-4 w-4 text-cyan-400" /> Open native z.ai Agent fleet
+              <span className="ml-auto text-[9px] text-zinc-500">Browser roster</span>
+            </CommandItem>
+          </CommandGroup>
+        ) : null}
 
         {/* TASKS */}
         {(mode === "all" || mode === "tasks") && (
