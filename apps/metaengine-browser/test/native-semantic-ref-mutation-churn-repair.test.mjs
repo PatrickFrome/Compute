@@ -98,11 +98,18 @@ function fakeChurningZai({
         }
         return {};
       }
+      if (method === 'DOM.resolveNode') {
+        return { object: { objectId: `node-${Number(params?.backendNodeId || 0)}` } };
+      }
+      if (method === 'Runtime.callFunctionOn') {
+        clickCount += 1;
+        return { result: { value: true } };
+      }
+      if (method === 'Runtime.releaseObject') return {};
       if (method === 'DOM.getBoxModel') {
         return { model: { content: Number(params?.backendNodeId) === 3 ? composerBox.slice() : STANDARD_BOX.slice() } };
       }
       if (method === 'Input.dispatchMouseEvent') {
-        if (params.type === 'mousePressed') clickCount += 1;
         return {};
       }
       throw new Error(`unexpected_debugger_command:${method}`);
@@ -266,7 +273,7 @@ test('document replacement after capture still kills the ref outright', async ()
   );
 });
 
-test('TYPED_CLICK across carousel churn lands exactly one physical click', async () => {
+test('TYPED_CLICK across carousel churn performs one exact geometry-free DOM activation', async () => {
   const h = fakeChurningZai();
   const frame = await captureSemanticFrame(h.webContents);
   const button = frame.semantic_targets.find((row) => row.role === 'button' && row.name === 'Select a model');
@@ -282,27 +289,32 @@ test('TYPED_CLICK across carousel churn lands exactly one physical click', async
     },
   });
   assert.equal(result.action, 'TYPED_CLICK');
-  assert.ok(result.point);
+  assert.equal(result.activation?.method, 'DOM_CLICK');
+  assert.equal(result.mouse_geometry_required, false);
+  assert.equal(result.viewport_geometry_required, false);
   assert.equal(h.counts().clickCount, 1);
+  assert.equal(h.calls.some(([method]) => method === 'DOM.getBoxModel'), false);
+  assert.equal(h.calls.some(([method]) => method === 'Input.dispatchMouseEvent'), false);
 });
 
-test('a zero-area (hidden carousel slide) click target fails closed, no physical effect', async () => {
+test('semantic activation is independent of zero-area viewport geometry', async () => {
   const h = fakeChurningZai({ composerBox: ZERO_AREA_BOX });
   const frame = await captureSemanticFrame(h.webContents);
   const composer = composerRefOf(frame);
-  await assert.rejects(
-    () => executeSemanticCommand(h.webContents, {
-      action: 'TYPED_CLICK',
-      platform: 'GLM_ZAI',
-      payload: {
-        role: 'textbox',
-        accessible_name: null,
-        semantic_ref: composer.semantic_ref,
-      },
-    }),
-    /native_semantic_target_not_visible/,
-  );
-  assert.equal(h.counts().clickCount, 0);
+  const result = await executeSemanticCommand(h.webContents, {
+    action: 'TYPED_CLICK',
+    platform: 'GLM_ZAI',
+    payload: {
+      role: 'textbox',
+      accessible_name: null,
+      semantic_ref: composer.semantic_ref,
+    },
+  });
+  assert.equal(result.activation?.method, 'DOM_CLICK');
+  assert.equal(result.mouse_geometry_required, false);
+  assert.equal(h.counts().clickCount, 1);
+  assert.equal(h.calls.some(([method]) => method === 'DOM.getBoxModel'), false);
+  assert.equal(h.calls.some(([method]) => method === 'Input.dispatchMouseEvent'), false);
 });
 
 test('capture during continuous churn still issues semantic refs', async () => {
