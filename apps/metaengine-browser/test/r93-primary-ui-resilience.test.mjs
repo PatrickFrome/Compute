@@ -13,7 +13,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const browserRoot = path.resolve(here, '..');
-const repoRoot = path.resolve(browserRoot, '..', '..');
+const appsRoot = path.resolve(browserRoot, '..');
 
 test('R93 canonical ME2 session selection uses Browser-owned session->tab binding, not session-id URL inference', async () => {
   const sessionId = 'me2_internal_session_alpha';
@@ -89,7 +89,7 @@ test('R93 canonical ME2 session selection uses Browser-owned session->tab bindin
 test('R93 primary renderer exposes only the narrow bound-session presentation intent', async () => {
   const preload = await fs.readFile(path.join(browserRoot, 'src', 'preload-shell.cjs'), 'utf8');
   const main = await fs.readFile(path.join(browserRoot, 'src', 'main.mjs'), 'utf8');
-  const command = await fs.readFile(path.join(repoRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx'), 'utf8');
+  const command = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'pages', 'command.tsx'), 'utf8');
 
   assert.match(preload, /selectPrimaryAgentSession/);
   assert.match(preload, /metaengine:shell:primary-agent-session-select/);
@@ -102,14 +102,14 @@ test('R93 primary renderer exposes only the narrow bound-session presentation in
 });
 
 test('R93 shared agent list polling has a bounded request lifetime', async () => {
-  const hook = await fs.readFile(path.join(repoRoot, 'me2-ui', 'src', 'hooks', 'use-agentchat-sessions.ts'), 'utf8');
+  const hook = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'hooks', 'use-agentchat-sessions.ts'), 'utf8');
   assert.match(hook, /AGENTCHAT_FETCH_TIMEOUT_MS\s*=\s*8_000/);
   assert.match(hook, /AbortSignal\.timeout\(AGENTCHAT_FETCH_TIMEOUT_MS\)/);
   assert.match(hook, /finally\s*\{[\s\S]{0,160}inFlight\s*=\s*false/);
 });
 
 test('R93 drawer drag is fenced to the workspace that started it and pointercancel never persists', async () => {
-  const drawer = await fs.readFile(path.join(repoRoot, 'me2-ui', 'src', 'components', 'me2', 'shell', 'context-drawer.tsx'), 'utf8');
+  const drawer = await fs.readFile(path.join(appsRoot, 'me2-ui', 'src', 'components', 'me2', 'shell', 'context-drawer.tsx'), 'utf8');
   assert.match(drawer, /const startWorkspace = workspace/);
   assert.match(drawer, /useMe2\.getState\(\)\.workspace === startWorkspace/);
   assert.match(drawer, /pointercancel", cancel/);
