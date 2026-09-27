@@ -19,12 +19,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function isReservedInteractionTarget(target: EventTarget | null, kind: PeekKind): boolean {
   if (!(target instanceof Element)) return false;
-  if (target.closest(`[data-peek-kind="${kind}"][data-peek-id]`)) return false;
-  return Boolean(target.closest(
+  const row = target.closest(`[data-peek-kind="${kind}"][data-peek-id]`);
+  const interactive = target.closest(
     'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], ' +
     '[role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], [role="tab"], ' +
     '[role="switch"], [role="checkbox"], [role="radio"], [role="slider"], [role="spinbutton"]',
-  ));
+  );
+  // The row itself is the Peek keyboard surface, but nested controls inside it
+  // keep native keyboard semantics (Space on Pause/Retire/links must not open Peek).
+  if (row && interactive === row) return false;
+  return Boolean(interactive);
 }
 
 function isFocusedPeekRow(target: EventTarget | null, kind: PeekKind, selectedId: string | null): boolean {

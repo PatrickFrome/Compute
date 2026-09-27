@@ -51,8 +51,16 @@ test('R96 Peek never steals native Space activation from unrelated controls', ()
   assert.match(hook, /\[role="button"\]/);
   assert.match(hook, /\[role="menuitem"\]/);
   assert.match(hook, /\[role="tab"\]/);
-  assert.match(hook, /if \(target\.closest\(\`\[data-peek-kind=/);
+  assert.match(hook, /const row = target\.closest\(\`\[data-peek-kind=/);
   assert.match(hook, /isEditableTarget\(event\.target\) \|\| isReservedInteractionTarget\(event\.target, kind\)/);
+});
+
+test('R96B nested interactive controls inside a Peek row keep native Space semantics', () => {
+  assert.match(hook, /const row = target\.closest/);
+  assert.match(hook, /const interactive = target\.closest/);
+  assert.match(hook, /if \(row && interactive === row\) return false/);
+  assert.match(hook, /return Boolean\(interactive\)/);
+  assert.doesNotMatch(hook, /if \(target\.closest\([\s\S]{0,80}data-peek-kind[\s\S]{0,80}\)\) return false/);
 });
 
 test('R96A Space Peek begins only from the currently focused selected row', () => {
