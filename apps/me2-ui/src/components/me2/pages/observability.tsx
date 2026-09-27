@@ -322,12 +322,60 @@ function EvidenceTimelinePanel({
   const openTask = useMe2((s) => s.openTask);
   const setPage = useMe2((s) => s.setPage);
 
+  const historyRequestSeq = useRef(0);
+  const [exactTaskEvents, setExactTaskEvents] = useState<Event[]>([]);
+  const [historyState, setHistoryState] = useState<"UNBOUND" | "LOADING" | "EXACT" | "DEGRADED">("UNBOUND");
+
+  useEffect(() => {
+    const seq = ++historyRequestSeq.current;
+    const taskId = inspectedTaskId;
+    if (!taskId) {
+      setExactTaskEvents([]);
+      setHistoryState("UNBOUND");
+      return;
+    }
+
+    let alive = true;
+    setExactTaskEvents([]);
+    setHistoryState("LOADING");
+    void me2Fetch<{ events?: Event[] }>(
+      `/events?task=${encodeURIComponent(taskId)}&limit=200&XTransformPort=3041`,
+      { signal: AbortSignal.timeout(8_000) },
+    ).then((result) => {
+      if (!alive || seq !== historyRequestSeq.current || useMe2.getState().inspectedTaskId !== taskId) return;
+      if (!result) {
+        setHistoryState("DEGRADED");
+        return;
+      }
+      const exact = (result.events ?? [])
+        .filter((event) => event.task_id === taskId)
+        .slice(0, 200);
+      setExactTaskEvents(exact);
+      setHistoryState("EXACT");
+    });
+    return () => { alive = false; };
+  }, [inspectedTaskId]);
+
   const task = useMemo(() => {
     if (!inspectedTaskId) return null;
     return snap?.tasks.find((row) => row.id === inspectedTaskId)
       ?? (snap?.archived ?? []).find((row) => row.id === inspectedTaskId)
       ?? null;
   }, [inspectedTaskId, snap]);
+
+  const boundEvents = useMemo(() => {
+    if (!inspectedTaskId) return [];
+    const bySeq = new Map<number, Event>();
+    for (const event of exactTaskEvents) {
+      if (event.task_id === inspectedTaskId) bySeq.set(event.seq, event);
+    }
+    for (const event of events) {
+      if (event.task_id === inspectedTaskId) bySeq.set(event.seq, event);
+    }
+    return [...bySeq.values()]
+      .sort((a, b) => b.seq - a.seq)
+      .slice(0, 80);
+  }, [events, exactTaskEvents, inspectedTaskId]);
 
   const rows = useMemo<EvidenceTimelineRow[]>(() => {
     if (!inspectedTaskId) return [];
@@ -342,7 +390,7 @@ function EvidenceTimelinePanel({
         bad: task.status === "FAILED" || task.status === "CANCELLED",
       });
     }
-    for (const event of events.filter((row) => row.task_id === inspectedTaskId).slice(0, 40)) {
+    for (const event of boundEvents) {
       out.push({
         key: `event:${event.seq}`,
         at: event.ts,
@@ -372,7 +420,7 @@ function EvidenceTimelinePanel({
         return (b.seq ?? 0) - (a.seq ?? 0);
       })
       .slice(0, 48);
-  }, [events, inspectedTaskId, task, verdicts]);
+  }, [boundEvents, inspectedTaskId, task, verdicts]);
 
   const openExactTask = useCallback(() => {
     if (!inspectedTaskId) return;
@@ -392,7 +440,7 @@ function EvidenceTimelinePanel({
       tone="cyan"
       right={(
         <span className="font-mono text-[9px] text-zinc-500">
-          {inspectedTaskId ? "exact task binding" : "no task selected"}
+{inspectedTaskId ? `exact task binding · history ${historyState.toLowerCase()}` : "no task selected"}
         </span>
       )}
     >
@@ -400,6 +448,7 @@ function EvidenceTimelinePanel({
         data-testid="evidence-timeline"
         data-bound-task-id={inspectedTaskId ?? ""}
         data-binding-mode={inspectedTaskId ? "EXACT_TASK_ID" : "UNBOUND"}
+        data-history-state={historyState}
         className="space-y-2"
       >
         <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 font-mono text-[9px]">
@@ -468,7 +517,7 @@ function EvidenceTimelinePanel({
         )}
 
         <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
-          causal rows require exact task_id equality; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
+          causal rows require exact task_id equality; task history is re-filtered after bounded daemon readback and merged with recent live rows; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
         </div>
       </div>
     </Sec>

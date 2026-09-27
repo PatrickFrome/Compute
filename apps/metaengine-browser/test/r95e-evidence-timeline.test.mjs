@@ -19,7 +19,7 @@ const packageSmoke = await readFile(
 test('R95E evidence timeline binds causal rows only by exact task identity', () => {
   assert.match(observe, /data-testid="evidence-timeline"/);
   assert.match(observe, /data-binding-mode=\{inspectedTaskId \? "EXACT_TASK_ID" : "UNBOUND"\}/);
-  assert.match(observe, /events\.filter\(\(row\) => row\.task_id === inspectedTaskId\)/);
+  assert.match(observe, /event\.task_id === inspectedTaskId/);
   assert.match(observe, /verdicts\?\.verdicts \?\? \[\]\)\.filter\(\(row\) => row\.task_id === inspectedTaskId\)/);
   assert.match(observe, /causal rows require exact task_id equality/);
 });
@@ -49,7 +49,7 @@ test('R95E timeline is bounded and merges task snapshot, exact events and exact 
   assert.match(observe, /kind: "TASK"/);
   assert.match(observe, /kind: "EVENT"/);
   assert.match(observe, /kind: "VERDICT"/);
-  assert.match(observe, /\.slice\(0, 40\)/);
+  assert.match(observe, /\.slice\(0, 80\)/);
   assert.match(observe, /\.slice\(0, 24\)/);
   assert.match(observe, /\.slice\(0, 48\)/);
 });
@@ -64,4 +64,23 @@ test('R95E physical gate captures OBSERVE and requires the evidence timeline con
   assert.match(packageSmoke, /evidence_binding_fail_closed -ne \$true/);
   assert.match(packageSmoke, /captures\)\.Count -ne 4/);
   assert.match(packageSmoke, /r95e-observe-evidence-1440x960/);
+});
+
+test('R95E.1 exact task history uses a bounded daemon read with identity and generation fencing', () => {
+  assert.match(observe, /\/events\?task=\$\{encodeURIComponent\(taskId\)\}&limit=200/);
+  assert.match(observe, /AbortSignal\.timeout\(8_000\)/);
+  assert.match(observe, /const seq = \+\+historyRequestSeq\.current/);
+  assert.match(observe, /seq !== historyRequestSeq\.current/);
+  assert.match(observe, /useMe2\.getState\(\)\.inspectedTaskId !== taskId/);
+  assert.match(observe, /\.filter\(\(event\) => event\.task_id === taskId\)/);
+  assert.match(observe, /setHistoryState\("DEGRADED"\)/);
+});
+
+test('R95E.1 history merges exact bounded history with recent live rows without heuristic joins', () => {
+  assert.match(observe, /const bySeq = new Map<number, Event>\(\)/);
+  assert.match(observe, /for \(const event of exactTaskEvents\)/);
+  assert.match(observe, /for \(const event of events\)/);
+  assert.match(observe, /bySeq\.set\(event\.seq, event\)/);
+  assert.match(observe, /data-history-state=\{historyState\}/);
+  assert.match(observe, /task history is re-filtered after bounded daemon readback/);
 });
