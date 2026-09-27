@@ -590,6 +590,71 @@ test('acquire resolves and downloads in one step', async (t) => {
   });
 });
 
+test('acquire pins the artifact id observed during in-progress producer resolution', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  const dir = makeWorkspace();
+  const artifactName = `metaengine-browser-windows-candidate-${HEAD}`;
+  const resolvedZip = Buffer.from('resolved-at-attempt-2');
+  const laterZip = Buffer.from('later-same-name');
+  let artifactLists = 0;
+  await withServer((request, response) => {
+    if (request.url.includes('/actions/workflows/browser-windows-package-smoke.yml/runs')) {
+      writeRunsResponse(response, [{
+        ...runShape({ runNumber: 41, status: 'in_progress', conclusion: null, id: 5041 }),
+        run_attempt: 2,
+      }]);
+      return;
+    }
+    if (request.url.includes('/actions/runs/5041/artifacts')) {
+      artifactLists += 1;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        total_count: artifactLists === 1 ? 1 : 2,
+        artifacts: artifactLists === 1
+          ? [{ id: 9301, name: artifactName, size_in_bytes: resolvedZip.length, expired: false, created_at: '2026-09-27T11:00:00Z' }]
+          : [
+              { id: 9301, name: artifactName, size_in_bytes: resolvedZip.length, expired: false, created_at: '2026-09-27T11:00:00Z' },
+              { id: 9302, name: artifactName, size_in_bytes: laterZip.length, expired: false, created_at: '2026-09-27T11:01:00Z' },
+            ],
+      }));
+      return;
+    }
+    if (request.url.includes('/actions/artifacts/9301/zip')) {
+      response.writeHead(200, { 'content-type': 'application/zip' });
+      response.end(resolvedZip);
+      return;
+    }
+    if (request.url.includes('/actions/artifacts/9302/zip')) {
+      response.writeHead(200, { 'content-type': 'application/zip' });
+      response.end(laterZip);
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase }) => {
+    try {
+      const outDir = join(dir, 'acquire-pinned');
+      const acquired = await acquireInstaller({
+        ...RESOLVE_BASE,
+        'api-base': apiBase,
+        artifact: artifactName,
+        out: outDir,
+        'allow-in-progress': 'true',
+      });
+      assert.equal(acquired.artifact_id, '9301');
+      assert.deepEqual(readFileSync(acquired.zip_path), resolvedZip);
+      const resolved = JSON.parse(readFileSync(acquired.resolved_path, 'utf8'));
+      assert.equal(resolved.artifact_id, '9301');
+      assert.equal(resolved.run_attempt, 2);
+      assert.equal(artifactLists, 2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 test('missing token fails with token_missing', async () => {
   const previous = { me2: process.env.ME2_GITHUB_TOKEN, gh: process.env.GITHUB_TOKEN, ghToken: process.env.GH_TOKEN };
   delete process.env.ME2_GITHUB_TOKEN;
