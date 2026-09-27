@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T21:22:22Z | worklog: 1984327B / 10819L | sha12=c85cb15c731d
+gen: 2026-09-27T21:57:24Z | worklog: 1991244B / 10873L | sha12=8adad39ca6a9
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -9,7 +9,7 @@ gen: 2026-09-27T21:22:22Z | worklog: 1984327B / 10819L | sha12=c85cb15c731d
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1984327B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1991244B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -24,9 +24,6 @@ gen: 2026-09-27T21:22:22Z | worklog: 1984327B / 10819L | sha12=c85cb15c731d
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- EVOLVE-ROUND-17-IMPL-20260927 → Раунд 17 — [EV-EMPTYSTATE-COVERAGE] расширить EmptyState на worktrees/verdicts/readback-хвост/донор-ланы: аудит при фризе консоли => гэп КОНФИРМИРОВАН (критерий НЕ выполнен), ложное закрытие запрещено; ценность раунда — lint-чистый sandbox-патч + новый блокер /donor-registry 404; движок v1.37 → v1.38
-- EVOLVE-ROUND-18 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-EMPTYSTATE-COVERAGE] расширить EmptyState-примитив на оставшиеся list-панели (worktrees, verdicts, readback-хвост, донор-ланы): сейчас EmptyState только на events/check-runs/mirror-tail (аудит R16) — остальные пустые списки рендерятся молча; критерий: каждая list-панель даёт иконка+заголовок+hint при 0 строк,
-- EVOLVE-ROUND-18-ENGINEFIX-20260927 → Раунд 18 — [EV-EMPTYSTATE-COVERAGE] re-pick при действующем фризе консоли => вместо повторного аудита R17 — архитектурный фикс движка: durable frozen-defer механизм (v1.39 → v1.40); ложное закрытие по-прежнему запрещено
 - EVOLVE-ROUND-19 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
 - EVOLVE-ROUND-19 → Раунд 19 — [EV-DONOR-404] fix daemon-route: GET /donor-registry 404 no-route на :3041 → read-only маршрут (НЕ page.tsx, фризом не блокируется) + археология/реконструкция движка после env-reset ~00:00 +08
 - BROWSER-TEST-20260928-0215 → Подключиться к live METAENGINE 0.7.0-dev.36336130139.1 (Supabase compute_fabric_a2_*), прогнать тесты всех механик браузера; классификация работает/не работает/не проверено относительно цели: создание GLM-чат-агентов, автономный флот, взаимная видимость/координация, вечный супервизор
@@ -39,47 +36,50 @@ gen: 2026-09-27T21:22:22Z | worklog: 1984327B / 10819L | sha12=c85cb15c731d
 - BROWSER-TEST-20260928-0500 → Пятый тик BROWSER-TEST: read-only мониторинг по протоколу v2 (детектор драфта = READ_TRANSCRIPT; typing заморожены).
 - EVOLVE-ROUND-20 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-CHARTS] полировка recharts: тултипы, легенда, подписи времени Europe/Moscow
 - EVOLVE-ROUND-20 → SELF-EVOLVE тик ME2 OS: прогон движка, реализация EV-CHARTS в Mission Control, верификация через gateway :81, self-update, расширение BACKLOG, синхронизация зеркал.
+- BROWSER-TEST-20260928-0530 → Job 419203 — live browser mechanics test (METAENGINE 0.7.0-dev.36336130139.1), protocol v2 read-only pass
+- UNLOCK-20260928-0536 → Job 419203 — оператор сообщил «Очистил»; проверка draft + попытка unlock-цепочки (первые ~10 часов кампании)
+- BROWSER-TEST-20260928-0600 → Job 419203 — ПОЛНЫЙ прогон всех механик (фазы A/B/C/C3/D) после снятия блокера 05:36
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-
-Work Log:
-- FLEET_STATUS: 4/4 ACTIVE (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC). TAB_CENSUS: total=18 (GLM_CHAT=17, -1 с прошлого тика). Probe-скрипт параметризован (tick-probe-0430.py <tag>) для переиспользования.
-- Draft-статус: READ_TRANSCRIPT tab_a66fab40 → DIRTY_DRAFT (все 5 маркеров, len=6128 без роста — нулевое загрязнение за тик; очистка оператором не выполнена).
-- Unlock-цепь не запускалась (CLEAN не выполнен). T01-T02b read-only COMPLETED. Артефакт: browser-test-results-t0500.json.
-
 Stage Summary:
-- Механики стабильны: 16 работает / 6 не работает (корневой блокер submit→conversation — ожидание operator cleanup) / прочее не проверено. Протокол v2 предотвращает дальнейшее загрязнение драфта.
+- Механики: FLEET_STATUS/TAB_CENSUS/READ_TRANSCRIPT + REST-чтение = работают; submit→conversation — корневой блокер (без изменений); unlock-цепочка отложена до очистки draft оператором; pollution=0 (len 6128 стабилен)
+- Следующий tick: probe 0530-шаблон (read-only) → при len<6128 или чистом хвосте немедленно unlock-цепочка (NEW_TAB→CAPTURE→SEMANTIC_TYPE submit_after_type→PRESS_KEY Enter→CAPTURE /c/)
 
 ---
-Task ID: EVOLVE-ROUND-20
-Agent: self-evolve v1.42 (sealed engine)
-Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-CHARTS] полировка recharts: тултипы, легенда, подписи времени Europe/Moscow
+Task ID: UNLOCK-20260928-0536
+Agent: Super Z (cron loop)
+Task: Job 419203 — оператор сообщил «Очистил»; проверка draft + попытка unlock-цепочки (первые ~10 часов кампании)
 
 Work Log:
-- client health: GET / = 200 (gateway :81), lint = 0/0, audit score = unknown%
-- движок: self-check DEGRADED, зеркала пересинхронизированы, версия движка: 1.42
-- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-CHARTS] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; daemon-route EV (mini-services) фризом НЕ блокируются; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-CHARTS' (durable в evolve.state); отложенные по фризу: 'self-update frozen-add-<MARKER>' (deferral, НЕ закрытие)
+- Probe 0535: probe-таб tab_a66fab40 всё ещё DIRTY (len=6128) → вывод: draft per-tab, оператор очистил ДРУГОЙ таб
+- unlock-0536.py: список 11 new-chat табов (no /c/, no /error) из state-blob → скан READ_TRANSCRIPT → tab_bc085d57 CLEAN (len=281, ноль маркеров — это таб, который чистил оператор)
+- Unlock-цепочка на нём: CAPTURE ✓ → SEMANTIC_TYPE (submit_after_type=True, text="METAENGINE unlock probe (GLM diag 0536)") ✓ 24s → PRESS_KEY Enter ✓ → CAPTURE: url=https://chat.z.ai/c/00868e19-33ff-4a76-90df-a925e8106a7f → conversation_created=True
+- Верификация доставки: READ_TRANSCRIPT нового /c/ таба → "METAENGINE unlock probe (GLM diag 0536)" присутствует (delivered=True), модель GLM-5.3-Flash
+- NEW_TAB-тест: tab_22d8857c создан → READ_TRANSCRIPT len=1113 dirty=false → новые табы БОЛЬШЕ НЕ наследуют грязный draft (общий источник localStorage["chat-input-"] очищен оператором)
 
 Stage Summary:
-- раунд 20 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+- КОРНЕВОЙ БЛОКЕР submit→conversation СНЯТ: механика работает на чистом табе. Переклассификация: NEW_TAB ✓ (чистое наследование), SEMANTIC_TYPE+submit_after_type ✓, PRESS_KEY ✓, submit→/c/ ✓, доставка сообщения ✓
+- Причина прежних фейлов: per-tab composer state (11 new-chat табов держали накопленные briefs len≈6128 и глотали submit) — не баг механики
+- Мины: ~10 старых new-chat табов всё ещё несут грязный draft (кандидаты на закрытие/NAVIGATE-reload позже)
+- Разблокированы цели 1–2: следующий tick может бутстрапить чат-агента (NEW_TAB → task-brief → submit) и проверять флот-конвейер end-to-end
+- Артефакты: browser-test-results-t0536.json (T01–T03, U-SCAN/U-TYPE/U-ENTER/U-CAP2/U-RESULT, V-RT, N-NEW/N-RT), скрипты tick-probe-0430.py + unlock-0536.py
 
 ---
-Task ID: EVOLVE-ROUND-20
-Agent: GLM (Super Z, session web-0e323763, Job 416839 tick 05:00+08)
-Task: SELF-EVOLVE тик ME2 OS: прогон движка, реализация EV-CHARTS в Mission Control, верификация через gateway :81, self-update, расширение BACKLOG, синхронизация зеркал.
+Task ID: BROWSER-TEST-20260928-0600
+Agent: Super Z (cron loop)
+Task: Job 419203 — ПОЛНЫЙ прогон всех механик (фазы A/B/C/C3/D) после снятия блокера 05:36
 
 Work Log:
-- Движок: bash scripts/phoenix/self-evolve.sealed.sh evolve → round=20, client HTTP 200 (:81), lint 0/0, next_task=EV-CHARTS ("полировка recharts: тултипы, легенда, подписи времени Europe/Moscow"), v=1.43.
-- Реализация (4 файла, только /-route; чужой aside zai-chat-export в page.tsx НЕ тронут):
-  1) src/lib/me2-bus.ts: hhmmss() → timeZone:"Europe/Moscow" (канонический форматтер всех data-лейблов времени);
-  2) src/components/me2/pages/tasks.tsx: легенда статусов ветвей под графом (9 статусов BRANCH_COLOR, цветные SVG-точки, title-тултип, aria-label);
-  3) src/components/me2/pages/observability.tsx: тултипы истории eval обогащены (московское время + длительность + passed/total);
-  4) src/components/me2/pages/browser.tsx: лог событий вкладки переведён на hhmmss (консистентность подписей, title "время Europe/Moscow").
-- Верификация: bun run lint = 0/0; agent-browser через gateway :81 (не raw :3000): страница грузится, TASKS-легенда LEGEND-OK (9 статусов), тайм-лейблы OBSERV = 00:06:11 (=21:06:11Z+3, Europe/Moscow ✓), page errors отсутствуют.
-- Найдено вне скоупа (для будущих тиков): 4 форматтера времени вне hhmmss (topbar-часы, mirror-panel ×2, code.tsx generatedAt) показывают TZ браузера; EV-DATES в BACKLOG уже покрывает, но topbar-часы возможно оставить локальными.
-- self-update implemented-EV-CHARTS → v1.44 (tasks_done=11, score=88%). BACKLOG +1: EV-SPARKLINES (микро-спарклайны в чипах, продолжение EV-CHARTS). Зеркала синхронизированы: /tmp/context-vault-mirror/phoenix-sealed/ + /home/sync/me2-context-backups/phoenix-sealed/.
+- Phase A (12): 7 COMPLETED (CONTROL_CAPABILITIES, TAB_CENSUS, SYSTEM_TELEMETRY, GATE_STATUS, SELF_UPDATE_STATUS, DOWNLOAD_STATUS, FLEET_STATUS); 2 budget-throttled (PROCESS_CENSUS, DEV_PLANE_STATUS — supervisor_action_budget_exceeded, транзиторно); 3 DB-блок (SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST — check-constraint 23514 на INSERT-fallback)
+- Phase B (3): CAPTURE ✓, READ_TRANSCRIPT ✓; FIND_IN_PAGE ✗ (23514)
+- Phase C: NEW_TAB ✓ (tab_5134aa96, draft_state=CLEAN — впервые в C-фазе), SELECT_TAB ✓, SEMANTIC_FOCUS ✓, SEMANTIC_TYPE(replace_existing, submit_after_type=False) ✓, PRESS_KEY ✓, NAVIGATE ✓ (20s), FLEET_RECONCILE ✓; НО post-submit url=https://chat.z.ai/ → conversation_created=False (тип-без-submit + отдельный Enter = ненадёжно); SET_ZOOM ✗ (23514, ×2)
+- Phase C3 (ретрай на .ctx-табе tab_ec2c7b50): SEMANTIC_TYPE(submit_after_type=True) → PRESS_KEY → url=https://chat.z.ai/c/d9902597 → conversation_created=True (2-е подтверждение рецепта; 05:36 + 05:56)
+- Phase D: FLEET_RECONCILE(target=4) ✓, флот 4→4 (no-op подтверждён; C11 target=5 тоже не вырос), SELF_UPDATE_CHECK state=CURRENT (hint 36315939303.1, resolved_tag=null)
 
 Stage Summary:
-- EV-CHARTS реализован и верифицирован: легенда графа ветвей, тултипы eval-истории, подписи времени Europe/Moscow в observability/browser. Клиент стабилен (:81 HTTP 200, lint 0/0, page errors нет). Движок v1.44, round=20, BACKLOG=23 entries. Секреты не печатались, force-push нет, hot-tree правки (aside) сохранены.
+- ИТОГ: 17 механик работают (включая submit→conversation через submit_after_type=True — цели 1–2 разблокированы), 6 не работают (FIND_IN_PAGE, SET_ZOOM, SESSION_STATUS, CHATGPT_STATUS, WEBMCP_LIST — все DB-constraint 23514; submit-путь с отдельным Enter), 2 budget-throttled (ретрай позже), mesh по-прежнему невидим
+- Канонический рецепт создания чат-агента: NEW_TAB(https://chat.z.ai/) → CAPTURE → SEMANTIC_TYPE{role:textbox, submit_after_type:TRUE, text:<brief>} → (опц. Enter) → CAPTURE проверка /c/
+- DB-constraint 23514: RPC-allowlist даёт 400 supervisor_action_invalid → INSERT-fallback отбивается check-констрейнтом — 5 механик недоступны до правки allowlist/констрейнта (вне нашего контроля, нужна операторская миграция)
+- Артефакт: browser-test-results.json (полный), .prev бэкап прежнего
 ```
