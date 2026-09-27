@@ -3,7 +3,7 @@
 // Identity + current context + one global command surface. Runtime telemetry is
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
-import { PAGES, WORKSPACES, useMe2 } from "@/components/me2/store";
+import { PAGES, WORKSPACES, workflowStageForPage, useMe2 } from "@/components/me2/store";
 import { Search, Command, Boxes, Radio, BellRing, PanelBottom, X } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useEffect, useState } from "react";
@@ -39,6 +39,7 @@ export function TopBar() {
   }, [attentionOpen, setChromeOverlay]);
 
   const pageMeta = PAGES.find((p) => p.key === page);
+  const stageMeta = workflowStageForPage(page);
   const workspaceMeta = WORKSPACES.find((w) => w.key === workspace);
   const mirrorAttention = Boolean(mirror && (mirror.mode !== "LIVE" || mirror.pending > 0));
   const nowMs = Date.now();
@@ -73,17 +74,23 @@ export function TopBar() {
         className="flex h-8 shrink-0 items-center gap-2 rounded-sm px-1.5 text-left hover:bg-zinc-900 focus-visible:outline-none"
         title="METAENGINE · Command Center"
       >
-        <span className="flex h-5 w-5 items-center justify-center border border-emerald-700/50 bg-emerald-950/40">
-          <Boxes className="h-3 w-3 text-emerald-400" aria-hidden />
+        <span className="flex h-5 w-5 items-center justify-center border border-cyan-800/60 bg-cyan-950/35">
+          <Boxes className="h-3 w-3 text-cyan-300" aria-hidden />
         </span>
         <span className="text-[12px] font-black tracking-[0.22em] text-zinc-100">ME2</span>
         <span className="hidden font-mono text-[9px] text-zinc-600 lg:inline">{snap?.meta.version ?? "…"}</span>
       </button>
 
-      <div className="hidden min-w-0 items-center gap-1.5 border-l border-zinc-800 pl-2 md:flex" aria-label="Текущий контекст">
-        <span className="truncate text-[10px] font-semibold tracking-[0.12em] text-zinc-300">{pageMeta?.label ?? page.toUpperCase()}</span>
+      <div className="hidden min-w-0 items-center gap-1.5 border-l border-zinc-800 pl-2 md:flex" aria-label="Текущий рабочий контекст">
+        <span className="max-w-28 truncate text-[10px] font-medium text-zinc-400">{workspaceMeta?.label ?? workspace}</span>
         <span className="text-zinc-700">/</span>
-        <span className="max-w-28 truncate text-[9px] text-zinc-500">{workspaceMeta?.label ?? workspace}</span>
+        <span className="truncate text-[10px] font-semibold tracking-[0.08em] text-zinc-100">{stageMeta.label}</span>
+        {pageMeta?.label && pageMeta.label !== stageMeta.label ? (
+          <>
+            <span className="text-zinc-700">/</span>
+            <span className="max-w-28 truncate font-mono text-[9px] text-zinc-600">{pageMeta.label}</span>
+          </>
+        ) : null}
       </div>
 
       <button
