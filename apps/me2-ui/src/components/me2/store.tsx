@@ -18,17 +18,16 @@ export type PageKey =
   | "command" | "agents" | "browser" | "code" | "tasks"
   | "supervisor" | "compute" | "memory" | "observability" | "system";
 
+// R97 native swarm convergence: COMMAND/AGENTS/COMPUTE were daemon/API-agent
+// surfaces. They are intentionally absent from production navigation.
 export const PAGES: { key: PageKey; label: string; num: string }[] = [
-  { key: "command", label: "COMMAND", num: "1" },
-  { key: "agents", label: "AGENTS", num: "2" },
-  { key: "browser", label: "BROWSER", num: "3" },
-  { key: "code", label: "CODE", num: "4" },
-  { key: "tasks", label: "TASKS", num: "5" },
-  { key: "supervisor", label: "SUPERVISOR", num: "6" },
-  { key: "compute", label: "COMPUTE", num: "7" },
-  { key: "memory", label: "MEMORY", num: "8" },
-  { key: "observability", label: "OBSERV", num: "9" },
-  { key: "system", label: "SYSTEM", num: "0" },
+  { key: "browser", label: "BROWSER", num: "1" },
+  { key: "tasks", label: "TASKS", num: "2" },
+  { key: "code", label: "CODE", num: "3" },
+  { key: "supervisor", label: "SUPERVISOR", num: "4" },
+  { key: "memory", label: "MEMORY", num: "5" },
+  { key: "observability", label: "OBSERV", num: "6" },
+  { key: "system", label: "SYSTEM", num: "7" },
 ];
 
 // R94 shell IA: workflow stages are the primary navigation vocabulary.
@@ -43,13 +42,12 @@ export const WORKFLOW_STAGES: Array<{
   pages: readonly PageKey[];
   hint: string;
 }> = [
-  { key: "command", label: "COMMAND", num: "1", primaryPage: "command", pages: ["command"], hint: "objective, active work, attention" },
+  { key: "run", label: "FLEET", num: "1", primaryPage: "browser", pages: ["browser"], hint: "native z.ai Agent fleet and selected Browser surface" },
   { key: "plan", label: "PLAN", num: "2", primaryPage: "tasks", pages: ["tasks"], hint: "tasks, dependencies, execution plan" },
   { key: "build", label: "BUILD", num: "3", primaryPage: "code", pages: ["code"], hint: "code, diffs, tests, terminal" },
-  { key: "run", label: "RUN", num: "4", primaryPage: "browser", pages: ["browser"], hint: "browser and application surfaces" },
-  { key: "fleet", label: "FLEET", num: "5", primaryPage: "agents", pages: ["agents", "supervisor"], hint: "agents, delegation, supervisor" },
-  { key: "observe", label: "OBSERVE", num: "6", primaryPage: "observability", pages: ["observability", "memory"], hint: "events, traces, memory, outcomes" },
-  { key: "system", label: "SYSTEM", num: "7", primaryPage: "system", pages: ["system", "compute"], hint: "runtime, compute, releases, settings" },
+  { key: "fleet", label: "SUPERVISE", num: "4", primaryPage: "supervisor", pages: ["supervisor"], hint: "objectives, coordination, recovery and approvals" },
+  { key: "observe", label: "OBSERVE", num: "5", primaryPage: "observability", pages: ["observability", "memory"], hint: "events, traces, memory and outcomes" },
+  { key: "system", label: "SYSTEM", num: "6", primaryPage: "system", pages: ["system"], hint: "runtime, releases and settings" },
 ];
 
 export function workflowStageForPage(page: PageKey) {
@@ -59,11 +57,11 @@ export function workflowStageForPage(page: PageKey) {
 // ── Workspaces (пресеты рабочих контекстов) ─────────────────────────────────────
 export type WorkspaceKey = "development" | "browser-ops" | "debugging" | "monitoring" | "supervise";
 export const WORKSPACES: { key: WorkspaceKey; label: string; page: PageKey; hint: string }[] = [
-  { key: "development", label: "Development", page: "command", hint: "агенты + браузер + супервизор" },
-  { key: "browser-ops", label: "Browser Ops", page: "browser", hint: "браузерная инфраструктура" },
-  { key: "debugging", label: "Debugging", page: "code", hint: "код, exec, песочницы" },
-  { key: "monitoring", label: "Monitoring", page: "observability", hint: "журналы, метрики, здоровье" },
-  { key: "supervise", label: "Supervisor", page: "supervisor", hint: "цели, оркестрация, control-plane" },
+  { key: "development", label: "Development", page: "browser", hint: "native Agent fleet + selected Browser surface" },
+  { key: "browser-ops", label: "Browser Ops", page: "browser", hint: "native fleet and browser infrastructure" },
+  { key: "debugging", label: "Debugging", page: "code", hint: "code, exec and sandboxes" },
+  { key: "monitoring", label: "Monitoring", page: "observability", hint: "evidence, metrics and health" },
+  { key: "supervise", label: "Supervisor", page: "supervisor", hint: "objectives, orchestration and recovery" },
 ];
 
 export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
