@@ -57,7 +57,9 @@ function registerPresentationIpc() {
   let overlay = false;
   let railOpen = true;
   let drawerOpen = false;
+  let drawerDock = 'bottom';
   let drawerHeight = 200;
+  let drawerWidth = 380;
 
   ipcMain.handle('metaengine:shell:primary-page', (_event, rawPage) => {
     page = String(rawPage || 'command');
@@ -88,16 +90,23 @@ function registerPresentationIpc() {
       authority_effect: false,
     });
   });
-  ipcMain.handle('metaengine:shell:primary-context-drawer', (_event, rawOpen, rawHeight) => {
+  ipcMain.handle('metaengine:shell:primary-context-drawer', (_event, rawOpen, rawDock, rawHeight, rawWidth) => {
     drawerOpen = rawOpen === true;
-    const requested = Number(rawHeight);
-    if (Number.isFinite(requested)) drawerHeight = Math.max(160, Math.min(360, Math.round(requested)));
+    drawerDock = String(rawDock || 'bottom').toLowerCase() === 'right' ? 'right' : 'bottom';
+    const requestedHeight = Number(rawHeight);
+    const requestedWidth = Number(rawWidth);
+    if (Number.isFinite(requestedHeight)) drawerHeight = Math.max(160, Math.min(360, Math.round(requestedHeight)));
+    if (Number.isFinite(requestedWidth)) drawerWidth = Math.max(320, Math.min(520, Math.round(requestedWidth)));
     return Object.freeze({
-      schema: 'metaengine.browser.r85-visual.context-drawer.v1',
+      schema: 'metaengine.browser.r95-visual.utility-panel.v1',
       requested_open: drawerOpen,
+      requested_dock: drawerDock,
       requested_height: drawerHeight,
+      requested_width: drawerWidth,
       effective_open: drawerOpen,
-      drawer_height: drawerHeight,
+      dock: drawerDock,
+      drawer_height: drawerDock === 'bottom' ? drawerHeight : 0,
+      drawer_width: drawerDock === 'right' ? drawerWidth : 0,
       presentation_only: true,
       authority_effect: false,
     });
@@ -150,6 +159,7 @@ async function metrics(contents) {
       agent_sidebar: rect('agent-sidebar'),
       browser_shell: rect('browser-shell'),
       context_drawer: rect('context-drawer'),
+      context_drawer_dock: document.querySelector('[data-testid="context-drawer"]')?.getAttribute('data-drawer-dock') || null,
       context_drawer_toggle: Boolean(document.querySelector('[data-testid="context-drawer-toggle"]')),
       sidebar_toggle: Boolean(document.querySelector('[data-testid="cc-sidebar-toggle"]')),
       attention_button: Boolean(document.querySelector('[data-testid="attention-button"]')),
@@ -299,6 +309,24 @@ async function main() {
     assertBaseMetrics(drawer);
     const drawerHeight = Math.round(drawer.metrics?.context_drawer?.height || 0);
     if (drawerHeight < 160 || drawerHeight > 360) throw new Error(`r85_visual_drawer_height:${drawerHeight}`);
+    if (drawer.metrics?.context_drawer_dock !== 'bottom') throw new Error(`r95_visual_bottom_dock:${drawer.metrics?.context_drawer_dock}`);
+
+    markPhase('DOCK_UTILITY_PANEL_RIGHT');
+    await withTimeout(
+      shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="utility-panel-dock-right"]')?.click(); true`),
+      5000,
+      'dock_utility_panel_right',
+    );
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer]')?.getAttribute('data-drawer-dock') === 'right'");
+    markPhase('CAPTURE_COMMAND_UTILITY_RIGHT');
+    const rightDrawer = await capture(shellView, 'r95-command-utility-right-1440x960');
+    assertBaseMetrics(rightDrawer);
+    const drawerWidth = Math.round(rightDrawer.metrics?.context_drawer?.width || 0);
+    if (drawerWidth < 320 || drawerWidth > 520) throw new Error(`r95_visual_right_drawer_width:${drawerWidth}`);
+    if (rightDrawer.metrics?.context_drawer_dock !== 'right') throw new Error(`r95_visual_right_dock:${rightDrawer.metrics?.context_drawer_dock}`);
+    if (Math.round(rightDrawer.metrics?.context_drawer?.height || 0) <= drawerHeight) {
+      throw new Error(`r95_visual_right_drawer_not_vertical:${JSON.stringify(rightDrawer.metrics?.context_drawer)}`);
+    }
 
     const evidence = Object.freeze({
       schema: 'metaengine.browser.r85-visual-evidence.v1',
@@ -306,7 +334,7 @@ async function main() {
       electron: process.versions.electron,
       platform: process.platform,
       arch: process.arch,
-      captures: Object.freeze([closed, drawer]),
+      captures: Object.freeze([closed, drawer, rightDrawer]),
       primary_me2_ui_captured: true,
       legacy_shell_captured: false,
       remote_browser_content_captured: false,
@@ -315,6 +343,8 @@ async function main() {
       closed_overlays_absent_from_dom: true,
       r85_geometry_verified: true,
       drawer_interaction_verified: true,
+      utility_panel_bottom_verified: true,
+      utility_panel_right_verified: true,
       broken_image_fallback_hidden: true,
       visual_golden_comparison_enabled: false,
       presentation_only: true,
