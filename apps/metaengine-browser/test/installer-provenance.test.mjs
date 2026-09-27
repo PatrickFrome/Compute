@@ -228,6 +228,64 @@ test('resolve prefers a successful exact-head producer over a newer cancelled du
   assert.equal(row.run_id, 42);
 });
 
+test('resolve freezes the earliest successful exact-head producer as canonical', async () => {
+  const fetchImpl = async (input) => {
+    const url = String(input);
+    if (url.includes('/actions/workflows/')) {
+      return new Response(JSON.stringify({
+        workflow_runs: [
+          { id: 44, head_sha: HEAD, status: 'completed', conclusion: 'success' },
+          { id: 42, head_sha: HEAD, status: 'completed', conclusion: 'success' },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('/actions/runs/42/artifacts')) {
+      return new Response(JSON.stringify({
+        artifacts: [{ id: 99, name: `metaengine-browser-windows-candidate-${HEAD}`, expired: false }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  const row = await resolveProducerArtifact({
+    repository: REPO,
+    sourceHead: HEAD,
+    token: TOKEN,
+    fetchImpl,
+  });
+  assert.equal(row.state, 'READY');
+  assert.equal(row.run_id, 42);
+});
+
+test('resolve fails closed on duplicate exact-name artifacts in the canonical run', async () => {
+  const fetchImpl = async (input) => {
+    const url = String(input);
+    if (url.includes('/actions/workflows/')) {
+      return new Response(JSON.stringify({
+        workflow_runs: [{ id: 42, head_sha: HEAD, status: 'completed', conclusion: 'success' }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('/actions/runs/42/artifacts')) {
+      return new Response(JSON.stringify({
+        artifacts: [
+          { id: 99, name: `metaengine-browser-windows-candidate-${HEAD}`, expired: false },
+          { id: 100, name: `metaengine-browser-windows-candidate-${HEAD}`, expired: false },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('{}', { status: 404 });
+  };
+  await assert.rejects(
+    resolveProducerArtifact({
+      repository: REPO,
+      sourceHead: HEAD,
+      token: TOKEN,
+      fetchImpl,
+    }),
+    (error) => error instanceof InstallerProvenanceError
+      && error.code === 'installer_provenance_artifact_ambiguous',
+  );
+});
+
 test('resolve waits for exact named artifact after successful run', async () => {
   const row = await resolveProducerArtifact({
     repository: REPO,
