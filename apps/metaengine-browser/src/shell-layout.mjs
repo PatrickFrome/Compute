@@ -273,15 +273,12 @@ export function planShellLayout({
     // gets first claim on the presentation budget, then the inspector may use
     // the remaining width. Native Browser minimum remains the hard floor.
     const inspectorRequested = windowWidth >= ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH;
-    const drawerRightFloor = drawerRequested && requestedDock === 'RIGHT'
-      ? ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH
-      : 0;
+    const rightUtilityRequested = drawerRequested && requestedDock === 'RIGHT';
     const inspectorFits = windowWidth
       - ME2_PRIMARY_PAGE_PADDING * 2
       - (ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP)
-      - drawerRightFloor
       >= SHELL_MIN_REMOTE_WIDTH;
-    const inspectorVisible = inspectorRequested && inspectorFits;
+    const inspectorVisible = inspectorRequested && inspectorFits && !rightUtilityRequested;
     const baseRight = inspectorVisible
       ? ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP
       : ME2_PRIMARY_PAGE_PADDING;
@@ -330,7 +327,7 @@ export function planShellLayout({
     effectiveSidebar = 'HIDDEN';
     effectiveOperations = 'CLOSED';
     if (inspectorRequested && !inspectorVisible) {
-      adaptations.push(drawerRequested && requestedDock === 'RIGHT'
+      adaptations.push(rightUtilityRequested
         ? 'ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL'
         : 'ME2_RUN_INSPECTOR_RELEASED_FOR_ACTIVE_SURFACE');
     }
