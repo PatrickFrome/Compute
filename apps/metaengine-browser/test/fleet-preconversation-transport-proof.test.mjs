@@ -67,6 +67,7 @@ test('root transport proof is an in-process admission overlay until a canonical 
       target_id: bound.target_id,
       generation_epoch: bound.generation_epoch,
       conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      agent_surface_sha256: 'a'.repeat(64),
     });
     assert.equal(canonical.agents[0].lifecycle_state, 'ACTIVE');
     assert.equal(canonical.agents[0].transport_proof.transport_stage, undefined);
