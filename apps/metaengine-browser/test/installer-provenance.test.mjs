@@ -487,6 +487,9 @@ test('Installed Chat consumes immutable producer bytes instead of rebuilding NSI
   assert.match(source, /installer-provenance\.mjs verify/);
   assert.match(source, /actions:\s*read/);
   assert.match(source, /timeout-minutes:\s*75/);
+  assert.doesNotMatch(source, /Build and stage exact-head ME2 UI|pack-me2-ui|bun run build/);
+  assert.match(source, /apps\/me2-ui\/\*\*/);
+  assert.match(source, /apps\/me2-daemon\/\*\*/);
 });
 
 test('Final Runtime consumes immutable producer bytes instead of rebuilding NSIS', async () => {
@@ -496,6 +499,9 @@ test('Final Runtime consumes immutable producer bytes instead of rebuilding NSIS
   assert.match(source, /installer-provenance\.mjs verify/);
   assert.match(source, /actions:\s*read/);
   assert.match(source, /timeout-minutes:\s*80/);
+  assert.doesNotMatch(source, /Setup Bun \(for ME2 UI build\)|Build and pack ME2 UI|bun run build|me2-ui-dist staged/);
+  assert.match(source, /apps\/me2-ui\/\*\*/);
+  assert.match(source, /apps\/me2-daemon\/\*\*/);
 });
 
 test('Autonomous Soak consumes immutable producer bytes instead of rebuilding NSIS', async () => {
@@ -505,4 +511,8 @@ test('Autonomous Soak consumes immutable producer bytes instead of rebuilding NS
   assert.match(source, /installer-provenance\.mjs verify/);
   assert.match(source, /actions:\s*read/);
   assert.match(source, /timeout-minutes:\s*90/);
+  assert.doesNotMatch(source, /Build and stage exact-head ME2 UI|pack-me2-ui|bun run build/);
+  assert.match(source, /apps\/me2-ui\/\*\*/);
+  assert.match(source, /apps\/me2-daemon\/\*\*/);
+  assert.match(source, /apps\/metaengine-browser\/scripts\/installer-provenance\.mjs/);
 });
