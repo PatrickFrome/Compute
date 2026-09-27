@@ -10174,3 +10174,28 @@ Work Log:
 
 Stage Summary:
 - Публикация актуальна: sandbox/me2-os = fbb125e9; дерево чистое; блокеров нет
+---
+Task ID: R86-BUILD-ONCE-PROVENANCE-20260927
+Agent: Z.ai Code (main)
+Task: Полноценная разработка браузера (директива оператора: не мониторинг/аудит): закрыть следующий архитектурный срез «build once → immutable installer SHA/provenance → downstream gates тестируют одни и те же bytes» (устранить 4× дублирование NSIS-сборки), НЕ мешая R85 visual capture.
+
+Work Log:
+- Аудит: daemon 0.21.0 жив (47/47, last_seq 226); /home/z/.a2/.github.env валиден; кодовая база браузера локализована = /home/z/me2-desktop (origin PatrickFrome/Compute), R85-ветка work/r85-control-room-ui-v1, PR #987 OPEN/DRAFT/mergeable=true
+- PR-head ушёл вперёд во время раунда: 35cacda4 → … → ca04c934 → ac6e1d60 (2-4 коммита/час, драйвит другой цикл). test-contract fix УЖЕ приземлился коммитом 631ac0e3 «test(r85): qualify causal drawer identity contract»: тест теперь требует seq:++contextDrawerSyncSeq + presentationSyncStillCurrent(request,{seq,workspace,page}) — ровно как предписывал оператор; Critical Audit/Shell/и др. на новых головах SUCCESS
+- CI-гонка: cancel-in-progress отменяет Package Smoke каждой волны при следующем пуше (#2422→#2423 cancelled, далее #2424→#2426→#2427→…→#2436 in_progress) → пуш в PR-ветку заблокирован весь раунд (правило оператора «не отменять visual capture» соблюдено)
+- Картография 4× NSIS: package-smoke / installed-chat / final-runtime / soak — идентичная «npx electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json» (4 легаси-workflow вне R85-волны не тронуты)
+- NEW scripts/installer-provenance.mjs (zero-dep, node>=18): write | verify | resolve | download | acquire; схемы metaengine.browser.installer-provenance.v1 / -acquired.v1 / installer-run-resolved.v1 / installer-artifact-downloaded.v1 / -error.v1; fail-closed коды: sha_mismatch, size_mismatch, head_mismatch, name_mismatch, installer_missing, provenance_schema_invalid, provenance_field_invalid, artifact_not_found, artifact_expired, installer_provenance_producer_failed/_run_absent/_timeout
+- Package Smoke (продюсер, единственный NSIS-builder): после digest — «installer-provenance.mjs write» (installer/blockmap/config sha256, GITHUB_RUN_ID/NUMBER, source-head); installer-provenance.json добавлен в артефакт metaengine-browser-windows-candidate-<head>
+- Consumers ×3 (Installed Chat / Final Runtime / Soak package-session-soak): шаг «Build exact-head…» заменён на «Acquire provenanced exact-head installer from Package Smoke» (acquire→Expand-Archive→verify fail-closed), прежние RUNNER_TEMP-пути и proof-JSON-схемы сохранены байт-в-байт; permissions += actions:read; таймауты 28→75 / 30→80 / 45→90 (poll 45м, interval 30s, absent-grace 10м)
+- Тесты: test/installer-provenance.test.mjs ×19 (CLI spawnSync — не-сетевые; resolve/download/acquire — in-process против локального http-фейка GitHub API; loopback capability-probe со skip) — 19/19
+- Урок среды (UX-урок №9): в песочнице fetch на loopback из процесса-внука (spawnSync) висит НАВСЕГДА без ошибки/запроса; лечение — скрипт экспортирует API при не-CLI-запуске (pathToFileURL-гейт), сетевые тесты идут in-process
+- Верификация: YAML-парс 4/4 ok; node --check ok; node --test: 19/19 + clean-genesis/release-exact-sha-workflow-contract/package-identity 27/27 + me2-primary-shell-runtime 40/40; после ребейза 59/59; секрет-скан диффа = 0
+- Ребейз на ac6e1d60 чистый (их: «repair visual harness selector syntax», «fail fast on visual harness parse errors» — пересечений нет); локальный коммит 1880a83a «ci(r86): build-once installer provenance for all downstream gates» — НАМЕРЕННО НЕ ЗАПУШЕН
+- Наблюдение: /home/z/.a2 частично деградировал (остался только .github.env); supabase-канал жив через ENVF/sealed-носители (heartbeat 11ok/0fail), функционального разрыва нет — восстановление дословно из ENVF при необходимости
+
+Stage Summary:
+- R86 СДЕЛАН: build-once provenance реализован и протестирован локально — 1 NSIS-сборка на head вместо 4; все downstream-гейты верифицируют одни и те же байты (fail-closed), product-код и R85-гейты не ослаблены
+- Push-процедура в окне тишины (Package Smoke текущего head не in-flight): cd /home/z/me2-wt-r86 && git fetch origin work/r85-control-room-ui-v1 && git rebase FETCH_HEAD && (cd apps/metaengine-browser && node --test test/installer-provenance.test.mjs) && git push origin HEAD:work/r85-control-room-ui-v1
+- После пуша: первый acquire-прогон покажет единственность NSIS-builder; следить за installer_provenance_* кодами в installed-chat/final-runtime/soak
+- Backlog R87: подрезка таймаутов по фактической статистике прогонов; перевод 4 легаси-workflow на build-once; прокинуть provenance в release-evidence-gate/fast-autorelease аттестацию; EV-A11Y; watcher CI-гонки
+- Открытое: R2 S3 secret access key (оператор); .a2 partial (не блокер); terminal outcome R85 visual capture (#2436…) — ждём
