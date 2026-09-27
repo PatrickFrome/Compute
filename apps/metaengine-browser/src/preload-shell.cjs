@@ -234,6 +234,10 @@ const setPrimaryContextDrawer = (open, height) => ipcRenderer.invoke(
   open === true,
   Number.isFinite(Number(height)) ? Number(height) : null,
 );
+const selectPrimaryAgentSession = (sessionId) => ipcRenderer.invoke(
+  'metaengine:shell:primary-agent-session-select',
+  String(sessionId ?? ''),
+);
 
 if (isPrimaryMe2PresentationDocument()) {
   // R84 capability fence: the Browser-owned loopback ME2 renderer is a
@@ -246,6 +250,7 @@ if (isPrimaryMe2PresentationDocument()) {
     setPrimaryOverlay,
     setPrimaryCommandRail,
     setPrimaryContextDrawer,
+    selectPrimaryAgentSession,
     presentation_only: true,
     browser_command_authority: false,
     scheduler_authority: false,
