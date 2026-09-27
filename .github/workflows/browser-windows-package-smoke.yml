@@ -156,6 +156,9 @@ jobs:
           if ($evidence.primary_me2_ui_captured -ne $true `
               -or $evidence.legacy_shell_captured -ne $false `
               -or $evidence.remote_browser_content_captured -ne $false `
+              -or $evidence.remote_browser_transport_blocked -ne $true `
+              -or -not (@($evidence.blocked_remote_browser_ports) -contains '3042') `
+              -or -not (@($evidence.blocked_remote_browser_ports) -contains '3043') `
               -or $evidence.exact_main_workspace -ne $true `
               -or $evidence.advanced_surfaces_settings_only -ne $true `
               -or $evidence.command_search_available -ne $true `
