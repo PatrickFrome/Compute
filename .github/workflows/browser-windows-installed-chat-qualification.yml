@@ -94,19 +94,36 @@ jobs:
           $artifactRoot = "$env:RUNNER_TEMP\package-smoke-artifact"
           Remove-Item $artifactZip -Force -ErrorAction SilentlyContinue
           Remove-Item $artifactRoot -Recurse -Force -ErrorAction SilentlyContinue
-          node scripts/installer-provenance.mjs acquire `
+          $acquireJson = & node scripts/installer-provenance.mjs acquire `
             --repository '${{ github.repository }}' `
             --source-head $head `
             --output $artifactZip `
             --timeout-seconds 2700 `
             --poll-ms 15000
-          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_installer_acquire_failed' }
+          $acquireExit = $LASTEXITCODE
+          if ($acquireExit -ne 0) { throw 'installed_chat_installer_acquire_failed' }
+          $acquireLine = @($acquireJson | Where-Object { ([string]$_).Trim() }) | Select-Object -Last 1
+          if (-not $acquireLine) { throw 'installed_chat_installer_acquire_receipt_missing' }
+          $acquire = ([string]$acquireLine) | ConvertFrom-Json
+          if ($acquire.schema -ne 'metaengine.browser.installer-provenance-acquire.v1' `
+              -or [string]$acquire.source_head -ne $head `
+              -or [string]$acquire.artifact_name -ne "metaengine-browser-windows-candidate-$head" `
+              -or [int64]$acquire.producer_run_id -le 0 `
+              -or $acquire.exact_head_bound -ne $true `
+              -or $acquire.authority_effect -ne $false) {
+            throw 'installed_chat_installer_acquire_receipt_invalid'
+          }
           Expand-Archive -LiteralPath $artifactZip -DestinationPath $artifactRoot -Force
           $provenancePath = Join-Path $artifactRoot 'installer-provenance.json'
           node scripts/installer-provenance.mjs verify --provenance $provenancePath --root $artifactRoot --expected-head $head
           if ($LASTEXITCODE -ne 0) { throw 'installed_chat_installer_provenance_invalid' }
           $provenance = Get-Content $provenancePath -Raw | ConvertFrom-Json
           if ([string]$provenance.package_version -ne $version) { throw 'installed_chat_installer_version_drift' }
+          if ([string]$provenance.repository -ne '${{ github.repository }}' `
+              -or [string]$provenance.artifact_name -ne [string]$acquire.artifact_name `
+              -or [int64]$provenance.producer_run_id -ne [int64]$acquire.producer_run_id) {
+            throw 'installed_chat_installer_producer_binding_drift'
+          }
           $installer = Join-Path $artifactRoot ([string]$provenance.files.installer.name)
           if (-not (Test-Path $installer -PathType Leaf)) { throw 'installed_chat_qualified_installer_missing' }
           Copy-Item $installer (Join-Path $env:RUNNER_TEMP ([string]$provenance.files.installer.name)) -Force
