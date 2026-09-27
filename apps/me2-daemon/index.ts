@@ -11,6 +11,8 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { closeSync, existsSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Server } from "socket.io";
 import {
   listAgents, listTasks, getTask, tailEvents, eventsByTask, db, emit, snapshot,
@@ -1254,7 +1256,7 @@ try { startHygieneLoop(); } catch (e) { console.error(`[hygiene] loop failed: ${
 // честно умирает ДО любых мутаций; мёртвый pid в lockfile = захват.
 // R51 (фаза C): путь lockfile переопределяется env ME2_LOCK_FILE — изолированный gate-probe
 // рядом с production-daemon'ом получает собственный lock (в CI дефолт не используется вторым).
-const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || "/tmp/me2-daemon.lock";
+const ME2_LOCK_FILE = process.env.ME2_LOCK_FILE || join(tmpdir(), "me2-daemon.lock");
 let poolBootAllowed = true;
 try {
   if (existsSync(ME2_LOCK_FILE)) {
