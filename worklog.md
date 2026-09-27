@@ -10890,3 +10890,21 @@ Stage Summary:
 - Разговоры-агенты, созданные конвейером сегодня: /c/00868e19 (unlock 0536), /c/d9902597 (A/B 0546) — цель 1 (создание чат-агентов) МЕХАНИЧЕСКИ ДОСТИГНУТА
 - Протокол для флота: NEW_TAB → CAPTURE → SEMANTIC_TYPE(submit_after_type=True, replace_existing=True) с task-brief; PRESS_KEY-Enter НЕ использовать для сабмита; мутации с паузой ≥15-20s
 - Результаты: browser-test-results-t0546.json (+зеркало ossfs); шаблон подтверждён
+
+---
+Task ID: BROWSER-TEST-20260928-0600b
+Agent: Super Z (cron loop)
+Task: Job 419203 — тик 06:00 + ДИРЕКТИВА оператора: «все агенты — ТОЛЬКО чат-агенты, остальное удалить, лимитов никаких»
+
+Work Log:
+- FLEET_STATUS detail: 4×ACTIVE = все чат-агенты (привязаны к GLM_CHAT табам), роли PLANNER(tab_fe50ead8)/RESEARCHER(tab_bc085d57)/IMPLEMENTER(tab_9f8b697d)/CRITIC(tab_6f7ea6e9); в флоте НЕ-чат агентов НЕТ — удалять нечего
+- policy: max_agents=null, hard_agent_cap=null (лимитов размера нет), spawn_burst_limit=8, capacity_model=ELASTIC_BACKLOG_DRIVEN, desired=4; off: direct_peer_messaging, automatic_work_retry, browser_authority, adopt_existing
+- FLEET_RECONCILE target=6: COMPLETED, policy desired_agents→6 ПРИНЯТ (лимитов нет подтверждено), но desired_slots=0 → флот 4→4: рост управляется БЭКЛОГОМ задач, не target'ом. Вывод: чтобы флот рос — скармливать задачи planner-у (FLEET TASK briefs)
+- CLOSE_TAB (первый тест): COMPLETED (12638ms) на мин-табе tab_a66fab40 (draft len=6128) — механика работает, мина снята
+- TAB_CENSUS после: total=21 {GLM_CHAT:20, LOCAL_DEV:1}; capabilities полный список: 48 действий (RELOAD, SCROLL, TYPED_CLICK, FLEET_SET_PROFILE, SET_SUPERVISOR_MODE, ARM/DISARM, GATE_*, SELF_UPDATE_APPLY, STOP_GENERATION, BACK/FORWARD, DEV_PLANE_* — кандидаты на тест в след. тиках)
+
+Stage Summary:
+- Директива оператора отражена: флот уже 100% чат-агенты (4/4, роли дев-команды); числовых лимитов нет (cap=null, burst=8, desired апдейтится); единственный «ограничитель» роста — отсутствие бэклога (backlog-driven модель)
+- Механики: +CLOSE_TAB работает (18 работающих), FLEET_RECONCILE-рост зависит от бэклога (не no-op, а backlog-gated)
+- След. шаги: FLEET_SET_PROFILE (вкл. direct_peer_messaging/automatic_work_retry — цели 2–3), тест RELOAD/SCROLL/TYPED_CLICK, раздача задач planner-у для роста флота
+- Артефакт: browser-test-results-t0600.json
