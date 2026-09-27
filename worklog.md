@@ -10334,3 +10334,21 @@ Stage Summary:
 - Сверка подходов закрыта вердиктом «port, не merge»; рецепт порта в backlog
 - DEVLOOP-EVOLVE: следующий тик: (ш.1) ci-race-check.sh; (ш.2) если RACE=0 — подготовить и запушить 3 порта-харденнинга (тест producer_run_id mismatch / topology pin / cardinality pin) одним малым коммитом на PR-head ПОСЛЕ того как Self Update E2E завершится, секрет-скан до коммита по регэкспу с порогом {20,}/{40,} в if-гейте; (ш.3) если RACE=1 — EV-A11Y в apps/metaengine-browser локально (подготовить коммит без пуша); CSV-статистику обновлять раз в 2-3 тика, не каждый
 - Backlog: 3 порта-харденнинга; EV-A11Y; таймауты 75/80/90 → рекомендация 2×p95+producer-grace (~40/45/55) по факту 3-5 стабильных волн; watcher параллельных веток r87/r88/r89
+
+---
+Task ID: R81-DESKTOP-GUARDIAN-20260927
+Agent: Z.ai Code (main)
+Task: Директива оператора «разрабатываем НЕ КОНСОЛЬ, а DESKTOP КЛИЕНТ metaengine в GITHUB» → раунд desktop-клиента: GAP #2 Guardian-parity light в PatrickFrome/Compute (apps/me2-desktop, ветка me2/r78-desktop-from-scratch)
+
+Work Log:
+- Аудит: daemon 0.21.0 (47/47, last_seq 226); me2-desktop HEAD 8d276feb (R80 #1a, 86/86); worktree r86 @ 4ed9ae49 — ОБНАРУЖЕН УЖЕ ЗАПУШЕННЫМ в work/r85-control-room-ui-v1 (CI Self Update E2E in-flight на нём; PR-ветку не трогал)
+- GAP-ROADMAP desktop-клиента: курсор 5.5/8, R81 = #2 Guardian-parity лайт — реализовано полностью
+- Код: GUARDIAN-константы (me2-constants.mjs), guardian-contract.mjs (pure: makeBeacon/validateBeacon/evaluateBeacon/nextBackoffMs/decideRestart/computeRestartsInWindow), scripts/guardian.mjs (внешний watchdog zero-dep, CLI + createGuardian с инъекциями), main.mjs (+beacon-writer после plane_up, SMOKE не бьётся, clean_exit в before-quit)
+- Тесты: test/guardian.test.mjs — 27 pure+интеграционных (tmp-файлы, инъекции spawnImpl/aliveImpl); SUITE 113/113 GREEN; check-syntax 37 файлов OK
+- Версия 0.8.3-dev.0.1; GAP-ROADMAP: #2 → 🔄 parity-лайт (курсор 6/8), условие PR оператора: 3/3 зелёных gate ВЫПОЛНЕНО
+- Пуш: 82a44902 + ad872b98 + b8ed647e → me2/r78-desktop-from-scratch (PAT-паттерн, remote URL чист, grep секретов 0); ME2 Desktop Gate: SUCCESS (3-й подряд); ls-remote/api верифицировано
+
+Stage Summary:
+- Desktop-клиент продвинут: GAP #2 закрыт до parity-лайт, честные инварианты (clean-exit не воюется, cap 8/ч, свидетельства в журнале переживают рестарт guardian'а)
+- Backlog R82: #8 brain-адаптер + #4 native-supervisor client (после ≥1 недели живой обкатки guardian); Xvfb-интеграционный smoke guardian
+- Freeze соблюдён: work/r85-control-room-ui-v1 не тронут
