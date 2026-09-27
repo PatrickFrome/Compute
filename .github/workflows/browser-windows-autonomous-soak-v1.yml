@@ -13,6 +13,7 @@ on:
       - 'apps/metaengine-browser/native/**'
       - 'apps/metaengine-browser/scripts/windows-autonomous-session-soak.ps1'
       - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/metaengine-browser/scripts/qualified-installer-consumer.ps1'
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/me2-ui/**'
