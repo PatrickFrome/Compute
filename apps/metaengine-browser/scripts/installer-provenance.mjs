@@ -153,6 +153,24 @@ function pickNewestRun(runs, head) {
   return mine.reduce((newest, run) => (Number(run.run_number) > Number(newest.run_number) ? run : newest));
 }
 
+function pickNewestArtifact(artifacts, artifactName) {
+  const matches = (Array.isArray(artifacts) ? artifacts : [])
+    .filter((artifact) => artifact?.name === artifactName);
+  if (matches.length === 0) return null;
+  return matches.reduce((newest, artifact) => {
+    const newestCreated = Date.parse(String(newest?.created_at || ''));
+    const artifactCreated = Date.parse(String(artifact?.created_at || ''));
+    if (Number.isFinite(artifactCreated) && Number.isFinite(newestCreated) && artifactCreated !== newestCreated) {
+      return artifactCreated > newestCreated ? artifact : newest;
+    }
+    if (Number.isFinite(artifactCreated) && !Number.isFinite(newestCreated)) return artifact;
+    if (!Number.isFinite(artifactCreated) && Number.isFinite(newestCreated)) return newest;
+    const newestId = Number(newest?.id || 0);
+    const artifactId = Number(artifact?.id || 0);
+    return artifactId > newestId ? artifact : newest;
+  });
+}
+
 function sleep(ms) {
   return new Promise((resolveSleep) => {
     setTimeout(resolveSleep, Math.max(0, ms));
@@ -236,8 +254,8 @@ async function resolveRun(options) {
             apiBase,
           );
           const artifacts = Array.isArray(listed.artifacts) ? listed.artifacts : [];
-          const artifact = artifacts.find((row) => row.name === artifactName && row.expired !== true);
-          if (artifact) {
+          const artifact = pickNewestArtifact(artifacts, artifactName);
+          if (artifact && artifact.expired !== true) {
             return {
               schema: RESOLVED_SCHEMA,
               repository,
@@ -368,12 +386,25 @@ async function downloadArtifact(options) {
 
   const list = await githubJson(`/repos/${repository}/actions/runs/${runId}/artifacts?per_page=100`, token, apiBase);
   const artifacts = Array.isArray(list.artifacts) ? list.artifacts : [];
-  const match = artifacts.find((artifact) => artifact.name === artifactName);
+  const exactArtifactId = options['artifact-id'] === undefined || options['artifact-id'] === true
+    ? null
+    : String(options['artifact-id']);
+  const match = exactArtifactId
+    ? artifacts.find((artifact) => artifact.name === artifactName && String(artifact.id) === exactArtifactId)
+    : pickNewestArtifact(artifacts, artifactName);
   if (!match) {
-    throw new ProvenanceError('artifact_not_found', { artifact: artifactName, run_id: runId });
+    throw new ProvenanceError(exactArtifactId ? 'artifact_id_not_found' : 'artifact_not_found', {
+      artifact: artifactName,
+      artifact_id: exactArtifactId,
+      run_id: runId,
+    });
   }
   if (match.expired) {
-    throw new ProvenanceError('artifact_expired', { artifact: artifactName, run_id: runId });
+    throw new ProvenanceError('artifact_expired', {
+      artifact: artifactName,
+      artifact_id: String(match.id),
+      run_id: runId,
+    });
   }
 
   const response = await fetch(`${apiBase}/repos/${repository}/actions/artifacts/${match.id}/zip`, {
@@ -604,6 +635,7 @@ async function acquireInstaller(options) {
     repository: resolved.repository,
     token: options.token || process.env.ME2_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
     'run-id': resolved.run_id,
+    ...(resolved.artifact_id ? { 'artifact-id': resolved.artifact_id } : {}),
   });
   return { ...downloaded, resolved_path: resolvedPath };
 }
