@@ -53,6 +53,21 @@ The workflows no longer inline low-level calls to:
 
 They invoke the R91 helper in `Acquire` and `Wait` modes and preserve their own product-specific installed proofs.
 
+
+## Trigger-topology defect found during qualification setup
+
+Opening the R91 PR exposed a separate exact-head orchestration defect: Installed Chat / Final Runtime / Autonomous Soak were scheduled for the new head, but Package Smoke was not, because the producer's pull-request path filter was narrower than the union of its consumers.
+
+That topology is invalid for an exact-head immutable artifact system: every consumer head requires a Package Smoke artifact whose provenance names that same head. Reusing a parent artifact would violate the source-head contract, while waiting for a producer that was never scheduled would deadlock/fail the consumers.
+
+R91 therefore also closes the producer trigger graph:
+
+- Package Smoke now includes `apps/metaengine-browser/**` in its PR trigger surface;
+- consumer workflow file changes themselves also trigger Package Smoke;
+- the contract test pins this closure so a future consumer-only CI change cannot schedule downstream qualification without an exact-head producer.
+
+This deliberately prefers correctness over avoiding one producer run. The build-once architecture still removes the larger duplicate cost: only Package Smoke builds NSIS.
+
 ## Safety invariants
 
 R91 does not change:
