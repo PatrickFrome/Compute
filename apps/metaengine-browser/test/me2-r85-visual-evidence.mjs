@@ -160,6 +160,8 @@ async function metrics(contents) {
       mission_objective: rect('mission-objective-card'),
       mission_active_work: rect('mission-active-work'),
       browser_shell: rect('browser-shell'),
+      evidence_timeline: rect('evidence-timeline'),
+      evidence_binding_mode: document.querySelector('[data-testid="evidence-timeline"]')?.getAttribute('data-binding-mode') || null,
       context_drawer: rect('context-drawer'),
       utility_panel_body: rect('utility-panel-body'),
       context_drawer_dock: document.querySelector('[data-testid="context-drawer"]')?.getAttribute('data-drawer-dock') || null,
@@ -222,6 +224,16 @@ function assertBaseMetrics(row) {
   if (m?.page === 'browser') {
     if (!m?.browser_shell || Math.round(m.browser_shell.width || 0) < 500 || Math.round(m.browser_shell.height || 0) < 300) {
       throw new Error(`r95c_visual_run_browser_missing:${JSON.stringify(m?.browser_shell)}`);
+    }
+    return;
+  }
+  if (m?.page === 'observability') {
+    if (!m?.evidence_timeline || Math.round(m.evidence_timeline.width || 0) < 400 || Math.round(m.evidence_timeline.height || 0) < 80) {
+      throw new Error(`r95e_visual_evidence_timeline_missing:${JSON.stringify(m?.evidence_timeline)}`);
+    }
+    if (m?.browser_shell != null) throw new Error('r95e_visual_observe_must_not_host_browser');
+    if (!['UNBOUND', 'EXACT_TASK_ID'].includes(String(m?.evidence_binding_mode || ''))) {
+      throw new Error(`r95e_visual_evidence_binding_mode_invalid:${m?.evidence_binding_mode}`);
     }
     return;
   }
@@ -361,13 +373,33 @@ async function main() {
     })()`);
     if (rightControlsVisible !== true) throw new Error('r95c_visual_right_drawer_controls_not_visible');
 
+    markPhase('CLOSE_RUN_UTILITY');
+    await withTimeout(
+      shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="context-drawer-toggle"]')?.click(); true`),
+      5000,
+      'close_run_utility',
+    );
+    await waitFor(shellView.webContents, "!document.querySelector('[data-testid=context-drawer]')");
+
+    markPhase('NAVIGATE_OBSERVE');
+    await withTimeout(
+      shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="workflow-stage-observe"]')?.click(); true`),
+      5000,
+      'navigate_observe',
+    );
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-observability]')");
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=evidence-timeline]')");
+    const evidenceTimeline = await capture(shellView, 'r95e-observe-evidence-1440x960');
+    assertBaseMetrics(evidenceTimeline);
+    if (evidenceTimeline.metrics.context_drawer != null) throw new Error('r95e_visual_observe_drawer_should_be_closed');
+
     const evidence = Object.freeze({
       schema: 'metaengine.browser.r85-visual-evidence.v1',
       source_head: process.env.ME2_BUILD_SHA || null,
       electron: process.versions.electron,
       platform: process.platform,
       arch: process.arch,
-      captures: Object.freeze([closed, drawer, rightDrawer]),
+      captures: Object.freeze([closed, drawer, rightDrawer, evidenceTimeline]),
       primary_me2_ui_captured: true,
       legacy_shell_captured: false,
       remote_browser_content_captured: false,
@@ -380,6 +412,8 @@ async function main() {
       run_surface_verified: true,
       utility_panel_bottom_verified: true,
       utility_panel_right_verified: true,
+      evidence_timeline_verified: true,
+      evidence_binding_fail_closed: evidenceTimeline.metrics.evidence_binding_mode === 'UNBOUND' || evidenceTimeline.metrics.evidence_binding_mode === 'EXACT_TASK_ID',
       broken_image_fallback_hidden: true,
       visual_golden_comparison_enabled: false,
       presentation_only: true,
