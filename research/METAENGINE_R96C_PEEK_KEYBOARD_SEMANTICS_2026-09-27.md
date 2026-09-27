@@ -39,8 +39,14 @@ Linear explicitly reserves Space for preview and lets Up/Down move through adjac
 
 - Queue Task cards with no nested widgets become focusable `role="link"` surfaces: Enter opens, Space previews.
 - Agent cards and BranchGraph task rows contain nested controls, so they become focusable `role="group"` containers instead of false buttons.
-- `aria-keyshortcuts` documents Enter / Space / Arrow navigation on the focus surface.
+- `aria-keyshortcuts` exposes only the unconditional focus-surface shortcuts (`Enter` and `Space`). Arrow browsing is available only while Space is held, so advertising ArrowUp/ArrowDown as standalone shortcuts would be false metadata. The held-Space arrow behavior remains documented in the visible Peek UI/help text instead.
 - Real nested buttons/selects remain real controls, and R96B's reserved-target fence prevents Peek from stealing their Space key.
 - No command, task, Browser, scheduler, IPC, DB or network path is added.
 
 A future R96D may implement Linear's quick-tap-to-pin behavior separately. It must not be conflated with this semantic repair.
+
+
+### WAI-ARIA aria-keyshortcuts metadata contract
+https://www.w3.org/TR/wai-aria-1.3/#aria-keyshortcuts
+
+The attribute is a space-separated list of concrete keyboard shortcuts. `Space` is a valid non-modifier key token, but `ArrowUp` / `ArrowDown` would imply those keys independently invoke behavior. METAENGINE only handles them while Peek is already held, so R96C deliberately does not expose them as standalone `aria-keyshortcuts`.
