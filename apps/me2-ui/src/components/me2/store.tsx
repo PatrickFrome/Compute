@@ -294,7 +294,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       ? dock
       : get().contextDrawerDock;
 
-    if (request.page !== "command") {
+    if (request.page !== "browser") {
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: want,
