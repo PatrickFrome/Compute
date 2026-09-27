@@ -258,6 +258,9 @@ jobs:
             package_version=$version
             installer_name=$installer.Name
             installer_sha256=$digest
+            producer_run_id=[int64]$acquire.producer_run_id
+            producer_run_attempt=[int64]$acquire.producer_run_attempt
+            producer_completed_at_acquire=[bool]$acquire.producer_completed_at_acquire
             semantic_edges=100000
             endurance_semantic_edges=1000000
             endurance_browser_cells=128
