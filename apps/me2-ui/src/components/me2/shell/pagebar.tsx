@@ -77,7 +77,7 @@ export function PageBar() {
     <nav
       aria-label="Workflow stages METAENGINE"
       data-testid="pagebar"
-      className="flex h-10 shrink-0 items-stretch border-t border-zinc-800/80 bg-[#0b0b0d] px-1.5"
+      className="flex h-9 shrink-0 items-stretch border-t border-zinc-800/80 bg-[#0b0b0d] px-1.5"
     >
       <div className="relative flex items-center pr-1">
         <button
@@ -96,7 +96,7 @@ export function PageBar() {
         {wsOpen ? (
           <>
             <button type="button" aria-hidden className="fixed inset-0 z-40 cursor-default" onClick={() => setWorkspaceMenu(false)} tabIndex={-1} />
-            <div role="menu" className="absolute bottom-10 left-0 z-50 w-64 overflow-hidden border border-zinc-800 bg-[#111114] shadow-2xl">
+            <div role="menu" className="absolute bottom-9 left-0 z-50 w-64 overflow-hidden border border-zinc-800 bg-[#111114] shadow-2xl">
               <p className="border-b border-zinc-800 px-3 py-2 text-[9px] font-bold uppercase tracking-widest text-zinc-500">Workspaces</p>
               {WORKSPACES.map((w) => (
                 <button
@@ -167,7 +167,7 @@ export function PageBar() {
               {stageMenu === stage.key ? (
                 <>
                   <button type="button" aria-hidden className="fixed inset-0 z-40 cursor-default" onClick={() => setStageMenuOpen(null)} tabIndex={-1} />
-                  <div role="menu" className="absolute bottom-10 left-0 z-50 min-w-48 overflow-hidden border border-zinc-800 bg-[#111114] py-1 shadow-2xl">
+                  <div role="menu" className="absolute bottom-9 left-0 z-50 min-w-48 overflow-hidden border border-zinc-800 bg-[#111114] py-1 shadow-2xl">
                     <p className="px-3 py-1.5 text-[9px] uppercase tracking-widest text-zinc-600">{stage.label} modules</p>
                     {stage.pages.map((modulePage) => (
                       <button
