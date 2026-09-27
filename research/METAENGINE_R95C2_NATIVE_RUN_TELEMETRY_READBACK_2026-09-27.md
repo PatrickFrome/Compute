@@ -89,3 +89,33 @@ The harness now:
 - still exits 0 only after successful evidence serialization.
 
 Primary source: https://www.electronjs.org/docs/latest/api/app
+
+
+## Physical visibility contract: mounted DOM is not rendered telemetry
+
+With the harness exit race removed, the exact physical failure became:
+`r95c2_visual_right_utility_must_release_telemetry`.
+
+The product readback path was already returning a hidden telemetry state. The harness itself
+was conflating DOM existence with rendered visibility: BrowserPage intentionally keeps the
+telemetry `<div>` mounted and switches it to Tailwind `hidden`, while the harness's
+`rect()` returned a non-null object for every existing node. A `display:none` element can
+therefore appear as a non-null zero-size DOMRect even though it has no rendered box.
+
+The physical proof is strengthened rather than relaxed:
+- telemetry visibility now uses `getClientRects().length` plus positive width/height;
+- DOM presence and `data-inspector-visible` remain recorded separately;
+- after Right dock selection, the harness waits for the asynchronous Main→renderer readback
+  state (`data-inspector-visible=false`) before capture;
+- a rendered telemetry rect after that point remains a hard failure.
+
+This matches the platform model: MDN documents that `getClientRects()` returns an empty list
+for `display:none` / non-rendered elements, while `getBoundingClientRect()` may return a
+zero-sized rectangle when no non-empty border boxes remain. Electron's `ipcRenderer.invoke`
+is Promise-based, so the native reply is asynchronous and the physical gate must wait for the
+reply-derived render state, not merely the synchronous dock selector change.
+
+Primary sources:
+- https://developer.mozilla.org/en-US/docs/Web/API/Element/getClientRects
+- https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect
+- https://www.electronjs.org/docs/latest/api/ipc-renderer

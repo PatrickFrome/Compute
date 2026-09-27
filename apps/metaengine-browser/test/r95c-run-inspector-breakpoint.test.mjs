@@ -143,3 +143,19 @@ test('R95C.2 physical harness cannot let last-window cleanup mask a failing asse
   assert.match(visualHarness, /r85-visual-failure\.json/);
   assert.match(visualHarness, /app\.exit\(1\)/);
 });
+
+
+test('R95C.2 physical visibility proof distinguishes a hidden mounted telemetry node from rendered pixels', () => {
+  assert.match(visualHarness, /const visibleRect = \(id\) =>/);
+  assert.match(visualHarness, /el\.getClientRects\(\)\.length === 0/);
+  assert.match(visualHarness, /run_telemetry_inspector: visibleRect\('run-telemetry-inspector'\)/);
+  assert.match(visualHarness, /run_telemetry_inspector_dom_present/);
+  assert.match(visualHarness, /data-inspector-visible/);
+});
+
+test('R95C.2 Right Utility capture waits for asynchronous native readback convergence', () => {
+  const dockAt = visualHarness.indexOf("data-drawer-dock') === 'right'");
+  const readbackAt = visualHarness.indexOf("data-inspector-visible') === 'false'", dockAt);
+  const captureAt = visualHarness.indexOf("r95c-run-utility-right-1440x960", readbackAt);
+  assert.ok(dockAt >= 0 && readbackAt > dockAt && captureAt > readbackAt);
+});
