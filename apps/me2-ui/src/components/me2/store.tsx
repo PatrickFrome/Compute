@@ -294,7 +294,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       ? dock
       : get().contextDrawerDock;
 
-    if (request.page !== "command") {
+    if (request.page !== "browser") {
       set({
         contextDrawerPreferredOpen: want,
         contextDrawerOpen: want,
@@ -617,7 +617,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
 
   setPage: (p) => {
     // Any page transition invalidates in-flight drawer geometry replies.
-    // A new COMMAND sync below gets a fresh sequence/context token.
+    // A new RUN/Browser sync below gets a fresh sequence/context token.
     contextDrawerSyncSeq += 1;
     set((st) => {
       if (st.page === p) return st;
@@ -630,7 +630,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       };
     });
     syncPagePresentation(p);
-    if (p === "command") get().syncContextDrawer();
+    if (p === "browser") get().syncContextDrawer();
     else set({
       contextDrawerOpen: get().contextDrawerPreferredOpen,
       contextDrawerHeight: get().contextDrawerPreferredHeight,

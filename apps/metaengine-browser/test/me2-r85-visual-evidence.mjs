@@ -75,7 +75,7 @@ function registerPresentationIpc() {
     return Object.freeze({
       schema: 'metaengine.browser.r85-visual.primary-overlay.v1',
       active: overlay,
-      native_browser_surface_visible: !overlay && page === 'command',
+      native_browser_surface_visible: !overlay && page === 'browser',
       presentation_only: true,
       authority_effect: false,
     });
@@ -157,6 +157,8 @@ async function metrics(contents) {
       statusbar: rect('statusbar'),
       command: rect('page-command'),
       agent_sidebar: rect('agent-sidebar'),
+      mission_objective: rect('mission-objective-card'),
+      mission_active_work: rect('mission-active-work'),
       browser_shell: rect('browser-shell'),
       context_drawer: rect('context-drawer'),
       utility_panel_body: rect('utility-panel-body'),
@@ -204,14 +206,26 @@ function assertBaseMetrics(row) {
   if (Math.round(m?.topbar?.height || 0) !== 42) throw new Error(`r85_visual_topbar_height:${m?.topbar?.height}`);
   if (Math.round(m?.pagebar?.height || 0) !== 36) throw new Error(`r85_visual_pagebar_height:${m?.pagebar?.height}`);
   if (Math.round(m?.statusbar?.height || 0) !== 22) throw new Error(`r85_visual_statusbar_height:${m?.statusbar?.height}`);
-  if (Math.round(m?.agent_sidebar?.width || 0) !== 252) throw new Error(`r85_visual_agent_sidebar_width:${m?.agent_sidebar?.width}`);
-  if (m?.page !== 'command') throw new Error(`r85_visual_page:${m?.page}`);
-  if (!m?.context_drawer_toggle || !m?.sidebar_toggle || !m?.attention_button) throw new Error('r85_visual_global_controls_missing');
+  if (!m?.context_drawer_toggle || !m?.attention_button) throw new Error('r85_visual_global_controls_missing');
   if (m?.palette_mounted) throw new Error('r85_visual_closed_overlay_semantic_pollution');
   if (m?.broken_browser_images_hidden !== true) {
     throw new Error(`r85_visual_broken_browser_image_visible:${JSON.stringify(m?.browser_images || [])}`);
   }
   if (m?.remote_browser_pixels_visible) throw new Error('r85_visual_remote_browser_pixels_visible');
+  if (m?.page === 'command') {
+    if (Math.round(m?.agent_sidebar?.width || 0) !== 252) throw new Error(`r95c_visual_agent_sidebar_width:${m?.agent_sidebar?.width}`);
+    if (!m?.sidebar_toggle) throw new Error('r95c_visual_command_sidebar_toggle_missing');
+    if (!m?.mission_objective || !m?.mission_active_work) throw new Error('r95c_visual_mission_control_missing');
+    if (m?.browser_shell != null) throw new Error('r95c_visual_command_must_not_host_browser');
+    return;
+  }
+  if (m?.page === 'browser') {
+    if (!m?.browser_shell || Math.round(m.browser_shell.width || 0) < 500 || Math.round(m.browser_shell.height || 0) < 300) {
+      throw new Error(`r95c_visual_run_browser_missing:${JSON.stringify(m?.browser_shell)}`);
+    }
+    return;
+  }
+  throw new Error(`r95c_visual_unexpected_page:${m?.page}`);
 }
 
 async function main() {
@@ -292,45 +306,50 @@ async function main() {
     markPhase('WAIT_PRIMARY_COMMAND');
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-command]')");
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer-toggle]')");
-    await waitForRemoteIsolation();
-    markPhase('CAPTURE_COMMAND_CLOSED');
-    const closed = await capture(shellView, 'r85-command-1440x960');
+    markPhase('CAPTURE_COMMAND_MISSION');
+    const closed = await capture(shellView, 'r95c-command-mission-1440x960');
     assertBaseMetrics(closed);
-    if (closed.metrics.context_drawer != null) throw new Error('r85_visual_drawer_should_start_closed');
+    if (closed.metrics.context_drawer != null) throw new Error('r95c_visual_drawer_should_start_closed');
 
-    markPhase('OPEN_CONTEXT_DRAWER');
+    markPhase('NAVIGATE_RUN');
+    await withTimeout(
+      shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="workflow-stage-run"]')?.click(); true`),
+      5000,
+      'navigate_run',
+    );
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-browser]')");
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=browser-shell]')");
+    await waitForRemoteIsolation();
+
+    markPhase('OPEN_RUN_UTILITY_BOTTOM');
     await withTimeout(
       shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="context-drawer-toggle"]')?.click(); true`),
       5000,
-      'open_context_drawer',
+      'open_run_utility_bottom',
     );
-    await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer]')");
-    markPhase('CAPTURE_COMMAND_DRAWER');
-    const drawer = await capture(shellView, 'r85-command-drawer-1440x960');
+    await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer]')?.getAttribute('data-drawer-dock') === 'bottom'");
+    const drawer = await capture(shellView, 'r95c-run-utility-bottom-1440x960');
     assertBaseMetrics(drawer);
     const drawerHeight = Math.round(drawer.metrics?.context_drawer?.height || 0);
-    if (drawerHeight < 160 || drawerHeight > 360) throw new Error(`r85_visual_drawer_height:${drawerHeight}`);
-    if (drawer.metrics?.context_drawer_dock !== 'bottom') throw new Error(`r95_visual_bottom_dock:${drawer.metrics?.context_drawer_dock}`);
+    if (drawerHeight < 160 || drawerHeight > 360) throw new Error(`r95c_visual_drawer_height:${drawerHeight}`);
 
-    markPhase('DOCK_UTILITY_PANEL_RIGHT');
+    markPhase('DOCK_RUN_UTILITY_RIGHT');
     await withTimeout(
       shellView.webContents.executeJavaScript(`document.querySelector('[data-testid="utility-panel-dock-right"]')?.click(); true`),
       5000,
-      'dock_utility_panel_right',
+      'dock_run_utility_right',
     );
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer]')?.getAttribute('data-drawer-dock') === 'right'");
-    markPhase('CAPTURE_COMMAND_UTILITY_RIGHT');
-    const rightDrawer = await capture(shellView, 'r95-command-utility-right-1440x960');
+    const rightDrawer = await capture(shellView, 'r95c-run-utility-right-1440x960');
     assertBaseMetrics(rightDrawer);
     const drawerWidth = Math.round(rightDrawer.metrics?.context_drawer?.width || 0);
-    if (drawerWidth < 320 || drawerWidth > 520) throw new Error(`r95_visual_right_drawer_width:${drawerWidth}`);
-    if (rightDrawer.metrics?.context_drawer_dock !== 'right') throw new Error(`r95_visual_right_dock:${rightDrawer.metrics?.context_drawer_dock}`);
+    if (drawerWidth < 320 || drawerWidth > 520) throw new Error(`r95c_visual_right_drawer_width:${drawerWidth}`);
     if (Math.round(rightDrawer.metrics?.context_drawer?.height || 0) <= drawerHeight) {
-      throw new Error(`r95_visual_right_drawer_not_vertical:${JSON.stringify(rightDrawer.metrics?.context_drawer)}`);
+      throw new Error(`r95c_visual_right_drawer_not_vertical:${JSON.stringify(rightDrawer.metrics?.context_drawer)}`);
     }
     const rightBody = rightDrawer.metrics?.utility_panel_body;
     if (!rightBody || Math.round(rightBody.width || 0) < drawerWidth - 16 || Math.round(rightBody.height || 0) < 300) {
-      throw new Error(`r95_visual_right_drawer_body_missing:${JSON.stringify(rightBody)}`);
+      throw new Error(`r95c_visual_right_drawer_body_missing:${JSON.stringify(rightBody)}`);
     }
     const rightControlsVisible = await shellView.webContents.executeJavaScript(`(() => {
       const tab = document.querySelector('[data-testid="context-drawer"] [role="tab"]');
@@ -340,7 +359,7 @@ async function main() {
       const b = dock.getBoundingClientRect();
       return a.width > 20 && a.height > 10 && b.width > 20 && b.height > 10;
     })()`);
-    if (rightControlsVisible !== true) throw new Error('r95_visual_right_drawer_controls_not_visible');
+    if (rightControlsVisible !== true) throw new Error('r95c_visual_right_drawer_controls_not_visible');
 
     const evidence = Object.freeze({
       schema: 'metaengine.browser.r85-visual-evidence.v1',
@@ -357,6 +376,8 @@ async function main() {
       closed_overlays_absent_from_dom: true,
       r85_geometry_verified: true,
       drawer_interaction_verified: true,
+      mission_control_verified: true,
+      run_surface_verified: true,
       utility_panel_bottom_verified: true,
       utility_panel_right_verified: true,
       broken_image_fallback_hidden: true,

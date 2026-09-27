@@ -1,22 +1,26 @@
 "use client";
 /**
- * ME2 BROWSER (R74, Page 3) — браузерная инфраструктура.
- * Центр: BrowserStage (полный режим — скринкаст, вкладки, pair-control, CDP-фолбэк).
- * Правая колонка (≥lg) — порт legacy-телеметрии:
- *  - SENSE  (tl-sense, L4044-4080): aria-перцепция GET /browser/sense (+?refresh=1), дифы
+ * ME2 RUN (R95, Page 4) — workflow-страница исполнения: НАСТОЯЩИЙ браузер +
+ * превью приложения. Хостит legacy-модуль BROWSER (data-testid="page-browser"):
+ * центр — BrowserStage (compact: фиксированные h-7/h-9/h-6 chrome = точная
+ * native-геометрия ME2_R95_RUN), правая колонка (≥lg) — порт legacy-телеметрии:
+ *  - SENSE  (tl-sense): aria-перцепция GET /browser/sense (+?refresh=1), дифы
  *           /browser/sense/diffs, actuation POST /browser/sense/act {key,action,text} с авто-verify;
- *  - OBSV   (tl-obsv, L4082-4124): GET /browser/obsv?limit=14, POST ops attach/reset/stop/ttl,
+ *  - OBSV   (tl-obsv): GET /browser/obsv?limit=14, POST ops attach/reset/stop/ttl,
  *           ленты network/console/exceptions;
  *  - EFFECT (effect-плоскость daemon, GET /browser/effect): вердикты + durable fences,
  *           clear — только с подтверждением и честным тостом при 403 (approval-гейт fence_clear);
- *  - CDP-LIVE (L4339-4386): /stats :3043 — stats-чипы (контролы качества q/w живут в BrowserStage).
+ *  - CDP-LIVE: /stats :3043 — stats-чипы (контролы качества q/w живут в BrowserStage).
+ * R95-IA: Browser больше не является центром COMMAND (Alt+1 — миссия); RUN —
+ * единственная страница с native Browser surface (ME2_R95_RUN профиль).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Radar, RefreshCw, ScanEye, ShieldCheck, Zap } from "lucide-react";
-import { PageHeader, Sec, Chip } from "@/components/me2/ui/primitives";
+import { Sec, Chip } from "@/components/me2/ui/primitives";
 import { me2Fetch, toastBus } from "@/lib/me2-bus";
 import { BrowserStage } from "@/components/me2/stages/browser-stage";
+import { useMe2 } from "@/components/me2/store";
 
 // ── типы (зеркало daemon: sense.ts / obsv.ts / effect.ts) ───────────────────────
 type SenseTarget = { ref: string; role: string; name: string };
@@ -404,14 +408,21 @@ function CdpLiveSection() {
   );
 }
 
-// ── Page: BROWSER ───────────────────────────────────────────────────────────────
+// ── Page: RUN (host модуля BROWSER) ───────────────────────────────────────
 export function BrowserPage() {
+  const utilityRightOpen = useMe2((s) => s.contextDrawerOpen && s.contextDrawerDock === "right");
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-browser" data-panel-browser>
-      <PageHeader title="BROWSER" sub="браузерная инфраструктура и Browser Agents" />
+      {/* R95: фиксированный h-8 strip — native-геометрия ME2_R95_RUN резервирует
+          ровно 32px над tabstrip/urlbar (вместо гибкого PageHeader R74) */}
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2">
+        <h2 className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-300">RUN</h2>
+        <span className="min-w-0 truncate text-[10px] text-zinc-500">браузер и превью приложения · сенсоры справа (lg+)</span>
+      </div>
       <div className="flex min-h-0 flex-1 gap-2">
-        <BrowserStage />
-        <div className="mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto lg:flex" aria-label="Браузерная инфраструктура">
+        <BrowserStage compact defaultCastOn />
+        <div className={`${utilityRightOpen ? "hidden" : "mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto lg:flex"}`} aria-label="Браузерная инфраструктура" data-testid="run-telemetry-inspector" data-inspector-visible={utilityRightOpen ? "false" : "true"}>
           <SenseSection />
           <ObsvSection />
           <EffectSection />

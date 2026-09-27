@@ -26,6 +26,9 @@ export const ME2_PRIMARY_CONTEXT_DRAWER_WIDTH = 380;
 export const ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH = 320;
 export const ME2_PRIMARY_CONTEXT_DRAWER_MAX_WIDTH = 520;
 export const ME2_PRIMARY_MIN_BROWSER_HEIGHT = 320;
+export const ME2_PRIMARY_RUN_INSPECTOR_WIDTH = 384;
+export const ME2_PRIMARY_RUN_INSPECTOR_GAP = 8;
+export const ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH = 1024;
 
 const SIDEBAR_MODES = new Set(['EXPANDED', 'COMPACT', 'HIDDEN']);
 const OPERATIONS_MODES = new Set(['OPEN', 'CLOSED']);
@@ -227,11 +230,111 @@ export function planShellLayout({
     remoteHeight = Math.max(0, windowHeight - top - bottom);
     effectiveSidebar = left === preferredLeft ? 'EXPANDED' : 'HIDDEN';
     effectiveOperations = 'CLOSED';
+  } else if (surfaceProfile === 'ME2_R95_RUN') {
+    // RUN is the only primary ME2 page that owns native Browser pixels.
+    // Reserve renderer chrome, optional telemetry inspector, and the global
+    // Utility Panel before projecting the Browser WebContentsView.
+    top = Math.min(
+      ME2_PRIMARY_TOP_HEIGHT
+        + ME2_PRIMARY_PAGE_PADDING
+        + ME2_PRIMARY_COMMAND_AGENT_HEADER_HEIGHT
+        + ME2_PRIMARY_COMMAND_GAP
+        + ME2_PRIMARY_BROWSER_TABSTRIP_HEIGHT
+        + ME2_PRIMARY_BROWSER_URLBAR_HEIGHT,
+      windowHeight,
+    );
+    const baseBottom = Math.min(
+      ME2_PRIMARY_PAGEBAR_HEIGHT
+        + ME2_PRIMARY_STATUSBAR_HEIGHT
+        + ME2_PRIMARY_PAGE_PADDING
+        + ME2_PRIMARY_BROWSER_STATUS_HEIGHT,
+      Math.max(0, windowHeight - top),
+    );
+    left = ME2_PRIMARY_PAGE_PADDING;
+    const rawDock = String(me2_context_drawer_dock || 'BOTTOM').trim().toUpperCase();
+    const requestedDock = ME2_DRAWER_DOCKS.has(rawDock) ? rawDock : 'BOTTOM';
+    const drawerRequested = me2_context_drawer_open === true;
+    const requestedDrawerHeight = clamp(
+      me2_context_drawer_height,
+      ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT,
+      ME2_PRIMARY_CONTEXT_DRAWER_MAX_HEIGHT,
+      ME2_PRIMARY_CONTEXT_DRAWER_HEIGHT,
+    );
+    const requestedDrawerWidth = clamp(
+      me2_context_drawer_width,
+      ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH,
+      ME2_PRIMARY_CONTEXT_DRAWER_MAX_WIDTH,
+      ME2_PRIMARY_CONTEXT_DRAWER_WIDTH,
+    );
+
+    // The telemetry inspector is optional. A user-requested Right Utility Panel
+    // gets first claim on the presentation budget, then the inspector may use
+    // the remaining width. Native Browser minimum remains the hard floor.
+    const inspectorRequested = windowWidth >= ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH;
+    const rightUtilityRequested = drawerRequested && requestedDock === 'RIGHT';
+    const inspectorFits = windowWidth
+      - ME2_PRIMARY_PAGE_PADDING * 2
+      - (ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP)
+      >= SHELL_MIN_REMOTE_WIDTH;
+    const inspectorVisible = inspectorRequested && inspectorFits && !rightUtilityRequested;
+    const baseRight = inspectorVisible
+      ? ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP
+      : ME2_PRIMARY_PAGE_PADDING;
+    right = baseRight;
+    bottom = baseBottom;
+    me2DrawerRequestedOpen = drawerRequested;
+    me2DrawerRequestedDock = requestedDock;
+    me2DrawerRequestedHeight = requestedDrawerHeight;
+    me2DrawerRequestedWidth = requestedDrawerWidth;
+    me2DrawerEffectiveDock = requestedDock;
+
+    if (drawerRequested && requestedDock === 'BOTTOM') {
+      const capacity = Math.max(0, windowHeight - top - baseBottom - ME2_PRIMARY_MIN_BROWSER_HEIGHT);
+      const effectiveHeight = capacity >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT
+        ? Math.min(requestedDrawerHeight, capacity)
+        : 0;
+      if (effectiveHeight >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_HEIGHT) {
+        me2DrawerEffectiveOpen = true;
+        me2DrawerHeight = effectiveHeight;
+        bottom = Math.min(baseBottom + effectiveHeight, Math.max(0, windowHeight - top));
+        if (effectiveHeight < requestedDrawerHeight) adaptations.push('ME2_CONTEXT_DRAWER_CLAMPED_FOR_ACTIVE_SURFACE');
+      } else {
+        me2DrawerEffectiveOpen = false;
+        adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
+      }
+    } else if (drawerRequested && requestedDock === 'RIGHT') {
+      const capacity = Math.max(0, windowWidth - left - baseRight - SHELL_MIN_REMOTE_WIDTH);
+      const effectiveWidth = capacity >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH
+        ? Math.min(requestedDrawerWidth, capacity)
+        : 0;
+      if (effectiveWidth >= ME2_PRIMARY_CONTEXT_DRAWER_MIN_WIDTH) {
+        me2DrawerEffectiveOpen = true;
+        me2DrawerWidth = effectiveWidth;
+        right = baseRight + effectiveWidth;
+        if (effectiveWidth < requestedDrawerWidth) adaptations.push('ME2_CONTEXT_DRAWER_CLAMPED_FOR_ACTIVE_SURFACE');
+      } else {
+        me2DrawerEffectiveOpen = false;
+        adaptations.push('ME2_CONTEXT_DRAWER_CLOSED_FOR_ACTIVE_SURFACE');
+      }
+    } else {
+      me2DrawerEffectiveOpen = false;
+    }
+
+    contentWidth = Math.max(0, windowWidth - left - right);
+    remoteHeight = Math.max(0, windowHeight - top - bottom);
+    effectiveSidebar = 'HIDDEN';
+    effectiveOperations = 'CLOSED';
+    if (inspectorRequested && !inspectorVisible) {
+      adaptations.push(rightUtilityRequested
+        ? 'ME2_RUN_INSPECTOR_RELEASED_FOR_UTILITY_PANEL'
+        : 'ME2_RUN_INSPECTOR_RELEASED_FOR_ACTIVE_SURFACE');
+    }
   } else if (surfaceProfile !== 'LEGACY_BROWSER_SHELL') {
     surfaceProfile = 'LEGACY_BROWSER_SHELL';
   }
 
   const activeSurfaceWidthTarget = Math.min(SHELL_MIN_REMOTE_WIDTH, windowWidth);
+  const isMe2DrawerSurface = surfaceProfile === 'ME2_R75_COMMAND' || surfaceProfile === 'ME2_R95_RUN';
 
   return Object.freeze({
     schema: 'metaengine.browser-shell.layout-plan.v1',
@@ -249,14 +352,14 @@ export function planShellLayout({
     active_surface_target_satisfied: contentWidth >= activeSurfaceWidthTarget,
     active_surface_priority: true,
     me2_command_rail_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2_command_rail_open !== false : null,
-    me2_context_drawer_requested_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerRequestedOpen : null,
-    me2_context_drawer_requested_dock: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerRequestedDock : null,
-    me2_context_drawer_requested_height: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerRequestedHeight : null,
-    me2_context_drawer_requested_width: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerRequestedWidth : null,
-    me2_context_drawer_effective_open: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerEffectiveOpen : null,
-    me2_context_drawer_effective_dock: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerEffectiveDock : null,
-    me2_context_drawer_height: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerHeight : 0,
-    me2_context_drawer_width: surfaceProfile === 'ME2_R75_COMMAND' ? me2DrawerWidth : 0,
+    me2_context_drawer_requested_open: isMe2DrawerSurface ? me2DrawerRequestedOpen : null,
+    me2_context_drawer_requested_dock: isMe2DrawerSurface ? me2DrawerRequestedDock : null,
+    me2_context_drawer_requested_height: isMe2DrawerSurface ? me2DrawerRequestedHeight : null,
+    me2_context_drawer_requested_width: isMe2DrawerSurface ? me2DrawerRequestedWidth : null,
+    me2_context_drawer_effective_open: isMe2DrawerSurface ? me2DrawerEffectiveOpen : null,
+    me2_context_drawer_effective_dock: isMe2DrawerSurface ? me2DrawerEffectiveDock : null,
+    me2_context_drawer_height: isMe2DrawerSurface ? me2DrawerHeight : 0,
+    me2_context_drawer_width: isMe2DrawerSurface ? me2DrawerWidth : 0,
     chrome_degrades_before_active_surface: true,
     adaptations: Object.freeze(adaptations),
     adapted: adaptations.length > 0,
