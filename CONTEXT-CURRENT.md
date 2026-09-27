@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T01:43:05Z | worklog: 1887947B / 10336L | sha12=bb411534ebe3
+gen: 2026-09-27T01:52:13Z | worklog: 1890241B / 10354L | sha12=744de4c4e03f
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -9,7 +9,7 @@ gen: 2026-09-27T01:43:05Z | worklog: 1887947B / 10336L | sha12=bb411534ebe3
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1887947B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1890241B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -24,7 +24,6 @@ gen: 2026-09-27T01:43:05Z | worklog: 1887947B / 10336L | sha12=bb411534ebe3
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- SEC-RESTORE-2 → Оператор ре-постнул секреты (88B-blob + service_role eyJ-JWT). Восстановить Supabase-канал, обновить носители, обновить cron-payload heartbeat до v2.2.
 - R85-LIVE-AUDIT → фиксация состояния R85 qualification: exact head 35cacda4, PR #987, test-drift, Package Smoke #2422
 - R85-INSTALLER-FORGE-20260927 → закрыть audit-loop R85 и реализовать архитектурный срез build-once installer provenance
 - R80 → Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
@@ -39,27 +38,10 @@ gen: 2026-09-27T01:43:05Z | worklog: 1887947B / 10336L | sha12=bb411534ebe3
 - R87-CI-PIPELINE-WATCHERS-20260927 → ME2 DEV-LOOP v1, тик 1. Приоритет оператора: desktop-клиент (не консоль). Аудит веток /home/z/me2-desktop → разработка механизмов конвейера: (1) ci-race-check.sh, (2) ci-run-stats.sh; PR-ветка заморожена CI-гонкой.
 - R87-SCAN-GATE-INCIDENT-20260927 → Разбор срабатывания секрет-скана в тике R87 (коммит fa7ce1e4 → рельса 2116bb22)
 - R87-WAVE-VALIDATION-RECONCILE-20260927 → Тик 2. DEVLOOP-EVOLVE применён: старт с ci-race-check.sh → проверка outcomes первой build-once-волны 4ed9ae49 → сверка с параллельной r86-installer-provenance-v1 (приоритет (a) прошлого тика)
+- R81-DESKTOP-GUARDIAN-20260927 → Директива оператора «разрабатываем НЕ КОНСОЛЬ, а DESKTOP КЛИЕНТ metaengine в GITHUB» → раунд desktop-клиента: GAP #2 Guardian-parity light в PatrickFrome/Compute (apps/me2-desktop, ветка me2/r78-desktop-from-scratch)
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-- Данные stats (минуты, p95/max): Package Smoke 10.7/10.7, Installed Chat 6.3/6.3, Final Runtime 6.9/6.9, Soak 13.6/13.6, Self Update E2E 17.3/17.3, Critical Audit 6.5/6.5, Shell 3.8, Dirty Profile 5.7, Orchestrator 3.8, Typed Workspaces 0.9, R84 Convergence 1.3 → текущие consumer-таймауты 75/80/90 мин имеют запас ×5-11 против p95; рекомендация R87: при стабильной статистике после build-once-волны срезать до ~2×p95+producer(11м) с грейсом
-- Шаг 5: heartbeat ok (wb=1877193, sb=2ok/0fail, cp=11, stale=0); dev.log runtime-ошибок нет (изменения — только новые scripts/, daemon/page.tsx не тронуты)
-- Секрет-скан новых файлов (ci-race-check.sh, ci-run-stats.sh, worklog-дифф): ghp_|vck_|eyJhbGciOi = 0
-
-Stage Summary:
-- Тик закрыт: 2 механизма конвейера в рельсе — ci-race-check.sh (пуш-гейт PR-ветки: RACE=1|0|UNKNOWN) и ci-run-stats.sh (p50/p95/max длительности → download/ci-run-stats.csv); R86 подтверждён приземлившимся (4ed9ae49); UI-работы тик не открывал (freeze)
-- UX-урок №10: «python3 - <<PY» + pipe одновременно — heredoc побеждает, данные теряются молча (bad_json без причины); паттерн-лекарство: curl → mktemp-файл → путь как argv (применён в обоих скриптах)
-- DEVLOOP-EVOLVE: следующий тик ОБЯЗАН начать с `bash scripts/ci-race-check.sh work/r85-control-room-ui-v1` вместо ручного curl-аудита (экономия 1-2 мин/тик, детерминизм); если RACE=0 И Package Smoke предыдущей волны (4ed9ae49) completed — первым делом проверить её conclusions (первая build-once-волна!) и только потом выбирать новую задачу; приоритет задач следующего тика: (a) резолв параллельной r86-installer-provenance-v1 «bind consumer to producer receipt» vs наша acquire-схема, (b) EV-A11Y в apps/metaengine-browser при открытом окне, (c) таймауты по CSV-статистике
-- Backlog следующего тика: проверка outcomes волны 4ed9ae49; сверка подходов provenance; EV-A11Y; подрезка таймаутов; watcher параллельных веток (r87/r88/r89)
----
-Task ID: R87-SCAN-GATE-INCIDENT-20260927
-Agent: devloop-417497
-Task: Разбор срабатывания секрет-скана в тике R87 (коммит fa7ce1e4 → рельса 2116bb22)
-
-Work Log:
-- Сигнал: grep -cE 'ghp_|vck_|eyJhbGciOi' по staged-диффу вернул 1; из-за цепочки '&&/;' коммит ушёл до решения гейта
-- Разбор git show: единственное совпадение — строка worklog «…ghp_|vck_|eyJhbGciOi = 0» (литерал паттерна в собственной заметке о скане); альтернативы ghp_/vck_ требуют суффикс [A-Za-z0-9]+ — совпадений нет; eyJhbGciOi совпал как голый литерал без порога длины → ЛОЖНОЕ СРАБАТЫВАНИЕ, реальных токенов 0, утечки нет, force-push не требуется
-- Процедурные фиксы (применяются с этого тика): (1) скан-гейт = отдельный шаг с if-гейтом и exit 1 ДО коммита, grep -c в &&-цепочках запрещён; (2) regex с порогом длины: ghp_[A-Za-z0-9]{20,}|vck_[A-Za-z0-9]{20,}|eyJhbGciOi[A-Za-z0-9._-]{40,}; (3) в worklog-заметках литералы паттернов маскировать (g·hp_, vc·k_, eyJ…-JWT-префикс)
 
 Stage Summary:
 - Инцидент закрыт как false positive; рельса 2116bb22 чиста (проверка git show: только литерал паттерна); скан-гейт тика захарденен — правило попадает в DEVLOOP-EVOLVE следующего тика
@@ -82,4 +64,22 @@ Stage Summary:
 - Сверка подходов закрыта вердиктом «port, не merge»; рецепт порта в backlog
 - DEVLOOP-EVOLVE: следующий тик: (ш.1) ci-race-check.sh; (ш.2) если RACE=0 — подготовить и запушить 3 порта-харденнинга (тест producer_run_id mismatch / topology pin / cardinality pin) одним малым коммитом на PR-head ПОСЛЕ того как Self Update E2E завершится, секрет-скан до коммита по регэкспу с порогом {20,}/{40,} в if-гейте; (ш.3) если RACE=1 — EV-A11Y в apps/metaengine-browser локально (подготовить коммит без пуша); CSV-статистику обновлять раз в 2-3 тика, не каждый
 - Backlog: 3 порта-харденнинга; EV-A11Y; таймауты 75/80/90 → рекомендация 2×p95+producer-grace (~40/45/55) по факту 3-5 стабильных волн; watcher параллельных веток r87/r88/r89
+
+---
+Task ID: R81-DESKTOP-GUARDIAN-20260927
+Agent: Z.ai Code (main)
+Task: Директива оператора «разрабатываем НЕ КОНСОЛЬ, а DESKTOP КЛИЕНТ metaengine в GITHUB» → раунд desktop-клиента: GAP #2 Guardian-parity light в PatrickFrome/Compute (apps/me2-desktop, ветка me2/r78-desktop-from-scratch)
+
+Work Log:
+- Аудит: daemon 0.21.0 (47/47, last_seq 226); me2-desktop HEAD 8d276feb (R80 #1a, 86/86); worktree r86 @ 4ed9ae49 — ОБНАРУЖЕН УЖЕ ЗАПУШЕННЫМ в work/r85-control-room-ui-v1 (CI Self Update E2E in-flight на нём; PR-ветку не трогал)
+- GAP-ROADMAP desktop-клиента: курсор 5.5/8, R81 = #2 Guardian-parity лайт — реализовано полностью
+- Код: GUARDIAN-константы (me2-constants.mjs), guardian-contract.mjs (pure: makeBeacon/validateBeacon/evaluateBeacon/nextBackoffMs/decideRestart/computeRestartsInWindow), scripts/guardian.mjs (внешний watchdog zero-dep, CLI + createGuardian с инъекциями), main.mjs (+beacon-writer после plane_up, SMOKE не бьётся, clean_exit в before-quit)
+- Тесты: test/guardian.test.mjs — 27 pure+интеграционных (tmp-файлы, инъекции spawnImpl/aliveImpl); SUITE 113/113 GREEN; check-syntax 37 файлов OK
+- Версия 0.8.3-dev.0.1; GAP-ROADMAP: #2 → 🔄 parity-лайт (курсор 6/8), условие PR оператора: 3/3 зелёных gate ВЫПОЛНЕНО
+- Пуш: 82a44902 + ad872b98 + b8ed647e → me2/r78-desktop-from-scratch (PAT-паттерн, remote URL чист, grep секретов 0); ME2 Desktop Gate: SUCCESS (3-й подряд); ls-remote/api верифицировано
+
+Stage Summary:
+- Desktop-клиент продвинут: GAP #2 закрыт до parity-лайт, честные инварианты (clean-exit не воюется, cap 8/ч, свидетельства в журнале переживают рестарт guardian'а)
+- Backlog R82: #8 brain-адаптер + #4 native-supervisor client (после ≥1 недели живой обкатки guardian); Xvfb-интеграционный smoke guardian
+- Freeze соблюдён: work/r85-control-room-ui-v1 не тронут
 ```
