@@ -70,7 +70,7 @@ jobs:
         working-directory: apps/me2-ui
         shell: bash
         env:
-          ME2_BUILD_SHA: ${{ github.sha }}
+          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set +e
           STUB=../metaengine-browser/me2-ui-dist
@@ -86,8 +86,18 @@ jobs:
           # electron-builder берёт extraResources from app-root браузера
           rm -rf "$STUB"
           cp -r me2-ui-dist "$STUB"
+          node ../metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root "$STUB" --expected-sha "$ME2_BUILD_SHA" >> ui-build.log 2>&1
+          VERIFY=$?
+          if [ $VERIFY -ne 0 ]; then
+            echo "me2-ui skipped (exact-head provenance verification failed) — honest stub"
+            tail -20 ui-build.log
+            rm -rf "$STUB"
+            mkdir -p "$STUB"
+            printf 'ME2 UI bundle absent (exact-head provenance verification failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"
+            exit 0
+          fi
           tail -2 ui-build.log
-          echo "me2-ui-dist staged: $(du -sh "$STUB" | cut -f1)"
+          echo "me2-ui-dist staged and exact-head verified: $(du -sh "$STUB" | cut -f1)"
           exit 0
 
       - name: Build exact-head unsigned NSIS installer
