@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   mergeExactTaskEvidenceEvents,
+  resolveExactTaskStreamResponse,
   taskStreamResponseStillCurrent,
 } from '../../me2-ui/src/lib/r95e-evidence-contracts.mjs';
 
@@ -87,14 +88,17 @@ test('R95E.1 event join stays bounded even when exact fetched history is larger 
   assert.equal(exact.at(-1).seq, 211);
 });
 
-test('R95E.2 store advances generation on every open and cannot overwrite a newer task stream', () => {
+test('R95E.2 store advances generation on every open and routes history through the executable race reducer', () => {
   assert.match(store, /let taskStreamRequestSeq = 0/);
   assert.match(store, /const requestSeq = \+\+taskStreamRequestSeq/);
   assert.match(store, /streamTaskId: id/);
-  assert.match(store, /const exactFetched = d\.events\.filter\(\(event\) => event\.task_id === id\)/);
   assert.match(store, /taskStreamResponseStillCurrent\(/);
-  assert.match(store, /\{ seq: requestSeq, taskId: id \}/);
-  assert.match(store, /\{ seq: taskStreamRequestSeq, taskId: state\.inspectedTaskId, streamTaskId: state\.streamTaskId \}/);
+  assert.match(store, /resolveExactTaskStreamResponse\(\{/);
+  assert.match(store, /request: \{ seq: requestSeq, taskId: id \}/);
+  assert.match(store, /seq: taskStreamRequestSeq/);
+  assert.match(store, /taskId: state\.inspectedTaskId/);
+  assert.match(store, /streamTaskId: state\.streamTaskId/);
+  assert.match(store, /responseEvents: d\?\.events \?\? null/);
   assert.match(store, /closeTask: \(\) => \{[\s\S]{0,180}set\(\{ detail: null \}\)/);
   assert.doesNotMatch(store, /closeTask: \(\) => \{[\s\S]{0,180}streamTaskId: null/);
 });
@@ -102,10 +106,7 @@ test('R95E.2 store advances generation on every open and cannot overwrite a newe
 test('R95E.1 live exact events survive the bounded fetch merge while wrong-task events fail closed', () => {
   assert.match(store, /st\.streamTaskId === st\.inspectedTaskId/);
   assert.match(store, /e\.task_id === st\.inspectedTaskId/);
-  assert.match(store, /const bySeq = new Map<number, Event>\(\)/);
-  assert.match(store, /for \(const event of exactFetched\) bySeq\.set\(event\.seq, event\)/);
-  assert.match(store, /for \(const event of state\.stream\) bySeq\.set\(event\.seq, event\)/);
-  assert.match(store, /\.sort\(\(a, b\) => a\.seq - b\.seq\)[\s\S]{0,80}\.slice\(-200\)/);
+  assert.match(store, /resolveExactTaskStreamResponse\(\{/);
 });
 
 test('R95E.1 OBSERVE consumes only the shared exact-task join contract', () => {
@@ -135,4 +136,69 @@ test('R95E.2 closing Task Sheet preserves exact inspected history for OBSERVE', 
   assert.doesNotMatch(block, /stream:\s*\[\]/);
   assert.doesNotMatch(block, /streamTaskId:\s*null/);
   assert.doesNotMatch(block, /inspectedTaskId:\s*null/);
+});
+
+
+test('R96 release reducer rejects a delayed A response after B becomes current and preserves live B over fetched B', () => {
+  const delayedA = resolveExactTaskStreamResponse({
+    request: { seq: 41, taskId: 'task-a' },
+    current: {
+      seq: 42,
+      taskId: 'task-b',
+      streamTaskId: 'task-b',
+      stream: [{ seq: 22, task_id: 'task-b', type: 'LIVE_B', data: 'live' }],
+    },
+    responseEvents: [{ seq: 21, task_id: 'task-a', type: 'FETCH_A', data: 'stale' }],
+    limit: 200,
+  });
+  assert.equal(delayedA.applied, false);
+  assert.equal(delayedA.patch, null);
+
+  const exactB = resolveExactTaskStreamResponse({
+    request: { seq: 42, taskId: 'task-b' },
+    current: {
+      seq: 42,
+      taskId: 'task-b',
+      streamTaskId: 'task-b',
+      stream: [
+        { seq: 22, task_id: 'task-b', type: 'LIVE_B', data: 'live wins' },
+        { seq: 24, task_id: 'task-a', type: 'WRONG_LIVE', data: 'reject' },
+      ],
+    },
+    responseEvents: [
+      { seq: 22, task_id: 'task-b', type: 'FETCH_B_DUP', data: 'older duplicate' },
+      { seq: 20, task_id: 'task-b', type: 'FETCH_B_OLD', data: 'history' },
+      { seq: 19, task_id: 'task-a', type: 'WRONG_FETCH', data: 'reject' },
+      { seq: Number.NaN, task_id: 'task-b', type: 'BAD_SEQ', data: 'reject' },
+    ],
+    limit: 200,
+  });
+  assert.equal(exactB.applied, true);
+  assert.equal(exactB.patch.streamState, 'EXACT');
+  assert.deepEqual(exactB.patch.stream.map((row) => row.seq), [20, 22]);
+  assert.equal(exactB.patch.stream[1].type, 'LIVE_B');
+});
+
+test('R96 release reducer surfaces bounded history failure as DEGRADED only for the exact current task', () => {
+  const current = {
+    seq: 9,
+    taskId: 'task-z',
+    streamTaskId: 'task-z',
+    stream: [{ seq: 3, task_id: 'task-z', type: 'LIVE', data: 'keep' }],
+  };
+  const degraded = resolveExactTaskStreamResponse({
+    request: { seq: 9, taskId: 'task-z' },
+    current,
+    responseEvents: null,
+  });
+  assert.equal(degraded.applied, true);
+  assert.deepEqual(degraded.patch, { streamState: 'DEGRADED' });
+
+  const staleFailure = resolveExactTaskStreamResponse({
+    request: { seq: 8, taskId: 'task-z' },
+    current,
+    responseEvents: null,
+  });
+  assert.equal(staleFailure.applied, false);
+  assert.equal(staleFailure.patch, null);
 });
