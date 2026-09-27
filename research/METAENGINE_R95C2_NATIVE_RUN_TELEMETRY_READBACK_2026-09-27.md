@@ -55,3 +55,14 @@ The same ordering is applied to restored Browser page state and history navigati
 Primary sources:
 - https://www.electronjs.org/docs/latest/api/ipc-renderer
 - https://www.electronjs.org/docs/latest/tutorial/ipc
+
+
+## Follow-up ABA audit: history navigation is also a new presentation generation
+
+A second async review found an ABA case in Alt+Left/Right history navigation. That path changed `page` without advancing `contextDrawerSyncSeq`. A delayed RUN reply from browser→other→browser could therefore see the same page/workspace again and pass a fence that had not changed generation.
+
+R95C.2 now increments the presentation generation before every history page transition. This follows the same concurrency principle used by revisioned control planes: identity/value equality alone is not enough after an intervening generation. Kubernetes uses `resourceVersion` to reject stale updates, and etcd exposes monotonically increasing revisions/compare predicates for the same reason.
+
+Primary sources:
+- https://kubernetes.io/docs/reference/using-api/api-concepts/
+- https://etcd.io/docs/v3.7/learning/api/
