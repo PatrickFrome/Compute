@@ -466,6 +466,17 @@ async function restHandler(req: IncomingMessage, res: ServerResponse): Promise<v
       try { return json(res, 200, { ok: true, rerere: { ...rerereEnable(), ...rerereRemaining() } }); }
       catch (e) { return json(res, 500, { ok: false, error: (e as Error).message }); }
     }
+    // ── EV-DONOR-404 (R19): GET /donor-registry — read-only реестр донор-клиентов.
+    // Исторический дефект (R17, 2026-09-27): no route → 404 → панель «Донор-реестр» навсегда
+    // в PanelLoading (вечный skeleton). Донор-клиенты пока не регистрируются (desktop donor
+    // PR #967 pending) → честный пустой реестр (200 + donors:[]) рендерит empty-state вместо
+    // вечной загрузки. Read-only, вне шины (47-инвариант не тронут).
+    if (path === "/donor-registry" && req.method === "GET") {
+      return json(res, 200, {
+        ok: true, service: "me2-daemon", donors: [], count: 0,
+        note: "registry empty — no donor clients registered yet (desktop donor PR #967 pending)", ts: nowIso(),
+      });
+    }
 
     // ── R16: M7 OTel-lite ──
     if (path === "/spans" && req.method === "GET") return json(res, 200, otelStatus());
