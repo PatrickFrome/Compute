@@ -186,7 +186,9 @@ let primaryShellPage = 'command';
 let primaryShellOverlayActive = false;
 let primaryCommandRailOpen = true;
 let primaryContextDrawerOpen = false;
+let primaryContextDrawerDock = 'BOTTOM';
 let primaryContextDrawerHeight = 200;
+let primaryContextDrawerWidth = 380;
 let primaryShellUrl = null;
 const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
 let devosSourceSnapshot = null;
@@ -764,7 +766,9 @@ function layout() {
       : 'LEGACY_BROWSER_SHELL',
     me2_command_rail_open: primaryCommandRailOpen,
     me2_context_drawer_open: primaryContextDrawerOpen,
+    me2_context_drawer_dock: primaryContextDrawerDock,
     me2_context_drawer_height: primaryContextDrawerHeight,
+    me2_context_drawer_width: primaryContextDrawerWidth,
   });
   shellView?.setBounds(shellLayoutPlan.shell_bounds);
   if (shellView) { try { windowRef.contentView.addChildView(shellView); } catch {} }
@@ -2005,22 +2009,39 @@ ipcMain.handle('metaengine:shell:primary-command-rail', async (event, rawOpen) =
     authority_effect: false,
   });
 });
-ipcMain.handle('metaengine:shell:primary-context-drawer', async (event, rawOpen, rawHeight) => {
+ipcMain.handle('metaengine:shell:primary-context-drawer', async (event, rawOpen, rawDock, rawHeight, rawWidth) => {
   assertShellSender(event);
   if (typeof rawOpen !== 'boolean') throw new Error('primary_shell_context_drawer_state_invalid');
+
+  const dock = String(rawDock || 'BOTTOM').trim().toUpperCase();
+  if (dock !== 'BOTTOM' && dock !== 'RIGHT') throw new Error('primary_shell_context_drawer_dock_invalid');
+
   const height = Number(rawHeight);
   if (rawHeight != null && (!Number.isFinite(height) || height < 0 || height > 2000)) {
     throw new Error('primary_shell_context_drawer_height_invalid');
   }
+
+  const width = Number(rawWidth);
+  if (rawWidth != null && (!Number.isFinite(width) || width < 0 || width > 3000)) {
+    throw new Error('primary_shell_context_drawer_width_invalid');
+  }
+
   primaryContextDrawerOpen = rawOpen;
+  primaryContextDrawerDock = dock;
   if (rawHeight != null) primaryContextDrawerHeight = Math.floor(height);
+  if (rawWidth != null) primaryContextDrawerWidth = Math.floor(width);
   layout();
+
   return Object.freeze({
-    schema: 'metaengine.browser.me2-primary-context-drawer.v2',
+    schema: 'metaengine.browser.me2-primary-context-drawer.v3',
     requested_open: primaryContextDrawerOpen,
+    requested_dock: primaryContextDrawerDock,
     requested_height: primaryContextDrawerHeight,
+    requested_width: primaryContextDrawerWidth,
     effective_open: shellLayoutPlan?.me2_context_drawer_effective_open === true,
+    dock: String(shellLayoutPlan?.me2_context_drawer_effective_dock || primaryContextDrawerDock).toLowerCase(),
     drawer_height: Number(shellLayoutPlan?.me2_context_drawer_height || 0),
+    drawer_width: Number(shellLayoutPlan?.me2_context_drawer_width || 0),
     remote_bounds: shellLayoutPlan ? structuredClone(shellLayoutPlan.remote_bounds) : null,
     presentation_only: true,
     scheduler_authority: false,
