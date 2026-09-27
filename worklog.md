@@ -10161,3 +10161,16 @@ Work Log:
 
 Stage Summary:
 - Публикация актуальна: sandbox/me2-os = 3b630e6a; дерево чистое; блокеров нет
+
+---
+Task ID: R80
+Agent: cron-413338
+Task: Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
+
+Work Log:
+- .github.env валиден (token=valid, без печати)
+- push-pending-r80.sh: main→sandbox/me2-os up-to-date (ff-состояние подтверждено), архив-ветки up-to-date
+- ls-remote ≡ local HEAD = fbb125e9 ✅
+
+Stage Summary:
+- Публикация актуальна: sandbox/me2-os = fbb125e9; дерево чистое; блокеров нет
