@@ -1096,7 +1096,7 @@ function renderContextSet(next) {
   const list = section('Selected tabs', rows.length ? `${rows.length} explicit binding(s)` : 'empty');
   list.list.className = 'commandList';
   for (const row of rows) {
-    const label = text(row.tab.title, row.isChatSurfaceTab(tab) ? 'ChatGPT' : hostFor(row.tab.url));
+    const label = text(row.tab.title, isChatSurfaceTab(row.tab) ? 'ChatGPT' : hostFor(row.tab.url));
     const hint = row.workspace
       ? `${compact(row.workspace.branch_name, 26)} · ${row.workspace.state}`
       : (row.agent ? `${text(row.agent.role)} · ${text(row.agent.lifecycle_state)}` : hostFor(row.tab.url));
