@@ -368,6 +368,13 @@ jobs:
           if (-not $env:ME2_PACKAGE_PRODUCER_RUN_ID -or -not $env:ME2_PACKAGE_PRODUCER_RUN_ATTEMPT) {
             throw 'soak_package_producer_not_qualified_binding_missing'
           }
+          $proofPath = "$env:RUNNER_TEMP\windows-autonomous-soak-proof.json"
+          if (-not (Test-Path $proofPath -PathType Leaf)) { throw 'soak_package_producer_proof_missing' }
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          if ([int64]$proof.producer_run_id -ne [int64]$env:ME2_PACKAGE_PRODUCER_RUN_ID `
+              -or [int64]$proof.producer_run_attempt -ne [int64]$env:ME2_PACKAGE_PRODUCER_RUN_ATTEMPT) {
+            throw 'soak_package_producer_binding_drift'
+          }
           node ./scripts/installer-provenance.mjs wait `
             --repo $env:GITHUB_REPOSITORY `
             --head $env:EXACT_HEAD `
@@ -376,6 +383,8 @@ jobs:
             --timeout-ms 2700000 `
             --poll-ms 5000
           if ($LASTEXITCODE -ne 0) { throw 'soak_package_producer_not_qualified' }
+          $proof | Add-Member -NotePropertyName producer_terminal_success -NotePropertyValue $true -Force
+          $proof | ConvertTo-Json -Depth 12 | Set-Content $proofPath -Encoding utf8
 
       - name: Prove source checkout unchanged
         shell: bash
