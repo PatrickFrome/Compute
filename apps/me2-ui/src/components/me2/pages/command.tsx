@@ -425,7 +425,7 @@ function OutcomesCard({ events, nowMs }: { events: Me2Event[]; nowMs: number }) 
 }
 
 // ── Page: COMMAND CENTER (R95 mission control) ─────────────────────────────────
-const COMMAND_RAIL_WEB_MIN_WIDTH = 984; // mirrors native 6 + 252 + 720 + 6 geometry gate
+const COMMAND_RAIL_WEB_MIN_WIDTH = 900; // 252px Mission Rail + a useful mission canvas; no native Browser geometry
 
 export function CommandPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -452,33 +452,14 @@ export function CommandPage() {
   }, []);
 
   const syncPrimaryRail = useCallback(async (preferred: boolean) => {
-    const shell = (window as Window & {
-      metaengineShell?: {
-        setPrimaryCommandRail?: (open: boolean) => Promise<{ effective_open?: boolean } | null>;
-      };
-    }).metaengineShell;
-    if (!shell?.setPrimaryCommandRail) {
-      const effective = preferred && window.innerWidth >= COMMAND_RAIL_WEB_MIN_WIDTH;
-      const constrained = preferred && !effective;
-      railConstrainedRef.current = constrained;
-      setRailConstrained(constrained);
-      setSidebarOpen(effective);
-      return;
-    }
-    try {
-      const result = await shell.setPrimaryCommandRail(preferred);
-      const effective = typeof result?.effective_open === "boolean" ? result.effective_open : preferred;
-      const constrained = preferred && !effective;
-      railConstrainedRef.current = constrained;
-      setRailConstrained(constrained);
-      setSidebarOpen(effective);
-    } catch {
-      // Presentation bridge failure must not create command authority or leave a
-      // phantom rail over native pixels. Fail closed to the no-rail layout.
-      railConstrainedRef.current = preferred;
-      setRailConstrained(preferred);
-      setSidebarOpen(false);
-    }
+    // R95C: COMMAND no longer owns native Browser pixels. Rail adaptation is
+    // renderer-local presentation state; the legacy main-process bridge stays
+    // available only for older shells and is intentionally not consulted here.
+    const effective = preferred && window.innerWidth >= COMMAND_RAIL_WEB_MIN_WIDTH;
+    const constrained = preferred && !effective;
+    railConstrainedRef.current = constrained;
+    setRailConstrained(constrained);
+    setSidebarOpen(effective);
   }, []);
 
   const setRailPreference = useCallback((open: boolean) => {
@@ -495,9 +476,8 @@ export function CommandPage() {
     setRailPreference(!preferredRailOpen.current);
   }, [setRailPreference]);
 
-  // One preference, two projections: React rail + main-process native viewport.
-  // The main process remains geometry authority and may force the rail closed
-  // when the protected active surface minimum width would otherwise be violated.
+  // One persisted preference, one renderer-local COMMAND projection.
+  // Native geometry authority lives on RUN and is intentionally absent here.
   useEffect(() => {
     const preferred = commandRailPreferredOpen;
     preferredRailOpen.current = preferred;
@@ -579,7 +559,7 @@ export function CommandPage() {
             aria-disabled={railConstrained}
             disabled={railConstrained}
             data-testid="cc-sidebar-toggle"
-            title={railConstrained ? "Mission Rail автоматически скрыт, чтобы сохранить минимум ширины активной поверхности. Увеличьте окно." : "Список агентов и цель (⌘B)"}
+            title={railConstrained ? "Mission Rail временно скрыт, чтобы сохранить полезную ширину mission canvas. Увеличьте окно." : "Список агентов и цель (⌘B)"}
             className="shrink-0 rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
           >
             <PanelLeft className="h-3.5 w-3.5" aria-hidden />
