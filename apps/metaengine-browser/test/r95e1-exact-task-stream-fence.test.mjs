@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   mergeExactTaskEvidenceEvents,
+  reduceExactTaskHistoryResponse,
   taskStreamResponseStillCurrent,
 } from '../../me2-ui/src/lib/r95e-evidence-contracts.mjs';
 
@@ -91,10 +92,12 @@ test('R95E.2 store advances generation on every open and cannot overwrite a newe
   assert.match(store, /let taskStreamRequestSeq = 0/);
   assert.match(store, /const requestSeq = \+\+taskStreamRequestSeq/);
   assert.match(store, /streamTaskId: id/);
-  assert.match(store, /const exactFetched = d\.events\.filter\(\(event\) => event\.task_id === id\)/);
-  assert.match(store, /taskStreamResponseStillCurrent\(/);
-  assert.match(store, /\{ seq: requestSeq, taskId: id \}/);
-  assert.match(store, /\{ seq: taskStreamRequestSeq, taskId: state\.inspectedTaskId, streamTaskId: state\.streamTaskId \}/);
+  assert.match(store, /reduceExactTaskHistoryResponse\(\{/);
+  assert.match(store, /request: \{ seq: requestSeq, taskId: id \}/);
+  assert.match(store, /seq: taskStreamRequestSeq/);
+  assert.match(store, /taskId: state\.inspectedTaskId/);
+  assert.match(store, /streamTaskId: state\.streamTaskId/);
+  assert.match(store, /liveStream: state\.stream/);
   assert.match(store, /closeTask: \(\) => \{[\s\S]{0,180}set\(\{ detail: null \}\)/);
   assert.doesNotMatch(store, /closeTask: \(\) => \{[\s\S]{0,180}streamTaskId: null/);
 });
@@ -120,8 +123,8 @@ test('R95E.2 exact history fetch is bounded and surfaces degraded readback hones
   assert.match(store, /streamState: "UNBOUND" \| "LOADING" \| "EXACT" \| "DEGRADED"/);
   assert.match(store, /streamState: "LOADING"/);
   assert.match(store, /AbortSignal\.timeout\(8_000\)/);
-  assert.match(store, /if \(!d\?\.events\) return \{ streamState: "DEGRADED" as const \}/);
-  assert.match(store, /streamState: "EXACT" as const/);
+  assert.match(store, /fetchedEvents: d\?\.events \?\? null/);
+  assert.match(store, /reduceExactTaskHistoryResponse\(\{/);
   assert.match(observe, /data-history-state=\{streamState\}/);
   assert.match(observe, /history \$\{streamState\.toLowerCase\(\)\}/);
 });
@@ -135,4 +138,48 @@ test('R95E.2 closing Task Sheet preserves exact inspected history for OBSERVE', 
   assert.doesNotMatch(block, /stream:\s*\[\]/);
   assert.doesNotMatch(block, /streamTaskId:\s*null/);
   assert.doesNotMatch(block, /inspectedTaskId:\s*null/);
+});
+
+
+test('R95E.2 delayed A response has zero state effect after B becomes current', () => {
+  const currentB = {
+    seq: 12,
+    taskId: 'task-b',
+    streamTaskId: 'task-b',
+  };
+  const liveB = [
+    { seq: 120, task_id: 'task-b', type: 'LIVE_B' },
+  ];
+
+  const acceptedB = reduceExactTaskHistoryResponse({
+    request: { seq: 12, taskId: 'task-b' },
+    current: currentB,
+    fetchedEvents: [
+      { seq: 118, task_id: 'task-b', type: 'FETCHED_B' },
+      { seq: 117, task_id: 'task-a', type: 'WRONG_TASK' },
+    ],
+    liveStream: liveB,
+  });
+  assert.equal(acceptedB?.streamState, 'EXACT');
+  assert.deepEqual(acceptedB?.stream.map((event) => event.seq), [118, 120]);
+  assert.equal(acceptedB?.stream.at(-1)?.type, 'LIVE_B');
+
+  const delayedA = reduceExactTaskHistoryResponse({
+    request: { seq: 11, taskId: 'task-a' },
+    current: currentB,
+    fetchedEvents: [
+      { seq: 99, task_id: 'task-a', type: 'LATE_A' },
+    ],
+    liveStream: acceptedB?.stream ?? [],
+  });
+  assert.equal(delayedA, null);
+
+  const degradedB = reduceExactTaskHistoryResponse({
+    request: { seq: 12, taskId: 'task-b' },
+    current: currentB,
+    fetchedEvents: null,
+    liveStream: acceptedB?.stream ?? [],
+  });
+  assert.equal(degradedB?.streamState, 'DEGRADED');
+  assert.deepEqual(degradedB?.stream.map((event) => event.seq), [118, 120]);
 });
