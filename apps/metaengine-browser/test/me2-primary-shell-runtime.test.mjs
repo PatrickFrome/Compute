@@ -192,8 +192,10 @@ test('ME2 page navigation controls presentation only through the trusted preload
     preload.indexOf('} else {', preload.indexOf('if (isPrimaryMe2PresentationDocument())')),
   );
   assert.doesNotMatch(primaryBranch, /snapshot:\s*\(\)|command:\s*\(|presentationFocus|onBrainDelta|brainStreamStatus/);
-  assert.match(store, /metaengineShell\?: \{ setPrimaryPage\?:/);
-  assert.match(store, /shell\?\.setPrimaryPage\?\.\(p\)/);
+  assert.match(store, /metaengineShell\?: \{[\s\S]{0,220}setPrimaryPage\?: \(page: string\) => Promise<unknown> \| unknown/);
+  assert.match(store, /const result = shell\?\.setPrimaryPage\?\.\(p\)/);
+  assert.match(store, /primaryPageAck = Promise\.resolve\(result\)/);
+  assert.match(store, /return primaryPageAck/);
   assert.match(main, /presentation_only:\s*true/);
   assert.match(main, /scheduler_authority:\s*false/);
   assert.match(main, /browser_command_authority:\s*false/);
