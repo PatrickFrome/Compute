@@ -410,7 +410,7 @@ function CdpLiveSection() {
 
 // ── Page: RUN (host модуля BROWSER) ───────────────────────────────────────
 export function BrowserPage() {
-  const utilityRightOpen = useMe2((s) => s.contextDrawerOpen && s.contextDrawerDock === "right");
+  const telemetryInspectorVisible = useMe2((s) => s.runTelemetryInspectorVisible);
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-browser" data-panel-browser>
@@ -418,11 +418,11 @@ export function BrowserPage() {
           ровно 32px над tabstrip/urlbar (вместо гибкого PageHeader R74) */}
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-zinc-800/80 bg-zinc-950/50 px-2">
         <h2 className="text-[10px] font-bold uppercase tracking-[0.14em] text-zinc-300">RUN</h2>
-        <span className="min-w-0 truncate text-[10px] text-zinc-500">браузер и превью приложения · сенсоры справа (1124px+)</span>
+        <span className="min-w-0 truncate text-[10px] text-zinc-500">браузер и превью приложения · сенсоры справа когда native layout подтверждает место</span>
       </div>
       <div className="flex min-h-0 flex-1 gap-2">
         <BrowserStage compact defaultCastOn />
-        <div className={`${utilityRightOpen ? "hidden" : "mc-scroll hidden w-96 shrink-0 flex-col gap-2 overflow-y-auto min-[1124px]:flex"}`} aria-label="Браузерная инфраструктура" data-testid="run-telemetry-inspector" data-inspector-visible={utilityRightOpen ? "false" : "true"}>
+        <div className={telemetryInspectorVisible ? "mc-scroll flex w-96 shrink-0 flex-col gap-2 overflow-y-auto" : "hidden"} aria-label="Браузерная инфраструктура" data-testid="run-telemetry-inspector" data-inspector-visible={telemetryInspectorVisible ? "true" : "false"}>
           <SenseSection />
           <ObsvSection />
           <EffectSection />
