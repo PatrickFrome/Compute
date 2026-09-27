@@ -65,3 +65,69 @@ export function mergeExactTaskEvidenceEvents({
     .sort((a, b) => Number(b.seq) - Number(a.seq))
     .slice(0, boundedLimit);
 }
+
+
+/**
+ * Resolve one bounded exact-task history response into a presentation patch.
+ * The helper is pure so the same race semantics used by Zustand can be tested
+ * with real delayed-response ordering rather than source-text assertions.
+ *
+ * @param {{
+ *   request:{seq:number,taskId:string},
+ *   current:{seq:number,taskId:string|null,streamTaskId:string|null,stream?:Array<any>},
+ *   responseEvents?:Array<any>|null,
+ *   limit?:number
+ * }} input
+ */
+export function resolveExactTaskStreamResponse({
+  request,
+  current,
+  responseEvents = null,
+  limit = 200,
+} = {}) {
+  if (!taskStreamResponseStillCurrent(request, current)) {
+    return Object.freeze({ applied: false, patch: null });
+  }
+
+  if (!Array.isArray(responseEvents)) {
+    return Object.freeze({
+      applied: true,
+      patch: Object.freeze({ streamState: 'DEGRADED' }),
+    });
+  }
+
+  const taskId = String(request?.taskId ?? '');
+  const bySeq = new Map();
+
+  for (const event of responseEvents) {
+    if (String(event?.task_id ?? '') !== taskId) continue;
+    const seq = Number(event?.seq);
+    if (!Number.isSafeInteger(seq)) continue;
+    bySeq.set(seq, event);
+  }
+
+  // Live exact events observed after the fetch began win over a fetched row
+  // with the same sequence number.
+  for (const event of Array.isArray(current?.stream) ? current.stream : []) {
+    if (String(event?.task_id ?? '') !== taskId) continue;
+    const seq = Number(event?.seq);
+    if (!Number.isSafeInteger(seq)) continue;
+    bySeq.set(seq, event);
+  }
+
+  const boundedLimit = Math.max(
+    1,
+    Math.min(200, Number.isSafeInteger(Number(limit)) ? Number(limit) : 200),
+  );
+  const stream = [...bySeq.values()]
+    .sort((a, b) => Number(a.seq) - Number(b.seq))
+    .slice(-boundedLimit);
+
+  return Object.freeze({
+    applied: true,
+    patch: Object.freeze({
+      stream: Object.freeze(stream),
+      streamState: 'EXACT',
+    }),
+  });
+}

@@ -11,7 +11,7 @@ import {
   type Snapshot, type Event, type ActionMeta, type Mirror, type Task,
 } from "@/lib/me2-bus";
 import { presentationSyncStillCurrent } from "@/lib/r85-ui-contracts.mjs";
-import { taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
+import { resolveExactTaskStreamResponse, taskStreamResponseStillCurrent } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── Pages (DaVinci-Resolve принцип: специализированные рабочие контексты) ──────
 export type PageKey =
@@ -91,6 +91,7 @@ interface Me2State {
   inspectedTaskId: string | null;
   stream: Event[];
   streamTaskId: string | null;
+  streamState: "UNBOUND" | "LOADING" | "EXACT" | "DEGRADED";
   // contextual drawer (read-only presentation plane)
   contextDrawerPreferredOpen: boolean;
   contextDrawerOpen: boolean;
@@ -254,6 +255,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   inspectedTaskId: null,
   stream: [],
   streamTaskId: null,
+  streamState: "UNBOUND",
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
   contextDrawerTab: "events",
@@ -679,34 +681,42 @@ export const useMe2 = create<Me2State>((set, get) => ({
       inspectedTaskId: task?.id ?? id,
       stream: [],
       streamTaskId: id,
+      streamState: "LOADING",
       contextDrawerTab: state.contextDrawerPreferredOpen && state.contextDrawerFollowSelection ? "selection" : state.contextDrawerTab,
     }));
     if (get().contextDrawerPreferredOpen && get().contextDrawerFollowSelection) {
       writeWorkspaceLayout(get().workspace, { drawerTab: "selection" });
     }
-    void me2Fetch<{ events: Event[] }>(`/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`).then((d) => {
-      if (!d?.events) return;
-      const exactFetched = d.events.filter((event) => event.task_id === id);
+    void me2Fetch<{ events: Event[] }>(
+      `/events?task=${encodeURIComponent(id)}&limit=200&XTransformPort=3041`,
+      { signal: AbortSignal.timeout(8_000) },
+    ).then((d) => {
       set((state) => {
         if (!taskStreamResponseStillCurrent(
           { seq: requestSeq, taskId: id },
           { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
         )) return {};
-        const bySeq = new Map<number, Event>();
-        for (const event of exactFetched) bySeq.set(event.seq, event);
-        for (const event of state.stream) bySeq.set(event.seq, event);
-        return {
-          stream: [...bySeq.values()]
-            .sort((a, b) => a.seq - b.seq)
-            .slice(-200),
-        };
+        const resolved = resolveExactTaskStreamResponse({
+          request: { seq: requestSeq, taskId: id },
+          current: {
+            seq: taskStreamRequestSeq,
+            taskId: state.inspectedTaskId,
+            streamTaskId: state.streamTaskId,
+            stream: state.stream,
+          },
+          responseEvents: d?.events ?? null,
+          limit: 200,
+        });
+        if (!resolved.applied || !resolved.patch) return {};
+        return resolved.patch as Pick<Me2State, "stream" | "streamState">;
       });
     });
   },
 
   closeTask: () => {
-    taskStreamRequestSeq += 1;
-    set({ detail: null, stream: [], streamTaskId: null });
+    // Closing the Task Sheet is not deselection. Keep the bounded exact stream
+    // alive for OBSERVE; a later openTask() advances generation and replaces it.
+    set({ detail: null });
   },
 
   setChatId: (id) => {
