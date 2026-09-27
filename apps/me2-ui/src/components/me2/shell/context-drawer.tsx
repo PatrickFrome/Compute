@@ -4,7 +4,7 @@
 // renderer preference never becomes Browser routing or command authority.
 
 import { useCallback, useEffect, useRef } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import {
   Activity, Bot, Crosshair, Database, ListChecks, ScanSearch, Server, X,
   PanelBottom, PanelRight,
@@ -166,7 +166,20 @@ export function ContextDrawer() {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", onKey);
       resizeCleanup.current = null;
+    };
+    const restore = () => {
+      const current = sameTransaction();
+      cleanup();
+      if (!current) return;
+      if (startDock === "right") setWidth(startWidth, false);
+      else setHeight(startHeight, false);
+    };
+    const onKey = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== "Escape") return;
+      keyEvent.preventDefault();
+      restore();
     };
     const move = (pointerEvent: PointerEvent) => {
       if (!sameTransaction()) {
@@ -196,19 +209,27 @@ export function ContextDrawer() {
       if (startDock === "right") setWidth(nextWidth, true);
       else setHeight(nextHeight, true);
     };
-    const cancel = () => {
-      const current = sameTransaction();
-      cleanup();
-      if (!current) return;
-      if (startDock === "right") setWidth(startWidth, false);
-      else setHeight(startHeight, false);
-    };
+    const cancel = restore;
 
     resizeCleanup.current = cleanup;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
     window.addEventListener("pointercancel", cancel, { once: true });
+    window.addEventListener("keydown", onKey);
   }, [dock, height, setHeight, setWidth, width, workspace]);
+
+  const resetByDoubleTap = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const state = useMe2.getState();
+    if (state.workspace !== workspace || state.contextDrawerDock !== dock) return;
+    if (dock === "right") {
+      if (width === preferredWidth) return;
+      setWidth(preferredWidth, true);
+      return;
+    }
+    if (height === preferredHeight) return;
+    setHeight(preferredHeight, true);
+  }, [dock, height, preferredHeight, preferredWidth, setHeight, setWidth, width, workspace]);
 
   const resizeByKeyboard = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     let next: number | null = null;
@@ -265,13 +286,18 @@ export function ContextDrawer() {
         aria-controls="context-drawer-content"
         data-testid="context-drawer-resizer"
         onPointerDown={beginResize}
+        onDoubleClick={resetByDoubleTap}
         onKeyDown={resizeByKeyboard}
-        className={`group relative shrink-0 bg-zinc-900 outline-none focus-visible:bg-cyan-950 ${
-          dock === "right" ? "h-full w-1.5 cursor-col-resize" : "h-1.5 w-full cursor-row-resize"
+        className={`group relative shrink-0 bg-zinc-900 outline-none focus-visible:bg-cyan-950 before:absolute before:content-[''] ${
+          dock === "right"
+            ? "h-full w-1.5 cursor-col-resize before:-inset-x-1.5 before:inset-y-0"
+            : "h-1.5 w-full cursor-row-resize before:inset-x-0 before:-inset-y-1.5"
         }`}
-        title={dock === "right" ? "Drag to resize · ←/→ 20px · Home/End" : "Drag to resize · ↑/↓ 20px · Home/End"}
+        title={dock === "right"
+          ? "Drag to resize · ←/→ 20px · Home/End · Esc cancel · double-click reset"
+          : "Drag to resize · ↑/↓ 20px · Home/End · Esc cancel · double-click reset"}
       >
-        <span className={`pointer-events-none absolute bg-zinc-700 group-hover:bg-cyan-700 ${
+        <span className={`pointer-events-none absolute bg-zinc-700 group-hover:bg-cyan-700 group-focus-visible:bg-cyan-500 ${
           dock === "right"
             ? "left-1/2 top-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2"
             : "left-1/2 top-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2"
