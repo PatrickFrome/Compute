@@ -270,6 +270,8 @@ test('R85 Package Smoke captures the actual primary ME2 surface, not only legacy
   assert.match(r85VisualHarness, /legacy_shell_captured:\s*false/);
   assert.match(r85VisualHarness, /remote_browser_content_captured:\s*false/);
   assert.match(r85VisualHarness, /closed_overlays_absent_from_dom:\s*true/);
+  assert.match(r85VisualHarness, /broken_image_fallback_hidden:\s*true/);
+  assert.match(r85VisualHarness, /broken_browser_images_hidden/);
   assert.match(r85VisualHarness, /capturePage\(\)/);
   assert.match(r85VisualHarness, /ME2_UI_HEALTH_URL/);
   assert.match(r85VisualHarness, /VISUAL_PHASE_TIMEOUT_MS = 120_000/);
@@ -356,6 +358,17 @@ test('R85 Command hides browser transport tuning while full Browser retains it',
   assert.match(me2BrowserStage, /compact \? \(\s*<span className="ml-auto text-zinc-600">/);
   assert.match(me2BrowserStage, /\[30, 55, 85\]\.map/);
   assert.match(me2BrowserStage, /\[480, 640, 960\]\.map/);
+});
+
+test('R85 Browser image fallbacks never expose broken-image text in the primary surface', () => {
+  assert.match(me2BrowserStage, /data-testid="browser-cast-image"/);
+  assert.match(me2BrowserStage, /data-testid="browser-cdp-fallback-image"/);
+  assert.match(me2BrowserStage, /alt=""\s+aria-hidden="true"\s+className="block h-full w-full object-contain opacity-0"/);
+  assert.match(me2BrowserStage, /alt=""\s+aria-hidden="true"\s+className="absolute inset-0 h-full w-full object-contain opacity-0"/);
+  assert.match(me2BrowserStage, /onLoad=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "1"; \}\}/);
+  assert.match(me2BrowserStage, /onError=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "0"; \}\}/);
+  assert.match(me2BrowserStage, /onLoad=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "1"; cdpNextTick\(2000\); \}\}/);
+  assert.match(me2BrowserStage, /onError=\{\(e\) => \{ e\.currentTarget\.style\.opacity = "0"; cdpNextTick\(6000\); \}\}/);
 });
 
 test('R85 native Browser overlays only the viewport and preserves compact Browser chrome', () => {
