@@ -144,6 +144,15 @@ async function metrics(contents) {
       sidebar_toggle: Boolean(document.querySelector('[data-testid="cc-sidebar-toggle"]')),
       attention_button: Boolean(document.querySelector('[data-testid="attention-button"]')),
       palette_mounted: Boolean(document.querySelector('[cmdk-root], [data-testid="registry-action-args"], [role="dialog"]')),
+      browser_images: Array.from(document.querySelectorAll('[data-testid="browser-cast-image"], [data-testid="browser-cdp-fallback-image"]')).map((el) => ({
+        testid: el.getAttribute('data-testid'),
+        complete: Boolean(el.complete),
+        natural_width: Number(el.naturalWidth || 0),
+        opacity: Number(getComputedStyle(el).opacity),
+      })),
+      broken_browser_images_hidden: Array.from(document.querySelectorAll('[data-testid="browser-cast-image"], [data-testid="browser-cdp-fallback-image"]')).every((el) => (
+        Number(el.naturalWidth || 0) > 0 || Number(getComputedStyle(el).opacity) === 0
+      )),
       page: document.querySelector('[data-testid="page-outlet"]')?.getAttribute('data-page') || null,
       body_background: getComputedStyle(document.body).backgroundColor,
     };
@@ -175,6 +184,9 @@ function assertBaseMetrics(row) {
   if (m?.page !== 'command') throw new Error(`r85_visual_page:${m?.page}`);
   if (!m?.context_drawer_toggle || !m?.sidebar_toggle || !m?.attention_button) throw new Error('r85_visual_global_controls_missing');
   if (m?.palette_mounted) throw new Error('r85_visual_closed_overlay_semantic_pollution');
+  if (m?.broken_browser_images_hidden !== true) {
+    throw new Error(`r85_visual_broken_browser_image_visible:${JSON.stringify(m?.browser_images || [])}`);
+  }
 }
 
 async function main() {
@@ -270,6 +282,7 @@ async function main() {
       closed_overlays_absent_from_dom: true,
       r85_geometry_verified: true,
       drawer_interaction_verified: true,
+      broken_image_fallback_hidden: true,
       visual_golden_comparison_enabled: false,
       presentation_only: true,
       authority_effect: false,
