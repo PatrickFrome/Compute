@@ -10,12 +10,9 @@ import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
-import { CommandPage } from "@/components/me2/pages/command";
-import { AgentsPage } from "@/components/me2/pages/agents";
 import { CodePage } from "@/components/me2/pages/code";
 import { TasksPage } from "@/components/me2/pages/tasks";
 import { SupervisorPage } from "@/components/me2/pages/supervisor";
-import { ComputePage } from "@/components/me2/pages/compute";
 import { MemoryPage } from "@/components/me2/pages/memory";
 import { ObservabilityPage } from "@/components/me2/pages/observability";
 import { SystemPage } from "@/components/me2/pages/system";
@@ -113,12 +110,9 @@ function usePrimaryChatRoster() {
 
 function PageOutlet({ page }: { page: PageKey }) {
   switch (page) {
-    case "command": return <CommandPage />;
-    case "agents": return <AgentsPage />;
     case "code": return <CodePage />;
     case "tasks": return <TasksPage />;
     case "supervisor": return <SupervisorPage />;
-    case "compute": return <ComputePage />;
     case "memory": return <MemoryPage />;
     case "observability": return <ObservabilityPage />;
     case "system": return <SystemPage />;
