@@ -43,7 +43,7 @@ function refs(value, label) {
 function parseBlocks(text) {
   const source = String(text || '');
   const blocks = [];
-  const re = new RegExp(`\\`\\`\\`${AGENT_RESULT_FENCE}[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n\\`\\`\\``, 'g');
+  const re = new RegExp('```' + AGENT_RESULT_FENCE + '[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n```', 'g');
   let match;
   while ((match = re.exec(source)) !== null) {
     const block = match[1];
