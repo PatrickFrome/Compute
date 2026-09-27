@@ -20,6 +20,7 @@ import MirrorPanel from "@/components/me2/mirror-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { mergeExactTaskEvidenceEvents } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type Probe = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
@@ -344,18 +345,13 @@ function EvidenceTimelinePanel({
         bad: task.status === "FAILED" || task.status === "CANCELLED",
       });
     }
-    const exactEventsBySeq = new Map<number, Event>();
-    for (const event of events) {
-      if (event.task_id === inspectedTaskId) exactEventsBySeq.set(event.seq, event);
-    }
-    if (streamTaskId === inspectedTaskId) {
-      for (const event of stream) {
-        if (event.task_id === inspectedTaskId) exactEventsBySeq.set(event.seq, event);
-      }
-    }
-    const exactEvents = [...exactEventsBySeq.values()]
-      .sort((a, b) => b.seq - a.seq)
-      .slice(0, 40);
+    const exactEvents = mergeExactTaskEvidenceEvents({
+      taskId: inspectedTaskId,
+      events,
+      streamTaskId,
+      stream,
+      limit: 40,
+    }) as Event[];
     for (const event of exactEvents) {
       out.push({
         key: `event:${event.seq}`,
