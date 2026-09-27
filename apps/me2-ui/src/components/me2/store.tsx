@@ -69,6 +69,8 @@ export type PaletteMode = "all" | "actions" | "agents" | "tasks" | "pages";
 export type DialogKind = "newTask" | "eventsSearch" | "budget" | "reset" | "openSite" | null;
 export type ContextDrawerTab = "selection" | "events" | "commands" | "runtime";
 export type ContextDrawerDock = "bottom" | "right";
+export type PeekKind = "task" | "agent";
+export type PeekTarget = { kind: PeekKind; id: string };
 
 interface Me2State {
   // связь
@@ -89,6 +91,8 @@ interface Me2State {
   detail: Task | null;
   inspectedTaskId: string | null;
   stream: Event[];
+  // R96 temporary Peek is ephemeral presentation state only: no persistence/data authority.
+  peekTarget: PeekTarget | null;
   // contextual drawer (read-only presentation plane)
   contextDrawerPreferredOpen: boolean;
   contextDrawerOpen: boolean;
@@ -112,6 +116,7 @@ interface Me2State {
   setWorkspace: (w: WorkspaceKey) => void;
   setPalette: (open: boolean) => void;
   setDialog: (d: DialogKind) => void;
+  setPeekTarget: (target: PeekTarget | null) => void;
   setContextDrawer: (open: boolean) => void;
   setContextDrawerTab: (tab: ContextDrawerTab) => void;
   setContextDrawerFollowSelection: (follow: boolean) => void;
@@ -250,6 +255,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   detail: null,
   inspectedTaskId: null,
   stream: [],
+  peekTarget: null,
   contextDrawerPreferredOpen: false,
   contextDrawerOpen: false,
   contextDrawerTab: "events",
@@ -266,6 +272,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   booted: false,
 
   setBusy: (b) => set({ busyAction: b }),
+  setPeekTarget: (target) => set({ peekTarget: target }),
   setChromeOverlay: (source, open) => {
     const key = String(source || "").trim().slice(0, 64);
     if (!key) return;
@@ -625,6 +632,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
       const history = [...prefix, p].slice(-20);
       return {
         page: p,
+        peekTarget: null,
         recentPages: history,
         pageHistoryIndex: history.length - 1,
       };
@@ -644,6 +652,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
     const layoutPreference = readWorkspaceLayout(w);
     set({
       workspace: w,
+      peekTarget: null,
       contextDrawerPreferredOpen: layoutPreference.drawerOpen,
       contextDrawerTab: layoutPreference.drawerTab,
       contextDrawerFollowSelection: layoutPreference.drawerFollowSelection,
