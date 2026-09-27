@@ -450,9 +450,13 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
           >
             <img
               ref={castImgRef}
-              alt="Живой вид активной вкладки браузера"
-              className="block h-full w-full object-contain"
+              data-testid="browser-cast-image"
+              alt=""
+              aria-hidden="true"
+              className="block h-full w-full object-contain opacity-0"
               draggable={false}
+              onLoad={(e) => { e.currentTarget.style.opacity = "1"; }}
+              onError={(e) => { e.currentTarget.style.opacity = "0"; }}
               onPointerDown={(e) => castSendMouse("mousePressed", e)}
               onPointerUp={(e) => castSendMouse("mouseReleased", e)}
               onContextMenu={(e) => { if (castCtl) e.preventDefault(); }}
@@ -475,12 +479,14 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
             {!castStat.connected && (
               <img
                 key={`cdp-${cdpQ}-${cdpW}-${cdpTick}`}
+                data-testid="browser-cdp-fallback-image"
                 src={`/screencast.jpg?XTransformPort=3043&q=${cdpQ}&w=${cdpW}&t=${cdpTick}`}
-                alt="CDP-фолбэк: кадр активной вкладки"
-                className="absolute inset-0 h-full w-full object-contain"
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-contain opacity-0"
                 decoding="async"
-                onLoad={() => cdpNextTick(2000)}
-                onError={() => cdpNextTick(6000)}
+                onLoad={(e) => { e.currentTarget.style.opacity = "1"; cdpNextTick(2000); }}
+                onError={(e) => { e.currentTarget.style.opacity = "0"; cdpNextTick(6000); }}
               />
             )}
             {!castStat.connected && (
