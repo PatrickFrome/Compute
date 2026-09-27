@@ -96,6 +96,18 @@ Each Workspace persists independently:
 
 Switching Workspace or dock invalidates an in-flight resize transaction before any pointer-up can persist the old geometry.
 
+## Post-physical visual review
+
+The first exact-head R95 physical screenshot exposed a defect that the geometry-only evidence did not catch: in Right mode the vertical splitter was a full-height item inside a column flex container, so it consumed the panel's layout axis and pushed the visible controls/body out of view. Native Browser bounds were correct, but the Utility Panel itself rendered as an empty black strip.
+
+Correction:
+- Right mode now switches the panel root to `flex-row`.
+- The vertical splitter remains the left sibling.
+- Header, dock/size controls and content live in a dedicated `utility-panel-body` column beside it.
+- Visual qualification now verifies the body bounding box and actual tab/dock control visibility, not only outer panel geometry.
+
+Research consequence: VS Code/DevTools-style docking requires both **native surface reservation** and **internal panel layout evidence**. A correct outer rectangle is insufficient proof that the docked tool is usable.
+
 ## Next research/implementation step
 
 After R95 physical qualification:
