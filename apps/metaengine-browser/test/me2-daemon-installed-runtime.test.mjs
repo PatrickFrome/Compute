@@ -188,7 +188,7 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   );
 });
 
-test('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
+test('Browser-owned ME2 UI cannot start the legacy daemon watchdog', async () => {\n  const instrumentation = await fs.readFile(path.join(repoRoot, 'apps', 'me2-ui', 'src', 'instrumentation.ts'), 'utf8');\n  assert.match(instrumentation, /ME2_HOSTED_BY_BROWSER/);\n  assert.match(instrumentation, /ME2_WATCHDOG/);\n  assert.ok(instrumentation.indexOf('ME2_HOSTED_BY_BROWSER') < instrumentation.indexOf('me2-watchdog'));\n});\ntest('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
   let attempts = 0;
   const ready = await waitForMe2DaemonReady({
     attempts: 4,
