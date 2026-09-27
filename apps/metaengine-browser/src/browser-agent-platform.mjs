@@ -16,9 +16,9 @@
 //     ("Send Message"); name-based click authority is impossible, submits go
 //     through Enter with composer-cleared / new-conversation readback.
 //   - models: GLM-5.3 (flagship, login required), GLM-5.3-Flash (default),
-//     GLM-5.2; per-session model choice is selected by the operator and
-//     persisted by the site — the fleet types into whatever model the
-//     signed-in session has selected.
+//     GLM-5.2; the fleet target model is GLM-5.3-Flash. The selected session model must
+//     be proven from fresh browser perception before task dispatch; page text
+//     never grants authority and an unproven/mismatched model is fenced.
 //   - auth surface: https://chat.z.ai/auth (Google / Email / Github).
 //   - conversation URLs: https://chat.z.ai/c/<uuid>.
 
@@ -26,8 +26,8 @@ export const AGENT_PLATFORM_SCHEMA = 'metaengine.browser.agent-platform.v1';
 export const AGENT_PLATFORM_ID = 'GLM_ZAI';
 export const AGENT_PLATFORM_HOSTS = Object.freeze(['chat.z.ai']);
 export const AGENT_PLATFORM_HOME_URL = 'https://chat.z.ai/';
-export const AGENT_PLATFORM_MODEL = 'GLM-5.3';
-export const AGENT_PLATFORM_MODEL_SELECTION = 'OPERATOR_SESSION_DEFAULT';
+export const AGENT_PLATFORM_MODEL = 'GLM-5.3-Flash';
+export const AGENT_PLATFORM_MODEL_SELECTION = 'EXACT_SESSION_MODEL_REQUIRED';
 
 const CONVERSATION_PATH_RE = /^\/c\/[a-z0-9-]+\/?$/i;
 const AUTH_PATH_RE = /^\/auth(\/|$)/i;
