@@ -163,6 +163,11 @@ function selectedTab(next) {
   return rows.find((tab) => tab.tab_id === state.selected_tab_id) || null;
 }
 
+function isChatSurfaceTab(tab) {
+  const kind = String(tab?.kind || '').toUpperCase();
+  return kind === 'CHATGPT' || kind === 'GLM_CHAT';
+}
+
 function fleetAgentForTab(next, tabId) {
   const rows = Array.isArray(next?.fleet?.agents) ? next.fleet.agents : [];
   return rows.find((row) => String(row?.tab_id || '') === String(tabId || '')) || null;
@@ -266,8 +271,8 @@ function renderActive(next) {
     if (focusedSurface.type === 'BROWSER' && focusedSurface.tab_id) {
       const focusedTab = (next?.tabs?.tabs || []).find((row) => String(row.tab_id) === String(focusedSurface.tab_id));
       if (focusedTab && document.activeElement !== address) address.value = focusedTab.url || '';
-      routeKind.textContent = focusedTab?.kind === 'CHATGPT' ? 'CHAT' : 'WEB';
-      routeKind.classList.toggle('chat', focusedTab?.kind === 'CHATGPT');
+      routeKind.textContent = isChatSurfaceTab(focusedTab) ? 'CHAT' : 'WEB';
+      routeKind.classList.toggle('chat', isChatSurfaceTab(focusedTab));
     } else {
       routeKind.textContent = 'SURFACE';
       routeKind.classList.remove('chat');
@@ -285,7 +290,7 @@ function renderActive(next) {
     activeMeta.textContent = 'Awaiting browser state';
     return;
   }
-  const chat = tab.kind === 'CHATGPT';
+  const chat = isChatSurfaceTab(tab);
   activeKind.textContent = workspace ? 'P' : (chat ? 'C' : 'W');
   activeTitle.textContent = text(tab.title, chat ? 'ChatGPT' : hostFor(tab.url));
   activeMeta.textContent = actuation
@@ -1091,7 +1096,7 @@ function renderContextSet(next) {
   const list = section('Selected tabs', rows.length ? `${rows.length} explicit binding(s)` : 'empty');
   list.list.className = 'commandList';
   for (const row of rows) {
-    const label = text(row.tab.title, row.tab.kind === 'CHATGPT' ? 'ChatGPT' : hostFor(row.tab.url));
+    const label = text(row.tab.title, row.isChatSurfaceTab(tab) ? 'ChatGPT' : hostFor(row.tab.url));
     const hint = row.workspace
       ? `${compact(row.workspace.branch_name, 26)} · ${row.workspace.state}`
       : (row.agent ? `${text(row.agent.role)} · ${text(row.agent.lifecycle_state)}` : hostFor(row.tab.url));
@@ -1475,7 +1480,7 @@ function updateWorkbenchRouteKind() {
     return;
   }
   const tab = selectedTab(snapshot);
-  const chat = tab?.kind === 'CHATGPT';
+  const chat = isChatSurfaceTab(tab);
   routeKind.textContent = chat ? 'CHAT' : 'WEB';
   routeKind.classList.toggle('chat', chat);
 }
@@ -2116,7 +2121,7 @@ function omniboxHintItems(value) {
     }
   } else if (prefix === '@') {
     for (const tab of tabSearchMatches(snapshot, query).slice(0, 8)) {
-      const chat = tab.kind === 'CHATGPT';
+      const chat = isChatSurfaceTab(tab);
       items.push({ kind: 'TAB', label: compact(tab.title || (chat ? 'ChatGPT' : tab.url), 40), hint: chat ? 'chat surface' : hostFor(tab.url), run: () => api.command('SELECT_TAB', { tab_id: tab.tab_id }) });
     }
   }
