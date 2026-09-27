@@ -135,6 +135,7 @@ export function planShellLayout({
   let me2DrawerEffectiveDock = null;
   let me2DrawerHeight = 0;
   let me2DrawerWidth = 0;
+  let me2RunInspectorEffectiveVisible = null;
 
   if (surfaceProfile === 'ME2_R75_COMMAND') {
     // ME2 shell itself owns all chrome. Reserve the exact visible chrome and
@@ -281,6 +282,7 @@ export function planShellLayout({
       - (ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP)
       >= SHELL_MIN_REMOTE_WIDTH;
     const inspectorVisible = inspectorRequested && inspectorFits && !rightUtilityRequested;
+    me2RunInspectorEffectiveVisible = inspectorVisible;
     const baseRight = inspectorVisible
       ? ME2_PRIMARY_PAGE_PADDING + ME2_PRIMARY_RUN_INSPECTOR_WIDTH + ME2_PRIMARY_RUN_INSPECTOR_GAP
       : ME2_PRIMARY_PAGE_PADDING;
@@ -364,6 +366,9 @@ export function planShellLayout({
     me2_context_drawer_effective_dock: isMe2DrawerSurface ? me2DrawerEffectiveDock : null,
     me2_context_drawer_height: isMe2DrawerSurface ? me2DrawerHeight : 0,
     me2_context_drawer_width: isMe2DrawerSurface ? me2DrawerWidth : 0,
+    me2_run_inspector_effective_visible: surfaceProfile === 'ME2_R95_RUN'
+      ? me2RunInspectorEffectiveVisible === true
+      : null,
     chrome_degrades_before_active_surface: true,
     adaptations: Object.freeze(adaptations),
     adapted: adaptations.length > 0,
