@@ -15,6 +15,7 @@ function response(status, body) {
 
 function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
   const calls = [];
+  let currentTabUrl = tabUrl;
   const state = {
     tabs: [{ tab_id: TAB_ID, url: tabUrl, selected: false }],
     active_tab: null,
@@ -62,7 +63,19 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
       assert.equal(target_id, TARGET_ID);
       assert.equal(generation_epoch, 7);
       assert.equal(transport_url, 'https://chat.z.ai/');
-      return activate({ stage: 'PRECONVERSATION_ROOT', hash: '2'.repeat(64) });
+      const agent = state.fleet.agents[0];
+      agent.lifecycle_state = 'BOUND_UNVERIFIED';
+      agent.transport_proof = {
+        schema: 'metaengine.browser.fleet-transport-proof.v1',
+        transport_stage: 'PRECONVERSATION_ROOT',
+        tab_id: TAB_ID,
+        target_id: TARGET_ID,
+        generation_epoch: 7,
+        conversation_url_sha256: '2'.repeat(64),
+        proven_at: new Date().toISOString(),
+        authority_effect: false,
+      };
+      return structuredClone(state.fleet);
     },
     markTransportProven: async ({ agent_id, tab_id, target_id, generation_epoch, conversation_url }) => {
       assert.equal(agent_id, AGENT_ID);
@@ -83,8 +96,27 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
         tab_id: TAB_ID,
         target_id: TARGET_ID,
         process_incarnation_id: 'process-incarnation-test-1',
-        url: tabUrl,
+        url: currentTabUrl,
+        semantic_targets: currentTabUrl === 'https://chat.z.ai/' ? [{
+          role: 'textbox', name: 'How can I help you today?', value_length: 0,
+          semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'a'.repeat(64) },
+          backend_node_id: 7,
+        }] : [],
         authority_effect: false,
+      };
+    }
+    if (command.action === 'SEMANTIC_TYPE') {
+      assert.equal(currentTabUrl, 'https://chat.z.ai/');
+      assert.equal(command.payload.submit_after_type, true);
+      assert.equal(command.payload.replace_existing, true);
+      currentTabUrl = CONVERSATION;
+      state.tabs[0].url = CONVERSATION;
+      return {
+        effect_state: 'PROVEN_NEW_CONVERSATION',
+        composer_cleared: true,
+        new_conversation_observed: true,
+        automatic_retry_allowed: false,
+        authority_effect: true,
       };
     }
     if (command.action === 'FLEET_RECONCILE') return { ok: true, authority_effect: false };
@@ -161,25 +193,21 @@ test('one restored conversation is promoted locally before the normal scheduler 
   }
 });
 
-test('root ChatGPT tabs gain preconversation transport proof without TYPE or CLICK', async () => {
+test('root GLM tab is bootstrapped to canonical conversation before scheduler cycle', async () => {
   const h = harness({ tabUrl: 'https://chat.z.ai/' });
   try {
     const snapshot = await h.cycle.cycle();
-    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
-    assert.equal(h.state.fleet.agents[0].transport_proof.transport_stage, 'PRECONVERSATION_ROOT');
-    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_PRECONVERSATION');
-    assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'PRECONVERSATION_ROOT');
-    assert.equal(snapshot.fleet_transport_promotion.local_proof_state, 'PROVEN_PRECONVERSATION');
-    assert.equal(snapshot.fleet_transport_promotion.conversation_url_sha256, null);
-    assert.equal(snapshot.preconversation_transport_promotion_non_effect, true);
-    assert.equal(h.calls.some((row) => row[1] === 'SEMANTIC_TYPE'), false);
+    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'ACTIVE');
+    assert.equal(h.state.fleet.agents[0].transport_proof.transport_stage, undefined);
+    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE');
+    assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'CONVERSATION');
+    assert.match(snapshot.fleet_transport_promotion.bootstrap_prompt_sha256, /^[a-f0-9]{64}$/);
+    assert.equal(snapshot.fleet_transport_promotion.write_ahead_barrier_persisted, true);
+    assert.equal(h.calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 1);
     assert.equal(h.calls.some((row) => row[1] === 'TYPED_CLICK'), false);
-    assert.deepEqual(h.calls.slice(0, 4), [
-      ['http', '/v1/devos/promotion-lease'],
-      ['command', 'CAPTURE'],
-      ['http', '/v1/devos/promotion-release'],
-      ['http', '/v1/devos/cycle'],
-    ]);
+    const bootstrapIndex = h.calls.findIndex((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE');
+    const cycleIndex = h.calls.findIndex((row) => row[0] === 'http' && row[1] === '/v1/devos/cycle');
+    assert.ok(bootstrapIndex >= 0 && cycleIndex > bootstrapIndex, 'conversation bootstrap must complete before scheduler cycle');
   } finally {
     h.cleanup();
   }
