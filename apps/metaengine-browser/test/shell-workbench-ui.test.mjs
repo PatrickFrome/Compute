@@ -29,11 +29,10 @@ test('workbench preserves self-only CSP and native-inset surfaces', () => {
   assert.match(css, /--ops-width/);
 });
 
-test('workbench renderer exposes layout and navigation but no authority actuation', () => {
+test('workbench renderer exposes managed selection and settings routing but no authority actuation', () => {
   assert.match(js, /SHELL_LAYOUT_SET/);
-  assert.match(js, /NEW_CHATGPT/);
   assert.match(js, /SELECT_TAB/);
-  assert.match(js, /CLOSE_TAB/);
+  assert.doesNotMatch(js, /CLOSE_TAB/);
   for (const command of authorityCommands) assert.doesNotMatch(js, new RegExp(`['\"]${command}['\"]`));
 });
 
