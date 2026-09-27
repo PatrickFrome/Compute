@@ -295,7 +295,7 @@ export async function waitProducerSuccess({
   fetchImpl = fetch,
 } = {}) {
   const repository = requireString(repo, 'repo_missing');
-  if (!/^[^/\\s]+\\/[^/\\s]+$/.test(repository)) fail('repo_invalid');
+  if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) fail('repo_invalid');
   const exactHead = normalizeHead(head);
   const exactRunId = normalizePositiveInt(runId, 'run_id_invalid');
   const exactAttempt = runAttempt == null ? null : normalizePositiveInt(runAttempt, 'run_attempt_invalid');
