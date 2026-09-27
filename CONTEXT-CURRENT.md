@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T03:52:08Z | worklog: 1894868B / 10385L | sha12=743ff5182669
+gen: 2026-09-27T04:22:06Z | worklog: 1894868B / 10385L | sha12=743ff5182669
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
