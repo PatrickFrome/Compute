@@ -27,6 +27,7 @@ const digest = (buffer) => crypto.createHash('sha256').update(buffer).digest('he
 
 const VISUAL_PHASE_TIMEOUT_MS = 120_000;
 let visualPhase = 'BOOT';
+const blockedRemoteBrowserPorts = new Set();
 
 function markPhase(phase) {
   visualPhase = phase;
@@ -113,6 +114,15 @@ async function waitFor(contents, expression, timeoutMs = 20000) {
   throw new Error(`r85_visual_wait_timeout:${expression}`);
 }
 
+async function waitForRemoteIsolation(timeoutMs = 10000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (blockedRemoteBrowserPorts.has('3042') && blockedRemoteBrowserPorts.has('3043')) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`r85_visual_remote_transport_not_isolated:${[...blockedRemoteBrowserPorts].sort().join(',')}`);
+}
+
 async function settle(contents) {
   await withTimeout(contents.executeJavaScript(`Promise.race([
     document.fonts?.ready ? document.fonts.ready.then(() => 'fonts-ready') : Promise.resolve('fonts-unavailable'),
@@ -153,6 +163,9 @@ async function metrics(contents) {
       broken_browser_images_hidden: Array.from(document.querySelectorAll('[data-testid="browser-cast-image"], [data-testid="browser-cdp-fallback-image"]')).every((el) => (
         Number(el.naturalWidth || 0) > 0 || Number(getComputedStyle(el).opacity) === 0
       )),
+      remote_browser_pixels_visible: Array.from(document.querySelectorAll('[data-testid="browser-cast-image"], [data-testid="browser-cdp-fallback-image"]')).some((el) => (
+        Number.parseFloat(getComputedStyle(el).opacity || '0') > 0 && Number(el.naturalWidth || 0) > 0
+      )),
       page: document.querySelector('[data-testid="page-outlet"]')?.getAttribute('data-page') || null,
       body_background: getComputedStyle(document.body).backgroundColor,
     };
@@ -187,6 +200,7 @@ function assertBaseMetrics(row) {
   if (m?.broken_browser_images_hidden !== true) {
     throw new Error(`r85_visual_broken_browser_image_visible:${JSON.stringify(m?.browser_images || [])}`);
   }
+  if (m?.remote_browser_pixels_visible) throw new Error('r85_visual_remote_browser_pixels_visible');
 }
 
 async function main() {
@@ -242,6 +256,22 @@ async function main() {
   windowRef.contentView.addChildView(shellView);
   shellView.setBounds({ x: 0, y: 0, width: 1440, height: 960 });
 
+  shellView.webContents.session.webRequest.onBeforeRequest(
+    { urls: ['<all_urls>'] },
+    (details, callback) => {
+      try {
+        const url = new URL(details.url);
+        const port = url.searchParams.get('XTransformPort');
+        if (port === '3042' || port === '3043') {
+          blockedRemoteBrowserPorts.add(port);
+          callback({ cancel: true });
+          return;
+        }
+      } catch { /* non-standard URL: allow */ }
+      callback({});
+    },
+  );
+
   try {
     markPhase('LOAD_PRIMARY_ME2');
     await withTimeout(shellView.webContents.loadURL(`${gateway.url}/#command`), 25_000, 'load_primary_me2');
@@ -251,6 +281,7 @@ async function main() {
     markPhase('WAIT_PRIMARY_COMMAND');
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=page-command]')");
     await waitFor(shellView.webContents, "document.querySelector('[data-testid=context-drawer-toggle]')");
+    await waitForRemoteIsolation();
     markPhase('CAPTURE_COMMAND_CLOSED');
     const closed = await capture(shellView, 'r85-command-1440x960');
     assertBaseMetrics(closed);
@@ -279,6 +310,8 @@ async function main() {
       primary_me2_ui_captured: true,
       legacy_shell_captured: false,
       remote_browser_content_captured: false,
+      remote_browser_transport_blocked: blockedRemoteBrowserPorts.has('3042') && blockedRemoteBrowserPorts.has('3043'),
+      blocked_remote_browser_ports: Object.freeze([...blockedRemoteBrowserPorts].sort()),
       closed_overlays_absent_from_dom: true,
       r85_geometry_verified: true,
       drawer_interaction_verified: true,
@@ -291,6 +324,7 @@ async function main() {
     console.log(JSON.stringify(evidence));
   } finally {
     markPhase('SHUTDOWN');
+    try { shellView.webContents.session.webRequest.onBeforeRequest(null); } catch {}
     try { shellView.webContents.close(); } catch {}
     try { windowRef.destroy(); } catch {}
     try { stopMe2UiGateway(); } catch {}
