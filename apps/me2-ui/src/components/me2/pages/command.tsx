@@ -104,6 +104,8 @@ type MissionAttention = {
   detail: string;
   page: "tasks" | "agents" | "observability" | "system";
   tone: "rose" | "amber";
+  focusTaskId?: string;
+  focusChatId?: string;
 };
 
 // ── Mission Rail (ChatGPT-стиль списка агентов + цель + исходы) ────────────────
@@ -332,7 +334,7 @@ function ActiveWorkCard({ tasks, nowMs }: { tasks: Task[]; nowMs: number }) {
           <button
             key={t.id}
             type="button"
-            onClick={() => openTask(t.id)}
+            onClick={() => { openTask(t.id); setPage("tasks"); }}
             title={`${t.title}\n${t.status} · шаг ${t.steps}/${t.max_steps}${t.agent_id ? ` · агент ${t.agent_id}` : ""}${t.result ? `\n→ ${t.result.slice(0, 140)}` : ""}${t.error ? `\n⚠ ${t.error.slice(0, 140)}` : ""}`}
             className="mb-0.5 flex w-full items-center gap-2 rounded px-1.5 py-1.5 text-left transition hover:bg-zinc-900/70"
           >
@@ -348,7 +350,16 @@ function ActiveWorkCard({ tasks, nowMs }: { tasks: Task[]; nowMs: number }) {
 }
 
 function AttentionCard({ items }: { items: MissionAttention[] }) {
+  const openTask = useMe2((s) => s.openTask);
+  const setChatId = useMe2((s) => s.setChatId);
   const setPage = useMe2((s) => s.setPage);
+
+  const openAttention = useCallback((item: MissionAttention) => {
+    if (item.focusTaskId) openTask(item.focusTaskId);
+    if (item.focusChatId) setChatId(item.focusChatId);
+    setPage(item.page);
+  }, [openTask, setChatId, setPage]);
+
   return (
     <section
       aria-label="Внимание"
@@ -367,8 +378,8 @@ function AttentionCard({ items }: { items: MissionAttention[] }) {
           <button
             key={item.id}
             type="button"
-            onClick={() => setPage(item.page)}
-            title={`${item.detail} → ${item.page.toUpperCase()}`}
+            onClick={() => openAttention(item)}
+            title={`${item.detail} → ${item.page.toUpperCase()}${item.focusTaskId || item.focusChatId ? " · exact selection" : ""}`}
             className="mb-0.5 flex w-full items-start gap-2 rounded px-1.5 py-1.5 text-left transition hover:bg-zinc-900/70"
           >
             <span aria-hidden className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${item.tone === "rose" ? "bg-rose-400" : "bg-amber-400"}`} />
@@ -409,9 +420,16 @@ function OutcomesCard({ events, nowMs }: { events: Me2Event[]; nowMs: number }) 
             <button
               key={e.seq}
               type="button"
-              onClick={() => { if (e.task_id) openTask(e.task_id); }}
-              title={`${e.type} · ${e.data.slice(0, 180)}`}
-              className={`mb-0.5 flex w-full items-center gap-2 rounded px-1.5 py-1 text-left transition hover:bg-zinc-900/70 ${e.task_id ? "cursor-pointer" : "cursor-default"}`}
+              onClick={() => {
+                if (e.task_id) {
+                  openTask(e.task_id);
+                  setPage("tasks");
+                } else {
+                  setPage("observability");
+                }
+              }}
+              title={`${e.type} · ${e.data.slice(0, 180)} · ${e.task_id ? "open task" : "open observe"}`}
+              className="mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-left transition hover:bg-zinc-900/70"
             >
               <span className="shrink-0 font-mono text-[9px] text-zinc-600">{ageLabel(e.ts, nowMs)}</span>
               <span className={`shrink-0 font-mono text-[9px] ${bad ? "text-rose-400" : "text-emerald-400/90"}`}>{e.type.replace(/^TASK_|^COMMAND_|^AGENT_CHAT_/, "").toLowerCase()}</span>
@@ -541,14 +559,34 @@ export function CommandPage() {
 
   const attention = useMemo<MissionAttention[]>(() => {
     const tasks = snap?.tasks ?? [];
-    const failedTasks = tasks.filter((t) => t.status === "FAILED");
-    const blockedAgents = sessions.filter((s) => s.outcome_status === "blocked" || s.fail_streak >= 3);
+    const failedTasks = tasks
+      .filter((t) => t.status === "FAILED")
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const blockedAgents = sessions
+      .filter((s) => s.outcome_status === "blocked" || s.fail_streak >= 3)
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    const latestFailed = failedTasks[0] ?? null;
+    const latestBlocked = blockedAgents[0] ?? null;
     const mirrorDegraded = Boolean(mirror && (mirror.mode !== "LIVE" || mirror.pending > 0));
     const budgetPct = Math.round((kpis.budgetUsed / Math.max(1, kpis.budgetLimit)) * 100);
     const items: MissionAttention[] = [];
     if (!connected) items.push({ id: "transport", label: "Transport offline", detail: "Socket :3040 недоступен; REST-fallback может быть активен.", page: "observability", tone: "rose" });
-    if (failedTasks.length > 0) items.push({ id: "tasks", label: `${failedTasks.length} failed task${failedTasks.length === 1 ? "" : "s"}`, detail: "В очереди есть проваленные задачи — проверьте evidence перед повтором.", page: "tasks", tone: "rose" });
-    if (blockedAgents.length > 0) items.push({ id: "agents", label: `${blockedAgents.length} blocked agent${blockedAgents.length === 1 ? "" : "s"}`, detail: blockedAgents.map((s) => s.title).slice(0, 3).join(", "), page: "agents", tone: "rose" });
+    if (failedTasks.length > 0) items.push({
+      id: "tasks",
+      label: `${failedTasks.length} failed task${failedTasks.length === 1 ? "" : "s"}`,
+      detail: latestFailed ? `Последний провал: ${latestFailed.title}` : "В очереди есть проваленные задачи — проверьте evidence перед повтором.",
+      page: "tasks",
+      tone: "rose",
+      focusTaskId: latestFailed?.id,
+    });
+    if (blockedAgents.length > 0) items.push({
+      id: "agents",
+      label: `${blockedAgents.length} blocked agent${blockedAgents.length === 1 ? "" : "s"}`,
+      detail: blockedAgents.map((s) => s.title).slice(0, 3).join(", "),
+      page: "agents",
+      tone: "rose",
+      focusChatId: latestBlocked?.id,
+    });
     if (mirrorDegraded) items.push({ id: "mirror", label: `Mirror ${mirror?.mode ?? "unknown"}`, detail: `Outbox ${mirror?.pending ?? 0}${mirror?.last_error ? " · " + mirror.last_error.slice(0, 90) : ""}`, page: "observability", tone: "amber" });
     if (kpis.workersOnline === 0) items.push({ id: "workers", label: "0 workers online", detail: "Реестр workers не сообщает живой ёмкости.", page: "system", tone: "amber" });
     if (budgetPct >= 75) items.push({ id: "budget", label: `Command budget ${budgetPct}%`, detail: `${kpis.budgetUsed}/${kpis.budgetLimit} cost units в текущем окне.`, page: "system", tone: "amber" });
