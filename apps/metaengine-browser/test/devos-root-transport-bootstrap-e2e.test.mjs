@@ -17,7 +17,7 @@ function response(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => structuredClone(body) };
 }
 
-function proof(stage, url) {
+function proof(stage, url, agentSurfaceSha256 = null) {
   return {
     schema: 'metaengine.browser.fleet-transport-proof.v1',
     ...(stage === 'PRECONVERSATION_ROOT' ? { transport_stage: stage } : {}),
@@ -25,6 +25,7 @@ function proof(stage, url) {
     target_id: TARGET_ID,
     generation_epoch: 7,
     conversation_url_sha256: sha256(url),
+    ...(stage === 'CONVERSATION' ? { agent_surface_sha256: agentSurfaceSha256 } : {}),
     proven_at: new Date().toISOString(),
     authority_effect: false,
   };
@@ -87,7 +88,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       agent.transport_proof = proof('PRECONVERSATION_ROOT', ROOT);
       return structuredClone(state.fleet);
     },
-    markTransportProven: async ({ agent_id, tab_id, target_id, generation_epoch, conversation_url }) => {
+    markTransportProven: async ({ agent_id, tab_id, target_id, generation_epoch, conversation_url, agent_surface_sha256 }) => {
       assert.deepEqual({ agent_id, tab_id, target_id, generation_epoch, conversation_url }, {
         agent_id: AGENT_ID,
         tab_id: TAB_ID,
@@ -95,9 +96,10 @@ test('root worker is bootstrapped under promotion lease before task lease and re
         generation_epoch: 7,
         conversation_url: CONVERSATION,
       });
+      assert.match(agent_surface_sha256, /^[a-f0-9]{64}$/);
       const agent = state.fleet.agents[0];
       agent.lifecycle_state = 'ACTIVE';
-      agent.transport_proof = proof('CONVERSATION', CONVERSATION);
+      agent.transport_proof = proof('CONVERSATION', CONVERSATION, agent_surface_sha256);
       return structuredClone(state.fleet);
     },
   };
@@ -109,22 +111,59 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     for (const row of state.tabs) row.selected = row.tab_id === tabId;
   };
 
-  const frame = ({ url, generating = false } = {}) => ({
-    schema: 'metaengine.native-browser.perception.v1',
-    tab_id: TAB_ID,
-    target_id: TARGET_ID,
-    process_incarnation_id: 'process-incarnation-root-bootstrap-e2e',
-    url,
-    viewport: { width: 1200, height: 800 },
-    semantic_targets: [
-      { role: 'textbox', name: null, semantic_ref: { schema: 'metaengine.native-browser.semantic-ref.v1', semantic_ref_id: 'semref_' + 'd'.repeat(64) }, backend_node_id: 3 },
-      ...(generating ? [{ role: 'button', name: 'Stop generating' }] : [{ role: 'button', name: 'Send prompt' }]),
-    ],
-    authority_effect: false,
+  let surfaceState = 'CHAT_ROOT';
+  const semanticRef = (suffix) => ({
+    schema: 'metaengine.native-browser.semantic-ref.v1',
+    semantic_ref_id: 'semref_' + suffix.repeat(64).slice(0, 64),
   });
+  const frame = ({ generating = false } = {}) => {
+    const base = {
+      schema: 'metaengine.native-browser.perception.v1',
+      tab_id: TAB_ID,
+      target_id: TARGET_ID,
+      process_incarnation_id: 'process-incarnation-root-bootstrap-e2e',
+      state_revision_id: `rev_${sha256(surfaceState)}`,
+      url: surfaceState === 'CONVERSATION' ? CONVERSATION : ROOT,
+      viewport: { width: 1200, height: 800 },
+      authority_effect: false,
+    };
+    if (surfaceState === 'CHAT_ROOT') {
+      return {
+        ...base,
+        semantic_targets: [
+          { role: 'button', name: 'Agent', semantic_ref: semanticRef('a'), backend_node_id: 11 },
+        ],
+        interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.2' }] },
+      };
+    }
+    if (surfaceState === 'AGENT_HOME' || surfaceState === 'AGENT_TASK') {
+      return {
+        ...base,
+        semantic_targets: [
+          { role: 'button', name: 'Agent', semantic_ref: semanticRef('b'), backend_node_id: 21 },
+          { role: 'button', name: 'New Task', semantic_ref: semanticRef('c'), backend_node_id: 22 },
+          { role: 'button', name: 'Full-Stack', semantic_ref: semanticRef('d'), backend_node_id: 23 },
+          { role: 'button', name: 'Writing', semantic_ref: semanticRef('e'), backend_node_id: 24 },
+          { role: 'button', name: 'Select a model', semantic_ref: semanticRef('f'), backend_node_id: 25 },
+          ...(surfaceState === 'AGENT_TASK'
+            ? [{ role: 'textbox', name: 'Describe your task', value_length: 0, value_sha256: null, semantic_ref: semanticRef('1'), backend_node_id: 31 }]
+            : []),
+        ],
+        interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.3-Flash' }] },
+      };
+    }
+    return {
+      ...base,
+      semantic_targets: [
+        { role: 'textbox', name: 'Send a Message', value_length: 0, semantic_ref: semanticRef('2'), backend_node_id: 41 },
+        ...(generating ? [{ role: 'button', name: 'Stop generating', semantic_ref: semanticRef('3'), backend_node_id: 42 }] : []),
+      ],
+      interaction_tree: { elements: [{ role: 'button', text: 'GLM-5.3-Flash' }] },
+    };
+  };
 
   const executeCommand = async (command) => {
-    calls.push(['command', command.action]);
+    calls.push(['command', command.action, command.payload?.accessible_name || command.payload?.key || null]);
     if (command.action === 'FLEET_RECONCILE') return structuredClone(state.fleet);
     if (command.action === 'SELECT_TAB') {
       syncSelection(command.payload.tab_id);
@@ -132,12 +171,27 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     }
     if (command.action === 'CAPTURE') {
       captureCount += 1;
-      if (captureCount === 1) return frame({ url: ROOT }); // promotion CAPTURE before seed
-      return frame({ url: CONVERSATION, generating: captureCount >= 4 }); // post-seed and task readbacks
+      return frame({ generating: surfaceState === 'CONVERSATION' && submitCount >= 2 });
+    }
+    if (command.action === 'TYPED_CLICK') {
+      if (command.payload.accessible_name === 'Agent' && surfaceState === 'CHAT_ROOT') {
+        surfaceState = 'AGENT_HOME';
+        return { activation: { method: 'DOM_CLICK' }, mouse_geometry_required: false, authority_effect: true };
+      }
+      if (command.payload.accessible_name === 'New Task' && surfaceState === 'AGENT_HOME') {
+        surfaceState = 'AGENT_TASK';
+        return { activation: { method: 'DOM_CLICK' }, mouse_geometry_required: false, authority_effect: true };
+      }
+      throw new Error(`unexpected_activation:${command.payload.accessible_name}:${surfaceState}`);
     }
     if (command.action === 'SEMANTIC_TYPE') {
       assert.equal(command.payload.submit_after_type, true);
       submitCount += 1;
+      if (submitCount === 1) {
+        assert.equal(surfaceState, 'AGENT_TASK');
+        surfaceState = 'CONVERSATION';
+        state.tabs[1].url = CONVERSATION;
+      }
       return {
         effect_state: submitCount === 1 ? 'PROVEN_NEW_CONVERSATION' : 'PROVEN_COMPOSER_CLEARED',
         composer_cleared: true,
@@ -147,8 +201,8 @@ test('root worker is bootstrapped under promotion lease before task lease and re
         authority_effect: true,
       };
     }
-    if (command.action === 'TYPED_CLICK') {
-      return { authority_effect: true };
+    if (command.action === 'PRESS_KEY') {
+      return { key: command.payload.key, mouse_geometry_required: false, authority_effect: true };
     }
     throw new Error(`unexpected_command:${command.action}`);
   };
@@ -202,6 +256,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
       assert.equal(state.fleet.agents[0].lifecycle_state, 'ACTIVE', 'scheduler must see only canonical conversation ACTIVE');
       assert.equal(state.fleet.agents[0].transport_proof.transport_stage, undefined);
       assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
+      assert.match(state.fleet.agents[0].transport_proof.agent_surface_sha256, /^[a-f0-9]{64}$/);
       return response(200, {
         schema: 'metaengine.devos.browser-cycle.v1',
         backlog: { ready: 1, running: 0, by_role: { IMPLEMENTER: 1 } },
@@ -214,9 +269,11 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     if (path === '/v1/devos/mark-running') {
       assert.equal(request.payload.task_id, TASK_ID);
       assert.equal(request.payload.proof.conversation_url_sha256, sha256(CONVERSATION));
+      assert.match(request.payload.proof.agent_surface_sha256, /^[a-f0-9]{64}$/);
       const current = state.fleet.agents[0].transport_proof;
       markRunningObservedCanonicalProof = current.transport_stage !== 'PRECONVERSATION_ROOT'
-        && current.conversation_url_sha256 === sha256(CONVERSATION);
+        && current.conversation_url_sha256 === sha256(CONVERSATION)
+        && /^[a-f0-9]{64}$/.test(current.agent_surface_sha256);
       return response(200, { state: 'RUNNING', automatic_retry_allowed: false, authority_effect: false });
     }
     throw new Error(`unexpected_http:${path}`);
@@ -230,7 +287,7 @@ test('root worker is bootstrapped under promotion lease before task lease and re
 
   try {
     const snapshot = await cycle.cycle();
-    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE');
+    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE_AGENT_SESSION');
     assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'CONVERSATION');
     assert.equal(snapshot.fleet_transport_promotion.write_ahead_barrier_persisted, true);
     assert.equal(snapshot.dispatch.state, 'RUNNING');
@@ -240,7 +297,8 @@ test('root worker is bootstrapped under promotion lease before task lease and re
     assert.equal(state.fleet.agents[0].transport_proof.conversation_url_sha256, sha256(CONVERSATION));
     assert.equal(submitCount, 2, 'one bootstrap seed and one task submit are expected');
     assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'SEMANTIC_TYPE').length, 2);
-    assert.equal(calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK').length, 0);
+    const activations = calls.filter((row) => row[0] === 'command' && row[1] === 'TYPED_CLICK');
+    assert.deepEqual(activations.map((row) => row[2]), ['Agent', 'New Task']);
     const typeIndexes = calls.map((row, index) => row[1] === 'SEMANTIC_TYPE' ? index : -1).filter((index) => index >= 0);
     const cycleIndex = calls.findIndex((row) => row[1] === '/v1/devos/cycle');
     const markRunningIndex = calls.findIndex((row) => row[1] === '/v1/devos/mark-running');
