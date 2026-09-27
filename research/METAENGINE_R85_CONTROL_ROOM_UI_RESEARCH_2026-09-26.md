@@ -735,3 +735,17 @@ Required:
 - source/runtime tests green;
 - no authority widening;
 - no regression in installed chat, soak, host resilience, self-update qualification.
+
+
+## Physical visual follow-up — broken image fallback leakage
+
+The first terminal-green R85 primary capture at exact head `ac6e1d6096ad140ac6a82de69d9472af8a8edf2b` exposed a defect that the geometry/semantic gate did not catch: while both Browser frame transports were unavailable, Chromium rendered the fallback `<img>` broken-image icon/alt text directly in the native Browser viewport. The primary WS image and CDP fallback image overlapped near the upper-left of the viewport even though all measured R85 geometry was correct.
+
+Root cause:
+- the live-frame `<img>` existed before the first frame had a source;
+- the CDP fallback `<img>` remained visible when `/screencast.jpg` failed;
+- both carried user-visible alt text, so transport failure leaked presentation artifacts into the control-room surface.
+
+R85 now treats frame images as renderer-owned visual layers: each starts at opacity zero, becomes visible only after a successful image load, returns to opacity zero on load error, and uses the already-labelled viewport container for accessibility instead of broken-image fallback text. The physical visual harness now records both image surfaces and fails if an image with `naturalWidth === 0` is visually exposed.
+
+This strengthens the visual qualification principle: valid DOM anchors and exact geometry are necessary but not sufficient; transport-degraded media surfaces must also prove that unloaded/broken content cannot leak browser-native fallback presentation into the operator UI.
