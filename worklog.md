@@ -10243,3 +10243,15 @@ Work Log:
 Stage Summary:
 - EV-FOOTER ЗАКРЫТ: sticky-bottom поведение (flex+mt-auto), safe-area inset, nav-ряд+jump-чипы+«наверх», статус-ряд — всё верифицировано интерактивом через :81; page.tsx не изменялся (наследие R81-PHASE0 подтверждено как полное)
 - Движок v1.26, backlog: EV-FAB (новый) → EV-DARKMODE → EV-SCROLLBAR по порядку pick_task
+---
+Task ID: R80
+Agent: cron-413338
+Task: Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
+
+Work Log:
+- .github.env валиден (token=valid, без печати)
+- push-pending-r80.sh: main→sandbox/me2-os up-to-date (17822b85 = HEAD после R12-EV-FOOTER sync); архив-ветки up-to-date
+- ls-remote ≡ local HEAD = 17822b85 ✅
+
+Stage Summary:
+- Публикация актуальна: sandbox/me2-os = 17822b85; дерево чистое; блокеров нет
