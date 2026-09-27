@@ -646,22 +646,26 @@ export const useMe2 = create<Me2State>((set, get) => ({
   },
 
   setPage: (p) => {
+    // R97 compatibility fence: historical deep links into daemon/API-agent
+    // surfaces never resurrect those control planes. They converge to the
+    // canonical native Browser fleet workspace.
+    const nextPage: PageKey = (p === "command" || p === "agents" || p === "compute") ? "browser" : p;
     // Any page transition invalidates in-flight drawer geometry replies.
     // A new RUN/Browser sync below gets a fresh sequence/context token.
     contextDrawerSyncSeq += 1;
     set((st) => {
-      if (st.page === p) return st;
+      if (st.page === nextPage) return st;
       const prefix = st.recentPages.slice(0, st.pageHistoryIndex + 1);
-      const history = [...prefix, p].slice(-20);
+      const history = [...prefix, nextPage].slice(-20);
       return {
-        page: p,
+        page: nextPage,
         peekTarget: null,
         recentPages: history,
         pageHistoryIndex: history.length - 1,
       };
     });
-    const primaryPageAck = syncPagePresentation(p);
-    if (p === "browser") {
+    const primaryPageAck = syncPagePresentation(nextPage);
+    if (nextPage === "browser") {
       const reconcileRunGeometry = () => {
         if (get().page === "browser") get().syncContextDrawer();
       };
