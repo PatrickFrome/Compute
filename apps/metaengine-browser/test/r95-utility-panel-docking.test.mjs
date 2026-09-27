@@ -131,7 +131,7 @@ test('R95 Browser-owned bridge remains narrow presentation-only geometry synchro
 
 test('R95 physical visual harness captures both Bottom and Right Utility Panel states', () => {
   assert.match(visualHarness, /utility-panel-dock-right/);
-  assert.match(visualHarness, /r95c-run-utility-right-1440x960/);
+  assert.match(visualHarness, /r95c-run-utility-right-1680x960/);
   assert.match(visualHarness, /utility_panel_bottom_verified:\s*true/);
   assert.match(visualHarness, /utility_panel_right_verified:\s*true/);
   assert.match(visualHarness, /context_drawer_dock/);
