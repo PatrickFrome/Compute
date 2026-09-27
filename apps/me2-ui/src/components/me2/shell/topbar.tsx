@@ -4,7 +4,7 @@
 // compressed into attention-oriented health, leaving the workspace as the focus.
 
 import { PAGES, WORKSPACES, workflowStageForPage, useMe2 } from "@/components/me2/store";
-import { Search, Command, Boxes, Radio, BellRing, PanelBottom, X, ChevronDown, Check, RotateCcw } from "lucide-react";
+import { Search, Command, Boxes, Radio, BellRing, PanelBottom, PanelRight, X, ChevronDown, Check, RotateCcw } from "lucide-react";
 import { Dot } from "@/components/me2/ui/primitives";
 import { useEffect, useState } from "react";
 
@@ -20,6 +20,7 @@ export function TopBar() {
   const resetWorkspaceLayout = useMe2((s) => s.resetWorkspaceLayout);
   const contextDrawerPreferredOpen = useMe2((s) => s.contextDrawerPreferredOpen);
   const contextDrawerOpen = useMe2((s) => s.contextDrawerOpen);
+  const contextDrawerDock = useMe2((s) => s.contextDrawerDock);
   const setContextDrawer = useMe2((s) => s.setContextDrawer);
   const setChromeOverlay = useMe2((s) => s.setChromeOverlay);
   const [attentionOpen, setAttentionOpen] = useState(false);
@@ -179,7 +180,7 @@ export function TopBar() {
           type="button"
           onClick={() => setContextDrawer(!contextDrawerPreferredOpen)}
           aria-pressed={contextDrawerOpen}
-          aria-label={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Context Drawer скрыт из-за высоты окна" : contextDrawerOpen ? "Закрыть Context Drawer" : "Открыть Context Drawer"}
+          aria-label={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Utility Panel скрыт из-за минимального размера Browser" : contextDrawerOpen ? "Закрыть Utility Panel" : "Открыть Utility Panel"}
           data-testid="context-drawer-toggle"
           className={`flex h-7 min-w-7 items-center justify-center border px-2 transition-colors ${
             contextDrawerOpen
@@ -188,9 +189,9 @@ export function TopBar() {
                 ? "border-amber-900/70 bg-amber-950/20 text-amber-300"
                 : "border-zinc-800 bg-zinc-950 text-zinc-600 hover:text-zinc-300"
           }`}
-          title={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Drawer сохранён, но Browser minimum height имеет приоритет. Увеличьте окно." : "Context Drawer · Ctrl/Cmd+J"}
+          title={contextDrawerPreferredOpen && !contextDrawerOpen && page === "command" ? "Utility Panel сохранён, но Browser minimum geometry имеет приоритет. Увеличьте окно." : `Utility Panel · ${contextDrawerDock === "right" ? "Right" : "Bottom"} · Ctrl/Cmd+J`}
         >
-          <PanelBottom className="h-3 w-3" aria-hidden />
+          {contextDrawerDock === "right" ? <PanelRight className="h-3 w-3" aria-hidden /> : <PanelBottom className="h-3 w-3" aria-hidden />}
         </button>
 
         <div className="relative">
