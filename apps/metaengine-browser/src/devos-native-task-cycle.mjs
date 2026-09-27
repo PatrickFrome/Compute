@@ -289,29 +289,9 @@ export class DevOsNativeTaskCycle {
           throw new Error('devos_transport_active_conversation_hash_mismatch');
         }
 
-        let fleetProof = exactTransportProof(agent);
-        let proofState = 'PREEXISTING_ACTIVE_PROOF_REVALIDATED';
-        if (String(fleetProof?.transport_stage || 'CONVERSATION') === 'PRECONVERSATION_ROOT') {
-          const upgraded = await markFleetTransportProvenFromNativeFrame({
-            binding: {
-              agent_id: agent.agent_id,
-              tab_id: agent.tab_id,
-              target_id: agent.target_id,
-              agent_generation_epoch: agent.generation_epoch,
-            },
-            frame,
-            expected_conversation_url_sha256: expectedHash,
-          });
-          if (upgraded?.state !== 'UPGRADED_CONVERSATION') {
-            throw new Error('devos_transport_preconversation_upgrade_invalid');
-          }
-          agent = exactFleetAgent(await this.#getState(), payload);
-          fleetProof = exactTransportProof(agent);
-          if (String(fleetProof?.transport_stage || 'CONVERSATION') === 'PRECONVERSATION_ROOT') {
-            throw new Error('devos_transport_preconversation_upgrade_not_persisted');
-          }
-          proofState = 'PRECONVERSATION_PROOF_UPGRADED';
-        }
+        const fleetProof = exactTransportProof(agent);
+        if (!fleetProof) throw new Error('devos_transport_active_agent_proof_invalid');
+        const proofState = 'PREEXISTING_ACTIVE_AGENT_PROOF_REVALIDATED';
 
         this.#lastFleetTransportProof = {
           schema: 'metaengine.browser.fleet-native-transport-proof.v2',
@@ -322,6 +302,7 @@ export class DevOsNativeTaskCycle {
           generation_epoch: agent.generation_epoch,
           fleet_proven_at: fleetProof.proven_at,
           conversation_url_sha256: expectedHash,
+          agent_surface_sha256: fleetProof.agent_surface_sha256,
           automatic_retry_allowed: false,
           authority_effect: false,
         };
