@@ -157,10 +157,10 @@ export function ContextDrawer() {
     let nextWidth = width;
     let frame = 0;
 
-    const sameTransaction = () => {
-      const state = useMe2.getState();
-      return state.workspace === startWorkspace && state.contextDrawerDock === startDock;
-    };
+    const sameTransaction = () => (
+      useMe2.getState().workspace === startWorkspace
+      && useMe2.getState().contextDrawerDock === startDock
+    );
     const cleanup = () => {
       if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", move);
@@ -370,7 +370,7 @@ export function ContextDrawer() {
               ? "bg-cyan-950/30 text-cyan-300"
               : "text-zinc-600 hover:text-zinc-300"
           }`}
-          title="Follow selected task/agent while the Utility Panel is open. The panel never auto-opens."
+          title="Follow selected task/agent while the Utility Panel is open. Drawer никогда не открывается автоматически."
         >
           <Crosshair className="h-3 w-3" aria-hidden />
           follow
