@@ -1,6 +1,15 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { AGENT_PLATFORM_ID, classifyAgentPlatformSurface, resolveAgentPlatformComposer } from './browser-agent-platform.mjs';
+import {
+  AGENT_PLATFORM_ID,
+  AGENT_PLATFORM_MODEL,
+  classifyAgentPlatformSurface,
+  resolveAgentPlatformAgentSurface,
+  resolveAgentPlatformComposer,
+  resolveAgentPlatformModelOption,
+  resolveAgentPlatformNavControl,
+  resolveAgentPlatformSelectedModel,
+} from './browser-agent-platform.mjs';
 import {
   DevOsNativeTaskCycle as CoreDevOsNativeTaskCycle,
   GLM_ROOT_CONVERSATION_SEED,
@@ -33,6 +42,34 @@ const HASH_RE = /^[a-f0-9]{64}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const sha256 = (value) => crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 const clip = (value, max = 240) => String(value ?? '').slice(0, max);
+
+function agentSurfaceDigest(proof) {
+  if (!proof || proof.schema !== 'metaengine.browser.agent-platform-surface-proof.v1' || proof.stage !== 'AGENT_HOME') {
+    throw new Error('devos_agent_surface_proof_invalid');
+  }
+  const material = {
+    schema: proof.schema,
+    stage: proof.stage,
+    target_id: String(proof.target_id || '').toLowerCase(),
+    process_incarnation_id: String(proof.process_incarnation_id || ''),
+    state_revision_id: String(proof.state_revision_id || ''),
+    template_names: [...(proof.template_names || [])].map(String).sort(),
+  };
+  if (!material.target_id || !material.process_incarnation_id || !material.state_revision_id || material.template_names.length < 2) {
+    throw new Error('devos_agent_surface_proof_incomplete');
+  }
+  return sha256(JSON.stringify(material));
+}
+
+function semanticActivationPayload(tabId, control) {
+  if (!control?.semantic_ref || !control?.role) throw new Error('devos_agent_semantic_control_invalid');
+  return {
+    tab_id: String(tabId || ''),
+    role: String(control.role),
+    accessible_name: control.accessible_name == null ? null : String(control.accessible_name),
+    semantic_ref: control.semantic_ref,
+  };
+}
 
 function transportUrl(value) {
   try {
