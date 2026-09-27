@@ -50,7 +50,7 @@ TMPB="$(mktemp /tmp/.shard-b.XXXXXX)"
   echo "(4) full-копии: Supabase me2-evidence/context-vault/latest/, ossfs /home/sync/me2-context-backups/latest/;"
   echo "(5) скрипты phoenix в /home/z/my-project/scripts/phoenix/ и /home/z/context-vault/latest/;"
   echo "(6) PHX-HEARTBEAT=Job 416629, Guard=416526, PAT-watcher=413338."
-  echo "ADDENDUM post-reset 20260928: reset ~00:00 +08 убил vault+/tmp+scripts/phoenix; worklog восстановлен 1937790B sha12=b1a42d9ec1e6 из 3 зеркал (polarfs/ossfs/supabase); phoenix-secrets-restore.sh пересоздан v2 (clone-fallback: репо не содержит скрипта); full-audit.sh УТЕРЯН; evolve.state v1.40 жив (PolarFS): rounds=18, frozen=EV-EMPTYSTATE-COVERAGE,EV-EMPTYSTATE-APPLY."
+  echo "ADDENDUM post-reset 20260928: reset ~00:00 +08 убил vault+/tmp+scripts/phoenix; worklog восстановлен 1937790B sha12=b1a42d9ec1e6 из 3 зеркал (polarfs/ossfs/supabase); phoenix-secrets-restore.sh пересоздан v2 (clone-fallback: репо не содержит скрипта); full-audit.sh УТЕРЯН; evolve.state v1.44 жив (PolarFS): rounds=20, tasks_done=11, score=88%, EV-CHARTS реализован+верифицирован (легенда ветвей tasks, MSK-тултипы observability/browser); BACKLOG=23 (новые: EV-DONOR-404, EV-SPARKLINES); корневой блокер submit→conversation подтверждён 5-й раз — протокол v2 (draft-детект только READ_TRANSCRIPT-хвост) даёт DIRTY_DRAFT без загрязнения; unlock ждёт оператора: очистить composer + localStorage['chat-input-']."
   echo "<<<CTX-END>>>"
 } > "$TMPB"
 
