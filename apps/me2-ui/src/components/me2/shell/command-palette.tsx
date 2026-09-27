@@ -275,7 +275,7 @@ export function CommandPalette() {
         <CommandEmpty>не найдено</CommandEmpty>
 
         {/* PAGES */}
-        {(mode === "all" || mode === "pages") && <CommandGroup heading="Pages · Alt+1..0">
+        {(mode === "all" || mode === "pages") && <CommandGroup heading="Advanced surfaces · search">
           {PAGES.map((p) => {
             const m = PAGE_META[p.key];
             const Icon = m?.icon ?? LayoutDashboard;
@@ -286,7 +286,7 @@ export function CommandPalette() {
               >
                 <Icon className="mr-2 h-4 w-4 text-emerald-400" /> {p.label}
                 <span className="ml-2 truncate text-[10px] text-zinc-500">{m?.hint}</span>
-                <span className="ml-auto font-mono text-[9px] text-zinc-600">Alt+{p.num}</span>
+                <span className="ml-auto font-mono text-[9px] text-zinc-600">search</span>
               </CommandItem>
             );
           })}
