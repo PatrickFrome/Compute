@@ -656,7 +656,8 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
   assert.match(store, /setChromeOverlay/);
   assert.match(me2Shell, /setPrimaryOverlay\(nativeOverlayOpen\)/);
   assert.match(me2Topbar, /setChromeOverlay\("attention"/);
-  assert.match(me2Pagebar, /setChromeOverlay\("workspace-menu"/);
+  assert.match(me2Topbar, /setChromeOverlay\("workspace-menu"/);
+  assert.match(me2Pagebar, /setChromeOverlay\("stage-menu"/);
 });
 
 test('ME2 UI routing authority is revoked on stop, degradation, or owned-process loss', () => {
