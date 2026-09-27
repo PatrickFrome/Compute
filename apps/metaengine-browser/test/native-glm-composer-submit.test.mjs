@@ -64,6 +64,11 @@ function fakeZai({ submitWorks = true, navigateOnSubmit = false } = {}) {
         }
         return {};
       }
+      if (method === 'DOM.resolveNode') {
+        return { object: { objectId: `node-${Number(params?.backendNodeId || 0)}` } };
+      }
+      if (method === 'Runtime.callFunctionOn') return { result: { value: true } };
+      if (method === 'Runtime.releaseObject') return {};
       if (method === 'DOM.getBoxModel') {
         return { model: { content: [10, 10, 110, 10, 110, 60, 10, 60] } };
       }
@@ -224,7 +229,7 @@ test('GLM STOP requires an exact semantic-ref button target', async () => {
   }), /native_glm_stop_requires_semantic_ref_button/);
 });
 
-test('GLM STOP clicks the exact semantic-ref button through the backend node', async () => {
+test('GLM STOP activates the exact semantic-ref button without viewport geometry', async () => {
   const h = fakeZai();
   const frame = await captureSemanticFrame(h.webContents);
   const stopButton = frame.semantic_targets.find((row) => row.role === 'button');
@@ -239,7 +244,13 @@ test('GLM STOP clicks the exact semantic-ref button through the backend node', a
   });
   assert.equal(result.platform, 'GLM_ZAI');
   assert.equal(result.target.role, 'button');
-  assert.ok(h.calls.some(([m, p]) => m === 'Input.dispatchMouseEvent' && p.type === 'mousePressed' && p.button === 'left'));
+  assert.equal(result.activation?.method, 'DOM_CLICK');
+  assert.equal(result.mouse_geometry_required, false);
+  assert.equal(result.viewport_geometry_required, false);
+  assert.ok(h.calls.some(([m]) => m === 'DOM.resolveNode'));
+  assert.ok(h.calls.some(([m]) => m === 'Runtime.callFunctionOn'));
+  assert.equal(h.calls.some(([m]) => m === 'DOM.getBoxModel'), false);
+  assert.equal(h.calls.some(([m]) => m === 'Input.dispatchMouseEvent'), false);
 });
 
 test('ChatGPT submit contract is unchanged for the legacy operator lane', async () => {
