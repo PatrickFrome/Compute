@@ -31,6 +31,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-nsis-package-smoke:
@@ -68,6 +69,14 @@ jobs:
       - name: Prove startup observability reducer before packaging
         working-directory: apps/metaengine-browser
         run: node --test test/browser-startup-observability.test.mjs
+
+      - name: Prove installer provenance tooling before packaging
+        working-directory: apps/metaengine-browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check scripts/installer-provenance.mjs
+          node --test test/installer-provenance.test.mjs
 
       - name: Capture deterministic shell-only visual evidence
         working-directory: apps/metaengine-browser
@@ -153,7 +162,96 @@ jobs:
           }
           Write-Host ($evidence | ConvertTo-Json -Compress -Depth 10)
 
+      - name: Resolve shared forge installer for exact head
+        id: resolve-forge
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactName = 'me2-installer-forge-' + $env:HEAD_SHA
+          $apiPath = "repos/$env:GITHUB_REPOSITORY/actions/artifacts?name=$artifactName&per_page=10"
+          $picked = $null
+          try {
+            $response = gh api $apiPath | ConvertFrom-Json
+            foreach ($artifact in @($response.artifacts)) {
+              if ($artifact.expired -eq $false -and $artifact.workflow_run -and [int64]$artifact.workflow_run.id -ne [int64]$env:GITHUB_RUN_ID) {
+                $picked = $artifact
+                break
+              }
+            }
+          } catch {
+            Write-Host "forge_resolve_api_error: $($_.Exception.Message)"
+          }
+          if ($picked) {
+            Write-Host ("forge_installer_reuse: artifact_id={0} run_id={1} size={2}" -f $picked.id, $picked.workflow_run.id, $picked.size_in_bytes)
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact_run_id=$($picked.workflow_run.id)" -Encoding utf8NoBOM
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact_id=$($picked.id)" -Encoding utf8NoBOM
+          } else {
+            Write-Host 'forge_installer_reuse: none found - building inline (legacy path)'
+            Add-Content -Path $env:GITHUB_OUTPUT -Value 'artifact_run_id=' -Encoding utf8NoBOM
+          }
+
+      - name: Import shared forge installer bytes for exact head
+        if: ${{ steps.resolve-forge.outputs.artifact_run_id != '' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: me2-installer-forge-${{ github.event.pull_request.head.sha || github.sha }}
+          path: forge-import
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.resolve-forge.outputs.artifact_run_id }}
+
+      - name: Prove imported installer provenance and stage candidate
+        if: ${{ steps.resolve-forge.outputs.artifact_run_id != '' }}
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FORGE_RUN_ID: ${{ steps.resolve-forge.outputs.artifact_run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $importDir = Join-Path $env:GITHUB_WORKSPACE 'forge-import'
+          $provenancePath = Join-Path $importDir 'installer-provenance.json'
+          if (-not (Test-Path $provenancePath -PathType Leaf)) { throw 'forge_import_provenance_missing' }
+          $provenance = Get-Content $provenancePath -Raw | ConvertFrom-Json
+          if ($provenance.schema -ne 'metaengine.installer.provenance.v1') { throw 'forge_import_provenance_schema_invalid' }
+          if ([string]$provenance.source_head -ne [string]$env:HEAD_SHA) { throw 'forge_import_source_head_drift' }
+          $installer = Join-Path $importDir ([string]$provenance.installer_name)
+          node scripts/installer-provenance.mjs verify --installer $installer --provenance $provenancePath
+          if ($LASTEXITCODE -ne 0) { throw "forge_import_provenance_verify_exit_$LASTEXITCODE" }
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          $blockmap = Join-Path $importDir ("METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap")
+          if (-not (Test-Path $blockmap -PathType Leaf)) { throw 'forge_import_blockmap_missing' }
+          Copy-Item $installer "$env:RUNNER_TEMP\candidate-setup.exe"
+          Copy-Item $installer (Join-Path $env:RUNNER_TEMP ([string]$provenance.installer_name))
+          $proof = [ordered]@{
+            schema='metaengine.browser.windows-package-smoke.v3'
+            source_head=[string]$env:HEAD_SHA
+            package_version=$version
+            installer_name=[string]$provenance.installer_name
+            installer_sha256=[string]$provenance.installer_sha256
+            blockmap_name=(Split-Path $blockmap -Leaf)
+            guardian_native_staging_required=$true
+            guardian_native_built_by_before_pack=$true
+            version_probe_verified=$false
+            normal_ui_boot_verified=$false
+            runtime_import_observability_verified=$false
+            second_instance_activation_verified=$false
+            signed=$false
+            published=$false
+            promotion_authorized=$false
+            authority_effect=$false
+            installer_source='forge-shared'
+            forge_run_id=[int64]$env:FORGE_RUN_ID
+          }
+          $proof | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Encoding utf8
+          Write-Host ("forge_import_staged: name={0} sha256={1} forge_run_id={2}" -f $provenance.installer_name, $provenance.installer_sha256, $env:FORGE_RUN_ID)
+
       - name: Build exact-head unsigned NSIS package through native staging hook
+        if: ${{ steps.resolve-forge.outputs.artifact_run_id == '' }}
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
@@ -188,9 +286,27 @@ jobs:
             published=$false
             promotion_authorized=$false
             authority_effect=$false
+            installer_source='inline-primary'
           } | ConvertTo-Json -Depth 4 | Set-Content "$env:RUNNER_TEMP\windows-package-proof.json" -Encoding utf8
+          node scripts/installer-provenance.mjs write --installer $installer.FullName --out dist-test\installer-provenance.json --source-head $sourceHead --builder-pin 'electron-builder@26.15.7' --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT --workflow "$env:GITHUB_WORKFLOW"
+          if ($LASTEXITCODE -ne 0) { throw "installer_provenance_write_exit_$LASTEXITCODE" }
+          node scripts/installer-provenance.mjs verify --installer $installer.FullName --provenance dist-test\installer-provenance.json --expect-sha256 $digest
+          if ($LASTEXITCODE -ne 0) { throw "installer_provenance_selfcheck_exit_$LASTEXITCODE" }
+          Write-Host ("installer_forged_inline: name={0} sha256={1}" -f $installer.Name, $digest)
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\candidate-setup.exe"
           Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name)
+
+      - name: Publish shared forge installer for downstream gates
+        if: ${{ steps.resolve-forge.outputs.artifact_run_id == '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: me2-installer-forge-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe.blockmap
+            apps/metaengine-browser/dist-test/installer-provenance.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Install exact-head package and prove Browser plus inert Guardian payload
         working-directory: apps/metaengine-browser

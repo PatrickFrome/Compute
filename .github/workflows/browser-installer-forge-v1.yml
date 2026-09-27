@@ -1,0 +1,142 @@
+name: Browser Installer Forge (build once)
+
+# R85 build-once installer provenance: forge builds the exact-head unsigned
+# NSIS package exactly once per head and uploads it as an immutable,
+# head-pinned artifact (me2-installer-forge-<head_sha>) together with a
+# verifier provenance record (schema metaengine.installer.provenance.v1).
+# Downstream gates (Package Smoke today; Installed Chat, Final Runtime,
+# Autonomous Soak next) must import and provenance-verify these bytes instead
+# of rebuilding NSIS independently.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Exact head SHA (or ref) to forge; defaults to current branch head'
+        required: false
+        default: ''
+  workflow_call:
+    outputs:
+      installer_name:
+        description: 'Forged installer file name'
+        value: ${{ jobs.forge-windows-nsis-installer.outputs.installer_name }}
+      installer_sha256:
+        description: 'SHA256 (lowercase hex) of the forged installer'
+        value: ${{ jobs.forge-windows-nsis-installer.outputs.installer_sha256 }}
+      source_head:
+        description: 'Exact head SHA the installer was forged from'
+        value: ${{ jobs.forge-windows-nsis-installer.outputs.source_head }}
+
+concurrency:
+  group: browser-installer-forge-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  forge-windows-nsis-installer:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    outputs:
+      installer_name: ${{ steps.forge.outputs.installer_name }}
+      installer_sha256: ${{ steps.forge.outputs.installer_sha256 }}
+      source_head: ${{ steps.forge.outputs.source_head }}
+    steps:
+      - name: Checkout exact forge head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Prove exact forge head
+        id: prove
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ inputs.ref || github.sha }}
+        run: |
+          set -euo pipefail
+          FORGE_HEAD="$(git rev-parse HEAD)"
+          test -n "$FORGE_HEAD"
+          # When the requested ref is an exact SHA (workflow_call contract),
+          # checkout must have materialized exactly that commit.
+          if [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+            test "$FORGE_HEAD" = "$EXPECTED_HEAD"
+          fi
+          echo "forge_head=$FORGE_HEAD" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Install test-package dependencies
+        working-directory: apps/metaengine-browser
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: Parse exact source before packaging
+        working-directory: apps/metaengine-browser
+        run: npm run check
+
+      - name: Prove installer provenance tooling before forge
+        working-directory: apps/metaengine-browser
+        run: node --test test/installer-provenance.test.mjs
+
+      - name: Build and stage exact-head ME2 UI
+        shell: pwsh
+        env:
+          ME2_BUILD_SHA: ${{ steps.prove.outputs.forge_head }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm install --no-audit --no-fund --global bun
+          Push-Location apps/me2-ui
+          try {
+            bun install --frozen-lockfile
+            bun run build
+            node scripts/pack-me2-ui.mjs
+          } finally { Pop-Location }
+          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
+          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'installer_forge_staged_me2_ui_invalid' }
+
+      - name: Forge exact-head unsigned NSIS package through native staging hook
+        id: forge
+        working-directory: apps/metaengine-browser
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sourceHead = '${{ steps.prove.outputs.forge_head }}'
+          $version = [string](node -p "require('./package.json').version")
+          if (-not $version) { throw 'package_version_missing' }
+          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
+          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
+          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $blockmap = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe.blockmap" -File | Select-Object -First 1
+          if (-not $installer -or -not $blockmap) { throw 'package_assets_missing' }
+          $stagedManifest = Join-Path (Get-Location) 'native-dist\guardian\guardian-native-manifest.json'
+          if (-not (Test-Path $stagedManifest -PathType Leaf)) { throw 'before_pack_guardian_staging_not_materialized' }
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          node scripts/installer-provenance.mjs write --installer $installer.FullName --out dist-test\installer-provenance.json --source-head $sourceHead --builder-pin 'electron-builder@26.15.7' --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT --workflow "$env:GITHUB_WORKFLOW"
+          if ($LASTEXITCODE -ne 0) { throw "installer_provenance_write_exit_$LASTEXITCODE" }
+          node scripts/installer-provenance.mjs verify --installer $installer.FullName --provenance dist-test\installer-provenance.json --expect-sha256 $digest
+          if ($LASTEXITCODE -ne 0) { throw "installer_provenance_selfcheck_exit_$LASTEXITCODE" }
+          Write-Host ("installer_forged: name={0} sha256={1} head={2}" -f $installer.Name, $digest, $sourceHead)
+          "installer_name=$($installer.Name)" >> $env:GITHUB_OUTPUT
+          "installer_sha256=$digest" >> $env:GITHUB_OUTPUT
+          "source_head=$sourceHead" >> $env:GITHUB_OUTPUT
+
+      - name: Upload immutable head-pinned forge installer artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: me2-installer-forge-${{ steps.prove.outputs.forge_head }}
+          path: |
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe
+            apps/metaengine-browser/dist-test/METAENGINE-Browser-Test-Setup-*.exe.blockmap
+            apps/metaengine-browser/dist-test/installer-provenance.json
+          if-no-files-found: error
+          retention-days: 14
