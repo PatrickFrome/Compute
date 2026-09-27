@@ -496,8 +496,8 @@ test('R85 workspace layout has an explicit reset path', () => {
   assert.match(store, /drawerFollowSelection: true/);
   assert.match(store, /commandRailOpen: true/);
   assert.match(store, /me2:workspace-layout-reset/);
-  assert.match(me2Pagebar, /data-testid="workspace-reset-layout"/);
-  assert.match(me2Pagebar, /Reset layout · \{activeWs\.label\}/);
+  assert.match(me2Topbar, /data-testid="workspace-reset-layout"/);
+  assert.match(me2Topbar, /Reset layout · \{workspaceMeta\?\.label \?\? workspace\}/);
 });
 
 test('R85 Context Drawer exposes selection-driven inspection without a second data plane', () => {
