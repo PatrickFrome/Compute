@@ -1,6 +1,6 @@
 # PHOENIX CONTEXT DIGEST (auto, heartbeat v2.2)
 
-gen: 2026-09-27T04:52:09Z | worklog: 1894868B / 10385L | sha12=743ff5182669
+gen: 2026-09-27T05:22:09Z | worklog: 1899198B / 10415L | sha12=bf0660055824
 
 ## КАК ПОЛУЧИТЬ ПОЛНЫЙ КОНТЕКСТ (выполни по порядку)
 1. `bash /home/z/my-project/scripts/phoenix/phoenix-restore.sh --check` — кворум 8 источников, вердикт целостности
@@ -9,7 +9,7 @@ gen: 2026-09-27T04:52:09Z | worklog: 1894868B / 10385L | sha12=743ff5182669
 4. Если локальный worklog усечён/отсутствует: `phoenix-restore.sh --merge` (секционный merge-append без потерь)
 5. Диагностика канала Supabase: хвост /home/z/context-vault/journal/phoenix.log (HB-SB-FAIL содержит тело ошибки)
 
-## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1894868B)
+## КАНАЛЫ ПОЛНОЙ КОПИИ worklog.md (1899198B)
 | Канал | Путь | Переживает env-reset |
 |-------|------|---------------------|
 | Supabase Storage | me2-evidence/context-vault/latest/worklog.md | ДА (внешний) |
@@ -24,8 +24,6 @@ gen: 2026-09-27T04:52:09Z | worklog: 1894868B / 10385L | sha12=743ff5182669
 - CTX-VAULT-COMPACTOR: (1h) — обновляет KV-шарды CTX-SHARD-A/B
 
 ## ПОСЛЕДНИЕ 15 СЕКЦИЙ worklog (Task ID → Task)
-- R80 → Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
-- R80 → Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
 - R86-BUILD-ONCE-PROVENANCE-20260927 → Полноценная разработка браузера (директива оператора: не мониторинг/аудит): закрыть следующий архитектурный срез «build once → immutable installer SHA/provenance → downstream gates тестируют одни и те же bytes» (устранить 4× дублирование NSIS-сборки), НЕ мешая R85 visual capture.
 - R80 → Проверка токена + push main→sandbox/me2-os + архив-ветки + ls-remote верификация
 - EVOLVE-ROUND-12 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
@@ -39,39 +37,11 @@ gen: 2026-09-27T04:52:09Z | worklog: 1894868B / 10385L | sha12=743ff5182669
 - R81-DESKTOP-GUARDIAN-20260927 → Директива оператора «разрабатываем НЕ КОНСОЛЬ, а DESKTOP КЛИЕНТ metaengine в GITHUB» → раунд desktop-клиента: GAP #2 Guardian-parity light в PatrickFrome/Compute (apps/me2-desktop, ветка me2/r78-desktop-from-scratch)
 - EVOLVE-ROUND-13 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
 - R13-EV-FOOTER-RECHECK-20260927 → SELF-EVOLVE tick (Job 416839, round=13, v1.27→1.28): движок перевыбрал закрытую EV-FOOTER (маркер v1.26 вытеснен из 12KB-tail) → честная реверификация + durable-фикс pick_task
+- EVOLVE-ROUND-14 → Раунд самоэволюции клиента — следующая задача бэклога: [EV-BACKLOG-CYCLE] backlog пройден полностью — повторный цикл полировки с версии +1
+- EVOLVE-ROUND-14-ENGINEFIX-20260927 → Раунд 14 — маркер [EV-BACKLOG-CYCLE]: честный аудит «уже реализовано?» => обнаружен и устранён ложный цикл pick_task (движок v1.28 → v1.30, self-update → v1.31)
 
 ## ХВОСТ worklog (последние 40 строк, вербатим)
 ```
-- Код: GUARDIAN-константы (me2-constants.mjs), guardian-contract.mjs (pure: makeBeacon/validateBeacon/evaluateBeacon/nextBackoffMs/decideRestart/computeRestartsInWindow), scripts/guardian.mjs (внешний watchdog zero-dep, CLI + createGuardian с инъекциями), main.mjs (+beacon-writer после plane_up, SMOKE не бьётся, clean_exit в before-quit)
-- Тесты: test/guardian.test.mjs — 27 pure+интеграционных (tmp-файлы, инъекции spawnImpl/aliveImpl); SUITE 113/113 GREEN; check-syntax 37 файлов OK
-- Версия 0.8.3-dev.0.1; GAP-ROADMAP: #2 → 🔄 parity-лайт (курсор 6/8), условие PR оператора: 3/3 зелёных gate ВЫПОЛНЕНО
-- Пуш: 82a44902 + ad872b98 + b8ed647e → me2/r78-desktop-from-scratch (PAT-паттерн, remote URL чист, grep секретов 0); ME2 Desktop Gate: SUCCESS (3-й подряд); ls-remote/api верифицировано
-
-Stage Summary:
-- Desktop-клиент продвинут: GAP #2 закрыт до parity-лайт, честные инварианты (clean-exit не воюется, cap 8/ч, свидетельства в журнале переживают рестарт guardian'а)
-- Backlog R82: #8 brain-адаптер + #4 native-supervisor client (после ≥1 недели живой обкатки guardian); Xvfb-интеграционный smoke guardian
-- Freeze соблюдён: work/r85-control-room-ui-v1 не тронут
-
----
-Task ID: EVOLVE-ROUND-13
-Agent: self-evolve v1.26 (sealed engine)
-Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-FOOTER] sticky footer (min-h-screen flex flex-col + mt-auto), safe-area insets
-
-Work Log:
-- client health: GET / = 200, lint = 0/0, audit score = 88%
-- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.26
-- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): реализуй [EV-FOOTER] в src/app/page.tsx (только / route), затем запусти 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-FOOTER'
-
-Stage Summary:
-- раунд 13 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
-
----
-Task ID: R13-EV-FOOTER-RECHECK-20260927
-Agent: Z.ai Code (main)
-Task: SELF-EVOLVE tick (Job 416839, round=13, v1.27→1.28): движок перевыбрал закрытую EV-FOOTER (маркер v1.26 вытеснен из 12KB-tail) → честная реверификация + durable-фикс pick_task
-
-Work Log:
-- evolve: round=13, client=HTTP 200 (:81), lint=0/0, score=88%, next_task=EV-FOOTER — ПОВТОР закрытой задачи R12 (третий симптом одного корня)
 - Root cause re-pick: pick_task сканирует только 12KB-tail worklog; маркер implemented-EV-FOOTER (v1.26, R12) вытеснен тяжёлыми секциями R87×3/R81-DESKTOP-GUARDIAN; client_tasks_done в state не вёлся (0)
 - Директива оператора соблюдена: src/app/page.tsx НЕ изменялся (git status: 0 записей; консоль заморожена, приоритет — desktop-клиент /home/z/me2-desktop)
 - Реверификация EV-FOOTER через gateway :81 (agent-browser, НЕ raw :3000): footer=lastElementChild корневого flex-col; root flex/column/min-h-screen (960px=viewport); классы mt-auto (computed margin резрешается в 0px при контенте длиннее viewport — норма flexbox, канон = класс) + safe-area-inset в DOM; зазор footer↔конец документа=0; footer 16 кнопок; мобильный 390: h-scroll=0 (scrollW=390), footer видим; скриншот download/r13-ev-footer-recheck390.png; lint exit=0
@@ -82,4 +52,34 @@ Work Log:
 Stage Summary:
 - Round 13 закрыт как RECHECK+ENGINE-FIX: EV-FOOTER подтверждена (0 строк изменено), re-pick баг устранён durably (маркеры в state переживают reset и tail-вытеснение — re-pick цикл R12/R13 невозможен), phoenix-snapshot write-ahead перед правкой worklog
 - Backlog порядка pick: EV-EMPTYSTATES → EV-KEYBOARD → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY
+
+---
+Task ID: EVOLVE-ROUND-14
+Agent: self-evolve v1.28 (sealed engine)
+Task: Раунд самоэволюции клиента — следующая задача бэклога: [EV-BACKLOG-CYCLE] backlog пройден полностью — повторный цикл полировки с версии +1
+
+Work Log:
+- client health: GET / = 200, lint = 0/0, audit score = 88%
+- движок: self-check OK, зеркала пересинхронизированы, версия движка: 1.28
+- СЛЕДУЮЩЕМУ АГЕНТУ (webDevReview/tick): маркер [EV-BACKLOG-CYCLE] — СНАЧАЛА аудит «уже реализовано?»; приоритет оператора 2026-09-27: DESKTOP-клиент /home/z/me2-desktop (apps/me2-desktop), консоль src/app/page.tsx ЗАМОРОЖЕНА → консольные EV = честная верификация через gateway :81 (agent-browser, НЕ raw :3000) при 0 строк правок; UI-EV реализовывать в apps/metaengine-browser; закрытие: 'bash scripts/phoenix/self-evolve.sealed.sh self-update implemented-EV-BACKLOG-CYCLE' (маркер теперь durable в evolve.state)
+
+Stage Summary:
+- раунд 14 зафиксирован; бэклог клиента продвигается; скрипт пережил проверки каналов выживания
+
+---
+Task ID: EVOLVE-ROUND-14-ENGINEFIX-20260927
+Agent: Super Z (cron SELF-EVOLVE tick, Job 416839)
+Task: Раунд 14 — маркер [EV-BACKLOG-CYCLE]: честный аудит «уже реализовано?» => обнаружен и устранён ложный цикл pick_task (движок v1.28 → v1.30, self-update → v1.31)
+
+Work Log:
+- аудит: implemented=CSV (durable) = 7 честных задач, но pick_task v1.28 вернул EV-BACKLOG-CYCLE — противоречие => root cause: v1.28-фолбэк «12KB-tail worklog» матчил ЛЮБОЕ упоминание маркера; строка хендовера R13 «Backlog порядка pick: EV-EMPTYSTATES → … → EV-ERRORBOUNDARY» ложно закрыла все 9 открытых задач (обратная сторона tail-вытеснения R12/R13)
+- fix v1.30 (scripts/phoenix/self-evolve.sealed.sh): (1) источник истины — implemented=CSV с ТОЧНЫМ comma-совпадением (case ",$list," в духе self_update); (2) worklog-фолбэк — только durable-токен «implemented-<MARKER>» целым словом (grep -qw), bare-упоминания более не закрывают задачи; (3) BACKLOG +EV-DESKTOP-SMOKE (приоритет оператора: DESKTOP apps/me2-desktop, gateway :81, аудит-only)
+- регресс-тесты (субшелл): PICK1 live-tail с bare-упоминаниями всех 9 => EV-EMPTYSTATES (ложный цикл устранён); PICK2 fake-tail с токеном implemented-EV-EMPTYSTATES => EV-KEYBOARD (фолбэк работает); bash -n OK
+- закрытие раунда ЧЕСТНО: self-update reason=round14-enginefix (routine), маркер implemented-EV-BACKLOG-CYCLE НЕ добавлялся (не реальная задача бэклога — client_tasks_done остался 7, без инфляции)
+- write-ahead: phoenix-snapshot ok (snapshots-wa) перед правками; движок без секретов (grep ghp_/cfat_/cfut_ = 0); page.tsx не тронут (0 строк, фриз соблюдён)
+- верификация: self-check mirrors=2/2(synced) OK; gateway :81 HTTP 200; lint=0/0 (движком, раунд); state: rounds=14 tasks_done=7 score=88 v=1.31
+
+Stage Summary:
+- Round 14 закрыт как ENGINE-FIX: ложный EV-BACKLOG-CYCLE устранён durably — закрытие задач теперь только по durable-источникам (state CSV / implemented-токен), упоминания в хендовер-строках безопасны; следующий pick = EV-EMPTYSTATES (первая реально открытая задача)
+- Backlog порядка pick: EV-EMPTYSTATES → EV-KEYBOARD → EV-CHARTS → EV-MOTION → EV-PWA → EV-DATES → EV-PERF → EV-A11Y → EV-FAB → EV-ERRORBOUNDARY → EV-DESKTOP-SMOKE
 ```
