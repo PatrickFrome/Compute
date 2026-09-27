@@ -76,14 +76,22 @@ jobs:
           $extract = Join-Path $env:RUNNER_TEMP "package-smoke-$sourceHead"
           Remove-Item $archive -Force -ErrorAction SilentlyContinue
           Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
-          node ./scripts/installer-provenance.mjs acquire `
+          $acquireLine = (& node ./scripts/installer-provenance.mjs acquire `
             --repo $env:GITHUB_REPOSITORY `
             --head $sourceHead `
             --artifact-name $artifactName `
             --output $archive `
             --timeout-ms 2700000 `
-            --poll-ms 5000
-          if ($LASTEXITCODE -ne 0) { throw 'final_runtime_installer_acquire_failed' }
+            --poll-ms 5000 `
+            --allow-in-progress true | Where-Object { ([string]$_).Trim().StartsWith('{') } | Select-Object -Last 1)
+          $acquireExit = $LASTEXITCODE
+          if ($acquireExit -ne 0 -or -not $acquireLine) { throw 'final_runtime_installer_acquire_failed' }
+          $acquire = ([string]$acquireLine) | ConvertFrom-Json
+          if ($acquire.schema -ne 'metaengine.browser.installer-provenance-acquire.v1' `
+              -or [int64]$acquire.producer_run_id -le 0 `
+              -or [int64]$acquire.producer_run_attempt -le 0) { throw 'final_runtime_installer_acquire_failed_binding_invalid' }
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_ID=$([int64]$acquire.producer_run_id)" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_ATTEMPT=$([int64]$acquire.producer_run_attempt)" -Encoding utf8
           Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
           $provenance = Join-Path $extract 'installer-provenance.json'
           $installer = Get-ChildItem $extract -Recurse -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
@@ -94,7 +102,9 @@ jobs:
             --expected-head $sourceHead `
             --installer $installer.FullName `
             --blockmap $blockmap.FullName `
-            --config (Join-Path (Get-Location) 'electron-builder.test.json')
+            --config (Join-Path (Get-Location) 'electron-builder.test.json') `
+            --expected-run-id ([string]$acquire.producer_run_id) `
+            --expected-run-attempt ([string]$acquire.producer_run_attempt)
           if ($LASTEXITCODE -ne 0) { throw 'final_runtime_installer_provenance_invalid' }
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\$($installer.Name)" -Force
           Copy-Item $installer.FullName "$env:RUNNER_TEMP\final-runtime-candidate.exe" -Force
@@ -190,6 +200,26 @@ jobs:
               try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch {}
             }
           }
+
+      - name: Require bound Package Smoke producer terminal success
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXACT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:ME2_PACKAGE_PRODUCER_RUN_ID -or -not $env:ME2_PACKAGE_PRODUCER_RUN_ATTEMPT) {
+            throw 'final_runtime_package_producer_not_qualified_binding_missing'
+          }
+          node ./scripts/installer-provenance.mjs wait `
+            --repo $env:GITHUB_REPOSITORY `
+            --head $env:EXACT_HEAD `
+            --run-id $env:ME2_PACKAGE_PRODUCER_RUN_ID `
+            --run-attempt $env:ME2_PACKAGE_PRODUCER_RUN_ATTEMPT `
+            --timeout-ms 2700000 `
+            --poll-ms 5000
+          if ($LASTEXITCODE -ne 0) { throw 'final_runtime_package_producer_not_qualified' }
 
       - name: Upload exact-head activated Windows installer and proof
         if: always()
