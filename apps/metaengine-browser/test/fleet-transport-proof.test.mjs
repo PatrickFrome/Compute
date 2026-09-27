@@ -37,6 +37,7 @@ test('BOUND_UNVERIFIED promotes to ACTIVE only with exact physical transport pro
     target_id: before.target_id,
     generation_epoch: before.generation_epoch,
     conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    agent_surface_sha256: 'a'.repeat(64),
   });
   const after = snap.agents[0];
   assert.equal(after.lifecycle_state, 'ACTIVE');
@@ -46,6 +47,7 @@ test('BOUND_UNVERIFIED promotes to ACTIVE only with exact physical transport pro
   assert.equal(after.transport_proof.target_id, before.target_id);
   assert.equal(after.transport_proof.generation_epoch, before.generation_epoch);
   assert.match(after.transport_proof.conversation_url_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(after.transport_proof.agent_surface_sha256, 'a'.repeat(64));
   assert.equal(JSON.stringify(after.transport_proof).includes('chatgpt.com/c/'), false);
 });
 
@@ -60,6 +62,7 @@ test('stale tab, target or generation cannot promote fleet agent', async () => {
     target_id: agent.target_id,
     generation_epoch: agent.generation_epoch,
     conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    agent_surface_sha256: 'a'.repeat(64),
   };
   await assert.rejects(() => h.provisioner.markTransportProven({ ...common, tab_id: 'tab_deadbeef-dead-beef-dead-beefdeadbeef' }), /fleet_transport_tab_binding_mismatch/);
   await assert.rejects(() => h.provisioner.markTransportProven({ ...common, target_id: 'webcontents:999' }), /fleet_transport_target_binding_mismatch/);
@@ -78,10 +81,30 @@ test('tab loss clears ACTIVE transport proof and increments incarnation', async 
     target_id: before.target_id,
     generation_epoch: before.generation_epoch,
     conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    agent_surface_sha256: 'a'.repeat(64),
   });
   await h.provisioner.onTabClosed(before.tab_id, 'TEST_LOSS');
   const after = h.provisioner.snapshot().agents[0];
   assert.equal(after.lifecycle_state, 'LOST');
   assert.equal(after.transport_proof, null);
   assert.equal(after.generation_epoch, before.generation_epoch + 1);
+});
+
+
+test('conversation URL alone cannot promote a worker without Agent-surface provenance', async () => {
+  const h = harness();
+  await h.provisioner.init();
+  await h.provisioner.reconcile({ active: true });
+  const agent = h.provisioner.snapshot().agents[0];
+  await assert.rejects(
+    h.provisioner.markTransportProven({
+      agent_id: agent.agent_id,
+      tab_id: agent.tab_id,
+      target_id: agent.target_id,
+      generation_epoch: agent.generation_epoch,
+      conversation_url: 'https://chat.z.ai/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    }),
+    /fleet_transport_agent_surface_proof_required/,
+  );
+  assert.equal(h.provisioner.snapshot().agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
 });
