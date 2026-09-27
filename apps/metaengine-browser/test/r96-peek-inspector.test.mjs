@@ -51,7 +51,7 @@ test('R96 Peek never steals native Space activation from unrelated controls', ()
   assert.match(hook, /\[role="button"\]/);
   assert.match(hook, /\[role="menuitem"\]/);
   assert.match(hook, /\[role="tab"\]/);
-  assert.match(hook, /if \(target\.closest\(\`\[data-peek-kind=/);
+  assert.match(hook, /const row = target\.closest\(\`\[data-peek-kind=/);
   assert.match(hook, /isEditableTarget\(event\.target\) \|\| isReservedInteractionTarget\(event\.target, kind\)/);
 });
 
