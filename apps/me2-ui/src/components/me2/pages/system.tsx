@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { FileJson, GitMerge, KeyRound, ListChecks, RefreshCw, SlidersHorizontal, TriangleAlert } from "lucide-react";
-import { useMe2 } from "@/components/me2/store";
+import { useMe2, type PageKey } from "@/components/me2/store";
 import { sendCommand, me2Fetch, hhmmss } from "@/lib/me2-bus";
 import { PageHeader, Sec, Chip, StateBadge, type SysState } from "@/components/me2/ui/primitives";
 import { useToast } from "@/hooks/use-toast";
@@ -59,9 +59,21 @@ const suState = (v: string): SysState =>
 const mechState = (v: string): SysState => (v === "WORKS" ? "Completed" : v === "CAVEAT" ? "Degraded" : "Failed");
 const SHORT7 = (h: string | null) => (h ? h.slice(0, 7) : "—");
 
+const ADVANCED_SURFACES: ReadonlyArray<{ page: PageKey; label: string; description: string }> = [
+  { page: "command", label: "Command", description: "mission control and orchestration overview" },
+  { page: "agents", label: "Agents", description: "fleet diagnostics and agent controls" },
+  { page: "code", label: "Code", description: "repository, execution and sandbox tools" },
+  { page: "tasks", label: "Tasks", description: "task graph, queue and task detail" },
+  { page: "supervisor", label: "Supervisor", description: "supervisor lifecycle and control plane" },
+  { page: "compute", label: "Compute", description: "workers, pools and compute capacity" },
+  { page: "memory", label: "Memory", description: "episodic memory and knowledge surfaces" },
+  { page: "observability", label: "Observability", description: "events, evidence and runtime health" },
+];
+
 export function SystemPage() {
   const { toast } = useToast();
   const setDialog = useMe2((s) => s.setDialog);
+  const setPage = useMe2((s) => s.setPage);
 
   const [tokensData, setTokensData] = useState<TokensT | null>(null);
   const [tokensBusy, setTokensBusy] = useState(false);
@@ -191,7 +203,30 @@ export function SystemPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="page-system" data-panel-system>
-      <PageHeader title="SYSTEM" sub="vault · policy · daemon source sync · матрица · контракт" />
+      <PageHeader title="SYSTEM" sub="settings · advanced surfaces · vault · policy · runtime" />
+      <div className="border-b border-zinc-800 bg-zinc-950/45 p-2" data-testid="settings-advanced-surfaces">
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <div>
+            <strong className="text-[10px] uppercase tracking-[0.16em] text-zinc-300">Advanced surfaces</strong>
+            <p className="text-[9px] text-zinc-600">Hidden from the main Chat Fleet workspace. Open only from Settings or Ctrl+K.</p>
+          </div>
+        </div>
+        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-4">
+          {ADVANCED_SURFACES.map((surface) => (
+            <button
+              key={surface.page}
+              type="button"
+              onClick={() => setPage(surface.page)}
+              data-testid={`settings-open-${surface.page}`}
+              className="border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-left transition hover:border-cyan-900/70 hover:bg-cyan-950/10"
+              title={surface.description}
+            >
+              <strong className="block text-[10px] text-zinc-300">{surface.label}</strong>
+              <span className="block truncate text-[9px] text-zinc-600">{surface.description}</span>
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="grid min-h-0 flex-1 gap-2 overflow-y-auto lg:grid-cols-2 mc-scroll items-start">
 
         {/* ── КОЛОНКА 1 ── */}
