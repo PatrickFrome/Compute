@@ -186,19 +186,26 @@ export async function markFleetTransportProvenFromNativeFrame({
     });
     state = 'PROVEN';
   }
-  const active = exactAgent(next, binding);
-  if (String(active.lifecycle_state) !== 'ACTIVE' || !active.transport_proof) throw new Error('fleet_runtime_transport_proof_not_persisted');
-  if (transport.stage === 'PRECONVERSATION_ROOT' && active.transport_proof.transport_stage !== 'PRECONVERSATION_ROOT') {
-    throw new Error('fleet_runtime_preconversation_proof_stage_invalid');
+  const proven = exactAgent(next, binding);
+  if (!proven.transport_proof) throw new Error('fleet_runtime_transport_proof_not_persisted');
+  if (transport.stage === 'PRECONVERSATION_ROOT') {
+    if (String(proven.lifecycle_state) !== 'BOUND_UNVERIFIED') {
+      throw new Error('fleet_runtime_preconversation_must_remain_unverified');
+    }
+    if (proven.transport_proof.transport_stage !== 'PRECONVERSATION_ROOT') {
+      throw new Error('fleet_runtime_preconversation_proof_stage_invalid');
+    }
+  } else if (String(proven.lifecycle_state) !== 'ACTIVE') {
+    throw new Error('fleet_runtime_conversation_not_active');
   }
 
   return Object.freeze({
     schema: 'metaengine.browser.fleet-native-transport-proof.v1',
     state,
-    agent_id: active.agent_id,
-    tab_id: active.tab_id,
-    target_id: active.target_id,
-    generation_epoch: active.generation_epoch,
+    agent_id: proven.agent_id,
+    tab_id: proven.tab_id,
+    target_id: proven.target_id,
+    generation_epoch: proven.generation_epoch,
     transport_stage: transport.stage,
     conversation_url_sha256: expectedHash,
     process_incarnation_sha256: sha256(processIncarnation),
