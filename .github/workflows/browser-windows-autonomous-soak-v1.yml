@@ -234,6 +234,7 @@ jobs:
               -or [int64]$acquire.producer_run_attempt -le 0) { throw 'soak_installer_acquire_failed_binding_invalid' }
           Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_ID=$([int64]$acquire.producer_run_id)" -Encoding utf8
           Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_ATTEMPT=$([int64]$acquire.producer_run_attempt)" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_COMPLETED_AT_ACQUIRE=$([bool]$acquire.producer_completed_at_acquire)" -Encoding utf8
           Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
           $provenance = Join-Path $extract 'installer-provenance.json'
           $installer = Get-ChildItem $extract -Recurse -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
