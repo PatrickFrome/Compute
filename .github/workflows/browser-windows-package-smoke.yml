@@ -7,6 +7,7 @@ on:
       - 'release/self-update-ambiguity-live-v2'
   pull_request:
     paths:
+      - 'apps/metaengine-browser/**'
       - 'apps/metaengine-browser/src/**'
       - 'apps/metaengine-browser/ui/**'
       - 'apps/metaengine-browser/native/**'
@@ -23,6 +24,9 @@ on:
       - 'apps/metaengine-browser/scripts/verify-me2-daemon-bundle.mjs'
       - 'apps/me2-ui/**'
       - 'apps/me2-daemon/**'
+      - '.github/workflows/browser-windows-installed-chat-qualification.yml'
+      - '.github/workflows/browser-final-runtime-activation-v1.yml'
+      - '.github/workflows/browser-windows-autonomous-soak-v1.yml'
       - '.github/workflows/browser-windows-package-smoke.yml'
 
 concurrency:
