@@ -7,6 +7,15 @@ const observe = await readFile(
   'utf8',
 );
 
+const visualHarness = await readFile(
+  new URL('./me2-r85-visual-evidence.mjs', import.meta.url),
+  'utf8',
+);
+const packageSmoke = await readFile(
+  new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url),
+  'utf8',
+);
+
 test('R95E evidence timeline binds causal rows only by exact task identity', () => {
   assert.match(observe, /data-testid="evidence-timeline"/);
   assert.match(observe, /data-binding-mode=\{inspectedTaskId \? "EXACT_TASK_ID" : "UNBOUND"\}/);
@@ -39,4 +48,16 @@ test('R95E timeline is bounded and merges task snapshot, exact events and exact 
   assert.match(observe, /\.slice\(0, 40\)/);
   assert.match(observe, /\.slice\(0, 24\)/);
   assert.match(observe, /\.slice\(0, 48\)/);
+});
+
+
+test('R95E physical gate captures OBSERVE and requires the evidence timeline contract', () => {
+  assert.match(visualHarness, /workflow-stage-observe/);
+  assert.match(visualHarness, /r95e-observe-evidence-1440x960/);
+  assert.match(visualHarness, /evidence_timeline_verified:\s*true/);
+  assert.match(visualHarness, /evidence_binding_fail_closed:/);
+  assert.match(packageSmoke, /evidence_timeline_verified -ne \$true/);
+  assert.match(packageSmoke, /evidence_binding_fail_closed -ne \$true/);
+  assert.match(packageSmoke, /captures\)\.Count -ne 4/);
+  assert.match(packageSmoke, /r95e-observe-evidence-1440x960/);
 });
