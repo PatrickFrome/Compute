@@ -467,3 +467,41 @@ test('CLI verify returns nonzero on tampered installer', async () => {
   assert.ok(row.code === 'sha_mismatch' || row.code === 'size_mismatch');
   assert.equal(row.authority_effect, false);
 });
+
+
+const workflowRoot = fileURLToPath(new URL('../../../.github/workflows/', import.meta.url));
+
+test('Package Smoke is the only R86 NSIS producer and publishes provenance payload', async () => {
+  const source = await readFile(path.join(workflowRoot, 'browser-windows-package-smoke.yml'), 'utf8');
+  assert.match(source, /electron-builder@26\.15\.7 --win nsis --x64 --config electron-builder\.test\.json/);
+  assert.match(source, /installer-provenance\.mjs write/);
+  assert.match(source, /installer-provenance\.json/);
+  assert.match(source, /METAENGINE-Browser-Test-Setup-\*-x64\.exe\.blockmap/);
+});
+
+test('Installed Chat consumes immutable producer bytes instead of rebuilding NSIS', async () => {
+  const source = await readFile(path.join(workflowRoot, 'browser-windows-installed-chat-qualification.yml'), 'utf8');
+  assert.doesNotMatch(source, /electron-builder@26\.15\.7 --win nsis/);
+  assert.match(source, /installer-provenance\.mjs acquire/);
+  assert.match(source, /installer-provenance\.mjs verify/);
+  assert.match(source, /actions:\s*read/);
+  assert.match(source, /timeout-minutes:\s*75/);
+});
+
+test('Final Runtime consumes immutable producer bytes instead of rebuilding NSIS', async () => {
+  const source = await readFile(path.join(workflowRoot, 'browser-final-runtime-activation-v1.yml'), 'utf8');
+  assert.doesNotMatch(source, /electron-builder@26\.15\.7 --win nsis/);
+  assert.match(source, /installer-provenance\.mjs acquire/);
+  assert.match(source, /installer-provenance\.mjs verify/);
+  assert.match(source, /actions:\s*read/);
+  assert.match(source, /timeout-minutes:\s*80/);
+});
+
+test('Autonomous Soak consumes immutable producer bytes instead of rebuilding NSIS', async () => {
+  const source = await readFile(path.join(workflowRoot, 'browser-windows-autonomous-soak-v1.yml'), 'utf8');
+  assert.doesNotMatch(source, /electron-builder@26\.15\.7 --win nsis/);
+  assert.match(source, /installer-provenance\.mjs acquire/);
+  assert.match(source, /installer-provenance\.mjs verify/);
+  assert.match(source, /actions:\s*read/);
+  assert.match(source, /timeout-minutes:\s*90/);
+});
