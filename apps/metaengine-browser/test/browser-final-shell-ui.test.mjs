@@ -22,7 +22,7 @@ test('browser-first chrome is flat dense and active-surface subordinate', () => 
   assert.match(dark, /\.verticalTab\.active[^{]*\{[\s\S]*background:#141d28/);
   assert.match(dark, /\.tabAvatar[^{]*\{[\s\S]*border-radius:7px/);
   assert.doesNotMatch(dark, /border-radius:50%[^}]*tabAvatar/);
-  assert.match(html, /<strong>Workspace<\/strong>/);
+  assert.match(html, /<strong>Chat Fleet<\/strong>/);
 });
 
 test('keyboard-first workbench grammar and Session authority boundaries remain intact', () => {
