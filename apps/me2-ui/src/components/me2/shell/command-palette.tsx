@@ -43,7 +43,8 @@ function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
   const setOpen = useMe2((s) => s.setPalette);
   const setPage = useMe2((s) => s.setPage);
   const setChatId = useMe2((s) => s.setChatId);
-  const { sessions } = useAgentChatSessions();
+  const { sessions, loading: chatsLoading, error: chatsError } = useAgentChatSessions();
+  const chatSnapshotTrusted = !chatsLoading && !chatsError;
 
   const activeChatIdsByAgent = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -60,7 +61,7 @@ function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
     <CommandGroup heading={`Агенты · ${agents.length}`}>
       {agents.slice(0, 8).map((a) => {
         const chatIds = activeChatIdsByAgent.get(a.id) ?? [];
-        const exactChatId = chatIds.length === 1 ? chatIds[0] : null;
+        const exactChatId = chatSnapshotTrusted && chatIds.length === 1 ? chatIds[0] : null;
         return (
           <CommandItem
             key={a.id}
@@ -73,7 +74,9 @@ function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
           >
             <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
             <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
-            {chatIds.length === 1 ? (
+            {!chatSnapshotTrusted ? (
+              <span className="ml-2 rounded border border-zinc-800 bg-zinc-900 px-1 font-mono text-[8px] text-zinc-500">chat unavailable</span>
+            ) : chatIds.length === 1 ? (
               <span className="ml-2 rounded border border-violet-900/60 bg-violet-950/30 px-1 font-mono text-[8px] text-violet-300">chat</span>
             ) : chatIds.length > 1 ? (
               <span className="ml-2 rounded border border-amber-900/60 bg-amber-950/30 px-1 font-mono text-[8px] text-amber-300">ambiguous chat</span>
