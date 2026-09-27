@@ -40,3 +40,18 @@ The process that owns native WebContentsView bounds also owns the telemetry-visi
 - no scheduler, browser-command, update, release, DB or production authority is added.
 
 This removes a duplicated geometry policy rather than adding another control plane.
+
+
+## Follow-up race audit: page transition must precede geometry readback
+
+A later audit found a causal race in the first R95C.2 draft. Renderer navigation invoked `setPrimaryPage("browser")` and immediately invoked the context-drawer/layout readback without waiting for the first IPC result. Both calls were asynchronous, so the second readback could observe the previous Main-process page and incorrectly return `run_inspector_visible=false` until a later resize or drawer action.
+
+Electron's official IPC contract defines `ipcRenderer.invoke()` as returning a Promise resolved with the `ipcMain.handle()` response. R95C.2 now uses that acknowledgement as a causal fence:
+
+`primary-page invoke → await acknowledgement → RUN geometry readback → generation/page fence → renderer projection`.
+
+The same ordering is applied to restored Browser page state and history navigation. A failed page acknowledgement fails the telemetry projection closed instead of guessing native geometry.
+
+Primary sources:
+- https://www.electronjs.org/docs/latest/api/ipc-renderer
+- https://www.electronjs.org/docs/latest/tutorial/ipc
