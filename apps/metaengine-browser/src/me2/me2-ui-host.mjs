@@ -134,6 +134,7 @@ function spawnUi(launch) {
     ...launch.env_patch,
     PORT: String(UI_PORT),
     ME2_HOSTED_BY_BROWSER: '1',
+    ME2_WATCHDOG: 'off',
   };
   child = spawn(launch.bin, launch.args, {
     cwd: launch.dir,
