@@ -34,7 +34,7 @@ test('presentation intent projection is synchronous and identity-only', () => {
 });
 
 test('Browser presentation activation requires one exact live tab binding and reuses the existing attach path', () => {
-  const block = functionSlice('selectBrowserTabForPresentation', 'applyPresentationFocusIntent');
+  const block = functionSlice('selectBrowserTabForPresentation', 'primaryChatFleetRoster');
   assert.match(block, /registry\.get\(id\)/);
   assert.match(block, /views\.get\(id\)/);
   assert.match(block, /if \(!tab\) throw new Error\('tab_not_found'\)/);
@@ -93,9 +93,11 @@ test('generic Browser SELECT_TAB remains physically independent from DevOS prese
 });
 
 test('presentation activation wiring contains no second scheduler, polling loop, or renderer authority path', () => {
-  const start = source.indexOf('function currentDevOSPresentationProjection()');
-  const end = source.indexOf('async function shellSnapshot()', start);
-  const block = source.slice(start, end);
+  const block = [
+    functionSlice('currentDevOSPresentationProjection', 'selectBrowserTabForPresentation'),
+    functionSlice('selectBrowserTabForPresentation', 'primaryChatFleetRoster'),
+    functionSlice('applyPresentationFocusIntent', 'shellSnapshot'),
+  ].join('\n');
   assert.doesNotMatch(block, /setTimeout|setInterval|queueMicrotask|requestAnimationFrame|retry/i);
   assert.doesNotMatch(block, /ipcRenderer|webContents\.executeJavaScript|executeJavaScript|sendInputEvent/);
 });
