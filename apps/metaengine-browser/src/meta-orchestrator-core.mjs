@@ -208,11 +208,6 @@ export function deriveProgressLedger({ plan, tasks = [], evidence = [] } = {}) {
   });
 }
 
-function riskCompanions(node) {
-  if (node.risk === 'CRITICAL') return ['CRITIC', 'FALSIFIER'];
-  if (node.risk === 'HIGH') return ['CRITIC'];
-  return [];
-}
 function verificationCompanions(node) {
   // R86 closed-loop sequencing: every implementation result is independently
   // verified after RESULT_READY. CRITICAL work keeps the stronger dual review.
@@ -437,10 +432,6 @@ export function reconcileMetaOrchestrator({
     .slice(0, fanout);
   for (const node of selected) {
     actions.push(nodeProposal(node, plan));
-    for (const companion of riskCompanions(node)) {
-      const companionPoint = `${node.point_id}.${companion.toLowerCase()}`;
-      if (!activePoints.has(companionPoint) && actions.length < maxParallel) actions.push(nodeProposal(node, plan, companion));
-    }
   }
 
   if (actions.length) {
