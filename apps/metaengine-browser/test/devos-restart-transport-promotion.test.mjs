@@ -40,7 +40,7 @@ function harness({ tabUrl = CONVERSATION, releaseThrows = false } = {}) {
 
   const activate = ({ stage, hash }) => {
     const agent = state.fleet.agents[0];
-    agent.lifecycle_state = 'ACTIVE';
+    agent.lifecycle_state = stage === 'PRECONVERSATION_ROOT' ? 'BOUND_UNVERIFIED' : 'ACTIVE';
     agent.transport_proof = {
       schema: 'metaengine.browser.fleet-transport-proof.v1',
       ...(stage === 'PRECONVERSATION_ROOT' ? { transport_stage: stage } : {}),
@@ -165,9 +165,9 @@ test('root ChatGPT tabs gain preconversation transport proof without TYPE or CLI
   const h = harness({ tabUrl: 'https://chat.z.ai/' });
   try {
     const snapshot = await h.cycle.cycle();
-    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'ACTIVE');
+    assert.equal(h.state.fleet.agents[0].lifecycle_state, 'BOUND_UNVERIFIED');
     assert.equal(h.state.fleet.agents[0].transport_proof.transport_stage, 'PRECONVERSATION_ROOT');
-    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_ACTIVE');
+    assert.equal(snapshot.fleet_transport_promotion.state, 'LOCAL_PRECONVERSATION');
     assert.equal(snapshot.fleet_transport_promotion.transport_stage, 'PRECONVERSATION_ROOT');
     assert.equal(snapshot.fleet_transport_promotion.local_proof_state, 'PROVEN_PRECONVERSATION');
     assert.equal(snapshot.fleet_transport_promotion.conversation_url_sha256, null);
