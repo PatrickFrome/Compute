@@ -132,6 +132,7 @@ export async function markFleetTransportProvenFromNativeFrame({
   frame,
   expected_conversation_url_sha256,
   expected_transport_url_sha256,
+  expected_agent_surface_sha256,
 } = {}) {
   if (!fleetRuntime) throw new Error('fleet_runtime_unavailable');
   const agent = exactAgent(fleetRuntime.snapshot(), binding);
@@ -149,10 +150,18 @@ export async function markFleetTransportProvenFromNativeFrame({
   if (!/^[a-f0-9]{64}$/.test(expectedHash) || sha256(transport.url) !== expectedHash) {
     throw new Error('fleet_runtime_transport_hash_mismatch');
   }
+  const agentSurfaceHash = String(expected_agent_surface_sha256 || '').toLowerCase();
+  if (transport.stage === 'CONVERSATION' && !/^[a-f0-9]{64}$/.test(agentSurfaceHash)) {
+    throw new Error('fleet_runtime_agent_surface_hash_required');
+  }
 
   if (String(agent.lifecycle_state) === 'ACTIVE') {
     const currentStage = String(agent?.transport_proof?.transport_stage || 'CONVERSATION');
     if (currentStage !== 'PRECONVERSATION_ROOT') {
+      if (transport.stage === 'CONVERSATION'
+          && String(agent?.transport_proof?.agent_surface_sha256 || '').toLowerCase() !== agentSurfaceHash) {
+        throw new Error('fleet_runtime_agent_surface_hash_mismatch');
+      }
       return Object.freeze({
         schema: 'metaengine.browser.fleet-native-transport-proof.v1',
         state: 'ALREADY_ACTIVE',
@@ -183,6 +192,7 @@ export async function markFleetTransportProvenFromNativeFrame({
       target_id: agent.target_id,
       generation_epoch: agent.generation_epoch,
       conversation_url: transport.url,
+      agent_surface_sha256: agentSurfaceHash,
     });
     const upgraded = exactAgent(next, binding);
     if (String(upgraded.lifecycle_state) !== 'ACTIVE' || !upgraded.transport_proof) throw new Error('fleet_runtime_transport_proof_not_persisted');
@@ -194,6 +204,7 @@ export async function markFleetTransportProvenFromNativeFrame({
       target_id: upgraded.target_id,
       generation_epoch: upgraded.generation_epoch,
       conversation_url_sha256: expectedHash,
+      agent_surface_sha256: agentSurfaceHash,
       process_incarnation_sha256: sha256(processIncarnation),
       automatic_retry_allowed: false,
       authority_effect: false,
@@ -221,6 +232,7 @@ export async function markFleetTransportProvenFromNativeFrame({
       target_id: agent.target_id,
       generation_epoch: agent.generation_epoch,
       conversation_url: transport.url,
+      agent_surface_sha256: agentSurfaceHash,
     });
     state = 'PROVEN';
   }
@@ -246,6 +258,7 @@ export async function markFleetTransportProvenFromNativeFrame({
     generation_epoch: proven.generation_epoch,
     transport_stage: transport.stage,
     conversation_url_sha256: expectedHash,
+    agent_surface_sha256: transport.stage === 'CONVERSATION' ? agentSurfaceHash : null,
     process_incarnation_sha256: sha256(processIncarnation),
     automatic_retry_allowed: false,
     authority_effect: false,
