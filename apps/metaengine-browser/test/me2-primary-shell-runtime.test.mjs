@@ -662,7 +662,7 @@ test('R85 presentation overlays temporarily remove the native Browser surface wi
   assert.match(store, /setChromeOverlay/);
   assert.match(me2Shell, /setPrimaryOverlay\(nativeOverlayOpen\)/);
   assert.doesNotMatch(me2Topbar, /setChromeOverlay\("attention"|setChromeOverlay\("workspace-menu"/);
-  assert.match(me2Topbar, /setPaletteOpen\(true\)/);
+  assert.match(me2Topbar, /setPalette\(true\)/);
   assert.match(me2Pagebar, /setChromeOverlay\("stage-menu"/);
 });
 
