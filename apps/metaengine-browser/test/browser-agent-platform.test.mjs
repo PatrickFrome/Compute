@@ -12,6 +12,9 @@ import {
   isAgentPlatformUrl,
   normalizeAgentPlatformConversationUrl,
   resolveAgentPlatformComposer,
+  resolveAgentPlatformAgentSurface,
+  resolveAgentPlatformSelectedModel,
+  resolveAgentPlatformNavControl,
   agentPlatformSnapshot,
 } from '../src/browser-agent-platform.mjs';
 
@@ -158,4 +161,95 @@ test('reload auth-redirect gate fences the GLM platform auth surface too', async
   assert.equal(reloadBlockedByAuthRedirect({ action: 'RELOAD', url: 'https://chatgpt.com/auth/login' }), true);
   assert.equal(reloadBlockedByAuthRedirect({ action: 'RELOAD', url: 'https://chat.z.ai/c/55fd8c37-00d0-4821-8e56-14f36c7be6db' }), false);
   assert.equal(reloadBlockedByAuthRedirect({ action: 'NAVIGATE', url: 'https://chat.z.ai/auth' }), false);
+});
+
+
+function semref(id) {
+  return {
+    schema: 'metaengine.native-browser.semantic-ref.v1',
+    semantic_ref_id: `semref_${String(id).padEnd(64, '0').slice(0,64)}`,
+  };
+}
+
+function liveAgentFrame({ model = 'GLM-5.3-Flash', omit = [] } = {}) {
+  const skip = new Set(omit);
+  const semantic_targets = [
+    ['button','Agent',3336],
+    ['button','Chat',3331],
+    ['button','New Task',3346],
+    ['button','Select a model',9469],
+    ['button','Full-Stack',11846],
+    ['button','Writing',11852],
+    ['button','Data Insight',11858],
+    ['button','IM',11841],
+  ].filter(([,name]) => !skip.has(name)).map(([role,name,id]) => ({
+    role, name, backend_node_id:id, semantic_ref:semref(name),
+  }));
+  return {
+    schema:'metaengine.native-browser.perception.v1',
+    url:'https://chat.z.ai/',
+    target_id:'webcontents:196',
+    process_incarnation_id:'d1fc5af9-de4f-404e-8cc1-92a3e83282e7',
+    state_revision_id:'rev_'.padEnd(68,'a'),
+    semantic_targets,
+    interaction_tree:{
+      schema:'metaengine.native-browser.interaction-tree.v1',
+      elements:[
+        {role:'statictext',text:model},
+        {role:'statictext',text:'Create anything you can imagine'},
+      ],
+    },
+    authority_effect:false,
+  };
+}
+
+test('z.ai Agent SPA readiness is semantic and does not use URL/title guessing', () => {
+  const frame = liveAgentFrame();
+  const proof = resolveAgentPlatformAgentSurface(frame);
+  assert.equal(proof.schema, 'metaengine.browser.agent-platform-surface-proof.v1');
+  assert.equal(proof.stage, 'AGENT_HOME');
+  assert.equal(proof.url, 'https://chat.z.ai/');
+  assert.equal(proof.target_id, 'webcontents:196');
+  assert.equal(proof.process_incarnation_id, frame.process_incarnation_id);
+  assert.equal(proof.state_revision_id, frame.state_revision_id);
+  assert.equal(proof.new_task.accessible_name, 'New Task');
+  assert.equal(proof.semantic_marker_count, 5);
+  assert.deepEqual(proof.template_names, ['Data Insight','Full-Stack','IM','Writing']);
+  assert.equal(proof.execution_authority, false);
+  assert.equal(proof.authority_effect, false);
+});
+
+test('z.ai Agent SPA proof fails closed without New Task or enough Agent-template controls', () => {
+  assert.equal(resolveAgentPlatformAgentSurface(liveAgentFrame({ omit:['New Task'] })), null);
+  assert.equal(resolveAgentPlatformAgentSurface(liveAgentFrame({ omit:['Full-Stack','Writing','Data Insight'] })), null);
+  const chatLike = liveAgentFrame({ omit:['New Task','Full-Stack','Writing','Data Insight','IM'] });
+  assert.equal(resolveAgentPlatformAgentSurface(chatLike), null);
+  assert.equal(resolveAgentPlatformAgentSurface({ ...liveAgentFrame(), url:'https://chat.z.ai/auth' }), null);
+  assert.equal(resolveAgentPlatformAgentSurface({ ...liveAgentFrame(), authority_effect:true }), null);
+});
+
+test('z.ai selected model is exact UI evidence and title branding is not accepted', () => {
+  const good = resolveAgentPlatformSelectedModel(liveAgentFrame({ model:'GLM-5.3-Flash' }));
+  assert.equal(good.model, 'GLM-5.3-Flash');
+  assert.equal(good.matches_required_model, true);
+  const wrong = resolveAgentPlatformSelectedModel(liveAgentFrame({ model:'GLM-5.2' }));
+  assert.equal(wrong.model, 'GLM-5.2');
+  assert.equal(wrong.matches_required_model, false);
+  assert.equal(resolveAgentPlatformSelectedModel({
+    ...liveAgentFrame(),
+    interaction_tree:{ elements:[{role:'statictext',text:'Z.ai - powered by GLM-5.3-Flash'}] },
+  }), null);
+  assert.equal(resolveAgentPlatformSelectedModel({
+    ...liveAgentFrame(),
+    interaction_tree:{ elements:[{role:'statictext',text:'GLM-5.2'},{role:'statictext',text:'GLM-5.3-Flash'}] },
+  }), null);
+});
+
+test('Agent/Chat/model navigation controls resolve only by exact semantic refs', () => {
+  const frame = liveAgentFrame();
+  assert.equal(resolveAgentPlatformNavControl(frame,'Agent').backend_node_id,3336);
+  assert.equal(resolveAgentPlatformNavControl(frame,'Chat').backend_node_id,3331);
+  assert.equal(resolveAgentPlatformNavControl(frame,'Select a model').backend_node_id,9469);
+  assert.equal(resolveAgentPlatformNavControl(frame,'API'),null);
+  assert.equal(resolveAgentPlatformNavControl(liveAgentFrame({ omit:['Agent'] }),'Agent'),null);
 });
