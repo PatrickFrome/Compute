@@ -55,12 +55,13 @@ test('Dark Workspace V2 is dark, browser-first and deliberately low-noise', () =
   assert.match(html, /color-scheme" content="dark"/);
   assert.match(html, /data-operations="CLOSED"/);
   assert.match(html, /placeholder="Search · > command · @ agent · \/ skill"/);
-  assert.match(html, /aria-label="Chats, agents, workspaces and BrowserCells"/);
-  assert.match(html, /aria-label="Brain coordination inspector"/);
+  assert.match(html, /aria-label="Chat agents and supervisors"/);
+  assert.match(html, /aria-label="Settings and advanced tools"/);
   assert.match(html, /data-section="overview"[^>]*>Status</);
   assert.match(html, /data-section="commands"[^>]*>Actions</);
   assert.match(html, /data-final-shell="metaengine-dark-workspace-v2"/);
   assert.match(html, /class="activeContext"/);
+  assert.match(css, /body\[data-final-shell="metaengine-dark-workspace-v2"\] \.activeContext[\s\S]{0,180}display:none!important/);
 
   assert.match(darkCss, /color-scheme:dark/);
   assert.match(darkCss, /--top-height:44px/);
