@@ -692,7 +692,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
           { seq: requestSeq, taskId: id },
           { seq: taskStreamRequestSeq, taskId: state.inspectedTaskId, streamTaskId: state.streamTaskId },
         )) return {};
-        const bySeq = new Map(exactFetched.map((event) => [event.seq, event]));
+        const bySeq = new Map<number, Event>();
+        for (const event of exactFetched) bySeq.set(event.seq, event);
         for (const event of state.stream) bySeq.set(event.seq, event);
         return {
           stream: [...bySeq.values()]
