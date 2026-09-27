@@ -48,13 +48,31 @@ function conversationUrl(value) {
 }
 
 function exactTransportProof(agent) {
+  // Task admission requires a canonical conversation. Root transport reachability
+  // is intentionally not enough: PRECONVERSATION_ROOT may contain an account-
+  // synced dirty draft and is not a runnable chat-agent.
   if (String(agent?.lifecycle_state || '') !== 'ACTIVE') return null;
   if (agent?.authority_effect === true || agent?.automatic_retry_allowed === true) return null;
   const proof = agent?.transport_proof;
   if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1') return null;
   if (proof.authority_effect !== false) return null;
   const stage = String(proof.transport_stage || 'CONVERSATION');
-  if (!['PRECONVERSATION_ROOT', 'CONVERSATION'].includes(stage)) return null;
+  if (stage !== 'CONVERSATION') return null;
+  if (String(proof.tab_id || '') !== String(agent.tab_id || '')) return null;
+  if (String(proof.target_id || '').toLowerCase() !== String(agent.target_id || '').toLowerCase()) return null;
+  if (Number(proof.generation_epoch) !== Number(agent.generation_epoch)) return null;
+  if (!HASH_RE.test(String(proof.conversation_url_sha256 || '').toLowerCase())) return null;
+  const provenAt = Date.parse(String(proof.proven_at || ''));
+  if (!Number.isFinite(provenAt)) return null;
+  return proof;
+}
+
+function exactPreconversationProof(agent) {
+  if (String(agent?.lifecycle_state || '') !== 'BOUND_UNVERIFIED') return null;
+  if (agent?.authority_effect === true || agent?.automatic_retry_allowed === true) return null;
+  const proof = agent?.transport_proof;
+  if (!proof || proof.schema !== 'metaengine.browser.fleet-transport-proof.v1') return null;
+  if (proof.authority_effect !== false || proof.transport_stage !== 'PRECONVERSATION_ROOT') return null;
   if (String(proof.tab_id || '') !== String(agent.tab_id || '')) return null;
   if (String(proof.target_id || '').toLowerCase() !== String(agent.target_id || '').toLowerCase()) return null;
   if (Number(proof.generation_epoch) !== Number(agent.generation_epoch)) return null;
@@ -112,7 +130,8 @@ function promotionCandidate(state) {
   const candidates = (fleet.agents || []).filter((agent) => {
     if (String(agent?.ownership || '') !== 'FLEET_OWNED') return false;
     if (String(agent?.lifecycle_state || '') !== 'BOUND_UNVERIFIED') return false;
-    if (agent?.transport_proof != null || agent?.authority_effect === true || agent?.automatic_retry_allowed === true) return false;
+    if (agent?.authority_effect === true || agent?.automatic_retry_allowed === true) return false;
+    if (agent?.transport_proof != null && !exactPreconversationProof(agent)) return false;
     if (!/^agent_[a-z0-9-]{8,64}$/.test(String(agent?.agent_id || '').toLowerCase())) return false;
     if (!String(agent?.tab_id || '') || !/^webcontents:[1-9][0-9]*$/.test(String(agent?.target_id || '').toLowerCase())) return false;
     if (!Number.isSafeInteger(Number(agent?.generation_epoch)) || Number(agent.generation_epoch) < 1) return false;
@@ -411,7 +430,7 @@ export class DevOsNativeTaskCycle {
         throw new Error('devos_transport_promotion_local_proof_invalid');
       }
       result = {
-        state: 'LOCAL_ACTIVE',
+        state: transport.stage === 'CONVERSATION' ? 'LOCAL_ACTIVE' : 'LOCAL_PRECONVERSATION',
         ...binding,
         lease_id: lease.lease_id,
         transport_stage: transport.stage,
