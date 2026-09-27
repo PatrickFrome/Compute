@@ -19,6 +19,10 @@ const packageSmoke = await readFile(
   new URL('../../../.github/workflows/browser-windows-package-smoke.yml', import.meta.url),
   'utf8',
 );
+const shell = await readFile(
+  new URL('../../me2-ui/src/components/me2/shell/me2-shell.tsx', import.meta.url),
+  'utf8',
+);
 
 test('R95E evidence timeline binds causal rows only by exact task identity', () => {
   assert.match(observe, /data-testid="evidence-timeline"/);
@@ -62,13 +66,13 @@ test('R95E timeline is bounded and merges task snapshot, exact events and exact 
 });
 
 
-test('R95E physical gate captures OBSERVE and requires the evidence timeline contract', () => {
-  assert.match(visualHarness, /workflow-stage-observe/);
-  assert.match(visualHarness, /r95e-observe-evidence-1440x960/);
-  assert.match(visualHarness, /evidence_timeline_verified:\s*true/);
-  assert.match(visualHarness, /evidence_binding_fail_closed:/);
-  assert.match(packageSmoke, /evidence_timeline_verified -ne \$true/);
-  assert.match(packageSmoke, /evidence_binding_fail_closed -ne \$true/);
-  assert.match(packageSmoke, /captures\)\.Count -ne 4/);
-  assert.match(packageSmoke, /r95e-observe-evidence-1440x960/);
+test('R97 keeps exact Evidence Timeline as an advanced module instead of persistent main chrome', () => {
+  assert.match(shell, /case "observability": return <ObservabilityPage \/>/);
+  assert.doesNotMatch(shell, /workflow-stage-observe|evidence-timeline/);
+  assert.match(visualHarness, /advanced_surfaces_settings_only/);
+  assert.match(visualHarness, /r97-settings-advanced-surface-1440x960/);
+  assert.match(visualHarness, /r97-command-search-1440x960/);
+  assert.match(packageSmoke, /advanced_surfaces_settings_only -ne \$true/);
+  assert.match(packageSmoke, /r97-settings-advanced-surface-1440x960/);
+  assert.match(packageSmoke, /r97-command-search-1440x960/);
 });
