@@ -117,22 +117,22 @@ test('R95E.1 OBSERVE consumes only the shared exact-task join contract', () => {
 });
 
 test('R95E.2 exact history fetch is bounded and surfaces degraded readback honestly', () => {
-  assert.match(store, /streamState: "UNBOUND" \\| "LOADING" \\| "EXACT" \\| "DEGRADED"/);
+  assert.match(store, /streamState: "UNBOUND" \| "LOADING" \| "EXACT" \| "DEGRADED"/);
   assert.match(store, /streamState: "LOADING"/);
-  assert.match(store, /AbortSignal\\.timeout\\(8_000\\)/);
-  assert.match(store, /if \\(!d\\?\\.events\\) return \\{ streamState: "DEGRADED" as const \\}/);
+  assert.match(store, /AbortSignal\.timeout\(8_000\)/);
+  assert.match(store, /if \(!d\?\.events\) return \{ streamState: "DEGRADED" as const \}/);
   assert.match(store, /streamState: "EXACT" as const/);
-  assert.match(observe, /data-history-state=\\{streamState\\}/);
-  assert.match(observe, /history \\$\\{streamState\\.toLowerCase\\(\\)\\}/);
+  assert.match(observe, /data-history-state=\{streamState\}/);
+  assert.match(observe, /history \$\{streamState\.toLowerCase\(\)\}/);
 });
 
 test('R95E.2 closing Task Sheet preserves exact inspected history for OBSERVE', () => {
   const closeStart = store.indexOf('closeTask: () => {');
   const closeEnd = store.indexOf('setChatId:', closeStart);
   const block = store.slice(closeStart, closeEnd);
-  assert.match(block, /set\\(\\{ detail: null \\}\\)/);
-  assert.doesNotMatch(block, /taskStreamRequestSeq \\+= 1/);
-  assert.doesNotMatch(block, /stream:\\s*\\[\\]/);
-  assert.doesNotMatch(block, /streamTaskId:\\s*null/);
-  assert.doesNotMatch(block, /inspectedTaskId:\\s*null/);
+  assert.match(block, /set\(\{ detail: null \}\)/);
+  assert.doesNotMatch(block, /taskStreamRequestSeq \+= 1/);
+  assert.doesNotMatch(block, /stream:\s*\[\]/);
+  assert.doesNotMatch(block, /streamTaskId:\s*null/);
+  assert.doesNotMatch(block, /inspectedTaskId:\s*null/);
 });
