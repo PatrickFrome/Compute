@@ -28,6 +28,9 @@ export const AGENT_PLATFORM_HOSTS = Object.freeze(['chat.z.ai']);
 export const AGENT_PLATFORM_HOME_URL = 'https://chat.z.ai/';
 export const AGENT_PLATFORM_MODEL = 'GLM-5.3-Flash';
 export const AGENT_PLATFORM_MODEL_SELECTION = 'EXACT_SESSION_MODEL_REQUIRED';
+export const AGENT_PLATFORM_AGENT_SURFACE_STAGE = 'AGENT_HOME';
+export const AGENT_PLATFORM_AGENT_TEMPLATE_NAMES = Object.freeze(['Full-Stack','Writing','Data Insight','IM']);
+export const AGENT_PLATFORM_KNOWN_MODELS = Object.freeze(['GLM-5.3','GLM-5.3-Flash','GLM-5.2']);
 
 const CONVERSATION_PATH_RE = /^\/c\/[a-z0-9-]+\/?$/i;
 const AUTH_PATH_RE = /^\/auth(\/|$)/i;
@@ -105,6 +108,92 @@ export function classifyAgentPlatformSurface(value) {
   return Object.freeze({ url: `https://chat.z.ai${path.toLowerCase()}`, stage: 'OTHER' });
 }
 
+
+function exactSemanticTarget(frame, role, name) {
+  const rows = Array.isArray(frame?.semantic_targets)
+    ? frame.semantic_targets.filter((row) =>
+        String(row?.role || '').toLowerCase() === String(role || '').toLowerCase()
+        && String(row?.name || '') === String(name || '')
+        && row?.semantic_ref)
+    : [];
+  return rows.length === 1 ? rows[0] : null;
+}
+
+function targetProjection(row) {
+  if (!row?.semantic_ref) return null;
+  return Object.freeze({
+    role: String(row.role || '').toLowerCase(),
+    accessible_name: row.name == null ? null : String(row.name),
+    semantic_ref: row.semantic_ref,
+    backend_node_id: Number(row.backend_node_id || 0) || null,
+  });
+}
+
+// z.ai Agent is SPA state on the same https://chat.z.ai/ URL as Chat. URL,
+// title and selected-tab state therefore cannot prove Agent readiness. The
+// minimum positive proof is a unique exact "New Task" control plus at least
+// two Agent-template controls observed in the SAME native perception revision.
+// The proof is read-only and carries no execution authority.
+export function resolveAgentPlatformAgentSurface(frame) {
+  if (!frame || frame.authority_effect === true || !isAgentPlatformUrl(frame.url) || isAgentPlatformAuthRedirectUrl(frame.url)) return null;
+  const newTask = exactSemanticTarget(frame, 'button', 'New Task');
+  if (!newTask) return null;
+  const agentNav = exactSemanticTarget(frame, 'button', 'Agent');
+  const templates = AGENT_PLATFORM_AGENT_TEMPLATE_NAMES
+    .map((name) => ({ name, row: exactSemanticTarget(frame, 'button', name) }))
+    .filter(({ row }) => Boolean(row));
+  if (templates.length < 2) return null;
+  const targetId = String(frame.target_id || '').toLowerCase();
+  const processIncarnationId = String(frame.process_incarnation_id || '');
+  const stateRevisionId = String(frame.state_revision_id || '');
+  if (!targetId || !processIncarnationId || !stateRevisionId) return null;
+  return Object.freeze({
+    schema: 'metaengine.browser.agent-platform-surface-proof.v1',
+    stage: AGENT_PLATFORM_AGENT_SURFACE_STAGE,
+    url: String(frame.url || ''),
+    target_id: targetId,
+    process_incarnation_id: processIncarnationId,
+    state_revision_id: stateRevisionId,
+    agent_nav: targetProjection(agentNav),
+    new_task: targetProjection(newTask),
+    template_names: Object.freeze(templates.map(({ name }) => name).sort()),
+    semantic_marker_count: 1 + templates.length,
+    page_data_authority: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+}
+
+// The selected model is evidence, not authority. It must be read from the
+// current accessibility interaction tree; page title branding is deliberately
+// ignored because the live Agent page can say "powered by GLM-5.3-Flash"
+// while the selected model control still shows GLM-5.2.
+export function resolveAgentPlatformSelectedModel(frame) {
+  if (!frame || frame.authority_effect === true || !isAgentPlatformUrl(frame.url)) return null;
+  const rows = Array.isArray(frame?.interaction_tree?.elements) ? frame.interaction_tree.elements : [];
+  const observed = [...new Set(rows
+    .map((row) => String(row?.text || '').trim())
+    .filter((text) => AGENT_PLATFORM_KNOWN_MODELS.includes(text)))];
+  if (observed.length !== 1) return null;
+  return Object.freeze({
+    schema: 'metaengine.browser.agent-platform-model-proof.v1',
+    model: observed[0],
+    required_model: AGENT_PLATFORM_MODEL,
+    matches_required_model: observed[0] === AGENT_PLATFORM_MODEL,
+    target_id: String(frame.target_id || '').toLowerCase() || null,
+    process_incarnation_id: String(frame.process_incarnation_id || '') || null,
+    state_revision_id: String(frame.state_revision_id || '') || null,
+    page_data_authority: false,
+    execution_authority: false,
+    authority_effect: false,
+  });
+}
+
+export function resolveAgentPlatformNavControl(frame, name) {
+  if (!['Agent','Chat','Select a model'].includes(String(name || ''))) return null;
+  return targetProjection(exactSemanticTarget(frame, 'button', String(name)));
+}
+
 // Composer resolution for semantic typing. The GLM composer is a textarea
 // whose accessible name is a localized placeholder, so the ONLY stable
 // addressing key is the semantic_ref captured from a fresh perception.
@@ -163,6 +252,10 @@ export function agentPlatformSnapshot() {
     auth_redirect_path: '/auth',
     model: AGENT_PLATFORM_MODEL,
     model_selection: AGENT_PLATFORM_MODEL_SELECTION,
+    agent_surface_stage: AGENT_PLATFORM_AGENT_SURFACE_STAGE,
+    agent_surface_readiness: 'NEW_TASK_PLUS_TWO_TEMPLATE_CONTROLS_SAME_REVISION',
+    model_readback: 'ACCESSIBILITY_INTERACTION_TREE_EXACT_LABEL',
+    url_is_agent_surface_authority: false,
     composer_addressing: 'SEMANTIC_REF_BACKEND_NODE_ID',
     composer_name_is_localized_placeholder: true,
     submit_path: 'ENTER_KEY_WITH_COMPOSER_CLEARED_OR_NEW_CONVERSATION_READBACK',
