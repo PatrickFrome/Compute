@@ -311,6 +311,10 @@ export function reconcileMetaOrchestrator({
     });
   }
 
+  const availableSlots = integer(capacity.available_slots ?? 0, 'available_slots', { min: 0, max: 4096 });
+  const maxParallel = integer(policy.max_parallel_proposals ?? 8, 'max_parallel_proposals', { min: 1, max: 128 });
+  const activePoints = activePointSet(tasks);
+
   // R86 autonomous closed loop: RESULT_READY is not completion. Before any
   // successor can advance, create independent verification work only after the
   // primary result exists. This prevents critics/falsifiers from racing the
@@ -405,7 +409,6 @@ export function reconcileMetaOrchestrator({
   }
 
   const pending = plan.nodes.filter((node) => progressByPoint.get(node.point_id)?.state === 'PENDING');
-  const activePoints = activePointSet(tasks);
   const eligible = pending.filter((node) => node.dependencies.every((dep) => progressByPoint.get(dep)?.state === 'VERIFIED'));
   const blocked = pending.filter((node) => node.dependencies.some((dep) => ['FAILED', 'AMBIGUOUS', 'EVIDENCE_PENDING', 'UNKNOWN'].includes(progressByPoint.get(dep)?.state)));
 
@@ -416,8 +419,6 @@ export function reconcileMetaOrchestrator({
     });
   }
 
-  const availableSlots = integer(capacity.available_slots ?? 0, 'available_slots', { min: 0, max: 4096 });
-  const maxParallel = integer(policy.max_parallel_proposals ?? 8, 'max_parallel_proposals', { min: 1, max: 128 });
   const fanout = Math.min(availableSlots, maxParallel, eligible.length);
   if (eligible.length > 0 && fanout === 0) {
     return authorityEnvelope({
