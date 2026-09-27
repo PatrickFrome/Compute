@@ -11,6 +11,8 @@ on:
       - 'apps/metaengine-browser/package.json'
       - 'apps/metaengine-browser/electron-builder.test.json'
       - 'apps/metaengine-browser/scripts/installer-provenance.mjs'
+      - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-final-runtime-activation-v1.yml'
 
 concurrency:
@@ -57,50 +59,6 @@ jobs:
       - name: Prove activation contract and VEF fail-closed semantics
         working-directory: apps/metaengine-browser
         run: node --test test/final-runtime-activation-contract.test.mjs
-
-      # R52 (фаза C7): соберём и упакуем панели Mission Control в me2-ui-dist —
-      # electron-builder заберёт их в resources/me2-ui (контракт me2-ui-host, R50).
-      # Fail-open: сбой UI-сборки НЕ валит релиз (фолбэк GET /ui остаётся честным) —
-      # но при успехе единая система едет в установке одной сборкой (один SHA → один релиз).
-      - name: Setup Bun (for ME2 UI build)
-        if: ${{ success() }}
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - name: Build and pack ME2 UI (C7, fail-open)
-        if: ${{ success() }}
-        working-directory: apps/me2-ui
-        shell: bash
-        env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          set +e
-          STUB=../metaengine-browser/me2-ui-dist
-          bun install --frozen-lockfile > ui-build.log 2>&1
-          BUN=$?
-          if [ $BUN -ne 0 ]; then echo "me2-ui skipped (bun install failed) — honest stub for extraResources"; mkdir -p "$STUB" && printf 'ME2 UI bundle absent (build failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"; exit 0; fi
-          bun run build >> ui-build.log 2>&1
-          BUILD=$?
-          if [ $BUILD -ne 0 ]; then echo "me2-ui skipped (next build failed) — honest stub"; tail -20 ui-build.log; mkdir -p "$STUB" && printf 'ME2 UI bundle absent (build failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"; exit 0; fi
-          bun run pack >> ui-build.log 2>&1
-          PACK=$?
-          if [ $PACK -ne 0 ]; then echo "me2-ui skipped (pack failed) — honest stub"; tail -20 ui-build.log; mkdir -p "$STUB" && printf 'ME2 UI bundle absent (pack failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"; exit 0; fi
-          # electron-builder берёт extraResources from app-root браузера
-          rm -rf "$STUB"
-          cp -r me2-ui-dist "$STUB"
-          node ../metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root "$STUB" --expected-sha "$ME2_BUILD_SHA" >> ui-build.log 2>&1
-          VERIFY=$?
-          if [ $VERIFY -ne 0 ]; then
-            echo "me2-ui skipped (exact-head provenance verification failed) — honest stub"
-            tail -20 ui-build.log
-            rm -rf "$STUB"
-            mkdir -p "$STUB"
-            printf 'ME2 UI bundle absent (exact-head provenance verification failed) — ui-host честно деградирует на фолбэк GET /ui (R50).\n' > "$STUB/README.md"
-            exit 0
-          fi
-          tail -2 ui-build.log
-          echo "me2-ui-dist staged and exact-head verified: $(du -sh "$STUB" | cut -f1)"
-          exit 0
 
       - name: Acquire exact-head immutable NSIS installer from Package Smoke
         working-directory: apps/metaengine-browser
