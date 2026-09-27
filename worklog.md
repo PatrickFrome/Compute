@@ -1484,3 +1484,23 @@ Stage Summary:
 - origin/main = посторонняя (RSI) линия: PR #821 (85767548) и ci(operator)-коммиты, merge-base с нашей историей ОТСУТСТВУЕТ (попытка rebase попробовала переложить все 109 коммитов — прервано `git rebase --abort`, состояние восстановлено чисто).
 - Правильная интеграция: каноническая рабочая ветка sandbox/me2-os = cfdd5d50 (R74) на remote → push main:sandbox/me2-os = fast-forward cfdd5d50..d9d42a13 (R75 опубликован). origin/main не тронут — слияние двух несвязанных историй = решение оператора.
 - PAT-паттерн: set-url с токеном из /home/z/.a2/.github.env → push → немедленный set-url на чистый URL + unset (значение не в логах).
+
+---
+Task ID: R81-DESKTOP-GUARDIAN-20260927
+Agent: Z.ai Code (main, директива оператора: «разрабатываем НЕ КОНСОЛЬ, а DESKTOP КЛИЕНТ metaengine в GITHUB»)
+Task: GAP-ROADMAP #2 — Guardian-parity light: внешний watchdog + beacon-контракт с тем же journal-контрактом; native SCM за кадром
+
+Work Log:
+- src/shared/me2-constants.mjs: блок GUARDIAN (BEACON_NAME, BEACON_INTERVAL_MS=5s, JOURNAL_NAME=me2-desktop-guardian.jsonl, WATCH_INTERVAL_MS=5s, STALE_MS=20s=4 пропущенных бита, BACKOFF 15s→120s, STABLE_RESET_MS=5min, MAX_RESTARTS_PER_WINDOW=8/ч — зеркалит DAEMON_HOST.MAX_RESTARTS)
+- src/me2/guardian-contract.mjs (pure, тестируемый): makeBeacon / validateBeacon (честный absent: null/corrupt/массив — одна причина), evaluateBeacon (порядок: shape → clean_exit → ts_in_future → pid_dead → beacon_stale → alive+ageMs), nextBackoffMs (удвоение с cap), decideRestart (monitor/wait/restart/give_up; clean_exit НИКОГДА не воюется; wait с честным retryInMs), computeRestartsInWindow (скользящее окно из записей журнала — свидетельства важнее памяти, переживает рестарт guardian'а)
+- src/main.mjs (тонкая electron-обвязка): startGuardianBeacon — атомарный writeJsonAtomic бикона {pid, boot_id: randomUUID, ts} каждые 5с в userData, unref-timer, старт ТОЛЬКО после plane.bringUp() (полуживой клиент не бьётся — не лжёт watchdog'у), SMOKE не бьётся; stopGuardianBeacon({clean:true}) в before-quit — clean_exit маркер; события guardian_beacon в lifecycle-журнал
+- scripts/guardian.mjs: внешний watchdog (node/bun, zero-dep), CLI --user-data-dir --client-cmd [--interval] [--once]; detached spawn клиента, SIGINT/SIGTERM → guardian_exit; exit-коды --once: 0 monitor / 4 restarted / 5 give_up; createGuardian экспортируем (инъекции spawnImpl/aliveImpl для тестов)
+- test/guardian.test.mjs: 27 тестов — shape/validate, все ветки evaluate, backoff-прогрессия, все ветки decide, окно-подсчёт, 4 интеграционных на реальных файлах tmp (monitor→restart с журналом, clean_exit, cap 8→give_up ровно 1 раз, corrupt beacon)
+- GAP-ROADMAP: #2 ❌ → 🔄 parity-лайт (курсор 6/8), раунд-журнал R81, очередь обновлена; условие оператора по PR — 3/3 зелёных gate (R79+R80+R81) ВЫПОЛНЕНО
+- Версия: 0.8.2-dev.0.1 → 0.8.3-dev.0.1
+
+Stage Summary:
+- SUITE 113/113 GREEN (node --test; было 86, +27 guardian), check-syntax 37 файлов OK (было 34)
+- Push: me2/r78-desktop-from-scratch @ 82a44902 + ad872b98 (docs) — ls-remote/api подтверждение; ME2 Desktop Gate: SUCCESS (3-й подряд)
+- Freeze соблюдён: браузерная PR-ветка work/r85-control-room-ui-v1 не тронута (там Self Update E2E in-flight на 4ed9ae49 = перебазированный R86 build-once provenance — уже в remote)
+- Backlog R82: #8 brain-адаптер + #4 native-supervisor client (после недельной живой обкатки guardian); интеграционный smoke guardian в Xvfb
