@@ -31,7 +31,8 @@ test('R95E explicitly refuses heuristic causal attribution for global chain, CI 
   assert.match(observe, /OTel aggregate is ambient evidence and is not treated as task-causal/);
   assert.match(observe, /global evidence-chain, CI and aggregate OTel stay ambient/);
   assert.match(observe, /CI .* ambient/);
-  assert.match(observe, /spans .* ambient/);
+  assert.match(observe, /const otelLabel = otel == null \? "spans \?" : `spans \$\{otel\.spans\} · drop \$\{otel\.dropped\}`/);
+  assert.match(observe, /OTel aggregate is ambient evidence and is not treated as task-causal/);
   assert.doesNotMatch(observe, /ci.*task_id\s*===/i);
 });
 
