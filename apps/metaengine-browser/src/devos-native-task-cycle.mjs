@@ -71,6 +71,57 @@ function semanticActivationPayload(tabId, control) {
   };
 }
 
+async function discoverAgentNavControlByKeyboard({
+  executeCommand,
+  binding,
+  initialFrame,
+  maxTabSteps = 18,
+} = {}) {
+  if (typeof executeCommand !== 'function') throw new Error('devos_agent_nav_discovery_executor_required');
+  let frame = initialFrame;
+  let control = resolveAgentPlatformNavControl(frame, 'Agent');
+  if (control?.semantic_ref) {
+    return Object.freeze({ state: 'FOUND', frame, control, tab_steps: 0, authority_effect: false });
+  }
+
+  const seenFocus = new Set();
+  for (let step = 1; step <= maxTabSteps; step += 1) {
+    // Tab changes only keyboard focus; it does not submit text, create a task,
+    // or invoke page geometry. Every step is followed by a fresh perception
+    // proof before another step is allowed.
+    await executeCommand({
+      action: 'PRESS_KEY',
+      platform: AGENT_PLATFORM_ID,
+      payload: { tab_id: binding.tab_id, key: 'Tab' },
+    });
+    frame = await executeCommand({
+      action: 'CAPTURE',
+      platform: AGENT_PLATFORM_ID,
+      payload: { tab_id: binding.tab_id },
+    });
+    if (String(frame?.target_id || '').toLowerCase() !== String(binding.target_id || '').toLowerCase()) {
+      throw new Error('devos_agent_nav_discovery_target_drift');
+    }
+    control = resolveAgentPlatformNavControl(frame, 'Agent');
+    if (control?.semantic_ref) {
+      return Object.freeze({ state: 'FOUND', frame, control, tab_steps: step, authority_effect: false });
+    }
+
+    const focused = frame?.focused_target || null;
+    const focusKey = focused
+      ? [String(focused.role || ''), String(focused.name || ''), Number(focused.backend_node_id || 0)].join(':')
+      : null;
+    if (focusKey) {
+      if (seenFocus.has(focusKey)) {
+        return Object.freeze({ state: 'FOCUS_CYCLE', frame, control: null, tab_steps: step, authority_effect: false });
+      }
+      seenFocus.add(focusKey);
+    }
+  }
+
+  return Object.freeze({ state: 'NOT_FOUND', frame, control: null, tab_steps: maxTabSteps, authority_effect: false });
+}
+
 function transportUrl(value) {
   try {
     const surface = classifyAgentPlatformSurface(String(value || ''));
@@ -466,13 +517,25 @@ export class DevOsNativeTaskCycle {
         // success is proven only by a fresh semantic CAPTURE, never by the
         // TYPED_CLICK receipt itself.
         if (!agentSurface) {
-          const agentControl = resolveAgentPlatformNavControl(frame, 'Agent');
+          let agentControl = resolveAgentPlatformNavControl(frame, 'Agent');
+          let navDiscovery = null;
+          if (!agentControl?.semantic_ref) {
+            navDiscovery = await discoverAgentNavControlByKeyboard({
+              executeCommand: this.#executeCommand,
+              binding,
+              initialFrame: frame,
+            });
+            frame = navDiscovery.frame || frame;
+            agentControl = navDiscovery.control || null;
+          }
           if (!agentControl?.semantic_ref) {
             result = {
               state: 'LOCAL_AGENT_NAV_NOT_READY',
               ...binding,
               lease_id: lease.lease_id,
               transport_stage: 'PRECONVERSATION_ROOT',
+              nav_discovery_state: navDiscovery?.state || 'NOT_ATTEMPTED',
+              nav_discovery_tab_steps: Number(navDiscovery?.tab_steps || 0),
               reason: 'AGENT_SEMANTIC_CONTROL_NOT_FOUND',
               automatic_retry_allowed: false,
               authority_effect: false,
