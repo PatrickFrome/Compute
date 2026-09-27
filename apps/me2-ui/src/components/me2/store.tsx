@@ -218,21 +218,33 @@ function writeWorkspaceLayout(workspace: WorkspaceKey, patch: Partial<WorkspaceL
   } catch { /* private mode */ }
 }
 
-function syncPagePresentation(p: PageKey) {
+function syncPagePresentation(p: PageKey): Promise<unknown> | null {
   try {
     localStorage.setItem(PAGE_LS, p);
     history.replaceState(null, "", `#${p}`);
   } catch { /* private mode */ }
+
+  let primaryPageAck: Promise<unknown> | null = null;
   try {
-    const shell = (window as Window & { metaengineShell?: { setPrimaryPage?: (page: string) => unknown; setPrimaryOverlay?: (active: boolean) => unknown } }).metaengineShell;
-    void shell?.setPrimaryPage?.(p);
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryPage?: (page: string) => Promise<unknown> | unknown;
+        setPrimaryOverlay?: (active: boolean) => unknown;
+      };
+    }).metaengineShell;
+    const result = shell?.setPrimaryPage?.(p);
+    if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+      primaryPageAck = Promise.resolve(result);
+    }
   } catch { /* Browser preload bridge absent in web-only mode */ }
+
   void (async () => {
     try {
       const { me2Desktop } = await import("@/lib/me2-desktop");
       me2Desktop()?.tabs.setActive("page", p);
     } catch { /* bridge absent */ }
   })();
+  return primaryPageAck;
 }
 
 export const useMe2 = create<Me2State>((set, get) => ({
