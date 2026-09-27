@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-windows-installed-chat-qualification.yml'
   workflow_dispatch:
 
@@ -81,24 +83,6 @@ jobs:
             throw 'detached_capture_view_physical_proof_invalid'
           }
 
-      - name: Build and stage exact-head ME2 UI
-        shell: pwsh
-        env:
-          ME2_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          npm install --no-audit --no-fund --global bun
-          Push-Location apps/me2-ui
-          try {
-            bun install --frozen-lockfile
-            bun run build
-            node scripts/pack-me2-ui.mjs
-          } finally { Pop-Location }
-          Remove-Item apps/metaengine-browser/me2-ui-dist -Recurse -Force -ErrorAction SilentlyContinue
-          Copy-Item -Recurse -Force apps/me2-ui/me2-ui-dist apps/metaengine-browser/me2-ui-dist
-          node apps/metaengine-browser/scripts/verify-me2-ui-bundle.mjs --root apps/metaengine-browser/me2-ui-dist --expected-sha $env:ME2_BUILD_SHA
-          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_staged_me2_ui_invalid' }
-
       - name: Acquire provenanced exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
         shell: powershell
@@ -114,15 +98,36 @@ jobs:
             --workflow browser-windows-package-smoke.yml `
             --artifact "metaengine-browser-windows-candidate-$sourceHead" `
             --out "$env:RUNNER_TEMP\provenanced-installer" `
-            --timeout-min 45 --interval-sec 30 --absent-grace-min 10
+            --timeout-min 45 --interval-sec 30 --absent-grace-min 10 `
+            --allow-in-progress true
           if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_acquire_failed' }
+          $resolved = Get-Content "$env:RUNNER_TEMP\provenanced-installer\resolved.json" -Raw | ConvertFrom-Json
+          if ($resolved.schema -ne 'metaengine.browser.installer-run-resolved.v1' `
+              -or [string]$resolved.head_sha -ne [string]$sourceHead `
+              -or [int64]$resolved.run_id -le 0 `
+              -or [int64]$resolved.run_number -le 0 `
+              -or [int64]$resolved.run_attempt -le 0) { throw 'installer_provenance_resolved_binding_invalid' }
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_ID=$([int64]$resolved.run_id)" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_NUMBER=$([int64]$resolved.run_number)" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_RUN_ATTEMPT=$([int64]$resolved.run_attempt)" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_PACKAGE_PRODUCER_COMPLETED_AT_ACQUIRE=$([bool]$resolved.producer_completed)" -Encoding utf8
           Expand-Archive -Path "$env:RUNNER_TEMP\provenanced-installer\artifact.zip" -DestinationPath "$env:RUNNER_TEMP\provenanced-installer\payload" -Force
           node scripts/installer-provenance.mjs verify `
             --dir "$env:RUNNER_TEMP\provenanced-installer\payload" `
-            --expect-head $sourceHead
+            --expect-head $sourceHead `
+            --expect-run-id $resolved.run_id `
+            --expect-run-number $resolved.run_number `
+            --expect-run-attempt $resolved.run_attempt `
+            --expect-workflow browser-windows-package-smoke.yml `
+            --config (Join-Path (Get-Location) 'electron-builder.test.json')
           if ($LASTEXITCODE -ne 0) { throw 'installer_provenance_verify_failed' }
           $acquired = Get-Content "$env:RUNNER_TEMP\provenanced-installer\payload\acquired.json" -Raw | ConvertFrom-Json
           if ($acquired.schema -ne 'metaengine.browser.installer-provenance-acquired.v1') { throw 'installer_provenance_acquired_schema_invalid' }
+          if ([string]$acquired.provenance_run_id -ne [string]$resolved.run_id `
+              -or [int64]$acquired.provenance_run_number -ne [int64]$resolved.run_number `
+              -or [int64]$acquired.provenance_run_attempt -ne [int64]$resolved.run_attempt `
+              -or $acquired.blockmap_verified -ne $true `
+              -or $acquired.config_verified -ne $true) { throw 'installed_chat_provenance_binding_invalid' }
           $installer = Get-Item $acquired.installer_path
           if (-not $installer) { throw 'installed_chat_qualification_installer_missing' }
           $digest = $acquired.installer_sha256
@@ -133,6 +138,10 @@ jobs:
             package_version=$version
             installer_name=$installer.Name
             installer_sha256=$digest
+            producer_run_id=[int64]$resolved.run_id
+            producer_run_number=[int64]$resolved.run_number
+            producer_run_attempt=[int64]$resolved.run_attempt
+            producer_completed_at_acquire=[bool]$resolved.producer_completed
             preconnect_armed=$false
             clean_genesis_control_verified=$false
             automatic_initial_tab_suppressed=$false
@@ -366,6 +375,32 @@ jobs:
               cmd.exe /d /c "taskkill.exe /PID $($normal.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
             }
           }
+
+      - name: Require bound Package Smoke producer terminal success
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = "$env:RUNNER_TEMP\installed-chat-proof.json"
+          if (-not (Test-Path $proofPath -PathType Leaf)) { throw 'installed_chat_package_producer_proof_missing' }
+          $proof = Get-Content $proofPath -Raw | ConvertFrom-Json
+          if ([int64]$proof.producer_run_id -ne [int64]$env:ME2_PACKAGE_PRODUCER_RUN_ID `
+              -or [int64]$proof.producer_run_number -ne [int64]$env:ME2_PACKAGE_PRODUCER_RUN_NUMBER `
+              -or [int64]$proof.producer_run_attempt -ne [int64]$env:ME2_PACKAGE_PRODUCER_RUN_ATTEMPT) {
+            throw 'installed_chat_package_producer_binding_drift'
+          }
+          node scripts/installer-provenance.mjs wait `
+            --head ([string]$proof.source_head) `
+            --workflow browser-windows-package-smoke.yml `
+            --run-id $env:ME2_PACKAGE_PRODUCER_RUN_ID `
+            --run-number $env:ME2_PACKAGE_PRODUCER_RUN_NUMBER `
+            --run-attempt $env:ME2_PACKAGE_PRODUCER_RUN_ATTEMPT `
+            --timeout-min 45 --interval-sec 10
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_package_producer_not_qualified' }
+          $proof | Add-Member -NotePropertyName producer_terminal_success -NotePropertyValue $true -Force
+          $proof | ConvertTo-Json -Depth 8 | Set-Content $proofPath -Encoding utf8
 
       - name: Prove exact source checkout unchanged
         shell: bash
