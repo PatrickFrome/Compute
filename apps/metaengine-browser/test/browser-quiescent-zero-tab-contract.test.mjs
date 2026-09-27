@@ -69,6 +69,12 @@ test('convergence product head contains no temporary patch authority and package
       filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
     },
     {
+      // R85: Browser package includes the self-contained daemon runtime as fixed evidence.
+      from: 'me2-daemon-dist',
+      to: 'me2-daemon',
+      filter: ['**/*'],
+    },
+    {
       // R52 (фаза C7): панели Mission Control едут в установщике (контракт me2-ui-host, R50)
       from: 'me2-ui-dist',
       to: 'me2-ui',

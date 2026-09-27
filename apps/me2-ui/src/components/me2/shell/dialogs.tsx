@@ -2,7 +2,7 @@
 // ── GLOBAL DIALOGS: НОВАЯ ЗАДАЧА · EVENTS_SEARCH · BUDGET · RESET · TASK SHEET ──
 // Все оверлеи — Global UI (доступны из любой Page, §2 дизайн-дока).
 
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +17,7 @@ import { agentChatOp } from "@/lib/me2-socket";
 import { eventsSearch, environmentReset, taskAction, age, hhmmss, EVENT_STYLE, type Task, type Event } from "@/lib/me2-bus";
 import {
   Rocket, Clock, Search, Gauge, Trash2, X, RotateCcw, Archive, Brain, CheckCircle2,
-  AlertTriangle, Activity,
+  AlertTriangle, Activity, Globe2,
 } from "lucide-react";
 
 // ── НОВАЯ ЗАДАЧА ────────────────────────────────────────────────────────────────
@@ -212,6 +212,77 @@ function BudgetDialog() {
   );
 }
 
+
+// ── OPEN SITE (presentation-only shell intent) ────────────────────────────────
+function OpenSiteDialog() {
+  const dialog = useMe2((s) => s.dialog);
+  const setDialog = useMe2((s) => s.setDialog);
+  const { toast } = useToast();
+  const [url, setUrl] = useState("https://");
+  const [busy, setBusy] = useState(false);
+
+  const open = async () => {
+    const value = url.trim();
+    if (!/^https?:\/\//i.test(value)) {
+      toast({ title: "URL не открыт", description: "Разрешены только http:// и https://", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const { me2Desktop } = await import("@/lib/me2-desktop");
+      const desktop = me2Desktop();
+      if (!desktop) {
+        toast({ title: "native shell недоступен", description: "Открытие сайта требует METAENGINE Desktop shell.", variant: "destructive" });
+        return;
+      }
+      const result = await desktop.tabs.openSite(value);
+      if (!result.ok) {
+        toast({ title: "вкладка не открыта", description: result.error ?? "ошибка native shell", variant: "destructive" });
+        return;
+      }
+      setDialog(null);
+      setUrl("https://");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={dialog === "openSite"} onOpenChange={(openState) => { if (!openState) setDialog(null); }}>
+      <DialogContent className="border-zinc-800 bg-zinc-950 sm:max-w-md" data-testid="open-site-dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-sm tracking-widest">
+            <Globe2 className="h-4 w-4 text-sky-400" aria-hidden /> ОТКРЫТЬ САЙТ
+          </DialogTitle>
+          <DialogDescription className="text-xs text-zinc-500">
+            новая native Browser-вкладка · только http/https · presentation flow
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1 py-1">
+          <Label htmlFor="open-site-url" className="text-xs text-zinc-400">URL</Label>
+          <Input
+            id="open-site-url"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter" && !busy) { event.preventDefault(); void open(); } }}
+            autoFocus
+            spellCheck={false}
+            inputMode="url"
+            aria-label="URL сайта для новой Browser-вкладки"
+            className="border-zinc-800 bg-zinc-900 font-mono text-xs"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" className="border-zinc-700" onClick={() => setDialog(null)}>отмена</Button>
+          <Button size="sm" className="bg-sky-700 hover:bg-sky-600" onClick={() => void open()} disabled={busy || !/^https?:\/\//i.test(url.trim())}>
+            <Globe2 className="mr-1 h-3.5 w-3.5" aria-hidden /> открыть
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── RESET (EMERGENCY) ───────────────────────────────────────────────────────────
 function ResetDialog() {
   const dialog = useMe2((s) => s.dialog);
@@ -269,8 +340,14 @@ function TaskSheet() {
     }
   };
 
-  const streamEndRef = useMemo(() => ({ current: null as HTMLDivElement | null }), []);
-  if (detail) setTimeout(() => streamEndRef.current?.scrollIntoView({ block: "end" }), 50);
+  const streamEndRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!detail) return;
+    const frame = window.requestAnimationFrame(() => {
+      streamEndRef.current?.scrollIntoView({ block: "end" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [detail?.id, stream.length]);
 
   return (
     <Sheet open={!!detail} onOpenChange={(o) => { if (!o) closeTask(); }}>
@@ -370,6 +447,7 @@ export function GlobalDialogs() {
       <NewTaskDialog />
       <EventsSearchDialog />
       <BudgetDialog />
+      <OpenSiteDialog />
       <ResetDialog />
       <TaskSheet />
     </>

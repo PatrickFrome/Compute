@@ -1,0 +1,69 @@
+{
+  "schema": "metaengine.r83.edge-canary-source-binding.v1",
+  "version": "1.0.0",
+  "candidate": {
+    "slug": "a2-browser-native-supervisor-v14-canary",
+    "observed_function_version": 1,
+    "observed_ezbr_sha256": "b88e59e8be31f6f0a4c3d58605bad5753d45acf04e9c5a65fe7c8f28e02c9be3",
+    "source_commit": "ef04d60a63c260cfaf7fe530b0026f03ea2401c4",
+    "service_marker": "/a2-browser-native-supervisor-v14-canary",
+    "source_binding": "PINNED_RAW_GITHUB_IMPORT_CLOSURE",
+    "imports": [
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-routes.mjs",
+        "git_blob_sha1": "a9316993a03256fbd33f872c7f707359f3bf6095"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/db-inspect-routes.mjs",
+        "git_blob_sha1": "1ab22b2e35b907814e7ace20f5f1821b35ddb157"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/devos-promotion-routes.mjs",
+        "git_blob_sha1": "74ab5dbfc7bfbd77f08b225922a3b5d742252f05"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/meta-routes.mjs",
+        "git_blob_sha1": "3570ba2313bac053ac1fd2d83dda7a3c32ab0df1"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/cognitive-delta-routes.mjs",
+        "git_blob_sha1": "d559219aeb199c706fb0d03530d71b4dc13528ec"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/emergency-routes.mjs",
+        "git_blob_sha1": "fe51384293f5b92fffa939dfbf46a1f00f11d21f"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/runtime-capability-health.mjs",
+        "git_blob_sha1": "d26cc771bef57de820e07083be402e540ea00df7"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/realtime-command-wake.mjs",
+        "git_blob_sha1": "1d16afe3bbe74e51d499115c0b92288cfe5a25b6"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/postgres-command-wake.mjs",
+        "git_blob_sha1": "db0532fd7d59d12701a7284683bfd5cfaf2481ec"
+      },
+      {
+        "path": "apps/metaengine-browser/supabase/a2-browser-native-supervisor-v1/result-receipt-readback.mjs",
+        "git_blob_sha1": "efc9e0f2ebb62532fb6d6582ed88376e798bf7fe"
+      }
+    ]
+  },
+  "production_observed": {
+    "slug": "a2-browser-native-supervisor-v1",
+    "observed_function_version": 13,
+    "observed_ezbr_sha256": "68c269077c9f6114a4abf2fabb4d51a5eb4ada263ba5c04c1adb898c600c6570"
+  },
+  "required_capabilities": [
+    "POSTGRES_NOTIFY_WAKE",
+    "RESULT_RECEIPT_READBACK",
+    "EMERGENCY_WAIT_ROUTE",
+    "PER_PLANE_STATE_MERGE",
+    "COGNITIVE_DELTA_ROUTE"
+  ],
+  "promotion_authorized": false,
+  "automatic_promotion_allowed": false,
+  "authority_effect": false
+}

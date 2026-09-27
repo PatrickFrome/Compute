@@ -67,18 +67,23 @@ test('worker observation and DevOS run only as idle work after remote command ad
   const idleKick = source.indexOf('this.#kickIdleWork()', commandAdmission);
   const idleMethod = source.indexOf('#kickIdleWork()');
   const observeIndex = source.indexOf('await this.#observeWorkers();', idleMethod);
-  const waitMaintenanceIndex = source.indexOf('await this.#waitForBaseMaintenanceIdle();', observeIndex);
-  const admissionIndex = source.indexOf("supervisor?.continuous_service?.actuation_allowed !== true", waitMaintenanceIndex);
+  const maintenanceDeferralIndex = source.indexOf("super.snapshot()?.control_fast_lane?.maintenance_in_flight === true", observeIndex);
+  const admissionIndex = source.indexOf("supervisor?.continuous_service?.actuation_allowed !== true", maintenanceDeferralIndex);
   const devosIndex = source.indexOf('await this.#devosTaskCycle.runOnce();', admissionIndex);
 
   assert.ok(commandAdmission > cycleStart, 'remote command lane must be admitted first');
   assert.ok(idleKick > commandAdmission, 'idle observation/DevOS must be kicked only after command admission');
   assert.ok(observeIndex > idleMethod, 'worker observation must remain inside idle work');
-  assert.ok(waitMaintenanceIndex > observeIndex, 'idle work must wait for existing base maintenance before DevOS');
-  assert.ok(admissionIndex > waitMaintenanceIndex, 'DevOS must remain behind authoritative continuous-service admission');
+  assert.ok(maintenanceDeferralIndex > observeIndex, 'idle work must defer if maintenance starts during observation');
+  assert.ok(admissionIndex > maintenanceDeferralIndex, 'DevOS must remain behind authoritative continuous-service admission');
   assert.ok(devosIndex > admissionIndex, 'bounded DevOS runOnce must remain behind idle observation, maintenance, and admission fences');
   assert.doesNotMatch(source, /#devosTaskCycle\.cycle\(\)/, 'continuous DevOS cycle must not be reintroduced');
-  assert.match(source, /if \(Number\(supervisor\?\.control_fast_lane\?\.last_batch_count \|\| 0\) === 0\) this\.#kickIdleWork\(\)/);
+  assert.doesNotMatch(source, /native_supervisor_idle_maintenance_wait_timeout|IDLE_MAINTENANCE_WAIT_MAX_MS|#waitForBaseMaintenanceIdle/, 'maintenance overlap must defer rather than hold the mutation fence behind a timeout');
+  assert.match(
+    source,
+    /if \(Number\(supervisor\?\.control_fast_lane\?\.last_batch_count \|\| 0\) === 0\s*&& supervisor\?\.control_fast_lane\?\.maintenance_in_flight !== true\) \{\s*this\.#kickIdleWork\(\);\s*\}/,
+    'DevOS idle work must require both an empty remote-command turn and settled base maintenance',
+  );
   assert.match(source, /worker_observer_source:\s*this\.#workerObserver\s*\?\s*'NATIVE_SUPERVISOR_HEARTBEAT'/);
   assert.match(source, /worker_observer_second_polling_loop:\s*false/);
   assert.match(source, /command_lease_precedes_idle_work:\s*true/);

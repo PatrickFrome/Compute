@@ -24,11 +24,13 @@ import { boundedNavigation } from './bounded-navigation.mjs';
 import { SupervisorDeviceIdentity } from './supervisor-device-identity.mjs';
 import { navigationDecision, newWindowDecision, REMOTE_WEB_PREFERENCES, SECURITY_POLICY } from './browser-policy.mjs';
 import { TabRegistry } from './tab-registry.mjs';
+import { reconcileDestroyedTabView } from './tab-view-lifecycle.mjs';
 // ME2 smart merge (R41): узкая capability вкладок для ME2-плоскости (fail-open, zero-authority).
 // Плоскость не переписывает createTab — она вызывает его штатно, политика навигации браузера авторитетна.
 import { me2FleetTabsSetHost } from './me2/me2-fleet-tabs-host.mjs';
+import { me2MissionSelectSession } from './me2/me2-mission-control.mjs';
 import { assertReloadAllowed } from './reload-auth-redirect-gate.mjs';
-import { ExactBrowserTabViewMap } from './browser-webcontents-tab-index.mjs';
+import { ExactBrowserTabViewMap, resolveExactWebContentsTabBinding } from './browser-webcontents-tab-index.mjs';
 import {
   assertExactNativeSupervisorMutationTargetCurrent,
   resolveExactNativeSupervisorMutationTarget,
@@ -68,12 +70,6 @@ nativeTheme.themeSource = 'dark';
 protocol.registerSchemesAsPrivileged([{ scheme: 'metaengine', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false } }]);
 
 const registry = new TabRegistry();
-// R41: регистрация хоста вкладок для ME2 Mission Control (браузер сам открывает чат-агентов
-// прямо в сайте). Guarded: ME2_INTEGRATION=0 → ровно прежнее поведение. createTab — hoisted
-// function declaration, ссылка валидна до её текстового определения.
-if (process.env.ME2_INTEGRATION !== '0') {
-  try { me2FleetTabsSetHost({ registry, createTab: (input, opts) => createTab(input, opts) }); } catch { /* ME2-плоскость опциональна */ }
-}
 const views = new ExactBrowserTabViewMap();
 const bridge = new ComputeBridgeClient();
 let windowRef = null;
@@ -87,6 +83,87 @@ let rsiRuntime = null;
 let rsiOutcomeRiver = null;
 let rsiOperatorSteering = null;
 let nativeSupervisor = null;
+
+function canonicalTabRuntimeIdentity(tabId) {
+  const id = String(tabId || '');
+  const tab = registry.get(id);
+  const view = views.get(id);
+  const exact = resolveExactWebContentsTabBinding(id);
+  if (!tab || !view || view.webContents.isDestroyed() || !exact) return null;
+
+  // R84: consume the already-live Browser Brain runtime binding through the
+  // NativeSupervisorClient. This is an O(1) read from BrowserRuntimeBindingIndex;
+  // do not scan snapshots and do not manufacture BrowserCell/CDP identity from
+  // URL, title, selected tab, WebContents id, or canonical tab id.
+  let runtime = null;
+  try { runtime = nativeSupervisor?.runtimeBinding?.(id) || null; } catch { runtime = null; }
+  if (runtime
+    && (runtime.schema !== 'metaengine.browser.runtime-binding.v1'
+      || runtime.valid !== true
+      || String(runtime.tab_id || '') !== id
+      || Number(runtime.web_contents_id || 0) !== Number(exact.web_contents_id))) {
+    runtime = null;
+  }
+
+  const cellId = runtime?.cell_id == null ? null : String(runtime.cell_id);
+  const cellGeneration = Number(runtime?.cell_generation || 0) || null;
+  const observedTargetId = runtime?.target_id == null ? null : String(runtime.target_id);
+  const webContentsFallbackTarget = `webcontents:${exact.web_contents_id}`;
+  const runtimeTargetId = observedTargetId && observedTargetId !== webContentsFallbackTarget ? observedTargetId : null;
+  const rendererProcessKey = runtime?.renderer_process_key == null ? null : String(runtime.renderer_process_key);
+  const runtimeIdentityComplete = Boolean(
+    runtime
+    && cellId
+    && cellGeneration
+    && runtimeTargetId
+    && rendererProcessKey
+    && runtime.renderer_process_identity_complete === true
+  );
+
+  return Object.freeze({
+    schema: 'metaengine.browser.canonical-tab-runtime-identity.v1',
+    tab_id: id,
+    browsercell_identity: cellId,
+    browsercell_identity_source: cellId ? 'BROWSER_RUNTIME_BINDING_INDEX' : null,
+    web_contents_id: Number(exact.web_contents_id),
+    webcontents_binding_generation: Number(exact.binding_generation),
+    runtime_binding_generation: Number(runtime?.binding_generation || 0) || null,
+    cell_id: cellId,
+    cell_generation: cellGeneration,
+    renderer_process_key: rendererProcessKey,
+    target_id: runtimeTargetId,
+    document_generation: Number(runtime?.document_generation || 0),
+    semantic_revision: Number(runtime?.semantic_revision || 0),
+    runtime_binding_live: runtime?.valid === true,
+    runtime_identity_complete: runtimeIdentityComplete,
+    runtime_binding_source: runtime ? 'BROWSER_RUNTIME_BINDING_INDEX_O1' : null,
+    identity_lookup_complexity: 'O(1)',
+    exact_identity: true,
+    selected_tab_fallback: false,
+    url_identity_fallback: false,
+    title_identity_fallback: false,
+    webcontents_target_fallback: false,
+    execution_authority: false,
+    command_leasing: false,
+    automatic_retry_allowed: false,
+    authority_effect: false,
+  });
+}
+
+// R84 Desktop convergence: Mission Control and native conversations use the
+// existing TabRegistry + ExactBrowserTabViewMap. No parallel tab/target registry.
+if (process.env.ME2_INTEGRATION !== '0') {
+  try {
+    me2FleetTabsSetHost({
+      registry,
+      createTab: (input, opts) => createTab(input, opts),
+      closeTab: (tabId) => closeTab(tabId),
+      selectTab: (tabId) => selectBrowserTabForPresentation(tabId),
+      resolveIdentity: (tabId) => canonicalTabRuntimeIdentity(tabId),
+    });
+  } catch { /* optional ME2 plane never becomes Browser authority */ }
+}
+
 let fallbackConsole = null;
 let shellBrainPortConsumerId = null;
 const humanTakeover = new HumanTakeoverController({ getSupervisor: () => nativeSupervisor });
@@ -101,6 +178,19 @@ tabNetworkActivity.setCompletionSink((entry) => agentObservationPlane.recordNetw
 let shellLayoutState = normalizeShellLayoutState();
 let shellLayoutPlan = null;
 let devosSurfaceGridPlan = null;
+// R84 primary Desktop convergence: the packaged R74/R75 ME2 UI is the normal
+// user-facing shell. The legacy metaengine://shell remains a local recovery
+// surface only when the packaged ME2 plane cannot prove itself healthy.
+let primaryShellMode = 'LEGACY_RECOVERY';
+let primaryShellPage = 'command';
+let primaryShellOverlayActive = false;
+let primaryCommandRailOpen = true;
+let primaryContextDrawerOpen = false;
+let primaryContextDrawerDock = 'BOTTOM';
+let primaryContextDrawerHeight = 200;
+let primaryContextDrawerWidth = 380;
+let primaryShellUrl = null;
+const ME2_PRIMARY_PAGES = new Set(['command','agents','browser','code','tasks','supervisor','compute','memory','observability','system']);
 let devosSourceSnapshot = null;
 let devosSessionLayoutsLoaded = false;
 let perceptionCache = { tab_id: null, captured_ms: 0, frame: null, error: null };
@@ -350,13 +440,20 @@ function applyPresentationFocusIntent(request) {
 }
 
 async function shellSnapshot() {
-  const tabs = registry.snapshot();
+  const rawTabs = registry.snapshot();
   const fleetSnapshot = fleet?.snapshot() || null;
   const ownerSafetyGatesSnapshot = ownerSafetyGates?.snapshot() || null;
   const developmentPlaneSnapshot = normalizeDevelopmentPlaneProjection(
     developmentPlane?.statusSnapshot?.() || developmentPlane?.snapshot() || null,
   );
   const supervisor = nativeSupervisor?.snapshot() || null;
+  const tabs = Object.freeze({
+    ...rawTabs,
+    tabs: Object.freeze((rawTabs?.tabs || []).map((tab) => Object.freeze({
+      ...tab,
+      runtime_identity: canonicalTabRuntimeIdentity(tab.tab_id),
+    }))),
+  });
   const compute = await currentComputeHealth();
   const presentationFocus = devosPresentationFocus.snapshot();
   const sessionLayouts = devosSessionLayouts.snapshot();
@@ -484,6 +581,168 @@ function fallbackSelectedSurface() {
   }];
 }
 
+function nativeBrowserSurfaceAllowed() {
+  return primaryShellMode !== 'ME2_PRIMARY'
+    || (primaryShellPage === 'browser' && primaryShellOverlayActive !== true);
+}
+
+async function preparePrimaryShellTarget() {
+  if (process.env.ME2_INTEGRATION === '0') {
+    primaryShellMode = 'LEGACY_RECOVERY';
+    primaryShellUrl = null;
+    return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_INTEGRATION_DISABLED' };
+  }
+  try {
+    const me2 = await import('./me2/me2-integration-entry.mjs');
+    const status = await me2.startMe2Integration({ app });
+    const gateway = status?.ui_gateway || null;
+    const host = status?.ui_host || null;
+    const ready = gateway?.state === 'LIVE'
+      && gateway?.ui_route_authorized === true
+      && typeof gateway?.url === 'string'
+      && gateway.url.startsWith('http://127.0.0.1:')
+      && host?.routing_authorized === true;
+    if (ready) {
+      primaryShellMode = 'ME2_PRIMARY';
+      primaryShellPage = 'command';
+      primaryShellOverlayActive = false;
+      primaryCommandRailOpen = true;
+      primaryContextDrawerOpen = false;
+      primaryContextDrawerHeight = 200;
+      primaryShellUrl = `${gateway.url}/#command`;
+      return { mode: primaryShellMode, url: primaryShellUrl, reason: 'PACKAGED_ME2_UI_PROVEN' };
+    }
+    recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL', new Error(
+      `me2_primary_shell_not_ready:gateway=${gateway?.state || 'UNKNOWN'}:host=${host?.state || 'UNKNOWN'}`,
+    ));
+  } catch (error) {
+    recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL', error);
+  }
+  primaryShellMode = 'LEGACY_RECOVERY';
+  primaryShellUrl = null;
+  return { mode: primaryShellMode, url: 'metaengine://shell/', reason: 'ME2_PRIMARY_DEGRADED_FALLBACK' };
+}
+
+const ME2_R75_DOM_IDS = Object.freeze(['me2-shell', 'topbar', 'page-command', 'cc-sidebar-toggle', 'pagebar', 'statusbar']);
+
+function cdpBoxVisible(model) {
+  const points = Array.isArray(model?.content) && model.content.length >= 8
+    ? model.content
+    : (Array.isArray(model?.border) ? model.border : []);
+  if (points.length < 8) return false;
+  const xs = [];
+  const ys = [];
+  for (let i = 0; i + 1 < points.length; i += 2) {
+    xs.push(Number(points[i]));
+    ys.push(Number(points[i + 1]));
+  }
+  if (xs.some((value) => !Number.isFinite(value)) || ys.some((value) => !Number.isFinite(value))) return false;
+  return Math.max(...xs) - Math.min(...xs) >= 2 && Math.max(...ys) - Math.min(...ys) >= 2;
+}
+
+async function probeMe2R75InstalledDomOnce(webContents) {
+  const present = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+  const visible = Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false]));
+  const dbg = webContents?.debugger;
+  let attachedHere = false;
+  let error = null;
+  try {
+    if (!dbg || typeof dbg.sendCommand !== 'function' || typeof dbg.attach !== 'function') {
+      throw new Error('me2_r75_cdp_debugger_unavailable');
+    }
+    if (!dbg.isAttached()) {
+      dbg.attach('1.3');
+      attachedHere = true;
+    }
+    await dbg.sendCommand('DOM.enable');
+    const documentResult = await dbg.sendCommand('DOM.getDocument', { depth: 2, pierce: true });
+    const rootNodeId = Number(documentResult?.root?.nodeId || 0);
+    if (!Number.isSafeInteger(rootNodeId) || rootNodeId <= 0) throw new Error('me2_r75_dom_root_missing');
+    for (const id of ME2_R75_DOM_IDS) {
+      const found = await dbg.sendCommand('DOM.querySelector', {
+        nodeId: rootNodeId,
+        selector: `[data-testid="${id}"]`,
+      });
+      const nodeId = Number(found?.nodeId || 0);
+      present[id] = Number.isSafeInteger(nodeId) && nodeId > 0;
+      if (!present[id]) continue;
+      try {
+        const box = await dbg.sendCommand('DOM.getBoxModel', { nodeId });
+        visible[id] = cdpBoxVisible(box?.model);
+      } catch {
+        visible[id] = false;
+      }
+    }
+  } catch (probeError) {
+    error = String(probeError?.message || probeError).slice(0, 240);
+  } finally {
+    try { if (attachedHere && dbg?.isAttached()) dbg.detach(); } catch {}
+  }
+  const complete = error == null
+    && ME2_R75_DOM_IDS.every((id) => present[id] === true && visible[id] === true);
+  return Object.freeze({
+    complete,
+    present: Object.freeze({ ...present }),
+    visible: Object.freeze({ ...visible }),
+    error,
+  });
+}
+
+async function probeMe2R75InstalledDom(webContents, {
+  timeoutMs = 12000,
+  intervalMs = 150,
+} = {}) {
+  // Read-only convergence fence: loadURL() can settle before Next/React has
+  // committed the final layout/CSS box models on a cold installed machine.
+  // Re-observe the same strict DOM+BoxModel contract for one bounded window.
+  // This is not an effect retry and grants no renderer/browser/scheduler authority.
+  const startedAt = Date.now();
+  const deadline = startedAt + Math.max(0, Number(timeoutMs) || 0);
+  const pauseMs = Math.max(25, Math.min(1000, Number(intervalMs) || 150));
+  let attempts = 0;
+  let last = null;
+
+  do {
+    attempts += 1;
+    last = await probeMe2R75InstalledDomOnce(webContents);
+    if (last.complete === true) break;
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, pauseMs));
+  } while (true);
+
+  const complete = last?.complete === true;
+  const row = Object.freeze({
+    schema: 'metaengine.browser.me2-r75-installed-ui.v1',
+    state: complete ? 'ME2_R75_UI_CONTRACT_CONFIRMED' : 'ME2_R75_UI_CONTRACT_INCOMPLETE',
+    page: primaryShellPage,
+    required: ME2_R75_DOM_IDS,
+    present: last?.present || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    visible: last?.visible || Object.fromEntries(ME2_R75_DOM_IDS.map((id) => [id, false])),
+    evidence_source: 'MAIN_PROCESS_CDP_DOM_BOX_MODEL_BOUNDED_CONVERGENCE',
+    probe_attempts: attempts,
+    probe_elapsed_ms: Math.max(0, Date.now() - startedAt),
+    probe_timeout_ms: Math.max(0, Number(timeoutMs) || 0),
+    error: last?.error || null,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    legacy_shell_is_normal_path: false,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    automatic_effect_retry_allowed: false,
+    authority_effect: false,
+  });
+  console[complete ? 'log' : 'error'](JSON.stringify(row));
+  return Object.freeze({
+    complete,
+    present: Object.freeze({ ...(last?.present || {}) }),
+    visible: Object.freeze({ ...(last?.visible || {}) }),
+    attempts,
+    elapsed_ms: row.probe_elapsed_ms,
+    error: last?.error || null,
+  });
+}
+
 function computeDevOSSurfaceGrid() {
   if (!shellLayoutPlan) return null;
   const shell = currentDevOSPresentationShellView();
@@ -498,10 +757,22 @@ function computeDevOSSurfaceGrid() {
 function layout() {
   if (!windowRef || windowRef.isDestroyed()) return;
   const { width, height } = windowRef.getContentBounds();
-  shellLayoutPlan = planShellLayout({ width, height, state: shellLayoutState });
+  shellLayoutPlan = planShellLayout({
+    width,
+    height,
+    state: shellLayoutState,
+    surface_profile: primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'browser'
+      ? 'ME2_R95_RUN'
+      : 'LEGACY_BROWSER_SHELL',
+    me2_command_rail_open: primaryCommandRailOpen,
+    me2_context_drawer_open: primaryContextDrawerOpen,
+    me2_context_drawer_dock: primaryContextDrawerDock,
+    me2_context_drawer_height: primaryContextDrawerHeight,
+    me2_context_drawer_width: primaryContextDrawerWidth,
+  });
   shellView?.setBounds(shellLayoutPlan.shell_bounds);
   if (shellView) { try { windowRef.contentView.addChildView(shellView); } catch {} }
-  devosSurfaceGridPlan = computeDevOSSurfaceGrid();
+  devosSurfaceGridPlan = nativeBrowserSurfaceAllowed() ? computeDevOSSurfaceGrid() : null;
   const browserPaneByTab = new Map((devosSurfaceGridPlan?.browser_panes || []).map((pane) => [String(pane.tab_id || ''), pane]));
   for (const [tabId, view] of views) {
     const pane = browserPaneByTab.get(String(tabId));
@@ -523,6 +794,12 @@ function attachSelected({ force_single_selected = false } = {}) {
     shellView?.setBounds(shellLayoutPlan.shell_bounds);
   }
   if (force_single_selected) {
+    if (!nativeBrowserSurfaceAllowed()) {
+      for (const [, view] of views) {
+        try { windowRef.contentView.removeChildView(view); } catch {}
+      }
+      return;
+    }
     const selected = registry.selected();
     for (const [tabId, view] of views) {
       if (tabId === selected?.tab_id && !view.webContents.isDestroyed()) {
@@ -569,6 +846,22 @@ function wireRemoteView(tab, view) {
   view.webContents.on('did-navigate-in-page', sync);
   view.webContents.on('page-title-updated', sync);
   view.webContents.on('render-process-gone', () => { invalidatePerception(tab.tab_id); publishSnapshot().catch(() => {}); });
+  // R82 live repair: ExactBrowserTabViewMap removes the physical view binding
+  // on Electron's destroyed event. Retire the matching logical TabRegistry row
+  // on that exact physical proof as well; otherwise supervisor state can keep a
+  // ghost tab forever and ambiguity reconciliation repeatedly targets a view
+  // that no longer exists. Explicit closeTab() is safe because registry.close
+  // is idempotent and the helper becomes a no-op when close won the race.
+  view.webContents.once('destroyed', () => {
+    void reconcileDestroyedTabView({
+      tabId: tab.tab_id,
+      registry,
+      fleet,
+      invalidatePerception,
+      attachSelected,
+      publishSnapshot,
+    });
+  });
 }
 
 async function createTab(input = AGENT_PLATFORM_HOME_URL, { select = true, load = true, awaitLoad = true, role = 'USER', created_by_continuity_id = null } = {}) {
@@ -1297,6 +1590,19 @@ async function initNativeSupervisor() {
       hostResilience: globalThis.__METAENGINE_HOST_RESILIENCE_RUNTIME__ || false,
       getState: nativeSupervisorState,
       executeCommand: executeNativeSupervisorCommand,
+      // R84: one canonical logical BrowserCell allocation lives inside the
+      // existing TabRegistry. The realtime Brain consumes this metadata on the
+      // same process/semantic event path; no URL/title inference or second map.
+      resolveBrowserCell: (tabId) => {
+        const tab = registry.get(String(tabId));
+        if (!tab?.browser_cell_id || !Number.isSafeInteger(Number(tab.browser_cell_generation))) return null;
+        return Object.freeze({
+          cell_id: String(tab.browser_cell_id),
+          cell_generation: Number(tab.browser_cell_generation),
+          provider: tab.kind === 'GLM_CHAT' ? 'ZAI' : (tab.kind === 'CHATGPT' ? 'CHATGPT' : null),
+          role: tab.role || null,
+        });
+      },
       observeLocalTarget,
       workerObservationBudget: 4,
       controlStatePath: supervisorControlStatePath(),
@@ -1604,20 +1910,42 @@ async function createWindow() {
   });
   layout();
 
-  // The only user-visible startup boundary is the local packaged shell. Remote
-  // navigation, persisted Fleet state, supervisor identity, DevOS and local
-  // bridge availability are degradable subsystems and must never destroy the UI.
-  await shellView.webContents.loadURL('metaengine://shell/');
+  // R84/R75 Desktop convergence: packaged ME2 is the normal shell. The old
+  // metaengine://shell is retained only as a deterministic local recovery path.
+  // Remote agent/browser views remain native WebContentsViews and are composed
+  // above the ME2 command-center stage; ME2 renderer pixels never gain browser
+  // execution authority.
+  const shellTarget = await preparePrimaryShellTarget();
+  try {
+    await shellView.webContents.loadURL(shellTarget.url);
+    if (shellTarget.mode === 'ME2_PRIMARY') {
+      const r75 = await probeMe2R75InstalledDom(shellView.webContents);
+      if (r75.complete !== true) {
+        throw new Error(`me2_r75_primary_shell_contract_incomplete:${r75.error || 'dom_or_geometry_missing'}`);
+      }
+    }
+  } catch (error) {
+    if (shellTarget.mode !== 'ME2_PRIMARY') throw error;
+    recordStartupSubsystemDegraded('ME2_PRIMARY_SHELL_LOAD', error);
+    primaryShellMode = 'LEGACY_RECOVERY';
+    primaryShellPage = 'command';
+    primaryShellOverlayActive = false;
+    primaryShellUrl = null;
+    await shellView.webContents.loadURL('metaengine://shell/');
+  }
   layout();
   windowRef.show();
   windowRef.focus();
   console.log(JSON.stringify({
-    schema: 'metaengine.browser-local-shell.v1',
-    state: 'LOCAL_SHELL_VISIBLE',
+    schema: 'metaengine.browser-local-shell.v2',
+    state: primaryShellMode === 'ME2_PRIMARY' ? 'ME2_PRIMARY_SHELL_VISIBLE' : 'LEGACY_RECOVERY_SHELL_VISIBLE',
+    shell_mode: primaryShellMode,
+    shell_url_class: primaryShellMode === 'ME2_PRIMARY' ? 'PACKAGED_ME2_LOOPBACK' : 'METAENGINE_RECOVERY_PROTOCOL',
     version: app.getVersion(),
     pid: process.pid,
     remote_network_required: false,
     fleet_state_required: false,
+    legacy_shell_is_normal_path: false,
     authority_effect: false,
   }));
 
@@ -1629,6 +1957,118 @@ async function createWindow() {
 }
 
 ipcMain.handle('metaengine:shell:snapshot', async (event) => { assertShellSender(event); return shellSnapshot(); });
+ipcMain.handle('metaengine:shell:primary-page', async (event, rawPage) => {
+  assertShellSender(event);
+  const page = String(rawPage || '').trim().toLowerCase();
+  if (!ME2_PRIMARY_PAGES.has(page)) throw new Error('primary_shell_page_invalid');
+  primaryShellPage = page;
+  layout();
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-page.v1',
+    page,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:primary-overlay', async (event, rawActive) => {
+  assertShellSender(event);
+  if (typeof rawActive !== 'boolean') throw new Error('primary_shell_overlay_state_invalid');
+  primaryShellOverlayActive = rawActive;
+  layout();
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-overlay.v1',
+    active: primaryShellOverlayActive,
+    native_browser_surface_visible: nativeBrowserSurfaceAllowed(),
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:primary-command-rail', async (event, rawOpen) => {
+  assertShellSender(event);
+  if (typeof rawOpen !== 'boolean') throw new Error('primary_shell_command_rail_state_invalid');
+  primaryCommandRailOpen = rawOpen;
+  layout();
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-command-rail.v1',
+    requested_open: primaryCommandRailOpen,
+    effective_open: shellLayoutPlan?.effective_sidebar === 'EXPANDED',
+    remote_bounds: shellLayoutPlan ? structuredClone(shellLayoutPlan.remote_bounds) : null,
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:primary-context-drawer', async (event, rawOpen, rawDock, rawHeight, rawWidth) => {
+  assertShellSender(event);
+  if (typeof rawOpen !== 'boolean') throw new Error('primary_shell_context_drawer_state_invalid');
+
+  const dock = String(rawDock || 'BOTTOM').trim().toUpperCase();
+  if (dock !== 'BOTTOM' && dock !== 'RIGHT') throw new Error('primary_shell_context_drawer_dock_invalid');
+
+  const height = Number(rawHeight);
+  if (rawHeight != null && (!Number.isFinite(height) || height < 0 || height > 2000)) {
+    throw new Error('primary_shell_context_drawer_height_invalid');
+  }
+
+  const width = Number(rawWidth);
+  if (rawWidth != null && (!Number.isFinite(width) || width < 0 || width > 3000)) {
+    throw new Error('primary_shell_context_drawer_width_invalid');
+  }
+
+  primaryContextDrawerOpen = rawOpen;
+  primaryContextDrawerDock = dock;
+  if (rawHeight != null) primaryContextDrawerHeight = Math.floor(height);
+  if (rawWidth != null) primaryContextDrawerWidth = Math.floor(width);
+  layout();
+
+  return Object.freeze({
+    schema: 'metaengine.browser.me2-primary-context-drawer.v3',
+    requested_open: primaryContextDrawerOpen,
+    requested_dock: primaryContextDrawerDock,
+    requested_height: primaryContextDrawerHeight,
+    requested_width: primaryContextDrawerWidth,
+    effective_open: shellLayoutPlan?.me2_context_drawer_effective_open === true,
+    dock: String(shellLayoutPlan?.me2_context_drawer_effective_dock || primaryContextDrawerDock).toLowerCase(),
+    drawer_height: Number(shellLayoutPlan?.me2_context_drawer_height || 0),
+    drawer_width: Number(shellLayoutPlan?.me2_context_drawer_width || 0),
+    run_inspector_visible: shellLayoutPlan?.me2_run_inspector_effective_visible === true,
+    remote_bounds: shellLayoutPlan ? structuredClone(shellLayoutPlan.remote_bounds) : null,
+    presentation_only: true,
+    scheduler_authority: false,
+    browser_command_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+ipcMain.handle('metaengine:shell:primary-agent-session-select', async (event, rawSessionId) => {
+  assertShellSender(event);
+  const sessionId = String(rawSessionId || '').trim();
+  if (!sessionId || sessionId.length > 256) throw new Error('primary_shell_agent_session_invalid');
+  const result = await me2MissionSelectSession(sessionId);
+  return Object.freeze({
+    ...result,
+    presentation_only: true,
+    renderer_routing_authority: false,
+    browser_command_authority: false,
+    scheduler_authority: false,
+    update_authority: false,
+    release_authority: false,
+    authority_effect: false,
+  });
+});
+
 ipcMain.handle('metaengine:shell:system-deltas', async (event, message) => {
   assertShellSender(event);
   const limit = Number.isSafeInteger(Number(message?.limit)) ? Number(message.limit) : 32;

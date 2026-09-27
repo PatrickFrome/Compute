@@ -1,6 +1,6 @@
 {
   "name": "me2-daemon",
-  "version": "0.43.0",
+  "version": "0.57.1",
   "private": true,
   "description": "METAENGINE 2 core daemon: API-native agent runtime (no browser tabs)",
   "scripts": {

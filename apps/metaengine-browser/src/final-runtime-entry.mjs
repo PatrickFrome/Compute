@@ -167,7 +167,7 @@ if (primaryUiRecoveryEnabled && primaryInstance) {
 // ME2-рунтайма на хосте или любых ошибках — браузер работает ровно как раньше.
 // Не касается self-update authority, single-instance, second-scheduler, окон.
 // Карта слияния: docs/me2-smart-merge-r40.md
-if (!probeStdoutReserved && primaryUiRecoveryEnabled && process.env.ME2_INTEGRATION !== '0') {
+if (primaryInstance && !probeStdoutReserved && primaryUiRecoveryEnabled && process.env.ME2_INTEGRATION !== '0') {
   import('./me2/me2-integration-entry.mjs')
     .then((me2) => {
       const r = me2.startMe2Integration({ app });

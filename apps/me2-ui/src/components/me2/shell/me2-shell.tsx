@@ -1,7 +1,9 @@
 "use client";
-// ── ME2 SHELL: композиция глобального каркаса (R74 Page-архитектура) ───────────
-// TopBar (global) · PageOutlet (условный монтаж страниц — перф-паттерн legacy)
-// · PageBar (Resolve-навигация) · StatusBar · GlobalDialogs + Palette + toast-мост.
+// ── ME2 SHELL: professional control-room shell (R85) ─────────────────────────
+// One stable global command bar, one task-focused page surface, Resolve-style
+// page dock and a thin read-only status line. Closed overlays are not mounted:
+// this keeps the native Browser semantic projection free from hidden palette
+// controls and reduces false automation targets.
 
 import { useEffect } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
@@ -9,6 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { PageBar } from "@/components/me2/shell/pagebar";
 import { StatusBar } from "@/components/me2/shell/statusbar";
+import { ContextDrawer } from "@/components/me2/shell/context-drawer";
+import { PeekInspector } from "@/components/me2/shell/peek-inspector";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
 import { GlobalDialogs } from "@/components/me2/shell/dialogs";
 import { CommandPage } from "@/components/me2/pages/command";
@@ -41,12 +45,16 @@ function PageOutlet({ page }: { page: PageKey }) {
 export function Me2Shell() {
   const page = useMe2((s) => s.page);
   const init = useMe2((s) => s.init);
+  const paletteOpen = useMe2((s) => s.paletteOpen);
+  const dialog = useMe2((s) => s.dialog);
+  const detail = useMe2((s) => s.detail);
+  const contextDrawerDock = useMe2((s) => s.contextDrawerDock);
+  const peekTarget = useMe2((s) => s.peekTarget);
+  const chromeOverlaySources = useMe2((s) => s.chromeOverlaySources);
   const { toast } = useToast();
 
-  // инициализация стора (WS, REST-fallback, hotkeys, desktop-мост) — один раз
   useEffect(() => { init(); }, [init]);
 
-  // toast-мост: модули без хуков диспатчат me2:toast → Sonner
   useEffect(() => {
     const h = (e: Event) => {
       const d = (e as CustomEvent<{ title: string; description?: string; variant?: "default" | "destructive" }>).detail;
@@ -56,17 +64,42 @@ export function Me2Shell() {
     return () => window.removeEventListener("me2:toast", h);
   }, [toast]);
 
+  const overlaysOpen = Boolean(dialog || detail);
+  const nativeOverlayOpen = Boolean(paletteOpen || overlaysOpen || peekTarget || chromeOverlaySources.length > 0);
+
+  useEffect(() => {
+    const shell = (window as Window & {
+      metaengineShell?: {
+        setPrimaryOverlay?: (active: boolean) => unknown;
+      };
+    }).metaengineShell;
+    if (!shell?.setPrimaryOverlay) return;
+    void shell.setPrimaryOverlay(nativeOverlayOpen);
+    return () => { void shell.setPrimaryOverlay?.(false); };
+  }, [nativeOverlayOpen]);
+
   return (
-    <div className="mc-dark flex h-screen min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-200" data-testid="me2-shell">
+    <div
+      className="mc-dark flex h-screen min-h-0 flex-col overflow-hidden bg-[#09090b] text-zinc-200 selection:bg-emerald-400/20"
+      data-testid="me2-shell"
+    >
       <TopBar />
-      {/* PageOutlet: только активная страница в DOM (перф), состояние данных в store */}
-      <main className="min-h-0 flex-1 overflow-hidden p-2" data-testid="page-outlet" data-page={page}>
-        <PageOutlet page={page} />
-      </main>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <main
+          className="min-h-0 min-w-0 flex-1 overflow-hidden p-1.5"
+          data-testid="page-outlet"
+          data-page={page}
+        >
+          <PageOutlet page={page} />
+        </main>
+        {contextDrawerDock === "right" ? <ContextDrawer /> : null}
+      </div>
+      {contextDrawerDock === "bottom" ? <ContextDrawer /> : null}
       <PageBar />
       <StatusBar />
-      <CommandPalette />
-      <GlobalDialogs />
+      <PeekInspector />
+      {paletteOpen ? <CommandPalette /> : null}
+      {overlaysOpen ? <GlobalDialogs /> : null}
     </div>
   );
 }

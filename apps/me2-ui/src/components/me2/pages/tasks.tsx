@@ -7,16 +7,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  AppWindow, Activity, GitBranch, ListChecks, MonitorPlay, MousePointerClick, Plus, RefreshCw,
+  Activity, GitBranch, ListChecks, Plus,
 } from "lucide-react";
 import {
-  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, loadBrowserTabs, me2Fetch, taskAction,
-  type BranchTabKey, type BrowserTab, type Task,
+  BRANCH_COLOR, BRANCH_TABS, age, hhmmss, me2Fetch, taskAction,
+  type BranchTabKey, type Task,
 } from "@/lib/me2-bus";
 import { agentChatOp } from "@/lib/me2-socket";
 import { useMe2 } from "@/components/me2/store";
+import { useTemporaryPeekList } from "@/hooks/use-temporary-peek";
 import { Chip, PageHeader, Sec, StatusBadge } from "@/components/me2/ui/primitives";
-import MirrorPanel from "@/components/me2/mirror-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -33,6 +33,7 @@ type RetryMetrics = {
   without_lesson: { n: number; completed: number; rate: number | null };
   ab?: { treatment: { n: number; completed: number; rate: number | null }; control: { n: number; completed: number; rate: number | null }; control_crossover: number };
 };
+const TASKS_BRANCH_VIEW_LS = "me2.tasks.branch-view.v1";
 const CAUSE_RU: Record<string, string> = {
   budget_exhausted: "бюджет шагов",
   provider_unavailable: "провайдер недоступен",
@@ -81,12 +82,14 @@ function BranchDot({ status, x, y, color }: { status: string; x: number; y: numb
  *  Рейка таймлайна, каждая задача — ветвь с точкой статуса; retry-линии (parent_id → merge-дуга
  *  к родителю); hover-tooltip через portal (fixed, не обрезается скролл-контейнером); окно 60
  *  ветвей (старшие скрыты за toggle); ↻ retry и ✦ LLM-рефлексия на FAILED/CANCELLED строках. */
-function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
+function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId, selectedId, onSelect }: {
   tasks: Task[];
   onOpen: (t: Task) => void;
   onRetry: (t: Task) => void;
   onReflect?: (t: Task) => void;
   reflectingId?: string | null;
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   const ROW_H = 30, W = 340, RAIL_X = 16, FORK_X = 46, DOT_X = 208, TEXT_X = 220, STEPS_X = 334;
   const WINDOW = 60;
@@ -184,16 +187,24 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
               key={t.id}
               className="branch-row"
               data-branch-id={t.id}
-              onClick={() => onOpen(t)}
+              data-peek-kind="task"
+              data-peek-id={t.id}
+              data-peek-selected={selectedId === t.id ? "true" : "false"}
+              onClick={() => { onSelect?.(t.id); onOpen(t); }}
               onMouseEnter={set}
               onMouseMove={set}
               onMouseLeave={clearThis}
-              onFocus={set}
+              onFocus={(e) => { set(e); onSelect?.(t.id); }}
               onBlur={clearThis}
-              role="button"
+              role="group"
               tabIndex={0}
-              aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов`}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(t); } }}
+              aria-current={selectedId === t.id ? "true" : undefined}
+              aria-keyshortcuts="Enter Space"
+              aria-label={`Задача ${t.title} · ${t.status} · ${t.steps} из ${t.max_steps} шагов · Enter открыть · Space Peek`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); onOpen(t); }
+                else if (e.key === " ") e.preventDefault();
+              }}
             >
               <rect className="branch-hover" x={4} y={y - ROW_H / 2 + 2} width={W - 8} height={ROW_H - 4} rx={6} fill="#ffffff" />
               <title>{`${t.title} · ${t.status} · ${t.steps}/${t.max_steps}`}</title>
@@ -219,8 +230,15 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
                   <g
                     className="branch-retry cursor-pointer"
                     onClick={(e) => { e.stopPropagation(); onRetry(t); }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onRetry(t);
+                    }}
                     role="button"
-                    tabIndex={-1}
+                    tabIndex={0}
+                    aria-keyshortcuts="Enter Space"
                     aria-label={`Повторить задачу ${t.title}`}
                   >
                     <title>{"Повторить (TASK_RETRY: +2 шага, рефлексия родителя в контексте)"}</title>
@@ -233,8 +251,15 @@ function BranchGraph({ tasks, onOpen, onRetry, onReflect, reflectingId }: {
                     <g
                       className="branch-reflect cursor-pointer"
                       onClick={(e) => { e.stopPropagation(); onReflect(t); }}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onReflect(t);
+                      }}
                       role="button"
-                      tabIndex={-1}
+                      tabIndex={0}
+                      aria-keyshortcuts="Enter Space"
                       aria-label={`Сгенерировать LLM-рефлексию для задачи ${t.title}`}
                     >
                       <title>{"LLM-рефлексия (tier-2): вербальный урок провала — через супервизора флота (R44)"}</title>
@@ -356,8 +381,20 @@ export function TasksPage() {
   const setChatId = useMe2((s) => s.setChatId);
   const setDialog = useMe2((s) => s.setDialog);
 
-  // вкладка-фильтр ветвей
+  // вкладка-фильтр ветвей; Linear/Blender-style view preference survives page switches.
   const [branchTab, setBranchTab] = useState<BranchTabKey>("ALL");
+  const [branchViewReady, setBranchViewReady] = useState(false);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(TASKS_BRANCH_VIEW_LS) as BranchTabKey | null;
+      if (stored && BRANCH_TABS.some((tab) => tab.key === stored)) setBranchTab(stored);
+    } catch { /* private mode */ }
+    setBranchViewReady(true);
+  }, []);
+  useEffect(() => {
+    if (!branchViewReady) return;
+    try { localStorage.setItem(TASKS_BRANCH_VIEW_LS, branchTab); } catch { /* private mode */ }
+  }, [branchTab, branchViewReady]);
 
   // R11 legacy: pass-rate ретраев с LLM-уроком vs без — /metrics, поллинг 20s
   const [retryMetrics, setRetryMetrics] = useState<RetryMetrics | null>(null);
@@ -399,28 +436,6 @@ export function TasksPage() {
   // retry ↻ на ветви — TASK_RETRY через шину
   const retryBranch = useCallback(async (t: Task) => { await taskAction("TASK_RETRY", t.id); }, []);
 
-  // v0.6.0 legacy: живые вкладки agent-browser в шапке секции ВЕТКИ
-  const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
-  const [browserBusy, setBrowserBusy] = useState(false);
-  const [castOn, setCastOn] = useState(false);
-  const [castCtl, setCastCtl] = useState(false);
-  const refreshTabs = useCallback(async () => {
-    setBrowserBusy(true);
-    try { setBrowserTabs(await loadBrowserTabs()); }
-    finally { setBrowserBusy(false); }
-  }, []);
-  useEffect(() => { void refreshTabs(); const iv = setInterval(() => void refreshTabs(), 15_000); return () => clearInterval(iv); }, [refreshTabs]);
-  // тумблеры live/руль управляют стримом :3042 глобально (BrowserStage на COMMAND) —
-  // мост через window-события (расширение legacy-контракта window-событий)
-  const toggleCast = useCallback((on: boolean) => {
-    setCastOn(on);
-    window.dispatchEvent(new CustomEvent("me2:cast-toggle", { detail: { on } }));
-  }, []);
-  const toggleCastCtl = useCallback((on: boolean) => {
-    setCastCtl(on);
-    window.dispatchEvent(new CustomEvent("me2:cast-ctl", { detail: { on } }));
-  }, []);
-
   // ── панель ВЕТКИ: данные + счётчики вкладок (порт legacy L2124-2139) ──────────
   const branchData = useMemo(() => [...(snap?.tasks ?? []), ...(snap?.archived ?? [])], [snap]);
   const branchCounts = useMemo(() => {
@@ -443,6 +458,20 @@ export function TasksPage() {
     () => (snap?.tasks ?? []).filter((t) => t.status === "READY" || t.status === "HANDED_OFF" || t.status === "PARKED"),
     [snap],
   );
+  const [peekTaskId, setPeekTaskId] = useState<string | null>(null);
+  const peekTaskIds = useMemo(() => {
+    const ids = [...branchTasks.map((t) => t.id), ...queueTasks.map((t) => t.id)];
+    return Array.from(new Set(ids));
+  }, [branchTasks, queueTasks]);
+  const effectivePeekTaskId = peekTaskId && peekTaskIds.includes(peekTaskId)
+    ? peekTaskId
+    : null;
+  useTemporaryPeekList({
+    kind: "task",
+    ids: peekTaskIds,
+    selectedId: effectivePeekTaskId,
+    onSelect: setPeekTaskId,
+  });
   const etaOf = useCallback((t: Task): string | null => {
     const nb = t.not_before_ms ?? 0;
     if (t.status === "PARKED" || nb > nowMs) {
@@ -475,7 +504,7 @@ export function TasksPage() {
         actions={retryChip}
       />
       <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
-        {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + вкладки + вкладки браузера) ── */}
+        {/* ── лево: ВЕТКИ·ЗАДАЧИ (граф + task-фильтры; Browser живёт на COMMAND/BROWSER) ── */}
         <div className="flex min-h-0 min-w-0 flex-col lg:flex-[2]">
           <Sec
             id="tasks-branches"
@@ -514,65 +543,6 @@ export function TasksPage() {
                 })}
               </div>
             </div>
-            {/* вкладки браузера: живые вкладки agent-browser (v0.6.0) */}
-            <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-zinc-800/60 bg-black/20 px-1 py-1.5" aria-label="Ветки браузера">
-              <span className="flex shrink-0 items-center gap-1 pr-1 text-[9px] font-semibold tracking-widest text-zinc-500">
-                <AppWindow className="h-3 w-3 text-sky-400" aria-hidden /> БРАУЗЕР
-              </span>
-              {browserTabs.length === 0 && !browserBusy && (
-                <button type="button" onClick={() => void refreshTabs()} className="shrink-0 text-[10px] text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline">
-                  показать вкладки
-                </button>
-              )}
-              {browserTabs.map((t) => (
-                <span
-                  key={t.id}
-                  title={`${t.title}\n${t.url}`}
-                  className={`flex max-w-44 shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 py-1 text-[10px] transition ${
-                    t.active
-                      ? "border-zinc-600 bg-zinc-800 text-zinc-100"
-                      : "border-zinc-800 bg-zinc-900/60 text-zinc-400"
-                  }`}
-                >
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
-                  <span className="truncate">{t.title.slice(0, 26) || t.url}</span>
-                </span>
-              ))}
-              <button
-                type="button"
-                onClick={() => toggleCast(!castOn)}
-                aria-pressed={castOn}
-                title="Живой вид активной вкладки — WS-стрим агента-браузера (:3042, Stage на COMMAND)"
-                className={`ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition ${
-                  castOn ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                }`}
-              >
-                <MonitorPlay className="h-3 w-3" aria-hidden />
-                live
-              </button>
-              {castOn && (
-                <button
-                  type="button"
-                  onClick={() => toggleCastCtl(!castCtl)}
-                  aria-pressed={castCtl}
-                  title="Руль: клики, клавиатура и колесо в кадре идут в активную вкладку. Ctrl/Meta-комбо остаются у оператора."
-                  className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] transition ${
-                    castCtl ? "bg-amber-500/15 text-amber-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
-                  }`}
-                >
-                  <MousePointerClick className="h-3 w-3" aria-hidden />
-                  руль
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void refreshTabs()}
-                aria-label="Обновить вкладки браузера"
-                className="flex shrink-0 items-center gap-1 rounded px-1.5 py-1 text-[10px] text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200"
-              >
-                <RefreshCw className={`h-3 w-3 ${browserBusy ? "animate-spin" : ""}`} aria-hidden />
-              </button>
-            </div>
             <div className="px-1 py-1">
               {branchTasks.length === 0 ? (
                 <p className="p-4 text-center text-xs text-zinc-500">в этой вкладке ветвей нет</p>
@@ -583,13 +553,15 @@ export function TasksPage() {
                   onRetry={(t) => void retryBranch(t)}
                   onReflect={(t) => void reflectTask(t)}
                   reflectingId={reflectingId}
+                  selectedId={effectivePeekTaskId}
+                  onSelect={setPeekTaskId}
                 />
               )}
             </div>
           </Sec>
         </div>
 
-        {/* ── право: ОЧЕРЕДЬ + METRICS + MIRROR ── */}
+        {/* ── право: ОЧЕРЕДЬ + METRICS; Mirror живёт в OBSERVABILITY/Attention ── */}
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto mc-scroll lg:flex-[1]">
           <Sec
             id="tasks-queue"
@@ -609,11 +581,24 @@ export function TasksPage() {
               {queueTasks.map((t) => {
                 const eta = etaOf(t);
                 return (
-                  <button
+                  <div
                     key={t.id}
-                    className="w-full rounded-md border border-zinc-800/80 bg-zinc-900/60 p-2.5 text-left transition hover:border-zinc-600 hover:bg-zinc-800/60"
-                    onClick={() => openTask(t.id)}
-                    aria-label={`Открыть задачу ${t.title}`}
+                    role="link"
+                    tabIndex={0}
+                    data-peek-kind="task"
+                    data-peek-id={t.id}
+                    data-peek-selected={effectivePeekTaskId === t.id ? "true" : "false"}
+                    className={`w-full cursor-pointer rounded-md border bg-zinc-900/60 p-2.5 text-left transition hover:bg-zinc-800/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-600 ${
+                      effectivePeekTaskId === t.id ? "border-cyan-900/80" : "border-zinc-800/80 hover:border-zinc-600"
+                    }`}
+                    onFocus={() => setPeekTaskId(t.id)}
+                    onClick={() => { setPeekTaskId(t.id); openTask(t.id); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); openTask(t.id); }
+                      else if (e.key === " ") e.preventDefault();
+                    }}
+                    aria-keyshortcuts="Enter Space"
+                    aria-label={`Задача ${t.title} · Enter открыть · Space Peek`}
                   >
                     <div className="flex items-center gap-2">
                       <StatusBadge status={t.status} />
@@ -629,7 +614,7 @@ export function TasksPage() {
                       {t.role && <span className="shrink-0 rounded border border-zinc-700 px-1 text-[9px] text-zinc-500">{t.role}</span>}
                       {eta && <span className="ml-auto shrink-0 text-amber-400/90" title="park-and-resume (R72): задача не убита — ждёт окна квоты">{eta}</span>}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -665,8 +650,6 @@ export function TasksPage() {
               </div>
             )}
           </Sec>
-
-          <MirrorPanel />
         </div>
       </div>
     </div>

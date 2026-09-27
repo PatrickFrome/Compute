@@ -20,6 +20,7 @@ import MirrorPanel from "@/components/me2/mirror-panel";
 import { useToast } from "@/hooks/use-toast";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { mergeExactTaskEvidenceEvents } from "@/lib/r95e-evidence-contracts.mjs";
 
 // ── типы ответов daemon (по живым маршрутам v0.57.1) ────────────────────────────
 type Probe = { n: number; p50: number | null; p95: number | null; p99: number | null; max: number | null };
@@ -71,6 +72,17 @@ const LANE_CHIP = (lane: string) =>
 
 const etaOf = (c: Command, nowMs: number) => `${Math.max(1, Math.ceil(((c.run_after ?? 0) - nowMs) / 1000))}s`;
 
+type EventViewPresetKey = "attention" | "all" | "tasks" | "fleet" | "commands" | "custom";
+const EVENT_VIEW_PRESET_LS = "me2.obs.events.preset.v1";
+const EVENT_VIEW_PRESETS: Array<{ key: Exclude<EventViewPresetKey, "custom">; label: string; lane: string; attentionOnly?: boolean }> = [
+  { key: "attention", label: "attention", lane: "ALL", attentionOnly: true },
+  { key: "all", label: "all", lane: "ALL" },
+  { key: "tasks", label: "tasks", lane: "TASK" },
+  { key: "fleet", label: "fleet", lane: "AGENT" },
+  { key: "commands", label: "commands", lane: "COMMAND" },
+];
+const EVENT_ATTENTION_TOKENS = ["FAILED", "ERROR", "AMBIGUOUS", "BLOCKED", "DEGRADED", "REJECTED", "OFFLINE"];
+
 // вердикты bench/eval → единый словарь состояний (§9)
 const benchState = (v: string): SysState => (v === "PASS" ? "LIVE" : v === "FAIL" ? "Failed" : "WARMUP");
 const evalState = (v: string): SysState => (v === "PASS" ? "Completed" : v === "FAIL" ? "Failed" : "Degraded");
@@ -99,8 +111,47 @@ function EventLogPanel() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState("");
   const [laneFilter, setLaneFilter] = useState("ALL");
+  const [viewPreset, setViewPreset] = useState<EventViewPresetKey>("attention");
   const logRef = useRef<HTMLDivElement | null>(null);
   const [frozenSeq, setFrozenSeq] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"compact" | "full">("compact");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("me2.obs.events.view.v1");
+      if (saved === "compact" || saved === "full") setViewMode(saved);
+    } catch { /* private mode */ }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(EVENT_VIEW_PRESET_LS) as EventViewPresetKey | null;
+      if (saved && ["attention", "all", "tasks", "fleet", "commands", "custom"].includes(saved)) {
+        setViewPreset(saved);
+        const preset = EVENT_VIEW_PRESETS.find((item) => item.key === saved);
+        if (preset) setLaneFilter(preset.lane);
+      }
+    } catch { /* private mode */ }
+  }, []);
+
+  const applyViewPreset = useCallback((key: Exclude<EventViewPresetKey, "custom">) => {
+    const preset = EVENT_VIEW_PRESETS.find((item) => item.key === key);
+    if (!preset) return;
+    setViewPreset(key);
+    setLaneFilter(preset.lane);
+    setFilter("");
+    try { localStorage.setItem(EVENT_VIEW_PRESET_LS, key); } catch { /* private mode */ }
+  }, []);
+
+  const markCustomView = useCallback(() => {
+    setViewPreset("custom");
+    try { localStorage.setItem(EVENT_VIEW_PRESET_LS, "custom"); } catch { /* private mode */ }
+  }, []);
+
+  const changeViewMode = useCallback((mode: "compact" | "full") => {
+    setViewMode(mode);
+    try { localStorage.setItem("me2.obs.events.view.v1", mode); } catch { /* ignore */ }
+  }, []);
 
   // пауза хвоста: фиксируем водяной знак seq в обработчике (список честно заморожен, WS не рвём)
   const toggleTail = useCallback((on: boolean) => {
@@ -122,22 +173,65 @@ function EventLogPanel() {
     let list = display;
     const lane = EVENT_FILTERS.find((f) => f.key === laneFilter);
     if (lane?.prefix) list = list.filter((e) => e.type.startsWith(lane.prefix));
+    if (viewPreset === "attention") {
+      list = list.filter((event) => {
+        const haystack = `${event.type} ${event.data ?? ""}`.toUpperCase();
+        return EVENT_ATTENTION_TOKENS.some((token) => haystack.includes(token));
+      });
+    }
     if (filter.trim()) {
       const f = filter.toLowerCase();
       list = list.filter((e) => e.type.toLowerCase().includes(f) || (e.data ?? "").toLowerCase().includes(f));
     }
     return list;
-  }, [display, laneFilter, filter]);
+  }, [display, laneFilter, filter, viewPreset]);
+
+  const grouped = useMemo(() => {
+    if (viewMode === "full") return filtered.map((event) => ({ event, count: 1 }));
+    const rows: Array<{ event: Event; count: number }> = [];
+    for (const event of filtered) {
+      const prev = rows[rows.length - 1];
+      if (
+        prev
+        && prev.event.type === event.type
+        && prev.event.task_id === event.task_id
+        && prev.event.agent_id === event.agent_id
+      ) {
+        prev.count += 1;
+      } else {
+        rows.push({ event, count: 1 });
+      }
+    }
+    return rows;
+  }, [filtered, viewMode]);
 
   return (
     <Sec
       id="obs-event-log" title="EVENT LOG" icon={ScrollText}
-      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {filtered.length}</span>}
+      right={<span className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-500"><Dot on={connected} pulse /> {connected ? "live" : "offline"} · {grouped.length}/{filtered.length}</span>}
     >
       <div className="flex h-full min-h-0 flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800/70 pb-2">
+          <div className="flex items-center gap-1" role="group" aria-label="Operator event views" data-testid="event-view-presets">
+            {EVENT_VIEW_PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                onClick={() => applyViewPreset(preset.key)}
+                aria-pressed={viewPreset === preset.key}
+                className={`border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide ${
+                  viewPreset === preset.key
+                    ? "border-cyan-900/80 bg-cyan-950/30 text-cyan-300"
+                    : "border-transparent text-zinc-600 hover:border-zinc-800 hover:text-zinc-300"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+            {viewPreset === "custom" ? <span className="px-1 font-mono text-[8px] uppercase text-zinc-600">custom</span> : null}
+          </div>
           <Input
-            value={filter} onChange={(e) => setFilter(e.target.value)}
+            value={filter} onChange={(e) => { setFilter(e.target.value); markCustomView(); }}
             placeholder="фильтр: тип или данные…"
             className="h-7 min-w-28 flex-1 border-zinc-800 bg-zinc-900 font-mono text-[11px]"
           />
@@ -145,12 +239,30 @@ function EventLogPanel() {
             {EVENT_FILTERS.map((f) => (
               <button
                 key={f.key}
-                onClick={() => setLaneFilter(f.key)}
+                onClick={() => { setLaneFilter(f.key); markCustomView(); }}
                 className={`rounded px-1.5 py-0.5 text-[10px] transition ${laneFilter === f.key ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"}`}
               >
                 {f.label}
               </button>
             ))}
+          </div>
+          <div className="flex items-center gap-1 border-l border-zinc-800 pl-2" role="group" aria-label="Плотность Event Log">
+            <button
+              type="button"
+              onClick={() => changeViewMode("compact")}
+              aria-pressed={viewMode === "compact"}
+              className={`px-1.5 py-0.5 font-mono text-[9px] ${viewMode === "compact" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-600 hover:text-zinc-300"}`}
+            >
+              compact
+            </button>
+            <button
+              type="button"
+              onClick={() => changeViewMode("full")}
+              aria-pressed={viewMode === "full"}
+              className={`px-1.5 py-0.5 font-mono text-[9px] ${viewMode === "full" ? "bg-cyan-950/40 text-cyan-300" : "text-zinc-600 hover:text-zinc-300"}`}
+            >
+              full
+            </button>
           </div>
           <label className="flex shrink-0 items-center gap-1 text-[10px] text-zinc-500" title="прилипание к свежим событиям (лента prepend'ит сверху); пауза честно замораживает список">
             {liveTail ? "live" : "пауза"}
@@ -165,14 +277,15 @@ function EventLogPanel() {
           ref={logRef} data-testid="event-log"
           className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-0.5 font-mono text-[10.5px] leading-relaxed [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-track]:bg-transparent"
         >
-          {filtered.length === 0 && (
+          {grouped.length === 0 && (
             <p className="p-4 text-center text-zinc-500">{events.length ? "ничего не найдено по фильтру" : "ожидание событий…"}</p>
           )}
-          {filtered.map((e) => (
+          {grouped.map(({ event: e, count }) => (
             <div key={e.seq} className="flex gap-2 rounded px-1.5 py-0.5 hover:bg-zinc-800/50">
               <span className="shrink-0 text-zinc-600">{e.seq}</span>
               <span className="shrink-0 text-zinc-500">{hhmmss(e.ts)}</span>
               <span className={`w-36 shrink-0 truncate font-semibold ${EVENT_STYLE[e.type] ?? "text-zinc-400"}`} title={e.type}>{e.type}</span>
+              {count > 1 ? <span className="shrink-0 border border-zinc-800 px-1 font-mono text-[8px] text-cyan-400">×{count}</span> : null}
               <span className="min-w-0 flex-1 truncate text-zinc-500" title={e.data}>{e.data}</span>
             </div>
           ))}
@@ -181,6 +294,199 @@ function EventLogPanel() {
     </Sec>
   );
 }
+
+
+type EvidenceTimelineRow = {
+  key: string;
+  at: string;
+  kind: "TASK" | "EVENT" | "VERDICT";
+  label: string;
+  detail: string;
+  bad: boolean;
+  seq?: number;
+};
+
+function EvidenceTimelinePanel({
+  verdicts,
+  chain,
+  ci,
+  otel,
+}: {
+  verdicts: VdT | null;
+  chain: ChainVerifyT | null;
+  ci: CiT | null;
+  otel: OtelT | null;
+}) {
+  const snap = useMe2((s) => s.snap);
+  const events = useMe2((s) => s.events);
+  const stream = useMe2((s) => s.stream);
+  const streamTaskId = useMe2((s) => s.streamTaskId);
+  const streamState = useMe2((s) => s.streamState);
+  const inspectedTaskId = useMe2((s) => s.inspectedTaskId);
+  const openTask = useMe2((s) => s.openTask);
+  const setPage = useMe2((s) => s.setPage);
+
+  const task = useMemo(() => {
+    if (!inspectedTaskId) return null;
+    return snap?.tasks.find((row) => row.id === inspectedTaskId)
+      ?? (snap?.archived ?? []).find((row) => row.id === inspectedTaskId)
+      ?? null;
+  }, [inspectedTaskId, snap]);
+
+  const rows = useMemo<EvidenceTimelineRow[]>(() => {
+    if (!inspectedTaskId) return [];
+    const out: EvidenceTimelineRow[] = [];
+    if (task) {
+      out.push({
+        key: `task:${task.id}`,
+        at: task.updated_at,
+        kind: "TASK",
+        label: `${task.status} · ${task.title}`,
+        detail: task.error?.trim() || task.result?.trim() || `step ${task.steps}/${task.max_steps}`,
+        bad: task.status === "FAILED" || task.status === "CANCELLED",
+      });
+    }
+    const exactEvents = mergeExactTaskEvidenceEvents({
+      taskId: inspectedTaskId,
+      events,
+      streamTaskId,
+      stream,
+      limit: 40,
+    }) as Event[];
+    for (const event of exactEvents) {
+      out.push({
+        key: `event:${event.seq}`,
+        at: event.ts,
+        kind: "EVENT",
+        label: event.type,
+        detail: event.data || `event seq ${event.seq}`,
+        bad: EVENT_ATTENTION_TOKENS.some((token) => `${event.type} ${event.data ?? ""}`.toUpperCase().includes(token)),
+        seq: event.seq,
+      });
+    }
+    for (const verdict of (verdicts?.verdicts ?? []).filter((row) => row.task_id === inspectedTaskId).slice(0, 24)) {
+      out.push({
+        key: `verdict:${verdict.seq}`,
+        at: verdict.at,
+        kind: "VERDICT",
+        label: `verdict #${verdict.seq}`,
+        detail: verdict.reasons?.length ? verdict.reasons.join(" · ") : "verdict recorded",
+        bad: Boolean(verdict.reasons?.length),
+        seq: verdict.seq,
+      });
+    }
+    return out
+      .sort((a, b) => {
+        const atA = Number.isFinite(new Date(a.at).getTime()) ? new Date(a.at).getTime() : 0;
+        const atB = Number.isFinite(new Date(b.at).getTime()) ? new Date(b.at).getTime() : 0;
+        if (atB !== atA) return atB - atA;
+        return (b.seq ?? 0) - (a.seq ?? 0);
+      })
+      .slice(0, 48);
+  }, [events, inspectedTaskId, stream, streamTaskId, task, verdicts]);
+
+  const openExactTask = useCallback(() => {
+    if (!inspectedTaskId) return;
+    openTask(inspectedTaskId);
+    setPage("tasks");
+  }, [inspectedTaskId, openTask, setPage]);
+
+  const chainLabel = chain == null ? "chain ?" : chain.ok ? `chain ✓ ${chain.checked}` : `chain ✗ ${chain.broken_at ?? "?"}`;
+  const ciLabel = ci == null ? "CI ?" : `CI ${ci.verdict}`;
+  const otelLabel = otel == null ? "spans ?" : `spans ${otel.spans} · drop ${otel.dropped}`;
+
+  return (
+    <Sec
+      id="obs-evidence-timeline"
+      title="RUN·EVIDENCE"
+      icon={Activity}
+      tone="cyan"
+      right={(
+        <span className="font-mono text-[9px] text-zinc-500">
+          {inspectedTaskId ? `exact task binding · history ${streamState.toLowerCase()}` : "no task selected"}
+        </span>
+      )}
+    >
+      <div
+        data-testid="evidence-timeline"
+        data-bound-task-id={inspectedTaskId ?? ""}
+        data-binding-mode={inspectedTaskId ? "EXACT_TASK_ID" : "UNBOUND"}
+        data-history-state={streamState}
+        className="space-y-2"
+      >
+        <div className="flex flex-wrap items-center gap-1 border-b border-zinc-800/70 pb-1.5 font-mono text-[9px]">
+          <span
+            className={chain?.ok === true ? "text-emerald-400" : chain?.ok === false ? "text-rose-400" : "text-zinc-600"}
+            title="Evidence-chain verification is global ambient evidence; it is not task-causal without an explicit task-bound chain receipt"
+          >{chainLabel} ambient</span>
+          <span className="text-zinc-800">·</span>
+          <span className="text-zinc-500" title="CI status is ambient evidence and is not joined to the selected task without an explicit identity binding">{ciLabel} ambient</span>
+          <span className="text-zinc-800">·</span>
+          <span className="text-zinc-500" title="OTel aggregate is ambient evidence and is not treated as task-causal">{otelLabel} ambient</span>
+        </div>
+
+        {!inspectedTaskId ? (
+          <div className="rounded border border-dashed border-zinc-800 px-2 py-3 text-center">
+            <p className="text-[11px] text-zinc-500">Выберите задачу в COMMAND или PLAN, чтобы собрать её exact evidence timeline.</p>
+            <p className="mt-1 font-mono text-[9px] text-zinc-700">no heuristic joins · no inferred CI ownership · read only</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-start gap-2 rounded border border-zinc-800/70 bg-zinc-950/60 px-2 py-1.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[11px] font-medium text-zinc-200" title={task?.title ?? inspectedTaskId}>
+                  {task?.title ?? inspectedTaskId}
+                </div>
+                <div className="mt-0.5 font-mono text-[9px] text-zinc-600">
+                  task {inspectedTaskId.slice(0, 16)}{task?.agent_id ? ` · agent ${task.agent_id.slice(0, 12)}` : ""}{task?.status ? ` · ${task.status}` : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openExactTask}
+                data-testid="evidence-open-plan"
+                className="shrink-0 rounded border border-zinc-800 px-1.5 py-0.5 font-mono text-[9px] uppercase text-cyan-300 transition hover:border-cyan-800 hover:bg-cyan-950/20"
+                title="Open exact task in PLAN"
+              >
+                plan →
+              </button>
+            </div>
+
+            <div className="mc-scroll max-h-40 space-y-0.5 overflow-y-auto pr-1" role="list" aria-label="Exact task evidence timeline">
+              {rows.map((row) => (
+                <div
+                  key={row.key}
+                  role="listitem"
+                  className="grid grid-cols-[42px_64px_minmax(0,1fr)] items-start gap-1.5 rounded px-1.5 py-1 font-mono text-[9px] hover:bg-zinc-900/60"
+                  data-evidence-kind={row.kind}
+                >
+                  <span className="text-zinc-700">{row.at ? hhmmss(row.at) : "—"}</span>
+                  <span className={row.bad ? "text-rose-400" : row.kind === "VERDICT" ? "text-violet-400" : row.kind === "TASK" ? "text-cyan-400" : "text-emerald-400/90"}>
+                    {row.kind}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-zinc-300" title={row.label}>{row.label}</span>
+                    <span className="block truncate text-zinc-600" title={row.detail}>{row.detail}</span>
+                  </span>
+                </div>
+              ))}
+              {rows.length === 0 ? (
+                <div className="rounded border border-dashed border-zinc-800 px-2 py-2 text-center font-mono text-[9px] text-zinc-600">
+                  exact task selected · evidence rows not observed yet
+                </div>
+              ) : null}
+            </div>
+          </>
+        )}
+
+        <div className="font-mono text-[8px] leading-3 text-zinc-700" data-testid="evidence-binding-contract">
+          causal rows require exact task_id equality; fetched task history is admitted only when streamTaskId matches the selected task and the bounded readback is generation-fenced; history state is explicit; global evidence-chain, CI and aggregate OTel stay ambient until a stronger persisted binding exists
+        </div>
+      </div>
+    </Sec>
+  );
+}
+
 
 // ── страница ────────────────────────────────────────────────────────────────────
 export function ObservabilityPage() {
@@ -303,9 +609,14 @@ export function ObservabilityPage() {
       <PageHeader title="OBSERVABILITY" sub="журнал · шина · ingress · аудит · здоровье" />
       <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
 
-        {/* ── ЛЕВО: EVENT LOG ── */}
-        <div className="flex min-h-0 flex-1 flex-col lg:flex-[2] [&>section]:min-h-0 [&>section]:flex-1" data-testid="panel-log">
-          <EventLogPanel />
+        {/* ── ЛЕВО: EXACT TASK EVIDENCE + EVENT LOG ── */}
+        <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-[2]" data-testid="panel-log">
+          <div className="shrink-0">
+            <EvidenceTimelinePanel verdicts={vd} chain={evChain} ci={ciData} otel={otel} />
+          </div>
+          <div className="min-h-0 flex-1 [&>section]:h-full [&>section]:min-h-0">
+            <EventLogPanel />
+          </div>
         </div>
 
         {/* ── ЦЕНТР: BUS + INGRESS ── */}

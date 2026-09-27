@@ -2,19 +2,20 @@
 // ── COMMAND PALETTE (⌘K): универсальный переход к любому объекту системы ───────
 // Режимы: Pages / Agents / Tasks / Commands+Реестр-47 (keyboard-first, §8 дизайн-дока).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
 import { PAGES, useMe2 } from "@/components/me2/store";
-import { sendCommand, spawnAgent, STATUS_BADGE, type ActionMeta } from "@/lib/me2-bus";
+import { sendCommand, spawnAgent, STATUS_BADGE, type ActionMeta, type Agent } from "@/lib/me2-bus";
 import {
   Plus, Bot, RefreshCw, Zap, Boxes, Download, Gauge, Trash2, Search, Rocket,
   LayoutDashboard, ListChecks, Terminal, Globe, ShieldCheck, Cpu, BrainCircuit,
   Activity, Settings2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useAgentChatSessions } from "@/hooks/use-agentchat-sessions";
 
 const PAGE_META: Record<string, { icon: LucideIcon; hint: string }> = {
   command: { icon: LayoutDashboard, hint: "агенты + браузер + супервизор" },
@@ -38,6 +39,77 @@ function laneChip(lane: string): string {
   }
 }
 
+function AgentPaletteGroup({ agents }: { agents: Agent[] }) {
+  const setOpen = useMe2((s) => s.setPalette);
+  const setPage = useMe2((s) => s.setPage);
+  const setChatId = useMe2((s) => s.setChatId);
+  const nowMs = useMe2((s) => s.nowMs);
+  const {
+    sessions,
+    loading: chatsLoading,
+    refreshing: chatsRefreshing,
+    error: chatsError,
+    updatedAt: chatsUpdatedAt,
+    refresh: refreshChats,
+  } = useAgentChatSessions();
+  const chatSnapshotFresh = chatsUpdatedAt > 0 && Math.max(0, nowMs - chatsUpdatedAt) <= 7_000;
+  const chatSnapshotTrusted = !chatsLoading && !chatsRefreshing && !chatsError && chatSnapshotFresh;
+
+  useEffect(() => {
+    void refreshChats();
+  }, [refreshChats]);
+
+  const activeChatIdsByAgent = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const session of sessions) {
+      if (session.status !== "ACTIVE") continue;
+      const ids = map.get(session.agent_id) ?? [];
+      ids.push(session.id);
+      map.set(session.agent_id, ids);
+    }
+    return map;
+  }, [sessions]);
+
+  return (
+    <CommandGroup heading={`Агенты · ${agents.length}`}>
+      {agents.slice(0, 8).map((a) => {
+        const chatIds = activeChatIdsByAgent.get(a.id) ?? [];
+        const exactChatId = chatSnapshotTrusted && chatIds.length === 1 ? chatIds[0] : null;
+        return (
+          <CommandItem
+            key={a.id}
+            value={`agent ${a.id} ${a.role}`}
+            onSelect={() => {
+              setChatId(exactChatId);
+              setPage("agents");
+              setOpen(false);
+            }}
+          >
+            <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
+            <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
+            {!chatSnapshotTrusted ? (
+              <span className="ml-2 rounded border border-zinc-800 bg-zinc-900 px-1 font-mono text-[8px] text-zinc-500">{chatsRefreshing ? "chat revalidating" : "chat unavailable"}</span>
+            ) : chatIds.length === 1 ? (
+              <span className="ml-2 rounded border border-violet-900/60 bg-violet-950/30 px-1 font-mono text-[8px] text-violet-300">chat</span>
+            ) : chatIds.length > 1 ? (
+              <span className="ml-2 rounded border border-amber-900/60 bg-amber-950/30 px-1 font-mono text-[8px] text-amber-300">ambiguous chat</span>
+            ) : null}
+            <span className="ml-auto font-mono text-[9px] text-zinc-600">{a.model}</span>
+          </CommandItem>
+        );
+      })}
+      {["IMPLEMENTER", "RESEARCHER", "OPERATOR"].map((r) => (
+        <CommandItem key={`spawn-${r}`} value={`spawn создать агента ${r}`} onSelect={() => { void spawnAgent(r); setOpen(false); }}>
+          <Plus className="mr-2 h-4 w-4 text-amber-400" /> Создать агента {r} <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
+        </CommandItem>
+      ))}
+      <CommandItem value="fleet reconcile сверка" onSelect={() => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); setOpen(false); }}>
+        <RefreshCw className="mr-2 h-4 w-4 text-amber-400" /> Сверка флота (reconcile) <span className="ml-auto text-xs text-zinc-500">CONTROL</span>
+      </CommandItem>
+    </CommandGroup>
+  );
+}
+
 export function CommandPalette() {
   const open = useMe2((s) => s.paletteOpen);
   const setOpen = useMe2((s) => s.setPalette);
@@ -47,9 +119,22 @@ export function CommandPalette() {
   const snap = useMe2((s) => s.snap);
   const openTask = useMe2((s) => s.openTask);
   const setChatId = useMe2((s) => s.setChatId);
-  const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks">("all");
+  const [mode, setMode] = useState<"all" | "pages" | "agents" | "tasks" | "actions">("all");
+  const [pendingAction, setPendingAction] = useState<ActionMeta | null>(null);
+  const [pendingArgs, setPendingArgs] = useState("{}");
+  const [confirmFlush, setConfirmFlush] = useState(false);
 
-  const chats = snap?.agents ?? [];
+  const confirmBudgetFlush = () => {
+    setConfirmFlush(true);
+  };
+
+  const runBudgetFlush = () => {
+    void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" });
+    setConfirmFlush(false);
+    setOpen(false);
+  };
+
+  const agents = snap?.agents ?? [];
   const tasks = useMemo(() => {
     const all = [...(snap?.tasks ?? []), ...(snap?.archived ?? [])];
     return all.slice(0, 40);
@@ -63,7 +148,7 @@ export function CommandPalette() {
       WORKERS_LIST: () => { void sendCommand("WORKERS_LIST", {}, { quiet: true, successMsg: "список workers в шине" }); },
       ACTIONS_LIST: () => { void sendCommand("ACTIONS_LIST", {}, { quiet: true, successMsg: "реестр действий в шине" }); },
       FLEET_RECONCILE: () => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); },
-      BUDGET_FLUSH: () => { void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" }); },
+      BUDGET_FLUSH: confirmBudgetFlush,
       ENVIRONMENT_RESET: () => setDialog("reset"),
       TASK_ENQUEUE: () => setDialog("newTask"),
       TASK_SCHEDULE: () => setDialog("newTask"),
@@ -74,19 +159,28 @@ export function CommandPalette() {
     if (fn) {
       fn();
       if (meta.action !== "ENVIRONMENT_RESET" && meta.action !== "TASK_ENQUEUE" && meta.action !== "TASK_SCHEDULE") setOpen(false);
+    } else if (meta.args) {
+      // Keep argument entry inside the ME2 semantic overlay instead of falling
+      // out to window.prompt, which was invisible to the composition model.
+      setPendingArgs("{}");
+      setPendingAction(meta);
     } else {
       setOpen(false);
-      if (meta.args) {
-        const raw = window.prompt(`Аргументы ${meta.action} (${meta.args}) — JSON, напр. {"id":"tk_..."}`, "{}");
-        if (raw) {
-          try {
-            const payload = JSON.parse(raw) as Record<string, unknown>;
-            void sendCommand(meta.action, payload, {});
-          } catch {
-            window.dispatchEvent(new CustomEvent("me2:toast", { detail: { title: `${meta.action} ✗`, description: "аргументы не JSON", variant: "destructive" } }));
-          }
-        }
-      }
+    }
+  };
+
+  const runPendingRegistryAction = () => {
+    if (!pendingAction) return;
+    try {
+      const payload = JSON.parse(pendingArgs) as Record<string, unknown>;
+      void sendCommand(pendingAction.action, payload, {});
+      setPendingAction(null);
+      setPendingArgs("{}");
+      setOpen(false);
+    } catch {
+      window.dispatchEvent(new CustomEvent("me2:toast", {
+        detail: { title: `${pendingAction.action} ✗`, description: "аргументы не JSON", variant: "destructive" },
+      }));
     }
   };
 
@@ -101,13 +195,87 @@ export function CommandPalette() {
   };
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="ME2: страница (@) · агент · задача · команда… · реестр {реестр}/47" />
+    <CommandDialog open={open} onOpenChange={(next) => { if (!next) { setPendingAction(null); setPendingArgs("{}"); setConfirmFlush(false); } setOpen(next); }}>
+      <CommandInput placeholder="ME2: найти страницу · агента · задачу · команду…" />
+      <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1.5" aria-label="Режим Command Palette">
+        {([
+          ["all", "всё"],
+          ["pages", "pages"],
+          ["agents", "agents"],
+          ["tasks", "tasks"],
+          ["actions", "actions"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setMode(key)}
+            aria-pressed={mode === key}
+            className={`border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+              mode === key
+                ? "border-emerald-800/70 bg-emerald-950/25 text-emerald-300"
+                : "border-transparent text-zinc-500 hover:border-zinc-800 hover:text-zinc-300"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {pendingAction ? (
+        <div className="space-y-3 p-3" data-testid="registry-action-args">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" title={`Authority lane: ${pendingAction.lane}`} className={`h-5 border px-1.5 font-mono text-[8px] ${laneChip(pendingAction.lane)}`}>
+              {pendingAction.lane.replace("_", " ")}
+            </Badge>
+            <span className="font-mono text-xs text-zinc-200">{pendingAction.action}</span>
+          </div>
+          <p className="text-[10px] leading-relaxed text-zinc-500">
+            {pendingAction.desc}{pendingAction.args ? ` · args: ${pendingAction.args}` : ""}
+          </p>
+          <textarea
+            value={pendingArgs}
+            onChange={(event) => setPendingArgs(event.target.value)}
+            rows={6}
+            spellCheck={false}
+            aria-label={`JSON аргументы для ${pendingAction.action}`}
+            className="w-full resize-y border border-zinc-800 bg-zinc-950 p-2 font-mono text-[11px] text-zinc-200 outline-none focus:border-emerald-900"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => { setPendingAction(null); setPendingArgs("{}"); }}
+              className="border border-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+            >
+              назад
+            </button>
+            <button
+              type="button"
+              onClick={runPendingRegistryAction}
+              className="border border-emerald-900 bg-emerald-950/30 px-2 py-1 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-950/60"
+            >
+              выполнить
+            </button>
+          </div>
+        </div>
+      ) : confirmFlush ? (
+        <div className="space-y-3 p-3" data-testid="emergency-flush-confirm">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="h-5 border border-rose-800 px-1.5 font-mono text-[8px] text-rose-300">EMERGENCY</Badge>
+            <span className="font-mono text-xs font-semibold text-rose-300">BUDGET_FLUSH</span>
+          </div>
+          <p className="text-[11px] leading-relaxed text-zinc-400">
+            Сбросить очередь command bus? Все отложенные команды будут сняты. Это явный effect и он не запускается из постоянного chrome.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setConfirmFlush(false)} className="border border-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-900">отмена</button>
+            <button type="button" onClick={runBudgetFlush} className="border border-rose-800 bg-rose-950/30 px-2 py-1 text-[10px] font-semibold text-rose-300 hover:bg-rose-950/60">подтвердить EMERGENCY</button>
+          </div>
+        </div>
+      ) : (
       <CommandList>
         <CommandEmpty>не найдено</CommandEmpty>
 
         {/* PAGES */}
-        <CommandGroup heading="Pages · Alt+1..0">
+        {(mode === "all" || mode === "pages") && <CommandGroup heading="Pages · Alt+1..0">
           {PAGES.map((p) => {
             const m = PAGE_META[p.key];
             const Icon = m?.icon ?? LayoutDashboard;
@@ -122,32 +290,14 @@ export function CommandPalette() {
               </CommandItem>
             );
           })}
-        </CommandGroup>
-        <CommandSeparator />
+        </CommandGroup>}
+        {mode === "all" ? <CommandSeparator /> : null}
 
-        {/* AGENTS (чаты) */}
-        {(mode === "all") && (
-          <CommandGroup heading={`Агенты · ${chats.length}`}>
-            {chats.slice(0, 8).map((a) => (
-              <CommandItem key={a.id} value={`agent ${a.id} ${a.role}`} onSelect={() => { setChatId(a.id); setPage("command"); setOpen(false); }}>
-                <Bot className="mr-2 h-4 w-4 text-amber-400" /> {a.role}
-                <Badge variant="outline" className={`ml-2 border px-1 font-mono text-[8px] ${STATUS_BADGE[a.status] ?? ""}`}>{a.status}</Badge>
-                <span className="ml-auto font-mono text-[9px] text-zinc-600">{a.model}</span>
-              </CommandItem>
-            ))}
-            {["IMPLEMENTER", "RESEARCHER", "OPERATOR"].map((r) => (
-              <CommandItem key={`spawn-${r}`} value={`spawn создать агента ${r}`} onSelect={() => { void spawnAgent(r); setOpen(false); }}>
-                <Plus className="mr-2 h-4 w-4 text-amber-400" /> Создать агента {r} <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
-              </CommandItem>
-            ))}
-            <CommandItem value="fleet reconcile сверка" onSelect={() => { void sendCommand("FLEET_RECONCILE", {}, { lane: "CONTROL" }); setOpen(false); }}>
-              <RefreshCw className="mr-2 h-4 w-4 text-amber-400" /> Сверка флота (reconcile) <span className="ml-auto text-xs text-zinc-500">CONTROL</span>
-            </CommandItem>
-          </CommandGroup>
-        )}
+        {/* AGENTS — bind only an exact ACTIVE chat session; ambiguous/missing chat stays fail-closed. */}
+        {(mode === "all" || mode === "agents") && <AgentPaletteGroup agents={agents} />}
 
         {/* TASKS */}
-        {(mode === "all") && (
+        {(mode === "all" || mode === "tasks") && (
           <CommandGroup heading={`Задачи · ${tasks.length}`}>
             <CommandItem value="new новая задача" onSelect={() => { setDialog("newTask"); setOpen(false); }}>
               <Rocket className="mr-2 h-4 w-4 text-emerald-400" /> Новая задача… <span className="ml-auto text-xs text-zinc-500">MUTATION</span>
@@ -164,6 +314,7 @@ export function CommandPalette() {
         )}
 
         {/* ДИАГНОСТИКА */}
+        {(mode === "all" || mode === "actions") && <>
         <CommandSeparator />
         <CommandGroup heading="Диагностика и действия">
           <CommandItem value="ping" onSelect={() => { void sendCommand("PING", {}, { quiet: true, successMsg: "pong" }); setOpen(false); }}>
@@ -186,22 +337,23 @@ export function CommandPalette() {
         {/* ОПАСНАЯ ЗОНА */}
         <CommandSeparator />
         <CommandGroup heading="Опасная зона">
-          <CommandItem value="flush сброс очередь" onSelect={() => { void sendCommand("BUDGET_FLUSH", {}, { lane: "EMERGENCY", successMsg: "очередь шины сброшена" }); setOpen(false); }} className="text-rose-400">
+          <CommandItem value="flush сброс очередь" onSelect={confirmBudgetFlush} className="text-rose-400">
             <Gauge className="mr-2 h-4 w-4" /> Сбросить очередь шины (FLUSH)… <span className="ml-auto text-xs text-rose-500/70">EMERGENCY</span>
           </CommandItem>
           <CommandItem value="reset среда" onSelect={() => { setDialog("reset"); setOpen(false); }} className="text-rose-400">
             <Trash2 className="mr-2 h-4 w-4" /> Сброс среды (EMERGENCY)…
           </CommandItem>
         </CommandGroup>
+        </>}
 
         {/* РЕЕСТР-47 */}
-        {catalog.length > 0 && (
+        {catalog.length > 0 && (mode === "all" || mode === "actions") && (
           <>
             <CommandSeparator />
             <CommandGroup heading={`Реестр действий шины · ${catalog.length}/47`}>
               {catalog.map((m) => (
                 <CommandItem key={m.action} value={`${m.action} ${m.desc} ${m.group}`} onSelect={() => runRegistryAction(m)}>
-                  <Badge variant="outline" className={`mr-2 h-4 shrink-0 border px-1 font-mono text-[8px] ${laneChip(m.lane)}`}>{m.lane.slice(0, 4)}</Badge>
+                  <Badge variant="outline" title={`Authority lane: ${m.lane}`} aria-label={`Authority lane ${m.lane}`} className={`mr-2 h-5 shrink-0 border px-1.5 font-mono text-[8px] ${laneChip(m.lane)}`}>{m.lane.replace("_", " ")}</Badge>
                   <span className="font-mono text-xs">{m.action}</span>
                   <span className="ml-2 truncate text-[10px] text-zinc-500">{m.desc}</span>
                   <span className="ml-auto shrink-0 font-mono text-[9px] text-zinc-600">c{m.cost}</span>
@@ -211,6 +363,7 @@ export function CommandPalette() {
           </>
         )}
       </CommandList>
+      )}
     </CommandDialog>
   );
 }

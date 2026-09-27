@@ -82,6 +82,7 @@ async function metaengineGuardianNativeBeforePack(context) {
     ref: process.env.GITHUB_REF || null,
   });
   const buildScript = path.join(__dirname, 'build-guardian-native-staging.ps1');
+  const daemonBuildScript = path.join(__dirname, 'build-me2-daemon-staging.ps1');
   const powershell = process.env.SystemRoot
     ? path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
     : 'powershell.exe';
@@ -95,6 +96,16 @@ async function metaengineGuardianNativeBeforePack(context) {
   if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error(`guardian_native_staging_build_failed:${result.status}`);
+  }
+
+  const daemonResult = spawnSync(
+    powershell,
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', daemonBuildScript, '-ExpectedSourceHead', trustRoot.build_sha],
+    { cwd: appRoot, stdio: 'inherit', windowsHide: true },
+  );
+  if (daemonResult.error) throw daemonResult.error;
+  if (daemonResult.status !== 0) {
+    throw new Error(`me2_daemon_staging_build_failed:${daemonResult.status}`);
   }
 }
 

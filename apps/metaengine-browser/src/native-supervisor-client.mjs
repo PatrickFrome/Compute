@@ -227,6 +227,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
   #quitDurabilityApproved = false;
   #quitDurabilityPromise = null;
   #selfUpdateDurabilityReadyRef = () => false;
+  #resolveBrowserCell = null;
 
   constructor(options = {}) {
     const executeCommand = options.executeCommand;
@@ -330,6 +331,10 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
     this.#processPlaneSet = (value) => { realtimeProcessPlane = value; };
     this.#selfUpdateDurabilityReadyRef = () => selfUpdateDurabilityReady;
     this.#version = String(options.version || '0.0.0');
+    if (options.resolveBrowserCell != null && typeof options.resolveBrowserCell !== 'function') {
+      throw new Error('native_supervisor_browser_cell_resolver_invalid');
+    }
+    this.#resolveBrowserCell = options.resolveBrowserCell || null;
     this.#cognitiveTransport = createNativeSupervisorCognitiveTransport({
       identity: this.#workspaceIdentity,
       fetchImpl: this.#workspaceFetch,
@@ -542,6 +547,7 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       const plane = new BrowserRealtimeProcessPlane({
         app,
         getWebContents: () => webContents.getAllWebContents(),
+        resolveBrowserCell: this.#resolveBrowserCell,
         sampleMs: 250,
         eventLimit: 512,
         onChange: () => {
@@ -622,6 +628,14 @@ export class NativeSupervisorClient extends CoreNativeSupervisorClient {
       }
     })().finally(() => { this.#workspaceObservationPromise = null; });
     return this.#workspaceObservationPromise;
+  }
+
+  runtimeBinding(tabId, options = {}) {
+    // R84: read through the already-running BrowserRealtimeProcessPlane/Brain
+    // binding index. No snapshot scan, no second registry, no command authority.
+    const plane = this.#processPlaneRef?.();
+    if (!plane || typeof plane.runtimeBinding !== 'function') return null;
+    return plane.runtimeBinding(tabId, options);
   }
 
   snapshot() {

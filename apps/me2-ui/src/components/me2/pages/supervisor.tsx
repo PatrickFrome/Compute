@@ -101,6 +101,7 @@ export function SupervisorPage() {
   const [hoNext, setHoNext] = useState("");
   const [hoDone, setHoDone] = useState("");
   const [brainGoal, setBrainGoal] = useState("");
+  const [reviewTaskId, setReviewTaskId] = useState("");
 
   // ── loaders (порт legacy) ──
   const loadWg = useCallback(async () => {
@@ -201,10 +202,13 @@ export function SupervisorPage() {
     await mcxOp("glm", { op }, op === "probe" ? "probe GLM снята — факт в /glm" : "флот переведён на канонический тег GLM", loadGlm);
   }, [mcxOp, loadGlm]);
   const runReview = useCallback(async () => {
-    const id = window.prompt("task_id задачи для ревью (POST /reviews/run):", "");
-    if (!id?.trim()) return;
-    await mcxOp("reviews/run", { task_id: id.trim() }, "ревью поставлено в очередь — вердикт появится в TASK_REVIEWED и /reviews", loadRev);
-  }, [mcxOp, loadRev]);
+    const id = reviewTaskId.trim();
+    if (!id) {
+      toast({ title: "review ✗", description: "укажите task_id — скрытый native prompt больше не используется", variant: "destructive" });
+      return;
+    }
+    await mcxOp("reviews/run", { task_id: id }, "ревью поставлено в очередь — вердикт появится в TASK_REVIEWED и /reviews", loadRev);
+  }, [reviewTaskId, mcxOp, loadRev, toast]);
 
   // R30 C4: approvals — approve/deny заявок + переключение политик
   const apprOp = useCallback(async (body: Record<string, unknown>, okMsg: string) => {
@@ -396,7 +400,18 @@ export function SupervisorPage() {
             <div className="mb-1.5 flex gap-1.5">
               <button type="button" onClick={() => void glmOp("probe")} disabled={mcxBusy} aria-label="Снять живую пробу GLM" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">probe</button>
               <button type="button" onClick={() => void glmOp("upgrade")} disabled={mcxBusy} aria-label="Перевести флот на канонический тег GLM" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">upgrade флот</button>
-              <button type="button" onClick={() => void runReview()} disabled={mcxBusy} aria-label="Запустить антифальшь-ревью задачи" data-testid="reviews-run" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40">запустить ревью</button>
+              <input
+                value={reviewTaskId}
+                onChange={(e) => setReviewTaskId(e.target.value)}
+                list="review-task-ids"
+                placeholder="task_id для ревью"
+                aria-label="Task ID для антифальшь-ревью"
+                className="h-6 w-40 border border-zinc-800 bg-zinc-950/70 px-1.5 font-mono text-[9px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-cyan-900"
+              />
+              <datalist id="review-task-ids">
+                {(wg?.tasks ?? []).slice(0, 40).map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </datalist>
+              <button type="button" onClick={() => void runReview()} disabled={mcxBusy || !reviewTaskId.trim()} aria-label="Запустить антифальшь-ревью задачи" data-testid="reviews-run" className="rounded border border-cyan-900 px-1.5 py-0.5 font-mono text-[9px] text-cyan-300 transition hover:bg-cyan-950/40 disabled:opacity-40">ревью</button>
               <button type="button" onClick={() => { void loadGlm(); void loadRev(); }} disabled={mcxBusy} aria-label="Обновить GLM и ревью" className="ml-auto text-zinc-600 transition hover:text-zinc-300"><RefreshCw className={`h-3 w-3 ${mcxBusy ? "animate-spin" : ""}`} aria-hidden /></button>
             </div>
             {glmData?.last_probe && (

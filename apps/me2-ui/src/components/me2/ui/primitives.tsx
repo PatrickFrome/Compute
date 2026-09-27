@@ -194,11 +194,11 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
     cyan: "text-cyan-400", violet: "text-violet-400", teal: "text-teal-400",
   };
   return (
-    <section className="card-lift flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/80" data-sec={id}>
-      <div className="flex w-full shrink-0 items-center border-b border-zinc-800/80">
+    <section className="flex min-h-0 flex-col overflow-hidden border border-zinc-800/90 bg-[#0b0b0d]" data-sec={id}>
+      <div className="flex w-full shrink-0 items-center border-b border-zinc-800/80 bg-zinc-950/55">
         <button
           type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`}
-          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-zinc-900/60"
+          className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-zinc-900/60"
         >
           <Icon className={`h-3.5 w-3.5 shrink-0 ${tones[tone]}`} aria-hidden />
           <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-300">{title}</span>
@@ -206,7 +206,7 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
         {right && <div className="flex shrink-0 items-center gap-1.5 pr-1">{right}</div>}
         <button
           type="button" onClick={toggle} aria-expanded={open} aria-controls={`${id}-body`} aria-label={open ? "свернуть секцию" : "развернуть секцию"}
-          className="flex shrink-0 items-center px-2 py-2 text-zinc-600 hover:text-zinc-300"
+          className="flex shrink-0 items-center px-2 py-1.5 text-zinc-600 hover:text-zinc-300"
         >
           <svg aria-hidden viewBox="0 0 12 12" className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}>
             <path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -214,7 +214,7 @@ export function Sec({ id, title, icon: Icon, right, children, defaultOpen = true
         </button>
       </div>
       {open && (
-        <div id={`${id}-body`} className={`min-h-0 flex-1 overflow-y-auto mc-scroll ${dense ? "p-2" : "p-3"}`}>
+        <div id={`${id}-body`} className={`min-h-0 flex-1 overflow-y-auto mc-scroll ${dense ? "p-1.5" : "p-2.5"}`}>
           {children}
         </div>
       )}

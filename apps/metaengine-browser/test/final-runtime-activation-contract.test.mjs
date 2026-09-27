@@ -39,6 +39,22 @@ test('packaged browser enters through the final runtime activation hook', () => 
   assert.match(supervisor, /final_runtime_activation_required/);
 });
 
+test('final runtime workflow binds immutable Package Smoke bytes to the exact candidate head', () => {
+  const workflow = source('../../.github/workflows/browser-final-runtime-activation-v1.yml');
+  assert.match(workflow, /qualified-installer-consumer\.ps1 -Mode Acquire/);
+  assert.match(workflow, /-ExpectedHead \$expectedHead/);
+  assert.match(workflow, /ME2_INSTALLER_BINDING_PATH/);
+  assert.match(workflow, /qualified-installer-consumer\.ps1 -Mode Wait/);
+  assert.match(workflow, /final-runtime-activation-proof\.json/);
+  assert.match(workflow, /producer_run_id=\[int64\]\$binding\.producer_run_id/);
+  assert.match(workflow, /producer_run_number=\[int64\]\$binding\.producer_run_number/);
+  assert.match(workflow, /producer_run_attempt=\[int64\]\$binding\.producer_run_attempt/);
+  assert.match(workflow, /apps\/me2-ui\/\*\*/);
+  assert.match(workflow, /apps\/me2-daemon\/\*\*/);
+  assert.doesNotMatch(workflow, /installer-provenance\.mjs acquire|installer-provenance\.mjs wait/);
+  assert.doesNotMatch(workflow, /ME2_BUILD_SHA|bun run build|Build and pack ME2 UI/);
+});
+
 test('Host activation is primary before enrollment while remote signing remains fail-closed', () => {
   const hostIdentity = source('src/host-agent-supervisor-identity.mjs');
   const connectBody = hostIdentity.match(/async connect\(\) \{([\s\S]*?)\n    \},/)?.[1] || '';

@@ -98,6 +98,12 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
     const prof = CAST_PROFILES[castProfile];
     const pacing = prof.pacing as "push" | "ack";
     let autoFps: number = prof.maxFps; // для «авто»: текущий адаптивный потолок
+    const hideCastImage = () => {
+      const img = castImgRef.current;
+      if (!img) return;
+      img.style.opacity = "0";
+      img.removeAttribute("src");
+    };
     try {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(`${proto}://${location.host}/?XTransformPort=3042&maxFps=${prof.maxFps}${pacing === "ack" ? "&pacing=ack" : ""}`);
@@ -147,13 +153,20 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
           }
         } catch { /* не-JSON кадр — игнор */ }
       };
-      ws.onerror = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: false, error: "стрим недоступен (:3042)" })); };
-      ws.onclose = () => { if (!stopped) setCastStat((s) => ({ ...s, connected: false })); };
+      ws.onerror = () => {
+        hideCastImage();
+        if (!stopped) setCastStat((s) => ({ ...s, connected: false, error: "стрим недоступен (:3042)" }));
+      };
+      ws.onclose = () => {
+        hideCastImage();
+        if (!stopped) setCastStat((s) => ({ ...s, connected: false }));
+      };
     } catch {
       setCastStat((s) => ({ ...s, connected: false, error: "WS не открыт" }));
     }
     return () => {
       stopped = true;
+      hideCastImage();
       try { ws?.close(); } catch { /* уже закрыт */ }
       castWsRef.current = null;
       setCastStat((s) => ({ ...s, connected: false, fps: 0, kbs: null }));
@@ -297,12 +310,12 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
 
   return (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/40"
+      className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${compact ? "bg-black" : "border border-zinc-800 bg-zinc-900/40"}`}
       data-testid="browser-shell"
     >
       {/* таб-полоса: живые вкладки agent-browser */}
       <div
-        className="flex shrink-0 items-end gap-1 overflow-x-auto border-b border-zinc-800 bg-black/30 px-2 pt-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={`flex shrink-0 items-end gap-1 overflow-x-auto border-b border-zinc-800 bg-black/30 px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${compact ? "h-7 pt-1" : "pt-1.5"}`}
         role="tablist"
         aria-label="Вкладки браузера"
         data-testid="browser-tabstrip"
@@ -311,28 +324,33 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
           <Globe className="h-3 w-3" aria-hidden /> ME2
         </span>
         {browserTabs.map((t) => (
-          <span
+          <div
             key={t.id}
-            title={`${t.title}\n${t.url}`}
-            role="tab"
-            aria-selected={t.active}
-            onClick={() => void activateTab(t)}
-            className={`group/tab flex max-w-52 shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 py-1 text-[10px] transition ${
+            className={`group/tab flex max-w-52 shrink-0 items-center rounded-t-md border border-b-0 transition ${
               t.active ? "border-zinc-600 bg-zinc-800 text-zinc-100" : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "animate-pulse bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
-            <span className="truncate">{t.title.slice(0, 30) || t.url}</span>
+            <button
+              type="button"
+              title={`${t.title}\n${t.url}`}
+              role="tab"
+              aria-selected={t.active}
+              onClick={() => void activateTab(t)}
+              className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1 text-left text-[10px] focus-visible:outline-none"
+            >
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.active ? "animate-pulse bg-sky-400" : "bg-zinc-600"}`} aria-hidden />
+              <span className="truncate">{t.title.slice(0, 30) || t.url}</span>
+            </button>
             <button
               type="button"
               aria-label={`Закрыть вкладку ${t.title || t.url}`}
               title="BROWSER_CLOSE — закрыть вкладку"
-              onClick={(e) => { e.stopPropagation(); void closeTab(t); }}
-              className="shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-rose-950 hover:text-rose-300 group-hover/tab:opacity-100"
+              onClick={() => void closeTab(t)}
+              className="mr-1 shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition hover:bg-rose-950 hover:text-rose-300 focus:opacity-100 group-hover/tab:opacity-100"
             >
               <X className="h-2.5 w-2.5" aria-hidden />
             </button>
-          </span>
+          </div>
         ))}
         <button
           type="button"
@@ -387,7 +405,7 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
       </div>
 
       {/* адресная строка + профиль полосы */}
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 py-1.5">
+      <div className={`flex shrink-0 items-center gap-1.5 border-b border-zinc-800 bg-zinc-900/60 px-2 ${compact ? "h-9 py-0" : "py-1.5"}`}>
         <button
           type="button"
           onClick={reloadCast}
@@ -410,25 +428,27 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
             className="min-w-0 flex-1 truncate bg-transparent font-mono text-[10px] text-zinc-300 placeholder:text-zinc-500 focus:outline-none"
           />
         </div>
-        <div role="group" aria-label="Профиль полосы стрима" className="hidden items-center gap-0.5 rounded border border-zinc-800 bg-black/40 p-0.5 md:flex">
-          {(Object.keys(CAST_PROFILES) as CastProfile[]).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setCastProfile(p)}
-              aria-pressed={castProfile === p}
-              title={
-                p === "макс" ? "push-пейсинг, до 12 fps — минимум задержки (для руля)"
-                : p === "баланс" ? "ack-пейсинг, 8 fps — один кадр в полёте, без очередей"
-                : p === "эконом" ? "ack-пейсинг, 2 fps — минимум полосы для слабой сети"
-                : "ack-пейсинг, потолок fps подстраивается под измеренную полосу (2..12)"
-              }
-              className={`rounded px-1.5 py-0.5 font-mono text-[9px] transition ${castProfile === p ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"}`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+        {!compact && (
+          <div role="group" aria-label="Профиль полосы стрима" className="hidden items-center gap-0.5 rounded border border-zinc-800 bg-black/40 p-0.5 md:flex">
+            {(Object.keys(CAST_PROFILES) as CastProfile[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setCastProfile(p)}
+                aria-pressed={castProfile === p}
+                title={
+                  p === "макс" ? "push-пейсинг, до 12 fps — минимум задержки (для руля)"
+                  : p === "баланс" ? "ack-пейсинг, 8 fps — один кадр в полёте, без очередей"
+                  : p === "эконом" ? "ack-пейсинг, 2 fps — минимум полосы для слабой сети"
+                  : "ack-пейсинг, потолок fps подстраивается под измеренную полосу (2..12)"
+                }
+                className={`rounded px-1.5 py-0.5 font-mono text-[9px] transition ${castProfile === p ? "bg-emerald-500/15 text-emerald-300" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"}`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ВЬЮПОРТ: живой сайт (WS-стрим :3042; фолбэк — CDP-кадр :3043) */}
@@ -443,9 +463,13 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
           >
             <img
               ref={castImgRef}
-              alt="Живой вид активной вкладки браузера"
-              className="block h-full w-full object-contain"
+              data-testid="browser-cast-image"
+              alt=""
+              aria-hidden="true"
+              className="block h-full w-full object-contain opacity-0"
               draggable={false}
+              onLoad={(e) => { e.currentTarget.style.opacity = "1"; }}
+              onError={(e) => { e.currentTarget.style.opacity = "0"; }}
               onPointerDown={(e) => castSendMouse("mousePressed", e)}
               onPointerUp={(e) => castSendMouse("mouseReleased", e)}
               onContextMenu={(e) => { if (castCtl) e.preventDefault(); }}
@@ -468,12 +492,14 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
             {!castStat.connected && (
               <img
                 key={`cdp-${cdpQ}-${cdpW}-${cdpTick}`}
+                data-testid="browser-cdp-fallback-image"
                 src={`/screencast.jpg?XTransformPort=3043&q=${cdpQ}&w=${cdpW}&t=${cdpTick}`}
-                alt="CDP-фолбэк: кадр активной вкладки"
-                className="absolute inset-0 h-full w-full object-contain"
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-contain opacity-0"
                 decoding="async"
-                onLoad={() => cdpNextTick(2000)}
-                onError={() => cdpNextTick(6000)}
+                onLoad={(e) => { e.currentTarget.style.opacity = "1"; cdpNextTick(2000); }}
+                onError={(e) => { e.currentTarget.style.opacity = "0"; cdpNextTick(6000); }}
               />
             )}
             {!castStat.connected && (
@@ -501,7 +527,7 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
 
       {/* статус-строка браузера */}
       <div
-        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800 bg-black/30 px-2 py-1 font-mono text-[9px] text-zinc-500"
+        className={`flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800 bg-black/30 px-2 font-mono text-[9px] text-zinc-500 ${compact ? "h-6 py-0" : "py-1"}`}
         data-testid="browser-status"
       >
         {!compact && (
@@ -515,35 +541,45 @@ export function BrowserStage({ compact, defaultCastOn = false }: { compact?: boo
             <Terminal className="h-3 w-3" aria-hidden /> консоль ({castConsole.length})
           </button>
         )}
-        <span className="hidden sm:inline">
-          {cdpInfo?.cdp ? <>cdp :{cdpInfo.cdp.port} · кадров {cdpInfo.frames} · стримов {cdpInfo.streams}</> : "cdp-цель не найдена"}
-        </span>
-        <span className="ml-auto flex items-center gap-1" role="group" aria-label="Качество CDP-фолбэка">
-          {[30, 55, 85].map((q) => (
-            <button
-              key={q}
-              type="button"
-              aria-pressed={cdpQ === q}
-              className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpQ === q ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
-              onClick={() => setCdpQ(q)}
-            >
-              q{q}
-            </button>
-          ))}
-          <span className="text-zinc-700" aria-hidden>·</span>
-          {[480, 640, 960].map((w) => (
-            <button
-              key={w}
-              type="button"
-              aria-pressed={cdpW === w}
-              className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpW === w ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
-              onClick={() => setCdpW(w)}
-            >
-              w{w}
-            </button>
-          ))}
-          {!compact && <span className="hidden text-zinc-600 lg:inline">живая лента — не в audit-журнале</span>}
-        </span>
+        {compact ? (
+          <span className="ml-auto text-zinc-600">
+            {castStat.connected
+              ? `stream ${castStat.fps}fps${castStat.lastAge != null ? ` · ${castStat.lastAge}ms` : ""}`
+              : "CDP fallback"}
+          </span>
+        ) : (
+          <>
+            <span className="hidden sm:inline">
+              {cdpInfo?.cdp ? <>cdp :{cdpInfo.cdp.port} · кадров {cdpInfo.frames} · стримов {cdpInfo.streams}</> : "cdp-цель не найдена"}
+            </span>
+            <span className="ml-auto flex items-center gap-1" role="group" aria-label="Качество CDP-фолбэка">
+              {[30, 55, 85].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  aria-pressed={cdpQ === q}
+                  className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpQ === q ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
+                  onClick={() => setCdpQ(q)}
+                >
+                  q{q}
+                </button>
+              ))}
+              <span className="text-zinc-700" aria-hidden>·</span>
+              {[480, 640, 960].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  aria-pressed={cdpW === w}
+                  className={`rounded border px-1 py-0.5 font-mono text-[8px] transition ${cdpW === w ? "border-violet-500 bg-violet-950/60 text-violet-300" : "border-zinc-800 text-zinc-500 hover:text-zinc-300"}`}
+                  onClick={() => setCdpW(w)}
+                >
+                  w{w}
+                </button>
+              ))}
+              <span className="hidden text-zinc-600 lg:inline">живая лента — не в audit-журнале</span>
+            </span>
+          </>
+        )}
       </div>
       {castConOpen && !compact && (
         <div className="mc-scroll max-h-24 shrink-0 overflow-y-auto border-t border-zinc-800 bg-black/60 p-1.5 font-mono text-[9px] leading-relaxed">

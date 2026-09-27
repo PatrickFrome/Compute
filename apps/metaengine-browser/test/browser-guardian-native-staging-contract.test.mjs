@@ -13,6 +13,7 @@ const builder = JSON.parse(read('electron-builder.test.json'));
 const hookPath = path.join(root, 'scripts/electron-builder-before-pack.cjs');
 const buildPath = path.join(root, 'scripts/build-guardian-native-staging.ps1');
 const verifyPath = path.join(root, 'scripts/verify-installed-guardian-native-staging.ps1');
+const daemonBuildPath = path.join(root, 'scripts/build-me2-daemon-staging.ps1');
 const hook = read('scripts/electron-builder-before-pack.cjs');
 const build = read('scripts/build-guardian-native-staging.ps1');
 const verify = read('scripts/verify-installed-guardian-native-staging.ps1');
@@ -46,6 +47,11 @@ test('electron-builder owns the single Guardian native staging build boundary', 
     to: 'browser-shared',
     filter: ['action-contract.mjs', 'node-registry.mjs', 'receipt-contract.mjs', 'semantic-perception-compiler.mjs'],
   }, {
+    // R85: self-contained ME2 daemon executable, Browser-owned and zero-scheduler by default.
+    from: 'me2-daemon-dist',
+    to: 'me2-daemon',
+    filter: ['**/*'],
+  }, {
     // R52 (фаза C7): панели Mission Control едут в установщике (контракт me2-ui-host, R50)
     from: 'me2-ui-dist',
     to: 'me2-ui',
@@ -76,13 +82,16 @@ test('native staging package identity is read without JavaScript Windows path in
 });
 
 test('Guardian staging PowerShell remains parse-safe on Windows', { skip: process.platform !== 'win32' }, () => {
-  for (const file of [buildPath, verifyPath]) {
+  for (const file of [buildPath, verifyPath, daemonBuildPath]) {
     const parsed = parsePowerShellFile(file);
     assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   }
   assert.doesNotMatch(verify, /^\s+-or\b/m, 'continuation operators must not begin unescaped PowerShell lines');
   assert.doesNotMatch(verify, /\$ExpectedPackageVersion:\$/m, 'PowerShell variable followed by colon requires ${} delimiting');
   assert.match(verify, /\$\{ExpectedPackageVersion\}:\$verifiedVersion/);
+  const daemonBuild = read('scripts/build-me2-daemon-staging.ps1');
+  assert.doesNotMatch(daemonBuild, /\$sourceHead:\$ExpectedSourceHead/);
+  assert.doesNotMatch(daemonBuild, /\$packageVersion:\$runtimeVersion/);
 });
 
 test('staging manifest grants no LocalSystem activation authority', () => {

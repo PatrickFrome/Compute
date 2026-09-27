@@ -589,14 +589,14 @@ export function CodePage() {
             </div>
           </Sec>
 
-          <Sec id="code-sandboxes-plane" title="SANDBOXES PLANE" icon={Boxes} tone="cyan"
+          <Sec id="code-sandboxes-plane" title="SANDBOXES · LEGACY LOCKED" icon={Boxes} tone="amber" defaultOpen={false}
             right={<>
               {sb && <span className="hidden font-mono text-[10px] text-zinc-500 sm:inline" title="local: git worktree + prlimit + tar.gz sha256 · vercel: нужен SANDBOX_VERCEL_TOKEN">{sb.sandboxes.length} шт · local:{sb.providers.local === "READY" ? "✓" : "?"}</span>}
               {refreshBtn(() => void loadSb(), sbBusy, "Обновить список песочниц")}
             </>}>
             <div data-testid="sandboxes-plane" className="space-y-2.5">
               <div className="rounded border border-amber-900/40 bg-amber-950/10 px-2 py-1.5 font-mono text-[9px] text-amber-300/80">
-                read-only: операции create/exec/snapshot/restore/destroy шли через POST /sandbox op-switch — в daemon v0.57.1 этот хендлер МЁРТВ (перехватывается первым /sandbox-хендлером probe/run/config). Кнопки отключены честно; exec-попытка показывает ошибку daemon'а.
+                legacy capability unavailable: create/exec/snapshot/restore/destroy через старый POST /sandbox op-switch не маршрутизируются в daemon v0.57.1. Контур свёрнут по умолчанию и остаётся fail-close; рабочий SANDBOX OS находится выше.
               </div>
 
               <form className="flex gap-2" onSubmit={(e) => e.preventDefault()}>

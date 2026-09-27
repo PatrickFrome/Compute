@@ -209,3 +209,33 @@ test('stop removes app/webContents listeners and has no hidden command scheduler
   assert.equal(plane.snapshot().second_scheduler, false);
   assert.equal(plane.snapshot().cognitive_delta_second_scheduler, false);
 });
+
+
+test('canonical BrowserCell resolver feeds the existing Brain runtime binding without a second scheduler', () => {
+  const app = new FakeApp(metrics());
+  const remote = new FakeContents({ id: 47, pid: 200, url: 'https://chat.z.ai/' });
+  const tabId = 'tab_00000000-0000-4000-8000-000000000047';
+  const plane = new BrowserRealtimeProcessPlane({
+    app,
+    getWebContents: () => [remote],
+    resolveTabId: () => tabId,
+    resolveBrowserCell: (id) => id === tabId
+      ? { cell_id: 'cell:canonical-47', cell_generation: 1, provider: 'ZAI', role: 'FLEET' }
+      : null,
+    sampleMs: 5000,
+  });
+
+  const started = plane.start();
+  const binding = plane.runtimeBinding(tabId, { require_complete_process_identity: true });
+  assert.ok(binding);
+  assert.equal(binding.tab_id, tabId);
+  assert.equal(binding.cell_id, 'cell:canonical-47');
+  assert.equal(binding.cell_generation, 1);
+  assert.equal(binding.web_contents_id, 47);
+  assert.equal(binding.renderer_process_key, '200:1725520000100');
+  assert.equal(binding.provider, 'ZAI');
+  assert.equal(binding.role, 'FLEET');
+  assert.equal(binding.execution_authority, false);
+  assert.equal(started.second_scheduler, false);
+  plane.stop();
+});

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const BRANCH_LINEAGE_AUDIT_SCHEMA = 'metaengine.devos.branch-lineage-audit.v1';
-export const BRANCH_LINEAGE_AUDIT_VERSION = '1.3.0';
+export const BRANCH_LINEAGE_AUDIT_VERSION = '1.4.0';
 
 export const AUTHORITY_RULES = Object.freeze([
   ['CI_GOVERNANCE', (p) => p.startsWith('.github/workflows/')],
@@ -81,9 +81,10 @@ function parseCounts(value) {
   return { base_only_commits: Number(match[1]), unique_commits: Number(match[2]) };
 }
 
-function relationClass({ baseSha, headSha, baseOnly, unique, authority, tipDeltaCount }) {
+function relationClass({ baseSha, headSha, baseOnly, unique, authority, tipDeltaCount, historyRelated }) {
   if (headSha === baseSha) return 'BASE';
   if (unique === 0) return 'CONTAINED';
+  if (historyRelated === false) return 'UNRELATED_HISTORY';
   const prefix = baseOnly === 0 ? 'AHEAD' : 'DIVERGED';
   if (tipDeltaCount === 0) return `${prefix}_HISTORY_ONLY`;
   return `${prefix}_${authority ? 'AUTHORITY' : 'NONAUTHORITY'}`;
@@ -99,7 +100,8 @@ function riskRank(classification) {
     DIVERGED_NONAUTHORITY: 2,
     AHEAD_AUTHORITY: 3,
     DIVERGED_AUTHORITY: 4,
-  })[classification] ?? 5;
+    UNRELATED_HISTORY: 5,
+  })[classification] ?? 6;
 }
 
 function sortRisk(a, b) {
@@ -208,7 +210,7 @@ export function auditBranchLineage({
   cwd = process.cwd(),
   baseRef = 'HEAD',
   namespace = 'refs/remotes/origin/',
-  include = /^(work|integration|release)\//,
+  include = /.+/,
   maxBranches = 1000,
   maxFilesPerBranch = 200,
   refs = null,
@@ -233,16 +235,21 @@ export function auditBranchLineage({
     const counts = parseCounts(git(cwd, ['rev-list', '--left-right', '--count', `${baseSha}...${headSha}`]));
     let mergeBaseSha = null;
     let uniquePaths = [];
+    let historyRelated = true;
     if (counts.unique_commits === 0) {
       mergeBaseSha = headSha;
     } else if (counts.base_only_commits === 0) {
       mergeBaseSha = baseSha;
       uniquePaths = git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', `${baseSha}..${headSha}`, '--']).split('\n').filter(Boolean);
     } else {
-      mergeBaseSha = git(cwd, ['merge-base', baseSha, headSha]);
-      if (!/^[0-9a-f]{40}$/i.test(mergeBaseSha || '')) throw new Error(`branch_lineage_merge_base_invalid:${row.branch}`);
-      mergeBaseSha = mergeBaseSha.toLowerCase();
-      uniquePaths = git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', `${mergeBaseSha}..${headSha}`, '--']).split('\n').filter(Boolean);
+      const mergeBase = git(cwd, ['merge-base', baseSha, headSha], { allowFailure: true });
+      if (/^[0-9a-f]{40}$/i.test(mergeBase || '')) {
+        mergeBaseSha = mergeBase.toLowerCase();
+        uniquePaths = git(cwd, ['diff', '--name-only', '--diff-filter=ACDMRTUXB', `${mergeBaseSha}..${headSha}`, '--']).split('\n').filter(Boolean);
+      } else {
+        historyRelated = false;
+        uniquePaths = git(cwd, ['ls-tree', '-r', '--name-only', headSha]).split('\n').filter(Boolean);
+      }
     }
 
     // Tip-to-tip diff is symmetric: it also contains files changed only on the base.
@@ -263,14 +270,17 @@ export function auditBranchLineage({
       unique: counts.unique_commits,
       authority: authority.authority_critical,
       tipDeltaCount: tipDeltaPaths.length,
+      historyRelated,
     });
-    const semanticConvergedToBase = counts.unique_commits > 0 && tipDeltaPaths.length === 0;
+    const semanticConvergedToBase = counts.unique_commits > 0
+      && (historyRelated ? tipDeltaPaths.length === 0 : allTipDeltaPaths.length === 0);
     return {
       branch: row.branch,
       ref: row.refname,
       family: familyOf(row.branch),
       head_sha: headSha,
       merge_base_sha: mergeBaseSha,
+      history_related: historyRelated,
       base_only_commits: counts.base_only_commits,
       unique_commits: counts.unique_commits,
       classification,
@@ -355,7 +365,7 @@ function parseCli(argv) {
     cwd: process.cwd(),
     baseRef: 'HEAD',
     namespace: 'refs/remotes/origin/',
-    include: /^(work|integration|release)\//,
+    include: /.+/,
     maxBranches: 1000,
     maxFilesPerBranch: 200,
     format: 'json',
@@ -386,12 +396,13 @@ function help() {
     'Usage: node coordination/devos/branch-lineage-auditor.mjs [options]',
     '  --base <ref>          comparison base (default HEAD)',
     '  --namespace <ref/>    branch namespace (default refs/remotes/origin/)',
-    '  --include <regex>      branch-name regex (default ^(work|integration|release)/)',
+    '  --include <regex>      optional branch-name regex (default: all branches in namespace)',
     '  --format json|markdown',
     '  --max-branches <n>     fail-closed branch cap (default 1000)',
     '  --max-files <n>        emitted file cap per branch (authority detection still scans all)',
     '',
     'Lineage tips are derived only from exact Git ancestry inside the same branch family.',
+    'Branches with no common ancestor are classified as UNRELATED_HISTORY instead of aborting the audit.',
     'Current authority classification uses branch-owned final tip delta; historical authority provenance remains separately visible.',
     'The auditor is read-only and never runs git mutation commands.',
   ].join('\n');

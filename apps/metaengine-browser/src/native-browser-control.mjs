@@ -69,6 +69,24 @@ const DEFAULT_COMMAND_CDP_DEADLINE_MS = 30000;
 const clip = (value, max) => String(value ?? '').slice(0, max);
 const axRawValue = (node, key) => String(node?.[key]?.value ?? '');
 const axValue = (node, key) => axRawValue(node, key).trim();
+function axPropertyValue(node, key) {
+  const row = (Array.isArray(node?.properties) ? node.properties : [])
+    .find((property) => String(property?.name || '') === String(key));
+  return row?.value?.value ?? null;
+}
+function normalizedSemanticRole(node) {
+  const role = axValue(node, 'role').toLowerCase();
+  if (TEXT_INPUT_ROLES.has(role)) return role;
+  // R82 liveness hardening: controlled editors can expose an explicitly
+  // editable AX generic node without Chromium preserving the historical
+  // textbox role. Keep this normalization scoped to the generic editor node:
+  // Chromium may also mark StaticText/paragraph descendants as editable when
+  // they live inside a contenteditable composer. Promoting those descendants
+  // to textbox creates dozens of false composers and makes the supervisor
+  // fail closed with supervisor_composer_not_unique.
+  const editable = String(axPropertyValue(node, 'editable') ?? '').trim().toLowerCase();
+  return role === 'generic' && ['true', 'plaintext', 'richtext'].includes(editable) ? 'textbox' : role;
+}
 const sha256 = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
 
 export function nativeBrowserTargetIdentity(webContents) {
@@ -112,7 +130,7 @@ function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
   const frameIds = semanticNodeFrameIds(nodes);
   for (const node of nodes) {
     if (node?.ignored === true) continue;
-    const role = axValue(node, 'role').toLowerCase();
+    const role = normalizedSemanticRole(node);
     const name = axValue(node, 'name');
     const backendNodeId = Number(node?.backendDOMNodeId || 0);
     // GLM agent platform (2026-09-19): the chat.z.ai composer is a textarea

@@ -7,6 +7,8 @@ on:
   pull_request:
     paths:
       - 'apps/metaengine-browser/**'
+      - 'apps/me2-ui/**'
+      - 'apps/me2-daemon/**'
       - '.github/workflows/browser-windows-installed-chat-qualification.yml'
   workflow_dispatch:
 
@@ -16,11 +18,12 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-installed-chat-qualification:
     runs-on: windows-2025
-    timeout-minutes: 28
+    timeout-minutes: 75
     steps:
       - name: Checkout exact candidate head
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
@@ -80,29 +83,35 @@ jobs:
             throw 'detached_capture_view_physical_proof_invalid'
           }
 
-      - name: Build exact-head unsigned NSIS installer
+      - name: Acquire provenanced exact-head installer from Package Smoke
         working-directory: apps/metaengine-browser
         shell: powershell
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          ME2_GITHUB_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $sourceHead = '${{ github.event.pull_request.head.sha || github.sha }}'
           $version = [string](node -p "require('./package.json').version")
           if (-not $version) { throw 'package_version_missing' }
-          Remove-Item dist-test -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item native-dist\guardian -Recurse -Force -ErrorAction SilentlyContinue
-          npx --yes electron-builder@26.15.7 --win nsis --x64 --config electron-builder.test.json --publish never
-          $installer = Get-ChildItem dist-test -Filter "METAENGINE-Browser-Test-Setup-$version-x64.exe" -File | Select-Object -First 1
+          $bindingPath = "$env:RUNNER_TEMP\provenanced-installer\consumer-binding.json"
+          .\scripts\qualified-installer-consumer.ps1 -Mode Acquire -ExpectedHead $sourceHead -WorkRoot "$env:RUNNER_TEMP\provenanced-installer" -ConfigPath (Join-Path (Get-Location) 'electron-builder.test.json') -BindingPath $bindingPath
+          if ($LASTEXITCODE -ne 0) { throw 'qualified_installer_consumer_acquire_failed' }
+          $binding = Get-Content $bindingPath -Raw | ConvertFrom-Json
+          if ($binding.schema -ne 'metaengine.browser.qualified-installer-consumer-binding.v1') { throw 'qualified_installer_consumer_binding_invalid' }
+          Add-Content -Path $env:GITHUB_ENV -Value "ME2_INSTALLER_BINDING_PATH=$bindingPath" -Encoding utf8
+          $installer = Get-Item ([string]$binding.installer_path)
           if (-not $installer) { throw 'installed_chat_qualification_installer_missing' }
-          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           Copy-Item $installer.FullName (Join-Path $env:RUNNER_TEMP $installer.Name) -Force
           @{
             schema='metaengine.browser.windows-installed-chat-qualification.v2'
             source_head=$sourceHead
             package_version=$version
             installer_name=$installer.Name
-            installer_sha256=$digest
+            installer_sha256=[string]$binding.installer_sha256
+            producer_run_id=[int64]$binding.producer_run_id
+            producer_run_number=[int64]$binding.producer_run_number
+            producer_run_attempt=[int64]$binding.producer_run_attempt
+            producer_completed_at_acquire=[bool]$binding.producer_completed_at_acquire
             preconnect_armed=$false
             clean_genesis_control_verified=$false
             automatic_initial_tab_suppressed=$false
@@ -132,6 +141,35 @@ jobs:
           $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\METAENGINE Browser Test'
           $app = Join-Path $installRoot 'METAENGINE Browser Test.exe'
           if (-not (Test-Path $app -PathType Leaf)) { throw "qualified_installed_browser_missing:$app" }
+
+          $uiEvidence = "$env:RUNNER_TEMP\installed-chat-me2-ui-proof.json"
+          node scripts/verify-me2-ui-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-ui') `
+            --expected-sha ([string]$proof.source_head) `
+            --runtime $app --smoke --evidence $uiEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_me2_ui_bundle_invalid' }
+          $uiProof = Get-Content $uiEvidence -Raw | ConvertFrom-Json
+          if ($uiProof.runtime_smoke -ne 'PASS' -or [int64]$uiProof.installed_size_bytes -ne [int64]$uiProof.manifest_size_bytes) {
+            throw 'installed_chat_me2_ui_runtime_invalid'
+          }
+
+          $daemonEvidence = "$env:RUNNER_TEMP\installed-chat-me2-daemon-proof.json"
+          node scripts/verify-me2-daemon-bundle.mjs `
+            --root (Join-Path $installRoot 'resources\me2-daemon') `
+            --expected-sha ([string]$proof.source_head) `
+            --smoke --evidence $daemonEvidence
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_me2_daemon_bundle_invalid' }
+          $daemonProof = Get-Content $daemonEvidence -Raw | ConvertFrom-Json
+          if ($daemonProof.runtime_smoke -ne 'PASS' `
+              -or $daemonProof.external_bun_required -ne $false `
+              -or $daemonProof.smoke_child_external_runtime_path_sanitized -ne $true) {
+            throw 'installed_chat_me2_daemon_runtime_invalid'
+          }
+          $proof | Add-Member -NotePropertyName me2_ui_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_ui_installed_size_bytes -NotePropertyValue ([int64]$uiProof.installed_size_bytes) -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_installed_verified -NotePropertyValue $true -Force
+          $proof | Add-Member -NotePropertyName me2_daemon_version -NotePropertyValue ([string]$daemonProof.daemon_version) -Force
+          $proof | ConvertTo-Json -Depth 6 | Set-Content $proofPath -Encoding utf8
 
           $profileOut = "$env:RUNNER_TEMP\installed-chat-profile.out"
           $profileErr = "$env:RUNNER_TEMP\installed-chat-profile.err"
@@ -165,12 +203,13 @@ jobs:
             $normal = Start-Process -FilePath $app -PassThru -RedirectStandardOutput $normalOut -RedirectStandardError $normalErr
             $null = $normal.Handle
             $deadline = [DateTime]::UtcNow.AddSeconds(55)
-            $localShellIndex = -1
+            $primaryShellIndex = -1
             $preconnectIndex = -1
             $userSessionIndex = -1
             $nativeSupervisorIndex = -1
             $initialTabIndex = -1
             $remoteLoadIndex = -1
+            $r75UiConfirmed = $false
             $cleanControl = $false
             $controlState = $null
             $readySince = $null
@@ -183,20 +222,27 @@ jobs:
               }
               if (Test-Path $normalOut -PathType Leaf) {
                 $normalLines = @(Get-Content $normalOut -ErrorAction SilentlyContinue)
-                $localShellIndex = -1
+                $primaryShellIndex = -1
                 $preconnectIndex = -1
                 $userSessionIndex = -1
                 $nativeSupervisorIndex = -1
                 $initialTabIndex = -1
                 $remoteLoadIndex = -1
+                $r75UiConfirmed = $false
                 for ($i = 0; $i -lt $normalLines.Count; $i++) {
                   $line = [string]$normalLines[$i]
                   if (-not $line.Trim().StartsWith('{')) { continue }
                   try { $runtimeEvent = $line | ConvertFrom-Json } catch { continue }
-                  if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v1' `
-                      -and $runtimeEvent.state -eq 'LOCAL_SHELL_VISIBLE' `
+                  if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v2' `
+                      -and $runtimeEvent.state -eq 'ME2_PRIMARY_SHELL_VISIBLE' `
+                      -and $runtimeEvent.shell_mode -eq 'ME2_PRIMARY' `
+                      -and $runtimeEvent.legacy_shell_is_normal_path -eq $false `
                       -and $runtimeEvent.authority_effect -eq $false) {
-                    $localShellIndex = $i
+                    $primaryShellIndex = $i
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser-local-shell.v2' `
+                      -and $runtimeEvent.state -eq 'LEGACY_RECOVERY_SHELL_VISIBLE') {
+                    throw 'installed_legacy_recovery_shell_visible_on_healthy_me2'
                   }
                   if ($runtimeEvent.schema -eq 'metaengine.browser.chat-preconnect.v1' `
                       -and $runtimeEvent.state -eq 'ARMED' `
@@ -224,6 +270,17 @@ jobs:
                   if ($runtimeEvent.schema -eq 'metaengine.browser-startup-subsystem.v1' -and $runtimeEvent.subsystem -eq 'INITIAL_REMOTE_LOAD') {
                     $remoteLoadIndex = $i
                   }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' `
+                      -and $runtimeEvent.state -eq 'ME2_R75_UI_CONTRACT_CONFIRMED' `
+                      -and $runtimeEvent.authority_effect -eq $false) {
+                    $r75UiConfirmed = $true
+                  }
+                  if ($runtimeEvent.schema -eq 'metaengine.browser.me2-r75-installed-ui.v1' `
+                      -and $runtimeEvent.state -eq 'ME2_R75_UI_CONTRACT_INCOMPLETE') {
+                    Get-Content $normalOut -ErrorAction SilentlyContinue
+                    Get-Content $normalErr -ErrorAction SilentlyContinue
+                    throw 'installed_me2_r75_dom_contract_incomplete'
+                  }
                 }
               }
               $cleanControl = $false
@@ -238,7 +295,7 @@ jobs:
                   $cleanControl = $true
                 }
               }
-              if ($localShellIndex -ge 0 -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
+              if ($primaryShellIndex -ge 0 -and $r75UiConfirmed -and $preconnectIndex -ge 0 -and $userSessionIndex -ge 0 -and $nativeSupervisorIndex -ge 0 -and $cleanControl) {
                 if (-not $readySince) { $readySince = [DateTime]::UtcNow }
                 if (([DateTime]::UtcNow - $readySince).TotalSeconds -ge 2) { break }
               } else {
@@ -247,18 +304,28 @@ jobs:
               Start-Sleep -Milliseconds 250
             }
 
-            if ($localShellIndex -lt 0) { throw 'installed_local_shell_not_visible' }
+            if (-not $r75UiConfirmed) {
+              Get-Content $normalOut -ErrorAction SilentlyContinue
+              Get-Content $normalErr -ErrorAction SilentlyContinue
+              throw 'installed_me2_r75_dom_contract_not_confirmed'
+            }
+
+            if ($primaryShellIndex -lt 0) { throw 'installed_me2_primary_shell_not_visible' }
             if ($preconnectIndex -lt 0) { throw 'installed_chatgpt_preconnect_not_armed' }
             if ($userSessionIndex -lt 0) { throw 'installed_persistent_user_session_not_ready' }
             if ($nativeSupervisorIndex -lt 0) { throw 'installed_native_supervisor_not_ready' }
             if (-not $cleanControl) { throw 'installed_clean_genesis_control_not_verified' }
             if ($initialTabIndex -ge 0) { throw 'installed_clean_genesis_created_initial_tab' }
             if ($remoteLoadIndex -ge 0) { throw 'installed_clean_genesis_started_initial_remote_load' }
-            if (-not ($localShellIndex -lt $preconnectIndex -and $preconnectIndex -lt $userSessionIndex)) {
-              throw 'installed_chatgpt_preconnect_order_invalid'
+            if (-not ($primaryShellIndex -lt $preconnectIndex -and $preconnectIndex -lt $userSessionIndex)) {
+              throw 'installed_me2_primary_shell_preconnect_order_invalid'
             }
 
             $proof.preconnect_armed = $true
+            $proof | Add-Member -NotePropertyName me2_primary_shell_visible_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName me2_r75_dom_contract_verified -NotePropertyValue $true -Force
+            $proof | Add-Member -NotePropertyName legacy_recovery_shell_visible_on_normal_startup -NotePropertyValue $false -Force
+            $proof | Add-Member -NotePropertyName normal_shell_mode -NotePropertyValue 'ME2_PRIMARY' -Force
             $proof.clean_genesis_control_verified = $true
             $proof.automatic_initial_tab_suppressed = $true
             $proof.automatic_initial_remote_load_suppressed = $true
@@ -279,6 +346,17 @@ jobs:
             }
           }
 
+      - name: Require bound Package Smoke producer terminal success
+        working-directory: apps/metaengine-browser
+        shell: powershell
+        env:
+          ME2_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:ME2_INSTALLER_BINDING_PATH) { throw 'installed_chat_package_binding_path_missing' }
+          .\scripts\qualified-installer-consumer.ps1 -Mode Wait -ExpectedHead '${{ github.event.pull_request.head.sha || github.sha }}' -BindingPath $env:ME2_INSTALLER_BINDING_PATH -ProofPath "$env:RUNNER_TEMP\installed-chat-proof.json"
+          if ($LASTEXITCODE -ne 0) { throw 'installed_chat_package_producer_not_qualified' }
+
       - name: Prove exact source checkout unchanged
         shell: bash
         env:
@@ -295,6 +373,8 @@ jobs:
           path: |
             ${{ runner.temp }}/METAENGINE-Browser-Test-Setup-*-x64.exe
             ${{ runner.temp }}/installed-chat-proof.json
+            ${{ runner.temp }}/installed-chat-me2-ui-proof.json
+            ${{ runner.temp }}/installed-chat-me2-daemon-proof.json
             ${{ runner.temp }}/installed-chat-normal.out
             ${{ runner.temp }}/installed-chat-normal.err
             ${{ runner.temp }}/detached-capture-view-physical.jsonl
