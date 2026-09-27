@@ -589,7 +589,26 @@ export const useMe2 = create<Me2State>((set, get) => ({
             e.preventDefault();
             const target = st.recentPages[nextIndex];
             set({ page: target, pageHistoryIndex: nextIndex });
-            syncPagePresentation(target);
+            const primaryPageAck = syncPagePresentation(target);
+            if (target === "browser") {
+              const reconcileRunGeometry = () => {
+                if (get().page === "browser") get().syncContextDrawer();
+              };
+              if (primaryPageAck) {
+                void primaryPageAck.then(reconcileRunGeometry).catch(() => {
+                  if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+                });
+              } else {
+                reconcileRunGeometry();
+              }
+            } else {
+              set({
+                contextDrawerOpen: get().contextDrawerPreferredOpen,
+                contextDrawerHeight: get().contextDrawerPreferredHeight,
+                contextDrawerWidth: get().contextDrawerPreferredWidth,
+                runTelemetryInspectorVisible: false,
+              });
+            }
           }
         }
       }
@@ -651,13 +670,26 @@ export const useMe2 = create<Me2State>((set, get) => ({
         pageHistoryIndex: history.length - 1,
       };
     });
-    syncPagePresentation(p);
-    if (p === "browser") get().syncContextDrawer();
-    else set({
-      contextDrawerOpen: get().contextDrawerPreferredOpen,
-      contextDrawerHeight: get().contextDrawerPreferredHeight,
-      contextDrawerWidth: get().contextDrawerPreferredWidth,
-    });
+    const primaryPageAck = syncPagePresentation(p);
+    if (p === "browser") {
+      const reconcileRunGeometry = () => {
+        if (get().page === "browser") get().syncContextDrawer();
+      };
+      if (primaryPageAck) {
+        void primaryPageAck.then(reconcileRunGeometry).catch(() => {
+          if (get().page === "browser") set({ runTelemetryInspectorVisible: false });
+        });
+      } else {
+        reconcileRunGeometry();
+      }
+    } else {
+      set({
+        contextDrawerOpen: get().contextDrawerPreferredOpen,
+        contextDrawerHeight: get().contextDrawerPreferredHeight,
+        contextDrawerWidth: get().contextDrawerPreferredWidth,
+        runTelemetryInspectorVisible: false,
+      });
+    }
   },
 
   setWorkspace: (w) => {
