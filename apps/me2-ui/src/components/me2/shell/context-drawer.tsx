@@ -112,12 +112,21 @@ export function ContextDrawer() {
   const snap = useMe2((s) => s.snap);
   const mirror = useMe2((s) => s.mirror);
   const connected = useMe2((s) => s.connected);
+  const workspace = useMe2((s) => s.workspace);
   const resizeCleanup = useRef<(() => void) | null>(null);
 
   useEffect(() => () => {
     resizeCleanup.current?.();
     resizeCleanup.current = null;
   }, []);
+
+  // Workspace is part of the resize transaction identity. Changing workspace
+  // cancels an active drag before another pointer event can persist dimensions
+  // into the newly selected workspace.
+  useEffect(() => {
+    resizeCleanup.current?.();
+    resizeCleanup.current = null;
+  }, [workspace]);
 
   const beginResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -126,34 +135,50 @@ export function ContextDrawer() {
 
     const startY = event.clientY;
     const startHeight = height;
+    const startWorkspace = workspace;
     let nextHeight = height;
     let frame = 0;
 
+    const sameWorkspace = () => useMe2.getState().workspace === startWorkspace;
     const cleanup = () => {
       if (frame) window.cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("pointercancel", cancel);
       resizeCleanup.current = null;
     };
     const move = (pointerEvent: PointerEvent) => {
+      if (!sameWorkspace()) {
+        cleanup();
+        return;
+      }
       nextHeight = Math.max(160, Math.min(360, startHeight + startY - pointerEvent.clientY));
       if (frame) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = 0;
+        if (!sameWorkspace()) {
+          cleanup();
+          return;
+        }
         setHeight(nextHeight, false);
       });
     };
     const finish = () => {
+      const current = sameWorkspace();
       cleanup();
-      setHeight(nextHeight, true);
+      if (current) setHeight(nextHeight, true);
+    };
+    const cancel = () => {
+      const current = sameWorkspace();
+      cleanup();
+      if (current) setHeight(startHeight, false);
     };
 
     resizeCleanup.current = cleanup;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-  }, [height, setHeight]);
+    window.addEventListener("pointercancel", cancel, { once: true });
+  }, [height, setHeight, workspace]);
 
   const resizeByKeyboard = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     let next: number | null = null;
