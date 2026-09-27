@@ -39,6 +39,13 @@ test('R96 hold-Space controller closes on release and keeps Arrow navigation ins
   assert.doesNotMatch(hook, /sendCommand|me2Fetch|fetch\(|WebSocket|agentChatOp/);
 });
 
+test('R96 Peek requires explicit row focus before Space can capture page navigation', () => {
+  assert.match(tasks, /const effectivePeekTaskId = peekTaskId && peekTaskIds\.includes\(peekTaskId\)[\s\S]{0,80}\? peekTaskId[\s\S]{0,40}: null;/);
+  assert.doesNotMatch(tasks, /effectivePeekTaskId[\s\S]{0,120}peekTaskIds\[0\]/);
+  assert.match(agents, /const effectivePeekAgentId = peekAgentId && peekAgentIds\.includes\(peekAgentId\)[\s\S]{0,80}\? peekAgentId[\s\S]{0,40}: null;/);
+  assert.doesNotMatch(agents, /effectivePeekAgentId[\s\S]{0,120}peekAgentIds\[0\]/);
+});
+
 test('R96 Peek never steals native Space activation from unrelated controls', () => {
   assert.match(hook, /function isReservedInteractionTarget/);
   assert.match(hook, /\[role="button"\]/);
@@ -46,6 +53,13 @@ test('R96 Peek never steals native Space activation from unrelated controls', ()
   assert.match(hook, /\[role="tab"\]/);
   assert.match(hook, /if \(target\.closest\(\`\[data-peek-kind=/);
   assert.match(hook, /isEditableTarget\(event\.target\) \|\| isReservedInteractionTarget\(event\.target, kind\)/);
+});
+
+test('R96A Space Peek begins only from the currently focused selected row', () => {
+  assert.match(hook, /function isFocusedPeekRow/);
+  assert.match(hook, /target\.closest\(\`\[data-peek-kind=/);
+  assert.match(hook, /row\?\.getAttribute\("data-peek-id"\) === selectedId/);
+  assert.match(hook, /if \(!id \|\| !isFocusedPeekRow\(event\.target, kind, id\)\) return/);
 });
 
 test('R96 held Peek rebinds or closes when live snapshot membership changes', () => {

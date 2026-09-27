@@ -450,7 +450,7 @@ export function TasksPage() {
   }, [branchTasks, queueTasks]);
   const effectivePeekTaskId = peekTaskId && peekTaskIds.includes(peekTaskId)
     ? peekTaskId
-    : peekTaskIds[0] ?? null;
+    : null;
   useTemporaryPeekList({
     kind: "task",
     ids: peekTaskIds,

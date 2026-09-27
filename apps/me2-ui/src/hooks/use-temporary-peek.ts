@@ -27,6 +27,12 @@ function isReservedInteractionTarget(target: EventTarget | null, kind: PeekKind)
   ));
 }
 
+function isFocusedPeekRow(target: EventTarget | null, kind: PeekKind, selectedId: string | null): boolean {
+  if (!(target instanceof Element) || !selectedId) return false;
+  const row = target.closest(`[data-peek-kind="${kind}"][data-peek-id]`);
+  return row?.getAttribute("data-peek-id") === selectedId;
+}
+
 function focusPeekItem(kind: PeekKind, id: string): void {
   window.requestAnimationFrame(() => {
     const nodes = Array.from(document.querySelectorAll(`[data-peek-kind="${kind}"][data-peek-id]`));
@@ -40,8 +46,8 @@ function focusPeekItem(kind: PeekKind, id: string): void {
 
 /**
  * Linear-style temporary Peek:
- * - hold Space: preview selected object without navigating;
- * - while held, ↑/↓ changes selection and keeps preview open;
+ * - hold Space while a concrete Task/Agent row has keyboard focus;
+ * - while held, ↑/↓ changes focus/selection and keeps preview open;
  * - release Space or press Escape: close preview.
  *
  * This hook owns presentation state only. It never opens Task detail, selects a
@@ -101,7 +107,7 @@ export function useTemporaryPeekList({
 
       if (event.key === " ") {
         const id = selectedRef.current;
-        if (!id) return;
+        if (!id || !isFocusedPeekRow(event.target, kind, id)) return;
         event.preventDefault();
         heldRef.current = true;
         setPeekTarget({ kind, id });
