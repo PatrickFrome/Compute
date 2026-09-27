@@ -99,6 +99,7 @@ interface Me2State {
   contextDrawerPreferredWidth: number;
   contextDrawerWidth: number;
   contextDrawerDock: ContextDrawerDock;
+  runTelemetryInspectorVisible: boolean;
   commandRailPreferredOpen: boolean;
   // selection (agent-first)
   chatId: string | null;
@@ -259,6 +260,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
   contextDrawerPreferredWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
   contextDrawerWidth: CONTEXT_DRAWER_DEFAULT_WIDTH,
   contextDrawerDock: "bottom",
+  runTelemetryInspectorVisible: false,
   commandRailPreferredOpen: true,
   chatId: null,
   busyAction: false,
@@ -303,6 +305,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: false,
       });
       return;
     }
@@ -319,6 +322,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
           dock?: ContextDrawerDock;
           drawer_height?: number;
           drawer_width?: number;
+          run_inspector_visible?: boolean;
         } | null>;
       };
     }).metaengineShell;
@@ -332,6 +336,10 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible:
+          typeof window !== "undefined"
+          && window.innerWidth >= 1124
+          && !(want && wantedDock === "right"),
       });
       return;
     }
@@ -357,6 +365,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: effectiveWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: result?.run_inspector_visible === true,
       });
     }).catch(() => {
       if (!presentationSyncStillCurrent(request, {
@@ -372,6 +381,7 @@ export const useMe2 = create<Me2State>((set, get) => ({
         contextDrawerPreferredWidth: wantedWidth,
         contextDrawerWidth: wantedWidth,
         contextDrawerDock: wantedDock,
+        runTelemetryInspectorVisible: false,
       });
     });
   },
