@@ -180,6 +180,8 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   assert.match(uiHost, /event: 'UI_STOP_CONFIRMED'/);
   assert.match(uiHost, /event: 'UI_STOP_UNCONFIRMED'/);
   assert.match(uiHost, /shutdown:\s*Object\.freeze\(\{ confirmed/);
+  assert.match(uiHost, /ME2_HOSTED_BY_BROWSER:\s*'1'/);
+  assert.match(uiHost, /ME2_WATCHDOG:\s*'off'/);
   const finalEntry = await fs.readFile(path.join(appRoot, 'src', 'final-runtime-entry.mjs'), 'utf8');
   assert.match(
     finalEntry,
@@ -188,7 +190,14 @@ test('R85 package contract aligns daemon version and preserves one scheduler own
   );
 });
 
-test('Browser-owned ME2 UI cannot start the legacy daemon watchdog', async () => {\n  const instrumentation = await fs.readFile(path.join(repoRoot, 'apps', 'me2-ui', 'src', 'instrumentation.ts'), 'utf8');\n  assert.match(instrumentation, /ME2_HOSTED_BY_BROWSER/);\n  assert.match(instrumentation, /ME2_WATCHDOG/);\n  assert.ok(instrumentation.indexOf('ME2_HOSTED_BY_BROWSER') < instrumentation.indexOf('me2-watchdog'));\n});\ntest('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
+test('Browser-owned ME2 UI cannot start the legacy daemon watchdog', async () => {
+  const instrumentation = await fs.readFile(path.join(repoRoot, 'apps', 'me2-ui', 'src', 'instrumentation.ts'), 'utf8');
+  assert.match(instrumentation, /ME2_HOSTED_BY_BROWSER/);
+  assert.match(instrumentation, /ME2_WATCHDOG/);
+  assert.ok(instrumentation.indexOf('ME2_HOSTED_BY_BROWSER') < instrumentation.indexOf('me2-watchdog'));
+});
+
+test('initial daemon readiness is bounded readback and does not manufacture readiness', async () => {
   let attempts = 0;
   const ready = await waitForMe2DaemonReady({
     attempts: 4,
