@@ -33,3 +33,22 @@ No history was blindly merged. The convergence tree starts from the full R96D tr
 This convergence head is not release-qualified until exact-head Critical Audit, Shell, Package Smoke, Installed Chat, Final Runtime Activation, Autonomous Soak and Self Update E2E are all terminal green.
 
 A separate lineage audit is required for the four Guardian-only commits unique to `integration/metaengine-development-os-v1`; they are not silently ported here because process-effect authority deserves an isolated falsifiable convergence slice.
+
+
+## Run-attempt artifact identity
+
+A physical qualification rerun exposed a provenance defect that the earlier single-attempt tests did not cover. GitHub keeps multiple artifacts with the same name under one workflow run after reruns, while the workflow run identity advances through `run_attempt`. The consumer listed artifacts by run and selected the first matching name, so an attempt-2 consumer could download the attempt-1 installer and then correctly fail provenance verification with `producer_run_attempt_mismatch`.
+
+GitHub's REST API documents workflow-run artifact listing as a collection and gives every artifact a unique `artifact_id`; reruns are separate attempts of the same workflow run. Therefore name + run_id is not a sufficient immutable locator once a run has been rerun.
+
+R96 release hardening:
+- when downloading by name from a completed producer, choose the newest same-name artifact by `created_at` with artifact id as a deterministic fallback, then keep the existing provenance verification;
+- when an in-progress producer resolution already observed an exact `artifact_id`, carry that id into download so later same-name artifacts cannot silently replace the resolved object;
+- fail closed if the exact artifact id disappears or the downloaded provenance does not match source head / run id / run number / run attempt;
+- regression tests cover both duplicate same-name artifacts across attempts and exact artifact-id pinning.
+
+Primary sources:
+- GitHub REST Actions Artifacts: https://docs.github.com/en/rest/actions/artifacts
+- GitHub workflow reruns: https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
+
+This changes artifact selection only. It does not grant signing, publishing, update, scheduler, Browser, or production authority.
