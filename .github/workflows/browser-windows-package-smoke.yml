@@ -125,8 +125,23 @@ jobs:
           $ErrorActionPreference = 'Stop'
           node --check test/me2-r85-visual-evidence.mjs
           New-Item -ItemType Directory -Force -Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR | Out-Null
-          & .\node_modules\.bin\electron.cmd .\test\me2-r85-visual-evidence.mjs
-          if ($LASTEXITCODE -ne 0) { throw "r85_visual_evidence_electron_exit_$LASTEXITCODE" }
+          $electron = Join-Path (Resolve-Path '.\node_modules\electron\dist').Path 'electron.exe'
+          if (-not (Test-Path $electron -PathType Leaf)) { throw 'r85_visual_electron_binary_missing' }
+          $visualOut = Join-Path $env:RUNNER_TEMP 'r85-primary-visual.stdout.log'
+          $visualErr = Join-Path $env:RUNNER_TEMP 'r85-primary-visual.stderr.log'
+          Remove-Item $visualOut,$visualErr -Force -ErrorAction SilentlyContinue
+          $visual = Start-Process -FilePath $electron -ArgumentList '.\test\me2-r85-visual-evidence.mjs' -PassThru -NoNewWindow -RedirectStandardOutput $visualOut -RedirectStandardError $visualErr
+          $null = $visual.Handle
+          if (-not $visual.WaitForExit(135000)) {
+            cmd.exe /d /c "taskkill.exe /PID $($visual.Id) /T /F >nul 2>&1 & exit /b 0" | Out-Null
+            Get-Content $visualOut -ErrorAction SilentlyContinue
+            Get-Content $visualErr -ErrorAction SilentlyContinue
+            throw 'r85_visual_evidence_process_timeout'
+          }
+          $visual.WaitForExit()
+          Get-Content $visualOut -ErrorAction SilentlyContinue
+          Get-Content $visualErr -ErrorAction SilentlyContinue
+          if ($visual.ExitCode -ne 0) { throw "r85_visual_evidence_electron_exit_$($visual.ExitCode)" }
           $evidencePath = Join-Path $env:METAENGINE_R85_VISUAL_EVIDENCE_DIR 'r85-visual-evidence.json'
           if (-not (Test-Path $evidencePath -PathType Leaf)) { throw 'r85_visual_evidence_json_missing' }
           $evidence = Get-Content $evidencePath -Raw | ConvertFrom-Json
@@ -596,5 +611,7 @@ jobs:
             ${{ runner.temp }}/browser-shell-visual/*.png
             ${{ runner.temp }}/r85-primary-visual/r85-visual-evidence.json
             ${{ runner.temp }}/r85-primary-visual/*.png
+            ${{ runner.temp }}/r85-primary-visual.stdout.log
+            ${{ runner.temp }}/r85-primary-visual.stderr.log
           if-no-files-found: warn
           retention-days: 30
