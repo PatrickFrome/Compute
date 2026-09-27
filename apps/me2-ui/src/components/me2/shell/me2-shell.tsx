@@ -1,13 +1,11 @@
 "use client";
 // R97 primary shell: one persistent workspace.
-// Left: every active chat actor (supervisors first, then agents).
-// Right: the exact native Browser WebContents bound to the selected session.
-// All diagnostic/engineering pages remain reachable only through Settings or
-// the command palette and do not occupy persistent chrome.
+// Left: canonical live chat actors (supervisors first, then fleet agents).
+// Right: the exact native Browser WebContents selected by Browser main.
+// Advanced pages remain available only through Settings / command search.
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMe2, type PageKey } from "@/components/me2/store";
-import { useAgentChatSessions, type AgentChatSession } from "@/hooks/use-agentchat-sessions";
 import { useToast } from "@/hooks/use-toast";
 import { TopBar } from "@/components/me2/shell/topbar";
 import { CommandPalette } from "@/components/me2/shell/command-palette";
@@ -22,15 +20,96 @@ import { MemoryPage } from "@/components/me2/pages/memory";
 import { ObservabilityPage } from "@/components/me2/pages/observability";
 import { SystemPage } from "@/components/me2/pages/system";
 
+type PrimaryChatActor = {
+  actor_id: string;
+  actor_type: "SUPERVISOR" | "AGENT";
+  role: string;
+  state: string;
+  tab_id: string;
+  selected: boolean;
+  title: string;
+  model: string;
+  exact_native_binding: boolean;
+};
+
+type PrimaryChatRoster = {
+  schema: "metaengine.browser.primary-chat-fleet-roster.v1";
+  actors: PrimaryChatActor[];
+  actor_count: number;
+  supervisor_count: number;
+  agent_count: number;
+  selected_actor_id: string | null;
+};
+
 type PrimaryShellBridge = {
   setPrimaryOverlay?: (active: boolean) => unknown;
-  selectPrimaryAgentSession?: (sessionId: string) => Promise<{
-    state?: string;
+  primaryChatFleetRoster?: () => Promise<PrimaryChatRoster>;
+  selectPrimaryChatActor?: (actorId: string) => Promise<{
     selection_applied?: boolean;
+    actor_id?: string;
     tab_id?: string | null;
-    conversation_url?: string | null;
   } | null>;
 };
+
+const EMPTY_ROSTER: PrimaryChatRoster = {
+  schema: "metaengine.browser.primary-chat-fleet-roster.v1",
+  actors: [],
+  actor_count: 0,
+  supervisor_count: 0,
+  agent_count: 0,
+  selected_actor_id: null,
+};
+
+function shellBridge(): PrimaryShellBridge | null {
+  return (window as Window & { metaengineShell?: PrimaryShellBridge }).metaengineShell ?? null;
+}
+
+function usePrimaryChatRoster() {
+  const [roster, setRoster] = useState<PrimaryChatRoster>(EMPTY_ROSTER);
+  const [state, setState] = useState<"LOADING" | "LIVE" | "UNAVAILABLE">("LOADING");
+  const inFlight = useRef(false);
+
+  const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    const bridge = shellBridge();
+    if (!bridge?.primaryChatFleetRoster) {
+      setState("UNAVAILABLE");
+      return;
+    }
+    inFlight.current = true;
+    try {
+      const next = await bridge.primaryChatFleetRoster();
+      if (next?.schema !== "metaengine.browser.primary-chat-fleet-roster.v1" || !Array.isArray(next.actors)) {
+        setState("UNAVAILABLE");
+        return;
+      }
+      setRoster(next);
+      setState("LIVE");
+    } catch {
+      setState("UNAVAILABLE");
+    } finally {
+      inFlight.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (cancelled) return;
+      await refresh();
+    };
+    void load();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 2_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
+
+  return { roster, state, refresh };
+}
 
 function PageOutlet({ page }: { page: PageKey }) {
   switch (page) {
@@ -47,79 +126,74 @@ function PageOutlet({ page }: { page: PageKey }) {
   }
 }
 
-function actorLabel(session: AgentChatSession) {
-  const role = String(session.role || "AGENT").trim().toUpperCase();
-  if (role === "SUPERVISOR") return "SUPERVISOR";
-  return role || "AGENT";
-}
-
-function actorTone(session: AgentChatSession) {
-  if (session.state === "THINKING") return "bg-amber-400";
-  if (session.last_error || session.fail_streak > 0) return "bg-rose-400";
-  return "bg-emerald-400";
+function actorTone(actor: PrimaryChatActor) {
+  const state = String(actor.state || "").toUpperCase();
+  if (state === "ACTIVE") return "bg-emerald-400";
+  if (state === "BOUND_UNVERIFIED" || state === "PROVISIONING") return "bg-amber-400";
+  return "bg-rose-400";
 }
 
 function ChatFleetRail() {
-  const { sessions, loading, error } = useAgentChatSessions();
-  const chatId = useMe2((s) => s.chatId);
+  const { roster, state, refresh } = usePrimaryChatRoster();
+  const localSelection = useMe2((s) => s.chatId);
   const setChatId = useMe2((s) => s.setChatId);
   const attemptedInitial = useRef<string | null>(null);
-  const active = sessions.filter((session) => session.status === "ACTIVE");
-  const supervisors = active.filter((session) => String(session.role || "").toUpperCase() === "SUPERVISOR");
-  const agents = active.filter((session) => String(session.role || "").toUpperCase() !== "SUPERVISOR");
+
+  const supervisors = roster.actors.filter((actor) => actor.actor_type === "SUPERVISOR");
+  const agents = roster.actors.filter((actor) => actor.actor_type === "AGENT");
   const ordered = [...supervisors, ...agents];
+  const selectedActorId = roster.selected_actor_id || localSelection;
 
-  const select = async (session: AgentChatSession) => {
-    setChatId(session.id);
-    window.dispatchEvent(new CustomEvent("me2:chat-selected", { detail: session.id }));
-    const shell = (window as Window & { metaengineShell?: PrimaryShellBridge }).metaengineShell;
-    if (!shell?.selectPrimaryAgentSession) return;
-    await shell.selectPrimaryAgentSession(session.id).catch(() => null);
-  };
+  const select = useCallback(async (actor: PrimaryChatActor) => {
+    const bridge = shellBridge();
+    if (!bridge?.selectPrimaryChatActor) return;
+    setChatId(actor.actor_id);
+    const result = await bridge.selectPrimaryChatActor(actor.actor_id).catch(() => null);
+    if (result?.selection_applied === true) await refresh();
+  }, [refresh, setChatId]);
 
-  // One bounded initial presentation choice. If the Mission Control binding is
-  // not ready yet we do not poll/retry the physical selection; the user can
-  // select the actor once its exact binding is visible.
+  // One bounded startup choice only when Browser has no selected managed actor.
+  // No retry loop: exact binding must already exist for selection to succeed.
   useEffect(() => {
-    if (chatId || ordered.length === 0) return;
+    if (roster.selected_actor_id || ordered.length === 0) return;
     const first = ordered[0];
-    if (!first || attemptedInitial.current === first.id) return;
-    attemptedInitial.current = first.id;
+    if (!first || attemptedInitial.current === first.actor_id) return;
+    attemptedInitial.current = first.actor_id;
     void select(first);
-  // The ordered identity list changes only when the bounded /agentchat snapshot changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId, ordered.map((session) => session.id).join("|")]);
+  }, [ordered, roster.selected_actor_id, select]);
 
-  const section = (title: string, rows: AgentChatSession[]) => (
+  const section = (title: string, rows: PrimaryChatActor[]) => (
     <section className="space-y-1" aria-label={title}>
       <div className="flex items-center justify-between px-2 pt-2 text-[9px] font-bold uppercase tracking-[0.16em] text-zinc-600">
         <span>{title}</span><span>{rows.length}</span>
       </div>
-      {rows.map((session) => {
-        const selected = chatId === session.id;
+      {rows.map((actor) => {
+        const selected = selectedActorId === actor.actor_id || actor.selected;
         return (
           <button
-            key={session.id}
+            key={actor.actor_id}
             type="button"
-            onClick={() => void select(session)}
-            data-testid={String(session.role || "").toUpperCase() === "SUPERVISOR" ? "chat-supervisor-row" : "chat-agent-row"}
-            data-session-id={session.id}
+            onClick={() => void select(actor)}
+            data-testid={actor.actor_type === "SUPERVISOR" ? "chat-supervisor-row" : "chat-agent-row"}
+            data-actor-id={actor.actor_id}
             aria-current={selected ? "page" : undefined}
             className={`group flex w-full items-center gap-2 border-l-2 px-2 py-2 text-left transition ${
               selected
                 ? "border-cyan-400 bg-cyan-950/20 text-zinc-100"
                 : "border-transparent text-zinc-400 hover:border-zinc-700 hover:bg-zinc-900/70 hover:text-zinc-200"
             }`}
-            title={session.objective || session.title || actorLabel(session)}
+            title={actor.title || actor.role}
           >
             <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-800 bg-zinc-950 font-mono text-[10px] font-bold text-zinc-300">
-              {actorLabel(session).slice(0, 2)}
-              <i className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-[#0b0b0d] ${actorTone(session)}`} />
+              {(actor.actor_type === "SUPERVISOR" ? "S" : actor.role || "A").slice(0, 2).toUpperCase()}
+              <i className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-[#0b0b0d] ${actorTone(actor)}`} />
             </span>
             <span className="min-w-0 flex-1">
-              <strong className="block truncate text-[11px] font-semibold">{actorLabel(session)}</strong>
+              <strong className="block truncate text-[11px] font-semibold">
+                {actor.actor_type === "SUPERVISOR" ? "SUPERVISOR" : actor.role}
+              </strong>
               <small className="block truncate font-mono text-[9px] text-zinc-600">
-                {session.state} · GLM-5.3-Flash
+                {actor.state} · {actor.model || "GLM-5.3-Flash"}
               </small>
             </span>
           </button>
@@ -130,19 +204,21 @@ function ChatFleetRail() {
 
   return (
     <aside
-      className="h-full min-h-0 w-[288px] shrink-0 overflow-hidden border-r border-zinc-800 bg-[#0b0b0d]"
+      className="h-full min-h-0 w-[288px] shrink-0 overflow-hidden border-r border-zinc-800 bg-[#0b0b0d] max-[1007px]:hidden"
       data-testid="chat-fleet-rail"
       aria-label="Chat agents and supervisors"
     >
       <div className="flex h-10 items-center justify-between border-b border-zinc-800 px-3">
         <div>
           <strong className="block text-[10px] uppercase tracking-[0.16em] text-zinc-300">Chat Fleet</strong>
-          <span className="font-mono text-[8px] text-zinc-600">GLM-5.3-Flash · {active.length} live</span>
+          <span className="font-mono text-[8px] text-zinc-600">
+            {state === "LIVE" ? `GLM-5.3-Flash · ${roster.actor_count} live` : state}
+          </span>
         </div>
       </div>
       <div className="mc-scroll h-[calc(100%-40px)] overflow-y-auto pb-3">
-        {loading && active.length === 0 ? <p className="px-3 py-4 text-[10px] text-zinc-600">Loading chat actors…</p> : null}
-        {error && active.length === 0 ? <p className="px-3 py-4 text-[10px] text-rose-400">Fleet unavailable</p> : null}
+        {state === "LOADING" && ordered.length === 0 ? <p className="px-3 py-4 text-[10px] text-zinc-600">Loading chat actors…</p> : null}
+        {state === "UNAVAILABLE" && ordered.length === 0 ? <p className="px-3 py-4 text-[10px] text-rose-400">Browser roster unavailable</p> : null}
         {section("Supervisors", supervisors)}
         {section("Agents", agents)}
       </div>
@@ -163,7 +239,7 @@ function PrimaryChatFleetWorkspace() {
         aria-label="Selected chat agent website"
       >
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center text-[10px] text-zinc-700">
-          <span>Selected agent website is rendered by the native Browser surface.</span>
+          <span>Selected GLM chat is rendered here by the native Browser surface.</span>
         </div>
       </section>
     </div>
@@ -195,7 +271,7 @@ export function Me2Shell() {
   const nativeOverlayOpen = Boolean(paletteOpen || overlaysOpen || peekTarget || chromeOverlaySources.length > 0);
 
   useEffect(() => {
-    const shell = (window as Window & { metaengineShell?: PrimaryShellBridge }).metaengineShell;
+    const shell = shellBridge();
     if (!shell?.setPrimaryOverlay) return;
     void shell.setPrimaryOverlay(nativeOverlayOpen);
     return () => { void shell.setPrimaryOverlay?.(false); };
