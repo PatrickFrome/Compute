@@ -68,6 +68,12 @@ R91 therefore also closes the producer trigger graph:
 
 This deliberately prefers correctness over avoiding one producer run. The build-once architecture still removes the larger duplicate cost: only Package Smoke builds NSIS.
 
+### Shared-helper trigger dependency
+
+A second trigger-graph audit found that Final Runtime and Autonomous Soak executed the new shared helper but their selective PR path filters did not yet include the helper file itself. That would allow a future helper-only change to receive Package Smoke evidence without rerunning every consumer that depends on the helper.
+
+The R91 line now explicitly includes `apps/metaengine-browser/scripts/qualified-installer-consumer.ps1` in Final Runtime and Autonomous Soak triggers. Installed Chat already covers it through `apps/metaengine-browser/**`. A regression pins this dependency closure.
+
 ## Safety invariants
 
 R91 does not change:
