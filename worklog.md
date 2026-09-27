@@ -10986,3 +10986,22 @@ Work Log:
 
 Stage Summary:
 - Мастер-директива конвергенции теперь воспроизводится автоматически каждый час: каждый запуск агента начинает с полного текста директивы и продолжает с последнего Task ID worklog (без повторов завершённых фаз)
+
+---
+Task ID: DIRECTIVE-CONVERGENCE-20260928-0758
+Agent: Super Z (Principal Engineer run, mandate PRINCIPAL-DIRECTIVE.md sha 0aa09579)
+Task: полная инвентаризация и конвергенция METAENGINE Browser/DevOS; proof z.ai Agent-path; settings audit; closed-loop; perf
+
+Work Log:
+- Source-of-truth: live client 2a60d6a2 v0.7.0-dev.36336130139.1 CONTROL+armed; fleet 4 (PLANNER/RESEARCHER/IMPLEMENTER/CRITIC, ELASTIC_BACKLOG_DRIVEN, max_agents=null); 14-15 табов; checkpoint CP4 AUTHORITATIVE; coordination plane = 261 таблиц/~90 RPC
+- PERF (#13, 361 команд): issue→lease p50=1.0s/p95=2.6s (fast-lane здоров); issue→completed p50=3.1s/p95=22.5s/p99=75.9s; lanes READ_ONLY=223/TAB_MUTATION=85/GLOBAL_MUTATION=53 — bottleneck = LEASED-hang хвост (lease-watchdog отсутствует), не транспорт
+- INVENTORY REGISTRY создан: scripts/phoenix/AUDIT-REGISTRY-20260928.md (+vault+sync зеркала): 48 implemented → KEEP 27 / KEEP+FIX 9 / FIX 4 / MERGE 2 / QUARANTINE 6; roadmap-21 классифицирован (POINTER/DRAG/SET_ZOOM=REMOVE-geometry, CHATGPT_*=REMOVE, KEY_PRESS/SEARCH_WEB=INTEGRATE); REMOVE ledger плоскостей: enqueue_v1/v2+complete_v4+lease_v1/v2 legacy, duel_*, meta_orchestrator_*→MERGE, federation_*+aop1_* = МЁРТВЫ в schema-cache (404)
+- SETTINGS AUDIT: budget 24pts/60s = главный тормоз масштабирования (owner-fix); direct_peer_messaging=false, automatic_work_retry=false, automatic_install=true, install_authority=false — все по назначению; 15 gates owner-only; cognitive_cursor 403 RBAC — мёртвый контур
+- AGENT-PATH (#2) — ГЛАВНЫЙ РЕЗУЛЬТАТ: sidebar Agent (tab_6924b587, 96 els) → TYPED_CLICK INSERT COMPLETED → Agent-space стабилен → "Send a Message" SEMANTIC_TYPE(submit, replace=false) → **effect=PROVEN_NEW_CONVERSATION + /c/36ce7b45** — контракт «агент создан через Agent-surface, не chat» ЗАКРЫТ физически; readback-гэп: READ_TRANSCRIPT=0 на agent-сессиях (тред вне a11y-дерева) — FIX; модель agent-space = GLM-5.2, требуется Select-model → GLM-5.3-Flash
+- LESSONS.md: 17 operational lessons (L01-L17: recipe-валидация, semref TTL ~60s = tight capture→click, budget-поведение, dead RPC-плоскости, readback-гэп)
+- Loop: 15-мин директивный cron Job 419718 активен; LESSONS.md = bounded operational memory с provenance (retrieval в брифы каждого цикла)
+
+Stage Summary:
+- ФИЗИЧЕСКИ ДОКАЗАНО: agent-создание через Agent-surface (PROVEN_NEW_CONVERSATION), TYPED_CLICK INSERT-путь координатно-независим, lane-параллелизм, fast-lane p50=1.0s
+- Канонизация: agent-creation path = sidebar→Agent→Send a Message(submit); chat-рецепт → fallback worker-surface; task/lesson authority = worklog+LESSONS.md+command-plane (RPC-плоскости мертвы)
+- Гэпы (честно): readback agent-тредов, GLM-5.3-Flash select, lease-watchdog, budget owner-fix, rebuild/CI/installer = operator-pipeline (вне песочницы)
