@@ -510,8 +510,8 @@ test('missing token fails with token_missing', async () => {
     );
   } finally {
     if (previous.me2 !== undefined) process.env.ME2_GITHUB_TOKEN = previous.me2;
-    if (previous.gh !== undefined) process.env.GITHUB_TOKEN = previous.gh;
-    if (previous.ghToken !== undefined) process.env.GH_TOKEN = previous.ghToken;
+    if (previous.gh !== undefined) process.env['GITHUB_TOKEN'] = previous.gh;
+    if (previous.ghToken !== undefined) process.env['GH_TOKEN'] = previous.ghToken;
   }
 });
 
