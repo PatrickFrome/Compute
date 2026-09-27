@@ -335,10 +335,13 @@ test('R85 agent tab binding is exact-session-only and rejects similar-title fall
   assert.equal(duplicate.kind, 'ambiguous');
   assert.equal(duplicate.matches.length, 2);
 
-  assert.match(me2Command, /resolveExactAgentTab\(tabs, s\.id\)/);
-  assert.doesNotMatch(me2Command, /title \?\?|\.title \?\? ""\)\.toLowerCase\(\)\.includes\(t\)/);
-  assert.doesNotMatch(me2Command, /zai\.length === 1 \? zai\[0\]/);
-  assert.match(me2Command, /title-fallback запрещён/);
+  // R93 moved COMMAND off daemon tab census entirely. Keep the pure R85
+  // resolver regression above as a historical fail-closed contract, but the
+  // primary renderer now consumes only Browser's canonical session->tab binding.
+  assert.match(me2Command, /selectPrimaryAgentSession\(s\.id\)/);
+  assert.doesNotMatch(me2Command, /resolveExactAgentTab/);
+  assert.doesNotMatch(me2Command, /loadBrowserTabs/);
+  assert.doesNotMatch(me2Command, /BROWSER_SELECT_TAB/);
 });
 
 test('R85 semantic workbench avoids nested interactive agent rows', () => {
