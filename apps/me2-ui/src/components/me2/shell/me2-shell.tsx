@@ -192,6 +192,9 @@ function ChatFleetRail() {
               <strong className="block truncate text-[11px] font-semibold">
                 {actor.actor_type === "SUPERVISOR" ? "SUPERVISOR" : actor.role}
               </strong>
+              <small className="block truncate font-mono text-[9px] text-zinc-500" data-testid="chat-actor-short-id">
+                {actor.actor_id.split(":").at(-1)?.slice(0, 18) || actor.actor_id.slice(0, 18)}
+              </small>
               <small className="block truncate font-mono text-[9px] text-zinc-600">
                 {actor.state} · {actor.model || "GLM-5.3-Flash"}
               </small>
