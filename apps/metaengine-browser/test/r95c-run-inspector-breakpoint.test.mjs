@@ -18,9 +18,9 @@ const browserPage = await readFile(
 );
 
 test('R95C renderer and main process share one exact RUN telemetry breakpoint', () => {
-  assert.equal(ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH, 1280);
-  assert.match(browserPage, /overflow-y-auto xl:flex/);
-  assert.doesNotMatch(browserPage, /overflow-y-auto lg:flex/);
+  assert.equal(ME2_PRIMARY_RUN_INSPECTOR_MIN_WINDOW_WIDTH, 1124);
+  assert.match(browserPage, /overflow-y-auto min-\[1124px\]:flex/);
+  assert.doesNotMatch(browserPage, /overflow-y-auto (?:lg|xl):flex/);
 });
 
 test('R95C 1100px RUN never releases a renderer-visible inspector over native Browser pixels', () => {
@@ -38,9 +38,9 @@ test('R95C 1100px RUN never releases a renderer-visible inspector over native Br
   assert.equal(plan.overlay_remote_content, false);
 });
 
-test('R95C xl RUN reserves exactly the renderer telemetry width plus gap', () => {
+test('R95C exact 1124px RUN threshold reserves renderer telemetry width plus gap', () => {
   const plan = planShellLayout({
-    width: 1280,
+    width: 1124,
     height: 900,
     state: normalizeShellLayoutState(),
     surface_profile: 'ME2_R95_RUN',
@@ -49,12 +49,12 @@ test('R95C xl RUN reserves exactly the renderer telemetry width plus gap', () =>
   const reservedRight = ME2_PRIMARY_PAGE_PADDING
     + ME2_PRIMARY_RUN_INSPECTOR_WIDTH
     + ME2_PRIMARY_RUN_INSPECTOR_GAP;
-  assert.equal(plan.remote_bounds.width, 1280 - ME2_PRIMARY_PAGE_PADDING - reservedRight);
+  assert.equal(plan.remote_bounds.width, 1124 - ME2_PRIMARY_PAGE_PADDING - reservedRight);
   assert.ok(plan.remote_bounds.width >= SHELL_MIN_REMOTE_WIDTH);
   assert.equal(plan.overlay_remote_content, false);
 });
 
-test('R95C Right Utility Panel can use sub-xl width only because renderer telemetry is also absent', () => {
+test('R95C Right Utility Panel can use sub-threshold width only because renderer telemetry is also absent', () => {
   const plan = planShellLayout({
     width: 1100,
     height: 900,
