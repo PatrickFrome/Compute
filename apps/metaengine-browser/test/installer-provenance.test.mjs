@@ -605,6 +605,7 @@ test('acquire pins the artifact id observed during in-progress producer resoluti
       writeRunsResponse(response, [{
         ...runShape({ runNumber: 41, status: 'in_progress', conclusion: null, id: 5041 }),
         run_attempt: 2,
+        run_started_at: '2026-09-27T10:59:00Z',
       }]);
       return;
     }
@@ -774,6 +775,7 @@ test('resolve may expose exact immutable artifact while producer is still in pro
       writeRunsResponse(response, [{
         ...runShape({ runNumber: 31, status: 'in_progress', conclusion: null, id: 5031 }),
         run_attempt: 4,
+        run_started_at: '2026-09-27T10:00:00Z',
       }]);
       return;
     }
@@ -781,7 +783,7 @@ test('resolve may expose exact immutable artifact while producer is still in pro
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({
         total_count: 1,
-        artifacts: [{ id: 9031, name: artifactName, size_in_bytes: 123, expired: false }],
+        artifacts: [{ id: 9031, name: artifactName, size_in_bytes: 123, expired: false, created_at: '2026-09-27T10:01:00Z' }],
       }));
       return;
     }
@@ -799,6 +801,70 @@ test('resolve may expose exact immutable artifact while producer is still in pro
     assert.equal(resolved.producer_completed, false);
     assert.equal(resolved.producer_conclusion, null);
     assert.equal(resolved.artifact_id, '9031');
+  });
+});
+
+test('in-progress rerun ignores prior-attempt artifact until current attempt artifact exists', async (t) => {
+  if (!(await loopbackAvailable())) {
+    t.skip('loopback fetch unavailable in this environment');
+    return;
+  }
+  const artifactName = `metaengine-browser-windows-candidate-${HEAD}`;
+  let artifactReads = 0;
+  await withServer((request, response) => {
+    if (request.url.includes('/actions/workflows/browser-windows-package-smoke.yml/runs')) {
+      writeRunsResponse(response, [{
+        ...runShape({ runNumber: 35, status: 'in_progress', conclusion: null, id: 5035 }),
+        run_attempt: 2,
+        run_started_at: '2026-09-27T11:00:00Z',
+      }]);
+      return;
+    }
+    if (request.url.includes('/actions/runs/5035/artifacts')) {
+      artifactReads += 1;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        total_count: artifactReads === 1 ? 1 : 2,
+        artifacts: artifactReads === 1
+          ? [{
+              id: 9134,
+              name: artifactName,
+              size_in_bytes: 120,
+              expired: false,
+              created_at: '2026-09-27T10:30:00Z',
+            }]
+          : [
+              {
+                id: 9134,
+                name: artifactName,
+                size_in_bytes: 120,
+                expired: false,
+                created_at: '2026-09-27T10:30:00Z',
+              },
+              {
+                id: 9135,
+                name: artifactName,
+                size_in_bytes: 121,
+                expired: false,
+                created_at: '2026-09-27T11:01:00Z',
+              },
+            ],
+      }));
+      return;
+    }
+    response.writeHead(404).end();
+  }, async ({ apiBase }) => {
+    const resolved = await resolveRun({
+      ...RESOLVE_BASE,
+      'api-base': apiBase,
+      artifact: artifactName,
+      'allow-in-progress': 'true',
+      'interval-sec': '0',
+    });
+    assert.equal(resolved.run_id, '5035');
+    assert.equal(resolved.run_attempt, 2);
+    assert.equal(resolved.artifact_id, '9135');
+    assert.equal(artifactReads, 2);
   });
 });
 
