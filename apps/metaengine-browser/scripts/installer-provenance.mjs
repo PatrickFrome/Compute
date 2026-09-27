@@ -94,6 +94,8 @@ export function validateProvenance(raw, { expectedHead = null } = {}) {
     code: 'installer_provenance_run_id_invalid',
   });
   const artifactName = requireText(raw.artifact_name, 'installer_provenance_artifact_name_invalid', 260);
+  const packageVersion = requireText(raw.package_version, 'installer_provenance_package_version_invalid', 128);
+  if (!/^[0-9A-Za-z.+-]+$/.test(packageVersion)) fail('installer_provenance_package_version_invalid');
   if (raw.signed !== false || raw.published !== false || raw.promotion_authorized !== false || raw.authority_effect !== false) {
     fail('installer_provenance_authority_invalid');
   }
@@ -103,6 +105,7 @@ export function validateProvenance(raw, { expectedHead = null } = {}) {
     producer_run_id: producerRunId,
     repository,
     artifact_name: artifactName,
+    package_version: packageVersion,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     files: Object.freeze({
       installer: validateAsset(raw.files?.installer, 'installer'),
@@ -122,6 +125,7 @@ export async function writeProvenance({
   producerRunId,
   repository,
   artifactName,
+  packageVersion,
   installer,
   blockmap,
   config,
@@ -134,6 +138,8 @@ export async function writeProvenance({
     code: 'installer_provenance_run_id_invalid',
   });
   const normalizedArtifact = requireText(artifactName, 'installer_provenance_artifact_name_invalid', 260);
+  const normalizedPackageVersion = requireText(packageVersion, 'installer_provenance_package_version_invalid', 128);
+  if (!/^[0-9A-Za-z.+-]+$/.test(normalizedPackageVersion)) fail('installer_provenance_package_version_invalid');
   const [installerAsset, blockmapAsset, configAsset] = await Promise.all([
     hashFile(installer),
     hashFile(blockmap),
@@ -145,6 +151,7 @@ export async function writeProvenance({
     producer_run_id: runId,
     repository: normalizedRepo,
     artifact_name: normalizedArtifact,
+    package_version: normalizedPackageVersion,
     created_at: new Date().toISOString(),
     files: Object.freeze({
       installer: installerAsset,
@@ -187,6 +194,7 @@ export async function verifyProvenance({ provenance, root, expectedHead = null }
     producer_run_id: row.producer_run_id,
     repository: row.repository,
     artifact_name: row.artifact_name,
+    package_version: row.package_version,
     files: Object.freeze(verified),
     exact_bytes_verified: true,
     authority_effect: false,
@@ -412,6 +420,7 @@ export async function runCli(argv = process.argv.slice(2), env = process.env) {
       producerRunId: args.run_id,
       repository: args.repository,
       artifactName: args.artifact_name,
+      packageVersion: args.package_version,
       installer: args.installer,
       blockmap: args.blockmap,
       config: args.config,
