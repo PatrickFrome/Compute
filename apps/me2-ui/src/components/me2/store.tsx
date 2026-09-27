@@ -263,8 +263,8 @@ export const useMe2 = create<Me2State>((set, get) => ({
   catalog: [],
   mirror: null,
   nowMs: Date.now(),
-  page: "command",
-  recentPages: ["command"],
+  page: "browser",
+  recentPages: ["browser"],
   pageHistoryIndex: 0,
   workspace: "development",
   paletteOpen: false,
@@ -486,18 +486,14 @@ export const useMe2 = create<Me2State>((set, get) => ({
     initGuard = true;
     set({ booted: true });
 
-    // восстановление страницы/workspace (после гидрации — без mismatch)
+    // R97 single-main-workspace: every browser launch returns to the live
+    // chat-fleet workspace. Advanced pages remain reachable only through the
+    // command palette / Settings during the current session; stale page/hash
+    // persistence never replaces the primary workspace on the next boot.
     window.setTimeout(() => {
       try {
-        const h = window.location.hash.replace("#", "");
-        const stored = localStorage.getItem(PAGE_LS);
-        const raw = (PAGES.some((p) => p.key === h) && h) || stored;
-        const restoredPage: PageKey = raw && PAGES.some((p) => p.key === raw)
-          ? raw as PageKey
-          : "command";
-        if (restoredPage !== "command" || raw === "command") {
-          set({ page: restoredPage, recentPages: [restoredPage], pageHistoryIndex: 0 });
-        }
+        const restoredPage: PageKey = "browser";
+        set({ page: restoredPage, recentPages: [restoredPage], pageHistoryIndex: 0 });
         const primaryPageAck = syncPagePresentation(restoredPage);
         const storedWs = localStorage.getItem(WS_LS) as WorkspaceKey | null;
         const activeWorkspace = storedWs && WORKSPACES.some((item) => item.key === storedWs) ? storedWs : get().workspace;
