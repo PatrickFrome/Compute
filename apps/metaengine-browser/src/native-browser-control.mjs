@@ -148,6 +148,12 @@ function uniqueSemanticTargets(nodes = [], { semanticRefContext = null } = {}) {
       backend_node_id: backendNodeId,
       frame_id: frameId,
       selector_mode: name ? 'ROLE_NAME_OR_BACKEND_NODE_ID' : 'BACKEND_NODE_ID_REQUIRED',
+      // R97 native-Agent navigation: expose Chromium AX focus state as
+      // read-only perception. This lets the Browser perform bounded keyboard
+      // traversal (Tab/Enter) and prove which semantic control owns focus
+      // without screen coordinates, page eval, or guessed geometry.
+      focusable: axPropertyValue(node, 'focusable') === true,
+      focused: axPropertyValue(node, 'focused') === true,
     };
     if (
       semanticRefContext
@@ -529,6 +535,7 @@ export async function captureSemanticFrame(webContents) {
         }
       : null;
     const semanticTargets = uniqueSemanticTargets(nodes, { semanticRefContext });
+    const focusedTargets = semanticTargets.filter((row) => row.focused === true);
     return {
       schema: 'metaengine.native-browser.perception.v1',
       captured_at: capturedAt,
@@ -537,6 +544,9 @@ export async function captureSemanticFrame(webContents) {
       url,
       title: clip(webContents.getTitle?.() || '', 240),
       semantic_targets: semanticTargets,
+      focused_target: focusedTargets.length === 1 ? focusedTargets[0] : null,
+      focused_target_count: focusedTargets.length,
+      focus_readback_geometry_free: true,
       unnamed_text_inputs_addressable_by_backend_node_id: true,
       semantic_refs_issued: semanticTargets.filter((row) => row.semantic_ref).length,
       semantic_ref_context_complete: semanticRefContext != null,
