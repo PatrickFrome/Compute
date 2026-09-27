@@ -583,7 +583,7 @@ function fallbackSelectedSurface() {
 
 function nativeBrowserSurfaceAllowed() {
   return primaryShellMode !== 'ME2_PRIMARY'
-    || (primaryShellPage === 'command' && primaryShellOverlayActive !== true);
+    || (primaryShellPage === 'browser' && primaryShellOverlayActive !== true);
 }
 
 async function preparePrimaryShellTarget() {
@@ -761,8 +761,8 @@ function layout() {
     width,
     height,
     state: shellLayoutState,
-    surface_profile: primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'command'
-      ? 'ME2_R75_COMMAND'
+    surface_profile: primaryShellMode === 'ME2_PRIMARY' && primaryShellPage === 'browser'
+      ? 'ME2_R95_RUN'
       : 'LEGACY_BROWSER_SHELL',
     me2_command_rail_open: primaryCommandRailOpen,
     me2_context_drawer_open: primaryContextDrawerOpen,
